@@ -1,10 +1,87 @@
 import AppKit
+import Foundation
 
 struct PanelMetrics {
-    /// User-facing viewport size. Future external controls sit outside this width.
+    /// User-facing Window Size always means the WKWebView viewport.
     static let defaultViewportSize = NSSize(width: 430, height: 820)
     static let minimumViewportSize = NSSize(width: 320, height: 400)
-    static let futureExternalControlZoneWidth: CGFloat = 76
+    static let externalControlZoneWidth: CGFloat = 76
+
+    /// Window movement is available from a predictable perimeter band on all
+    /// four sides. The outer inset stays free for AppKit's native resize hit
+    /// testing; corners stay free so diagonal resizing remains easy to acquire.
+    static let perimeterDragResizeInset: CGFloat = 6
+    static let perimeterDragBandWidth: CGFloat = 12
+    static let perimeterDragCornerExclusion: CGFloat = 28
+
+    static let webPanelCornerRadius: CGFloat = 14
+    static let structuralBorderWidth: CGFloat = 1
+
+    static var defaultPanelSize: NSSize {
+        panelSize(forViewport: defaultViewportSize)
+    }
+
+    static var minimumPanelSize: NSSize {
+        panelSize(forViewport: minimumViewportSize)
+    }
+
+    static func panelSize(forViewport viewportSize: NSSize) -> NSSize {
+        NSSize(
+            width: externalControlZoneWidth + max(viewportSize.width, 0),
+            height: max(viewportSize.height, 0)
+        )
+    }
+
+    static func viewportSize(forPanelSize panelSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(panelSize.width - externalControlZoneWidth, 0),
+            height: max(panelSize.height, 0)
+        )
+    }
+
+    static func clampedPanelSize(_ proposedSize: NSSize) -> NSSize {
+        NSSize(
+            width: max(proposedSize.width, minimumPanelSize.width),
+            height: max(proposedSize.height, minimumPanelSize.height)
+        )
+    }
+}
+
+struct PanelFrameStore {
+    static let defaultKey = "FloatTabs.panelFrame"
+
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        key: String = PanelFrameStore.defaultKey
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    func loadFrame() -> NSRect? {
+        guard let encodedFrame = defaults.string(forKey: key) else { return nil }
+
+        let frame = NSRectFromString(encodedFrame)
+        guard Self.isValid(frame) else { return nil }
+        return frame
+    }
+
+    func saveFrame(_ frame: NSRect) {
+        guard Self.isValid(frame) else { return }
+        defaults.set(NSStringFromRect(frame), forKey: key)
+    }
+
+    private static func isValid(_ frame: NSRect) -> Bool {
+        frame.origin.x.isFinite
+            && frame.origin.y.isFinite
+            && frame.width.isFinite
+            && frame.height.isFinite
+            && frame.width > 0
+            && frame.height > 0
+    }
 }
 
 enum ScreenPositioning {
@@ -19,9 +96,10 @@ enum ScreenPositioning {
     }
 
     static func centeredFrame(size: NSSize, in visibleFrame: NSRect) -> NSRect {
-        let clampedSize = NSSize(
-            width: min(size.width, visibleFrame.width),
-            height: min(size.height, visibleFrame.height)
+        let clampedSize = constrainedSize(
+            size,
+            minimumSize: .zero,
+            maximumSize: visibleFrame.size
         )
 
         return NSRect(
@@ -32,11 +110,17 @@ enum ScreenPositioning {
         )
     }
 
-    static func clampedFrame(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {
+    static func clampedFrame(
+        _ frame: NSRect,
+        to visibleFrame: NSRect,
+        minimumSize: NSSize = PanelMetrics.minimumPanelSize
+    ) -> NSRect {
         var result = frame
-
-        result.size.width = min(max(result.width, 1), visibleFrame.width)
-        result.size.height = min(max(result.height, 1), visibleFrame.height)
+        result.size = constrainedSize(
+            frame.size,
+            minimumSize: minimumSize,
+            maximumSize: visibleFrame.size
+        )
 
         result.origin.x = min(
             max(result.origin.x, visibleFrame.minX),
@@ -48,5 +132,67 @@ enum ScreenPositioning {
         )
 
         return result
+    }
+
+    static func restoredFrame(
+        _ savedFrame: NSRect,
+        visibleFrames: [NSRect],
+        fallbackVisibleFrame: NSRect,
+        minimumSize: NSSize = PanelMetrics.minimumPanelSize
+    ) -> NSRect {
+        let destination = bestVisibleFrame(for: savedFrame, visibleFrames: visibleFrames)
+            ?? fallbackVisibleFrame
+
+        return clampedFrame(savedFrame, to: destination, minimumSize: minimumSize)
+    }
+
+    static func bestVisibleFrame(for frame: NSRect, visibleFrames: [NSRect]) -> NSRect? {
+        var bestFrame: NSRect?
+        var bestArea: CGFloat = 0
+
+        for visibleFrame in visibleFrames {
+            let area = intersectionArea(frame, visibleFrame)
+            if area > bestArea {
+                bestArea = area
+                bestFrame = visibleFrame
+            }
+        }
+
+        return bestFrame
+    }
+
+    private static func constrainedSize(
+        _ proposedSize: NSSize,
+        minimumSize: NSSize,
+        maximumSize: NSSize
+    ) -> NSSize {
+        NSSize(
+            width: constrainedLength(
+                proposedSize.width,
+                minimum: minimumSize.width,
+                maximum: maximumSize.width
+            ),
+            height: constrainedLength(
+                proposedSize.height,
+                minimum: minimumSize.height,
+                maximum: maximumSize.height
+            )
+        )
+    }
+
+    private static func constrainedLength(
+        _ proposed: CGFloat,
+        minimum: CGFloat,
+        maximum: CGFloat
+    ) -> CGFloat {
+        guard maximum > 0 else { return 0 }
+        let allowedMinimum = min(max(minimum, 0), maximum)
+        return min(max(proposed, allowedMinimum), maximum)
+    }
+
+    private static func intersectionArea(_ lhs: NSRect, _ rhs: NSRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull else { return 0 }
+        return max(intersection.width, 0) * max(intersection.height, 0)
     }
 }

@@ -8,13 +8,22 @@ The product is intentionally not a full browser. It keeps a small number of freq
 
 ```text
 Stage 0 Window Feasibility Spike: PASSED
-→ current baseline: native floating-panel foundation validated
-→ next step: Stage 1 Window Shell / External Control Zone
+Stage 1 Core Native Shell: PASSED
+→ current baseline: native floating shell + frame/multi-display/window-movement foundation
+→ next engineering line: Stage 2 Persistent Web App Slots
 ```
 
-Stage 0 has been validated on a real Mac against the critical product path: FloatTabs can be summoned with the global shortcut above a native full-screen Obsidian window, become interactive, accept WKWebView keyboard input, hide again, and restore the previous app workflow. The automated build and unit-test lane also passes on GitHub-hosted macOS.
+Stage 0 validated the critical real-Mac window path: FloatTabs can be summoned with the global shortcut above a native full-screen Obsidian window, become interactive, accept WKWebView keyboard input, hide again, and restore the previous app workflow.
 
-See [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md) for the recorded acceptance scope and evidence.
+Stage 1 adds the production-facing native shell foundation: separate WKWebView viewport semantics, the `76 pt` external control zone, resize/frame restore, multi-display recovery, Menu Bar toggle behavior, and the accepted four-sided perimeter movement model. The audited Stage 1 baseline passes the maintained GitHub-hosted macOS build/test lane.
+
+Recorded evidence and interaction decisions:
+
+- [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md)
+- [`docs/validation/Stage_1_Acceptance.md`](docs/validation/Stage_1_Acceptance.md)
+- [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
+
+The Stage 1 perimeter drag model must be revalidated against real website edge controls/scrollbars once Stage 2 introduces actual Web App slots and the visible external shell. Website interaction has priority over drag convenience.
 
 ## Canonical Documentation
 
@@ -29,7 +38,10 @@ Read these before changing product behavior, architecture, or UI:
 3. **UI Design System**  
    [`docs/design/FloatTabs_UI_Design_System_v1.2.md`](docs/design/FloatTabs_UI_Design_System_v1.2.md)
 
-4. **Generated UI/UX References**  
+4. **Accepted Stage Interaction Addenda**  
+   [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
+
+5. **Generated UI/UX References**  
    [`docs/uiux/README.md`](docs/uiux/README.md)
 
 ### Source-of-Truth Precedence
@@ -40,6 +52,7 @@ If materials conflict:
 Design/System rule for UI
 + Product scope
 + Technical Architecture
++ accepted Stage interaction addenda
         ↓
 override generated Stitch screenshots / code.html
 ```
@@ -111,10 +124,9 @@ Release architecture includes Developer ID signing, Hardened Runtime, Apple nota
 Keep `main` in a reviewed/known-good state. Develop features on focused branches, for example:
 
 ```text
-feat/stage-1-window-shell
-feat/webview-foundation
-feat/external-tab-shell
-feat/persistent-web-app-slots
+feat/stage-2-persistent-web-app-slots
+feat/stage-3-rendering-profiles
+feat/stage-4-web-compatibility-sessions
 ```
 
 Before merging code that changes product behavior or UI structure, confirm it does not conflict with the canonical documentation above.

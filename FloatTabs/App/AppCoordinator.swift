@@ -13,12 +13,17 @@ final class AppCoordinator {
     func start() {
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
+            isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onQuit: { NSApp.terminate(nil) }
         )
 
         globalHotkeyController = GlobalHotkeyController(
             onToggle: { [weak self] in self?.toggleFloatTabs() }
         )
+    }
+
+    func prepareForTermination() {
+        panelController.prepareForTermination()
     }
 
     private func toggleFloatTabs() {

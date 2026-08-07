@@ -12,6 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.start()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        coordinator?.prepareForTermination()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
