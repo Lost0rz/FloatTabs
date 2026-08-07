@@ -52,18 +52,31 @@ final class PanelRootView: NSView {
     }
 }
 
-/// The zone is visually transparent. Blank area intentionally returns nil from
-/// AppKit view hit testing; future visible controls can be added as subviews and
-/// will continue to receive events normally.
-///
-/// Important: NSView hit testing is a window-internal routing mechanism. This
-/// does not claim that WindowServer will forward the event to another app; that
-/// behavior remains a real-Mac Stage 1 acceptance item.
+/// The zone is visually transparent. Most blank area intentionally returns nil
+/// from AppKit view hit testing so it remains click-through in the real-Mac
+/// behavior already observed. Only explicit control subviews should intercept
+/// events. Stage 1 reserves one small top drag region; future tabs and system
+/// controls can be added as additional subviews without turning the full 76 pt
+/// zone into an invisible sidebar.
 final class ExternalControlZoneView: NSView {
+    let dragRegionView = PanelDragRegionView()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+
+        dragRegionView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dragRegionView)
+
+        NSLayoutConstraint.activate([
+            dragRegionView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            dragRegionView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dragRegionView.topAnchor.constraint(equalTo: topAnchor),
+            dragRegionView.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.externalControlZoneDragRegionHeight
+            ),
+        ])
     }
 
     @available(*, unavailable)
@@ -77,6 +90,39 @@ final class ExternalControlZoneView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let candidate = super.hitTest(point)
         return candidate === self ? nil : candidate
+    }
+}
+
+/// A deliberately small drag target outside the WKWebView. Using
+/// NSWindow.performDrag(with:) delegates the actual move to WindowServer and
+/// avoids making the whole transparent control zone consume mouse events.
+final class PanelDragRegionView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        toolTip = "Drag FloatTabs"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isOpaque: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .openHand)
     }
 }
 
