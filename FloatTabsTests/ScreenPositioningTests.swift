@@ -35,9 +35,13 @@ final class PanelMetricsTests: XCTestCase {
         XCTAssertEqual(viewportSize, PanelMetrics.minimumViewportSize)
     }
 
-    func testDragRegionFitsBeforeFrozenShellFirstTabOffset() {
-        XCTAssertGreaterThan(PanelMetrics.externalControlZoneDragRegionHeight, 0)
-        XCTAssertLessThanOrEqual(PanelMetrics.externalControlZoneDragRegionHeight, 20)
+    func testPerimeterDragBandLeavesNativeResizeLaneAndCornersFree() {
+        XCTAssertGreaterThan(PanelMetrics.perimeterDragResizeInset, 0)
+        XCTAssertGreaterThan(PanelMetrics.perimeterDragBandWidth, 0)
+        XCTAssertGreaterThan(
+            PanelMetrics.perimeterDragCornerExclusion,
+            PanelMetrics.perimeterDragBandWidth
+        )
     }
 }
 
@@ -148,7 +152,7 @@ final class PanelFrameStoreTests: XCTestCase {
 
 @MainActor
 final class PanelRootViewLayoutTests: XCTestCase {
-    func testDefaultPanelLaysOutExactControlZoneAndViewportWidths() {
+    func testDefaultPanelLaysOutExactControlZoneViewportAndDragOverlay() {
         let webView = WKWebView(frame: .zero)
         let root = PanelRootView(webView: webView)
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
@@ -163,24 +167,85 @@ final class PanelRootViewLayoutTests: XCTestCase {
             root.webPanelContainerView.frame.size,
             PanelMetrics.defaultViewportSize
         )
+        XCTAssertEqual(root.perimeterDragView.frame, root.bounds)
     }
 }
 
 @MainActor
-final class ExternalControlZoneHitTestingTests: XCTestCase {
-    func testBlankZonePassesThroughWhileTopDragRegionRemainsInteractive() {
-        let zone = ExternalControlZoneView(
-            frame: NSRect(x: 0, y: 0, width: PanelMetrics.externalControlZoneWidth, height: 200)
-        )
-        zone.layoutSubtreeIfNeeded()
+final class PanelPerimeterDragHitTestingTests: XCTestCase {
+    func testAllFourPerimeterBandsAreInteractive() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
 
-        let dragPoint = NSPoint(
+        let inset = PanelMetrics.perimeterDragResizeInset
+        let halfBand = PanelMetrics.perimeterDragBandWidth / 2
+        let bounds = root.bounds
+        let points = [
+            NSPoint(x: bounds.midX, y: bounds.minY + inset + halfBand),
+            NSPoint(x: bounds.midX, y: bounds.maxY - inset - halfBand),
+            NSPoint(x: bounds.minX + inset + halfBand, y: bounds.midY),
+            NSPoint(x: bounds.maxX - inset - halfBand, y: bounds.midY),
+        ]
+
+        for point in points {
+            XCTAssertTrue(
+                root.hitTest(point) is PanelPerimeterDragView,
+                "Expected perimeter drag hit at \(point)"
+            )
+        }
+    }
+
+    func testOutermostResizeLaneIsNotConsumedByDragOverlay() {
+        let view = PanelPerimeterDragView(
+            frame: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        )
+
+        let point = NSPoint(x: 1, y: view.bounds.midY)
+        XCTAssertNil(view.hitTest(point))
+    }
+
+    func testCornersRemainFreeForDiagonalResize() {
+        let view = PanelPerimeterDragView(
+            frame: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        )
+
+        let inset = PanelMetrics.perimeterDragResizeInset
+        let halfBand = PanelMetrics.perimeterDragBandWidth / 2
+        let point = NSPoint(
+            x: inset + halfBand,
+            y: view.bounds.maxY - inset - halfBand
+        )
+
+        XCTAssertNil(view.hitTest(point))
+    }
+
+    func testBlankExternalControlZoneStillPassesThroughAwayFromPerimeter() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        let blankPoint = NSPoint(
             x: PanelMetrics.externalControlZoneWidth / 2,
-            y: zone.bounds.maxY - PanelMetrics.externalControlZoneDragRegionHeight / 2
+            y: root.bounds.midY
         )
-        let blankPoint = NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: 80)
 
-        XCTAssertTrue(zone.hitTest(dragPoint) is PanelDragRegionView)
-        XCTAssertNil(zone.hitTest(blankPoint))
+        XCTAssertNil(root.hitTest(blankPoint))
+    }
+
+    func testWebsiteCenterIsNotConsumedByDragOverlay() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        let websitePoint = NSPoint(
+            x: PanelMetrics.externalControlZoneWidth + PanelMetrics.defaultViewportSize.width / 2,
+            y: root.bounds.midY
+        )
+
+        XCTAssertFalse(root.hitTest(websitePoint) is PanelPerimeterDragView)
     }
 }

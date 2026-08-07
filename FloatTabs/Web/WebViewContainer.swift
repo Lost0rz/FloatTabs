@@ -6,10 +6,12 @@ import WebKit
 final class PanelRootView: NSView {
     let externalControlZoneView: ExternalControlZoneView
     let webPanelContainerView: WebPanelContainerView
+    let perimeterDragView: PanelPerimeterDragView
 
     init(webView: WKWebView) {
         externalControlZoneView = ExternalControlZoneView()
         webPanelContainerView = WebPanelContainerView(webView: webView)
+        perimeterDragView = PanelPerimeterDragView()
 
         super.init(frame: .zero)
 
@@ -18,9 +20,16 @@ final class PanelRootView: NSView {
 
         externalControlZoneView.translatesAutoresizingMaskIntoConstraints = false
         webPanelContainerView.translatesAutoresizingMaskIntoConstraints = false
+        perimeterDragView.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(externalControlZoneView)
+        // Ordering matters. The perimeter drag overlay sits above WebKit so the
+        // four edge bands are predictable even when the website fills the
+        // visible rectangle. The external control zone sits above that overlay
+        // so future tabs/gear/FT controls retain interaction priority; blank
+        // control-zone space still returns nil and can fall through normally.
         addSubview(webPanelContainerView)
+        addSubview(perimeterDragView)
+        addSubview(externalControlZoneView)
 
         NSLayoutConstraint.activate([
             externalControlZoneView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -36,6 +45,11 @@ final class PanelRootView: NSView {
             webPanelContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
             webPanelContainerView.topAnchor.constraint(equalTo: topAnchor),
             webPanelContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            perimeterDragView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            perimeterDragView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            perimeterDragView.topAnchor.constraint(equalTo: topAnchor),
+            perimeterDragView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
@@ -52,31 +66,15 @@ final class PanelRootView: NSView {
     }
 }
 
-/// The zone is visually transparent. Most blank area intentionally returns nil
-/// from AppKit view hit testing so it remains click-through in the real-Mac
-/// behavior already observed. Only explicit control subviews should intercept
-/// events. Stage 1 reserves one small top drag region; future tabs and system
-/// controls can be added as additional subviews without turning the full 76 pt
-/// zone into an invisible sidebar.
+/// The zone is visually transparent. Blank area intentionally returns nil from
+/// AppKit view hit testing. Future tabs and system controls can be added as
+/// subviews; because this view is layered above the perimeter drag overlay,
+/// those explicit controls will take precedence wherever they are visible.
 final class ExternalControlZoneView: NSView {
-    let dragRegionView = PanelDragRegionView()
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-
-        dragRegionView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dragRegionView)
-
-        NSLayoutConstraint.activate([
-            dragRegionView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            dragRegionView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            dragRegionView.topAnchor.constraint(equalTo: topAnchor),
-            dragRegionView.heightAnchor.constraint(
-                equalToConstant: PanelMetrics.externalControlZoneDragRegionHeight
-            ),
-        ])
     }
 
     @available(*, unavailable)
@@ -93,20 +91,23 @@ final class ExternalControlZoneView: NSView {
     }
 }
 
-/// A deliberately small drag target outside the WKWebView. Using
-/// NSWindow.performDrag(with:) delegates the actual move to WindowServer and
-/// avoids making the whole transparent control zone consume mouse events.
-final class PanelDragRegionView: NSView {
+/// A predictable four-sided movement affordance. The outermost resize inset is
+/// deliberately left untouched for AppKit's native resize handling, and the
+/// corners are excluded so diagonal resize acquisition remains reliable.
+///
+/// The overlay is otherwise hit-test transparent: website interaction and the
+/// future external-control blank zone are unaffected away from the narrow edge
+/// bands. Movement uses Apple's public NSWindow.performDrag(with:) API.
+final class PanelPerimeterDragView: NSView {
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        toolTip = "Drag FloatTabs"
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
     }
 
     override var isOpaque: Bool { false }
@@ -116,13 +117,78 @@ final class PanelDragRegionView: NSView {
         true
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.performDrag(with: event)
     }
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        addCursorRect(bounds, cursor: .openHand)
+        for rect in Self.dragRects(in: bounds) {
+            addCursorRect(rect, cursor: .openHand)
+        }
+    }
+
+    static func dragRects(in bounds: NSRect) -> [NSRect] {
+        guard bounds.width > 0, bounds.height > 0 else { return [] }
+
+        let resizeInset = max(PanelMetrics.perimeterDragResizeInset, 0)
+        let requestedBand = max(PanelMetrics.perimeterDragBandWidth, 0)
+        let cornerExclusion = max(PanelMetrics.perimeterDragCornerExclusion, 0)
+        let insetBounds = bounds.insetBy(dx: resizeInset, dy: resizeInset)
+
+        guard insetBounds.width > 0, insetBounds.height > 0 else { return [] }
+
+        let horizontalBandHeight = min(requestedBand, insetBounds.height)
+        let verticalBandWidth = min(requestedBand, insetBounds.width)
+        let horizontalLength = max(insetBounds.width - 2 * cornerExclusion, 0)
+        let verticalLength = max(insetBounds.height - 2 * cornerExclusion, 0)
+
+        var rects: [NSRect] = []
+
+        if horizontalLength > 0, horizontalBandHeight > 0 {
+            rects.append(
+                NSRect(
+                    x: insetBounds.minX + cornerExclusion,
+                    y: insetBounds.minY,
+                    width: horizontalLength,
+                    height: horizontalBandHeight
+                )
+            )
+            rects.append(
+                NSRect(
+                    x: insetBounds.minX + cornerExclusion,
+                    y: insetBounds.maxY - horizontalBandHeight,
+                    width: horizontalLength,
+                    height: horizontalBandHeight
+                )
+            )
+        }
+
+        if verticalLength > 0, verticalBandWidth > 0 {
+            rects.append(
+                NSRect(
+                    x: insetBounds.minX,
+                    y: insetBounds.minY + cornerExclusion,
+                    width: verticalBandWidth,
+                    height: verticalLength
+                )
+            )
+            rects.append(
+                NSRect(
+                    x: insetBounds.maxX - verticalBandWidth,
+                    y: insetBounds.minY + cornerExclusion,
+                    width: verticalBandWidth,
+                    height: verticalLength
+                )
+            )
+        }
+
+        return rects
     }
 }
 

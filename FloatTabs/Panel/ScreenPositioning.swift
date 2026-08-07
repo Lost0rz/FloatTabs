@@ -7,9 +7,12 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
-    /// Reserved at the very top of the external control zone. This stays outside
-    /// the WKWebView and below the frozen shell's 22–24 pt first-tab top offset.
-    static let externalControlZoneDragRegionHeight: CGFloat = 20
+    /// Window movement is available from a predictable perimeter band on all
+    /// four sides. The outer inset stays free for AppKit's native resize hit
+    /// testing; corners stay free so diagonal resizing remains easy to acquire.
+    static let perimeterDragResizeInset: CGFloat = 6
+    static let perimeterDragBandWidth: CGFloat = 12
+    static let perimeterDragCornerExclusion: CGFloat = 28
 
     static let webPanelCornerRadius: CGFloat = 14
     static let structuralBorderWidth: CGFloat = 1
