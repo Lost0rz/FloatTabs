@@ -502,14 +502,14 @@ Web App group 与 bottom system group 不加 separator；large empty gap 本身�
 
 ## 8.4 Shape
 
-目标：
+目标视觉：
 
-- file-folder/index tab;
-- attached to panel edge;
-- not conventional Sidebar;
-- not Toolbar Button.
+- file-folder/index tab language;
+- protruding from the left side as in the approved mockups;
+- not a conventional Sidebar;
+- not a Toolbar Button.
 
-右侧视觉必须与 Web Panel 连续，不出现明显“独立圆角按钮漂浮在旁边”的强分离感；但不要求为了这一点强行重画已认可的主视觉。
+**不要继续为了“是否必须物理连接主面板、右侧是否一定要取消圆角”等细节重画/重构。** 已认可 mockup 的悬浮/突出感可以保留；生产实现只需保持整体层级、active 变大、左侧外缘定位与统一视觉语言。具体 join geometry 不是当前需要继续优化的产品问题。
 
 ## 8.5 Layering
 
