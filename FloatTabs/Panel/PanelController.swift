@@ -132,6 +132,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func persistPanelFrame() {
+        // The panel starts at an implementation-only .zero origin. Avoid
+        // creating or overwriting stored state if the app quits before the
+        // panel has ever been positioned for display.
+        guard hasPositionedPanel else { return }
         frameStore.saveFrame(panel.frame)
     }
 }
