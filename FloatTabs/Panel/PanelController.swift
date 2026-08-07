@@ -1,34 +1,43 @@
 import AppKit
-import SwiftUI
 import WebKit
 
 @MainActor
-final class PanelController {
+final class PanelController: NSObject, NSWindowDelegate {
     private let panel: FloatingPanel
     private let webView: WKWebView
+    private let frameStore: PanelFrameStore
+
     private var previousApplication: NSRunningApplication?
+    private var restoredFrame: NSRect?
     private var hasPositionedPanel = false
 
     var isVisible: Bool {
         panel.isVisible
     }
 
-    init(webView: WKWebView? = nil) {
+    init(
+        webView: WKWebView? = nil,
+        frameStore: PanelFrameStore = PanelFrameStore()
+    ) {
         let webView = webView ?? WebViewFactory.makeStageZeroWebView()
         self.webView = webView
+        self.frameStore = frameStore
+        restoredFrame = frameStore.loadFrame()
 
-        let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
+        let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
-        panel.contentViewController = NSHostingController(
-            rootView: WebViewContainer(webView: webView)
-        )
+
+        super.init()
+
+        panel.delegate = self
+        panel.contentView = PanelRootView(webView: webView)
 
         WebViewFactory.loadStageZeroPage(in: webView)
     }
 
     func showFloatTabs() {
         capturePreviousApplication()
-        positionPanelForCurrentScreen()
+        positionPanelForCurrentScreens()
         activateFloatTabs()
 
         panel.makeKeyAndOrderFront(nil)
@@ -36,6 +45,7 @@ final class PanelController {
     }
 
     func hideFloatTabs() {
+        persistPanelFrame()
         panel.orderOut(nil)
 
         guard let previousApplication else {
@@ -46,6 +56,19 @@ final class PanelController {
         self.previousApplication = nil
         NSApp.deactivate()
         _ = previousApplication.activate(options: [])
+    }
+
+    func prepareForTermination() {
+        persistPanelFrame()
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        PanelMetrics.clampedPanelSize(frameSize)
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        clampPanelToConnectedScreens()
+        persistPanelFrame()
     }
 
     private func activateFloatTabs() {
@@ -62,23 +85,53 @@ final class PanelController {
         previousApplication = frontmost
     }
 
-    private func positionPanelForCurrentScreen() {
-        guard let screen = ScreenPositioning.targetScreen() else { return }
+    private func positionPanelForCurrentScreens() {
+        let screens = NSScreen.screens
+        guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+
+        let visibleFrames = screens.map(\.visibleFrame)
+        let targetFrame: NSRect
 
         if hasPositionedPanel {
-            panel.setFrame(
-                ScreenPositioning.clampedFrame(panel.frame, to: screen.visibleFrame),
-                display: false
+            targetFrame = ScreenPositioning.restoredFrame(
+                panel.frame,
+                visibleFrames: visibleFrames,
+                fallbackVisibleFrame: fallbackScreen.visibleFrame
+            )
+        } else if let restoredFrame {
+            targetFrame = ScreenPositioning.restoredFrame(
+                restoredFrame,
+                visibleFrames: visibleFrames,
+                fallbackVisibleFrame: fallbackScreen.visibleFrame
             )
         } else {
-            panel.setFrame(
-                ScreenPositioning.centeredFrame(
-                    size: PanelMetrics.defaultViewportSize,
-                    in: screen.visibleFrame
-                ),
-                display: false
+            targetFrame = ScreenPositioning.centeredFrame(
+                size: PanelMetrics.defaultPanelSize,
+                in: fallbackScreen.visibleFrame
             )
-            hasPositionedPanel = true
         }
+
+        panel.setFrame(targetFrame, display: false)
+        restoredFrame = nil
+        hasPositionedPanel = true
+    }
+
+    private func clampPanelToConnectedScreens() {
+        let screens = NSScreen.screens
+        guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+
+        let clamped = ScreenPositioning.restoredFrame(
+            panel.frame,
+            visibleFrames: screens.map(\.visibleFrame),
+            fallbackVisibleFrame: fallbackScreen.visibleFrame
+        )
+
+        if clamped != panel.frame {
+            panel.setFrame(clamped, display: true)
+        }
+    }
+
+    private func persistPanelFrame() {
+        frameStore.saveFrame(panel.frame)
     }
 }
