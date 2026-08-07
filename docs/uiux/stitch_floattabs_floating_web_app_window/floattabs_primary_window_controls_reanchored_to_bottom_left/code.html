@@ -1,0 +1,262 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>FloatTabs — Current Web App Controls</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "outline": "#8e9192",
+                        "primary": "#ffffff",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-container": "#636565",
+                        "on-secondary-fixed": "#1a1c1c",
+                        "on-surface-variant": "#c4c7c8",
+                        "tertiary-fixed-dim": "#c8c6c6",
+                        "on-primary-fixed": "#1a1c1c",
+                        "tertiary": "#ffffff",
+                        "on-error": "#690005",
+                        "surface-container-low": "#1c1b1b",
+                        "on-background": "#e5e2e1",
+                        "secondary": "#c7c6c6",
+                        "secondary-fixed-dim": "#c7c6c6",
+                        "on-primary-fixed-variant": "#454747",
+                        "secondary-container": "#484949",
+                        "error-container": "#93000a",
+                        "on-primary": "#2f3131",
+                        "error": "#ffb4ab",
+                        "on-secondary-container": "#b8b8b8",
+                        "surface-container-lowest": "#0e0e0e",
+                        "secondary-fixed": "#e3e2e2",
+                        "inverse-primary": "#5d5f5f",
+                        "primary-fixed": "#e2e2e2",
+                        "background": "#131313",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "on-tertiary-fixed-variant": "#474747",
+                        "surface-container": "#20201f",
+                        "outline-variant": "#444748",
+                        "primary-container": "#e2e2e2",
+                        "surface": "#131313",
+                        "tertiary-container": "#e4e2e1",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "on-secondary": "#2f3131",
+                        "on-surface": "#e5e2e1",
+                        "surface-dim": "#131313",
+                        "on-tertiary": "#303030",
+                        "inverse-on-surface": "#313030",
+                        "surface-tint": "#c6c6c7",
+                        "tertiary-fixed": "#e4e2e1",
+                        "surface-variant": "#353535",
+                        "on-tertiary-container": "#656464",
+                        "on-error-container": "#ffdad6",
+                        "surface-bright": "#393939",
+                        "on-secondary-fixed-variant": "#464747",
+                        "surface-container-highest": "#353535",
+                        "surface-container-high": "#2a2a2a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "margin-window": "20px",
+                        "xs": "4px",
+                        "unit": "4px",
+                        "xl": "32px",
+                        "lg": "24px",
+                        "sm": "8px",
+                        "gutter": "12px"
+                    },
+                    "fontFamily": {
+                        "headline-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "mono-code": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "label-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-sm": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "label-md": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "mono-code": ["12px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "body-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "body-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "label-sm": ["10px", { "lineHeight": "12px", "letterSpacing": "0.03em", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .mac-blur {
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+        }
+        .popover-shadow {
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.1) inset;
+        }
+        .menu-item-hover:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-black text-on-surface w-full h-screen flex items-center justify-center overflow-hidden font-body-md select-none">
+<!-- Main Wallpaper Background -->
+<div class="absolute inset-0 bg-cover bg-center w-full h-full opacity-40 mix-blend-screen" data-alt="A dark, moody, abstract gradient background with soft deep blues and rich blacks, reminiscent of macOS Monterey dark mode. Minimalist and ultra-high resolution." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBydQXSS08EEkOtZ4x5PRAl8Al3z1wDihzNGl496iKvXXMS_8vpWSO8aQ__5Hyvgcgt6YFsaPABQvy037f5ThRDb8Y-T8PXBbuo0CKinHrbhvpSgqCiI1g72cKOg58eWEaX97bAeFlSducwtpbmD8izE3yttNkYyhHiFLmTGJb4zR3Yx2rEA8_yAGFY23830LC-l2_FFtB9oXAQP6P8VjdlReEK57if09RaVL1D_k35y7awjI6c36zV3g')"></div>
+<!-- Main Container -->
+<div class="relative flex items-center justify-center h-full w-full">
+<!-- Left Sidebar (FloatTabs UI) -->
+<div class="fixed -left-[40px] top-xl flex flex-col gap-xs items-end w-[48px] z-50 transition-transform duration-200 ease-out" style="left: calc(50% - 255px); top: 0px; height: 100vh; padding-top: 24px; padding-bottom: 24px; position: absolute;"><!-- Top Group: App Tabs -->
+<div class="flex flex-col items-end gap-xs w-full">
+<div class="bg-surface-container-high text-primary w-[48px] h-[32px] rounded-l-lg flex items-center justify-center transition-all duration-200 relative group cursor-pointer">
+<span class="font-label-sm text-label-sm">GPT</span>
+
+</div>
+<div class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 cursor-pointer border border-white/5 border-r-0">
+<span class="font-label-sm text-label-sm">X</span>
+</div>
+<div class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 cursor-pointer border border-white/5 border-r-0">
+<span class="font-label-sm text-label-sm">CL</span>
+</div>
+<div class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 cursor-pointer border border-white/5 border-r-0">
+<span class="font-label-sm text-label-sm">IG</span>
+</div>
+<div class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 cursor-pointer border border-white/5 border-r-0">
+<span class="font-label-sm text-label-sm">TT</span>
+</div>
+<div class="mt-sm w-[40px] h-[32px] flex items-center justify-center text-on-surface-variant opacity-60 hover:opacity-100 transition-opacity cursor-pointer">
+<span class="material-symbols-outlined text-[16px]">add</span>
+</div>
+</div>
+<!-- Spacer for large vertical gap -->
+<div class="flex-1"></div>
+<!-- Bottom Group: System Controls -->
+<div class="flex flex-col items-end gap-2 w-full mb-4 relative">
+<!-- Gear Icon (Anchor for Popover) -->
+<div class="w-[40px] h-[40px] bg-[#1c1b1b]/80 mac-blur rounded-full flex items-center justify-center text-on-surface-variant cursor-pointer hover:text-primary hover:bg-[#2a2a2a] transition-all border border-white/10" id="settings-trigger">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</div>
+<!-- Master Control -->
+<div class="w-[40px] h-[40px] bg-[#1c1b1b]/80 mac-blur rounded-full flex items-center justify-center text-primary shadow-lg border border-white/10 cursor-pointer hover:bg-[#2a2a2a] transition-colors">
+<span class="font-label-md text-label-md font-bold tracking-widest">FT</span>
+</div>
+<!-- Repositioned Popover (Anchored to Gear) -->
+<div class="absolute bottom-[100%] left-[48px] mb-2 w-[260px] bg-[#1e1e1e]/90 mac-blur rounded-[12px] border border-white/10 popover-shadow flex flex-col p-2 z-[100] transform origin-bottom-left transition-all duration-200 ease-out">
+<div class="px-2 py-1 mb-1">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">GPT</span>
+</div>
+<div class="flex items-center justify-between px-2 py-1.5 menu-item-hover group">
+<span class="font-body-sm text-body-sm text-on-surface">Zoom</span>
+<div class="flex items-center bg-black/40 rounded-md border border-white/5 overflow-hidden">
+<button class="w-6 h-6 flex items-center justify-center hover:bg-white/10 text-on-surface-variant transition-colors"><span class="material-symbols-outlined text-[14px]">remove</span></button>
+<span class="font-label-md text-label-md w-[40px] text-center text-primary">110%</span>
+<button class="w-6 h-6 flex items-center justify-center hover:bg-white/10 text-on-surface-variant transition-colors"><span class="material-symbols-outlined text-[14px]">add</span></button>
+</div>
+</div>
+<div class="px-2 py-1.5 mt-1">
+<span class="font-body-sm text-body-sm text-on-surface block mb-1.5">View Mode</span>
+<div class="flex bg-black/40 rounded-md p-[2px] border border-white/5">
+<button class="flex-1 py-1 rounded bg-[#333333] shadow-sm text-primary font-label-md text-label-md text-center transition-all border border-white/5">Responsive</button>
+<button class="flex-1 py-1 rounded text-on-surface-variant font-label-md text-label-md text-center hover:text-primary transition-all">Desktop</button>
+<button class="flex-1 py-1 rounded text-on-surface-variant font-label-md text-label-md text-center hover:text-primary transition-all">Mobile</button>
+</div>
+</div>
+<div class="flex items-center justify-between px-2 py-1.5 mt-1 menu-item-hover cursor-pointer group">
+<span class="font-body-sm text-body-sm text-on-surface">Window Size</span>
+<div class="flex items-center text-on-surface-variant group-hover:text-primary transition-colors">
+<span class="font-body-sm text-body-sm mr-1">Large Mobile</span>
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+</div>
+</div>
+<div class="h-[1px] bg-white/10 my-1 mx-2"></div>
+<div class="flex items-center justify-between px-2 py-1.5 menu-item-hover cursor-pointer group">
+<span class="font-body-sm text-body-sm text-on-surface">Pin Window</span>
+<span class="material-symbols-outlined text-[16px] text-primary">check</span>
+</div>
+<div class="h-[1px] bg-white/10 my-1 mx-2"></div>
+<div class="flex flex-col">
+<div class="px-2 py-1.5 menu-item-hover cursor-pointer font-body-sm text-body-sm text-on-surface">Reload</div>
+<div class="px-2 py-1.5 menu-item-hover cursor-pointer font-body-sm text-body-sm text-on-surface flex justify-between items-center">
+                Open in Default Browser
+                <span class="material-symbols-outlined text-[14px] text-on-surface-variant">open_in_new</span>
+</div>
+<div class="px-2 py-1.5 menu-item-hover cursor-pointer font-body-sm text-body-sm text-on-surface">Edit Web App…</div>
+</div>
+<div class="h-[1px] bg-white/10 my-1 mx-2"></div>
+<div class="px-2 py-1.5 menu-item-hover cursor-pointer font-body-sm text-body-sm text-on-surface flex items-center text-on-surface-variant hover:text-primary">
+<span class="material-symbols-outlined text-[16px] mr-2">settings</span>
+            FloatTabs Settings…
+        </div>
+</div>
+</div></div>
+<!-- Main Window -->
+<div class="w-[430px] h-[820px] bg-[#242424]/95 mac-blur rounded-[14px] shadow-[0_20px_40px_rgba(0,0,0,0.5)] border border-white/10 relative overflow-hidden flex flex-col z-40">
+<!-- Inner Light Border -->
+<div class="absolute inset-x-0 top-0 h-[1px] bg-white/10 pointer-events-none"></div>
+<!-- TopAppBar -->
+<div class="h-6 w-full flex items-center justify-between px-md bg-transparent mt-xs cursor-grab active:cursor-grabbing relative z-50">
+<div class="flex items-center text-on-surface-variant hover:bg-white/5 rounded px-1 transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[18px]">drag_handle</span>
+</div>
+<!-- Headline intentionally empty as per JSON -->
+
+</div>
+<!-- Content Area (AI Chat Context) -->
+<div class="flex-1 overflow-hidden flex flex-col p-4 pt-2">
+<!-- Sample Chat Content -->
+<div class="flex-1 overflow-y-auto pr-2 space-y-4 pb-[80px]">
+<!-- AI Message -->
+<div class="flex flex-col gap-2 relative pl-4 border-l border-white/20">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">ChatGPT</span>
+<p class="font-body-sm text-body-sm text-on-surface">Here is a refined version of the utility script for macOS window management.</p>
+<!-- Code Block -->
+<div class="bg-[#121212] rounded-lg border border-white/10 p-3 mt-1 group relative">
+<div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-[#2a2a2a] border border-white/10 rounded p-1 cursor-pointer">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant">content_copy</span>
+</div>
+<pre class="font-mono-code text-mono-code text-secondary"><code><span class="text-[#a5d6ff]">const</span> <span class="text-[#d2a8ff]">windowManager</span> = {
+  <span class="text-[#79c0ff]">init</span>() {
+    <span class="text-[#ff7b72]">this</span>.setupListeners();
+    console.<span class="text-[#79c0ff]">log</span>(<span class="text-[#a5d6ff]">'Ready.'</span>);
+  }
+};</code></pre>
+</div>
+</div>
+<!-- User Message -->
+<div class="flex justify-end mt-4">
+<div class="bg-[#333333] rounded-lg px-3 py-2 max-w-[85%]">
+<p class="font-body-sm text-body-sm text-primary">Looks good. Can we add a pinning feature?</p>
+</div>
+</div>
+<!-- AI Message -->
+<div class="flex flex-col gap-2 relative pl-4 border-l border-white/20 mt-4">
+<p class="font-body-sm text-body-sm text-on-surface">Yes, we can implement an "always on top" property for the pin feature.</p>
+</div>
+</div>
+<!-- Input Area (Overlay) -->
+<div class="absolute bottom-4 left-4 right-4 h-[44px] bg-[#1e1e1e]/80 mac-blur rounded-full border border-white/10 flex items-center px-4 shadow-lg">
+<span class="material-symbols-outlined text-on-surface-variant mr-3">add_circle</span>
+<input class="flex-1 bg-transparent border-none outline-none text-body-sm text-primary placeholder-on-surface-variant focus:ring-0 p-0" placeholder="Message ChatGPT..." readonly="" type="text">
+<span class="material-symbols-outlined text-on-surface-variant ml-2 opacity-50 cursor-not-allowed">send</span>
+</div>
+</div>
+</div>
+</div>
+
+
+</body></html>

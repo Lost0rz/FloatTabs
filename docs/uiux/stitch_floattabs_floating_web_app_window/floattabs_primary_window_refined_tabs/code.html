@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FloatTabs - Quiet Precision UI</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "inverse-primary": "#5d5f5f",
+                    "primary-fixed-dim": "#c6c6c7",
+                    "on-primary": "#2f3131",
+                    "primary-container": "#e2e2e2",
+                    "inverse-on-surface": "#313030",
+                    "primary": "#ffffff",
+                    "on-background": "#e5e2e1",
+                    "tertiary": "#ffffff",
+                    "on-surface": "#e5e2e1",
+                    "on-primary-container": "#636565",
+                    "surface-container-highest": "#353535",
+                    "on-primary-fixed": "#1a1c1c",
+                    "surface-tint": "#c6c6c7",
+                    "on-tertiary-fixed-variant": "#474747",
+                    "background": "#131313",
+                    "secondary-fixed-dim": "#c7c6c6",
+                    "error-container": "#93000a",
+                    "secondary": "#c7c6c6",
+                    "on-secondary-fixed-variant": "#464747",
+                    "on-error": "#690005",
+                    "on-secondary": "#2f3131",
+                    "on-tertiary": "#303030",
+                    "secondary-container": "#484949",
+                    "on-surface-variant": "#c4c7c8",
+                    "surface-container-lowest": "#0e0e0e",
+                    "tertiary-fixed": "#e4e2e1",
+                    "error": "#ffb4ab",
+                    "tertiary-container": "#e4e2e1",
+                    "on-error-container": "#ffdad6",
+                    "primary-fixed": "#e2e2e2",
+                    "surface-container-low": "#1c1b1b",
+                    "surface-bright": "#393939",
+                    "on-secondary-fixed": "#1a1c1c",
+                    "on-primary-fixed-variant": "#454747",
+                    "surface-container": "#20201f",
+                    "tertiary-fixed-dim": "#c8c6c6",
+                    "outline-variant": "#444748",
+                    "surface-variant": "#353535",
+                    "surface": "#131313",
+                    "surface-dim": "#131313",
+                    "inverse-surface": "#e5e2e1",
+                    "on-secondary-container": "#b8b8b8",
+                    "surface-container-high": "#2a2a2a",
+                    "secondary-fixed": "#e3e2e2",
+                    "on-tertiary-container": "#656464",
+                    "on-tertiary-fixed": "#1b1c1c",
+                    "outline": "#8e9192"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "xs": "4px",
+                    "unit": "4px",
+                    "lg": "24px",
+                    "margin-window": "20px",
+                    "md": "16px",
+                    "sm": "8px",
+                    "gutter": "12px",
+                    "xl": "32px"
+            },
+            "fontFamily": {
+                    "body-md": ["Inter", "sans-serif"],
+                    "body-sm": ["Inter", "sans-serif"],
+                    "headline-sm": ["Inter", "sans-serif"],
+                    "mono-code": ["JetBrains Mono", "monospace"],
+                    "label-md": ["Inter", "sans-serif"],
+                    "label-sm": ["Inter", "sans-serif"]
+            },
+            "fontSize": {
+                    "body-md": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400"}],
+                    "body-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400"}],
+                    "headline-sm": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "mono-code": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                    "label-md": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                    "label-sm": ["10px", {"lineHeight": "12px", "letterSpacing": "0.03em", "fontWeight": "600"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        /* Base typography imports */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap');
+        
+        body {
+            background-color: #000; /* Fallback */
+        }
+        
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.2);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex items-center justify-center relative font-body-md text-on-surface">
+<!-- Desktop Environment Context (Blurred Background) -->
+<div class="absolute inset-0 bg-cover bg-center opacity-70 filter blur-[30px] scale-110" data-alt="A moody, abstract digital landscape resembling a premium macOS dark mode wallpaper. Flowing, organic gradients of deep charcoal, subtle indigo, and muted teal blend seamlessly. The lighting is extremely soft and diffuse, creating a sense of vast atmospheric depth without sharp contrasts. The aesthetic is highly polished, minimal, and calming, perfect for a high-end desktop environment." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB2GBo7Tga0gCXa443y541FflH4dhqaTv6caeQVkbbEmqplE0RgHC7IkRfw-FkW-k-WziuMjyrzyC0j7Ak0lbm2Gt7D_tDFYB06B6BrvbFJJEGGpzjPcMUlQEyd6cb5NKOPNGt-VPTRsvc1rG_b2SQ7x2CWWEFQ21rCiIG4cxaX0ryNtXgMeBpCNau4LsiD3oWEJC4bj-xn510CqntKyWxcnFRYLSIin27rZbbXOJ-7rv4iLoPJXluzvQ')">
+</div>
+<!-- Floating Window System Wrapper -->
+<!-- Represents the physical bounding box including the protruding tabs -->
+<div class="relative w-[430px] h-[820px] flex drop-shadow-2xl">
+<!-- Index Tabs (NavigationDrawer Anchor Implementation) -->
+<!-- Placed absolute relative to the wrapper, extending leftwards. Z-index 0 to sit behind window. -->
+<div class="absolute -left-[40px] inset-y-0 flex flex-col justify-between py-margin-window z-0 w-[48px]">
+<!-- Top Stack: Web App Tabs -->
+<div class="flex flex-col gap-xs">
+<!-- Active Tab: GPT -->
+<button class="bg-surface-container-high text-primary w-[48px] h-[32px] rounded-l-lg flex items-center justify-center translate-x-[-8px] shadow-[inset_1px_1px_0_rgba(255,255,255,0.05)] border-y border-l border-surface-container-high">
+<span class="font-label-sm text-label-sm uppercase tracking-widest">GPT</span>
+</button>
+<!-- Inactive Tab: X -->
+<button class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 border border-transparent hover:border-surface-variant shadow-[inset_1px_1px_0_rgba(255,255,255,0.02)]">
+<span class="font-label-sm text-label-sm uppercase tracking-widest">X</span>
+</button>
+<!-- Inactive Tab: CL -->
+<button class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 border border-transparent hover:border-surface-variant shadow-[inset_1px_1px_0_rgba(255,255,255,0.02)]">
+<span class="font-label-sm text-label-sm uppercase tracking-widest">CL</span>
+</button>
+<!-- Inactive Tab: IG -->
+<button class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 border border-transparent hover:border-surface-variant shadow-[inset_1px_1px_0_rgba(255,255,255,0.02)]">
+<span class="font-label-sm text-label-sm uppercase tracking-widest">IG</span>
+</button>
+<!-- Inactive Tab: TT -->
+<button class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-80 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 border border-transparent hover:border-surface-variant shadow-[inset_1px_1px_0_rgba(255,255,255,0.02)]">
+<span class="font-label-sm text-label-sm uppercase tracking-widest">TT</span>
+</button>
+<!-- New Tab Button -->
+<button class="bg-surface-container-low text-on-surface-variant w-[40px] h-[32px] rounded-l-lg flex items-center justify-center opacity-60 hover:opacity-100 hover:translate-x-[-4px] transition-all duration-200 border border-transparent">
+<span class="material-symbols-outlined text-[14px]">add</span>
+</button>
+</div>
+<!-- Bottom Anchor: FloatTabs Master Control -->
+<div class="flex flex-col items-end">
+<button class="bg-surface-variant text-primary w-[40px] h-[40px] rounded-l-xl flex items-center justify-center shadow-lg border-y border-l border-white/10 hover:translate-x-[-4px] transition-transform">
+<span class="font-label-sm text-label-sm font-bold tracking-tighter">FT</span>
+</button>
+</div>
+</div>
+<!-- Main Window Container -->
+<!-- Uses surface-container-high to physically merge with the active tab color as per style guide -->
+<!-- Layering depth achieved via specific complex shadow -->
+<main class="absolute inset-0 bg-surface-container-high rounded-[14px] border border-surface-container-low shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_20px_40px_rgba(0,0,0,0.5)] flex flex-col z-10 overflow-hidden backdrop-blur-xl">
+<!-- TopAppBar (Anchor Implementation) -->
+<!-- Extremely thin 24px drag area -->
+<header class="w-full h-[24px] flex items-center justify-end pr-md bg-transparent cursor-grab active:cursor-grabbing hover:bg-white/5 transition-colors duration-150 border-b border-transparent">
+<button class="text-outline hover:text-on-surface transition-colors flex items-center justify-center w-6 h-6 rounded">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</header>
+<!-- Web Content Canvas (AI Chat Interface) -->
+<div class="flex-1 overflow-y-auto px-margin-window py-gutter flex flex-col gap-[32px]">
+<!-- AI Message Cluster -->
+<!-- Transparent background, silver vertical accent line (border-l-2 border-outline-variant) -->
+<div class="flex flex-col gap-sm pl-gutter border-l-2 border-outline-variant">
+<div class="flex items-center gap-sm mb-xs">
+<span class="material-symbols-outlined text-[14px] text-primary">auto_awesome</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">AI Assistant</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface leading-relaxed max-w-[95%]">
+                        I've analyzed the request for setting up the initialization protocol. Here is a robust Python snippet that handles the environment configuration dynamically while adhering to our strict typing standards.
+                    </p>
+<!-- Code Block -->
+<!-- #121212 background mapped to bg-surface, JetBrains Mono font -->
+<div class="mt-sm bg-surface rounded-lg border border-surface-variant p-gutter overflow-hidden shadow-sm">
+<div class="flex items-center justify-between mb-sm border-b border-surface-variant/50 pb-xs">
+<span class="font-label-sm text-label-sm text-on-surface-variant">core_init.py</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[14px]">content_copy</span>
+</button>
+</div>
+<pre class="overflow-x-auto"><code class="font-mono-code text-mono-code text-primary-fixed-dim block leading-loose">
+<span class="text-[#c678dd]">import</span> os
+<span class="text-[#c678dd]">from</span> typing <span class="text-[#c678dd]">import</span> Dict, Optional
+
+<span class="text-[#c678dd]">def</span> <span class="text-[#61afef]">initialize_environment</span>(
+    config_path: str,
+    strict_mode: bool = <span class="text-[#d19a66]">True</span>
+) -&gt; Dict[str, str]:
+    <span class="text-[#5c6370]">"""Loads and validates core environment variables."""</span>
+    <span class="text-[#c678dd]">if not</span> os.path.exists(config_path):
+        <span class="text-[#c678dd]">raise</span> FileNotFoundError(<span class="text-[#98c379]">f"Config missing: {config_path}"</span>)
+    
+    <span class="text-[#c678dd]">return</span> { <span "="" class="text-[#98c379]">"STATUS"</span>: <span "="" class="text-[#98c379]">"INITIALIZED"</span> }
+                        </code></pre>
+</div>
+<p class="font-body-md text-body-md text-on-surface leading-relaxed max-w-[95%] mt-xs">
+                        This structure ensures we fail fast if the configuration path is invalid, preventing downstream cascading errors.
+                    </p>
+</div>
+<!-- User Message -->
+<!-- Subtle #333333 surface mapped to bg-surface-variant -->
+<div class="self-end max-w-[85%] bg-surface-variant rounded-xl p-md shadow-sm border border-white/5 relative mt-md">
+<p class="font-body-md text-body-md text-on-surface">
+                        That looks perfect. Can we also add a quick validation step for the `STATUS` key before returning the dictionary?
+                    </p>
+<!-- Tail visual cue (optional minimal detail) -->
+<div class="absolute bottom-3 -right-[4px] w-2 h-2 bg-surface-variant rotate-45 border-r border-b border-white/5"></div>
+</div>
+</div>
+<!-- Input Area -->
+<!-- Single-line pill shape at the bottom -->
+<div class="px-margin-window pb-margin-window pt-sm bg-gradient-to-t from-surface-container-high to-transparent">
+<div class="h-[40px] bg-surface-container-lowest/80 backdrop-blur-md rounded-full border border-surface-variant flex items-center px-md focus-within:border-primary/50 focus-within:bg-surface-container-low transition-all duration-300 shadow-inner group">
+<button class="text-outline hover:text-primary transition-colors mr-sm shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">add_circle</span>
+</button>
+<input class="flex-1 bg-transparent border-none outline-none focus:ring-0 font-body-md text-body-md text-on-surface placeholder-on-surface-variant/70 min-w-0" placeholder="Message AI..." type="text"/>
+<button class="text-outline group-focus-within:text-primary transition-colors ml-sm shrink-0 flex items-center justify-center opacity-50 group-focus-within:opacity-100">
+<span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+</button>
+</div>
+</div>
+</main>
+</div>
+</body></html>

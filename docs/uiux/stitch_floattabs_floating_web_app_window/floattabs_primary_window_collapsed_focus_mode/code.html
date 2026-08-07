@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FloatTabs - Focus Mode</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#131313",
+                        "surface-container-high": "#2a2a2a",
+                        "on-tertiary": "#303030",
+                        "secondary": "#c7c6c6",
+                        "on-error": "#690005",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-dim": "#131313",
+                        "surface-variant": "#353535",
+                        "on-surface": "#e5e2e1",
+                        "on-background": "#e5e2e1",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-container": "#b8b8b8",
+                        "on-secondary-fixed-variant": "#464747",
+                        "inverse-surface": "#e5e2e1",
+                        "tertiary-fixed-dim": "#c8c6c6",
+                        "on-secondary": "#2f3131",
+                        "surface-container-lowest": "#0e0e0e",
+                        "secondary-fixed": "#e3e2e2",
+                        "on-tertiary-fixed-variant": "#474747",
+                        "outline-variant": "#444748",
+                        "inverse-primary": "#5d5f5f",
+                        "on-secondary-fixed": "#1a1c1c",
+                        "outline": "#8e9192",
+                        "on-primary-fixed": "#1a1c1c",
+                        "tertiary": "#ffffff",
+                        "surface-bright": "#393939",
+                        "primary-fixed": "#e2e2e2",
+                        "secondary-fixed-dim": "#c7c6c6",
+                        "error": "#ffb4ab",
+                        "primary": "#ffffff",
+                        "surface-container-highest": "#353535",
+                        "inverse-on-surface": "#313030",
+                        "tertiary-fixed": "#e4e2e1",
+                        "surface-container": "#20201f",
+                        "background": "#131313",
+                        "on-tertiary-container": "#656464",
+                        "on-surface-variant": "#c4c7c8",
+                        "on-primary": "#2f3131",
+                        "surface-tint": "#c6c6c7",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "primary-container": "#e2e2e2",
+                        "on-primary-fixed-variant": "#454747",
+                        "tertiary-container": "#e4e2e1",
+                        "secondary-container": "#484949",
+                        "error-container": "#93000a",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "on-primary-container": "#636565"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "xs": "4px",
+                        "xl": "32px",
+                        "unit": "4px",
+                        "gutter": "12px",
+                        "sm": "8px",
+                        "md": "16px",
+                        "margin-window": "20px"
+                    },
+                    "fontFamily": {
+                        "headline-sm": ["Inter"],
+                        "mono-code": ["JetBrains Mono"],
+                        "label-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-sm": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "mono-code": ["12px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "label-md": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "label-sm": ["10px", { "lineHeight": "12px", "letterSpacing": "0.03em", "fontWeight": "600" }],
+                        "body-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>body {
+    background-image: url(https://lh3.googleusercontent.com/aida-public/AB6AXuDSHMx3aUvbMwGpF_pskEGYZWXQrd0djQ8Lf5DGNc9sJloU5VCdbPpetyJWUtf1VN5D4r0xEsp8E2SbmR4ZAVARXXkolUVqhy6qWL49MKnaHmidjY8DwH1GqT5ss3R8XxiBoQkkkzBx8qXc3LiQLbf26mQ5PJfw07VYP8FI7hGvkfT9KZt5AvgqZpb4vzpKyH7oDJVHtpmRv2MFkoQb7cbQtGKTvlHclI36CsLFQCJ94Qo8yC62W7PdXQ);
+    background-size: cover;
+    background-position: center;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    overflow: hidden
+    }
+/* Simulating the MacOS wallpaper environment */
+.desktop-bg {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, #0a0a0a, #1a1a1a);
+    z-index: -1
+    }
+.window-shadow {
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)
+    }
+.material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24
+    }
+/* Smooth scrolling for the chat area */
+.chat-scroll::-webkit-scrollbar {
+    width: 4px
+    }
+.chat-scroll::-webkit-scrollbar-track {
+    background: transparent
+    }
+.chat-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px
+    }</style>
+</head>
+<body class="text-on-surface antialiased">
+<div class="desktop-bg" data-alt="A dark, abstract macOS-style wallpaper featuring deep obsidian tones with subtle, blurry hints of warm ambient light in the background. The mood is premium, minimalist, and cinematic, providing a distraction-free backdrop for a floating UI window."></div>
+<!-- Main Window Container -->
+<div class="relative w-[430px] h-[820px] bg-surface rounded-[14px] window-shadow flex flex-col border border-white/5 overflow-visible">
+<!-- Top App Bar (Draggable region) -->
+<!-- Translating TopAppBar JSON styles to HTML -->
+<div class="h-6 w-full flex items-center justify-between px-md bg-transparent cursor-grab active:cursor-grabbing text-on-surface-variant z-10 shrink-0">
+<!-- Invisible spacer to balance the flex layout since there's no leading icon in this view -->
+<div class="w-6 h-6"></div>
+<!-- Trailing Icon -->
+<div class="w-[24px] h-[24px] flex items-center justify-end pr-md">
+<span class="material-symbols-outlined text-outline hover:text-primary transition-colors hover:bg-white/5 rounded-full p-0.5 cursor-pointer" data-icon="more_horiz" style="font-size: 16px;">more_horiz</span>
+</div>
+</div>
+<!-- FloatTabs Master Control (FT) -->
+<div class="absolute -left-[40px] bottom-xl flex flex-col gap-xs items-end w-[48px] z-20">
+<div class="bg-surface-container-high text-primary w-[48px] h-[32px] rounded-l-lg flex items-center justify-center translate-x-[-8px] transition-transform duration-200 ease-out border border-r-0 border-white/10 shadow-[0_4px_12px_rgba(0,0,0,0.5)] cursor-pointer group hover:translate-x-[-12px]">
+<span class="font-label-md text-label-md group-hover:opacity-80 transition-opacity">FT</span>
+</div>
+</div>
+<!-- Content Canvas (AI Chat) -->
+<div class="flex-1 flex flex-col px-margin-window pb-margin-window overflow-hidden relative">
+<!-- Chat History Area -->
+<div class="flex-1 overflow-y-auto chat-scroll flex flex-col gap-lg pb-xl pt-sm pr-xs">
+<!-- User Message -->
+<div class="flex justify-end w-full">
+<div class="bg-surface-variant text-on-surface px-md py-sm rounded-lg max-w-[85%] font-body-md text-body-md shadow-sm">
+                        Can you write a Python script to fetch the latest space news from an API?
+                    </div>
+</div>
+<!-- AI Response -->
+<div class="flex flex-col gap-sm w-full relative pl-md">
+<!-- Subtle accent line for AI -->
+<div class="absolute left-0 top-0 bottom-0 w-[1px] bg-outline-variant/30"></div>
+<div class="font-body-md text-body-md text-on-surface-variant pr-md">
+                        Certainly. Here is a simple Python script using the `requests` library to fetch the latest space news from the Spaceflight News API.
+                    </div>
+<!-- Code Block -->
+<div class="bg-[#121212] rounded-lg border border-white/5 overflow-hidden mt-sm shadow-inner">
+<div class="flex items-center justify-between px-md py-[6px] bg-white/[0.02] border-b border-white/5">
+<span class="font-label-sm text-label-sm text-outline">python</span>
+<span class="material-symbols-outlined text-outline cursor-pointer hover:text-primary transition-colors text-[14px]">content_copy</span>
+</div>
+<div class="p-md overflow-x-auto">
+<pre class="font-mono-code text-mono-code text-on-surface-variant"><code class="language-python">import requests
+import json
+
+def fetch_space_news():
+    url = "https://api.spaceflightnewsapi.net/v4/articles/?limit=3"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        
+        for article in data['results']:
+            print(f"Title: {article['title']}")
+            print(f"URL: {article['url']}\n")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+
+if __name__ == "__main__":
+    fetch_space_news()</code></pre>
+</div>
+</div>
+<div class="font-body-md text-body-md text-on-surface-variant pr-md mt-sm">
+                        Make sure to run <code>pip install requests</code> if you haven't already.
+                    </div>
+</div>
+<!-- User Message 2 -->
+<div class="flex justify-end w-full mt-md">
+<div class="bg-surface-variant text-on-surface px-md py-sm rounded-lg max-w-[85%] font-body-md text-body-md shadow-sm">
+                        Thanks! How do I handle rate limits?
+                    </div>
+</div>
+<!-- AI Response 2 -->
+<div class="flex flex-col gap-sm w-full relative pl-md">
+<!-- Subtle accent line for AI -->
+<div class="absolute left-0 top-0 bottom-0 w-[1px] bg-outline-variant/30"></div>
+<div class="font-body-md text-body-md text-on-surface-variant pr-md">
+                        The Spaceflight News API is fairly generous, but handling rate limits (HTTP 429) usually involves implementing a backoff strategy. You can use the <code>time.sleep()</code> function or a library like `tenacity`.
+                    </div>
+</div>
+</div>
+<!-- Input Area -->
+<div class="mt-auto pt-sm relative shrink-0">
+<div class="absolute inset-0 bg-gradient-to-t from-surface to-transparent -top-lg h-lg pointer-events-none"></div>
+<div class="relative bg-surface-container-high/50 border border-white/10 rounded-full px-md py-sm flex items-center gap-sm shadow-sm backdrop-blur-md focus-within:border-white/30 transition-colors">
+<span class="material-symbols-outlined text-outline text-[18px]">add_circle</span>
+<input class="flex-1 bg-transparent border-none outline-none focus:ring-0 font-body-md text-body-md text-on-surface placeholder:text-outline p-0" placeholder="Message AI..." type="text"/>
+<span class="material-symbols-outlined text-outline hover:text-primary transition-colors cursor-pointer text-[18px]">mic</span>
+</div>
+</div>
+</div>
+</div>
+</body></html>

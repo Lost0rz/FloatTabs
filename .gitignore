@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+
+# Swift
+.build/
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# Distribution
+dist/
+*.dmg
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.provisionprofile
+
+# Logs
+*.log
