@@ -7,6 +7,10 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
+    /// Reserved at the very top of the external control zone. This stays outside
+    /// the WKWebView and below the frozen shell's 22–24 pt first-tab top offset.
+    static let externalControlZoneDragRegionHeight: CGFloat = 20
+
     static let webPanelCornerRadius: CGFloat = 14
     static let structuralBorderWidth: CGFloat = 1
 
