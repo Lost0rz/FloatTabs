@@ -8,14 +8,14 @@ The product is intentionally not a full browser. It keeps a small number of freq
 
 ```text
 Stage 0 Window Feasibility Spike: PASSED
-Stage 1 Core Native Shell: ACCEPTED / MERGED BASELINE TARGET
-→ current implementation baseline: native floating shell + frame/multi-display/window-movement foundation
+Stage 1 Core Native Shell: PASSED
+→ current baseline: native floating shell + frame/multi-display/window-movement foundation
 → next engineering line: Stage 2 Persistent Web App Slots
 ```
 
 Stage 0 validated the critical real-Mac window path: FloatTabs can be summoned with the global shortcut above a native full-screen Obsidian window, become interactive, accept WKWebView keyboard input, hide again, and restore the previous app workflow.
 
-Stage 1 adds the production-facing native shell foundation: separate WKWebView viewport semantics, the `76 pt` external control zone, resize/frame restore, multi-display recovery, Menu Bar toggle behavior, and the accepted four-sided perimeter movement model. The latest audited Stage 1 head passes the maintained GitHub-hosted macOS build/test lane.
+Stage 1 adds the production-facing native shell foundation: separate WKWebView viewport semantics, the `76 pt` external control zone, resize/frame restore, multi-display recovery, Menu Bar toggle behavior, and the accepted four-sided perimeter movement model. The audited Stage 1 baseline passes the maintained GitHub-hosted macOS build/test lane.
 
 Recorded evidence and interaction decisions:
 
