@@ -33,6 +33,11 @@ final class PanelMetricsTests: XCTestCase {
         XCTAssertEqual(panelSize, NSSize(width: 396, height: 400))
         XCTAssertEqual(viewportSize, PanelMetrics.minimumViewportSize)
     }
+
+    func testDragRegionFitsBeforeFrozenShellFirstTabOffset() {
+        XCTAssertGreaterThan(PanelMetrics.externalControlZoneDragRegionHeight, 0)
+        XCTAssertLessThanOrEqual(PanelMetrics.externalControlZoneDragRegionHeight, 20)
+    }
 }
 
 final class ScreenPositioningTests: XCTestCase {
@@ -137,5 +142,24 @@ final class PanelFrameStoreTests: XCTestCase {
         let store = PanelFrameStore(defaults: defaults, key: "frame")
 
         XCTAssertNil(store.loadFrame())
+    }
+}
+
+@MainActor
+final class ExternalControlZoneHitTestingTests: XCTestCase {
+    func testBlankZonePassesThroughWhileTopDragRegionRemainsInteractive() {
+        let zone = ExternalControlZoneView(
+            frame: NSRect(x: 0, y: 0, width: PanelMetrics.externalControlZoneWidth, height: 200)
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let dragPoint = NSPoint(
+            x: PanelMetrics.externalControlZoneWidth / 2,
+            y: zone.bounds.maxY - PanelMetrics.externalControlZoneDragRegionHeight / 2
+        )
+        let blankPoint = NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: 80)
+
+        XCTAssertTrue(zone.hitTest(dragPoint) is PanelDragRegionView)
+        XCTAssertNil(zone.hitTest(blankPoint))
     }
 }
