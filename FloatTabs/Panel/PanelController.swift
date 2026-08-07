@@ -87,27 +87,33 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func positionPanelForCurrentScreens() {
         let screens = NSScreen.screens
-        guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
+        guard let targetScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
 
-        let visibleFrames = screens.map(\.visibleFrame)
         let targetFrame: NSRect
 
         if hasPositionedPanel {
-            targetFrame = ScreenPositioning.restoredFrame(
+            // Preserve the Stage 0 interaction contract: every new summon follows
+            // the current target display (pointer/main fallback), while retaining
+            // the panel's current size and relative origin as far as that display
+            // permits. Without this, a panel that still intersected an old screen
+            // could remain there even after the user moved to another display.
+            targetFrame = ScreenPositioning.clampedFrame(
                 panel.frame,
-                visibleFrames: visibleFrames,
-                fallbackVisibleFrame: fallbackScreen.visibleFrame
+                to: targetScreen.visibleFrame
             )
         } else if let restoredFrame {
+            // On the first show after launch, respect a saved frame if its display
+            // is still connected. If that display disappeared, fall back to the
+            // current target screen and clamp the frame into its visible area.
             targetFrame = ScreenPositioning.restoredFrame(
                 restoredFrame,
-                visibleFrames: visibleFrames,
-                fallbackVisibleFrame: fallbackScreen.visibleFrame
+                visibleFrames: screens.map(\.visibleFrame),
+                fallbackVisibleFrame: targetScreen.visibleFrame
             )
         } else {
             targetFrame = ScreenPositioning.centeredFrame(
                 size: PanelMetrics.defaultPanelSize,
-                in: fallbackScreen.visibleFrame
+                in: targetScreen.visibleFrame
             )
         }
 
