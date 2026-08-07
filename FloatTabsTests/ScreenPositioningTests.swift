@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import FloatTabs
 
@@ -142,6 +143,26 @@ final class PanelFrameStoreTests: XCTestCase {
         let store = PanelFrameStore(defaults: defaults, key: "frame")
 
         XCTAssertNil(store.loadFrame())
+    }
+}
+
+@MainActor
+final class PanelRootViewLayoutTests: XCTestCase {
+    func testDefaultPanelLaysOutExactControlZoneAndViewportWidths() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            root.externalControlZoneView.frame.width,
+            PanelMetrics.externalControlZoneWidth,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webPanelContainerView.frame.size,
+            PanelMetrics.defaultViewportSize
+        )
     }
 }
 
