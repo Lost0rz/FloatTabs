@@ -7,11 +7,14 @@ The product is intentionally not a full browser. It keeps a small number of freq
 ## Project Status
 
 ```text
-Pre-development baseline frozen
-→ next step: Stage 0 Window Feasibility Spike
+Stage 0 Window Feasibility Spike: PASSED
+→ current baseline: native floating-panel foundation validated
+→ next step: Stage 1 Window Shell / External Control Zone
 ```
 
-Stage 0 must prove that FloatTabs can reliably appear above a native full-screen app (especially Obsidian), accept WKWebView keyboard input, hide again, and restore focus to the previous app.
+Stage 0 has been validated on a real Mac against the critical product path: FloatTabs can be summoned with the global shortcut above a native full-screen Obsidian window, become interactive, accept WKWebView keyboard input, hide again, and restore the previous app workflow. The automated build and unit-test lane also passes on GitHub-hosted macOS.
+
+See [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md) for the recorded acceptance scope and evidence.
 
 ## Canonical Documentation
 
@@ -108,7 +111,7 @@ Release architecture includes Developer ID signing, Hardened Runtime, Apple nota
 Keep `main` in a reviewed/known-good state. Develop features on focused branches, for example:
 
 ```text
-feat/stage-0-floating-panel
+feat/stage-1-window-shell
 feat/webview-foundation
 feat/external-tab-shell
 feat/persistent-web-app-slots
