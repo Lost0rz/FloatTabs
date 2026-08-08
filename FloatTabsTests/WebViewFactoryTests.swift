@@ -70,28 +70,61 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(veryNarrowMobile.width, 320, accuracy: 0.001)
     }
 
-    func testFloatTabsWebViewKeepsVisibleFrameButUsesIndependentWebsiteBoundsAndZoom() {
-        let desktop = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        desktop.setFrameSize(NSSize(width: 430, height: 820))
+    func testDesktopUsesLogicalHostBoundsAndRealWideWebViewFrame() {
+        let host = makeLayoutHost(size: NSSize(width: 430, height: 820))
+        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        pin(webView: webView, to: host)
+        host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(desktop.frame.size.width, 430, accuracy: 0.001)
-        XCTAssertEqual(desktop.frame.size.height, 820, accuracy: 0.001)
-        XCTAssertEqual(desktop.bounds.width, 1280, accuracy: 0.001)
-        XCTAssertGreaterThan(desktop.bounds.height, desktop.frame.height)
-        XCTAssertEqual(desktop.pageZoom, 1.0, accuracy: 0.001)
+        XCTAssertEqual(host.frame.size.width, 430, accuracy: 0.001)
+        XCTAssertEqual(host.frame.size.height, 820, accuracy: 0.001)
+        XCTAssertEqual(host.bounds.width, 1280, accuracy: 0.001)
+        XCTAssertGreaterThan(host.bounds.height, host.frame.height)
 
-        let mobileRendering = WebRenderingProfile.canonicalDefault
+        // Crucially, WebKit now receives a real desktop-width frame. V3's
+        // rejected implementation changed the WKWebView's own bounds while its
+        // frame stayed 430 wide, so CSS media queries still saw a narrow page.
+        XCTAssertEqual(webView.frame.width, host.bounds.width, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, host.bounds.height, accuracy: 0.001)
+        XCTAssertEqual(webView.bounds.size, webView.frame.size)
+        XCTAssertEqual(webView.pageZoom, 1.0, accuracy: 0.001)
+    }
+
+    func testMobileUsesLogicalHostBoundsAndRealPhoneWidthWebViewFrame() {
+        let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
             .settingSimplePreset(.wide)
             .settingZoom(1.25)
-        let mobile = WebViewFactory.makeWebView(renderingProfile: mobileRendering)
-        mobile.setFrameSize(NSSize(width: 900, height: 850))
+        let host = makeLayoutHost(size: NSSize(width: 900, height: 850))
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        pin(webView: webView, to: host)
+        host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(mobile.frame.size.width, 900, accuracy: 0.001)
-        XCTAssertEqual(mobile.frame.size.height, 850, accuracy: 0.001)
-        XCTAssertEqual(mobile.bounds.width, 390, accuracy: 0.001)
-        XCTAssertLessThan(mobile.bounds.height, mobile.frame.height)
-        XCTAssertEqual(mobile.pageZoom, 1.25, accuracy: 0.001)
+        XCTAssertEqual(host.frame.size.width, 900, accuracy: 0.001)
+        XCTAssertEqual(host.frame.size.height, 850, accuracy: 0.001)
+        XCTAssertEqual(host.bounds.width, 390, accuracy: 0.001)
+        XCTAssertLessThan(host.bounds.height, host.frame.height)
+        XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, host.bounds.height, accuracy: 0.001)
+        XCTAssertEqual(webView.bounds.size, webView.frame.size)
+        XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
+    }
+
+    func testHostGeometryTracksVisibleResizeWithoutChangingWebsiteMode() {
+        let host = makeLayoutHost(size: NSSize(width: 430, height: 820))
+        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        pin(webView: webView, to: host)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.bounds.width, 1280, accuracy: 0.001)
+
+        host.setFrameSize(NSSize(width: 900, height: 850))
+        NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: host)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(host.frame.width, 900, accuracy: 0.001)
+        XCTAssertEqual(host.bounds.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
     }
 
     func testSafariCompatibilityIdentityIsCompleteInsteadOfNativeWKWebViewUA() {
@@ -270,5 +303,22 @@ final class WebViewFactoryTests: XCTestCase {
         WebViewFactory.configureHiddenScrollerStyle(scrollView)
         XCTAssertFalse(scrollView.hasVerticalScroller)
         XCTAssertFalse(scrollView.hasHorizontalScroller)
+    }
+
+    private func makeLayoutHost(size: NSSize) -> NSView {
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
+        host.translatesAutoresizingMaskIntoConstraints = true
+        return host
+    }
+
+    private func pin(webView: WKWebView, to host: NSView) {
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: host.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
     }
 }
