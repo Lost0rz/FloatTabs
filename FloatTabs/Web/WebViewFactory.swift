@@ -75,7 +75,8 @@ enum BrowserVersionResolver {
 }
 
 /// Generates the HTTP/JavaScript browser identity while the real engine stays
-/// WKWebView/WebKit. Website Mode and viewport are intentionally independent.
+/// WKWebView/WebKit. Website Mode and visible Window Size are intentionally
+/// independent.
 enum UserAgentProvider {
     static func userAgent(
         for renderingProfile: WebRenderingProfile,
@@ -174,6 +175,41 @@ enum UserAgentProvider {
     }
 }
 
+/// Separates the website's CSS/layout viewport from the visible FloatTabs
+/// window. Desktop never collapses below a desktop-class 1280 CSS-pixel width,
+/// while Mobile never expands beyond a phone-class 390 CSS-pixel width.
+///
+/// The returned height preserves the visible frame's aspect ratio so AppKit can
+/// uniformly map the logical website coordinate system into the actual window
+/// without stretching one axis independently from the other.
+enum WebsiteLayoutViewport {
+    static let desktopMinimumCSSWidth: CGFloat = 1280
+    static let mobileMaximumCSSWidth: CGFloat = 390
+
+    static func logicalSize(
+        forVisibleSize visibleSize: CGSize,
+        websiteMode: WebsiteMode
+    ) -> CGSize {
+        guard visibleSize.width > 0, visibleSize.height > 0 else {
+            return visibleSize
+        }
+
+        let logicalWidth: CGFloat
+        switch websiteMode {
+        case .desktop:
+            logicalWidth = max(desktopMinimumCSSWidth, visibleSize.width)
+        case .mobile:
+            logicalWidth = min(mobileMaximumCSSWidth, visibleSize.width)
+        }
+
+        let scale = logicalWidth / visibleSize.width
+        return CGSize(
+            width: logicalWidth,
+            height: visibleSize.height * scale
+        )
+    }
+}
+
 @MainActor
 enum WebViewFactory {
     static func makeWebView(
@@ -211,6 +247,9 @@ enum WebViewFactory {
         to webView: WKWebView
     ) {
         let rendering = renderingProfile.normalized()
+        if let floatTabsWebView = webView as? FloatTabsWebView {
+            floatTabsWebView.setWebsiteMode(rendering.effectiveWebsiteMode)
+        }
         webView.customUserAgent = UserAgentProvider.userAgent(for: rendering)
         webView.pageZoom = rendering.zoom
     }
@@ -281,17 +320,19 @@ enum WebViewFactory {
     """
 }
 
-/// WKWebView retains this controller for its whole lifetime. The controller
-/// watches local scroll-wheel events over this WebView and temporarily exposes
-/// only the scroller axis that is actually moving. Once scrolling stops, both
-/// AppKit scrollers are removed again so they cannot reserve or paint idle UI.
+/// The visible NSView frame remains the user-selected FloatTabs Window Size.
+/// Its bounds use the independent website layout coordinate system. AppKit then
+/// performs a uniform frame↔bounds transform, so a narrow window can still host
+/// a desktop CSS viewport and a wide window can still host a mobile CSS viewport.
 @MainActor
-private final class FloatTabsWebView: WKWebView {
+final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
+    private var websiteMode: WebsiteMode = .desktop
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
         transientScrollerController = TransientWebScrollerController(webView: self)
+        applyWebsiteLayoutBounds(forVisibleSize: frameRect.size)
     }
 
     @available(*, unavailable)
@@ -299,12 +340,47 @@ private final class FloatTabsWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setWebsiteMode(_ mode: WebsiteMode) {
+        guard websiteMode != mode else {
+            applyWebsiteLayoutBounds(forVisibleSize: frame.size)
+            return
+        }
+        websiteMode = mode
+        applyWebsiteLayoutBounds(forVisibleSize: frame.size)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        applyWebsiteLayoutBounds(forVisibleSize: newSize)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        applyWebsiteLayoutBounds(forVisibleSize: frame.size)
         transientScrollerController?.refreshScrollerState()
+    }
+
+    private func applyWebsiteLayoutBounds(forVisibleSize visibleSize: CGSize) {
+        guard visibleSize.width > 0, visibleSize.height > 0 else { return }
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: visibleSize,
+            websiteMode: websiteMode
+        )
+        guard abs(bounds.width - logicalSize.width) > 0.5
+                || abs(bounds.height - logicalSize.height) > 0.5 else {
+            return
+        }
+
+        setBoundsSize(logicalSize)
+        setBoundsOrigin(.zero)
+        needsDisplay = true
     }
 }
 
+/// WKWebView retains this controller for its whole lifetime. The controller
+/// watches local scroll-wheel events over this WebView and temporarily exposes
+/// only the scroller axis that is actually moving. Once scrolling stops, both
+/// AppKit scrollers are removed again so they cannot reserve or paint idle UI.
 @MainActor
 private final class TransientWebScrollerController {
     private weak var webView: WKWebView?
