@@ -5,6 +5,10 @@ enum AppCommand: Equatable {
     case nextSlot
     case previousSlot
     case addWebApp
+    case zoomIn
+    case zoomOut
+    case resetZoom
+    case quickURL
 }
 
 @MainActor
@@ -20,8 +24,22 @@ final class AppCommandController {
         self.isEnabled = isEnabled
         self.onCommand = onCommand
 
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self,
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            guard let self else { return event }
+
+            if let overlay = Self.presentedQuickURLOverlay(in: event.window ?? NSApp.keyWindow),
+               Self.shouldDismissQuickURL(for: event, overlay: overlay) {
+                overlay.dismiss()
+                overlay.onDismiss?()
+
+                // Escape / Cmd+L are consumed. Outside mouse clicks continue to
+                // the underlying website after dismissing the temporary overlay.
+                return event.type == .keyDown ? nil : event
+            }
+
+            guard event.type == .keyDown,
                   self.isEnabled(),
                   let command = Self.command(for: event) else {
                 return event
@@ -55,13 +73,29 @@ final class AppCommandController {
         flags.subtract([.capsLock, .numericPad, .function])
 
         if flags == [.command], let characters, characters.count == 1 {
-            if characters == "t" || characters == "T" {
+            switch characters.lowercased() {
+            case "t":
                 return .addWebApp
+            case "l":
+                return .quickURL
+            case "-":
+                return .zoomOut
+            case "0":
+                return .resetZoom
+            case "=", "+":
+                return .zoomIn
+            default:
+                if let value = Int(characters), (1...9).contains(value) {
+                    return .selectSlot(value)
+                }
             }
+        }
 
-            if let value = Int(characters), (1...9).contains(value) {
-                return .selectSlot(value)
-            }
+        // The physical + key is Shift+= on common Mac keyboard layouts.
+        if flags == [.command, .shift],
+           let characters,
+           characters == "+" || characters == "=" {
+            return .zoomIn
         }
 
         // Hardware Tab key. Using keyCode avoids Shift+Tab character-shape
@@ -75,6 +109,46 @@ final class AppCommandController {
             }
         }
 
+        return nil
+    }
+
+    static func presentedQuickURLOverlay(in window: NSWindow?) -> QuickURLOverlayView? {
+        guard let contentView = window?.contentView else { return nil }
+        return firstPresentedQuickURLOverlay(in: contentView)
+    }
+
+    static func shouldDismissQuickURL(
+        for event: NSEvent,
+        overlay: QuickURLOverlayView
+    ) -> Bool {
+        if event.type == .keyDown {
+            if event.keyCode == 53 { // Escape
+                return true
+            }
+            return command(for: event) == .quickURL
+        }
+
+        guard event.type == .leftMouseDown
+                || event.type == .rightMouseDown
+                || event.type == .otherMouseDown,
+              let superview = overlay.superview else {
+            return false
+        }
+
+        let point = superview.convert(event.locationInWindow, from: nil)
+        return !overlay.frame.contains(point)
+    }
+
+    private static func firstPresentedQuickURLOverlay(in view: NSView) -> QuickURLOverlayView? {
+        if let overlay = view as? QuickURLOverlayView, overlay.isPresented {
+            return overlay
+        }
+
+        for subview in view.subviews {
+            if let found = firstPresentedQuickURLOverlay(in: subview) {
+                return found
+            }
+        }
         return nil
     }
 }

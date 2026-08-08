@@ -38,6 +38,20 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(zone.hitTest(pointInSuperview) is AddWebAppControl)
     }
 
+    func testCurrentWebAppGearUsesActualVisibleHitAreaWhenSlotIsActive() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let pointInZone = NSPoint(
+            x: zone.currentControlsFrame.midX,
+            y: zone.currentControlsFrame.midY
+        )
+        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
+        XCTAssertTrue(zone.hitTest(pointInSuperview) is CurrentWebAppControl)
+    }
+
     func testActiveInactiveAndAddGeometryMatchDesignTokens() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
@@ -53,6 +67,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(activeView.frame.height, ExternalTabMetrics.tabHeight, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.width, ExternalTabMetrics.addNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.height, ExternalTabMetrics.addHeight, accuracy: 0.001)
+        XCTAssertEqual(zone.currentControlsFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
     }
 
     func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {
