@@ -23,12 +23,13 @@ final class WebViewFactoryTests: XCTestCase {
             .settingWebsiteMode(.mobile)
             .settingZoom(1.25)
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
         XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
         XCTAssertTrue(webView.customUserAgent?.contains("Version/") == true)
-        XCTAssertEqual((webView as? FloatTabsWebView)?.userPageZoom, 1.25, accuracy: 0.001)
+        XCTAssertEqual(floatTabsWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }
 
