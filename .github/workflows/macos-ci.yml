@@ -49,7 +49,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Native WebKit viewport strategy probe
+      - name: Write public WebKit strategy probe
         shell: bash
         run: |
           cat > /tmp/FloatTabsViewportProbe.swift <<'SWIFT'
@@ -83,124 +83,144 @@ jobs:
                   done = true
               }
               _ = spin(until: { done })
-              if let failure {
-                  print("JS ERROR: \(failure)")
-              }
+              if let failure { print("JS ERROR: \(failure)") }
               return result
           }
 
-          func probe(name: String, configure: (WKWebView) -> Void) {
-              let configuration = WKWebViewConfiguration()
-              configuration.websiteDataStore = .nonPersistent()
-              let webView = WKWebView(
-                  frame: NSRect(x: 0, y: 0, width: 430, height: 820),
-                  configuration: configuration
-              )
-              let window = NSWindow(
-                  contentRect: NSRect(x: 0, y: 0, width: 430, height: 820),
-                  styleMask: [.borderless],
-                  backing: .buffered,
-                  defer: false
-              )
-              window.contentView = webView
-              window.orderFront(nil)
+          enum Strategy: String {
+              case pageZoomDesktop
+              case magnificationDesktop
+              case pageZoomMobile
+          }
 
-              configure(webView)
-
-              let waiter = Waiter()
-              webView.navigationDelegate = waiter
-              webView.loadHTMLString(
-                  """
-                  <!doctype html>
-                  <html>
-                    <head>
-                      <meta name="viewport" content="width=device-width, initial-scale=1">
-                      <style>
-                        html, body { margin: 0; width: 100%; height: 100%; }
-                        #target {
-                          position: fixed;
-                          left: 50vw;
-                          top: 50vh;
-                          width: 120px;
-                          height: 80px;
-                          transform: translate(-50%, -50%);
-                        }
-                      </style>
-                    </head>
-                    <body>
-                      <button id="target">click</button>
-                      <script>
-                        window.clicks = 0;
-                        target.addEventListener('click', () => window.clicks++);
-                      </script>
-                    </body>
-                  </html>
-                  """,
-                  baseURL: nil
-              )
-              _ = spin(until: { waiter.finished })
-
-              let metrics = evaluate(
-                  """
-                  JSON.stringify({
-                    innerWidth: window.innerWidth,
-                    clientWidth: document.documentElement.clientWidth,
-                    desktopMQ: matchMedia('(min-width: 1000px)').matches,
-                    dpr: devicePixelRatio,
-                    zoom: getComputedStyle(document.documentElement).zoom,
-                    rect: (() => { const r = target.getBoundingClientRect(); return [r.left,r.top,r.width,r.height]; })()
-                  })
-                  """,
-                  in: webView
-              ) as? String ?? "<nil>"
-
-              let location = NSPoint(x: 215, y: 410)
-              if let down = NSEvent.mouseEvent(
-                  with: .leftMouseDown,
-                  location: location,
-                  modifierFlags: [],
-                  timestamp: ProcessInfo.processInfo.systemUptime,
-                  windowNumber: window.windowNumber,
-                  context: nil,
-                  eventNumber: 1,
-                  clickCount: 1,
-                  pressure: 1
-              ), let up = NSEvent.mouseEvent(
-                  with: .leftMouseUp,
-                  location: location,
-                  modifierFlags: [],
-                  timestamp: ProcessInfo.processInfo.systemUptime,
-                  windowNumber: window.windowNumber,
-                  context: nil,
-                  eventNumber: 2,
-                  clickCount: 1,
-                  pressure: 0
-              ) {
-                  webView.mouseDown(with: down)
-                  webView.mouseUp(with: up)
-                  _ = spin(until: { ((evaluate("window.clicks", in: webView) as? NSNumber)?.intValue ?? 0) > 0 }, timeout: 1)
-              }
-
-              let clicks = (evaluate("window.clicks", in: webView) as? NSNumber)?.intValue ?? -1
-              print("PROBE \(name): pageZoom=\(webView.pageZoom) magnification=\(webView.magnification) metrics=\(metrics) clicks=\(clicks)")
-              window.orderOut(nil)
+          guard CommandLine.arguments.count == 2,
+                let strategy = Strategy(rawValue: CommandLine.arguments[1]) else {
+              fatalError("missing strategy")
           }
 
           _ = NSApplication.shared
+          let configuration = WKWebViewConfiguration()
+          configuration.websiteDataStore = .nonPersistent()
+          let webView = WKWebView(
+              frame: NSRect(x: 0, y: 0, width: strategy == .pageZoomMobile ? 900 : 430, height: 820),
+              configuration: configuration
+          )
+          let window = NSWindow(
+              contentRect: webView.frame,
+              styleMask: [.borderless],
+              backing: .buffered,
+              defer: false
+          )
+          window.contentView = webView
+          window.orderFront(nil)
 
-          probe(name: "baseline") { _ in }
-          probe(name: "pageZoom-430-over-1280") { webView in
+          switch strategy {
+          case .pageZoomDesktop:
               webView.pageZoom = 430.0 / 1280.0
-          }
-          probe(name: "magnification-430-over-1280") { webView in
+          case .magnificationDesktop:
               webView.allowsMagnification = true
               webView.setMagnification(430.0 / 1280.0, centeredAt: NSPoint(x: 215, y: 410))
-          }
-          probe(name: "pageZoom-900-over-390") { webView in
+          case .pageZoomMobile:
               webView.pageZoom = 900.0 / 390.0
           }
+
+          let waiter = Waiter()
+          webView.navigationDelegate = waiter
+          webView.loadHTMLString(
+              """
+              <!doctype html>
+              <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                  <style>
+                    html, body { margin: 0; width: 100%; height: 100%; }
+                    #target {
+                      position: fixed;
+                      left: 50vw;
+                      top: 50vh;
+                      width: 120px;
+                      height: 80px;
+                      transform: translate(-50%, -50%);
+                    }
+                  </style>
+                </head>
+                <body>
+                  <button id="target">click</button>
+                  <script>
+                    window.clicks = 0;
+                    target.addEventListener('click', () => window.clicks++);
+                  </script>
+                </body>
+              </html>
+              """,
+              baseURL: nil
+          )
+          guard spin(until: { waiter.finished }) else { fatalError("navigation timeout") }
+
+          let innerWidth = (evaluate("window.innerWidth", in: webView) as? NSNumber)?.doubleValue ?? -1
+          let clientWidth = (evaluate("document.documentElement.clientWidth", in: webView) as? NSNumber)?.doubleValue ?? -1
+          let desktopMQ = (evaluate("matchMedia('(min-width: 1000px)').matches", in: webView) as? NSNumber)?.boolValue ?? false
+
+          let physicalWidth = webView.frame.width
+          let location = NSPoint(x: physicalWidth / 2, y: webView.frame.height / 2)
+          if let down = NSEvent.mouseEvent(
+              with: .leftMouseDown,
+              location: location,
+              modifierFlags: [],
+              timestamp: ProcessInfo.processInfo.systemUptime,
+              windowNumber: window.windowNumber,
+              context: nil,
+              eventNumber: 1,
+              clickCount: 1,
+              pressure: 1
+          ), let up = NSEvent.mouseEvent(
+              with: .leftMouseUp,
+              location: location,
+              modifierFlags: [],
+              timestamp: ProcessInfo.processInfo.systemUptime,
+              windowNumber: window.windowNumber,
+              context: nil,
+              eventNumber: 2,
+              clickCount: 1,
+              pressure: 0
+          ) {
+              webView.mouseDown(with: down)
+              webView.mouseUp(with: up)
+              _ = spin(until: {
+                  ((evaluate("window.clicks", in: webView) as? NSNumber)?.intValue ?? 0) > 0
+              }, timeout: 1)
+          }
+
+          let clicks = (evaluate("window.clicks", in: webView) as? NSNumber)?.intValue ?? -1
+          print("RESULT strategy=\(strategy.rawValue) innerWidth=\(innerWidth) clientWidth=\(clientWidth) desktopMQ=\(desktopMQ) clicks=\(clicks) pageZoom=\(webView.pageZoom) magnification=\(webView.magnification)")
+
+          let widthOK: Bool
+          let mqOK: Bool
+          switch strategy {
+          case .pageZoomDesktop, .magnificationDesktop:
+              widthOK = (1200...1360).contains(innerWidth) && (1200...1360).contains(clientWidth)
+              mqOK = desktopMQ
+          case .pageZoomMobile:
+              widthOK = (360...420).contains(innerWidth) && (360...420).contains(clientWidth)
+              mqOK = !desktopMQ
+          }
+
+          guard widthOK, mqOK, clicks > 0 else {
+              fatalError("strategy failed viewport/click contract")
+          }
           SWIFT
-          xcrun swift /tmp/FloatTabsViewportProbe.swift
+
+      - name: Probe pageZoom Desktop
+        continue-on-error: true
+        run: xcrun swift /tmp/FloatTabsViewportProbe.swift pageZoomDesktop
+
+      - name: Probe magnification Desktop
+        continue-on-error: true
+        run: xcrun swift /tmp/FloatTabsViewportProbe.swift magnificationDesktop
+
+      - name: Probe pageZoom Mobile
+        continue-on-error: true
+        run: xcrun swift /tmp/FloatTabsViewportProbe.swift pageZoomMobile
 
       - name: Unit tests
         run: >-
