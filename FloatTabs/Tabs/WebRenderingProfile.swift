@@ -38,17 +38,6 @@ enum BrowserIdentity: String, Codable, CaseIterable {
         case .custom: "Custom User Agent"
         }
     }
-
-    var fixedWebsiteMode: WebsiteMode? {
-        switch self {
-        case .macosSafari, .macosChrome, .windowsChrome, .windowsEdge, .linuxChrome:
-            .desktop
-        case .iphoneSafari, .iphoneChrome, .androidChrome:
-            .mobile
-        case .automatic, .custom:
-            nil
-        }
-    }
 }
 
 enum SimpleViewportPreset: String, Codable, CaseIterable {
@@ -288,8 +277,10 @@ struct WebRenderingProfile: Codable, Equatable {
         DevicePresetCatalog.preset(id: devicePresetID)
     }
 
+    /// Website Mode is an independent product layer. Exact browser identities
+    /// never coerce it; only Automatic uses it to resolve a compatibility UA.
     var effectiveWebsiteMode: WebsiteMode {
-        browserIdentity.fixedWebsiteMode ?? websiteMode
+        websiteMode
     }
 
     var effectiveBrowserIdentity: BrowserIdentity {
@@ -306,10 +297,6 @@ struct WebRenderingProfile: Codable, Equatable {
         copy.viewportWidth = max(viewportWidth, Self.minimumViewportSize.width)
         copy.viewportHeight = max(viewportHeight, Self.minimumViewportSize.height)
         copy.zoom = ZoomSteps.nearest(to: zoom)
-
-        if let fixedMode = copy.browserIdentity.fixedWebsiteMode {
-            copy.websiteMode = fixedMode
-        }
 
         if let custom = copy.customUserAgent?.trimmingCharacters(in: .whitespacesAndNewlines),
            !custom.isEmpty {
@@ -344,10 +331,6 @@ struct WebRenderingProfile: Codable, Equatable {
     func settingWebsiteMode(_ mode: WebsiteMode) -> WebRenderingProfile {
         var copy = self
         copy.websiteMode = mode
-        if let fixedMode = copy.browserIdentity.fixedWebsiteMode, fixedMode != mode {
-            copy.browserIdentity = .automatic
-            copy.customUserAgent = nil
-        }
         return copy.normalized()
     }
 
@@ -358,9 +341,6 @@ struct WebRenderingProfile: Codable, Equatable {
         var copy = self
         copy.browserIdentity = identity
         copy.customUserAgent = identity == .custom ? customUserAgent : nil
-        if let fixedMode = identity.fixedWebsiteMode {
-            copy.websiteMode = fixedMode
-        }
         return copy.normalized()
     }
 

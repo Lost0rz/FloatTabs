@@ -319,107 +319,33 @@ enum UserAgentProvider {
     }
 }
 
-/// macOS does not expose iOS's `preferredContentMode` desktop-class browsing
-/// behavior as a public WKWebView API. Apple WebKit's own macOS MiniBrowser
-/// instead separates physical view size from CSS layout size through WebKit's
-/// layout strategy and view scale.
-///
-/// 980 CSS px is grounded in WebKit's desktop-class browsing baseline. Mobile
-/// mode keeps a 390 CSS px phone baseline when the FloatTabs window is wider.
-/// The WKWebView frame itself always remains the selected Window Size.
-enum WebsiteLayoutPolicy {
-    static let desktopReferenceCSSWidth: CGFloat = 980
-    static let mobileReferenceCSSWidth: CGFloat = 390
+/// Pure V3 geometry: Website Mode controls the logical website layout viewport,
+/// while Window Size controls only the visible FloatTabs Web frame.
+enum WebsiteLayoutViewport {
+    static let desktopMinimumCSSWidth: CGFloat = 1280
+    static let mobileMaximumCSSWidth: CGFloat = 390
 
-    static func viewScale(
-        forVisibleWidth visibleWidth: CGFloat,
+    static func logicalSize(
+        forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
-    ) -> CGFloat {
-        guard visibleWidth > 0 else { return 1 }
+    ) -> CGSize {
+        guard visibleSize.width > 0, visibleSize.height > 0 else {
+            return visibleSize
+        }
 
+        let logicalWidth: CGFloat
         switch websiteMode {
         case .desktop:
-            return min(1, visibleWidth / desktopReferenceCSSWidth)
+            logicalWidth = max(desktopMinimumCSSWidth, visibleSize.width)
         case .mobile:
-            return max(1, visibleWidth / mobileReferenceCSSWidth)
+            logicalWidth = min(mobileMaximumCSSWidth, visibleSize.width)
         }
-    }
 
-    static func logicalWidth(
-        forVisibleWidth visibleWidth: CGFloat,
-        websiteMode: WebsiteMode
-    ) -> CGFloat {
-        let scale = viewScale(
-            forVisibleWidth: visibleWidth,
-            websiteMode: websiteMode
+        let scale = logicalWidth / visibleSize.width
+        return CGSize(
+            width: logicalWidth,
+            height: visibleSize.height * scale
         )
-        guard scale > 0 else { return visibleWidth }
-        return visibleWidth / scale
-    }
-}
-
-/// Thin dynamic bridge to the macOS WebKit SPI used by Apple's own MiniBrowser:
-/// `_setLayoutMode:` + `_setViewScale:`. Dynamic selector dispatch keeps the
-/// private headers out of FloatTabs and gives us an explicit availability
-/// check/fallback point for future WebKit changes.
-@MainActor
-enum WebKitLayoutSPI {
-    enum LayoutMode: UInt {
-        case viewSize = 0
-        case dynamicSizeComputedFromViewScale = 2
-    }
-
-    private static let setLayoutModeSelector = NSSelectorFromString("_setLayoutMode:")
-    private static let setViewScaleSelector = NSSelectorFromString("_setViewScale:")
-
-    static func isSupported(on webView: WKWebView) -> Bool {
-        webView.responds(to: setLayoutModeSelector)
-            && webView.responds(to: setViewScaleSelector)
-    }
-
-    @discardableResult
-    static func apply(
-        websiteMode: WebsiteMode,
-        visibleWidth: CGFloat,
-        to webView: WKWebView
-    ) -> Bool {
-        guard visibleWidth > 0, isSupported(on: webView) else {
-            return false
-        }
-
-        let scale = WebsiteLayoutPolicy.viewScale(
-            forVisibleWidth: visibleWidth,
-            websiteMode: websiteMode
-        )
-
-        if abs(scale - 1) <= 0.0001 {
-            invokeViewScale(1, on: webView)
-            invokeLayoutMode(.viewSize, on: webView)
-        } else {
-            invokeLayoutMode(.dynamicSizeComputedFromViewScale, on: webView)
-            invokeViewScale(scale, on: webView)
-        }
-        return true
-    }
-
-    private static func invokeLayoutMode(
-        _ mode: LayoutMode,
-        on webView: WKWebView
-    ) {
-        typealias Function = @convention(c) (AnyObject, Selector, UInt) -> Void
-        let implementation = webView.method(for: setLayoutModeSelector)
-        let function = unsafeBitCast(implementation, to: Function.self)
-        function(webView, setLayoutModeSelector, mode.rawValue)
-    }
-
-    private static func invokeViewScale(
-        _ scale: CGFloat,
-        on webView: WKWebView
-    ) {
-        typealias Function = @convention(c) (AnyObject, Selector, CGFloat) -> Void
-        let implementation = webView.method(for: setViewScaleSelector)
-        let function = unsafeBitCast(implementation, to: Function.self)
-        function(webView, setViewScaleSelector, scale)
     }
 }
 
@@ -435,6 +361,8 @@ enum WebViewFactory {
         configuration.applicationNameForUserAgent = UserAgentProvider.safariApplicationName(
             versions: versions
         )
+        configuration.defaultWebpagePreferences.preferredContentMode =
+            rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
 
         let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
@@ -540,20 +468,14 @@ enum WebViewFactory {
     """
 }
 
-/// The AppKit geometry remains ordinary: the WKWebView frame and bounds always
-/// match the visible FloatTabs Window Size. Only WebKit's internal page-layout
-/// strategy receives the desktop/mobile scale. This is the key difference from
-/// the rejected bounds-transform implementations that produced a black region.
+/// The WKWebView frame remains the user-selected visible Window Size. Its own
+/// public AppKit bounds provide the logical CSS/layout coordinate system. This
+/// keeps the transform local to the WebView instead of scaling its host view.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
     private var websiteMode: WebsiteMode = .desktop
     private var isApplyingWebsiteLayout = false
-    private var lastAppliedVisibleWidth: CGFloat = -1
-    private var lastAppliedMode: WebsiteMode?
-
-    private(set) var requestedWebsiteLayoutScale: CGFloat = 1
-    private(set) var websiteLayoutSPIAvailable = false
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
@@ -566,12 +488,7 @@ final class FloatTabsWebView: WKWebView {
     }
 
     func setWebsiteMode(_ mode: WebsiteMode) {
-        guard websiteMode != mode else {
-            applyWebsiteLayoutIfNeeded()
-            return
-        }
         websiteMode = mode
-        lastAppliedMode = nil
         applyWebsiteLayoutIfNeeded()
     }
 
@@ -587,28 +504,24 @@ final class FloatTabsWebView: WKWebView {
     }
 
     private func applyWebsiteLayoutIfNeeded() {
-        guard !isApplyingWebsiteLayout, bounds.width > 0 else { return }
+        guard !isApplyingWebsiteLayout,
+              frame.width > 0,
+              frame.height > 0 else {
+            return
+        }
 
-        let visibleWidth = bounds.width
-        let requestedScale = WebsiteLayoutPolicy.viewScale(
-            forVisibleWidth: visibleWidth,
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: frame.size,
             websiteMode: websiteMode
         )
-        requestedWebsiteLayoutScale = requestedScale
-
-        guard lastAppliedMode != websiteMode
-                || abs(lastAppliedVisibleWidth - visibleWidth) > 0.5 else {
+        guard abs(bounds.width - logicalSize.width) > 0.5
+                || abs(bounds.height - logicalSize.height) > 0.5 else {
             return
         }
 
         isApplyingWebsiteLayout = true
-        websiteLayoutSPIAvailable = WebKitLayoutSPI.apply(
-            websiteMode: websiteMode,
-            visibleWidth: visibleWidth,
-            to: self
-        )
-        lastAppliedMode = websiteMode
-        lastAppliedVisibleWidth = visibleWidth
+        setBoundsSize(logicalSize)
+        setBoundsOrigin(.zero)
         isApplyingWebsiteLayout = false
     }
 }

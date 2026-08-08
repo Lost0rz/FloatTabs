@@ -282,6 +282,7 @@ final class WebRenderingProfileTests: XCTestCase {
     func testCanonicalDefaultsAndCodableRoundTrip() throws {
         let profile = WebRenderingProfile.canonicalDefault
         XCTAssertEqual(profile.websiteMode, .desktop)
+        XCTAssertEqual(profile.effectiveWebsiteMode, .desktop)
         XCTAssertEqual(profile.browserIdentity, .automatic)
         XCTAssertEqual(profile.effectiveBrowserIdentity, .macosSafari)
         XCTAssertEqual(profile.sizePreset, .medium)
@@ -321,20 +322,29 @@ final class WebRenderingProfileTests: XCTestCase {
         XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
     }
 
-    func testExplicitIdentityProjectsToSimpleWebsiteModeWithoutChangingViewport() {
+    func testExplicitBrowserIdentityAndWebsiteModeRemainIndependent() {
         let base = WebRenderingProfile.canonicalDefault.settingViewport(
             CGSize(width: 430, height: 820)
         )
-        let android = base.settingBrowserIdentity(.androidChrome)
-        XCTAssertEqual(android.websiteMode, .mobile)
-        XCTAssertEqual(android.effectiveBrowserIdentity, .androidChrome)
-        XCTAssertEqual(android.viewportSize, CGSize(width: 430, height: 820))
+        let androidOnDesktop = base.settingBrowserIdentity(.androidChrome)
+        XCTAssertEqual(androidOnDesktop.websiteMode, .desktop)
+        XCTAssertEqual(androidOnDesktop.effectiveWebsiteMode, .desktop)
+        XCTAssertEqual(androidOnDesktop.browserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnDesktop.effectiveBrowserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnDesktop.viewportSize, CGSize(width: 430, height: 820))
 
-        let desktop = android.settingWebsiteMode(.desktop)
-        XCTAssertEqual(desktop.websiteMode, .desktop)
-        XCTAssertEqual(desktop.browserIdentity, .automatic)
-        XCTAssertEqual(desktop.effectiveBrowserIdentity, .macosSafari)
-        XCTAssertEqual(desktop.viewportSize, CGSize(width: 430, height: 820))
+        let androidOnMobile = androidOnDesktop.settingWebsiteMode(.mobile)
+        XCTAssertEqual(androidOnMobile.websiteMode, .mobile)
+        XCTAssertEqual(androidOnMobile.browserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnMobile.effectiveBrowserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnMobile.viewportSize, CGSize(width: 430, height: 820))
+
+        let windowsOnMobile = androidOnMobile.settingBrowserIdentity(.windowsChrome)
+        XCTAssertEqual(windowsOnMobile.websiteMode, .mobile)
+        XCTAssertEqual(windowsOnMobile.effectiveWebsiteMode, .mobile)
+        XCTAssertEqual(windowsOnMobile.browserIdentity, .windowsChrome)
+        XCTAssertEqual(windowsOnMobile.effectiveBrowserIdentity, .windowsChrome)
+        XCTAssertEqual(windowsOnMobile.viewportSize, CGSize(width: 430, height: 820))
     }
 
     func testDevicePresetIsAdvancedViewportShortcutAndManualResizeClearsIt() {
@@ -396,7 +406,7 @@ final class WebRenderingProfileTests: XCTestCase {
         XCTAssertEqual(ZoomSteps.percentageText(for: 1.33), "133%")
     }
 
-    func testOnlyEffectiveBrowserIdentityOrWebsiteModeRequiresWebViewRebuild() {
+    func testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild() {
         let base = WebRenderingProfile.canonicalDefault
         XCTAssertFalse(base.settingZoom(1.25).requiresWebViewRebuild(comparedTo: base))
         XCTAssertFalse(base.settingViewport(CGSize(width: 600, height: 800)).requiresWebViewRebuild(comparedTo: base))
