@@ -89,15 +89,19 @@ final class WebViewFactoryTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
 
+        guard let floatTabsWebView = webView as? FloatTabsWebView else {
+            return XCTFail("Expected FloatTabsWebView")
+        }
+
         XCTAssertEqual(host.bounds.size, host.frame.size)
         XCTAssertEqual(webView.frame.size, NSSize(width: 430, height: 820))
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
         XCTAssertEqual(
-            (webView as? FloatTabsWebView)?.requestedWebsiteLayoutScale,
+            floatTabsWebView.requestedWebsiteLayoutScale,
             430.0 / 980.0,
             accuracy: 0.001
         )
-        XCTAssertTrue((webView as? FloatTabsWebView)?.websiteLayoutSPIAvailable == true)
+        XCTAssertTrue(floatTabsWebView.websiteLayoutSPIAvailable)
     }
 
     func testPhysicalWebViewFrameTracksWindowResizeWithoutBlackRemainder() {
@@ -110,11 +114,15 @@ final class WebViewFactoryTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
 
+        guard let floatTabsWebView = webView as? FloatTabsWebView else {
+            return XCTFail("Expected FloatTabsWebView")
+        }
+
         XCTAssertEqual(host.bounds.size, NSSize(width: 900, height: 850))
         XCTAssertEqual(webView.frame.size, NSSize(width: 900, height: 850))
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
         XCTAssertEqual(
-            (webView as? FloatTabsWebView)?.requestedWebsiteLayoutScale,
+            floatTabsWebView.requestedWebsiteLayoutScale,
             900.0 / 980.0,
             accuracy: 0.001
         )
