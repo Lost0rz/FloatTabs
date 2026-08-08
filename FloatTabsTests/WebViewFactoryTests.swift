@@ -32,6 +32,68 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }
 
+    func testWebsiteLayoutViewportSeparatesModeFromVisibleWindowSize() {
+        let narrowWindow = CGSize(width: 430, height: 820)
+        let desktopLayout = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: narrowWindow,
+            websiteMode: .desktop
+        )
+        XCTAssertEqual(desktopLayout.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(
+            desktopLayout.width / desktopLayout.height,
+            narrowWindow.width / narrowWindow.height,
+            accuracy: 0.001
+        )
+
+        let wideWindow = CGSize(width: 900, height: 850)
+        let mobileLayout = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: wideWindow,
+            websiteMode: .mobile
+        )
+        XCTAssertEqual(mobileLayout.width, 390, accuracy: 0.001)
+        XCTAssertEqual(
+            mobileLayout.width / mobileLayout.height,
+            wideWindow.width / wideWindow.height,
+            accuracy: 0.001
+        )
+
+        let veryWideDesktop = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: CGSize(width: 1600, height: 900),
+            websiteMode: .desktop
+        )
+        XCTAssertEqual(veryWideDesktop.width, 1600, accuracy: 0.001)
+
+        let veryNarrowMobile = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: CGSize(width: 320, height: 700),
+            websiteMode: .mobile
+        )
+        XCTAssertEqual(veryNarrowMobile.width, 320, accuracy: 0.001)
+    }
+
+    func testFloatTabsWebViewKeepsVisibleFrameButUsesIndependentWebsiteBoundsAndZoom() {
+        let desktop = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        desktop.setFrameSize(NSSize(width: 430, height: 820))
+
+        XCTAssertEqual(desktop.frame.size.width, 430, accuracy: 0.001)
+        XCTAssertEqual(desktop.frame.size.height, 820, accuracy: 0.001)
+        XCTAssertEqual(desktop.bounds.width, 1280, accuracy: 0.001)
+        XCTAssertGreaterThan(desktop.bounds.height, desktop.frame.height)
+        XCTAssertEqual(desktop.pageZoom, 1.0, accuracy: 0.001)
+
+        let mobileRendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingSimplePreset(.wide)
+            .settingZoom(1.25)
+        let mobile = WebViewFactory.makeWebView(renderingProfile: mobileRendering)
+        mobile.setFrameSize(NSSize(width: 900, height: 850))
+
+        XCTAssertEqual(mobile.frame.size.width, 900, accuracy: 0.001)
+        XCTAssertEqual(mobile.frame.size.height, 850, accuracy: 0.001)
+        XCTAssertEqual(mobile.bounds.width, 390, accuracy: 0.001)
+        XCTAssertLessThan(mobile.bounds.height, mobile.frame.height)
+        XCTAssertEqual(mobile.pageZoom, 1.25, accuracy: 0.001)
+    }
+
     func testSafariCompatibilityIdentityIsCompleteInsteadOfNativeWKWebViewUA() {
         let ua = UserAgentProvider.userAgent(
             for: .macosSafari,
