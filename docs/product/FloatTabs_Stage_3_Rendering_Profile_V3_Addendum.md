@@ -50,7 +50,7 @@ Mobile must continue to receive a mobile-class layout even when FloatTabs is wid
 
 ### Window Size
 
-Controls only the visible WKWebView frame inside FloatTabs.
+Controls only the visible FloatTabs Web surface.
 
 Examples that must be valid:
 
@@ -81,20 +81,20 @@ Exact advanced identities remain compatibility identities, not a claim that WebK
 
 Zoom remains explicit user intent and is applied with `WKWebView.pageZoom`.
 
-Internal layout fitting/scaling must not overwrite or reinterpret the user's stored Zoom value.
+Internal layout fitting must not overwrite or reinterpret the user's stored Zoom value.
 
 ## 2. Internal website layout viewport
 
-FloatTabs now has two separate geometries:
+FloatTabs has two separate geometries:
 
 ```text
 Visible Window Size
         ↓
-FloatTabs Web surface frame
+FloatTabs WebPanelContainerView surface
 
 Website Mode
         ↓
-Internal CSS/layout viewport
+Real logical WKWebView frame / CSS layout viewport
 ```
 
 Canonical V3 layout widths:
@@ -107,7 +107,9 @@ Mobile:  never wider than 390 CSS px
 If the visible window is already wider than the Desktop minimum, Desktop may use that wider width.
 If the visible window is narrower than the Mobile maximum, Mobile may use the narrower visible width.
 
-The logical layout height is derived proportionally so AppKit can apply a uniform frame-to-bounds transform without stretching one axis differently from the other.
+The logical layout height is derived proportionally. The outer container uses public `NSScrollView.magnification` to fit the real logical WKWebView frame into the visible FloatTabs surface with a uniform scale. The WKWebView does not apply a second bounds transform.
+
+This means WebKit and responsive CSS see the logical Website Mode width, while the user still sees the selected Window Size.
 
 ## 3. Window presets remain visible sizes
 
@@ -138,7 +140,20 @@ Every rebuilt Slot must:
 - preserve other warm Slots;
 - preserve persisted Slot order and identity.
 
-## 5. Bilibili compatibility finding
+For Automatic Desktop identity, FloatTabs uses the native WKWebView UA path plus a resolved Safari/WebKit `applicationNameForUserAgent` suffix rather than requiring the Safari identity to be stored as `customUserAgent`. Automatic Mobile and exact compatibility identities may use explicit custom UA strings.
+
+## 5. Automated acceptance evidence
+
+Before real-Mac retest, automated validation must prove:
+
+- a 430 px visible Desktop surface gives the page an approximately 1280 CSS px layout width;
+- a 900 px visible Mobile surface gives the page an approximately 390 CSS px layout width;
+- resizing the visible surface recomputes fit geometry without changing Website Mode;
+- visible-to-logical pointer coordinate conversion remains consistent;
+- `WKWebView.pageZoom` remains independent from internal fit magnification;
+- pooled WebViews rebuild only when required and preserve the correct Safari/mobile identity path.
+
+## 6. Bilibili compatibility finding
 
 Real-Mac V2 testing showed that Bilibili can still report a browser-version/compatibility warning even when FloatTabs advertises current-looking identities such as Safari 26.6 or Chrome 151.
 
@@ -146,7 +161,7 @@ Therefore Stage 3 must not claim that this warning is solved merely because the 
 
 The Bilibili warning is a separate WebKit compatibility investigation. V3 must first make Desktop/Mobile layout semantics correct; browser compatibility claims require real-site evidence rather than UA-string tests alone.
 
-## 6. Stage 0–2 invariants
+## 7. Stage 0–2 invariants
 
 V3 must not regress:
 

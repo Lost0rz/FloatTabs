@@ -77,7 +77,12 @@ final class WebViewPoolTests: XCTestCase {
             desktop.configuration.defaultWebpagePreferences.preferredContentMode,
             .desktop
         )
-        XCTAssertTrue(desktop.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertTrue(
+            desktop.configuration.applicationNameForUserAgent?.contains("Version/") == true
+        )
+        XCTAssertTrue(
+            desktop.configuration.applicationNameForUserAgent?.contains("Safari/") == true
+        )
 
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
         let mobile = pool.webView(for: profile)
@@ -95,7 +100,12 @@ final class WebViewPoolTests: XCTestCase {
             desktopAgain.configuration.defaultWebpagePreferences.preferredContentMode,
             .desktop
         )
-        XCTAssertTrue(desktopAgain.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertTrue(
+            desktopAgain.configuration.applicationNameForUserAgent?.contains("Version/") == true
+        )
+        XCTAssertTrue(
+            desktopAgain.configuration.applicationNameForUserAgent?.contains("Safari/") == true
+        )
         XCTAssertEqual(pool.count, 1)
     }
 

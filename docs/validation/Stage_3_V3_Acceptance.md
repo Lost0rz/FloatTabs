@@ -1,6 +1,6 @@
 # Stage 3 V3 Acceptance — Website Layout vs Window Size
 
-> Status: RETEST REQUIRED
+> Status: REAL-MAC RETEST REQUIRED
 > Scope: Stage 3 V3 correction after V2 real-Mac rejection
 > Product: `docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`
 > Design: `docs/design/Stage_3_Rendering_Profile_V3.md`
@@ -20,7 +20,10 @@ Required before real-Mac retest:
 - package lock remains unchanged;
 - Desktop logical layout width is at least 1280 CSS px for a narrow window;
 - Mobile logical layout width is at most 390 CSS px for a wide window;
-- frame size remains the selected visible Window Size;
+- the outer visible surface remains the selected Window Size;
+- the WKWebView receives the real logical frame corresponding to Website Mode;
+- page-observed CSS width matches the logical frame;
+- public host magnification maps the logical frame into the visible surface;
 - user `pageZoom` remains independent from layout fitting;
 - existing WebView lifecycle and Stage 0–2 tests remain green.
 
@@ -38,7 +41,7 @@ Zoom = 100%
 
 Pass only if the site renders its desktop-class layout rather than simply falling into its narrow/mobile responsive layout.
 
-The visible FloatTabs Web area must remain 430 × 820.
+The visible FloatTabs Web area must remain 430 × 820, with no black or unfilled region caused by viewport fitting.
 
 ### 2. Wide Mobile is truly Mobile
 
@@ -52,7 +55,7 @@ Zoom = 100%
 
 Pass only if the site remains mobile-class even though the visible FloatTabs window is wide.
 
-The visible FloatTabs Web area must remain 900 × 850.
+The visible FloatTabs Web area must remain 900 × 850 and the page must fill the intended visible surface.
 
 ### 3. Reversible mode switching
 
@@ -76,6 +79,8 @@ must remain Desktop.
 
 At fixed Mobile mode the same size changes must remain Mobile.
 
+The Web surface must follow each selected visible size rather than leaving stale content dimensions or black space.
+
 ### 5. Zoom stays separate
 
 At fixed mode and size:
@@ -86,11 +91,11 @@ At fixed mode and size:
 ⌘0
 ```
 
-must change user zoom only. It must not silently change Website Mode or Window Size.
+must change user zoom only. It must not silently change Website Mode, Window Size, or the internal layout-fitting scale.
 
 ### 6. Pointer and input regression
 
-Because V3 uses a logical bounds transform, verify:
+Because V3 fits a real logical WKWebView frame through an outer magnified host, verify:
 
 - clicking links targets the correct visual point;
 - text input works;
@@ -105,7 +110,13 @@ Navigate between pages and reload.
 
 Website Mode must remain stable and idle scroll bars must return to hidden state.
 
-### 8. Slot persistence
+### 8. Browser identity runtime check
+
+For Automatic Desktop/macOS Safari identity, verify the effective page-observed UA contains Safari-compatible `Version/... Safari/...` tokens. Do not require the identity to be stored in `WKWebView.customUserAgent`; the supported Safari path uses native WKWebView UA plus `applicationNameForUserAgent`.
+
+For explicit Chrome/Edge/mobile compatibility identities, verify the selected identity is reflected in the effective UA while the engine remains WebKit.
+
+### 9. Slot persistence
 
 Quit and reopen.
 
@@ -118,7 +129,7 @@ Preserve:
 - current URL;
 - active Slot and order.
 
-### 9. Stage 0–2 regression
+### 10. Stage 0–2 regression
 
 Recheck:
 

@@ -145,15 +145,28 @@ final class WebViewFactoryTests: XCTestCase {
     func testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingBrowserIdentity(.macosSafari)
-        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
 
-        XCTAssertNil(webView.customUserAgent)
+        XCTAssertNil(
+            UserAgentProvider.customUserAgent(
+                for: rendering,
+                versions: versions
+            )
+        )
+
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
         )
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true
         )
+
+        loadTestHTML(in: webView)
+        let hasSafariRuntimeIdentity = evaluateNumber(
+            "navigator.userAgent.includes('Version/') && navigator.userAgent.includes('Safari/') ? 1 : 0",
+            in: webView
+        )
+        XCTAssertEqual(hasSafariRuntimeIdentity, 1, accuracy: 0.001)
     }
 
     func testSafariCompatibilityIdentityUsesResolvedWebKitVersion() {

@@ -468,14 +468,16 @@ enum WebViewFactory {
     """
 }
 
-/// The WKWebView frame remains the user-selected visible Window Size. Its own
-/// public AppKit bounds provide the logical CSS/layout coordinate system. This
-/// keeps the transform local to the WebView instead of scaling its host view.
+/// The outer WebPanelContainerView is the only owner of Stage 3 viewport
+/// geometry. FloatTabsWebView keeps ordinary AppKit geometry: its bounds always
+/// match its frame. The container gives it a real logical 1280/390-class frame
+/// and uses public NSScrollView magnification to fit that frame into the visible
+/// FloatTabs Window Size. Keeping geometry out of WKWebView prevents two
+/// independent transforms from fighting over WebKit layout and hit testing.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
-    private var websiteMode: WebsiteMode = .desktop
-    private var isApplyingWebsiteLayout = false
+    private(set) var websiteMode: WebsiteMode = .desktop
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
@@ -489,40 +491,11 @@ final class FloatTabsWebView: WKWebView {
 
     func setWebsiteMode(_ mode: WebsiteMode) {
         websiteMode = mode
-        applyWebsiteLayoutIfNeeded()
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        applyWebsiteLayoutIfNeeded()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        applyWebsiteLayoutIfNeeded()
         transientScrollerController?.refreshScrollerState()
-    }
-
-    private func applyWebsiteLayoutIfNeeded() {
-        guard !isApplyingWebsiteLayout,
-              frame.width > 0,
-              frame.height > 0 else {
-            return
-        }
-
-        let logicalSize = WebsiteLayoutViewport.logicalSize(
-            forVisibleSize: frame.size,
-            websiteMode: websiteMode
-        )
-        guard abs(bounds.width - logicalSize.width) > 0.5
-                || abs(bounds.height - logicalSize.height) > 0.5 else {
-            return
-        }
-
-        isApplyingWebsiteLayout = true
-        setBoundsSize(logicalSize)
-        setBoundsOrigin(.zero)
-        isApplyingWebsiteLayout = false
     }
 }
 
