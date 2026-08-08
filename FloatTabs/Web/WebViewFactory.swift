@@ -122,9 +122,7 @@ enum BrowserVersionResolver {
 /// WKWebView/WebKit. Website Mode, Window Size and Zoom remain separate inputs.
 @MainActor
 enum UserAgentProvider {
-    /// DuckDuckGo macOS uses the same pattern: keep WKWebView's native base UA
-    /// and append a Safari-compatible Version/Safari suffix. This preserves the
-    /// real system WebKit token instead of replacing the whole UA unnecessarily.
+    /// Keep WKWebView's native base UA and append a Safari-compatible suffix.
     static func safariApplicationName() -> String {
         safariApplicationName(versions: .current)
     }
@@ -319,33 +317,49 @@ enum UserAgentProvider {
     }
 }
 
-/// Pure V3 geometry: Website Mode controls the logical website layout viewport,
-/// while Window Size controls only the visible FloatTabs Web frame.
+/// Website Mode owns the CSS layout class while Window Size remains the real
+/// AppKit/WKWebView size. The public WKWebView.pageZoom API provides the mapping
+/// between the physical width and the target CSS width. This keeps WebKit's own
+/// event/hit-testing pipeline intact and avoids AppKit coordinate transforms or
+/// private WebKit layout SPI.
 enum WebsiteLayoutViewport {
     static let desktopMinimumCSSWidth: CGFloat = 1280
     static let mobileMaximumCSSWidth: CGFloat = 390
 
+    static func targetCSSWidth(
+        forVisibleWidth visibleWidth: CGFloat,
+        websiteMode: WebsiteMode
+    ) -> CGFloat {
+        guard visibleWidth > 0 else { return visibleWidth }
+        switch websiteMode {
+        case .desktop:
+            return max(desktopMinimumCSSWidth, visibleWidth)
+        case .mobile:
+            return min(mobileMaximumCSSWidth, visibleWidth)
+        }
+    }
+
+    static func fittingScale(
+        forVisibleWidth visibleWidth: CGFloat,
+        websiteMode: WebsiteMode
+    ) -> CGFloat {
+        guard visibleWidth > 0 else { return 1 }
+        let targetWidth = targetCSSWidth(
+            forVisibleWidth: visibleWidth,
+            websiteMode: websiteMode
+        )
+        guard targetWidth > 0 else { return 1 }
+        return visibleWidth / targetWidth
+    }
+
+    /// Compatibility hook for WebPanelContainerView. Under the public pageZoom
+    /// strategy the AppKit host must remain 1:1 with the visible surface; the
+    /// logical CSS width is produced inside WebKit instead of by resizing views.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
     ) -> CGSize {
-        guard visibleSize.width > 0, visibleSize.height > 0 else {
-            return visibleSize
-        }
-
-        let logicalWidth: CGFloat
-        switch websiteMode {
-        case .desktop:
-            logicalWidth = max(desktopMinimumCSSWidth, visibleSize.width)
-        case .mobile:
-            logicalWidth = min(mobileMaximumCSSWidth, visibleSize.width)
-        }
-
-        let scale = logicalWidth / visibleSize.width
-        return CGSize(
-            width: logicalWidth,
-            height: visibleSize.height * scale
-        )
+        visibleSize
     }
 }
 
@@ -394,13 +408,18 @@ enum WebViewFactory {
     ) {
         let rendering = renderingProfile.normalized()
         if let floatTabsWebView = webView as? FloatTabsWebView {
-            floatTabsWebView.setWebsiteMode(rendering.effectiveWebsiteMode)
+            floatTabsWebView.setRendering(
+                websiteMode: rendering.effectiveWebsiteMode,
+                userPageZoom: rendering.zoom
+            )
+        } else {
+            webView.pageZoom = rendering.zoom
         }
+
         webView.customUserAgent = UserAgentProvider.customUserAgent(
             for: rendering,
             versions: versions
         )
-        webView.pageZoom = rendering.zoom
     }
 
     /// At rest the WebView owns no visible AppKit scroller at all. This avoids
@@ -469,19 +488,22 @@ enum WebViewFactory {
     """
 }
 
-/// WebPanelContainerView is the only owner of Stage 3 viewport presentation.
-/// FloatTabsWebView keeps ordinary AppKit geometry: its bounds always match its
-/// frame. The container gives it a real logical 1280/390-class frame and fits
-/// that frame through a separate parent coordinate transform, so WebKit itself
-/// is never hosted inside a magnified scroll view.
+/// Keeps WKWebView at the real visible AppKit size. Website Mode is translated
+/// into a public WebKit pageZoom fitting factor so CSS layout can be 1280/390-
+/// class without any parent-view scaling. `userPageZoom` remains an independent
+/// product value and is composed with the internal fitting factor only at the
+/// final WebKit presentation boundary.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
     private(set) var websiteMode: WebsiteMode = .desktop
+    private(set) var userPageZoom: CGFloat = 1
+    private(set) var websiteLayoutScale: CGFloat = 1
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
         transientScrollerController = TransientWebScrollerController(webView: self)
+        refreshWebsiteLayoutScale()
     }
 
     @available(*, unavailable)
@@ -489,13 +511,40 @@ final class FloatTabsWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setRendering(
+        websiteMode: WebsiteMode,
+        userPageZoom: CGFloat
+    ) {
+        self.websiteMode = websiteMode
+        self.userPageZoom = userPageZoom
+        refreshWebsiteLayoutScale()
+    }
+
     func setWebsiteMode(_ mode: WebsiteMode) {
         websiteMode = mode
+        refreshWebsiteLayoutScale()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        refreshWebsiteLayoutScale()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        refreshWebsiteLayoutScale()
         transientScrollerController?.refreshScrollerState()
+    }
+
+    private func refreshWebsiteLayoutScale() {
+        websiteLayoutScale = WebsiteLayoutViewport.fittingScale(
+            forVisibleWidth: frame.width,
+            websiteMode: websiteMode
+        )
+        let effectivePageZoom = websiteLayoutScale * userPageZoom
+        if abs(pageZoom - effectivePageZoom) > 0.0001 {
+            pageZoom = effectivePageZoom
+        }
     }
 }
 
