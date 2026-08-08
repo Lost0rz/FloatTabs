@@ -175,13 +175,10 @@ enum UserAgentProvider {
     }
 }
 
-/// Separates the website's CSS/layout viewport from the visible FloatTabs
-/// window. Desktop never collapses below a desktop-class 1280 CSS-pixel width,
-/// while Mobile never expands beyond a phone-class 390 CSS-pixel width.
-///
-/// The returned height preserves the visible frame's aspect ratio so AppKit can
-/// uniformly map the logical website coordinate system into the actual window
-/// without stretching one axis independently from the other.
+/// The website layout viewport is independent from the visible FloatTabs
+/// window. A desktop site receives at least a 1280 CSS-pixel-wide WebView; a
+/// mobile site receives at most a 390 CSS-pixel-wide WebView. The outer AppKit
+/// host maps that logical coordinate system into the visible window.
 enum WebsiteLayoutViewport {
     static let desktopMinimumCSSWidth: CGFloat = 1280
     static let mobileMaximumCSSWidth: CGFloat = 390
@@ -320,19 +317,21 @@ enum WebViewFactory {
     """
 }
 
-/// The visible NSView frame remains the user-selected FloatTabs Window Size.
-/// Its bounds use the independent website layout coordinate system. AppKit then
-/// performs a uniform frame↔bounds transform, so a narrow window can still host
-/// a desktop CSS viewport and a wide window can still host a mobile CSS viewport.
+/// The WebView itself must keep a normal bounds rectangle so WebKit sees its
+/// real frame as the CSS/layout viewport. The direct AppKit host view owns the
+/// frame↔bounds scaling instead. This gives WebKit a real 1280/390-wide layout
+/// surface while the host's frame remains the user-selected Window Size.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
     private var websiteMode: WebsiteMode = .desktop
+    private weak var layoutHostView: NSView?
+    private var layoutHostFrameObserver: NSObjectProtocol?
+    private var isApplyingWebsiteLayout = false
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
         transientScrollerController = TransientWebScrollerController(webView: self)
-        applyWebsiteLayoutBounds(forVisibleSize: frameRect.size)
     }
 
     @available(*, unavailable)
@@ -340,40 +339,88 @@ final class FloatTabsWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setWebsiteMode(_ mode: WebsiteMode) {
-        guard websiteMode != mode else {
-            applyWebsiteLayoutBounds(forVisibleSize: frame.size)
-            return
+    deinit {
+        if let layoutHostFrameObserver {
+            NotificationCenter.default.removeObserver(layoutHostFrameObserver)
         }
-        websiteMode = mode
-        applyWebsiteLayoutBounds(forVisibleSize: frame.size)
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        applyWebsiteLayoutBounds(forVisibleSize: newSize)
+    func setWebsiteMode(_ mode: WebsiteMode) {
+        websiteMode = mode
+        applyWebsiteLayoutToHost()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+
+        if layoutHostView !== superview {
+            stopObservingLayoutHost(resetBounds: true)
+            beginObservingLayoutHostIfNeeded()
+        }
+        applyWebsiteLayoutToHost()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        applyWebsiteLayoutBounds(forVisibleSize: frame.size)
+        applyWebsiteLayoutToHost()
         transientScrollerController?.refreshScrollerState()
     }
 
-    private func applyWebsiteLayoutBounds(forVisibleSize visibleSize: CGSize) {
-        guard visibleSize.width > 0, visibleSize.height > 0 else { return }
-        let logicalSize = WebsiteLayoutViewport.logicalSize(
-            forVisibleSize: visibleSize,
-            websiteMode: websiteMode
-        )
-        guard abs(bounds.width - logicalSize.width) > 0.5
-                || abs(bounds.height - logicalSize.height) > 0.5 else {
+    private func beginObservingLayoutHostIfNeeded() {
+        guard let host = superview else { return }
+        layoutHostView = host
+        host.postsFrameChangedNotifications = true
+        layoutHostFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: host,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.applyWebsiteLayoutToHost()
+            }
+        }
+    }
+
+    private func stopObservingLayoutHost(resetBounds: Bool) {
+        if let layoutHostFrameObserver {
+            NotificationCenter.default.removeObserver(layoutHostFrameObserver)
+            self.layoutHostFrameObserver = nil
+        }
+
+        if resetBounds,
+           let host = layoutHostView,
+           host.frame.width > 0,
+           host.frame.height > 0 {
+            host.setBoundsSize(host.frame.size)
+            host.setBoundsOrigin(.zero)
+            host.needsLayout = true
+        }
+        layoutHostView = nil
+    }
+
+    private func applyWebsiteLayoutToHost() {
+        guard !isApplyingWebsiteLayout,
+              let host = layoutHostView ?? superview,
+              host.frame.width > 0,
+              host.frame.height > 0 else {
             return
         }
 
-        setBoundsSize(logicalSize)
-        setBoundsOrigin(.zero)
-        needsDisplay = true
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: host.frame.size,
+            websiteMode: websiteMode
+        )
+        guard abs(host.bounds.width - logicalSize.width) > 0.5
+                || abs(host.bounds.height - logicalSize.height) > 0.5 else {
+            return
+        }
+
+        isApplyingWebsiteLayout = true
+        host.setBoundsSize(logicalSize)
+        host.setBoundsOrigin(.zero)
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
+        isApplyingWebsiteLayout = false
     }
 }
 
