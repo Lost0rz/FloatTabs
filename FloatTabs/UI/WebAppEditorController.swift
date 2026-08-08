@@ -52,7 +52,7 @@ enum WebAppEditorController {
     ) {
         let alert = NSAlert()
         alert.messageText = "\(profile.name) Controls"
-        alert.informativeText = "Website Mode controls the site identity. Window Size is independent. Exact browser/device simulation is available under Advanced. The engine remains WebKit."
+        alert.informativeText = "Website Mode controls the site layout class. Window Size, Browser Identity, and Zoom are independent. Exact browser/device presets are available under Advanced. The engine remains WebKit."
         alert.addButton(withTitle: "Apply")
         alert.addButton(withTitle: "Cancel")
 
@@ -466,14 +466,7 @@ private final class RenderingForm: NSObject {
     }
 
     @objc private func modeSelectionChanged(_ sender: NSPopUpButton) {
-        guard let mode = selectedWebsiteMode() else { return }
-        if let identity = selectedBrowserIdentity(),
-           let fixedMode = identity.fixedWebsiteMode,
-           fixedMode != mode,
-           let automaticIndex = BrowserIdentity.allCases.firstIndex(of: .automatic) {
-            identityPopup.selectItem(at: automaticIndex)
-            customUAField.stringValue = ""
-        }
+        guard selectedWebsiteMode() != nil else { return }
         updateAutomaticIdentityTitle()
         updateCustomUAEditability()
         updateEffectiveUAPreview()
@@ -492,10 +485,7 @@ private final class RenderingForm: NSObject {
     }
 
     @objc private func identitySelectionChanged(_ sender: NSPopUpButton) {
-        guard let identity = selectedBrowserIdentity() else { return }
-        if let mode = identity.fixedWebsiteMode {
-            selectWebsiteMode(mode)
-        }
+        guard selectedBrowserIdentity() != nil else { return }
         updateAutomaticIdentityTitle()
         updateCustomUAEditability()
         updateEffectiveUAPreview()
@@ -558,11 +548,6 @@ private final class RenderingForm: NSObject {
             return nil
         }
         return CGSize(width: width, height: height)
-    }
-
-    private func selectWebsiteMode(_ mode: WebsiteMode) {
-        guard let index = WebsiteMode.allCases.firstIndex(of: mode) else { return }
-        modePopup.selectItem(at: index)
     }
 
     private func selectSimplePreset(_ preset: SimpleViewportPreset) {
