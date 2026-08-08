@@ -125,8 +125,12 @@ enum UserAgentProvider {
     /// DuckDuckGo macOS uses the same pattern: keep WKWebView's native base UA
     /// and append a Safari-compatible Version/Safari suffix. This preserves the
     /// real system WebKit token instead of replacing the whole UA unnecessarily.
+    static func safariApplicationName() -> String {
+        safariApplicationName(versions: .current)
+    }
+
     static func safariApplicationName(
-        versions: BrowserVersionCatalog = .current
+        versions: BrowserVersionCatalog
     ) -> String {
         "Version/\(versions.safari) Safari/\(versions.webKit)"
     }
@@ -134,8 +138,14 @@ enum UserAgentProvider {
     /// Runtime override. `nil` is deliberate for macOS Safari so WebKit can
     /// supply its native UA plus `applicationNameForUserAgent`.
     static func customUserAgent(
+        for renderingProfile: WebRenderingProfile
+    ) -> String? {
+        customUserAgent(for: renderingProfile, versions: .current)
+    }
+
+    static func customUserAgent(
         for renderingProfile: WebRenderingProfile,
-        versions: BrowserVersionCatalog = .current
+        versions: BrowserVersionCatalog
     ) -> String? {
         let profile = renderingProfile.normalized()
         let identity = resolvedIdentity(
@@ -157,8 +167,14 @@ enum UserAgentProvider {
     }
 
     static func userAgent(
+        for renderingProfile: WebRenderingProfile
+    ) -> String {
+        userAgent(for: renderingProfile, versions: .current)
+    }
+
+    static func userAgent(
         for renderingProfile: WebRenderingProfile,
-        versions: BrowserVersionCatalog = .current
+        versions: BrowserVersionCatalog
     ) -> String {
         let profile = renderingProfile.normalized()
         return userAgent(
@@ -172,8 +188,21 @@ enum UserAgentProvider {
     static func userAgent(
         for identity: BrowserIdentity,
         websiteMode: WebsiteMode,
+        customUserAgent: String? = nil
+    ) -> String {
+        userAgent(
+            for: identity,
+            websiteMode: websiteMode,
+            customUserAgent: customUserAgent,
+            versions: .current
+        )
+    }
+
+    static func userAgent(
+        for identity: BrowserIdentity,
+        websiteMode: WebsiteMode,
         customUserAgent: String? = nil,
-        versions: BrowserVersionCatalog = .current
+        versions: BrowserVersionCatalog
     ) -> String {
         switch resolvedIdentity(
             identity,
@@ -420,8 +449,19 @@ enum WebViewFactory {
 
     static func applyRuntimeRendering(
         _ renderingProfile: WebRenderingProfile,
+        to webView: WKWebView
+    ) {
+        applyRuntimeRendering(
+            renderingProfile,
+            to: webView,
+            versions: .current
+        )
+    }
+
+    static func applyRuntimeRendering(
+        _ renderingProfile: WebRenderingProfile,
         to webView: WKWebView,
-        versions: BrowserVersionCatalog = .current
+        versions: BrowserVersionCatalog
     ) {
         let rendering = renderingProfile.normalized()
         if let floatTabsWebView = webView as? FloatTabsWebView {
