@@ -2,8 +2,11 @@ import Foundation
 import WebKit
 
 /// Owns the per-Slot navigation lifecycle that must survive reloads and redirects.
-/// Website Mode is reasserted for every main navigation while the exact browser
-/// identity is supplied independently through `customUserAgent`.
+///
+/// On macOS, Website Mode is implemented by FloatTabsWebView's WebKit layout
+/// strategy plus the independently selected browser identity. We deliberately do
+/// not mutate WKWebpagePreferences.preferredContentMode here: WebKit exposes that
+/// desktop-class browsing API for iOS, not as the macOS layout mechanism.
 @MainActor
 final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private weak var webView: WKWebView?
@@ -41,32 +44,28 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         observation?.invalidate()
     }
 
-    static func applyWebsiteMode(
-        _ websiteMode: WebsiteMode,
-        to preferences: WKWebpagePreferences
-    ) {
-        preferences.preferredContentMode = WebViewFactory.preferredContentMode(for: websiteMode)
-    }
-
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         preferences: WKWebpagePreferences,
         decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
     ) {
-        Self.applyWebsiteMode(websiteMode, to: preferences)
+        restoreWebsiteMode(in: webView)
         decisionHandler(.allow, preferences)
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        restoreWebsiteMode(in: webView)
         restoreTransientScrollerPolicy(in: webView)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        restoreWebsiteMode(in: webView)
         restoreTransientScrollerPolicy(in: webView)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        restoreWebsiteMode(in: webView)
         restoreTransientScrollerPolicy(in: webView)
 
         DispatchQueue.main.async { [weak webView] in
@@ -89,6 +88,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreTransientScrollerPolicy(in: webView)
+    }
+
+    private func restoreWebsiteMode(in webView: WKWebView) {
+        (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
     }
 
     private func restoreTransientScrollerPolicy(in webView: WKWebView) {
