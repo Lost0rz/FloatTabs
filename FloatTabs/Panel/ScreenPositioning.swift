@@ -7,15 +7,24 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
-    /// Window movement is available from a predictable perimeter band on all
-    /// four sides. The outer inset stays free for AppKit's native resize hit
-    /// testing; corners stay free so diagonal resizing remains easy to acquire.
-    static let perimeterDragResizeInset: CGFloat = 6
-    static let perimeterDragBandWidth: CGFloat = 12
-    static let perimeterDragCornerExclusion: CGFloat = 28
+    /// Keep movement acquisition primarily outside WebKit. The effective top /
+    /// bottom target is 16 pt deep: 12 pt outside the viewport and only 4 pt
+    /// inside it. The website right edge remains protected for scrollbars.
+    static let outerInteractionGutter: CGFloat = 12
+    static let innerMovementOverlap: CGFloat = 4
+    static let webRightInteractionSafety: CGFloat = 24
+
+    /// The visible frame is deliberately much thinner than its hit target.
+    /// It is presentation-only and never participates in hit testing.
+    static let interactionBorderOutset: CGFloat = 2
+    static let interactionBorderLineWidth: CGFloat = 2.5
+
+    /// Bottom-right remains the only resize affordance.
+    static let resizeHandleSize: CGFloat = 18
+    static let resizeHandleInset: CGFloat = 0
 
     static let webPanelCornerRadius: CGFloat = 14
-    static let structuralBorderWidth: CGFloat = 1
+    static let structuralBorderWidth: CGFloat = 0
 
     static var defaultPanelSize: NSSize {
         panelSize(forViewport: defaultViewportSize)
@@ -27,15 +36,21 @@ struct PanelMetrics {
 
     static func panelSize(forViewport viewportSize: NSSize) -> NSSize {
         NSSize(
-            width: externalControlZoneWidth + max(viewportSize.width, 0),
+            width: externalControlZoneWidth
+                + max(viewportSize.width, 0)
+                + outerInteractionGutter,
             height: max(viewportSize.height, 0)
+                + 2 * outerInteractionGutter
         )
     }
 
     static func viewportSize(forPanelSize panelSize: NSSize) -> NSSize {
         NSSize(
-            width: max(panelSize.width - externalControlZoneWidth, 0),
-            height: max(panelSize.height, 0)
+            width: max(
+                panelSize.width - externalControlZoneWidth - outerInteractionGutter,
+                0
+            ),
+            height: max(panelSize.height - 2 * outerInteractionGutter, 0)
         )
     }
 
@@ -63,7 +78,6 @@ struct PanelFrameStore {
 
     func loadFrame() -> NSRect? {
         guard let encodedFrame = defaults.string(forKey: key) else { return nil }
-
         let frame = NSRectFromString(encodedFrame)
         guard Self.isValid(frame) else { return nil }
         return frame

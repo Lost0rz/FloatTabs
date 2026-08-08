@@ -5,9 +5,21 @@ final class AppCoordinator {
     private let panelController: PanelController
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
+    private var appCommandController: AppCommandController?
 
     init(panelController: PanelController? = nil) {
-        self.panelController = panelController ?? PanelController()
+        if let panelController {
+            self.panelController = panelController
+        } else {
+            let tabStore = TabStore(repository: ProfileRepository())
+            let webViewPool = WebViewPool(onURLChange: { slotID, url in
+                tabStore.updateCurrentURL(id: slotID, url: url)
+            })
+            self.panelController = PanelController(
+                tabStore: tabStore,
+                webViewPool: webViewPool
+            )
+        }
     }
 
     func start() {
@@ -19,6 +31,15 @@ final class AppCoordinator {
 
         globalHotkeyController = GlobalHotkeyController(
             onToggle: { [weak self] in self?.toggleFloatTabs() }
+        )
+
+        appCommandController = AppCommandController(
+            isEnabled: { [weak self] in
+                NSApp.isActive && (self?.panelController.isVisible ?? false)
+            },
+            onCommand: { [weak self] command in
+                self?.panelController.handle(command)
+            }
         )
     }
 
