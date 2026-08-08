@@ -15,6 +15,7 @@ final class WebViewFactoryTests: XCTestCase {
     func testStageZeroWebViewUsesPersistentWebsiteDataStore() {
         let webView = WebViewFactory.makeStageZeroWebView()
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
+        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
     func testRenderingProfileAppliesMobileIdentityContentModeAndZoom() {
@@ -112,7 +113,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(cssWidth, 390, accuracy: 2)
     }
 
-    func testMagnifiedHostMapsVisibleCoordinatesIntoLogicalWebCoordinates() {
+    func testLogicalHostMapsVisibleCoordinatesIntoLogicalWebCoordinates() {
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
         let container = host(webView, visibleSize: NSSize(width: 430, height: 820))
 

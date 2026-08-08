@@ -3,23 +3,23 @@ import WebKit
 
 @MainActor
 final class WebViewPool {
-    typealias InitialLoadHandler = (WKWebView, URL) -> Void
+    typealias LoadHandler = (WKWebView, URLRequest) -> Void
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
-    private let initialLoad: InitialLoadHandler
+    private let load: LoadHandler
 
     init(
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
-        initialLoad: @escaping InitialLoadHandler = { webView, url in
-            webView.load(URLRequest(url: url))
+        initialLoad: @escaping LoadHandler = { webView, request in
+            webView.load(request)
         }
     ) {
         self.onURLChange = onURLChange
-        self.initialLoad = initialLoad
+        load = initialLoad
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
@@ -28,7 +28,16 @@ final class WebViewPool {
         if let existing = webViews[profile.id],
            let appliedRendering = appliedRenderingProfiles[profile.id] {
             if desiredRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
-                return rebuildWebView(for: profile)
+                let navigationURL = Self.rebuildNavigationURL(
+                    initialURL: existing.backForwardList.currentItem?.initialURL,
+                    visibleURL: existing.url,
+                    storedCurrentURL: profile.currentURL,
+                    homeURL: profile.homeURL
+                )
+                return rebuildWebView(
+                    for: profile,
+                    navigationURL: navigationURL
+                )
             }
 
             WebViewFactory.applyRuntimeRendering(desiredRendering, to: existing)
@@ -36,7 +45,11 @@ final class WebViewPool {
             return existing
         }
 
-        return createWebView(for: profile)
+        return createWebView(
+            for: profile,
+            navigationURL: profile.currentURL ?? profile.homeURL,
+            cachePolicy: .useProtocolCachePolicy
+        )
     }
 
     func existingWebView(for slotID: UUID) -> WKWebView? {
@@ -62,14 +75,39 @@ final class WebViewPool {
         webViews.count
     }
 
-    private func rebuildWebView(for profile: WebAppProfile) -> WKWebView {
+    static func rebuildNavigationURL(
+        initialURL: URL?,
+        visibleURL: URL?,
+        storedCurrentURL: URL?,
+        homeURL: URL
+    ) -> URL {
+        for candidate in [initialURL, visibleURL, storedCurrentURL, homeURL] {
+            if let candidate, WebAppURL.isSafe(candidate) {
+                return candidate
+            }
+        }
+        return homeURL
+    }
+
+    private func rebuildWebView(
+        for profile: WebAppProfile,
+        navigationURL: URL
+    ) -> WKWebView {
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         webViews.removeValue(forKey: profile.id)
-        return createWebView(for: profile)
+        return createWebView(
+            for: profile,
+            navigationURL: navigationURL,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
     }
 
-    private func createWebView(for profile: WebAppProfile) -> WKWebView {
+    private func createWebView(
+        for profile: WebAppProfile,
+        navigationURL: URL,
+        cachePolicy: URLRequest.CachePolicy
+    ) -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
         let observer = SlotNavigationObserver(
@@ -83,8 +121,12 @@ final class WebViewPool {
         navigationObservers[profile.id] = observer
         appliedRenderingProfiles[profile.id] = rendering
 
-        let initialURL = profile.currentURL ?? profile.homeURL
-        initialLoad(webView, initialURL)
+        let request = URLRequest(
+            url: navigationURL,
+            cachePolicy: cachePolicy,
+            timeoutInterval: 60
+        )
+        load(webView, request)
         return webView
     }
 }

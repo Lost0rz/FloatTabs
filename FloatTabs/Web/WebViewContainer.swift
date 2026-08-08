@@ -589,13 +589,14 @@ final class ResizeReadoutView: NSView {
 }
 
 /// The visible FloatTabs Web surface stays at the user-selected Window Size.
-/// A dedicated NSScrollView supplies a public document-magnification transform
-/// around a real logical-size WKWebView. WebKit therefore receives a true
-/// 1280/390-class frame while AppKit preserves correct coordinate conversion,
-/// clipping, and hit testing for the visible surface.
+/// The logical host keeps that visible frame but uses a larger/smaller bounds
+/// coordinate system. The child WKWebView itself receives the real 1280/390-
+/// class frame, so WebKit sees the requested CSS viewport while ordinary AppKit
+/// ancestor coordinate conversion maps pointer events into WebKit coordinates.
+/// No NSScrollView magnification is involved.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
-    private let layoutScrollView = NSScrollView()
+    private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
@@ -609,7 +610,6 @@ final class WebPanelContainerView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         configureShell()
-        configureLayoutScrollView()
         showEmptyState()
     }
 
@@ -628,13 +628,17 @@ final class WebPanelContainerView: NSView {
             return
         }
 
-        layoutScrollView.documentView = nil
+        hostedWebView?.removeFromSuperview()
         webView.removeFromSuperview()
         webView.translatesAutoresizingMaskIntoConstraints = true
         webView.autoresizingMask = []
-        layoutScrollView.documentView = webView
+        logicalHostView.addSubview(webView)
         hostedWebView = webView
-        setContentView(layoutScrollView)
+
+        if currentContentView !== logicalHostView {
+            setContentView(logicalHostView)
+        }
+
         needsLayout = true
         layoutSubtreeIfNeeded()
         updateWebsiteLayoutIfNeeded()
@@ -642,9 +646,10 @@ final class WebPanelContainerView: NSView {
 
     func showEmptyState() {
         guard currentContentView !== emptyView else { return }
-        layoutScrollView.documentView = nil
+        hostedWebView?.removeFromSuperview()
         hostedWebView = nil
         websiteLayoutScale = 1
+        logicalHostView.bounds = NSRect(origin: .zero, size: logicalHostView.frame.size)
         setContentView(emptyView)
     }
 
@@ -690,19 +695,6 @@ final class WebPanelContainerView: NSView {
         updateSemanticColors()
     }
 
-    private func configureLayoutScrollView() {
-        layoutScrollView.drawsBackground = false
-        layoutScrollView.borderType = .noBorder
-        layoutScrollView.hasVerticalScroller = false
-        layoutScrollView.hasHorizontalScroller = false
-        layoutScrollView.autohidesScrollers = true
-        layoutScrollView.verticalScrollElasticity = .none
-        layoutScrollView.horizontalScrollElasticity = .none
-        layoutScrollView.allowsMagnification = false
-        layoutScrollView.minMagnification = 0.1
-        layoutScrollView.maxMagnification = 10
-    }
-
     private func setContentView(_ view: NSView) {
         currentContentView?.removeFromSuperview()
         view.removeFromSuperview()
@@ -725,33 +717,28 @@ final class WebPanelContainerView: NSView {
         let visibleSize = clipView.bounds.size
         guard visibleSize.width > 0, visibleSize.height > 0 else { return }
 
-        let mode: WebsiteMode =
-            webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
+        let mode = (webView as? FloatTabsWebView)?.websiteMode
+            ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
                 ? .mobile
-                : .desktop
+                : .desktop)
         let logicalSize = WebsiteLayoutViewport.logicalSize(
             forVisibleSize: visibleSize,
             websiteMode: mode
         )
         guard logicalSize.width > 0, logicalSize.height > 0 else { return }
 
-        let scale = visibleSize.width / logicalSize.width
-        websiteLayoutScale = scale
+        websiteLayoutScale = visibleSize.width / logicalSize.width
 
         if abs(webView.frame.width - logicalSize.width) > 0.5
             || abs(webView.frame.height - logicalSize.height) > 0.5 {
             webView.frame = NSRect(origin: .zero, size: logicalSize)
         }
 
-        if abs(layoutScrollView.magnification - scale) > 0.0001 {
-            layoutScrollView.magnification = scale
+        if abs(logicalHostView.bounds.width - logicalSize.width) > 0.5
+            || abs(logicalHostView.bounds.height - logicalSize.height) > 0.5
+            || logicalHostView.bounds.origin != .zero {
+            logicalHostView.bounds = NSRect(origin: .zero, size: logicalSize)
         }
-
-        // The proportional logical height guarantees the magnified document
-        // exactly fills the visible surface, so the outer host owns no scroll
-        // range. Scrolling remains exclusively inside WKWebView.
-        layoutScrollView.contentView.scroll(to: .zero)
-        layoutScrollView.reflectScrolledClipView(layoutScrollView.contentView)
     }
 
     private func updateSemanticColors() {

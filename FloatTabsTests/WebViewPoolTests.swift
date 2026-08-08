@@ -43,10 +43,10 @@ final class WebViewPoolTests: XCTestCase {
     }
 
     func testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL() {
-        var loadedURLs: [URL] = []
+        var loadedRequests: [URLRequest] = []
         let pool = WebViewPool(
             onURLChange: { _, _ in },
-            initialLoad: { _, url in loadedURLs.append(url) }
+            initialLoad: { _, request in loadedRequests.append(request) }
         )
         var firstProfile = makeProfile(name: "A")
         let secondProfile = makeProfile(name: "B")
@@ -64,12 +64,35 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(secondView === secondAgain)
         XCTAssertTrue(rebuilt.configuration.websiteDataStore.isPersistent)
         XCTAssertTrue(rebuilt.customUserAgent?.contains("Windows NT 10.0") == true)
-        XCTAssertEqual(loadedURLs.filter { $0 == firstProfile.currentURL }.count, 2)
+        XCTAssertEqual(
+            loadedRequests.filter { $0.url == firstProfile.currentURL }.count,
+            2
+        )
+        XCTAssertEqual(loadedRequests.first?.cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .reloadIgnoringLocalCacheData)
         XCTAssertEqual(pool.count, 2)
     }
 
+    func testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL() {
+        let initialURL = URL(string: "https://www.example.com/article")!
+        let redirectedURL = URL(string: "https://m.example.com/article")!
+
+        let result = WebViewPool.rebuildNavigationURL(
+            initialURL: initialURL,
+            visibleURL: redirectedURL,
+            storedCurrentURL: redirectedURL,
+            homeURL: URL(string: "https://www.example.com")!
+        )
+
+        XCTAssertEqual(result, initialURL)
+    }
+
     func testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking() {
-        let pool = makePool()
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
         var profile = makeProfile(name: "A")
 
         let desktop = pool.webView(for: profile)
@@ -106,6 +129,10 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(
             desktopAgain.configuration.applicationNameForUserAgent?.contains("Safari/") == true
         )
+        XCTAssertEqual(loadedRequests.count, 3)
+        XCTAssertEqual(loadedRequests[0].cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(loadedRequests[1].cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loadedRequests[2].cachePolicy, .reloadIgnoringLocalCacheData)
         XCTAssertEqual(pool.count, 1)
     }
 

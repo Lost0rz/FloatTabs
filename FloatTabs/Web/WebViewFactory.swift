@@ -358,6 +358,7 @@ enum WebViewFactory {
         let versions = BrowserVersionCatalog.current
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.preferences.isElementFullscreenEnabled = true
         configuration.applicationNameForUserAgent = UserAgentProvider.safariApplicationName(
             versions: versions
         )
@@ -468,12 +469,11 @@ enum WebViewFactory {
     """
 }
 
-/// The outer WebPanelContainerView is the only owner of Stage 3 viewport
-/// geometry. FloatTabsWebView keeps ordinary AppKit geometry: its bounds always
-/// match its frame. The container gives it a real logical 1280/390-class frame
-/// and uses public NSScrollView magnification to fit that frame into the visible
-/// FloatTabs Window Size. Keeping geometry out of WKWebView prevents two
-/// independent transforms from fighting over WebKit layout and hit testing.
+/// WebPanelContainerView is the only owner of Stage 3 viewport presentation.
+/// FloatTabsWebView keeps ordinary AppKit geometry: its bounds always match its
+/// frame. The container gives it a real logical 1280/390-class frame and fits
+/// that frame through a separate parent coordinate transform, so WebKit itself
+/// is never hosted inside a magnified scroll view.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private var transientScrollerController: TransientWebScrollerController?
