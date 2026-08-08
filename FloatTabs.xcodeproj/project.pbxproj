@@ -21,6 +21,21 @@
 		A0000000000000000000000C /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000001 /* KeyboardShortcuts */; };
 		A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* ScreenPositioningTests.swift */; };
 		A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* WebViewFactoryTests.swift */; };
+		A0000000000000000000000F /* AppCommandController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AppCommandController.swift */; };
+		A00000000000000000000010 /* WebRenderingProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* WebRenderingProfile.swift */; };
+		A00000000000000000000011 /* WebAppProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* WebAppProfile.swift */; };
+		A00000000000000000000012 /* TabStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* TabStore.swift */; };
+		A00000000000000000000013 /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
+		A00000000000000000000014 /* WebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* WebViewPool.swift */; };
+		A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* SlotNavigationObserver.swift */; };
+		A00000000000000000000016 /* ExternalTabRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* ExternalTabRail.swift */; };
+		A00000000000000000000017 /* WebAppEditorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* WebAppEditorController.swift */; };
+		A00000000000000000000018 /* EmptyWebAppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* EmptyWebAppView.swift */; };
+		A00000000000000000000019 /* TabStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* TabStoreTests.swift */; };
+		A0000000000000000000001A /* ProfileRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* ProfileRepositoryTests.swift */; };
+		A0000000000000000000001B /* WebViewPoolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* WebViewPoolTests.swift */; };
+		A0000000000000000000001C /* ExternalShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D /* ExternalShellTests.swift */; };
+		A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppCommandControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +64,21 @@
 		B0000000000000000000000D /* WebViewFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewFactoryTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000000E /* FloatTabs.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FloatTabs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0000000000000000000000F /* FloatTabsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FloatTabsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000010 /* AppCommandController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandController.swift; sourceTree = "<group>"; };
+		B00000000000000000000011 /* WebRenderingProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebRenderingProfile.swift; sourceTree = "<group>"; };
+		B00000000000000000000012 /* WebAppProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppProfile.swift; sourceTree = "<group>"; };
+		B00000000000000000000013 /* TabStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000014 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
+		B00000000000000000000015 /* WebViewPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewPool.swift; sourceTree = "<group>"; };
+		B00000000000000000000016 /* SlotNavigationObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotNavigationObserver.swift; sourceTree = "<group>"; };
+		B00000000000000000000017 /* ExternalTabRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalTabRail.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* WebAppEditorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppEditorController.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* EmptyWebAppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyWebAppView.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* TabStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStoreTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001B /* ProfileRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepositoryTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001C /* WebViewPoolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewPoolTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001D /* ExternalShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalShellTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001E /* AppCommandControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,7 +116,10 @@
 				H00000000000000000000004 /* Panel */,
 				H00000000000000000000005 /* MenuBar */,
 				H00000000000000000000006 /* Hotkeys */,
+				H0000000000000000000000B /* Tabs */,
+				H0000000000000000000000C /* Persistence */,
 				H00000000000000000000007 /* Web */,
+				H0000000000000000000000D /* UI */,
 				H00000000000000000000008 /* Resources */,
 			);
 			path = FloatTabs;
@@ -124,8 +157,27 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000008 /* GlobalHotkeyController.swift */,
+				B00000000000000000000010 /* AppCommandController.swift */,
 			);
 			path = Hotkeys;
+			sourceTree = "<group>";
+		};
+		H0000000000000000000000B /* Tabs */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000011 /* WebRenderingProfile.swift */,
+				B00000000000000000000012 /* WebAppProfile.swift */,
+				B00000000000000000000013 /* TabStore.swift */,
+			);
+			path = Tabs;
+			sourceTree = "<group>";
+		};
+		H0000000000000000000000C /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000014 /* ProfileRepository.swift */,
+			);
+			path = Persistence;
 			sourceTree = "<group>";
 		};
 		H00000000000000000000007 /* Web */ = {
@@ -133,8 +185,20 @@
 			children = (
 				B00000000000000000000009 /* WebViewFactory.swift */,
 				B0000000000000000000000A /* WebViewContainer.swift */,
+				B00000000000000000000015 /* WebViewPool.swift */,
+				B00000000000000000000016 /* SlotNavigationObserver.swift */,
 			);
 			path = Web;
+			sourceTree = "<group>";
+		};
+		H0000000000000000000000D /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000017 /* ExternalTabRail.swift */,
+				B00000000000000000000018 /* WebAppEditorController.swift */,
+				B00000000000000000000019 /* EmptyWebAppView.swift */,
+			);
+			path = UI;
 			sourceTree = "<group>";
 		};
 		H00000000000000000000008 /* Resources */ = {
@@ -150,6 +214,11 @@
 			children = (
 				B0000000000000000000000C /* ScreenPositioningTests.swift */,
 				B0000000000000000000000D /* WebViewFactoryTests.swift */,
+				B0000000000000000000001A /* TabStoreTests.swift */,
+				B0000000000000000000001B /* ProfileRepositoryTests.swift */,
+				B0000000000000000000001C /* WebViewPoolTests.swift */,
+				B0000000000000000000001D /* ExternalShellTests.swift */,
+				B0000000000000000000001E /* AppCommandControllerTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -270,14 +339,24 @@
 			files = (
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
+				A0000000000000000000000F /* AppCommandController.swift in Sources */,
+				A00000000000000000000018 /* EmptyWebAppView.swift in Sources */,
+				A00000000000000000000016 /* ExternalTabRail.swift in Sources */,
 				A00000000000000000000001 /* FloatTabsApp.swift in Sources */,
 				A00000000000000000000004 /* FloatingPanel.swift in Sources */,
 				A00000000000000000000008 /* GlobalHotkeyController.swift in Sources */,
 				A00000000000000000000005 /* PanelController.swift in Sources */,
+				A00000000000000000000013 /* ProfileRepository.swift in Sources */,
 				A00000000000000000000006 /* ScreenPositioning.swift in Sources */,
+				A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */,
 				A00000000000000000000007 /* StatusItemController.swift in Sources */,
+				A00000000000000000000012 /* TabStore.swift in Sources */,
+				A00000000000000000000011 /* WebAppProfile.swift in Sources */,
+				A00000000000000000000017 /* WebAppEditorController.swift in Sources */,
+				A00000000000000000000010 /* WebRenderingProfile.swift in Sources */,
 				A0000000000000000000000A /* WebViewContainer.swift in Sources */,
 				A00000000000000000000009 /* WebViewFactory.swift in Sources */,
+				A00000000000000000000014 /* WebViewPool.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,8 +364,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */,
+				A0000000000000000000001C /* ExternalShellTests.swift in Sources */,
+				A0000000000000000000001A /* ProfileRepositoryTests.swift in Sources */,
 				A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */,
+				A00000000000000000000019 /* TabStoreTests.swift in Sources */,
 				A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */,
+				A0000000000000000000001B /* WebViewPoolTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

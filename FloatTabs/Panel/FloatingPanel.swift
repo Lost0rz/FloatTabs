@@ -7,7 +7,7 @@ final class FloatingPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .resizable],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -23,8 +23,16 @@ final class FloatingPanel: NSPanel {
             .ignoresCycle,
         ]
 
-        // Stage 1 shell: the panel itself is transparent. The web surface owns
-        // its visible fallback, border, radius, and shadow.
+        // A non-activating panel can receive the first pointer interaction while
+        // another application is frontmost. The explicit show path still calls
+        // NSApp.activate() before focusing the active WKWebView, so keyboard input
+        // keeps the accepted Stage 0 behavior.
+        becomesKeyOnlyIfNeeded = true
+        acceptsMouseMovedEvents = true
+
+        // The native resizable style is intentionally disabled. Stage 2 owns a
+        // single bottom-right resize handle so edge movement and resizing cannot
+        // compete for the same pointer hit.
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
