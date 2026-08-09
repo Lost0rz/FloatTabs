@@ -132,9 +132,12 @@ final class WebViewPool {
         webViews.removeValue(forKey: slotID)
     }
 
-    func setMediaPlaybackSuspended(slotID: UUID, suspended: Bool) {
+    /// Pauses currently playing media without putting the page into WebKit's
+    /// stronger suspended state. A paused page remains user-resumable when the
+    /// Slot becomes active again.
+    func pauseMediaPlayback(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
-        webView.setAllMediaPlaybackSuspended(suspended, completionHandler: nil)
+        webView.pauseAllMediaPlayback(completionHandler: nil)
     }
 
     func contains(slotID: UUID) -> Bool {
