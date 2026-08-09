@@ -24,17 +24,26 @@ enum SiteCompatibilityPolicy {
     }
 }
 
+enum WebContentRecoveryDisposition: Equatable {
+    case reloadNow
+    case deferUntilActivation
+}
+
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = (WKWebView, URLRequest) -> Void
+    typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
+    private var lastKnownURLs: [UUID: URL] = [:]
+    private var deferredReloadSlotIDs = Set<UUID>()
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
 
     init(
@@ -42,10 +51,12 @@ final class WebViewPool {
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
         },
+        isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         downloadCoordinator: DownloadCoordinator? = nil
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.isSlotActive = isSlotActive
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
     }
 
@@ -69,6 +80,7 @@ final class WebViewPool {
 
             WebViewFactory.applyRuntimeRendering(desiredRendering, to: existing)
             appliedRenderingProfiles[profile.id] = desiredRendering
+            recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
             return existing
         }
 
@@ -85,13 +97,16 @@ final class WebViewPool {
 
     func navigate(slotID: UUID, to url: URL) {
         guard WebAppURL.isSafe(url), let webView = webViews[slotID] else { return }
-        webView.load(URLRequest(url: url))
+        lastKnownURLs[slotID] = url
+        load(webView, URLRequest(url: url))
     }
 
     func remove(slotID: UUID) {
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
+        lastKnownURLs.removeValue(forKey: slotID)
+        deferredReloadSlotIDs.remove(slotID)
         webViews.removeValue(forKey: slotID)
     }
 
@@ -101,6 +116,28 @@ final class WebViewPool {
 
     var count: Int {
         webViews.count
+    }
+
+    static func recoveryDisposition(isActive: Bool) -> WebContentRecoveryDisposition {
+        isActive ? .reloadNow : .deferUntilActivation
+    }
+
+    func handleContentProcessTermination(slotID: UUID) {
+        guard let webView = webViews[slotID] else { return }
+
+        switch Self.recoveryDisposition(isActive: isSlotActive(slotID)) {
+        case .reloadNow:
+            deferredReloadSlotIDs.remove(slotID)
+            guard let recoveryURL = recoveryURL(slotID: slotID, webView: webView) else {
+                deferredReloadSlotIDs.insert(slotID)
+                return
+            }
+            lastKnownURLs[slotID] = recoveryURL
+            load(webView, recoveryRequest(url: recoveryURL))
+
+        case .deferUntilActivation:
+            deferredReloadSlotIDs.insert(slotID)
+        }
     }
 
     static func rebuildNavigationURL(
@@ -124,6 +161,8 @@ final class WebViewPool {
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
+        lastKnownURLs.removeValue(forKey: profile.id)
+        deferredReloadSlotIDs.remove(profile.id)
         webViews.removeValue(forKey: profile.id)
         return createWebView(
             for: profile,
@@ -148,7 +187,14 @@ final class WebViewPool {
             webView: webView,
             websiteMode: rendering.effectiveWebsiteMode,
             downloadCoordinator: downloadCoordinator,
-            onURLChange: onURLChange
+            onURLChange: { [weak self] slotID, url in
+                guard let self else { return }
+                self.lastKnownURLs[slotID] = url
+                self.onURLChange(slotID, url)
+            },
+            onContentProcessTermination: { [weak self] slotID in
+                self?.handleContentProcessTermination(slotID: slotID)
+            }
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
@@ -160,6 +206,8 @@ final class WebViewPool {
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
         appliedRenderingProfiles[profile.id] = rendering
+        lastKnownURLs[profile.id] = navigationURL
+        deferredReloadSlotIDs.remove(profile.id)
 
         let request = URLRequest(
             url: navigationURL,
@@ -168,6 +216,34 @@ final class WebViewPool {
         )
         load(webView, request)
         return webView
+    }
+
+    private func recoverDeferredContentProcessIfNeeded(
+        for profile: WebAppProfile,
+        in webView: WKWebView
+    ) {
+        guard deferredReloadSlotIDs.remove(profile.id) != nil else { return }
+        let navigationURL = profile.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil }
+            ?? profile.homeURL
+        lastKnownURLs[profile.id] = navigationURL
+        load(webView, recoveryRequest(url: navigationURL))
+    }
+
+    private func recoveryURL(slotID: UUID, webView: WKWebView) -> URL? {
+        for candidate in [lastKnownURLs[slotID], webView.url] {
+            if let candidate, WebAppURL.isSafe(candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func recoveryRequest(url: URL) -> URLRequest {
+        URLRequest(
+            url: url,
+            cachePolicy: .useProtocolCachePolicy,
+            timeoutInterval: 60
+        )
     }
 
     private func discardPopupCoordinator(slotID: UUID) {
