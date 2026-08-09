@@ -155,6 +155,32 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
     }
 
+    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let first = pool.webView(for: profile)
+        let firstUA = first.customUserAgent
+        let second = pool.webView(for: profile)
+        let third = pool.webView(for: profile)
+
+        XCTAssertTrue(first === second)
+        XCTAssertTrue(second === third)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertEqual(second.customUserAgent, firstUA)
+        XCTAssertEqual(third.customUserAgent, firstUA)
+        XCTAssertTrue(third.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertFalse(third.customUserAgent?.contains("iPhone") == true)
+    }
+
     func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() {
         let pool = makePool()
         var profile = makeProfile(name: "A")
