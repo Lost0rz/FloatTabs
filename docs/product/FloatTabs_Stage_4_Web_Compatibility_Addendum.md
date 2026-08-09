@@ -1,6 +1,6 @@
 # FloatTabs — Stage 4 Web Compatibility Addendum
 
-> Status: **Stage 4 accepted; Navigation Intent + Slot Home extension under validation**  
+> Status: **Stage 4 accepted; Navigation Intent + Slot Home extension accepted**  
 > Base: merged Stage 4 on `main`  
 > Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, and Slot Home
 
@@ -156,6 +156,8 @@ Tab context menu → Return to Home
 
 Return to Home performs normal navigation to `homeURL`; it does not clear WebKit back/forward history. No permanent Home control is added to the webpage surface.
 
+The Slot context menu intentionally does not expose a separate Rename action. Name editing is owned by **Edit Web App…**, which already edits the Slot name together with the rest of the Web App configuration.
+
 ## 9. Accepted Stage 4 evidence
 
 Merged Stage 4 head before merge:
@@ -172,12 +174,12 @@ a3385419c8013c06919d95afabfd36779039e19e
 
 The prior clean macOS CI gate passed and Real-Mac acceptance passed for Bilibili Mobile/Desktop, ChatGPT Mobile attachment interaction, hidden webpage scrollbar with preserved scrolling, materially faster Website Mode switching, and the accepted compatibility baseline.
 
-## 10. Navigation Intent + Slot Home validation gate
+## 10. Navigation Intent + Slot Home acceptance evidence
 
-Before this extension is accepted on Real Mac, validate:
+Real-Mac acceptance passed for the Navigation Intent + Slot Home extension:
 
 1. ordinary Bilibili links, including cross-host links, remain in the current Slot;
-2. a user-activated `target=_blank` HTTP(S) link remains in the current Slot;
+2. user-activated `target=_blank` HTTP(S) links remain in the current Slot;
 3. webpage-link **Open in Floating Window** creates an independent FloatTabs floating window and leaves the source Slot unchanged;
 4. webpage-link **Open in Default Browser** opens the system default browser only when explicitly selected;
 5. scripted `window.open`, OAuth/login and `about:blank` popup flows retain temporary-popup behavior;
@@ -185,6 +187,27 @@ Before this extension is accepted on Real Mac, validate:
 7. `⌘⇧H` returns the active Slot to its stable `homeURL`;
 8. returning Home does not erase back/forward history;
 9. no permanent browser/Home chrome is added;
-10. accepted Bilibili Desktop clicks, ChatGPT Mobile attachment interaction, YouTube fullscreen, Website Mode identity, and hidden-scrollbar behavior do not regress.
+10. accepted Bilibili Desktop clicks, Bilibili Mobile layout, ChatGPT Mobile attachment interaction, YouTube fullscreen, Website Mode identity, switch performance, and hidden-scrollbar behavior remain normal;
+11. redundant Slot **Rename…** was removed; **Edit Web App…** remains the single name-edit path.
 
-This extension remains Draft until its automated gate is green and these Real-Mac checks pass.
+Final business cleanup commit:
+
+```text
+f6b1663b19a75e4fc71ef694cc54b701658969f6
+```
+
+Clean final code/workflow gate before documentation acceptance:
+
+```text
+d7622b50191ced6ec489e0dd123e6a13a2e3ff85
+```
+
+macOS CI #255: **PASS**
+
+- package resolution: PASS;
+- package lock unchanged: PASS;
+- Debug build: PASS;
+- full Unit Tests: PASS;
+- Slot context-menu regression confirms only Return to Home / Edit Web App / Remove Web App actions and no standalone Rename action.
+
+The extension is accepted and may be merged to `main`.
