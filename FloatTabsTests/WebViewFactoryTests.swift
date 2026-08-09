@@ -199,7 +199,11 @@ final class WebViewFactoryTests: XCTestCase {
         loadInteractiveTestHTML(in: webView)
         clickWebViewCenter(webView, in: window)
 
-        XCTAssertEqual(evaluateNumber("window.clicks", in: webView), 1, accuracy: 0.001)
+        // WKWebView forwards the synthesized mouse event to the WebContent
+        // process asynchronously, so the DOM click handler fires a few run-loop
+        // spins after `mouseDown`/`mouseUp` return. Poll for the side effect
+        // instead of asserting immediately, which would race WebKit delivery.
+        waitForJavaScriptNumber("window.clicks", in: webView, equals: 1)
         window.orderOut(nil)
     }
 
@@ -568,6 +572,49 @@ final class WebViewFactoryTests: XCTestCase {
             return .nan
         }
         return number
+    }
+
+    /// Polls a JavaScript numeric expression in a WKWebView until it matches the
+    /// expected value, or fails with a clear timeout.
+    ///
+    /// This is the correct way to assert on state that is mutated by an
+    /// asynchronous WebKit event. `webView.mouseDown`/`mouseUp` (and real
+    /// `sendEvent` dispatch) hand the event to the WebContent process, which
+    /// fires the DOM handler some run-loop iterations later. A single
+    /// `evaluateJavaScript` issued immediately afterward can return the
+    /// pre-event value. Polling on a short cadence waits for delivery to settle
+    /// instead of guessing a fixed sleep duration, succeeding as soon as the
+    /// value flips.
+    private func waitForJavaScriptNumber(
+        _ script: String,
+        in webView: WKWebView,
+        equals expected: Double,
+        accuracy: Double = 0.001,
+        timeout: TimeInterval = 2.0,
+        pollInterval: TimeInterval = 0.03
+    ) {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        var lastValue: Double = .nan
+        var matched = false
+
+        repeat {
+            lastValue = evaluateNumber(script, in: webView)
+            if !lastValue.isNaN, abs(lastValue - expected) <= accuracy {
+                matched = true
+                break
+            }
+            // Yield to the run loop so WebContent can process pending input.
+            let tick = expectation(description: "poll interval")
+            DispatchQueue.main.asyncAfter(deadline: .now() + pollInterval) { tick.fulfill() }
+            wait(for: [tick], timeout: pollInterval * 2)
+        } while Date() < deadline
+
+        if !matched {
+            XCTFail(
+                "Timed out after \(timeout)s waiting for `\(script)` to equal \(expected)"
+                + " ±\(accuracy); last value was \(lastValue)"
+            )
+        }
     }
 
     private func tryUnwrapFloatTabsWebView(_ webView: WKWebView) -> FloatTabsWebView {
