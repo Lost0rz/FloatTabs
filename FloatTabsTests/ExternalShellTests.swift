@@ -52,6 +52,32 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(zone.hitTest(pointInSuperview) is CurrentWebAppControl)
     }
 
+    func testTabContextMenuStartsWithReturnToHome() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(zone.tabView(for: active.id))
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: tab.frame.midX, y: tab.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        )!
+        let menu = try! XCTUnwrap(tab.menu(for: event))
+        let first = try! XCTUnwrap(menu.items.first)
+
+        XCTAssertEqual(first.title, "Return to Home")
+        XCTAssertEqual(first.keyEquivalent, "h")
+        XCTAssertEqual(first.keyEquivalentModifierMask, [.command, .shift])
+    }
+
     func testActiveInactiveAndAddGeometryMatchDesignTokens() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")

@@ -123,6 +123,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .quickURL:
             presentQuickURL()
+
+        case .returnHome:
+            returnActiveSlotHome()
         }
     }
 
@@ -171,6 +174,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         rail.onSelect = { [weak self] id in
             _ = self?.tabStore.select(id: id)
+        }
+        rail.onReturnHome = { [weak self] id in
+            self?.returnSlotHome(id: id)
         }
         rail.onAdd = { [weak self] in
             self?.presentAddWebAppEditor()
@@ -224,6 +230,30 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard !quickURLOverlayView.isPresented,
               let webView = rootView.webPanelContainerView.currentWebView else { return }
         _ = panel.makeFirstResponder(webView)
+    }
+
+    private func returnActiveSlotHome() {
+        guard let id = tabStore.activeTabID else { return }
+        returnSlotHome(id: id)
+    }
+
+    private func returnSlotHome(id: UUID) {
+        guard let profile = tabStore.profiles.first(where: { $0.id == id }),
+              WebAppURL.isSafe(profile.homeURL) else {
+            return
+        }
+
+        // `homeURL` is stable Slot identity; only `currentURL` moves. Updating
+        // currentURL before load also makes Return to Home deterministic for a
+        // cold inactive Slot without clearing a warm WebView's history list.
+        tabStore.updateCurrentURL(id: id, url: profile.homeURL)
+        if webViewPool.contains(slotID: id) {
+            webViewPool.navigate(slotID: id, to: profile.homeURL)
+        }
+
+        if tabStore.activeTabID == id {
+            focusActiveWebViewIfAvailable()
+        }
     }
 
     private func presentAddWebAppEditor() {

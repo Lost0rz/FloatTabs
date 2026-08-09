@@ -97,6 +97,23 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(repository.state.profiles.first?.renderingProfile, updated.renderingProfile)
     }
 
+    func testCurrentNavigationNeverMutatesStableHomeURL() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = store.add(name: "A", homeURL: urlA)!
+
+        store.updateCurrentURL(id: profile.id, url: urlB)
+
+        let updated = try! XCTUnwrap(store.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(updated.homeURL, urlA)
+        XCTAssertEqual(updated.currentURL, urlB)
+
+        let relaunched = TabStore(repository: repository)
+        let restored = try! XCTUnwrap(relaunched.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(restored.homeURL, urlA)
+        XCTAssertEqual(restored.currentURL, urlB)
+    }
+
     func testActiveSelectionUpdatesIdentity() {
         let store = TabStore(repository: MemoryProfileRepository())
         let first = store.add(name: "A", homeURL: urlA)!
