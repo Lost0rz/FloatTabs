@@ -4,17 +4,16 @@ on:
   push:
     branches:
       - feat/stage-4-closeout
-    paths:
-      - .github/workflows/stage4-slot-size-sync.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
           ref: feat/stage-4-closeout
           fetch-depth: 0
