@@ -53,14 +53,6 @@ final class AppCommandControllerTests: XCTestCase {
             AppCommandController.command(characters: "H", keyCode: 4, modifiers: [.command, .shift]),
             .returnHome
         )
-        XCTAssertEqual(
-            AppCommandController.command(characters: "p", keyCode: 35, modifiers: [.command, .shift]),
-            .togglePin
-        )
-        XCTAssertEqual(
-            AppCommandController.command(characters: "P", keyCode: 35, modifiers: [.command, .shift]),
-            .togglePin
-        )
 
         XCTAssertNil(AppCommandController.command(characters: "a", keyCode: 0, modifiers: [.command]))
         XCTAssertNil(AppCommandController.command(characters: "c", keyCode: 8, modifiers: [.command]))

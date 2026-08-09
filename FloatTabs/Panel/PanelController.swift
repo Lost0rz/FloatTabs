@@ -24,7 +24,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var followPreferredSize: Bool
-    private(set) var isPinned = false
 
     var isVisible: Bool {
         panel.isVisible
@@ -67,13 +66,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleManualResizeEnded()
         }
         configureSlotInteractions()
-        rootView.externalControlZoneView.setPinned(isPinned)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(applicationDidResignActive(_:)),
-            name: NSApplication.didResignActiveNotification,
-            object: NSApp
-        )
 
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -110,32 +102,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
-    static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
-        panelIsVisible && !isPinned
-    }
-
-    private func togglePinnedState() {
-        isPinned.toggle()
-        rootView.externalControlZoneView.setPinned(isPinned)
-    }
-
-    @objc private func applicationDidResignActive(_ notification: Notification) {
-        guard Self.shouldAutoHide(panelIsVisible: panel.isVisible, isPinned: isPinned) else {
-            return
-        }
-        autoHideAfterApplicationDeactivation()
-    }
-
-    private func autoHideAfterApplicationDeactivation() {
-        // The user has already selected another application. Unlike the explicit
-        // global-toggle hide path, do not reactivate `previousApplication` here:
-        // doing so would steal focus from the application the user just chose.
-        quickURLOverlayView.dismiss()
-        persistPanelFrame()
-        panel.orderOut(nil)
-        previousApplication = nil
-    }
-
 #if DEBUG
     func benchmarkControlSnapshot() -> [String: Any] {
         let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
@@ -153,7 +119,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         var snapshot: [String: Any] = [
             "visible": isVisible,
-            "pinned": isPinned,
             "profiles": profiles,
         ]
         snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
@@ -223,9 +188,6 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .returnHome:
             returnActiveSlotHome()
-
-        case .togglePin:
-            togglePinnedState()
         }
     }
 
@@ -298,9 +260,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onCurrentControls = { [weak self] in
             self?.presentCurrentWebAppControls()
-        }
-        rail.onTogglePin = { [weak self] in
-            self?.togglePinnedState()
         }
     }
 

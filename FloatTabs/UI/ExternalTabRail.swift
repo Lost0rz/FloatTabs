@@ -21,7 +21,6 @@ struct ExternalTabMetrics {
     static let systemControlNormalWidth: CGFloat = 34
     static let systemControlHoverWidth: CGFloat = 54
     static let systemControlBottomOffset: CGFloat = 18
-    static let systemControlGap: CGFloat = 4
 
     /// Dock-like magnification is proximity driven instead of a binary hover.
     /// At one row away the neighboring tab still grows noticeably; the effect
@@ -68,7 +67,6 @@ final class ExternalControlZoneView: NSView {
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onCurrentControls: (() -> Void)?
-    var onTogglePin: (() -> Void)?
 
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
@@ -76,7 +74,6 @@ final class ExternalControlZoneView: NSView {
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
     private let currentControls = CurrentWebAppControl()
-    private let pinControl = PinPanelControl()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerY: CGFloat?
 
@@ -91,17 +88,12 @@ final class ExternalControlZoneView: NSView {
 
         addSubview(addControl)
         addSubview(currentControls)
-        addSubview(pinControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
         currentControls.onActivate = { [weak self] in self?.onCurrentControls?() }
-        pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
         addControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         currentControls.onPointerMoved = { [weak self] event in
-            self?.updateDockPointer(with: event)
-        }
-        pinControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
     }
@@ -180,10 +172,6 @@ final class ExternalControlZoneView: NSView {
         layoutControls(animated: true, duration: ExternalTabMetrics.dockSettleDuration)
     }
 
-    func setPinned(_ isPinned: Bool) {
-        pinControl.setPinned(isPinned)
-    }
-
     override func layout() {
         super.layout()
         layoutControls(animated: false, duration: 0)
@@ -199,10 +187,6 @@ final class ExternalControlZoneView: NSView {
 
     var currentControlsFrame: NSRect {
         currentControls.frame
-    }
-
-    var pinControlFrame: NSRect {
-        pinControl.frame
     }
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
@@ -282,29 +266,9 @@ final class ExternalControlZoneView: NSView {
             )
             self.setFrame(addFrame, for: self.addControl, animated: animated)
 
-            let pinY = max(
+            let systemY = max(
                 self.bounds.height
                     - ExternalTabMetrics.systemControlBottomOffset
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let pinCenterY = pinY + ExternalTabMetrics.systemControlHeight / 2
-            let pinInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - pinCenterY)
-            } ?? 0
-            self.pinControl.setDockInfluence(pinInfluence)
-            let pinWidth = min(self.pinControl.preferredWidth, self.bounds.width)
-            let pinFrame = NSRect(
-                x: max(self.bounds.width - pinWidth, 0),
-                y: pinY,
-                width: pinWidth,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(pinFrame, for: self.pinControl, animated: animated)
-
-            let systemY = max(
-                pinY
-                    - ExternalTabMetrics.systemControlGap
                     - ExternalTabMetrics.systemControlHeight,
                 0
             )
@@ -742,126 +706,6 @@ final class AddWebAppControl: NSView {
             .cgColor
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
         layer?.borderWidth = 1
-    }
-}
-
-
-@MainActor
-final class PinPanelControl: NSView {
-    var onActivate: (() -> Void)?
-    var onPointerMoved: ((NSEvent) -> Void)?
-
-    private let imageView = NSImageView()
-    private var trackingAreaReference: NSTrackingArea?
-    private var isHovered = false
-    private var dockInfluence: CGFloat = 0
-
-    private(set) var isPinned = false {
-        didSet { updateAppearance() }
-    }
-
-    var preferredWidth: CGFloat {
-        ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = ExternalTabMetrics.tabRadius
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(imageView)
-        NSLayoutConstraint.activate([
-            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            imageView.widthAnchor.constraint(equalToConstant: 13),
-            imageView.heightAnchor.constraint(equalToConstant: 13),
-        ])
-        updateAppearance()
-    }
-
-    convenience init() {
-        self.init(frame: .zero)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
-    }
-
-    func setDockInfluence(_ influence: CGFloat) {
-        dockInfluence = min(max(influence, 0), 1)
-    }
-
-    func setPinned(_ pinned: Bool) {
-        isPinned = pinned
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingAreaReference {
-            removeTrackingArea(trackingAreaReference)
-        }
-        let tracking = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(tracking)
-        trackingAreaReference = tracking
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-        onPointerMoved?(event)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        onPointerMoved?(event)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        onActivate?()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        let symbol = isPinned ? "pin.fill" : "pin"
-        let description = isPinned ? "Pinned: keep FloatTabs visible" : "Pin FloatTabs"
-        imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
-        toolTip = isPinned
-            ? "Pinned · Click or press ⌘⇧P to auto-hide when inactive"
-            : "Keep FloatTabs Visible · ⌘⇧P"
-
-        let fraction: CGFloat
-        if isPinned {
-            fraction = isHovered ? 0.18 : 0.12
-        } else {
-            fraction = isHovered ? 0.10 : 0.02
-        }
-        layer?.backgroundColor = NSColor.controlBackgroundColor
-            .blended(withFraction: fraction, of: .labelColor)?
-            .withAlphaComponent(0.94)
-            .cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
-        layer?.borderWidth = 1
-        imageView.contentTintColor = isPinned ? .labelColor : .secondaryLabelColor
     }
 }
 
