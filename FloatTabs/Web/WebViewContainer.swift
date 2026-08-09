@@ -588,13 +588,12 @@ final class ResizeReadoutView: NSView {
     }
 }
 
-/// The user-selected FloatTabs Window Size always owns the full visible host.
-/// Desktop fills that host and may use public WebKit pageZoom only to fit a
-/// desktop-class CSS width into a narrower physical window. Mobile instead uses
-/// a real, centered WKWebView interaction surface capped at 390 px. Wider Mobile
-/// windows therefore show native AppKit gutters instead of stretching a 390 px
-/// page with pageZoom > 1. The host bounds remain 1:1 with the physical window;
-/// no parent transform, NSScrollView magnification, or private WebKit SPI is used.
+/// The visible FloatTabs Web surface stays at the user-selected Window Size.
+/// The logical host keeps that visible frame but uses a larger/smaller bounds
+/// coordinate system. The child WKWebView itself receives the real 1280/390-
+/// class frame, so WebKit sees the requested CSS viewport while ordinary AppKit
+/// ancestor coordinate conversion maps pointer events into WebKit coordinates.
+/// No NSScrollView magnification is involved.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
@@ -722,37 +721,23 @@ final class WebPanelContainerView: NSView {
             ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
                 ? .mobile
                 : .desktop)
-
-        let webWidth: CGFloat
-        switch mode {
-        case .desktop:
-            webWidth = visibleSize.width
-        case .mobile:
-            webWidth = min(WebsiteLayoutViewport.mobileMaximumCSSWidth, visibleSize.width)
-        }
-
-        let targetFrame = NSRect(
-            x: (visibleSize.width - webWidth) / 2,
-            y: 0,
-            width: webWidth,
-            height: visibleSize.height
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: visibleSize,
+            websiteMode: mode
         )
+        guard logicalSize.width > 0, logicalSize.height > 0 else { return }
 
-        // AppKit geometry is deliberately one-to-one. Mobile's extra physical
-        // width belongs to the FloatTabs window, not to the website viewport.
-        websiteLayoutScale = 1
+        websiteLayoutScale = visibleSize.width / logicalSize.width
 
-        if abs(webView.frame.minX - targetFrame.minX) > 0.5
-            || abs(webView.frame.minY - targetFrame.minY) > 0.5
-            || abs(webView.frame.width - targetFrame.width) > 0.5
-            || abs(webView.frame.height - targetFrame.height) > 0.5 {
-            webView.frame = targetFrame
+        if abs(webView.frame.width - logicalSize.width) > 0.5
+            || abs(webView.frame.height - logicalSize.height) > 0.5 {
+            webView.frame = NSRect(origin: .zero, size: logicalSize)
         }
 
-        if abs(logicalHostView.bounds.width - visibleSize.width) > 0.5
-            || abs(logicalHostView.bounds.height - visibleSize.height) > 0.5
+        if abs(logicalHostView.bounds.width - logicalSize.width) > 0.5
+            || abs(logicalHostView.bounds.height - logicalSize.height) > 0.5
             || logicalHostView.bounds.origin != .zero {
-            logicalHostView.bounds = NSRect(origin: .zero, size: visibleSize)
+            logicalHostView.bounds = NSRect(origin: .zero, size: logicalSize)
         }
     }
 
