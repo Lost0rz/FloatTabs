@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Stage 5C patch
-        run: python3 .github/stage5c_patch.py
+        run: |
+          python3 .github/stage5c_patch_fix.py
+          python3 .github/stage5c_patch.py
 
       - name: Validate diff
         run: |
