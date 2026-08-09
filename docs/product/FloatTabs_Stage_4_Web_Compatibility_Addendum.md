@@ -2,7 +2,7 @@
 
 > Status: **Stage 4 architecture/code closeout implemented; final Real-Mac warm-slot + active recovery smoke pending**  
 > Base: merged Stage 4 + Navigation Intent / Slot Home on `main`  
-> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, warm Slot residency, and WebContent process recovery
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, WebContent process recovery, and warm Slot presentation continuity
 
 ## 1. Stage 4 intent
 
@@ -132,39 +132,42 @@ Automatic + Mobile
 
 The exception does not change Window Size or user Zoom and does not apply to Bilibili, YouTube, or unrelated sites.
 
-The **effective runtime rendering profile must remain stable across warm Slot reuse**. Re-selecting an existing ChatGPT `WKWebView` recomputes the site compatibility profile and reapplies that effective runtime profile; FloatTabs must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
+The **effective runtime rendering profile must remain stable across warm Slot reuse**. When an existing ChatGPT `WKWebView` is reselected, FloatTabs recomputes the site compatibility profile and reapplies that effective runtime profile; it must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
 
 No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding experiments were rejected by Real-Mac testing and remain removed.
 
-## 7. Warm Slot residency and heavy SPA state
+## 7. Warm Slot residency and presentation
 
-Real-Mac closeout testing exposed an additional state-continuity requirement with long ChatGPT conversations: a light landing page opens quickly, while a long conversation contains a much larger live SPA/DOM/rendering state. Ordinary Slot switching must therefore preserve the already-loaded WebView as a true warm resident rather than treating every switch as a view teardown/re-attachment cycle.
+Long, state-heavy SPAs such as a long ChatGPT conversation are not adequately represented by HTTP cache alone. Their useful warm state includes live DOM, JavaScript/React state, scroll/layout state, and WebKit compositor state.
 
-Canonical warm behavior is now:
+FloatTabs therefore treats a warm Slot's live `WKWebView` as the primary in-memory presentation cache:
 
 ```text
-Slot A active
-Slot B inactive
-Slot C inactive
-
-A / B / C WKWebViews remain attached to the same FloatTabs AppKit window hierarchy
-        ↓
-Slot switch
-        ↓
-only sibling front/back ordering changes
-        ↓
-no ordinary removeFromSuperview / re-add cycle
-        ↓
-no new network load solely because another Slot became active
+ordinary Slot switch
+→ keep resident WKWebViews attached to the same FloatTabs window
+→ preserve the same WKWebView object
+→ preserve normal website data/cache
+→ switch only sibling front/back order
 ```
 
-This rule is **generic**, not ChatGPT-specific. It benefits any heavy SPA such as long AI conversations while avoiding domain-specific cache hacks.
+Ordinary Slot switching must not remove the inactive warm WebView from the AppKit window hierarchy merely because another Slot becomes active. Intentional Slot removal or a rendering-profile rebuild may still detach and replace the obsolete WebView.
 
-FloatTabs does not attempt to serialize or locally recreate ChatGPT conversation HTML, React state, streamed message state, or authenticated application memory. Persistent website storage and ordinary HTTP/WebKit caching remain owned by `WKWebsiteDataStore.default()` plus normal protocol cache policy. The additional performance layer is the live warm `WKWebView` itself, preserving in-memory DOM/JavaScript/compositor state whenever WebKit permits.
+Different Slots may also have different preferred Window Size presets. Automatic Slot switching therefore uses a **transactional presentation boundary**:
 
-Inactive resident WebViews are deliberately not hidden or detached merely to switch tabs. Stage 5 Resource Optimization owns the separate question of how inactive resident WebViews should reduce CPU/media/network work without destroying their warm state.
+```text
+select target Slot
+→ apply target panel size without intermediate resize animation
+→ finish AppKit layout
+→ resize resident WebViews to the final host bounds
+→ layout target WebView
+→ promote target WebView to the front
+```
 
-Deterministic AppKit coverage verifies that switching between two resident WebViews keeps both attached to the same window/superview and changes only sibling ordering.
+This prevents the gray container edge / delayed fill artifact that occurs when a target WebView is promoted at its previous frame while the panel is still animating through intermediate sizes.
+
+Explicit user-driven size edits may remain animated; the no-animation rule applies to automatic Slot-follow resizing so fast switching remains visually atomic.
+
+Stage 5 owns resource scheduling for inactive resident WebViews. Resource optimization must not silently destroy the warm-state guarantee established here.
 
 ## 8. Mode-switch loading performance
 
@@ -243,7 +246,7 @@ Recovery rules:
 - inactive recovery avoids unnecessary immediate network work;
 - deferred recovery reuses the existing `WKWebView` when sufficient;
 - `WKWebsiteDataStore.default()` is neither cleared nor replaced;
-- removal/rebuild of a Slot also clears its in-memory recovery bookkeeping and detaches the obsolete view from the warm residency host.
+- removal/rebuild of a Slot also clears its in-memory recovery bookkeeping.
 
 Deterministic tests cover the active/immediate policy, inactive/deferred policy, same-WebView deferred recovery, current-URL restoration, and observer-to-pool termination signal.
 
@@ -286,13 +289,14 @@ The merge-to-main macOS CI after PR #7 also passed.
 
 ## 14. Stage 4 closeout gate
 
-Automated closeout coverage now includes WebContent recovery, ChatGPT warm-slot runtime compatibility, and window-attached warm residency. The ChatGPT regression test verifies repeated `webView(for:)` reuse preserves one `WKWebView`, one initial load, and the macOS Safari compatibility identity. The AppKit residency test verifies inactive and active warm WebViews remain attached to the same window across repeated switches.
+Automated closeout coverage includes WebContent recovery and ChatGPT warm-slot runtime compatibility. The current code gate additionally passes after the warm-residency and transactional size-presentation changes.
 
-Two focused Real-Mac checks remain before PR #8 can be marked Ready:
+Focused Real-Mac checks remain before PR #8 can be marked Ready:
 
 ```text
 1. ChatGPT long-conversation warm Slot switching
    → repeated switch away/back avoids the prior long black/reload-like state
+   → different Slot size presets do not expose gray container edges / delayed fill
    → ChatGPT Mobile attachment interaction remains normal
 
 2. active Slot WebContent process terminates
