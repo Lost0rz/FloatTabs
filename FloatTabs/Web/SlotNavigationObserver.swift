@@ -113,6 +113,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let navigationCoordinator: WebNavigationCoordinator
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
+    private let onContentProcessTermination: @MainActor (UUID) -> Void
 
     init(
         slotID: UUID,
@@ -120,7 +121,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         websiteMode: WebsiteMode,
         navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
         downloadCoordinator: DownloadCoordinator? = nil,
-        onURLChange: @escaping @MainActor (UUID, URL) -> Void
+        onURLChange: @escaping @MainActor (UUID, URL) -> Void,
+        onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in }
     ) {
         self.slotID = slotID
         self.webView = webView
@@ -128,6 +130,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.navigationCoordinator = navigationCoordinator
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
+        self.onContentProcessTermination = onContentProcessTermination
         super.init()
 
         observation = webView.observe(\.url, options: [.new]) { observedWebView, _ in
@@ -242,6 +245,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        onContentProcessTermination(slotID)
     }
 
     private func restoreWebsiteMode(in webView: WKWebView) {
