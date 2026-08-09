@@ -1,0 +1,55 @@
+name: Stage 5C Command Backtick Validate
+
+on:
+  push:
+    branches:
+      - feat/stage-5c-presentation-pin
+    paths:
+      - .github/stage5c-command-backtick.trigger
+
+jobs:
+  validate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-5c-presentation-pin
+
+      - name: Validate Command-backtick hard-coded path
+        run: |
+          grep -q 'KeyboardShortcuts.events(for: shortcut)' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+          grep -q '\.backtick' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+          grep -q 'modifiers: \[.command\]' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+          ! grep -q 'toggleFloatTabs = Self' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+          git diff --check
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -resolvePackageDependencies \
+            -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Debug build
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test
