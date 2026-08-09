@@ -20,6 +20,10 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
     }
 
     static func safeSuggestedFilename(_ suggestedFilename: String) -> String {
+        guard !suggestedFilename.isEmpty else {
+            return "Download"
+        }
+
         let candidate = URL(fileURLWithPath: suggestedFilename).lastPathComponent
         return candidate.isEmpty ? "Download" : candidate
     }
