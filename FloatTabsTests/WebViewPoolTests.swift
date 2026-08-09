@@ -155,6 +155,32 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
     }
 
+    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let first = pool.webView(for: profile)
+        let firstUA = first.customUserAgent
+        let second = pool.webView(for: profile)
+        let third = pool.webView(for: profile)
+
+        XCTAssertTrue(first === second)
+        XCTAssertTrue(second === third)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertEqual(second.customUserAgent, firstUA)
+        XCTAssertEqual(third.customUserAgent, firstUA)
+        XCTAssertTrue(third.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertFalse(third.customUserAgent?.contains("iPhone") == true)
+    }
+
     func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() {
         let pool = makePool()
         var profile = makeProfile(name: "A")
@@ -197,6 +223,76 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: second.id))
         XCTAssertTrue(pool.webView(for: second) === secondView)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() {
+        XCTAssertEqual(
+            WebViewPool.recoveryDisposition(isActive: true),
+            .reloadNow
+        )
+        XCTAssertEqual(
+            WebViewPool.recoveryDisposition(isActive: false),
+            .deferUntilActivation
+        )
+    }
+
+    func testActiveWebContentTerminationReloadsLastKnownURLImmediately() {
+        var loadedRequests: [URLRequest] = []
+        var profile = makeProfile(name: "A")
+        profile.currentURL = URL(string: "https://example.com/current")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            isSlotActive: { _ in true }
+        )
+
+        _ = pool.webView(for: profile)
+        pool.handleContentProcessTermination(slotID: profile.id)
+
+        XCTAssertEqual(loadedRequests.count, 2)
+        XCTAssertEqual(loadedRequests.last?.url, profile.currentURL)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+    }
+
+    func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() {
+        var loadedRequests: [URLRequest] = []
+        var isActive = false
+        var profile = makeProfile(name: "A")
+        profile.currentURL = URL(string: "https://example.com/current")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            isSlotActive: { _ in isActive }
+        )
+
+        let original = pool.webView(for: profile)
+        pool.handleContentProcessTermination(slotID: profile.id)
+        XCTAssertEqual(loadedRequests.count, 1)
+
+        isActive = true
+        let recovered = pool.webView(for: profile)
+
+        XCTAssertTrue(original === recovered)
+        XCTAssertEqual(loadedRequests.count, 2)
+        XCTAssertEqual(loadedRequests.last?.url, profile.currentURL)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+    }
+
+    func testSlotNavigationObserverSurfacesContentProcessTermination() {
+        let webView = WebViewFactory.makeWebView()
+        let slotID = UUID()
+        var terminatedSlotID: UUID?
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onContentProcessTermination: { terminatedSlotID = $0 }
+        )
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+
+        XCTAssertEqual(terminatedSlotID, slotID)
     }
 
     func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() {

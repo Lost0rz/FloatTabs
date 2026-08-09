@@ -30,10 +30,9 @@ final class WebNavigationCoordinator {
         sourceURL: URL?,
         targetURL: URL?
     ) -> WebNavigationDisposition {
-        // `sourceURL` is retained in this seam because popup policy and tests
-        // still provide origin context, but ordinary user routing intentionally
-        // does not compare source/target hosts. Destination is chosen by user
-        // intent, not by same-site/cross-site classification.
+        // `sourceURL` remains part of the policy seam because popup callers and
+        // deterministic tests carry origin context. Ordinary user routing does
+        // not compare source/target hosts: destination is selected by user intent.
         _ = sourceURL
 
         guard !hasTargetFrame,
@@ -61,24 +60,8 @@ final class WebNavigationCoordinator {
         return .loadInCurrentSlot
     }
 
-    static func isSameSite(_ first: URL?, _ second: URL?) -> Bool {
-        guard let firstHost = normalizedHost(first),
-              let secondHost = normalizedHost(second) else {
-            return false
-        }
-        return firstHost == secondHost
-    }
-
     static func isWebURL(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
-    }
-
-    private static func normalizedHost(_ url: URL?) -> String? {
-        guard var host = url?.host?.lowercased(), !host.isEmpty else { return nil }
-        if host.hasPrefix("www.") {
-            host.removeFirst(4)
-        }
-        return host
     }
 }

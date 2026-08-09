@@ -627,38 +627,52 @@ No login method is declared supported before testing.
 
 # 8. Navigation Policy
 
-FloatTabs is not a general research browser.
+FloatTabs remains a lightweight persistent Web App container rather than a traditional research browser, but ordinary user navigation stays inside the active Slot unless the user explicitly chooses another destination.
 
-## 8.1 Same-Site Navigation
+## 8.1 Ordinary User Navigation
 
-Normal navigation inside the Web App remains in the current Slot and continuously updates `currentURL`.
-
-## 8.2 New Windows / External Links
-
-Use `WKUIDelegate` / navigation policy:
-
-- OAuth/login popup → temporary child WebView when appropriate;
-- same-site required popup → current Slot or child WebView;
-- ordinary external/research link → default system browser by default;
-- never auto-create a permanent FloatTabs Slot.
-
-`Open in Default Browser` must be available from the current Web App controls and Tab context menu.
-
-There is no top-right FloatTabs `…` menu.
-
-## 8.3 Quick URL
-
-There is no permanent address bar.
-
-`⌘L` opens a temporary URL overlay:
+Host comparison is not a browser-boundary rule.
 
 ```text
-current URL selected
-Enter → navigate + dismiss
-Esc → dismiss
+ordinary HTTP(S) left click       → current Slot
+user target=_blank HTTP(S) link   → current Slot
 ```
 
-No history/search suggestions in V1.
+Normal navigation continuously updates `currentURL` while preserving the stable Slot `homeURL`.
+
+## 8.2 Explicit Destinations / Website Popups
+
+HTTP(S) link context actions expose explicit user intent:
+
+```text
+Open in Floating Window → user-created FloatTabs floating window
+Open in Default Browser → system default browser
+Copy Link               → clipboard
+```
+
+Website-created contexts remain separate:
+
+- scripted `window.open` / OAuth/login popup → temporary child WebView when appropriate;
+- `about:blank` auth bootstrap → temporary child WebView;
+- non-web schemes → system handler;
+- never auto-create a permanent FloatTabs Slot.
+
+The system default browser is therefore an explicit user-selected destination, not an automatic cross-site policy.
+
+## 8.3 Slot Home / Quick URL
+
+`homeURL` is stable Slot identity; `currentURL` is mutable browsing position.
+
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return Home performs normal navigation and does not explicitly clear WebKit back/forward history.
+
+There is no permanent address bar. `⌘L` opens a temporary URL overlay; V1 has no history/search suggestions.
+
+There is no top-right FloatTabs `…` menu.
 
 ---
 
@@ -831,12 +845,15 @@ Direct DMG distribution does not require Mac App Store review.
 
 ## 14.1 Web Content Process Termination
 
-Implement `webViewWebContentProcessDidTerminate`.
+`SlotNavigationObserver` surfaces `webViewWebContentProcessDidTerminate` to `WebViewPool`.
 
-- current Slot → reload current URL;
-- inactive Slot → mark `needsReload` and restore on next activation;
+Recovery policy:
+
+- active Slot → immediately reload the last known safe/current URL with normal protocol cache policy;
+- inactive Slot → record deferred recovery and reload its persisted `currentURL` (falling back to `homeURL`) when that Slot is next activated;
+- reuse the same `WKWebView` for deferred recovery when sufficient;
 - do not crash the host app;
-- do not clear persistent website data.
+- do not clear or replace `WKWebsiteDataStore.default()`.
 
 ## 14.2 App Metadata Failure
 
