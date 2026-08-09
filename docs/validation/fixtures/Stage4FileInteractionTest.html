@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FloatTabs Stage 4 File Interaction Test</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 32px; line-height: 1.5; }
+    .row { margin: 16px 0; padding: 16px; border: 1px solid #ccc; border-radius: 12px; }
+    input, a { font: inherit; }
+    .result { margin-top: 8px; font-family: ui-monospace, SFMono-Regular, monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>FloatTabs Stage 4 File Interaction Test</h1>
+  <p>Serve this directory with the same local HTTP server used for the navigation fixture.</p>
+
+  <div class="row">
+    <h2>1. Single file upload</h2>
+    <input id="single" type="file" />
+    <div id="single-result" class="result">No file selected</div>
+  </div>
+
+  <div class="row">
+    <h2>2. Multiple file upload</h2>
+    <input id="multiple" type="file" multiple />
+    <div id="multiple-result" class="result">No files selected</div>
+  </div>
+
+  <div class="row">
+    <h2>3. Directory upload</h2>
+    <input id="directory" type="file" webkitdirectory multiple />
+    <div id="directory-result" class="result">No directory selected</div>
+  </div>
+
+  <div class="row">
+    <h2>4. Explicit HTML download</h2>
+    <a href="/download.txt" download="FloatTabs-download.txt">Download text fixture</a>
+  </div>
+
+  <div class="row">
+    <h2>5. Unshowable MIME download</h2>
+    <a href="/download.bin">Download binary MIME fixture</a>
+  </div>
+
+  <script>
+    function describe(input, target) {
+      const files = Array.from(input.files || []);
+      target.textContent = files.length
+        ? files.map(file => `${file.name} (${file.size} bytes)`).join('\n')
+        : 'Selection cancelled / empty';
+    }
+
+    const single = document.getElementById('single');
+    const multiple = document.getElementById('multiple');
+    const directory = document.getElementById('directory');
+    single.addEventListener('change', () => describe(single, document.getElementById('single-result')));
+    multiple.addEventListener('change', () => describe(multiple, document.getElementById('multiple-result')));
+    directory.addEventListener('change', () => describe(directory, document.getElementById('directory-result')));
+  </script>
+</body>
+</html>
