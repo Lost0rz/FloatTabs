@@ -1,0 +1,2 @@
+FloatTabs Stage 4 download fixture.
+If this file was saved through NSSavePanel, the explicit HTML download path passed.
