@@ -313,12 +313,14 @@ final class WebRenderingProfileTests: XCTestCase {
         let base = WebRenderingProfile.canonicalDefault
         let mobile = base.settingWebsiteMode(.mobile)
         XCTAssertEqual(mobile.websiteMode, .mobile)
-        XCTAssertEqual(mobile.effectiveBrowserIdentity, .iphoneSafari)
+        XCTAssertEqual(mobile.browserIdentity, .automatic)
+        XCTAssertEqual(mobile.effectiveBrowserIdentity, .macosSafari)
         XCTAssertEqual(mobile.viewportSize, base.viewportSize)
 
         let wide = mobile.settingSimplePreset(.wide)
         XCTAssertEqual(wide.websiteMode, .mobile)
-        XCTAssertEqual(wide.effectiveBrowserIdentity, .iphoneSafari)
+        XCTAssertEqual(wide.browserIdentity, .automatic)
+        XCTAssertEqual(wide.effectiveBrowserIdentity, .macosSafari)
         XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
     }
 
