@@ -7,7 +7,7 @@ Status: Draft implementation contract for Real-Mac validation.
 Stage 5C keeps the accepted Hot / Warm / Cold residency model and adds two targeted behaviors:
 
 1. **Inactive Hot presentation hiding** — keep Hot runtime state resident while hiding inactive Hot presentation.
-2. **Panel Auto-hide / Pin** — unpinned panels dismiss when another application becomes frontmost; pinned panels remain floating.
+2. **Panel Auto-hide / Pin** — unpinned panels dismiss on outside interaction; pinned panels remain floating.
 
 The goal is a lightweight summonable panel that can also become persistent when the user explicitly needs side-by-side reference.
 
@@ -31,9 +31,16 @@ Slot Residency
 - Pin is OFF on every app launch.
 - FloatTabs is summoned with the global shortcut or menu-bar control.
 - When another macOS application becomes the frontmost application, an unpinned visible FloatTabs panel orders out.
+- When the frontmost application does **not** change but the user clicks outside FloatTabs, an unpinned visible FloatTabs panel also orders out.
+- The outside-click path covers the full-screen/same-background-app case where FloatTabs was pinned, then unpinned, while the application behind it remained frontmost the entire time.
 - The auto-hide path does not reactivate a previously focused application; the application the user selected remains focused.
 
-Auto-hide is driven by `NSWorkspace.didActivateApplicationNotification`, not by `NSApplication.didResignActiveNotification`. FloatTabs uses a non-activating floating panel, so app-active state is not a reliable proxy for the user's actual frontmost-application transition.
+Auto-hide therefore uses two signals:
+
+1. `NSWorkspace.didActivateApplicationNotification` for actual frontmost-application changes, including keyboard application switching.
+2. `NSEvent.addGlobalMonitorForEvents` for left/right/other mouse-down events delivered to other applications, including clicks into an already-frontmost application.
+
+`NSApplication.didResignActiveNotification` is not used. FloatTabs uses a non-activating floating panel, so app-active state is not a reliable proxy for the user's actual interaction target.
 
 ### Pinned
 
@@ -42,6 +49,7 @@ Auto-hide is driven by `NSWorkspace.didActivateApplicationNotification`, not by 
 - Pinned means another application may become frontmost while FloatTabs remains visible above it.
 - `⌘⇧P` remains the app-local Pin toggle.
 - The global show/hide command may still explicitly hide a pinned panel.
+- Turning Pin OFF does not itself hide FloatTabs; the next outside click or frontmost-application change applies Auto-hide normally.
 
 ### Full-screen
 
@@ -140,7 +148,8 @@ Automated:
 - inactive Hot host becomes hidden;
 - reactivating the same Hot Slot unhides the same host/WebView;
 - Pin control and `⌘⇧P` mapping are present;
-- Auto-hide requires a different frontmost process and Pin OFF;
+- frontmost-app Auto-hide requires another process and Pin OFF;
+- external-mouse Auto-hide requires panel visible and Pin OFF, with no frontmost-app transition requirement;
 - `⌘ + \`` uses the hard-coded KeyboardShortcuts event path rather than the persisted Name/initial path;
 - existing Stage 4/5 unit tests remain green.
 
@@ -149,8 +158,9 @@ Real Mac:
 1. `⌘ + \`` summons FloatTabs from another application and explicitly hides it when pressed again.
 2. Pin OFF: clicking another application makes that app frontmost and FloatTabs disappears.
 3. Pin ON: clicking another application leaves FloatTabs visible while the other application remains usable.
-4. `⌘1 … ⌘9` continues to switch Slots while FloatTabs is active.
-5. Full-screen auxiliary behavior still works in both Pin states.
-6. ChatGPT Hot switch-back remains immediate and scale/layout/input/scroll correct.
-7. YouTube Desktop Hot + Allow background-media behavior is observed with inactive Hot presentation hidden.
-8. After functional acceptance, rerun the PR #10 benchmark to compare Hot CPU/memory against the previous baseline.
+4. Same-app regression: while the same full-screen application remains frontmost, turn Pin ON, then OFF, then click that same underlying application; FloatTabs must disappear immediately.
+5. `⌘1 … ⌘9` continues to switch Slots while FloatTabs is active.
+6. Full-screen auxiliary behavior still works in both Pin states.
+7. ChatGPT Hot switch-back remains immediate and scale/layout/input/scroll correct.
+8. YouTube Desktop Hot + Allow background-media behavior is observed with inactive Hot presentation hidden.
+9. After functional acceptance, rerun the PR #10 benchmark to compare Hot CPU/memory against the previous baseline.
