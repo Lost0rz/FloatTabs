@@ -24,6 +24,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var followPreferredSize: Bool
+    private(set) var isPinned = false
+    private var externalMouseMonitor: Any?
 
     var isVisible: Bool {
         panel.isVisible
@@ -66,6 +68,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleManualResizeEnded()
         }
         configureSlotInteractions()
+        rootView.externalControlZoneView.setPinned(isPinned)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidActivateApplication(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleExternalMouseDown()
+            }
+        }
 
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -102,6 +118,67 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
+    static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
+        panelIsVisible && !isPinned
+    }
+
+    private func togglePinnedState() {
+        isPinned.toggle()
+        rootView.externalControlZoneView.setPinned(isPinned)
+    }
+
+    static func shouldAutoHideForActivatedApplication(
+        panelIsVisible: Bool,
+        isPinned: Bool,
+        activatedProcessIdentifier: pid_t,
+        ownProcessIdentifier: pid_t
+    ) -> Bool {
+        panelIsVisible
+            && !isPinned
+            && activatedProcessIdentifier != ownProcessIdentifier
+    }
+
+    static func shouldAutoHideForExternalMouseDown(
+        panelIsVisible: Bool,
+        isPinned: Bool
+    ) -> Bool {
+        shouldAutoHide(panelIsVisible: panelIsVisible, isPinned: isPinned)
+    }
+
+    private func handleExternalMouseDown() {
+        guard Self.shouldAutoHideForExternalMouseDown(
+            panelIsVisible: panel.isVisible,
+            isPinned: isPinned
+        ) else {
+            return
+        }
+        autoHideAfterApplicationDeactivation()
+    }
+
+    @objc private func workspaceDidActivateApplication(_ notification: Notification) {
+        guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication,
+              Self.shouldAutoHideForActivatedApplication(
+                panelIsVisible: panel.isVisible,
+                isPinned: isPinned,
+                activatedProcessIdentifier: activatedApplication.processIdentifier,
+                ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier
+              ) else {
+            return
+        }
+        autoHideAfterApplicationDeactivation()
+    }
+
+    private func autoHideAfterApplicationDeactivation() {
+        // The user has already selected another application. Unlike the explicit
+        // global-toggle hide path, do not reactivate `previousApplication` here:
+        // doing so would steal focus from the application the user just chose.
+        quickURLOverlayView.dismiss()
+        persistPanelFrame()
+        panel.orderOut(nil)
+        previousApplication = nil
+    }
+
 #if DEBUG
     func benchmarkControlSnapshot() -> [String: Any] {
         let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
@@ -119,6 +196,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         var snapshot: [String: Any] = [
             "visible": isVisible,
+            "pinned": isPinned,
             "profiles": profiles,
         ]
         snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
@@ -188,6 +266,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .returnHome:
             returnActiveSlotHome()
+
+        case .togglePin:
+            togglePinnedState()
         }
     }
 
@@ -260,6 +341,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onCurrentControls = { [weak self] in
             self?.presentCurrentWebAppControls()
+        }
+        rail.onTogglePin = { [weak self] in
+            self?.togglePinnedState()
         }
     }
 

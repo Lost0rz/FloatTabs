@@ -697,7 +697,12 @@ final class WebPanelContainerView: NSView {
             if let host = hotHostViews[slotID] {
                 // Freeze the outgoing Hot viewport before another Slot changes
                 // the panel size. Only an active Hot host follows live resizing.
+                //
+                // Keep the independent host and WKWebView attached so Hot keeps
+                // its DOM/SPA/runtime state, but stop presenting an inactive Hot
+                // page. Reactivation unhides this exact same host in `showHot`.
                 host.autoresizingMask = []
+                host.isHidden = true
             }
         case .warm, .cold:
             hostedWebView?.removeFromSuperview()

@@ -38,6 +38,75 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(zone.hitTest(pointInSuperview) is AddWebAppControl)
     }
 
+    func testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState() {
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [], activeTabID: nil)
+        zone.setPinned(true)
+        zone.layoutSubtreeIfNeeded()
+
+        let pointInZone = NSPoint(x: zone.pinControlFrame.midX, y: zone.pinControlFrame.midY)
+        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
+        let pin = zone.hitTest(pointInSuperview) as? PinPanelControl
+
+        XCTAssertNotNil(pin)
+        XCTAssertTrue(pin?.isPinned == true)
+        XCTAssertEqual(zone.pinControlFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
+    }
+
+    func testWorkspaceAutoHideRequiresAnotherFrontmostApplication() {
+        XCTAssertTrue(
+            PanelController.shouldAutoHideForActivatedApplication(
+                panelIsVisible: true,
+                isPinned: false,
+                activatedProcessIdentifier: 200,
+                ownProcessIdentifier: 100
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForActivatedApplication(
+                panelIsVisible: true,
+                isPinned: true,
+                activatedProcessIdentifier: 200,
+                ownProcessIdentifier: 100
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForActivatedApplication(
+                panelIsVisible: true,
+                isPinned: false,
+                activatedProcessIdentifier: 100,
+                ownProcessIdentifier: 100
+            )
+        )
+    }
+
+    func testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange() {
+        XCTAssertTrue(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: true,
+                isPinned: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: true,
+                isPinned: true
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: false,
+                isPinned: false
+            )
+        )
+    }
+
+    func testPanelAutoHideDecisionRespectsPin() {
+        XCTAssertTrue(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: false))
+        XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: true))
+        XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: false, isPinned: false))
+    }
+
     func testCurrentWebAppGearUsesActualVisibleHitAreaWhenSlotIsActive() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
@@ -108,6 +177,8 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(zone.addControlFrame.width, ExternalTabMetrics.addNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.height, ExternalTabMetrics.addHeight, accuracy: 0.001)
         XCTAssertEqual(zone.currentControlsFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
+        XCTAssertEqual(zone.pinControlFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
+        XCTAssertLessThan(zone.currentControlsFrame.maxY, zone.pinControlFrame.minY)
     }
 
     func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {

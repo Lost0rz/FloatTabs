@@ -215,6 +215,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(first.window === window)
 
         container.deactivate(slotID: firstID, residencyPolicy: .hot)
+        XCTAssertTrue(first.superview?.isHidden == true)
         container.setFrameSize(NSSize(width: 900, height: 850))
         container.layoutSubtreeIfNeeded()
 
@@ -227,6 +228,13 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(first.frame.size, firstSize)
         XCTAssertTrue(first.window === window)
         XCTAssertTrue(second.window === window)
+        XCTAssertTrue(first.superview?.isHidden == true)
+
+        container.show(webView: first, slotID: firstID, residencyPolicy: .hot)
+        container.layoutSubtreeIfNeeded()
+        XCTAssertFalse(first.superview?.isHidden ?? true)
+        XCTAssertTrue(container.currentWebView === first)
+        XCTAssertTrue(first.window === window)
     }
 
     func testDesktopPublicPageZoomKeepsNativeClickHitTestingWorking() {
