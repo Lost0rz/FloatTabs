@@ -36,6 +36,8 @@
 		A0000000000000000000001B /* WebViewPoolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001C /* WebViewPoolTests.swift */; };
 		A0000000000000000000001C /* ExternalShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001D /* ExternalShellTests.swift */; };
 		A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppCommandControllerTests.swift */; };
+		A0000000000000000000001E /* WebNavigationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F /* WebNavigationCoordinator.swift */; };
+		A0000000000000000000001F /* PopupCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* PopupCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -79,6 +81,8 @@
 		B0000000000000000000001C /* WebViewPoolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewPoolTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001D /* ExternalShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalShellTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001E /* AppCommandControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandControllerTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000001F /* WebNavigationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000020 /* PopupCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -186,6 +190,8 @@
 				B00000000000000000000009 /* WebViewFactory.swift */,
 				B0000000000000000000000A /* WebViewContainer.swift */,
 				B00000000000000000000015 /* WebViewPool.swift */,
+				B0000000000000000000001F /* WebNavigationCoordinator.swift */,
+				B00000000000000000000020 /* PopupCoordinator.swift */,
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
 			);
 			path = Web;
@@ -349,6 +355,8 @@
 				A00000000000000000000013 /* ProfileRepository.swift in Sources */,
 				A00000000000000000000006 /* ScreenPositioning.swift in Sources */,
 				A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */,
+				A0000000000000000000001E /* WebNavigationCoordinator.swift in Sources */,
+				A0000000000000000000001F /* PopupCoordinator.swift in Sources */,
 				A00000000000000000000007 /* StatusItemController.swift in Sources */,
 				A00000000000000000000012 /* TabStore.swift in Sources */,
 				A00000000000000000000011 /* WebAppProfile.swift in Sources */,
@@ -432,7 +440,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs.stage0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -453,7 +461,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs.stage0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
