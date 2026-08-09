@@ -2,7 +2,7 @@
 
 > Status: **Stage 4 architecture/code closeout implemented; final Real-Mac warm-slot + active recovery smoke pending**  
 > Base: merged Stage 4 + Navigation Intent / Slot Home on `main`  
-> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, and WebContent process recovery
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, warm Slot residency, and WebContent process recovery
 
 ## 1. Stage 4 intent
 
@@ -132,11 +132,41 @@ Automatic + Mobile
 
 The exception does not change Window Size or user Zoom and does not apply to Bilibili, YouTube, or unrelated sites.
 
-The **effective runtime rendering profile must remain stable across warm Slot reuse**. When an existing ChatGPT `WKWebView` is detached and later reselected, FloatTabs recomputes the site compatibility profile and reapplies that effective runtime profile; it must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
+The **effective runtime rendering profile must remain stable across warm Slot reuse**. Re-selecting an existing ChatGPT `WKWebView` recomputes the site compatibility profile and reapplies that effective runtime profile; FloatTabs must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
 
 No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding experiments were rejected by Real-Mac testing and remain removed.
 
-## 7. Mode-switch loading performance
+## 7. Warm Slot residency and heavy SPA state
+
+Real-Mac closeout testing exposed an additional state-continuity requirement with long ChatGPT conversations: a light landing page opens quickly, while a long conversation contains a much larger live SPA/DOM/rendering state. Ordinary Slot switching must therefore preserve the already-loaded WebView as a true warm resident rather than treating every switch as a view teardown/re-attachment cycle.
+
+Canonical warm behavior is now:
+
+```text
+Slot A active
+Slot B inactive
+Slot C inactive
+
+A / B / C WKWebViews remain attached to the same FloatTabs AppKit window hierarchy
+        ↓
+Slot switch
+        ↓
+only sibling front/back ordering changes
+        ↓
+no ordinary removeFromSuperview / re-add cycle
+        ↓
+no new network load solely because another Slot became active
+```
+
+This rule is **generic**, not ChatGPT-specific. It benefits any heavy SPA such as long AI conversations while avoiding domain-specific cache hacks.
+
+FloatTabs does not attempt to serialize or locally recreate ChatGPT conversation HTML, React state, streamed message state, or authenticated application memory. Persistent website storage and ordinary HTTP/WebKit caching remain owned by `WKWebsiteDataStore.default()` plus normal protocol cache policy. The additional performance layer is the live warm `WKWebView` itself, preserving in-memory DOM/JavaScript/compositor state whenever WebKit permits.
+
+Inactive resident WebViews are deliberately not hidden or detached merely to switch tabs. Stage 5 Resource Optimization owns the separate question of how inactive resident WebViews should reduce CPU/media/network work without destroying their warm state.
+
+Deterministic AppKit coverage verifies that switching between two resident WebViews keeps both attached to the same window/superview and changes only sibling ordering.
+
+## 8. Mode-switch loading performance
 
 Website Mode / Browser Identity changes still rebuild the affected `WKWebView` so configuration and identity changes are applied from a clean WebKit boundary.
 
@@ -148,7 +178,7 @@ URLRequest.CachePolicy.useProtocolCachePolicy
 
 instead of deliberately bypassing cache. Real-Mac acceptance found this materially faster. Removing the rebuild itself remains deferred unless a later regression establishes a real performance blocker.
 
-## 8. Permanent webpage scrollbar suppression
+## 9. Permanent webpage scrollbar suppression
 
 Accepted behavior:
 
@@ -164,7 +194,7 @@ Implementation uses two boundaries:
 
 Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY`.
 
-## 9. Slot Home boundary
+## 10. Slot Home boundary
 
 A persistent Slot has two different navigation values:
 
@@ -186,7 +216,7 @@ Return to Home performs normal navigation to `homeURL`; it does not explicitly c
 
 The Slot context menu intentionally does not expose a separate Rename action. Name editing is owned by **Edit Web App…**, which already edits the Slot name together with the rest of the Web App configuration.
 
-## 10. WebContent process recovery
+## 11. WebContent process recovery
 
 Fresh Stage 4 closeout audit found the one remaining architecture/code gap: `webViewWebContentProcessDidTerminate` was specified but not implemented.
 
@@ -213,13 +243,13 @@ Recovery rules:
 - inactive recovery avoids unnecessary immediate network work;
 - deferred recovery reuses the existing `WKWebView` when sufficient;
 - `WKWebsiteDataStore.default()` is neither cleared nor replaced;
-- removal/rebuild of a Slot also clears its in-memory recovery bookkeeping.
+- removal/rebuild of a Slot also clears its in-memory recovery bookkeeping and detaches the obsolete view from the warm residency host.
 
 Deterministic tests cover the active/immediate policy, inactive/deferred policy, same-WebView deferred recovery, current-URL restoration, and observer-to-pool termination signal.
 
 Real-Mac closeout testing has additionally confirmed the inactive/deferred path: terminating a FloatTabs-owned inactive WebContent process leaves the current Slot unchanged, and the affected Slot recovers only when selected.
 
-## 11. Removed Stage 4 drift / dead seams
+## 12. Removed Stage 4 drift / dead seams
 
 The closeout also removes or corrects stale implementation/documentation that could cause future regressions:
 
@@ -230,7 +260,7 @@ The closeout also removes or corrects stale implementation/documentation that co
 - Architecture records the implemented WebContent recovery policy;
 - stale scrollbar comment describing the removed transient-scroller controller was corrected.
 
-## 12. Accepted evidence before closeout
+## 13. Accepted evidence before closeout
 
 Merged Stage 4 head before merge:
 
@@ -254,15 +284,15 @@ Real-Mac acceptance has already passed for Bilibili Mobile/Desktop, Bilibili Des
 
 The merge-to-main macOS CI after PR #7 also passed.
 
-## 13. Stage 4 closeout gate
+## 14. Stage 4 closeout gate
 
-Automated closeout coverage now includes both WebContent recovery and ChatGPT warm-slot runtime compatibility. The ChatGPT regression test verifies repeated `webView(for:)` reuse preserves one `WKWebView`, one initial load, and the macOS Safari compatibility identity.
+Automated closeout coverage now includes WebContent recovery, ChatGPT warm-slot runtime compatibility, and window-attached warm residency. The ChatGPT regression test verifies repeated `webView(for:)` reuse preserves one `WKWebView`, one initial load, and the macOS Safari compatibility identity. The AppKit residency test verifies inactive and active warm WebViews remain attached to the same window across repeated switches.
 
 Two focused Real-Mac checks remain before PR #8 can be marked Ready:
 
 ```text
-1. ChatGPT warm Slot switching
-   → repeated switch away/back does not fall into the prior long black/reload-like state
+1. ChatGPT long-conversation warm Slot switching
+   → repeated switch away/back avoids the prior long black/reload-like state
    → ChatGPT Mobile attachment interaction remains normal
 
 2. active Slot WebContent process terminates
