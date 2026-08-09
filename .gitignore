@@ -31,3 +31,6 @@ dist/
 
 # Logs
 *.log
+
+# Local performance benchmark output
+.benchmark-results/
