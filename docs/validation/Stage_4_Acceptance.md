@@ -194,45 +194,33 @@ From this commit onward, do not change the application Bundle Identifier during 
 
 ## 4C — Session/OAuth QA gate
 
+Status: **PARTIAL REAL-MAC PASS — shared session profile confirmed**
+
 Use:
 
 ```text
 docs/validation/Stage_4_Session_OAuth_Matrix.md
 ```
 
-Record a compatibility matrix for:
+Real-Mac evidence recorded on 2026-08-09:
 
 ```text
-ChatGPT
-Claude
-Gemini
-X
-Instagram
-TikTok
-Facebook
+ChatGPT authenticated use                           PASS
+Google authenticated state                         PASS
+YouTube authenticated state                        PASS
+Google session visible/reusable across FloatTabs Tabs PASS
 ```
 
-Columns:
+This confirms that ordinary persistent Slots are sharing the intended WebKit website-data/session profile in real use. Cross-Tab Google authentication is not isolated per Slot.
+
+The following two gates remain separate and are not inferred from cross-Tab sharing:
 
 ```text
-Direct Login
-Google SSO
-Apple SSO
-Popup
-Restart Restore
-Rendering Rebuild Restore
-Notes
+Quit FloatTabs completely → relaunch → authenticated state remains
+Website Mode / Browser Identity rebuild → authenticated state remains
 ```
 
-Allowed statuses:
-
-```text
-works
-works with limitations
-provider blocks embedded login
-not offered
-not yet tested
-```
+Record detailed provider results in `Stage_4_Session_OAuth_Matrix.md`.
 
 The deferred Sina/redirect-sensitive mode-switch case may be investigated in this compatibility phase. It is not retroactively part of Stage 3 acceptance.
 
