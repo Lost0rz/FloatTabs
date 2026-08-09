@@ -1,0 +1,36 @@
+name: Stage 4 warm-slot residency patch
+
+on:
+  push:
+    branches:
+      - feat/stage-4-closeout
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-4-closeout
+          fetch-depth: 0
+
+      - name: Apply warm residency patch
+        run: python3 .github/stage4-warm-residency-patch.py
+
+      - name: Remove construction tooling
+        run: |
+          rm .github/stage4-warm-residency-patch.py
+          rm .github/workflows/stage4-warm-residency.yml
+
+      - name: Validate and push
+        run: |
+          git diff --check
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: keep warm web views window-attached'
+          git push origin HEAD:feat/stage-4-closeout
