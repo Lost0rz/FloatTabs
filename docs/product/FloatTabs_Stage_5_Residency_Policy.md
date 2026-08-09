@@ -1,6 +1,6 @@
 # FloatTabs — Stage 5 Slot Residency Policy
 
-> Status: experimental implementation for Real-Mac acceptance
+> Status: functional closeout accepted; resource benchmark follows separately
 > Base: Stage 4 frozen `main` at `5df23da01fe37c08c8ecb4dd9a5f37f5a0c0ba21`
 
 ## 1. Product model
@@ -82,35 +82,57 @@ This PR must not change:
 
 The rejected Stage 4 experiment that resized multiple resident WebViews through one shared variable viewport must not be reintroduced.
 
-## 5. Real-Mac acceptance
+## 5. Functional acceptance evidence
 
-### Hot / ChatGPT
+### Hot / ChatGPT — PASS
 
-1. Set a long ChatGPT conversation to `Hot`.
-2. Open it fully, switch repeatedly through Bilibili / YouTube, then return.
-3. ChatGPT should remain correctly scaled and should materially improve return-to-interaction latency.
-4. Bilibili and YouTube must retain their own correct Window Size / Website Mode / Zoom.
+Real-Mac testing with a long ChatGPT conversation showed repeated Slot switching is smooth and the conversation is immediately usable again after returning. The independent Hot host preserves the heavy SPA presentation without reintroducing the cross-Slot viewport/font corruption seen in the rejected shared-host experiment.
 
-### Warm / video site
+### Background media — PASS with website capability boundary
 
-1. Set Bilibili or YouTube to `Warm` + `Pause When Inactive`.
-2. Start media and switch away.
-3. Current media should pause while inactive and the same pooled WebView should be reused on return.
-4. After returning, a normal user click on the website's play control must start playback immediately; FloatTabs must not leave the page media-suspended.
+After replacing `setAllMediaPlaybackSuspended` with user-resumable `pauseAllMediaPlayback`, normal website Play interaction is no longer intentionally held in a host-suspended state.
 
-### Background audio
+Observed Real-Mac behavior for `Allow Background Audio`:
 
-1. Set YouTube to `Warm` + `Allow Background Audio`.
-2. Start audio and switch away.
-3. FloatTabs must not explicitly pause or suspend the media. Whether detached Warm WebKit continues audio is recorded as Real-Mac behavior rather than forced with private/JavaScript hacks.
+| Site / Website Mode | Hot | Warm | Cold-pending |
+|---|---|---|---|
+| Bilibili | supported while resident | continues in observed testing | continues until Cold release |
+| YouTube Desktop | supported while resident | continues in observed testing | bounded by Cold release |
+| YouTube Mobile | supported while attached | site/WebKit pauses when detached | site/WebKit pauses when detached |
 
-### Cold
+This is an accepted compatibility boundary. `Allow Background Audio` means FloatTabs does not actively pause/suspend; it does not override a site's own inactive-page behavior.
 
-1. Set a disposable test Slot to `Cold`.
-2. Switch away for more than 30 seconds.
-3. Return to it.
-4. It should recreate from `currentURL`; persistent login/session should remain where WebKit supports it.
+### Cold eviction — PASS at lifecycle boundary
 
-## 6. Measurement after UX acceptance
+Real-Mac observation that Bilibili Cold-pending audio stops after the grace period is consistent with live WebView release. Automated lifecycle coverage additionally verifies:
 
-Only after the above behavior is accepted should Stage 5 record 1 / 3 / 6 Slot CPU, memory, energy and network baselines and decide whether Hot-count warnings or different Cold timing are necessary.
+- Cold release occurs after the grace period;
+- reactivation cancels pending Cold release;
+- Warm does not schedule Cold release;
+- release affects only the requested live WebView;
+- residency/media policy persistence round-trips and legacy profiles default safely.
+
+Persistent login/current-URL recovery continues to rely on the existing Stage 4 persistent `WKWebsiteDataStore.default()` and current-URL restoration architecture; provider-specific session behavior remains subject to normal website compatibility.
+
+## 6. Closeout boundary
+
+The Residency Policy implementation is functionally closed in this PR:
+
+- `Hot / Warm / Cold` semantics are defined and persisted;
+- Hot independent presentation ownership is accepted;
+- Warm pooled/detached reuse is accepted;
+- Cold grace + eviction behavior is defined and covered;
+- background-media behavior is defined without site-specific autoplay bypasses;
+- Source of Truth documents are synchronized;
+- Stage 4 rendering/navigation/session boundaries remain authoritative.
+
+The following work is deliberately **not** a blocker for this Residency PR and should continue in a separate measurement/tuning PR:
+
+- Instruments baseline for 1 / 3 / 6 Slot combinations;
+- host + WebContent memory measurements;
+- CPU / Energy / Network measurements;
+- switch-latency measurements;
+- deciding whether Hot-count warnings are useful;
+- deciding whether the 30-second Cold grace period should be tuned.
+
+Those measurements may tune defaults or warnings, but must not silently override an explicit user-selected Residency policy.
