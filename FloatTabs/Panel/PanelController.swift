@@ -25,6 +25,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var followPreferredSize: Bool
     private(set) var isPinned = false
+    private var externalMouseMonitor: Any?
 
     var isVisible: Bool {
         panel.isVisible
@@ -74,6 +75,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleExternalMouseDown()
+            }
+        }
 
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -128,6 +136,23 @@ final class PanelController: NSObject, NSWindowDelegate {
         panelIsVisible
             && !isPinned
             && activatedProcessIdentifier != ownProcessIdentifier
+    }
+
+    static func shouldAutoHideForExternalMouseDown(
+        panelIsVisible: Bool,
+        isPinned: Bool
+    ) -> Bool {
+        shouldAutoHide(panelIsVisible: panelIsVisible, isPinned: isPinned)
+    }
+
+    private func handleExternalMouseDown() {
+        guard Self.shouldAutoHideForExternalMouseDown(
+            panelIsVisible: panel.isVisible,
+            isPinned: isPinned
+        ) else {
+            return
+        }
+        autoHideAfterApplicationDeactivation()
     }
 
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {

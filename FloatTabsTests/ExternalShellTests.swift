@@ -80,6 +80,27 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange() {
+        XCTAssertTrue(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: true,
+                isPinned: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: true,
+                isPinned: true
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldAutoHideForExternalMouseDown(
+                panelIsVisible: false,
+                isPinned: false
+            )
+        )
+    }
+
     func testPanelAutoHideDecisionRespectsPin() {
         XCTAssertTrue(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: false))
         XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: true))
