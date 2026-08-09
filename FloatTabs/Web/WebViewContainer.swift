@@ -588,13 +588,23 @@ final class ResizeReadoutView: NSView {
     }
 }
 
+/// The visible FloatTabs Web surface stays at the user-selected Window Size.
+/// The logical host keeps that visible frame but uses a larger/smaller bounds
+/// coordinate system. The child WKWebView itself receives the real 1280/390-
+/// class frame, so WebKit sees the requested CSS viewport while ordinary AppKit
+/// ancestor coordinate conversion maps pointer events into WebKit coordinates.
+/// No NSScrollView magnification is involved.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
+    private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private weak var currentContentView: NSView?
+    private weak var hostedWebView: WKWebView?
+
+    private(set) var websiteLayoutScale: CGFloat = 1
 
     var currentWebView: WKWebView? {
-        currentContentView as? WKWebView
+        hostedWebView
     }
 
     override init(frame frameRect: NSRect) {
@@ -613,17 +623,39 @@ final class WebPanelContainerView: NSView {
     }
 
     func show(webView: WKWebView) {
-        guard currentContentView !== webView else { return }
-        setContentView(webView)
+        if hostedWebView === webView {
+            updateWebsiteLayoutIfNeeded()
+            return
+        }
+
+        hostedWebView?.removeFromSuperview()
+        webView.removeFromSuperview()
+        webView.translatesAutoresizingMaskIntoConstraints = true
+        webView.autoresizingMask = []
+        logicalHostView.addSubview(webView)
+        hostedWebView = webView
+
+        if currentContentView !== logicalHostView {
+            setContentView(logicalHostView)
+        }
+
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        updateWebsiteLayoutIfNeeded()
     }
 
     func showEmptyState() {
         guard currentContentView !== emptyView else { return }
+        hostedWebView?.removeFromSuperview()
+        hostedWebView = nil
+        websiteLayoutScale = 1
+        logicalHostView.bounds = NSRect(origin: .zero, size: logicalHostView.frame.size)
         setContentView(emptyView)
     }
 
     override func layout() {
         super.layout()
+        updateWebsiteLayoutIfNeeded()
         layer?.shadowPath = CGPath(
             roundedRect: bounds,
             cornerWidth: PanelMetrics.webPanelCornerRadius,
@@ -677,6 +709,36 @@ final class WebPanelContainerView: NSView {
         ])
 
         currentContentView = view
+    }
+
+    private func updateWebsiteLayoutIfNeeded() {
+        guard let webView = hostedWebView else { return }
+
+        let visibleSize = clipView.bounds.size
+        guard visibleSize.width > 0, visibleSize.height > 0 else { return }
+
+        let mode = (webView as? FloatTabsWebView)?.websiteMode
+            ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
+                ? .mobile
+                : .desktop)
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: visibleSize,
+            websiteMode: mode
+        )
+        guard logicalSize.width > 0, logicalSize.height > 0 else { return }
+
+        websiteLayoutScale = visibleSize.width / logicalSize.width
+
+        if abs(webView.frame.width - logicalSize.width) > 0.5
+            || abs(webView.frame.height - logicalSize.height) > 0.5 {
+            webView.frame = NSRect(origin: .zero, size: logicalSize)
+        }
+
+        if abs(logicalHostView.bounds.width - logicalSize.width) > 0.5
+            || abs(logicalHostView.bounds.height - logicalSize.height) > 0.5
+            || logicalHostView.bounds.origin != .zero {
+            logicalHostView.bounds = NSRect(origin: .zero, size: logicalSize)
+        }
     }
 
     private func updateSemanticColors() {

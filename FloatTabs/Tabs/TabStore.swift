@@ -74,7 +74,7 @@ final class TabStore {
             name: trimmedName,
             homeURL: homeURL,
             currentURL: homeURL,
-            renderingProfile: renderingProfile,
+            renderingProfile: renderingProfile.normalized(),
             createdAt: now,
             lastUsedAt: now
         )
@@ -87,7 +87,12 @@ final class TabStore {
     }
 
     @discardableResult
-    func update(id: UUID, name: String, homeURL: URL) -> Bool {
+    func update(
+        id: UUID,
+        name: String,
+        homeURL: URL,
+        renderingProfile: WebRenderingProfile? = nil
+    ) -> Bool {
         guard WebAppURL.isSafe(homeURL),
               let index = profiles.firstIndex(where: { $0.id == id }) else {
             return false
@@ -99,9 +104,42 @@ final class TabStore {
         let homeURLChanged = profiles[index].homeURL != homeURL
         profiles[index].name = trimmedName
         profiles[index].homeURL = homeURL
+        if let renderingProfile {
+            profiles[index].renderingProfile = renderingProfile.normalized()
+        }
         if homeURLChanged {
             profiles[index].currentURL = homeURL
         }
+        persistAndNotify()
+        return true
+    }
+
+    @discardableResult
+    func updateRenderingProfile(id: UUID, renderingProfile: WebRenderingProfile) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        let normalized = renderingProfile.normalized()
+        guard profiles[index].renderingProfile != normalized else { return true }
+        profiles[index].renderingProfile = normalized
+        persistAndNotify()
+        return true
+    }
+
+    @discardableResult
+    func updatePreferredViewport(id: UUID, size: CGSize) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        let updated = profiles[index].renderingProfile.settingViewport(size)
+        guard profiles[index].renderingProfile != updated else { return true }
+        profiles[index].renderingProfile = updated
+        persistAndNotify()
+        return true
+    }
+
+    @discardableResult
+    func updateZoom(id: UUID, zoom: CGFloat) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        let updated = profiles[index].renderingProfile.settingZoom(zoom)
+        guard profiles[index].renderingProfile != updated else { return true }
+        profiles[index].renderingProfile = updated
         persistAndNotify()
         return true
     }
@@ -256,10 +294,6 @@ final class TabStore {
             return lhs.order < rhs.order
         }
 
-        // Persisted metadata is user-owned state and can be partially corrupted or
-        // manually edited. A duplicate UUID would make two visible profiles map to
-        // one WebViewPool entry and one external-tab identity. Keep the first
-        // deterministic occurrence and normalize the remaining unique identities.
         var seenIDs = Set<UUID>()
         let unique = sorted.filter { profile in
             seenIDs.insert(profile.id).inserted
@@ -274,6 +308,7 @@ final class TabStore {
         profiles.enumerated().map { index, profile in
             var reindexed = profile
             reindexed.order = index
+            reindexed.renderingProfile = profile.renderingProfile.normalized()
             return reindexed
         }
     }

@@ -148,6 +148,29 @@ enum ScreenPositioning {
         return result
     }
 
+    /// When follow-preferred-size is enabled, Slot switching changes only the
+    /// panel size while preserving its top edge and left edge as much as the
+    /// active display allows. Disabled mode leaves the current frame untouched.
+    static func frameFollowingPreferredViewport(
+        currentFrame: NSRect,
+        preferredViewportSize: NSSize,
+        followPreferredSize: Bool,
+        visibleFrame: NSRect
+    ) -> NSRect {
+        guard followPreferredSize else { return currentFrame }
+
+        let requestedPanelSize = PanelMetrics.clampedPanelSize(
+            PanelMetrics.panelSize(forViewport: preferredViewportSize)
+        )
+        let topAnchored = NSRect(
+            x: currentFrame.minX,
+            y: currentFrame.maxY - requestedPanelSize.height,
+            width: requestedPanelSize.width,
+            height: requestedPanelSize.height
+        )
+        return clampedFrame(topAnchored, to: visibleFrame)
+    }
+
     static func restoredFrame(
         _ savedFrame: NSRect,
         visibleFrames: [NSRect],

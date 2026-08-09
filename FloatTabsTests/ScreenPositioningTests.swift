@@ -94,6 +94,33 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxY, visible.maxY)
     }
 
+    func testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible() {
+        let visible = NSRect(x: 0, y: 0, width: 1600, height: 1200)
+        let current = NSRect(x: 200, y: 220, width: 518, height: 844)
+        let frame = ScreenPositioning.frameFollowingPreferredViewport(
+            currentFrame: current,
+            preferredViewportSize: NSSize(width: 600, height: 800),
+            followPreferredSize: true,
+            visibleFrame: visible
+        )
+
+        XCTAssertEqual(frame.size, PanelMetrics.panelSize(forViewport: NSSize(width: 600, height: 800)))
+        XCTAssertEqual(frame.minX, current.minX, accuracy: 0.001)
+        XCTAssertEqual(frame.maxY, current.maxY, accuracy: 0.001)
+    }
+
+    func testDisabledPreferredViewportFollowLeavesFrameUntouched() {
+        let visible = NSRect(x: 0, y: 0, width: 1600, height: 1200)
+        let current = NSRect(x: 200, y: 220, width: 518, height: 844)
+        let frame = ScreenPositioning.frameFollowingPreferredViewport(
+            currentFrame: current,
+            preferredViewportSize: NSSize(width: 900, height: 850),
+            followPreferredSize: false,
+            visibleFrame: visible
+        )
+        XCTAssertEqual(frame, current)
+    }
+
     func testRestoredFrameStaysOnConnectedDisplayWhenItStillIntersects() {
         let primary = NSRect(x: 0, y: 0, width: 1440, height: 900)
         let secondary = NSRect(x: 1440, y: 0, width: 1920, height: 1080)

@@ -17,6 +17,11 @@ struct ExternalTabMetrics {
     static let addHoverWidth: CGFloat = 54
     static let addOpenWidth: CGFloat = 58
 
+    static let systemControlHeight: CGFloat = 28
+    static let systemControlNormalWidth: CGFloat = 34
+    static let systemControlHoverWidth: CGFloat = 54
+    static let systemControlBottomOffset: CGFloat = 18
+
     /// Dock-like magnification is proximity driven instead of a binary hover.
     /// At one row away the neighboring tab still grows noticeably; the effect
     /// then falls to zero before reaching the second distant row.
@@ -43,6 +48,12 @@ struct ExternalTabMetrics {
         let magnified = addNormalWidth + (addHoverWidth - addNormalWidth) * influence
         return isEditorOpen ? max(addOpenWidth, magnified) : magnified
     }
+
+    static func systemControlWidth(dockInfluence: CGFloat) -> CGFloat {
+        let influence = min(max(dockInfluence, 0), 1)
+        return systemControlNormalWidth
+            + (systemControlHoverWidth - systemControlNormalWidth) * influence
+    }
 }
 
 @MainActor
@@ -53,12 +64,14 @@ final class ExternalControlZoneView: NSView {
     var onRename: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
+    var onCurrentControls: (() -> Void)?
 
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
+    private let currentControls = CurrentWebAppControl()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerY: CGFloat?
 
@@ -72,8 +85,13 @@ final class ExternalControlZoneView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(addControl)
+        addSubview(currentControls)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
+        currentControls.onActivate = { [weak self] in self?.onCurrentControls?() }
         addControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        currentControls.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
     }
@@ -143,6 +161,7 @@ final class ExternalControlZoneView: NSView {
             view.update(profile: profile, isActive: profile.id == activeTabID)
         }
 
+        currentControls.isEnabled = activeTabID != nil
         needsLayout = true
     }
 
@@ -162,6 +181,10 @@ final class ExternalControlZoneView: NSView {
 
     var addControlFrame: NSRect {
         addControl.frame
+    }
+
+    var currentControlsFrame: NSRect {
+        currentControls.frame
     }
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
@@ -234,6 +257,26 @@ final class ExternalControlZoneView: NSView {
                 height: ExternalTabMetrics.addHeight
             )
             self.setFrame(addFrame, for: self.addControl, animated: animated)
+
+            let systemY = max(
+                self.bounds.height
+                    - ExternalTabMetrics.systemControlBottomOffset
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+            let systemCenterY = systemY + ExternalTabMetrics.systemControlHeight / 2
+            let systemInfluence = self.pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - systemCenterY)
+            } ?? 0
+            self.currentControls.setDockInfluence(systemInfluence)
+            let systemWidth = min(self.currentControls.preferredWidth, self.bounds.width)
+            let systemFrame = NSRect(
+                x: max(self.bounds.width - systemWidth, 0),
+                y: systemY,
+                width: systemWidth,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            self.setFrame(systemFrame, for: self.currentControls, animated: animated)
         }
 
         guard animated else {
@@ -598,5 +641,108 @@ final class AddWebAppControl: NSView {
             .cgColor
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
         layer?.borderWidth = 1
+    }
+}
+
+@MainActor
+final class CurrentWebAppControl: NSView {
+    var onActivate: (() -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    private let imageView = NSImageView()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private var dockInfluence: CGFloat = 0
+
+    var isEnabled = false {
+        didSet { updateAppearance() }
+    }
+
+    var preferredWidth: CGFloat {
+        ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        toolTip = "Current Web App Controls"
+
+        imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Current Web App Controls")
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 13),
+            imageView.heightAnchor.constraint(equalToConstant: 13),
+        ])
+        updateAppearance()
+    }
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isEnabled else { return nil }
+        return frame.contains(point) ? self : nil
+    }
+
+    func setDockInfluence(_ influence: CGFloat) {
+        dockInfluence = min(max(influence, 0), 1)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isEnabled else { return }
+        onActivate?()
+    }
+
+    private func updateAppearance() {
+        let fraction: CGFloat = isHovered ? 0.10 : 0.02
+        layer?.backgroundColor = NSColor.controlBackgroundColor
+            .blended(withFraction: fraction, of: .labelColor)?
+            .withAlphaComponent(isEnabled ? 0.94 : 0.55)
+            .cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
+        layer?.borderWidth = 1
+        imageView.contentTintColor = isEnabled ? .labelColor : .tertiaryLabelColor
     }
 }

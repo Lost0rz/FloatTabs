@@ -41,6 +41,62 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.activeTabID, third.id)
     }
 
+    func testAddAndEditPersistRenderingProfileAcrossRelaunch() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let initialRendering = WebRenderingProfile(
+            websiteMode: .mobile,
+            browserIdentity: .androidChrome,
+            customUserAgent: nil,
+            sizePreset: .small,
+            devicePresetID: nil,
+            orientation: .portrait,
+            viewportWidth: 390,
+            viewportHeight: 780,
+            zoom: 1.25
+        )
+        let profile = store.add(
+            name: "A",
+            homeURL: urlA,
+            renderingProfile: initialRendering
+        )!
+
+        let editedRendering = initialRendering
+            .settingBrowserIdentity(.windowsChrome)
+            .settingSimplePreset(.large)
+            .settingZoom(1.33)
+        XCTAssertTrue(
+            store.update(
+                id: profile.id,
+                name: "A Edited",
+                homeURL: urlA,
+                renderingProfile: editedRendering
+            )
+        )
+
+        let relaunched = TabStore(repository: repository)
+        let restored = try! XCTUnwrap(relaunched.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(restored.name, "A Edited")
+        XCTAssertEqual(restored.renderingProfile, editedRendering.normalized())
+    }
+
+    func testPreferredViewportAndZoomUpdatesPersistPerSlot() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = store.add(name: "A", homeURL: urlA)!
+
+        XCTAssertTrue(store.updatePreferredViewport(id: profile.id, size: CGSize(width: 612, height: 777)))
+        XCTAssertTrue(store.updateZoom(id: profile.id, zoom: 1.49))
+
+        let updated = try! XCTUnwrap(store.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(updated.renderingProfile.viewportWidth, 612)
+        XCTAssertEqual(updated.renderingProfile.viewportHeight, 777)
+        XCTAssertEqual(updated.renderingProfile.sizePreset, .custom)
+        XCTAssertNil(updated.renderingProfile.devicePresetID)
+        XCTAssertEqual(updated.renderingProfile.zoom, 1.50, accuracy: 0.001)
+        XCTAssertEqual(repository.state.profiles.first?.renderingProfile, updated.renderingProfile)
+    }
+
     func testActiveSelectionUpdatesIdentity() {
         let store = TabStore(repository: MemoryProfileRepository())
         let first = store.add(name: "A", homeURL: urlA)!
@@ -219,6 +275,148 @@ final class TabStoreTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: TimeInterval(order)),
             lastUsedAt: Date(timeIntervalSince1970: TimeInterval(order))
         )
+    }
+}
+
+final class WebRenderingProfileTests: XCTestCase {
+    func testCanonicalDefaultsAndCodableRoundTrip() throws {
+        let profile = WebRenderingProfile.canonicalDefault
+        XCTAssertEqual(profile.websiteMode, .desktop)
+        XCTAssertEqual(profile.effectiveWebsiteMode, .desktop)
+        XCTAssertEqual(profile.browserIdentity, .automatic)
+        XCTAssertEqual(profile.effectiveBrowserIdentity, .macosSafari)
+        XCTAssertEqual(profile.sizePreset, .medium)
+        XCTAssertNil(profile.devicePresetID)
+        XCTAssertEqual(profile.viewportSize, CGSize(width: 430, height: 820))
+        XCTAssertEqual(profile.zoom, 1.0)
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(WebRenderingProfile.self, from: data)
+        XCTAssertEqual(decoded, profile)
+    }
+
+    func testSimpleViewportPresetsAndMinimumClamp() {
+        XCTAssertEqual(SimpleViewportPreset.small.size, CGSize(width: 390, height: 780))
+        XCTAssertEqual(SimpleViewportPreset.medium.size, CGSize(width: 430, height: 820))
+        XCTAssertEqual(SimpleViewportPreset.large.size, CGSize(width: 600, height: 800))
+        XCTAssertEqual(SimpleViewportPreset.wide.size, CGSize(width: 900, height: 850))
+        XCTAssertNil(SimpleViewportPreset.custom.size)
+
+        let clamped = WebRenderingProfile.canonicalDefault.settingViewport(
+            CGSize(width: 120, height: 200)
+        )
+        XCTAssertEqual(clamped.viewportSize, CGSize(width: 320, height: 400))
+        XCTAssertEqual(clamped.sizePreset, .custom)
+    }
+
+    func testWebsiteModeAndViewportAreIndependent() {
+        let base = WebRenderingProfile.canonicalDefault
+        let mobile = base.settingWebsiteMode(.mobile)
+        XCTAssertEqual(mobile.websiteMode, .mobile)
+        XCTAssertEqual(mobile.effectiveBrowserIdentity, .iphoneSafari)
+        XCTAssertEqual(mobile.viewportSize, base.viewportSize)
+
+        let wide = mobile.settingSimplePreset(.wide)
+        XCTAssertEqual(wide.websiteMode, .mobile)
+        XCTAssertEqual(wide.effectiveBrowserIdentity, .iphoneSafari)
+        XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
+    }
+
+    func testExplicitBrowserIdentityAndWebsiteModeRemainIndependent() {
+        let base = WebRenderingProfile.canonicalDefault.settingViewport(
+            CGSize(width: 430, height: 820)
+        )
+        let androidOnDesktop = base.settingBrowserIdentity(.androidChrome)
+        XCTAssertEqual(androidOnDesktop.websiteMode, .desktop)
+        XCTAssertEqual(androidOnDesktop.effectiveWebsiteMode, .desktop)
+        XCTAssertEqual(androidOnDesktop.browserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnDesktop.effectiveBrowserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnDesktop.viewportSize, CGSize(width: 430, height: 820))
+
+        let androidOnMobile = androidOnDesktop.settingWebsiteMode(.mobile)
+        XCTAssertEqual(androidOnMobile.websiteMode, .mobile)
+        XCTAssertEqual(androidOnMobile.browserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnMobile.effectiveBrowserIdentity, .androidChrome)
+        XCTAssertEqual(androidOnMobile.viewportSize, CGSize(width: 430, height: 820))
+
+        let windowsOnMobile = androidOnMobile.settingBrowserIdentity(.windowsChrome)
+        XCTAssertEqual(windowsOnMobile.websiteMode, .mobile)
+        XCTAssertEqual(windowsOnMobile.effectiveWebsiteMode, .mobile)
+        XCTAssertEqual(windowsOnMobile.browserIdentity, .windowsChrome)
+        XCTAssertEqual(windowsOnMobile.effectiveBrowserIdentity, .windowsChrome)
+        XCTAssertEqual(windowsOnMobile.viewportSize, CGSize(width: 430, height: 820))
+    }
+
+    func testDevicePresetIsAdvancedViewportShortcutAndManualResizeClearsIt() {
+        let device = try! XCTUnwrap(DevicePresetCatalog.preset(id: "iphone-17-pro-max"))
+        var profile = WebRenderingProfile.canonicalDefault.settingDevicePreset(id: device.id)
+        XCTAssertEqual(profile.devicePresetID, device.id)
+        XCTAssertEqual(profile.sizePreset, .custom)
+        XCTAssertEqual(profile.viewportSize, CGSize(width: 440, height: 956))
+        XCTAssertEqual(profile.websiteMode, .desktop)
+
+        profile = profile.settingOrientation(.landscape)
+        XCTAssertEqual(profile.viewportSize, CGSize(width: 956, height: 440))
+        XCTAssertEqual(profile.devicePresetID, device.id)
+
+        profile = profile.settingViewport(CGSize(width: 500, height: 700))
+        XCTAssertNil(profile.devicePresetID)
+        XCTAssertEqual(profile.sizePreset, .custom)
+        XCTAssertEqual(profile.viewportSize, CGSize(width: 500, height: 700))
+    }
+
+    func testDeviceCatalogContainsCurrentPhoneAndTabletClasses() {
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "iphone-16e")?.portraitSize, CGSize(width: 390, height: 844))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "iphone-17-pro")?.portraitSize, CGSize(width: 402, height: 874))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "iphone-17-pro-max")?.portraitSize, CGSize(width: 440, height: 956))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "android-standard")?.portraitSize, CGSize(width: 412, height: 924))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "android-large")?.portraitSize, CGSize(width: 448, height: 997))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "ipad-mini")?.portraitSize, CGSize(width: 744, height: 1133))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "ipad-air-11")?.portraitSize, CGSize(width: 820, height: 1180))
+        XCTAssertEqual(DevicePresetCatalog.preset(id: "ipad-pro-13")?.portraitSize, CGSize(width: 1032, height: 1376))
+    }
+
+    func testLegacyStage3RenderingJSONMigratesWithoutLosingSizeOrZoom() throws {
+        let data = Data(
+            """
+            {
+              "browserCompatibility": "chrome",
+              "contentMode": "mobile",
+              "viewportWidth": 390,
+              "viewportHeight": 780,
+              "zoom": 1.25
+            }
+            """.utf8
+        )
+
+        let migrated = try JSONDecoder().decode(WebRenderingProfile.self, from: data)
+        XCTAssertEqual(migrated.websiteMode, .mobile)
+        XCTAssertEqual(migrated.browserIdentity, .iphoneChrome)
+        XCTAssertEqual(migrated.sizePreset, .small)
+        XCTAssertEqual(migrated.viewportSize, CGSize(width: 390, height: 780))
+        XCTAssertEqual(migrated.zoom, 1.25, accuracy: 0.001)
+    }
+
+    func testZoomStepTraversalAndResetHelpers() {
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 1.0), 1.10, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextSmaller(before: 1.0), 0.90, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 2.0), 2.0, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextSmaller(before: 0.5), 0.5, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nearest(to: 1.49), 1.50, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.percentageText(for: 1.33), "133%")
+    }
+
+    func testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild() {
+        let base = WebRenderingProfile.canonicalDefault
+        XCTAssertFalse(base.settingZoom(1.25).requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingViewport(CGSize(width: 600, height: 800)).requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingDevicePreset(id: "iphone-17-pro").requiresWebViewRebuild(comparedTo: base))
+
+        let browser = base.settingBrowserIdentity(.windowsChrome)
+        XCTAssertTrue(browser.requiresWebViewRebuild(comparedTo: base))
+
+        let mobile = base.settingWebsiteMode(.mobile)
+        XCTAssertTrue(mobile.requiresWebViewRebuild(comparedTo: base))
     }
 }
 
