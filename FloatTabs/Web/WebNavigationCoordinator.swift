@@ -30,6 +30,12 @@ final class WebNavigationCoordinator {
         sourceURL: URL?,
         targetURL: URL?
     ) -> WebNavigationDisposition {
+        // `sourceURL` is retained in this seam because popup policy and tests
+        // still provide origin context, but ordinary user routing intentionally
+        // does not compare source/target hosts. Destination is chosen by user
+        // intent, not by same-site/cross-site classification.
+        _ = sourceURL
+
         guard !hasTargetFrame,
               let targetURL,
               isWebURL(targetURL) else {
