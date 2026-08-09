@@ -19,36 +19,11 @@ on:
       - '.github/workflows/macos-ci.yml'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-and-test:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: feat/stage-4-web-compatibility-sessions
-
-      - name: Apply guarded native automatic UA repair
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          p = Path('FloatTabs/Web/WebViewFactory.swift')
-          text = p.read_text()
-          old = '''        webView.customUserAgent = UserAgentProvider.customUserAgent(\n            for: rendering,\n            versions: versions\n        )\n'''
-          new = '''        if rendering.browserIdentity != .automatic {\n            webView.customUserAgent = UserAgentProvider.customUserAgent(\n                for: rendering,\n                versions: versions\n            )\n        }\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one UA assignment block, found {text.count(old)}')
-          p.write_text(text.replace(old, new, 1))
-          PY
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add FloatTabs/Web/WebViewFactory.swift
-          git commit -m "fix: leave automatic user agent owned by WebKit"
-          git push origin HEAD:feat/stage-4-web-compatibility-sessions
 
       - name: Xcode version
         run: xcodebuild -version
@@ -97,9 +72,11 @@ jobs:
             grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
           fi
           echo '::endgroup::'
+
           if [ -d "$RUNNER_TEMP/FloatTabsTests.xcresult" ]; then
             echo '::group::XCResult test summary'
-            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
+            xcrun xcresulttool get test-results summary \
+              --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
             echo '::endgroup::'
           fi
 
