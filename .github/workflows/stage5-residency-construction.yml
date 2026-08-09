@@ -19,21 +19,39 @@ jobs:
           ref: feat/stage-5-residency-policy
           fetch-depth: 0
 
-      - name: Apply residency implementation
+      - name: Make Hot host reconciliation mutation-safe
         run: |
-          python3 .github/stage5_residency_patch.py
-          sed -i '' 's/[[:blank:]]*$//' docs/product/FloatTabs_Stage_5_Residency_Policy.md
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('FloatTabs/Web/WebViewContainer.swift')
+          text = path.read_text()
+          old = '''    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
+              for slotID in hotHostViews.keys where !validHotSlotIDs.contains(slotID) {
+                  guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
+                  host.webView?.removeFromSuperview()
+                  host.removeFromSuperview()
+              }
+          }
+          '''
+          new = '''    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
+              let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
+              for slotID in staleHotSlotIDs {
+                  guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
+                  host.webView?.removeFromSuperview()
+                  host.removeFromSuperview()
+              }
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one retainHotSlots match, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
-      - name: Validate project references
-        run: |
-          test -f FloatTabs/Web/SlotLifecycleCoordinator.swift
-          grep -q 'SlotLifecycleCoordinator.swift in Sources' FloatTabs.xcodeproj/project.pbxproj
-
-      - name: Commit implementation
+      - name: Commit cleanup
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add FloatTabs FloatTabsTests FloatTabs.xcodeproj docs/product/FloatTabs_Stage_5_Residency_Policy.md
+          git add FloatTabs/Web/WebViewContainer.swift
           git diff --cached --check
-          git commit -m 'feat: add configurable slot residency policies'
+          git commit -m 'fix: make hot host reconciliation mutation-safe'
           git push origin HEAD:feat/stage-5-residency-policy
