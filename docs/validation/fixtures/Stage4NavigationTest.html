@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FloatTabs Stage 4 Navigation Test</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 32px; line-height: 1.5; }
+    .row { margin: 16px 0; padding: 16px; border: 1px solid #ccc; border-radius: 12px; }
+    a, button { font: inherit; padding: 10px 14px; }
+    code { background: #f2f2f2; padding: 2px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>FloatTabs Stage 4 Navigation Test</h1>
+  <p>Serve this directory over HTTP and open this page in a FloatTabs Slot.</p>
+
+  <div class="row">
+    <h2>1. Same-site target=_blank</h2>
+    <p>Expected: load inside the current FloatTabs Slot. No system browser and no popup.</p>
+    <a href="/same.html" target="_blank">Open same-site page</a>
+  </div>
+
+  <div class="row">
+    <h2>2. Cross-site target=_blank</h2>
+    <p>Expected: open in the macOS default browser. The FloatTabs Slot stays on this page.</p>
+    <a href="https://example.com/" target="_blank">Open cross-site link</a>
+  </div>
+
+  <div class="row">
+    <h2>3. Scripted window.open</h2>
+    <p>Expected: a temporary FloatTabs child popup appears. It must not create a permanent Slot.</p>
+    <button onclick="window.open('https://example.org/', 'ft-stage4-popup', 'width=640,height=720')">Open temporary popup</button>
+  </div>
+
+  <div class="row">
+    <h2>4. about:blank popup</h2>
+    <p>Expected: a temporary blank child popup appears.</p>
+    <button onclick="window.open('about:blank', 'ft-stage4-blank', 'width=640,height=720')">Open about:blank popup</button>
+  </div>
+</body>
+</html>
