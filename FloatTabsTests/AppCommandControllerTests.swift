@@ -122,3 +122,50 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertTrue(AppCommandController.shouldDismissQuickURL(for: outsideClick, overlay: overlay))
     }
 }
+
+@MainActor
+final class MobileRenderingDiagnosticTests: XCTestCase {
+    func testMediumWebViewWidthIs390() {
+        let (_, webView) = makeMobileSurface(width: 430, height: 820)
+        XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
+    }
+
+    func testMediumWebViewOriginIs20() {
+        let (_, webView) = makeMobileSurface(width: 430, height: 820)
+        XCTAssertEqual(webView.frame.minX, 20, accuracy: 0.001)
+    }
+
+    func testMediumPageZoomIsOne() {
+        let (_, webView) = makeMobileSurface(width: 430, height: 820)
+        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
+    }
+
+    func testCompactWebViewWidthIs360() {
+        let (_, webView) = makeMobileSurface(width: 360, height: 720)
+        XCTAssertEqual(webView.frame.width, 360, accuracy: 0.001)
+    }
+
+    func testWideWebViewWidthIs390() {
+        let (_, webView) = makeMobileSurface(width: 900, height: 850)
+        XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
+    }
+
+    func testWideWebViewOriginIs255() {
+        let (_, webView) = makeMobileSurface(width: 900, height: 850)
+        XCTAssertEqual(webView.frame.minX, 255, accuracy: 0.001)
+    }
+
+    private func makeMobileSurface(width: CGFloat, height: CGFloat) -> (WebPanelContainerView, FloatTabsWebView) {
+        let rendering = WebRenderingProfile.canonicalDefault.settingWebsiteMode(.mobile)
+        guard let webView = WebViewFactory.makeWebView(renderingProfile: rendering) as? FloatTabsWebView else {
+            fatalError("Expected FloatTabsWebView")
+        }
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: width, height: height)
+        )
+        container.show(webView: webView)
+        container.layoutSubtreeIfNeeded()
+        webView.layoutSubtreeIfNeeded()
+        return (container, webView)
+    }
+}
