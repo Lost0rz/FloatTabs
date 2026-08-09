@@ -33,9 +33,11 @@
 
 This is independent from residency:
 
-- `Pause When Inactive` uses WebKit media suspension while the Slot is inactive.
-- `Allow Background Audio` leaves media unsuspended while the WebView remains resident.
+- `Pause When Inactive` calls WebKit's `pauseAllMediaPlayback` for the inactive Slot. This pauses current media but deliberately does **not** put the page into WebKit's stronger playback-suspended state, so the website and user remain free to start playback again after returning.
+- `Allow Background Audio` does not issue any FloatTabs media pause/suspend command while the WebView remains resident.
 - A Cold Slot can still be released after its grace period; release ends any remaining media runtime.
+
+`setAllMediaPlaybackSuspended` is intentionally not used for Slot switching. Real-Mac testing showed that repeated asynchronous suspend/unsuspend transitions could leave YouTube/Bilibili unable to accept a normal user play action and could surface autoplay-blocked errors.
 
 ## 3. Interaction
 
@@ -91,13 +93,14 @@ The rejected Stage 4 experiment that resized multiple resident WebViews through 
 
 1. Set Bilibili or YouTube to `Warm` + `Pause When Inactive`.
 2. Start media and switch away.
-3. Media should suspend while inactive and the same pooled WebView should be reused on return.
+3. Current media should pause while inactive and the same pooled WebView should be reused on return.
+4. After returning, a normal user click on the website's play control must start playback immediately; FloatTabs must not leave the page media-suspended.
 
 ### Background audio
 
 1. Set YouTube to `Warm` + `Allow Background Audio`.
 2. Start audio and switch away.
-3. Audio should remain allowed while the Warm WebView remains resident.
+3. FloatTabs must not explicitly pause or suspend the media. Whether detached Warm WebKit continues audio is recorded as Real-Mac behavior rather than forced with private/JavaScript hacks.
 
 ### Cold
 
