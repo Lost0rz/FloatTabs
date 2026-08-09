@@ -270,18 +270,22 @@ final class WebViewPool {
     }
 }
 
-/// Keeps every warm Slot's WKWebView attached to the same AppKit window.
-/// Switching Slots changes only sibling order. Existing WebViews are never
-/// removed/re-added merely because another Slot becomes active, so heavy SPA
-/// DOM/JS/compositor state can remain warm across ordinary Slot switches.
+/// Keeps every warm Slot's WKWebView attached to the same AppKit window while
+/// preserving each inactive Slot's own last-valid viewport geometry. A resident
+/// WebView must not inherit another Slot's preferred window size because
+/// FloatTabsWebView derives Website Mode fitting/pageZoom from its own frame.
 ///
-/// Stage 5 owns resource scheduling for these resident inactive views; this
-/// Stage 4 boundary is intentionally about state continuity and switch latency.
+/// The active WebView follows ordinary live panel resizing. Host-frame changes
+/// are synchronized on the next main-loop turn so an automatic Slot switch can
+/// promote its target first; this prevents the outgoing inactive WebView from
+/// being resized to the incoming Slot's preset.
 @MainActor
 final class WarmWebViewResidencyCoordinator {
     private unowned let container: WebPanelContainerView
     private weak var hostView: NSView?
     private weak var active: WKWebView?
+    private var hostFrameObserver: NSObjectProtocol?
+    private var activeFrameSyncPending = false
 
     init(container: WebPanelContainerView) {
         self.container = container
@@ -300,32 +304,26 @@ final class WarmWebViewResidencyCoordinator {
             guard let attachedHost = webView.superview else { return }
             hostView = attachedHost
             host = attachedHost
+            observeHostFrameChanges(host)
         }
 
         if webView.superview !== host {
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
-            webView.autoresizingMask = [.width, .height]
+            webView.autoresizingMask = []
             webView.frame = host.bounds
             host.addSubview(webView)
         } else {
             webView.translatesAutoresizingMaskIntoConstraints = true
-            webView.autoresizingMask = [.width, .height]
+            webView.autoresizingMask = []
         }
 
-        // Synchronize resident geometry before promoting the target WebView.
-        // Slots may have different preferred panel sizes; exposing the target at
-        // its stale previous frame causes the container background to appear at
-        // the edges until WebKit catches up.
-        for resident in host.subviews.compactMap({ $0 as? WKWebView }) {
-            resident.isHidden = false
-            resident.alphaValue = 1
-            resident.autoresizingMask = [.width, .height]
-            if resident.frame != host.bounds {
-                resident.frame = host.bounds
-            }
-        }
-        webView.layoutSubtreeIfNeeded()
+        // Only the target Slot adopts the current host bounds. Inactive resident
+        // WebViews intentionally keep their own last-valid frame/pageZoom instead
+        // of being resized every time another Slot changes the panel size.
+        webView.isHidden = false
+        webView.alphaValue = 1
+        sync(webView: webView, to: host)
 
         // Reordering the existing subviews keeps every resident WKWebView in the
         // same window hierarchy. AppKit moves shared views without remove/re-add.
@@ -340,6 +338,7 @@ final class WarmWebViewResidencyCoordinator {
     }
 
     func showEmptyState() {
+        stopObservingHostFrameChanges()
         if let hostView {
             for resident in hostView.subviews.compactMap({ $0 as? WKWebView }) {
                 resident.removeFromSuperview()
@@ -348,5 +347,46 @@ final class WarmWebViewResidencyCoordinator {
         active = nil
         hostView = nil
         container.showEmptyState()
+    }
+
+    private func observeHostFrameChanges(_ host: NSView) {
+        stopObservingHostFrameChanges()
+        host.postsFrameChangedNotifications = true
+        hostFrameObserver = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: host,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.scheduleActiveFrameSync()
+            }
+        }
+    }
+
+    private func stopObservingHostFrameChanges() {
+        if let hostFrameObserver {
+            NotificationCenter.default.removeObserver(hostFrameObserver)
+            self.hostFrameObserver = nil
+        }
+        activeFrameSyncPending = false
+    }
+
+    private func scheduleActiveFrameSync() {
+        guard !activeFrameSyncPending else { return }
+        activeFrameSyncPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.activeFrameSyncPending = false
+            guard let host = self.hostView,
+                  let active = self.active else { return }
+            self.sync(webView: active, to: host)
+        }
+    }
+
+    private func sync(webView: WKWebView, to host: NSView) {
+        if webView.frame != host.bounds {
+            webView.frame = host.bounds
+        }
+        webView.layoutSubtreeIfNeeded()
     }
 }
