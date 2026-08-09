@@ -6,7 +6,7 @@ import Foundation
 ///
 /// The listener binds to 127.0.0.1 on an ephemeral port and requires a random
 /// per-process token written to the user's FloatTabs Application Support folder.
-/// Release builds compile none of this implementation.
+/// Release builds contain no benchmark listener or control-info publication.
 final class BenchmarkControlServer {
     static let protocolVersion = 1
 
