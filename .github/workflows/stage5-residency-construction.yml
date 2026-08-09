@@ -1,0 +1,37 @@
+name: Stage 5 Residency Construction
+
+on:
+  push:
+    branches:
+      - feat/stage-5-residency-policy
+    paths:
+      - .github/stage5-residency.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-5-residency-policy
+          fetch-depth: 0
+
+      - name: Apply residency implementation
+        run: python3 .github/stage5_residency_patch.py
+
+      - name: Validate project references
+        run: |
+          test -f FloatTabs/Web/SlotLifecycleCoordinator.swift
+          grep -q 'SlotLifecycleCoordinator.swift in Sources' FloatTabs.xcodeproj/project.pbxproj
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FloatTabs FloatTabsTests FloatTabs.xcodeproj docs/product/FloatTabs_Stage_5_Residency_Policy.md
+          git diff --cached --check
+          git commit -m 'feat: add configurable slot residency policies'
+          git push origin HEAD:feat/stage-5-residency-policy
