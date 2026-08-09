@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply automatic benchmark control patch
-        run: python3 .github/benchmark_auto_control_patch.py
+        run: |
+          python3 .github/benchmark_auto_control_fix.py
+          python3 .github/benchmark_auto_control_patch.py
 
       - name: Validate generated sources
         run: |
