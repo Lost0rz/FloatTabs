@@ -1,8 +1,8 @@
 # FloatTabs — Stage 4 Web Compatibility Addendum
 
-> Status: **DRAFT — automated gate green; Real-Mac regression acceptance pending**  
-> Base: accepted Stage 3 rendering profile  
-> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, and real-site compatibility boundaries
+> Status: **Stage 4 accepted; Navigation Intent + Slot Home extension accepted**  
+> Base: merged Stage 4 on `main`  
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, and Slot Home
 
 ## 1. Stage 4 intent
 
@@ -17,19 +17,29 @@ Zoom
 
 These remain independent product controls. Website Mode must represent a real desktop/mobile website experience, not merely a different FloatTabs window size.
 
-## 2. Navigation / popup baseline
+## 2. Navigation Intent extension
 
-Stage 4 centralizes navigation ownership so the Slot lifecycle and routing policy do not grow ad-hoc site fixes.
+FloatTabs is the default browsing container for ordinary web navigation. Browser boundaries are selected by explicit user intent rather than by comparing URL hosts.
 
 Canonical routing:
 
 ```text
-same-site new context       → current Slot
-cross-site user link        → default browser
-scripted/window.open        → temporary child WKWebView
-about:blank                 → temporary child WKWebView
-non-web scheme              → system handler
+ordinary HTTP(S) user navigation     → current Slot
+user target=_blank HTTP(S) link      → current Slot
+right click: Open in Floating Window → user-created FloatTabs floating window
+right click: Open in Default Browser → system default browser
+scripted/window.open                 → temporary child WKWebView
+about:blank                          → temporary child WKWebView
+non-web scheme                       → system handler
 ```
+
+Important boundaries:
+
+- ordinary cross-site links are no longer sent to the default browser automatically;
+- same-host / cross-host classification does not control ordinary user navigation;
+- website-owned scripted popups remain separate from user-created floating windows so OAuth/login flows keep their temporary-window semantics;
+- explicit floating windows share the persistent FloatTabs WebKit website-data context and inherit the originating WebView rendering identity;
+- FloatTabs does not add a permanent browser toolbar or Home button inside the webpage rectangle.
 
 The accepted Bilibili Desktop `targetFrame == nil` interaction regression remains covered by deterministic navigation tests.
 
@@ -100,29 +110,19 @@ No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding exp
 
 ## 6. Mode-switch loading performance
 
-Website Mode / Browser Identity changes still rebuild the affected `WKWebView` in this Stage 4 implementation so configuration and identity changes are applied from a clean WebKit boundary.
+Website Mode / Browser Identity changes still rebuild the affected `WKWebView` so configuration and identity changes are applied from a clean WebKit boundary.
 
-The rebuild no longer deliberately bypasses HTTP/WebKit cache. Rebuilt navigation now uses:
+Rebuilt navigation uses:
 
 ```text
 URLRequest.CachePolicy.useProtocolCachePolicy
 ```
 
-instead of:
-
-```text
-reloadIgnoringLocalCacheData
-```
-
-This removes the forced cold-cache penalty observed during Desktop ↔ Mobile switching while preserving the existing rebuild safety model.
-
-If Real-Mac acceptance still finds mode switching materially too slow, the next optimization boundary is to remove the rebuild itself and apply mode-specific navigation preferences to a warm WebView. That is not claimed complete in this PR.
+instead of deliberately bypassing cache. Real-Mac acceptance found this materially faster. Removing the rebuild itself remains deferred unless a later regression establishes a real performance blocker.
 
 ## 7. Permanent webpage scrollbar suppression
 
-Real-Mac testing showed that the previous transient policy was not reliable. It explicitly enabled AppKit scrollers during wheel events, called `flashScrollers()`, and attempted to disable them after a 0.6-second timer. WebKit could keep the visible right-edge scrollbar alive after that timer, so the policy did not match the original FloatTabs shell requirement.
-
-The accepted behavior is now simpler:
+Accepted behavior:
 
 ```text
 webpage scrolling → remains fully functional
@@ -131,39 +131,83 @@ visual root scrollbar → remains hidden
 
 Implementation uses two boundaries:
 
-1. AppKit descendant `NSScrollView` scrollers remain disabled/hidden; FloatTabs no longer installs a scroll-wheel monitor, no longer calls `flashScrollers()`, and no longer owns a delayed hide timer.
-2. A `WKUserScript` injected at document start suppresses the root `html/body` scrollbar in WebContent with `scrollbar-width: none` plus the WebKit scrollbar pseudo-element while leaving document overflow/scrolling untouched.
+1. AppKit descendant `NSScrollView` scrollers remain disabled/hidden; FloatTabs does not install a scroll-wheel monitor, call `flashScrollers()`, or own a delayed hide timer.
+2. A `WKUserScript` injected at document start suppresses the root `html/body` scrollbar in WebContent while leaving document overflow/scrolling untouched.
 
-Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY` after the visual scrollbar is suppressed.
+Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY`.
 
-## 8. Automated gate
+## 8. Slot Home boundary
 
-Final clean code/workflow HEAD for this scrollbar regression pass:
+A persistent Slot has two different navigation values:
 
 ```text
-713a8bd4e7119dd170a9b9e0d82b2f41dde21509
+homeURL    → stable identity / return point for the Slot
+currentURL → current browsing position and may change continuously
 ```
 
-macOS CI #242: **PASS**
+Ordinary navigation updates `currentURL` but never changes `homeURL`.
+
+The user can explicitly return to the stable Slot Home through:
+
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return to Home performs normal navigation to `homeURL`; it does not clear WebKit back/forward history. No permanent Home control is added to the webpage surface.
+
+The Slot context menu intentionally does not expose a separate Rename action. Name editing is owned by **Edit Web App…**, which already edits the Slot name together with the rest of the Web App configuration.
+
+## 9. Accepted Stage 4 evidence
+
+Merged Stage 4 head before merge:
+
+```text
+bbf9fc8c69deb58f1dca0f6bd48b83617d0b4bee
+```
+
+Merged `main` commit:
+
+```text
+a3385419c8013c06919d95afabfd36779039e19e
+```
+
+The prior clean macOS CI gate passed and Real-Mac acceptance passed for Bilibili Mobile/Desktop, ChatGPT Mobile attachment interaction, hidden webpage scrollbar with preserved scrolling, materially faster Website Mode switching, and the accepted compatibility baseline.
+
+## 10. Navigation Intent + Slot Home acceptance evidence
+
+Real-Mac acceptance passed for the Navigation Intent + Slot Home extension:
+
+1. ordinary Bilibili links, including cross-host links, remain in the current Slot;
+2. user-activated `target=_blank` HTTP(S) links remain in the current Slot;
+3. webpage-link **Open in Floating Window** creates an independent FloatTabs floating window and leaves the source Slot unchanged;
+4. webpage-link **Open in Default Browser** opens the system default browser only when explicitly selected;
+5. scripted `window.open`, OAuth/login and `about:blank` popup flows retain temporary-popup behavior;
+6. Tab **Return to Home** navigates that Slot to its stable `homeURL`;
+7. `⌘⇧H` returns the active Slot to its stable `homeURL`;
+8. returning Home does not erase back/forward history;
+9. no permanent browser/Home chrome is added;
+10. accepted Bilibili Desktop clicks, Bilibili Mobile layout, ChatGPT Mobile attachment interaction, YouTube fullscreen, Website Mode identity, switch performance, and hidden-scrollbar behavior remain normal;
+11. redundant Slot **Rename…** was removed; **Edit Web App…** remains the single name-edit path.
+
+Final business cleanup commit:
+
+```text
+f6b1663b19a75e4fc71ef694cc54b701658969f6
+```
+
+Clean final code/workflow gate before documentation acceptance:
+
+```text
+d7622b50191ced6ec489e0dd123e6a13a2e3ff85
+```
+
+macOS CI #255: **PASS**
 
 - package resolution: PASS;
 - package lock unchanged: PASS;
 - Debug build: PASS;
 - full Unit Tests: PASS;
-- WebContent scrollbar suppression installed: PASS;
-- document scrolling preserved under suppression: PASS;
-- existing Mobile/Desktop identity tests remain green;
-- XCTest diagnostic artifact path retained for future failures.
+- Slot context-menu regression confirms only Return to Home / Edit Web App / Remove Web App actions and no standalone Rename action.
 
-## 9. Remaining Real-Mac gate
-
-Before marking the PR Ready, validate:
-
-1. Bilibili — Automatic + Mobile renders the actual mobile site, not a zoomed/squeezed desktop document;
-2. Bilibili — Desktop links/content remain clickable;
-3. ChatGPT — Automatic + Mobile `+` / attachment menu remains stable and the file chooser opens;
-4. webpage right-edge root scrollbar remains visually hidden while trackpad/mouse scrolling continues to work normally;
-5. Desktop ↔ Mobile switching remains materially faster after restoring normal cache use;
-6. YouTube Desktop controls and element fullscreen remain normal.
-
-The PR remains Draft until these Real-Mac checks pass.
+The extension is accepted and may be merged to `main`.

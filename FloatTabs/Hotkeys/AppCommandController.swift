@@ -9,6 +9,7 @@ enum AppCommand: Equatable {
     case zoomOut
     case resetZoom
     case quickURL
+    case returnHome
 }
 
 @MainActor
@@ -89,6 +90,12 @@ final class AppCommandController {
                     return .selectSlot(value)
                 }
             }
+        }
+
+        if flags == [.command, .shift],
+           let characters,
+           characters.lowercased() == "h" {
+            return .returnHome
         }
 
         // The physical + key is Shift+= on common Mac keyboard layouts.

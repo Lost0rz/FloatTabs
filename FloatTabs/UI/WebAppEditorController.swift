@@ -92,31 +92,6 @@ enum WebAppEditorController {
         }
     }
 
-    static func presentRename(
-        profile: WebAppProfile,
-        attachedTo window: NSWindow,
-        completion: @escaping (String?) -> Void
-    ) {
-        let alert = NSAlert()
-        alert.messageText = "Rename Web App"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(string: profile.name)
-        field.placeholderString = "Name"
-        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
-        alert.accessoryView = field
-
-        alert.beginSheetModal(for: window) { response in
-            guard response == .alertFirstButtonReturn else {
-                completion(nil)
-                return
-            }
-            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            completion(name.isEmpty ? nil : name)
-        }
-    }
-
     static func confirmRemove(
         profile: WebAppProfile,
         attachedTo window: NSWindow,

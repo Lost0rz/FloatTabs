@@ -209,11 +209,23 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .loadInCurrentSlot)
     }
 
-    func testNavigationCoordinatorLetsCrossSiteBlankReachUIDelegate() {
+    func testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot() {
         let result = WebNavigationCoordinator.disposition(
             hasTargetFrame: false,
+            navigationType: .linkActivated,
             sourceURL: URL(string: "https://example.com/article"),
             targetURL: URL(string: "https://developer.apple.com/documentation")
+        )
+
+        XCTAssertEqual(result, .loadInCurrentSlot)
+    }
+
+    func testNavigationCoordinatorLetsScriptedBlankReachUIDelegate() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: false,
+            navigationType: .other,
+            sourceURL: URL(string: "https://example.com/article"),
+            targetURL: URL(string: "https://accounts.example-idp.com/oauth")
         )
 
         XCTAssertEqual(result, .allow)
@@ -239,14 +251,14 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingSendsCrossSiteUserLinkToDefaultBrowser() {
+    func testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot() {
         let result = PopupCoordinator.disposition(
             navigationType: .linkActivated,
             sourceURL: URL(string: "https://example.com"),
             targetURL: URL(string: "https://developer.apple.com")
         )
 
-        XCTAssertEqual(result, .externalBrowser)
+        XCTAssertEqual(result, .currentSlot)
     }
 
     func testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup() {
@@ -277,6 +289,45 @@ final class WebViewPoolTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .externalBrowser)
+    }
+
+    func testExplicitLinkContextMenuOffersUserControlledDestinations() {
+        let webView = WebViewFactory.makeWebView()
+        let coordinator = LinkContextMenuCoordinator(
+            webView: webView,
+            openFloating: { _, _ in },
+            openExternal: { _ in }
+        )
+        let url = URL(string: "https://developer.apple.com/documentation")!
+        let menu = coordinator.menu(for: url, sourceWebView: webView)
+        let actionTitles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
+        let script = LinkContextMenuCoordinator.userScript()
+
+        XCTAssertEqual(
+            actionTitles,
+            ["Open in Floating Window", "Open in Default Browser", "Copy Link"]
+        )
+        XCTAssertEqual(script.injectionTime, .atDocumentStart)
+        XCTAssertFalse(script.isForMainFrameOnly)
+        XCTAssertTrue(script.source.contains("contextmenu"))
+        XCTAssertTrue(script.source.contains(LinkContextMenuCoordinator.handlerName))
+        coordinator.invalidate()
+    }
+
+    func testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity() {
+        let source = WebViewFactory.makeWebView()
+        source.customUserAgent = "FloatTabs-Test-UA/1.0"
+        let coordinator = PopupCoordinator(parentWebView: source)
+        let url = URL(string: "https://example.invalid/floating")!
+
+        let floating = try! XCTUnwrap(
+            coordinator.openUserFloatingWindow(url, from: source)
+        )
+
+        XCTAssertTrue(floating.configuration.websiteDataStore.isPersistent)
+        XCTAssertEqual(floating.customUserAgent, source.customUserAgent)
+        XCTAssertEqual(coordinator.userFloatingWindowCount, 1)
+        coordinator.closeAll()
     }
 
     func testUploadPanelPolicyForSingleFile() {

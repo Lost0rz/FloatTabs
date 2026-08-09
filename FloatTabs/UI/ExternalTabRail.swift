@@ -59,9 +59,9 @@ struct ExternalTabMetrics {
 @MainActor
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
+    var onReturnHome: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
-    var onRename: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onCurrentControls: (() -> Void)?
@@ -193,8 +193,8 @@ final class ExternalControlZoneView: NSView {
         addSubview(view, positioned: .above, relativeTo: addControl)
 
         view.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
+        view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
-        view.onRename = { [weak self] slotID in self?.onRename?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
         view.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
@@ -335,8 +335,8 @@ final class ExternalWebAppTabView: NSView {
     let slotID: UUID
 
     var onSelect: ((UUID) -> Void)?
+    var onReturnHome: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
-    var onRename: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
@@ -471,9 +471,15 @@ final class ExternalWebAppTabView: NSView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
 
-        let rename = NSMenuItem(title: "Rename…", action: #selector(renameFromMenu), keyEquivalent: "")
-        rename.target = self
-        menu.addItem(rename)
+        let home = NSMenuItem(
+            title: "Return to Home",
+            action: #selector(returnHomeFromMenu),
+            keyEquivalent: "h"
+        )
+        home.keyEquivalentModifierMask = [.command, .shift]
+        home.target = self
+        menu.addItem(home)
+        menu.addItem(.separator())
 
         let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu), keyEquivalent: "")
         edit.target = self
@@ -492,8 +498,8 @@ final class ExternalWebAppTabView: NSView {
         updateAppearance()
     }
 
-    @objc private func renameFromMenu() {
-        onRename?(slotID)
+    @objc private func returnHomeFromMenu() {
+        onReturnHome?(slotID)
     }
 
     @objc private func editFromMenu() {

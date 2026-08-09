@@ -56,21 +56,187 @@ final class UploadCoordinator {
     }
 }
 
-/// Owns temporary browsing contexts created through `target=_blank` or
-/// `window.open`. The classifier deliberately uses interaction semantics rather
-/// than provider-specific host lists:
+/// Adds explicit user intent to HTTP(S) link context menus without changing
+/// ordinary left-click delivery. The document-start script only intercepts a
+/// context-menu gesture when it resolves to a real web link, then forwards the
+/// absolute href to native AppKit menu actions.
+@MainActor
+final class LinkContextMenuCoordinator: NSObject, WKScriptMessageHandler {
+    typealias FloatingOpenHandler = (URL, WKWebView) -> Void
+    typealias ExternalOpenHandler = (URL) -> Void
+
+    static let handlerName = "floatTabsLinkContext"
+
+    private weak var webView: WKWebView?
+    private let openFloating: FloatingOpenHandler
+    private let openExternal: ExternalOpenHandler
+    private var representedURL: URL?
+    private weak var representedSourceWebView: WKWebView?
+
+    init(
+        webView: WKWebView,
+        openFloating: @escaping FloatingOpenHandler,
+        openExternal: @escaping ExternalOpenHandler
+    ) {
+        self.webView = webView
+        self.openFloating = openFloating
+        self.openExternal = openExternal
+        super.init()
+
+        let controller = webView.configuration.userContentController
+        controller.addUserScript(Self.userScript())
+        controller.add(self, name: Self.handlerName)
+    }
+
+    static func userScript() -> WKUserScript {
+        WKUserScript(
+            source: """
+            (() => {
+              if (window.__floatTabsLinkContextInstalled) return;
+              window.__floatTabsLinkContextInstalled = true;
+
+              document.addEventListener('contextmenu', (event) => {
+                const path = typeof event.composedPath === 'function'
+                  ? event.composedPath()
+                  : [];
+
+                let link = path.find((node) =>
+                  node
+                  && node.nodeType === 1
+                  && typeof node.matches === 'function'
+                  && node.matches('a[href], area[href]')
+                );
+
+                if (!link && event.target && event.target.nodeType === 1
+                    && typeof event.target.closest === 'function') {
+                  link = event.target.closest('a[href], area[href]');
+                }
+
+                const href = link && link.href;
+                if (!href || !/^https?:/i.test(href)) return;
+
+                const handler = window.webkit
+                  && window.webkit.messageHandlers
+                  && window.webkit.messageHandlers.floatTabsLinkContext;
+                if (!handler) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                  event.stopImmediatePropagation();
+                }
+                handler.postMessage(href);
+              }, true);
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == Self.handlerName,
+              let rawValue = message.body as? String,
+              let url = URL(string: rawValue),
+              WebAppURL.isSafe(url),
+              let sourceWebView = message.webView ?? webView else {
+            return
+        }
+
+        presentMenu(for: url, sourceWebView: sourceWebView)
+    }
+
+    func menu(for url: URL, sourceWebView: WKWebView) -> NSMenu {
+        representedURL = url
+        representedSourceWebView = sourceWebView
+
+        let menu = NSMenu()
+
+        let floating = NSMenuItem(
+            title: "Open in Floating Window",
+            action: #selector(openFloatingFromMenu),
+            keyEquivalent: ""
+        )
+        floating.target = self
+        menu.addItem(floating)
+
+        let external = NSMenuItem(
+            title: "Open in Default Browser",
+            action: #selector(openExternalFromMenu),
+            keyEquivalent: ""
+        )
+        external.target = self
+        menu.addItem(external)
+
+        menu.addItem(.separator())
+
+        let copy = NSMenuItem(
+            title: "Copy Link",
+            action: #selector(copyLinkFromMenu),
+            keyEquivalent: ""
+        )
+        copy.target = self
+        menu.addItem(copy)
+        return menu
+    }
+
+    func invalidate() {
+        webView?.configuration.userContentController.removeScriptMessageHandler(
+            forName: Self.handlerName
+        )
+    }
+
+    private func presentMenu(for url: URL, sourceWebView: WKWebView) {
+        guard let window = sourceWebView.window else { return }
+        let menu = menu(for: url, sourceWebView: sourceWebView)
+        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let viewPoint = sourceWebView.convert(windowPoint, from: nil)
+        menu.popUp(positioning: nil, at: viewPoint, in: sourceWebView)
+        representedURL = nil
+        representedSourceWebView = nil
+    }
+
+    @objc private func openFloatingFromMenu() {
+        guard let representedURL,
+              let representedSourceWebView else { return }
+        openFloating(representedURL, representedSourceWebView)
+    }
+
+    @objc private func openExternalFromMenu() {
+        guard let representedURL else { return }
+        openExternal(representedURL)
+    }
+
+    @objc private func copyLinkFromMenu() {
+        guard let representedURL else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(representedURL.absoluteString, forType: .string)
+    }
+}
+
+/// Owns new browsing contexts created through `target=_blank`, `window.open`,
+/// and explicit FloatTabs link actions.
 ///
-/// - same-site HTTP(S) stays in the current Slot;
-/// - a cross-site user link goes to the default browser;
-/// - a cross-site scripted popup is hosted in a temporary child WKWebView;
-/// - `about:blank` is a temporary popup because many auth flows create it first;
-/// - non-web schemes are handed to the system.
+/// Navigation Intent rules:
+///
+/// - any user-activated HTTP(S) link stays in the current Slot;
+/// - scripted HTTP(S) / `window.open` contexts use a temporary child WKWebView;
+/// - `about:blank` uses a temporary child because many auth flows create it first;
+/// - non-web schemes are handed to the system;
+/// - the default browser is used for web links only through the explicit context-menu action;
+/// - user-created floating windows are independent from temporary auth popups.
 @MainActor
 final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
     typealias ExternalOpenHandler = (URL) -> Void
 
     private weak var parentWebView: WKWebView?
     private var childPanels: [ObjectIdentifier: NSPanel] = [:]
+    private var userFloatingPanels: [ObjectIdentifier: NSPanel] = [:]
+    private var linkContextCoordinators: [ObjectIdentifier: LinkContextMenuCoordinator] = [:]
     private let openExternal: ExternalOpenHandler
     private let uploadCoordinator: UploadCoordinator
     private let downloadCoordinator: DownloadCoordinator
@@ -88,6 +254,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         super.init()
+        installExplicitLinkContextMenu(on: parentWebView)
     }
 
     static func disposition(
@@ -108,12 +275,9 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
             return .externalBrowser
         }
 
-        if WebNavigationCoordinator.isSameSite(sourceURL, targetURL) {
-            return .currentSlot
-        }
-
+        _ = sourceURL
         return navigationType == .linkActivated
-            ? .externalBrowser
+            ? .currentSlot
             : .temporaryPopup
     }
 
@@ -211,21 +375,104 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
 
     func windowWillClose(_ notification: Notification) {
         guard let panel = notification.object as? NSPanel,
-              let childWebView = panel.contentView as? WKWebView else {
+              let webView = panel.contentView as? WKWebView else {
             return
         }
 
-        childPanels.removeValue(forKey: ObjectIdentifier(childWebView))
+        let id = ObjectIdentifier(webView)
+        childPanels.removeValue(forKey: id)
+        userFloatingPanels.removeValue(forKey: id)
+        linkContextCoordinators.removeValue(forKey: id)?.invalidate()
         restoreParentFocus()
     }
 
     func closeAll() {
-        let webViews = childPanels.compactMap { _, panel in
-            panel.contentView as? WKWebView
-        }
+        let panels = Array(childPanels.values) + Array(userFloatingPanels.values)
+        let webViews = panels.compactMap { $0.contentView as? WKWebView }
         for webView in webViews {
             close(webView: webView, restoreFocus: false)
         }
+
+        if let parentWebView {
+            let id = ObjectIdentifier(parentWebView)
+            linkContextCoordinators.removeValue(forKey: id)?.invalidate()
+        }
+    }
+
+    @discardableResult
+    func openUserFloatingWindow(
+        _ url: URL,
+        from sourceWebView: WKWebView? = nil
+    ) -> WKWebView? {
+        guard WebAppURL.isSafe(url),
+              let sourceWebView = sourceWebView ?? parentWebView else {
+            return nil
+        }
+
+        let rendering: WebRenderingProfile
+        if let source = sourceWebView as? FloatTabsWebView {
+            rendering = WebRenderingProfile.canonicalDefault
+                .settingWebsiteMode(source.websiteMode)
+                .settingZoom(source.userPageZoom)
+        } else {
+            rendering = WebRenderingProfile.canonicalDefault
+                .settingZoom(sourceWebView.pageZoom)
+        }
+
+        let floatingWebView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        floatingWebView.customUserAgent = sourceWebView.customUserAgent
+        floatingWebView.allowsBackForwardNavigationGestures = true
+        floatingWebView.uiDelegate = self
+        floatingWebView.navigationDelegate = self
+        installExplicitLinkContextMenu(on: floatingWebView)
+
+        let sourceSize = sourceWebView.frame.size
+        let panel = NSPanel(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: max(sourceSize.width, 430),
+                height: max(sourceSize.height, 560)
+            ),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = url.host ?? "Floating Page"
+        panel.contentView = floatingWebView
+        panel.isReleasedWhenClosed = false
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.level = sourceWebView.window?.level ?? .floating
+        panel.collectionBehavior = sourceWebView.window?.collectionBehavior
+            ?? [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.delegate = self
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+
+        userFloatingPanels[ObjectIdentifier(floatingWebView)] = panel
+        floatingWebView.load(URLRequest(url: url))
+        return floatingWebView
+    }
+
+    var userFloatingWindowCount: Int {
+        userFloatingPanels.count
+    }
+
+    private func installExplicitLinkContextMenu(on webView: WKWebView) {
+        let id = ObjectIdentifier(webView)
+        guard linkContextCoordinators[id] == nil else { return }
+
+        let coordinator = LinkContextMenuCoordinator(
+            webView: webView,
+            openFloating: { [weak self] url, sourceWebView in
+                self?.openUserFloatingWindow(url, from: sourceWebView)
+            },
+            openExternal: { [weak self] url in
+                self?.openExternal(url)
+            }
+        )
+        linkContextCoordinators[id] = coordinator
     }
 
     private func makeTemporaryPopup(
@@ -263,14 +510,20 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
     }
 
     private func close(webView: WKWebView, restoreFocus: Bool) {
-        guard let panel = childPanels.removeValue(forKey: ObjectIdentifier(webView)) else {
+        let id = ObjectIdentifier(webView)
+        let temporaryPanel = childPanels.removeValue(forKey: id)
+        let userPanel = userFloatingPanels.removeValue(forKey: id)
+        linkContextCoordinators.removeValue(forKey: id)?.invalidate()
+
+        guard let panel = temporaryPanel ?? userPanel else {
             if restoreFocus {
                 restoreParentFocus()
             }
             return
         }
 
-        if let parentWindow = parentWebView?.window {
+        if temporaryPanel != nil,
+           let parentWindow = parentWebView?.window {
             parentWindow.removeChildWindow(panel)
         }
         panel.orderOut(nil)
