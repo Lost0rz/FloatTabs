@@ -709,7 +709,8 @@ final class WebPanelContainerView: NSView {
     }
 
     func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
-        for slotID in hotHostViews.keys where !validHotSlotIDs.contains(slotID) {
+        let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
+        for slotID in staleHotSlotIDs {
             guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
             host.webView?.removeFromSuperview()
             host.removeFromSuperview()
