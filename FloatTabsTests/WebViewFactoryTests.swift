@@ -18,7 +18,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
-    func testRenderingProfileAppliesMobileIdentityContentModeAndUserZoom() {
+    func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
             .settingZoom(1.25)
@@ -28,7 +28,20 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
         XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
-        XCTAssertTrue(webView.customUserAgent?.contains("Version/") == true)
+        XCTAssertTrue(webView.customUserAgent?.contains("Version/26.") == true)
+        XCTAssertTrue(
+            webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
+        )
+        XCTAssertTrue(
+            webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true
+        )
+
+        loadTestHTML(in: webView)
+        let hasMobileRuntimeIdentity = evaluateNumber(
+            "navigator.userAgent.includes('iPhone') ? 1 : 0",
+            in: webView
+        )
+        XCTAssertEqual(hasMobileRuntimeIdentity, 1, accuracy: 0.001)
         XCTAssertEqual(floatTabsWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }
@@ -404,6 +417,14 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(edge.contains("Chrome/150.0.7871.187"))
         XCTAssertTrue(edge.contains("Edg/150.0.4078.99"))
 
+        let iPhoneSafari = UserAgentProvider.userAgent(
+            for: .iphoneSafari,
+            websiteMode: .mobile,
+            versions: versions
+        )
+        XCTAssertTrue(iPhoneSafari.contains("iPhone"))
+        XCTAssertTrue(iPhoneSafari.contains("Version/26.6"))
+
         let iPhoneChrome = UserAgentProvider.userAgent(
             for: .iphoneChrome,
             websiteMode: .mobile,
@@ -422,7 +443,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(android.contains("Mobile Safari"))
     }
 
-    func testAutomaticIdentityFollowsWebsiteModeWithoutChangingWindowSizePolicy() {
+    func testAutomaticIdentityFollowsWebsiteModeWhenMaterialized() {
         let desktopUA = UserAgentProvider.userAgent(
             for: .automatic,
             websiteMode: .desktop,
@@ -433,10 +454,24 @@ final class WebViewFactoryTests: XCTestCase {
             websiteMode: .mobile,
             versions: versions
         )
+        XCTAssertNotEqual(mobileUA, desktopUA)
         XCTAssertTrue(desktopUA.contains("Macintosh"))
         XCTAssertTrue(desktopUA.contains("Version/26.6"))
         XCTAssertTrue(mobileUA.contains("iPhone"))
-        XCTAssertTrue(mobileUA.contains("Version/26.6"))
+        XCTAssertFalse(mobileUA.contains("Macintosh"))
+    }
+
+    func testExplicitMacOSSafariCanOverrideMobileAutomaticIdentity() {
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingBrowserIdentity(.macosSafari)
+        let ua = UserAgentProvider.customUserAgent(
+            for: rendering,
+            versions: versions
+        )
+
+        XCTAssertTrue(ua?.contains("Macintosh") == true)
+        XCTAssertFalse(ua?.contains("iPhone") == true)
     }
 
     func testCustomUserAgentPassesThroughExactly() {
@@ -501,24 +536,35 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertFalse(scrollView.hasHorizontalScroller)
     }
 
-    func testScrollerVisibilityCanBeEnabledOnlyForActiveAxis() {
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
-        WebViewFactory.configureHiddenScrollerStyle(scrollView)
+    func testWebViewInstallsPermanentContentScrollbarSuppression() {
+        let webView = WebViewFactory.makeWebView()
+        let script = webView.configuration.userContentController.userScripts.first {
+            $0.source.contains("floattabs-hidden-scrollbar-style")
+        }
 
-        WebViewFactory.setScrollerVisibility(
-            scrollView,
-            vertical: true,
-            horizontal: false
+        XCTAssertNotNil(script)
+        XCTAssertEqual(script?.injectionTime, WKUserScriptInjectionTime.atDocumentStart)
+        XCTAssertFalse(script?.isForMainFrameOnly ?? true)
+        XCTAssertTrue(script?.source.contains("html::-webkit-scrollbar") == true)
+        XCTAssertTrue(script?.source.contains("scrollbar-width: none") == true)
+    }
+
+    func testContentScrollbarSuppressionPreservesDocumentScrolling() {
+        let webView = WebViewFactory.makeWebView()
+        _ = host(webView, visibleSize: NSSize(width: 320, height: 400))
+        loadTestHTML(in: webView)
+
+        let styleInstalled = evaluateNumber(
+            "document.getElementById('floattabs-hidden-scrollbar-style') ? 1 : 0",
+            in: webView
+        )
+        let scrollY = evaluateNumber(
+            "(() => { document.body.style.height = '2400px'; window.scrollTo(0, 200); return window.scrollY; })()",
+            in: webView
         )
 
-        XCTAssertEqual(scrollView.scrollerStyle, .overlay)
-        XCTAssertTrue(scrollView.autohidesScrollers)
-        XCTAssertTrue(scrollView.hasVerticalScroller)
-        XCTAssertFalse(scrollView.hasHorizontalScroller)
-
-        WebViewFactory.configureHiddenScrollerStyle(scrollView)
-        XCTAssertFalse(scrollView.hasVerticalScroller)
-        XCTAssertFalse(scrollView.hasHorizontalScroller)
+        XCTAssertEqual(styleInstalled, 1, accuracy: 0.001)
+        XCTAssertGreaterThan(scrollY, 0)
     }
 
     private func host(

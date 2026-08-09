@@ -1,0 +1,2 @@
+FloatTabs Stage 4 binary-MIME fixture content.
+The .bin extension should be served as application/octet-stream by Python's SimpleHTTPServer.

@@ -1,25 +1,52 @@
 import Foundation
 import WebKit
 
+enum SiteCompatibilityPolicy {
+    static func runtimeRendering(
+        for renderingProfile: WebRenderingProfile,
+        navigationURL: URL
+    ) -> WebRenderingProfile {
+        let rendering = renderingProfile.normalized()
+        guard rendering.browserIdentity == .automatic,
+              rendering.websiteMode == .mobile,
+              requiresDesktopPointerIdentity(for: navigationURL) else {
+            return rendering
+        }
+
+        return rendering.settingBrowserIdentity(.macosSafari)
+    }
+
+    private static func requiresDesktopPointerIdentity(for url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "chatgpt.com"
+            || host.hasSuffix(".chatgpt.com")
+            || host == "chat.openai.com"
+    }
+}
+
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = (WKWebView, URLRequest) -> Void
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
+    private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let downloadCoordinator: DownloadCoordinator
 
     init(
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
-        }
+        },
+        downloadCoordinator: DownloadCoordinator? = nil
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
@@ -62,6 +89,7 @@ final class WebViewPool {
     }
 
     func remove(slotID: UUID) {
+        discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
         webViews.removeValue(forKey: slotID)
@@ -93,13 +121,14 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL
     ) -> WKWebView {
+        discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         webViews.removeValue(forKey: profile.id)
         return createWebView(
             for: profile,
             navigationURL: navigationURL,
-            cachePolicy: .reloadIgnoringLocalCacheData
+            cachePolicy: .useProtocolCachePolicy
         )
     }
 
@@ -109,16 +138,27 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy
     ) -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
-        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
+            for: rendering,
+            navigationURL: navigationURL
+        )
+        let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
             websiteMode: rendering.effectiveWebsiteMode,
+            downloadCoordinator: downloadCoordinator,
             onURLChange: onURLChange
         )
+        let popupCoordinator = PopupCoordinator(
+            parentWebView: webView,
+            downloadCoordinator: downloadCoordinator
+        )
+        webView.uiDelegate = popupCoordinator
 
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
+        popupCoordinators[profile.id] = popupCoordinator
         appliedRenderingProfiles[profile.id] = rendering
 
         let request = URLRequest(
@@ -128,5 +168,9 @@ final class WebViewPool {
         )
         load(webView, request)
         return webView
+    }
+
+    private func discardPopupCoordinator(slotID: UUID) {
+        popupCoordinators.removeValue(forKey: slotID)?.closeAll()
     }
 }

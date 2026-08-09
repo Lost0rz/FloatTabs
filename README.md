@@ -11,20 +11,24 @@ Stage 0 Window Feasibility Spike: PASSED
 Stage 1 Core Native Shell: PASSED
 Stage 2 Persistent Web App Slots: PASSED
 Stage 3 Rendering Profiles: PASSED
-→ current baseline: persistent Slots + independent Website Mode / Window Size / Browser Identity / Zoom
-→ next engineering line: Stage 4 Web Compatibility, Navigation, Sessions & OAuth
+Stage 4 Web Compatibility, Navigation, Sessions & OAuth: IN PROGRESS
+→ current Stage 4 slice: 4B popup / OAuth / external-link routing
 ```
 
-Stage 3 real-Mac acceptance now includes:
+Stage 3 real-Mac acceptance includes:
 
 - Desktop website layout in a narrow FloatTabs window;
 - Mobile website layout in a wide FloatTabs window;
 - Bilibili Desktop playback and interaction without the previous browser-version warning;
-- Bilibili Desktop links/new-window actions working through the current Stage 3 same-slot fallback;
+- Bilibili Desktop links/new-window actions working through the accepted compatibility path;
 - YouTube ordinary controls and enter/exit element fullscreen;
 - persistent per-Slot rendering values and the maintained macOS CI lane.
 
-Redirect-sensitive Website Mode switching such as the observed Sina case is explicitly deferred to compatibility follow-up and is not represented as solved.
+Stage 4A centralized navigation-policy ownership without changing accepted Stage 3 behavior. Stage 4B now adds structured new-context routing: same-site HTTP(S) stays in the current Slot, ordinary cross-site user links hand off to the default browser, and scripted cross-site/about:blank popups receive a temporary child WKWebView for login/OAuth-compatible flows.
+
+Later Stage 4 slices will record real-site session/OAuth compatibility and add file upload/download handling.
+
+Redirect-sensitive Website Mode switching such as the observed Sina case remains a compatibility follow-up and is not represented as solved.
 
 Recorded evidence and interaction decisions:
 
@@ -32,6 +36,7 @@ Recorded evidence and interaction decisions:
 - [`docs/validation/Stage_1_Acceptance.md`](docs/validation/Stage_1_Acceptance.md)
 - [`docs/validation/Stage_2_Acceptance.md`](docs/validation/Stage_2_Acceptance.md)
 - [`docs/validation/Stage_3_V3_Acceptance.md`](docs/validation/Stage_3_V3_Acceptance.md)
+- [`docs/validation/Stage_4_Acceptance.md`](docs/validation/Stage_4_Acceptance.md)
 - [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
 
 ## Canonical Documentation
@@ -50,7 +55,10 @@ Read these before changing product behavior, architecture, or UI:
 4. **Stage 3 Rendering Override**  
    [`docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`](docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md)
 
-5. **Generated UI/UX References**  
+5. **Stage 4 Compatibility Addendum**  
+   [`docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`](docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md)
+
+6. **Generated UI/UX References**  
    [`docs/uiux/README.md`](docs/uiux/README.md)
 
 ### Source-of-Truth Precedence

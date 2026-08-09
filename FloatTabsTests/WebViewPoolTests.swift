@@ -69,7 +69,7 @@ final class WebViewPoolTests: XCTestCase {
             2
         )
         XCTAssertEqual(loadedRequests.first?.cachePolicy, .useProtocolCachePolicy)
-        XCTAssertEqual(loadedRequests.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
         XCTAssertEqual(pool.count, 2)
     }
 
@@ -115,6 +115,7 @@ final class WebViewPoolTests: XCTestCase {
             .mobile
         )
         XCTAssertTrue(mobile.customUserAgent?.contains("iPhone") == true)
+        XCTAssertFalse(mobile.customUserAgent?.contains("Macintosh") == true)
 
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
         let desktopAgain = pool.webView(for: profile)
@@ -131,9 +132,27 @@ final class WebViewPoolTests: XCTestCase {
         )
         XCTAssertEqual(loadedRequests.count, 3)
         XCTAssertEqual(loadedRequests[0].cachePolicy, .useProtocolCachePolicy)
-        XCTAssertEqual(loadedRequests[1].cachePolicy, .reloadIgnoringLocalCacheData)
-        XCTAssertEqual(loadedRequests[2].cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loadedRequests[1].cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(loadedRequests[2].cachePolicy, .useProtocolCachePolicy)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() {
+        let pool = makePool()
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let webView = pool.webView(for: profile)
+
+        XCTAssertEqual(
+            webView.configuration.defaultWebpagePreferences.preferredContentMode,
+            .mobile
+        )
+        XCTAssertTrue(webView.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
     }
 
     func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() {
@@ -158,6 +177,13 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
     }
 
+    func testPooledWebViewsInstallPopupCoordinator() {
+        let pool = makePool()
+        let webView = pool.webView(for: makeProfile(name: "A"))
+
+        XCTAssertTrue(webView.uiDelegate is PopupCoordinator)
+    }
+
     func testRemovingOneSlotDoesNotAffectOtherWebViewIdentity() {
         let pool = makePool()
         let first = makeProfile(name: "A")
@@ -173,15 +199,161 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: false,
+            sourceURL: URL(string: "https://www.bilibili.com/"),
+            targetURL: URL(string: "https://bilibili.com/video/BV123")
+        )
+
+        XCTAssertEqual(result, .loadInCurrentSlot)
+    }
+
+    func testNavigationCoordinatorLetsCrossSiteBlankReachUIDelegate() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: false,
+            sourceURL: URL(string: "https://example.com/article"),
+            targetURL: URL(string: "https://developer.apple.com/documentation")
+        )
+
+        XCTAssertEqual(result, .allow)
+    }
+
+    func testNavigationCoordinatorAllowsNormalInFrameNavigation() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: true,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://example.com/next")
+        )
+
+        XCTAssertEqual(result, .allow)
+    }
+
+    func testPopupRoutingKeepsSameSiteContextInCurrentSlot() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://www.bilibili.com/"),
+            targetURL: URL(string: "https://bilibili.com/video/BV123")
+        )
+
+        XCTAssertEqual(result, .currentSlot)
+    }
+
+    func testPopupRoutingSendsCrossSiteUserLinkToDefaultBrowser() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://developer.apple.com")
+        )
+
+        XCTAssertEqual(result, .externalBrowser)
+    }
+
+    func testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://accounts.example-idp.com/oauth")
+        )
+
+        XCTAssertEqual(result, .temporaryPopup)
+    }
+
+    func testPopupRoutingTreatsAboutBlankAsTemporaryChild() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "about:blank")
+        )
+
+        XCTAssertEqual(result, .temporaryPopup)
+    }
+
+    func testPopupRoutingHandsNonWebSchemeToSystem() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "mailto:test@example.com")
+        )
+
+        XCTAssertEqual(result, .externalBrowser)
+    }
+
+    func testUploadPanelPolicyForSingleFile() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: false,
+            allowsDirectories: false
+        )
+
+        XCTAssertFalse(policy.allowsMultipleSelection)
+        XCTAssertTrue(policy.canChooseFiles)
+        XCTAssertFalse(policy.canChooseDirectories)
+    }
+
+    func testUploadPanelPolicyForMultipleFiles() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: true,
+            allowsDirectories: false
+        )
+
+        XCTAssertTrue(policy.allowsMultipleSelection)
+        XCTAssertTrue(policy.canChooseFiles)
+        XCTAssertFalse(policy.canChooseDirectories)
+    }
+
+    func testUploadPanelPolicyForDirectory() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: true,
+            allowsDirectories: true
+        )
+
+        XCTAssertTrue(policy.allowsMultipleSelection)
+        XCTAssertFalse(policy.canChooseFiles)
+        XCTAssertTrue(policy.canChooseDirectories)
+    }
+
+    func testExplicitDownloadActionUsesDownloadPolicy() {
+        XCTAssertEqual(
+            DownloadCoordinator.actionPolicy(shouldPerformDownload: true),
+            .download
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.actionPolicy(shouldPerformDownload: false),
+            .allow
+        )
+    }
+
+    func testUnshowableMimeResponseUsesDownloadPolicy() {
+        XCTAssertEqual(
+            DownloadCoordinator.responsePolicy(canShowMIMEType: false),
+            .download
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.responsePolicy(canShowMIMEType: true),
+            .allow
+        )
+    }
+
+    func testDownloadSuggestedFilenameDropsPathComponents() {
+        XCTAssertEqual(
+            DownloadCoordinator.safeSuggestedFilename("nested/path/report.txt"),
+            "report.txt"
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.safeSuggestedFilename(""),
+            "Download"
+        )
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
 
-    private func makeProfile(name: String) -> WebAppProfile {
+    private func makeProfile(name: String, homeURL: URL? = nil) -> WebAppProfile {
         WebAppProfile(
             order: 0,
             name: name,
-            homeURL: URL(string: "https://example.com/\(name)")!
+            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!
         )
     }
 }

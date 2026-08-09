@@ -133,8 +133,9 @@ enum UserAgentProvider {
         "Version/\(versions.safari) Safari/\(versions.webKit)"
     }
 
-    /// Runtime override. `nil` is deliberate for macOS Safari so WebKit can
-    /// supply its native UA plus `applicationNameForUserAgent`.
+    /// Runtime override. Automatic deliberately stays `nil` so WebKit can pair
+    /// the requested content mode with its native current UA. Explicit identities
+    /// remain compatibility overrides and may replace that native identity.
     static func customUserAgent(
         for renderingProfile: WebRenderingProfile
     ) -> String? {
@@ -146,13 +147,23 @@ enum UserAgentProvider {
         versions: BrowserVersionCatalog
     ) -> String? {
         let profile = renderingProfile.normalized()
+
+        if profile.browserIdentity == .automatic {
+            guard profile.effectiveWebsiteMode == .mobile else { return nil }
+            return userAgent(
+                for: .iphoneSafari,
+                websiteMode: .mobile,
+                versions: versions
+            )
+        }
+
         let identity = resolvedIdentity(
             profile.effectiveBrowserIdentity,
-            websiteMode: profile.effectiveWebsiteMode,
             customUserAgent: profile.customUserAgent
         )
 
-        if identity == .macosSafari {
+        if identity == .macosSafari,
+           profile.effectiveWebsiteMode == .desktop {
             return nil
         }
 
@@ -202,11 +213,11 @@ enum UserAgentProvider {
         customUserAgent: String? = nil,
         versions: BrowserVersionCatalog
     ) -> String {
-        switch resolvedIdentity(
-            identity,
-            websiteMode: websiteMode,
-            customUserAgent: customUserAgent
-        ) {
+        let resolved = identity == .automatic
+            ? (websiteMode == .desktop ? BrowserIdentity.macosSafari : .iphoneSafari)
+            : resolvedIdentity(identity, customUserAgent: customUserAgent)
+
+        switch resolved {
         case .automatic, .macosSafari:
             return macOSSafari(
                 safariVersion: versions.safari,
@@ -253,18 +264,15 @@ enum UserAgentProvider {
         }
     }
 
+    /// Normalizes explicit compatibility identities. Automatic is resolved by
+    /// Website Mode at the caller so WebKit can own its native current UA.
     private static func resolvedIdentity(
         _ identity: BrowserIdentity,
-        websiteMode: WebsiteMode,
         customUserAgent: String?
     ) -> BrowserIdentity {
-        if identity == .automatic {
-            return websiteMode == .desktop ? .macosSafari : .iphoneSafari
-        }
-
         if identity == .custom,
            customUserAgent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-            return websiteMode == .desktop ? .macosSafari : .iphoneSafari
+            return .macosSafari
         }
 
         return identity
@@ -365,6 +373,45 @@ enum WebsiteLayoutViewport {
 
 @MainActor
 enum WebViewFactory {
+    private static let hiddenScrollbarScriptSource = """
+    (() => {
+      const styleID = 'floattabs-hidden-scrollbar-style';
+      const install = () => {
+        const root = document.documentElement;
+        if (!root || document.getElementById(styleID)) return;
+
+        const style = document.createElement('style');
+        style.id = styleID;
+        style.textContent = `
+          html, body {
+            scrollbar-width: none !important;
+          }
+          html::-webkit-scrollbar,
+          body::-webkit-scrollbar {
+            width: 0 !important;
+            height: 0 !important;
+            display: none !important;
+          }
+        `;
+        (document.head || root).appendChild(style);
+      };
+
+      if (document.documentElement) {
+        install();
+      } else {
+        document.addEventListener('DOMContentLoaded', install, { once: true });
+      }
+    })();
+    """
+
+    static func hiddenScrollbarUserScript() -> WKUserScript {
+        WKUserScript(
+            source: hiddenScrollbarScriptSource,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+    }
+
     static func makeWebView(
         renderingProfile: WebRenderingProfile = .canonicalDefault
     ) -> WKWebView {
@@ -378,6 +425,7 @@ enum WebViewFactory {
         )
         configuration.defaultWebpagePreferences.preferredContentMode =
             rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
+        configuration.userContentController.addUserScript(hiddenScrollbarUserScript())
 
         let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
@@ -416,10 +464,12 @@ enum WebViewFactory {
             webView.pageZoom = rendering.zoom
         }
 
-        webView.customUserAgent = UserAgentProvider.customUserAgent(
+        if let customUserAgent = UserAgentProvider.customUserAgent(
             for: rendering,
             versions: versions
-        )
+        ) {
+            webView.customUserAgent = customUserAgent
+        }
     }
 
     /// At rest the WebView owns no visible AppKit scroller at all. This avoids
@@ -435,23 +485,10 @@ enum WebViewFactory {
     static func configureHiddenScrollerStyle(_ scrollView: NSScrollView) {
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
+        scrollView.verticalScroller?.isHidden = true
+        scrollView.horizontalScroller?.isHidden = true
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
-    }
-
-    static func setScrollerVisibility(
-        _ scrollView: NSScrollView,
-        vertical: Bool,
-        horizontal: Bool
-    ) {
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.hasVerticalScroller = vertical
-        scrollView.hasHorizontalScroller = horizontal
-
-        if vertical || horizontal {
-            scrollView.flashScrollers()
-        }
     }
 
     static func loadStageZeroPage(in webView: WKWebView) {
@@ -495,14 +532,12 @@ enum WebViewFactory {
 /// final WebKit presentation boundary.
 @MainActor
 final class FloatTabsWebView: WKWebView {
-    private var transientScrollerController: TransientWebScrollerController?
     private(set) var websiteMode: WebsiteMode = .desktop
     private(set) var userPageZoom: CGFloat = 1
     private(set) var websiteLayoutScale: CGFloat = 1
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
-        transientScrollerController = TransientWebScrollerController(webView: self)
         refreshWebsiteLayoutScale()
     }
 
@@ -533,7 +568,7 @@ final class FloatTabsWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         refreshWebsiteLayoutScale()
-        transientScrollerController?.refreshScrollerState()
+        WebViewFactory.configureHiddenScrollers(in: self)
     }
 
     private func refreshWebsiteLayoutScale() {
@@ -545,84 +580,5 @@ final class FloatTabsWebView: WKWebView {
         if abs(pageZoom - effectivePageZoom) > 0.0001 {
             pageZoom = effectivePageZoom
         }
-    }
-}
-
-/// WKWebView retains this controller for its whole lifetime. The controller
-/// watches local scroll-wheel events over this WebView and temporarily exposes
-/// only the scroller axis that is actually moving. Once scrolling stops, both
-/// AppKit scrollers are removed again so they cannot reserve or paint idle UI.
-@MainActor
-private final class TransientWebScrollerController {
-    private weak var webView: WKWebView?
-    private var localScrollMonitor: Any?
-    private var hideWorkItem: DispatchWorkItem?
-
-    private static let idleHideDelay: TimeInterval = 0.6
-    private static let minimumDelta: CGFloat = 0.01
-
-    init(webView: WKWebView) {
-        self.webView = webView
-        refreshScrollerState()
-
-        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
-            [weak self] event in
-            self?.handleScrollWheel(event)
-            return event
-        }
-    }
-
-    deinit {
-        hideWorkItem?.cancel()
-        if let localScrollMonitor {
-            NSEvent.removeMonitor(localScrollMonitor)
-        }
-    }
-
-    func refreshScrollerState() {
-        guard let webView else { return }
-        WebViewFactory.configureHiddenScrollers(in: webView)
-    }
-
-    private func handleScrollWheel(_ event: NSEvent) {
-        guard let webView,
-              event.window === webView.window else {
-            return
-        }
-
-        let location = webView.convert(event.locationInWindow, from: nil)
-        guard webView.bounds.contains(location) else { return }
-
-        let showVertical = abs(event.scrollingDeltaY) > Self.minimumDelta
-        let showHorizontal = abs(event.scrollingDeltaX) > Self.minimumDelta
-        guard showVertical || showHorizontal else { return }
-
-        let scrollViews = WebViewFactory.descendantScrollViews(in: webView)
-        for scrollView in scrollViews {
-            WebViewFactory.setScrollerVisibility(
-                scrollView,
-                vertical: showVertical,
-                horizontal: showHorizontal
-            )
-        }
-
-        scheduleHide(for: scrollViews)
-    }
-
-    private func scheduleHide(for scrollViews: [NSScrollView]) {
-        hideWorkItem?.cancel()
-
-        let item = DispatchWorkItem { [weak self, weak webView] in
-            guard self != nil, webView != nil else { return }
-            for scrollView in scrollViews {
-                WebViewFactory.configureHiddenScrollerStyle(scrollView)
-            }
-        }
-
-        hideWorkItem = item
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.idleHideDelay,
-            execute: item
-        )
     }
 }

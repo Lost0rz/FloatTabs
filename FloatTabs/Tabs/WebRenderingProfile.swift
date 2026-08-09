@@ -277,8 +277,9 @@ struct WebRenderingProfile: Codable, Equatable {
         DevicePresetCatalog.preset(id: devicePresetID)
     }
 
-    /// Website Mode is an independent product layer. Exact browser identities
-    /// never coerce it; only Automatic uses it to resolve a compatibility UA.
+    /// Website Mode and Browser Identity are independent product layers.
+    /// Automatic follows the requested Website Mode, while an explicit identity
+    /// remains independent and always wins.
     var effectiveWebsiteMode: WebsiteMode {
         websiteMode
     }
