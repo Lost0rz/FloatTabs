@@ -1,7 +1,7 @@
 # Stage 4 Acceptance — Web Compatibility, Navigation, Sessions & OAuth
 
 > Status: IN PROGRESS
-> Current slice: 4C Session/OAuth QA
+> Current slice: 4D Upload / Download
 > Base main: `d2def2bbe136345445b48c31de2a0b1fd4d60d4c`
 > Stage 3 accepted merge: `c7326a44cb3e8ebdda1b2aec4d147229f91a8332`
 > Product override: `docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`
@@ -158,8 +158,6 @@ YouTube fullscreen regression                      PASS
 
 **4B is accepted.**
 
-A real OAuth provider is deliberately not required for 4B acceptance. Provider login and session persistence belong to 4C.
-
 ## 4C preparation gate
 
 Status: **PASS**
@@ -194,53 +192,56 @@ From this commit onward, do not change the application Bundle Identifier during 
 
 ## 4C — Session/OAuth QA gate
 
-Status: **PARTIAL REAL-MAC PASS — shared session profile confirmed**
+Status: **REAL-MAC PASS**
 
-Use:
+Detailed record:
 
 ```text
 docs/validation/Stage_4_Session_OAuth_Matrix.md
 ```
 
-Real-Mac evidence recorded on 2026-08-09:
+Real-Mac evidence on 2026-08-09:
 
 ```text
-ChatGPT authenticated use                           PASS
-Google authenticated state                         PASS
-YouTube authenticated state                        PASS
-Google session visible/reusable across FloatTabs Tabs PASS
+ChatGPT authenticated use                              PASS
+Google authenticated state                            PASS
+YouTube authenticated state                           PASS
+Google session visible/reusable across FloatTabs Tabs  PASS
+Full FloatTabs quit → relaunch preserves login state   PASS
+WKWebView rebuild preserves login state                PASS
 ```
 
-This confirms that ordinary persistent Slots are sharing the intended WebKit website-data/session profile in real use. Cross-Tab Google authentication is not isolated per Slot.
+This proves that ordinary persistent Slots use the intended shared, persistent `WKWebsiteDataStore.default()` website-data/session profile. The authenticated state is neither isolated per Tab nor lost when the app process exits or a persistent Slot WKWebView is rebuilt.
 
-The following two gates remain separate and are not inferred from cross-Tab sharing:
+**4C is accepted.**
 
-```text
-Quit FloatTabs completely → relaunch → authenticated state remains
-Website Mode / Browser Identity rebuild → authenticated state remains
-```
+Fresh provider OAuth/SSO entry flows may continue to be recorded as compatibility coverage when encountered naturally. Stage 4 does not add cookie imports, token serialization, provider-specific auth bypasses, or security-policy workarounds.
 
-Record detailed provider results in `Stage_4_Session_OAuth_Matrix.md`.
-
-The deferred Sina/redirect-sensitive mode-switch case may be investigated in this compatibility phase. It is not retroactively part of Stage 3 acceptance.
+The deferred Sina/redirect-sensitive mode-switch case remains a compatibility follow-up and is not retroactively part of Stage 3 acceptance.
 
 ## 4D — Upload/download gate
 
+Status: **IMPLEMENTATION IN PROGRESS**
+
 Upload must support:
 
+- `WKUIDelegate` open-panel request → `NSOpenPanel`;
 - single file;
 - multiple files when requested;
 - directories when requested;
 - cancellation;
 - real ChatGPT attachment QA;
-- real Claude attachment QA.
+- real Claude attachment QA when practical.
 
 Download must support:
 
-- WebKit download handoff;
+- explicit HTML download actions and unshowable MIME responses through WebKit's download policy;
+- `WKDownload` → `WKDownloadDelegate`;
 - user-selected destination through `NSSavePanel`;
 - cancellation/failure handling;
 - no custom download-manager UI.
+
+A deterministic repository fixture should cover upload controls and WebKit download initiation before real-site QA.
 
 ## Regression gate
 
@@ -257,4 +258,4 @@ Every Stage 4 slice must keep these green:
 
 ## Merge gate
 
-The Stage 4 PR remains Draft until all Stage 4 slices selected for the PR have their automated and real-Mac acceptance explicitly recorded. Do not mark Ready merely because 4B compiles.
+The Stage 4 PR remains Draft until 4D automated and Real-Mac acceptance are recorded. Do not mark Ready merely because file interaction compiles.
