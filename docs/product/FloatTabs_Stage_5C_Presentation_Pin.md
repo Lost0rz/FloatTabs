@@ -1,6 +1,8 @@
 # FloatTabs Stage 5C — Presentation + Pin
 
-Status: Draft implementation contract for Real-Mac validation.
+Status: **Functional contract frozen after Real-Mac Panel interaction acceptance.**
+
+Stage 5C product behavior is frozen at this point. No further interaction-model or residency-model changes should be made unless a later Real-Mac presentation check or benchmark produces concrete regression evidence. PR #11 remains Draft and is not approved for merge solely by this freeze.
 
 ## 1. Purpose
 
@@ -11,7 +13,7 @@ Stage 5C keeps the accepted Hot / Warm / Cold residency model and adds two targe
 
 The goal is a lightweight summonable panel that can also become persistent when the user explicitly needs side-by-side reference.
 
-## 2. Panel Visibility Model
+## 2. Panel Visibility Model — FROZEN
 
 Panel visibility and Slot residency are separate concepts.
 
@@ -35,7 +37,7 @@ Slot Residency
 - The outside-click path covers the full-screen/same-background-app case where FloatTabs was pinned, then unpinned, while the application behind it remained frontmost the entire time.
 - The auto-hide path does not reactivate a previously focused application; the application the user selected remains focused.
 
-Auto-hide therefore uses two signals:
+Auto-hide uses two signals:
 
 1. `NSWorkspace.didActivateApplicationNotification` for actual frontmost-application changes, including keyboard application switching.
 2. `NSEvent.addGlobalMonitorForEvents` for left/right/other mouse-down events delivered to other applications, including clicks into an already-frontmost application.
@@ -44,10 +46,10 @@ Auto-hide therefore uses two signals:
 
 ### Pinned
 
-- The existing external control zone exposes `pin` / `pin.fill`.
+- The external control zone exposes `pin` / `pin.fill`.
 - Pin is session-only and is not persisted.
 - Pinned means another application may become frontmost while FloatTabs remains visible above it.
-- `⌘⇧P` remains the app-local Pin toggle.
+- `⌘⇧P` is the app-local Pin toggle.
 - The global show/hide command may still explicitly hide a pinned panel.
 - Turning Pin OFF does not itself hide FloatTabs; the next outside click or frontmost-application change applies Auto-hide normally.
 
@@ -55,9 +57,9 @@ Auto-hide therefore uses two signals:
 
 Existing all-spaces / full-screen auxiliary behavior remains unchanged. Pin controls persistence, not whether FloatTabs is allowed to appear over a full-screen application.
 
-## 3. Temporary Global Summon Shortcut
+## 3. Temporary Global Summon Shortcut — FROZEN FOR STAGE 5C
 
-Until the Settings redesign introduces a dedicated Hotkeys page, Stage 5C uses this temporary default:
+Until the Settings redesign introduces a dedicated Hotkeys page, Stage 5C uses:
 
 ```text
 ⌘ + `
@@ -68,9 +70,9 @@ Behavior:
 - Hidden → `⌘ + \`` shows FloatTabs.
 - Visible → `⌘ + \`` explicitly hides FloatTabs.
 
-The summon shortcut is registered as a hard-coded `KeyboardShortcuts.Shortcut` event stream in Stage 5C. It intentionally does not use the persisted `KeyboardShortcuts.Name("toggleFloatTabs", initial: ...)` path, because earlier builds already stored that Name in `UserDefaults` and changing only the `initial` value does not replace an existing stored shortcut.
+The summon shortcut is registered as a hard-coded `KeyboardShortcuts.Shortcut` event stream. It intentionally does not use the persisted `KeyboardShortcuts.Name("toggleFloatTabs", initial: ...)` path, because earlier builds already stored that Name in `UserDefaults` and changing only the `initial` value does not replace an existing stored shortcut.
 
-This hard-coded default is provisional. A later Settings rebuild will replace it with a dedicated Hotkeys section using user-recordable shortcuts, alongside Appearance, global preferences, About/help, and other application-level settings. That Settings redesign is outside Stage 5C.
+This hard-coded binding is only the Stage 5C default. A later Settings rebuild will replace it with a dedicated Hotkeys section using user-recordable shortcuts, alongside Appearance, global preferences, About/help, and other application-level settings.
 
 Existing app-local direct Slot shortcuts remain:
 
@@ -80,7 +82,7 @@ Existing app-local direct Slot shortcuts remain:
 
 Bare `1 … 9` are not intercepted because WKWebView text fields, forms, search boxes and chat editors must retain normal numeric input.
 
-## 4. Slot Presentation
+## 4. Slot Presentation — IMPLEMENTATION FROZEN
 
 The Active Slot is the only Slot that should be visually presented.
 
@@ -118,13 +120,13 @@ Existing accepted behavior remains unchanged: detach, start the inactivity grace
 
 Presentation hiding may cause a site or WebKit to pause media even when `Background Media = Allow Background Audio`.
 
-Stage 5C does not add site-specific workarounds. Real-Mac acceptance must explicitly check:
+Stage 5C does not add site-specific workarounds. Remaining observation points before merge are:
 
-- ChatGPT: Hot + Pause When Inactive — return remains immediate and layout-correct.
-- YouTube Desktop: Hot + Allow Background Audio — determine whether audio survives inactive Hot host hiding.
+- ChatGPT: Hot + Pause When Inactive — return should remain immediate and layout-correct.
+- YouTube Desktop: Hot + Allow Background Audio — observe whether audio survives inactive Hot host hiding.
 - Bilibili: same observation where useful.
 
-If hiding an inactive Hot host breaks an explicitly allowed background-media use case, media policy and presentation policy must be reconciled explicitly rather than masked with autoplay overrides or JavaScript `play()` forcing.
+If a concrete regression is observed, only the affected presentation/media behavior should be unfrozen. Do not reintroduce shared hosts, WebContent suspension, autoplay overrides, or JavaScript `play()` forcing.
 
 ## 6. Non-goals
 
@@ -140,27 +142,46 @@ Stage 5C does not:
 - add site-specific background-media hacks;
 - make Safari/Chrome comparison a release blocker.
 
-## 7. Acceptance Gates
+## 7. Acceptance / Freeze Record
 
-Automated:
+Automated validation:
 
-- inactive Hot host remains attached to the same window and preserves its frame;
-- inactive Hot host becomes hidden;
-- reactivating the same Hot Slot unhides the same host/WebView;
-- Pin control and `⌘⇧P` mapping are present;
-- frontmost-app Auto-hide requires another process and Pin OFF;
-- external-mouse Auto-hide requires panel visible and Pin OFF, with no frontmost-app transition requirement;
-- `⌘ + \`` uses the hard-coded KeyboardShortcuts event path rather than the persisted Name/initial path;
-- existing Stage 4/5 unit tests remain green.
+- inactive Hot host remains attached to the same window and preserves its frame — PASS;
+- inactive Hot host becomes hidden — PASS;
+- reactivating the same Hot Slot unhides the same host/WebView — PASS;
+- Pin control and `⌘⇧P` mapping — PASS;
+- frontmost-app Auto-hide requires another process and Pin OFF — PASS;
+- external-mouse Auto-hide requires panel visible and Pin OFF, with no frontmost-app transition requirement — PASS;
+- `⌘ + \`` uses the hard-coded KeyboardShortcuts event path rather than the persisted Name/initial path — PASS;
+- existing Stage 4/5 unit tests — PASS.
 
-Real Mac:
+Relevant validation runs:
 
-1. `⌘ + \`` summons FloatTabs from another application and explicitly hides it when pressed again.
-2. Pin OFF: clicking another application makes that app frontmost and FloatTabs disappears.
-3. Pin ON: clicking another application leaves FloatTabs visible while the other application remains usable.
-4. Same-app regression: while the same full-screen application remains frontmost, turn Pin ON, then OFF, then click that same underlying application; FloatTabs must disappear immediately.
-5. `⌘1 … ⌘9` continues to switch Slots while FloatTabs is active.
-6. Full-screen auxiliary behavior still works in both Pin states.
-7. ChatGPT Hot switch-back remains immediate and scale/layout/input/scroll correct.
-8. YouTube Desktop Hot + Allow background-media behavior is observed with inactive Hot presentation hidden.
-9. After functional acceptance, rerun the PR #10 benchmark to compare Hot CPU/memory against the previous baseline.
+- Stage 5C Pin Refine `31323583567` — package resolution, Debug build, full Unit tests PASS.
+- Hard-coded shortcut infrastructure `31324227749` — PASS.
+- Command-backtick validation `31324594052` — path validation, package resolution, Debug build, full Unit tests PASS.
+- Same-frontmost-app outside-click regression `31325027100` — implementation validation, package resolution, Debug build, full Unit tests PASS.
+
+Real-Mac Panel interaction acceptance:
+
+1. `⌘ + \`` show/hide — **PASS**.
+2. Pin OFF + outside application interaction auto-hides — **PASS**.
+3. Pin ON keeps FloatTabs visible while another application is usable — **PASS**.
+4. Same-frontmost full-screen regression: Pin ON → Pin OFF → click the same underlying application → FloatTabs hides immediately — **PASS**.
+5. `⌘1 … ⌘9` Slot switching — previously accepted and unchanged in this stage.
+
+Remaining before merge/final performance conclusion:
+
+- ChatGPT Hot presentation-return observation;
+- YouTube Desktop Hot + Allow Background Audio observation;
+- rerun the PR #10 automatic benchmark on this stacked branch and compare Hot CPU/memory against the previous baseline.
+
+## 8. Freeze Rule
+
+From this commit onward, Stage 5C interaction behavior is frozen. Do not make opportunistic UI, hotkey, Panel visibility, or residency changes in PR #11. A change requires one of:
+
+1. reproducible Real-Mac regression;
+2. failing automated regression test;
+3. benchmark evidence showing a material product problem.
+
+Any future Settings / Appearance / configurable Hotkeys work belongs to a separate stage/PR.
