@@ -210,17 +210,17 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
-        restoreTransientScrollerPolicy(in: webView)
+        restoreHiddenScrollerPolicy(in: webView)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
-        restoreTransientScrollerPolicy(in: webView)
+        restoreHiddenScrollerPolicy(in: webView)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
-        restoreTransientScrollerPolicy(in: webView)
+        restoreHiddenScrollerPolicy(in: webView)
 
         DispatchQueue.main.async { [weak webView] in
             guard let webView else { return }
@@ -233,7 +233,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         didFail navigation: WKNavigation!,
         withError error: Error
     ) {
-        restoreTransientScrollerPolicy(in: webView)
+        restoreHiddenScrollerPolicy(in: webView)
     }
 
     func webView(
@@ -241,14 +241,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
-        restoreTransientScrollerPolicy(in: webView)
+        restoreHiddenScrollerPolicy(in: webView)
     }
 
     private func restoreWebsiteMode(in webView: WKWebView) {
         (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
     }
 
-    private func restoreTransientScrollerPolicy(in webView: WKWebView) {
+    private func restoreHiddenScrollerPolicy(in webView: WKWebView) {
         WebViewFactory.configureHiddenScrollers(in: webView)
     }
 }

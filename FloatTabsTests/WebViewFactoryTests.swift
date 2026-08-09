@@ -536,24 +536,35 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertFalse(scrollView.hasHorizontalScroller)
     }
 
-    func testScrollerVisibilityCanBeEnabledOnlyForActiveAxis() {
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
-        WebViewFactory.configureHiddenScrollerStyle(scrollView)
+    func testWebViewInstallsPermanentContentScrollbarSuppression() {
+        let webView = WebViewFactory.makeWebView()
+        let script = webView.configuration.userContentController.userScripts.first {
+            $0.source.contains("floattabs-hidden-scrollbar-style")
+        }
 
-        WebViewFactory.setScrollerVisibility(
-            scrollView,
-            vertical: true,
-            horizontal: false
+        XCTAssertNotNil(script)
+        XCTAssertEqual(script?.injectionTime, WKUserScriptInjectionTime.atDocumentStart)
+        XCTAssertFalse(script?.isForMainFrameOnly ?? true)
+        XCTAssertTrue(script?.source.contains("html::-webkit-scrollbar") == true)
+        XCTAssertTrue(script?.source.contains("scrollbar-width: none") == true)
+    }
+
+    func testContentScrollbarSuppressionPreservesDocumentScrolling() {
+        let webView = WebViewFactory.makeWebView()
+        _ = host(webView, visibleSize: NSSize(width: 320, height: 400))
+        loadTestHTML(in: webView)
+
+        let styleInstalled = evaluateNumber(
+            "document.getElementById('floattabs-hidden-scrollbar-style') ? 1 : 0",
+            in: webView
+        )
+        let scrollY = evaluateNumber(
+            "(() => { document.body.style.height = '2400px'; window.scrollTo(0, 200); return window.scrollY; })()",
+            in: webView
         )
 
-        XCTAssertEqual(scrollView.scrollerStyle, .overlay)
-        XCTAssertTrue(scrollView.autohidesScrollers)
-        XCTAssertTrue(scrollView.hasVerticalScroller)
-        XCTAssertFalse(scrollView.hasHorizontalScroller)
-
-        WebViewFactory.configureHiddenScrollerStyle(scrollView)
-        XCTAssertFalse(scrollView.hasVerticalScroller)
-        XCTAssertFalse(scrollView.hasHorizontalScroller)
+        XCTAssertEqual(styleInstalled, 1, accuracy: 0.001)
+        XCTAssertGreaterThan(scrollY, 0)
     }
 
     private func host(

@@ -373,6 +373,45 @@ enum WebsiteLayoutViewport {
 
 @MainActor
 enum WebViewFactory {
+    private static let hiddenScrollbarScriptSource = """
+    (() => {
+      const styleID = 'floattabs-hidden-scrollbar-style';
+      const install = () => {
+        const root = document.documentElement;
+        if (!root || document.getElementById(styleID)) return;
+
+        const style = document.createElement('style');
+        style.id = styleID;
+        style.textContent = `
+          html, body {
+            scrollbar-width: none !important;
+          }
+          html::-webkit-scrollbar,
+          body::-webkit-scrollbar {
+            width: 0 !important;
+            height: 0 !important;
+            display: none !important;
+          }
+        `;
+        (document.head || root).appendChild(style);
+      };
+
+      if (document.documentElement) {
+        install();
+      } else {
+        document.addEventListener('DOMContentLoaded', install, { once: true });
+      }
+    })();
+    """
+
+    static func hiddenScrollbarUserScript() -> WKUserScript {
+        WKUserScript(
+            source: hiddenScrollbarScriptSource,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+    }
+
     static func makeWebView(
         renderingProfile: WebRenderingProfile = .canonicalDefault
     ) -> WKWebView {
@@ -386,6 +425,7 @@ enum WebViewFactory {
         )
         configuration.defaultWebpagePreferences.preferredContentMode =
             rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
+        configuration.userContentController.addUserScript(hiddenScrollbarUserScript())
 
         let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
@@ -445,23 +485,10 @@ enum WebViewFactory {
     static func configureHiddenScrollerStyle(_ scrollView: NSScrollView) {
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
+        scrollView.verticalScroller?.isHidden = true
+        scrollView.horizontalScroller?.isHidden = true
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
-    }
-
-    static func setScrollerVisibility(
-        _ scrollView: NSScrollView,
-        vertical: Bool,
-        horizontal: Bool
-    ) {
-        scrollView.scrollerStyle = .overlay
-        scrollView.autohidesScrollers = true
-        scrollView.hasVerticalScroller = vertical
-        scrollView.hasHorizontalScroller = horizontal
-
-        if vertical || horizontal {
-            scrollView.flashScrollers()
-        }
     }
 
     static func loadStageZeroPage(in webView: WKWebView) {
@@ -505,14 +532,12 @@ enum WebViewFactory {
 /// final WebKit presentation boundary.
 @MainActor
 final class FloatTabsWebView: WKWebView {
-    private var transientScrollerController: TransientWebScrollerController?
     private(set) var websiteMode: WebsiteMode = .desktop
     private(set) var userPageZoom: CGFloat = 1
     private(set) var websiteLayoutScale: CGFloat = 1
 
     override init(frame frameRect: NSRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frameRect, configuration: configuration)
-        transientScrollerController = TransientWebScrollerController(webView: self)
         refreshWebsiteLayoutScale()
     }
 
@@ -543,7 +568,7 @@ final class FloatTabsWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         refreshWebsiteLayoutScale()
-        transientScrollerController?.refreshScrollerState()
+        WebViewFactory.configureHiddenScrollers(in: self)
     }
 
     private func refreshWebsiteLayoutScale() {
@@ -555,90 +580,5 @@ final class FloatTabsWebView: WKWebView {
         if abs(pageZoom - effectivePageZoom) > 0.0001 {
             pageZoom = effectivePageZoom
         }
-    }
-}
-
-/// WKWebView retains this controller for its whole lifetime. The controller
-/// watches local scroll-wheel events over this WebView and temporarily exposes
-/// only the scroller axis that is actually moving. Once scrolling stops, both
-/// AppKit scrollers are removed again so they cannot reserve or paint idle UI.
-@MainActor
-private final class TransientWebScrollerController {
-    private weak var webView: WKWebView?
-    private var localScrollMonitor: Any?
-    private var hideWorkItem: DispatchWorkItem?
-
-    private static let idleHideDelay: TimeInterval = 0.6
-    private static let minimumDelta: CGFloat = 0.01
-
-    init(webView: WKWebView) {
-        self.webView = webView
-        refreshScrollerState()
-
-        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
-            [weak self] event in
-            self?.handleScrollWheel(event)
-            return event
-        }
-    }
-
-    deinit {
-        hideWorkItem?.cancel()
-        if let localScrollMonitor {
-            NSEvent.removeMonitor(localScrollMonitor)
-        }
-    }
-
-    func refreshScrollerState() {
-        guard let webView else { return }
-        WebViewFactory.configureHiddenScrollers(in: webView)
-    }
-
-    private func handleScrollWheel(_ event: NSEvent) {
-        guard let webView,
-              event.window === webView.window else {
-            return
-        }
-
-        let location = webView.convert(event.locationInWindow, from: nil)
-        guard webView.bounds.contains(location) else { return }
-
-        let showVertical = abs(event.scrollingDeltaY) > Self.minimumDelta
-        let showHorizontal = abs(event.scrollingDeltaX) > Self.minimumDelta
-        guard showVertical || showHorizontal else { return }
-
-        let scrollViews = WebViewFactory.descendantScrollViews(in: webView)
-        for scrollView in scrollViews {
-            WebViewFactory.setScrollerVisibility(
-                scrollView,
-                vertical: showVertical,
-                horizontal: showHorizontal
-            )
-        }
-
-        scheduleHide()
-    }
-
-    private func scheduleHide() {
-        hideWorkItem?.cancel()
-
-        let item = DispatchWorkItem { [weak self] in
-            guard let webView = self?.webView else { return }
-            WebViewFactory.configureHiddenScrollers(in: webView)
-
-            // WebKit can replace its internal scroll view during the same layout
-            // turn. Re-scan once more on the next main-queue turn so the current
-            // scroller, not a stale captured instance, is forced back to rest.
-            DispatchQueue.main.async { [weak webView] in
-                guard let webView else { return }
-                WebViewFactory.configureHiddenScrollers(in: webView)
-            }
-        }
-
-        hideWorkItem = item
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.idleHideDelay,
-            execute: item
-        )
     }
 }
