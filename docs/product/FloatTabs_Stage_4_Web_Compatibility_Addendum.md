@@ -118,33 +118,41 @@ This removes the forced cold-cache penalty observed during Desktop ↔ Mobile sw
 
 If Real-Mac acceptance still finds mode switching materially too slow, the next optimization boundary is to remove the rebuild itself and apply mode-specific navigation preferences to a warm WebView. That is not claimed complete in this PR.
 
-## 7. Transient webpage scrollbar behavior
+## 7. Permanent webpage scrollbar suppression
 
-The accepted shell behavior is:
+Real-Mac testing showed that the previous transient policy was not reliable. It explicitly enabled AppKit scrollers during wheel events, called `flashScrollers()`, and attempted to disable them after a 0.6-second timer. WebKit could keep the visible right-edge scrollbar alive after that timer, so the policy did not match the original FloatTabs shell requirement.
+
+The accepted behavior is now simpler:
 
 ```text
-scroll begins → relevant overlay scroller may appear
-scroll idle   → scroller disappears
+webpage scrolling → remains fully functional
+visual root scrollbar → remains hidden
 ```
 
-The delayed hide must not retain stale `NSScrollView` references because WebKit can recreate/reconfigure internal scroll views during layout. The transient-scroller controller therefore re-enumerates the current WebKit descendant scroll views when the idle timer fires, and rechecks once on the next main-queue turn before returning them to the hidden-at-rest state.
+Implementation uses two boundaries:
 
-Real-Mac acceptance must verify that the webpage right-edge vertical scrollbar does not remain pinned after scrolling stops.
+1. AppKit descendant `NSScrollView` scrollers remain disabled/hidden; FloatTabs no longer installs a scroll-wheel monitor, no longer calls `flashScrollers()`, and no longer owns a delayed hide timer.
+2. A `WKUserScript` injected at document start suppresses the root `html/body` scrollbar in WebContent with `scrollbar-width: none` plus the WebKit scrollbar pseudo-element while leaving document overflow/scrolling untouched.
+
+Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY` after the visual scrollbar is suppressed.
 
 ## 8. Automated gate
 
-Final clean HEAD for this regression pass:
+Final clean code/workflow HEAD for this scrollbar regression pass:
 
 ```text
-68c85cc65e2a9dd913cb3d440658d6f7f383d59b
+713a8bd4e7119dd170a9b9e0d82b2f41dde21509
 ```
 
-macOS CI #237: **PASS**
+macOS CI #242: **PASS**
 
 - package resolution: PASS;
 - package lock unchanged: PASS;
 - Debug build: PASS;
 - full Unit Tests: PASS;
+- WebContent scrollbar suppression installed: PASS;
+- document scrolling preserved under suppression: PASS;
+- existing Mobile/Desktop identity tests remain green;
 - XCTest diagnostic artifact path retained for future failures.
 
 ## 9. Remaining Real-Mac gate
@@ -154,8 +162,8 @@ Before marking the PR Ready, validate:
 1. Bilibili — Automatic + Mobile renders the actual mobile site, not a zoomed/squeezed desktop document;
 2. Bilibili — Desktop links/content remain clickable;
 3. ChatGPT — Automatic + Mobile `+` / attachment menu remains stable and the file chooser opens;
-4. webpage right-edge scrollbar appears during scroll when appropriate and disappears after idle;
-5. Desktop ↔ Mobile switching is materially faster after restoring normal cache use;
+4. webpage right-edge root scrollbar remains visually hidden while trackpad/mouse scrolling continues to work normally;
+5. Desktop ↔ Mobile switching remains materially faster after restoring normal cache use;
 6. YouTube Desktop controls and element fullscreen remain normal.
 
 The PR remains Draft until these Real-Mac checks pass.
