@@ -49,7 +49,19 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Mobile medium width diagnostic
+      - name: Mobile attached medium width diagnostic
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumAttachedWebViewWidthIs390
+          test
+
+      - name: Mobile detached medium width diagnostic
         run: >-
           xcodebuild
           -project FloatTabs.xcodeproj
