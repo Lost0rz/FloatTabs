@@ -41,7 +41,7 @@ Use only:
 
 | Site | Direct Login | Google SSO | Apple SSO | Popup / Redirect | Restart Restore | Rendering Rebuild Restore | Notes |
 |---|---|---|---|---|---|---|---|
-| ChatGPT | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
+| ChatGPT | works | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | Real-Mac authenticated use is normal on the frozen Stage 4C baseline. |
 | Claude | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
 | Gemini | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
 | X | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
@@ -49,13 +49,36 @@ Use only:
 | TikTok | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
 | Facebook | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | not yet tested | |
 
+## Shared Google-session evidence — Real Mac, 2026-08-09
+
+The current Stage 4C baseline was also verified against Google-authenticated properties outside the minimum provider matrix:
+
+```text
+ChatGPT authenticated use                         PASS
+Google authenticated state                       PASS
+YouTube authenticated state                      PASS
+Google login/session visible across FloatTabs Tabs PASS
+```
+
+Observed behavior: after Google authentication exists in one FloatTabs Tab/Slot, other FloatTabs Tabs can read and reuse the existing Google authenticated state without a separate login. This is direct Real-Mac evidence that ordinary persistent Slots are sharing the intended WebKit website-data/session profile rather than using isolated per-Tab stores.
+
+This result validates **cross-Tab session sharing only**. It does not by itself mark either of these separate gates as passed:
+
+```text
+Quit FloatTabs → relaunch → session still authenticated
+Website Mode / Browser Identity rebuild → session still authenticated
+```
+
+Those remain explicit 4C acceptance checks.
+
 ## Minimum 4C acceptance set
 
 Stage 4 does not require every provider above to work. Providers are allowed to block embedded browsers.
 
 Before 4C can be accepted, record at least:
 
-- two real sites whose normal login/session works end-to-end;
+- two real sites whose normal authenticated use/session works;
+- cross-Tab shared-session behavior for at least one authenticated provider;
 - one complete quit/relaunch session-restore result;
 - one complete Browser Identity or Website Mode rebuild-restore result;
 - one OAuth/SSO flow when a tested site offers it, or an explicit provider-blocked result;
