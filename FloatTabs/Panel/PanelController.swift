@@ -213,7 +213,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
         if activeChanged, hasPositionedPanel, followPreferredSize {
-            applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
+            // Automatic Slot switching is a presentation transaction. Animating
+            // through intermediate window sizes exposes the container background
+            // while WebKit catches up, especially for heavy long-conversation SPAs.
+            applyPreferredViewport(
+                activeProfile.renderingProfile.viewportSize,
+                animated: false
+            )
         }
 
         let webView = webViewPool.webView(for: activeProfile)
@@ -402,7 +408,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
-    private func applyPreferredViewport(_ viewportSize: CGSize) {
+    private func applyPreferredViewport(
+        _ viewportSize: CGSize,
+        animated: Bool = true
+    ) {
         guard hasPositionedPanel else { return }
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
@@ -418,7 +427,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             visibleFrame: visibleFrame
         )
         guard target != panel.frame else { return }
-        panel.setFrame(target, display: true, animate: true)
+        panel.setFrame(target, display: true, animate: animated)
+        if !animated {
+            // Complete AppKit geometry before the resident target WebView is
+            // promoted, avoiding a stale-frame presentation during fast switches.
+            rootView.layoutSubtreeIfNeeded()
+        }
         persistPanelFrame()
     }
 
