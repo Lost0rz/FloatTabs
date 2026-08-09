@@ -27,13 +27,21 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
-        XCTAssertNil(webView.customUserAgent)
+        XCTAssertTrue(webView.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
         )
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true
         )
+
+        loadTestHTML(in: webView)
+        let hasMacRuntimeIdentity = evaluateNumber(
+            "navigator.userAgent.includes('Macintosh') && !navigator.userAgent.includes('iPhone') ? 1 : 0",
+            in: webView
+        )
+        XCTAssertEqual(hasMacRuntimeIdentity, 1, accuracy: 0.001)
         XCTAssertEqual(floatTabsWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }

@@ -133,8 +133,11 @@ enum UserAgentProvider {
         "Version/\(versions.safari) Safari/\(versions.webKit)"
     }
 
-    /// Runtime override. `nil` is deliberate for macOS Safari so WebKit can
-    /// supply its native UA plus `applicationNameForUserAgent`.
+    /// Runtime override. Desktop macOS Safari can stay `nil` so WebKit supplies
+    /// its native UA plus `applicationNameForUserAgent`. Mobile content mode is
+    /// different: WebKit synthesizes an iPhone UA when no override is present,
+    /// so keep Website Mode and browser identity independent by explicitly
+    /// restoring the macOS Safari identity there.
     static func customUserAgent(
         for renderingProfile: WebRenderingProfile
     ) -> String? {
@@ -151,7 +154,8 @@ enum UserAgentProvider {
             customUserAgent: profile.customUserAgent
         )
 
-        if identity == .macosSafari {
+        if identity == .macosSafari,
+           profile.effectiveWebsiteMode == .desktop {
             return nil
         }
 
