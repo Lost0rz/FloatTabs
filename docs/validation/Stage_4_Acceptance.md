@@ -1,7 +1,7 @@
 # Stage 4 Acceptance — Web Compatibility, Navigation, Sessions & OAuth
 
 > Status: IN PROGRESS
-> Current slice: 4B Popup / OAuth / External-Link Routing
+> Current slice: 4C preparation after 4B Real-Mac acceptance
 > Base main: `d2def2bbe136345445b48c31de2a0b1fd4d60d4c`
 > Stage 3 accepted merge: `c7326a44cb3e8ebdda1b2aec4d147229f91a8332`
 > Product override: `docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`
@@ -50,7 +50,23 @@ Full Unit Tests              PASS
 
 ## 4B — Popup/OAuth/external routing
 
-Status: **AUTOMATED PASS / REAL-MAC RETEST REQUIRED**
+Status: **AUTOMATED PASS + REAL-MAC PASS**
+
+Implemented in:
+
+```text
+102d93299da966a53b114f56837f153275409605
+feat: route web popups and external links
+```
+
+Validated by macOS CI #163:
+
+```text
+Resolve Swift packages       PASS
+Package lock unchanged       PASS
+Debug Build                  PASS
+Full Unit Tests              PASS
+```
 
 ### Routing model
 
@@ -102,86 +118,58 @@ Automated tests cover:
 - pooled WKWebViews retain a `PopupCoordinator`;
 - all existing Stage 0–3 tests remain green.
 
-### Reproducible real-Mac fixture
+### Deterministic Real-Mac fixture
 
-Do not hunt for a third-party website to exercise routing. Use the repository fixture:
+The repository includes:
 
 ```text
 docs/validation/fixtures/Stage4NavigationTest.html
 docs/validation/fixtures/same.html
 ```
 
-From the repository root run:
+Serve with:
 
 ```bash
 python3 -m http.server 8765 --directory docs/validation/fixtures
 ```
 
-Then add a temporary FloatTabs Slot with:
+Open in FloatTabs:
 
 ```text
 http://127.0.0.1:8765/Stage4NavigationTest.html
 ```
 
-Run these four controls in order:
+Observed server requests on the accepted run included successful `200` / `304` responses for `Stage4NavigationTest.html` and `same.html`. Automatic requests for `favicon.ico` / `apple-touch-icon*.png` returned 404 and are explicitly non-blocking because they are browser icon discovery, not navigation failures.
 
-1. **Same-site `target=_blank`**
-   - click `Open same-site page`;
-   - expected: `same.html` replaces the current FloatTabs Slot content;
-   - expected: no Safari/default-browser window;
-   - expected: no temporary popup.
-
-2. **Cross-site `target=_blank`**
-   - return to the fixture page and click `Open cross-site link`;
-   - expected: `example.com` opens in the macOS default browser;
-   - expected: FloatTabs stays on the fixture page;
-   - expected: no permanent FloatTabs Slot is created.
-
-3. **Scripted `window.open`**
-   - click `Open temporary popup`;
-   - expected: a separate temporary child panel appears above FloatTabs and loads `example.org`;
-   - expected: the left FloatTabs rail does not gain a new Slot;
-   - close the popup with its normal window close button;
-   - expected: the parent FloatTabs window becomes key again and its WebView accepts click/keyboard input immediately.
-
-4. **`about:blank` popup**
-   - click `Open about:blank popup`;
-   - expected: a temporary blank child panel appears;
-   - close it;
-   - expected: parent focus returns and no persistent Slot remains.
-
-The local fixture validates routing mechanics only. It is not OAuth support certification.
-
-### Real-site regression gate
-
-After the fixture passes, verify only the already-known real pages:
+### Real-Mac result — 2026-08-09
 
 ```text
-Bilibili Desktop new-window/card links       PASS / FAIL
-Bilibili Mobile remains interactive          PASS / FAIL
-YouTube ordinary interaction/fullscreen       PASS / FAIL
+same-site target=_blank stays in current Slot     PASS
+cross-site target=_blank opens default browser    PASS
+FloatTabs remains on parent page                  PASS
+scripted window.open creates temporary popup      PASS
+popup does not create permanent Slot              PASS
+popup close restores parent FloatTabs             PASS
+parent input/focus works after popup close         PASS
+about:blank temporary popup                        PASS
+Bilibili Desktop regression                        PASS
+YouTube fullscreen regression                      PASS
 ```
 
-**No real OAuth provider is required to pass 4B.** Authentication/session validation begins in 4C after the navigation mechanics are accepted and the app identity decision is frozen.
+**4B is accepted.**
 
-## What “OAuth/session validation” means
+A real OAuth provider is deliberately not required for 4B acceptance. Provider login and session persistence belong to 4C.
 
-Stage 4C authentication validation is not code-signing certification and is not “does a popup exist.” It verifies the full website session lifecycle.
+## 4C preparation gate
 
-For one provider/site, record separately:
+Before long-lived login/session QA begins:
 
-```text
-1. Can the normal login UI start?
-2. If login uses a popup, does the temporary child WebView appear correctly?
-3. Can the user complete or cancel that flow without losing the parent page?
-4. After successful login, is the parent Slot authenticated?
-5. Quit FloatTabs completely and relaunch: is the session still authenticated?
-6. Change a rendering setting that rebuilds the Slot WebView: is the same login session still available?
-```
+1. freeze the release application identity / Bundle Identifier once;
+2. physically separate `WebNavigationCoordinator` and `PopupCoordinator` into focused Web-layer files before adding more responsibilities;
+3. keep the accepted 4B routing behavior unchanged during that cleanup;
+4. rerun the full automated gate after the preparation commit.
 
-A site that performs OAuth through a same-window redirect is also valid; it does not need to create a popup. The QA record should describe the actual flow rather than forcing every provider into the popup path.
-
-No provider is declared supported until the complete sequence above is tested.
+Changing the Bundle Identifier can move the WebKit data container, so the identity freeze must happen **before** recording restart/session-persistence results, not during or after them.
 
 ## 4C — Session/OAuth QA gate
 
@@ -220,8 +208,6 @@ not yet tested
 ```
 
 The deferred Sina/redirect-sensitive mode-switch case may be investigated in this compatibility phase. It is not retroactively part of Stage 3 acceptance.
-
-Before long-lived public session QA, the release app identity / Bundle Identifier must be treated as a deliberate freeze decision because changing it later can move the WebKit data container.
 
 ## 4D — Upload/download gate
 
