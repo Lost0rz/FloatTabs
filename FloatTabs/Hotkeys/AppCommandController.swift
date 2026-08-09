@@ -25,7 +25,7 @@ final class AppCommandController {
         self.onCommand = onCommand
 
         monitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown]
+            matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
 
@@ -36,20 +36,7 @@ final class AppCommandController {
 
                 // Escape / Cmd+L are consumed. Outside mouse clicks continue to
                 // the underlying website after dismissing the temporary overlay.
-                if event.type == .keyDown {
-                    return nil
-                }
-            }
-
-            // Mobile page fitting can require a coordinate correction when the
-            // public WKWebView.pageZoom is greater than 1. Do not return a newly
-            // synthesized NSEvent to NSWindow for another hit-test: dynamic web
-            // UIs may mutate between mouseDown and mouseUp (for example opening
-            // a popover), which can make one physical click act like two. Consume
-            // the physical event and forward exactly one corrected event to the
-            // WKWebView that was hit before the page changed.
-            if Self.forwardCorrectedMobileWebClickIfNeeded(event) {
-                return nil
+                return event.type == .keyDown ? nil : event
             }
 
             guard event.type == .keyDown,
@@ -125,33 +112,6 @@ final class AppCommandController {
         return nil
     }
 
-    /// Maps a physical point on a Mobile page that has been enlarged by the
-    /// Website Mode fitting scale back into the unscaled WebKit input space.
-    ///
-    /// `pageZoom > 1` scales from the page's top-left. AppKit mouse coordinates
-    /// use a bottom-left origin, so x divides directly while y must preserve the
-    /// distance from the top edge before dividing by the layout scale.
-    nonisolated static func correctedMobileWebPoint(
-        _ point: NSPoint,
-        webViewSize: NSSize,
-        layoutScale: CGFloat
-    ) -> NSPoint {
-        guard layoutScale > 1.0001,
-              webViewSize.width > 0,
-              webViewSize.height > 0 else {
-            return point
-        }
-
-        let correctedX = point.x / layoutScale
-        let distanceFromTop = webViewSize.height - point.y
-        let correctedY = webViewSize.height - (distanceFromTop / layoutScale)
-
-        return NSPoint(
-            x: min(max(correctedX, 0), webViewSize.width),
-            y: min(max(correctedY, 0), webViewSize.height)
-        )
-    }
-
     static func presentedQuickURLOverlay(in window: NSWindow?) -> QuickURLOverlayView? {
         guard let contentView = window?.contentView else { return nil }
         return firstPresentedQuickURLOverlay(in: contentView)
@@ -177,66 +137,6 @@ final class AppCommandController {
 
         let point = superview.convert(event.locationInWindow, from: nil)
         return !overlay.frame.contains(point)
-    }
-
-    private static func forwardCorrectedMobileWebClickIfNeeded(_ event: NSEvent) -> Bool {
-        guard event.type == .leftMouseDown || event.type == .leftMouseUp,
-              let window = event.window,
-              let contentView = window.contentView else {
-            return false
-        }
-
-        let pointInContent = contentView.convert(event.locationInWindow, from: nil)
-        guard let hitView = contentView.hitTest(pointInContent),
-              let webView = containingFloatTabsWebView(startingAt: hitView),
-              webView.websiteMode == .mobile,
-              webView.websiteLayoutScale > 1.0001 else {
-            return false
-        }
-
-        let localPoint = webView.convert(event.locationInWindow, from: nil)
-        let correctedLocalPoint = correctedMobileWebPoint(
-            localPoint,
-            webViewSize: webView.bounds.size,
-            layoutScale: webView.websiteLayoutScale
-        )
-        let correctedWindowPoint = webView.convert(correctedLocalPoint, to: nil)
-
-        guard let correctedEvent = NSEvent.mouseEvent(
-            with: event.type,
-            location: correctedWindowPoint,
-            modifierFlags: event.modifierFlags,
-            timestamp: event.timestamp,
-            windowNumber: event.windowNumber,
-            context: nil,
-            eventNumber: event.eventNumber,
-            clickCount: event.clickCount,
-            pressure: event.pressure
-        ) else {
-            return false
-        }
-
-        switch event.type {
-        case .leftMouseDown:
-            webView.mouseDown(with: correctedEvent)
-        case .leftMouseUp:
-            webView.mouseUp(with: correctedEvent)
-        default:
-            return false
-        }
-
-        return true
-    }
-
-    private static func containingFloatTabsWebView(startingAt view: NSView) -> FloatTabsWebView? {
-        var current: NSView? = view
-        while let candidate = current {
-            if let webView = candidate as? FloatTabsWebView {
-                return webView
-            }
-            current = candidate.superview
-        }
-        return nil
     }
 
     private static func firstPresentedQuickURLOverlay(in view: NSView) -> QuickURLOverlayView? {
