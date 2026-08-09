@@ -126,7 +126,7 @@ final class BenchmarkControlServer {
                 Darwin.read(fd, bytes.baseAddress, bytes.count)
             }
             guard count > 0 else { break }
-            data.append(buffer, count: count)
+            data.append(contentsOf: buffer.prefix(count))
             if data.last == 0x0A { break }
         }
 
@@ -142,7 +142,7 @@ final class BenchmarkControlServer {
 
         Task { @MainActor [weak self] in
             guard let self else {
-                self?.writeResponse(["ok": false, "error": "server_stopped"], to: fd)
+                Darwin.close(fd)
                 return
             }
             let response = self.commandHandler(request)
