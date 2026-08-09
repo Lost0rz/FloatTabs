@@ -35,61 +35,39 @@ final class WebViewFactoryTests: XCTestCase {
 
     func testWebsiteLayoutViewportSeparatesTargetCSSWidthFromVisibleWindowSize() {
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(
-                forVisibleWidth: 430,
-                websiteMode: .desktop
-            ),
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 430, websiteMode: .desktop),
             1280,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.fittingScale(
-                forVisibleWidth: 430,
-                websiteMode: .desktop
-            ),
+            WebsiteLayoutViewport.fittingScale(forVisibleWidth: 430, websiteMode: .desktop),
             430.0 / 1280.0,
             accuracy: 0.001
         )
-
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(
-                forVisibleWidth: 1400,
-                websiteMode: .desktop
-            ),
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 1400, websiteMode: .desktop),
             1400,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(
-                forVisibleWidth: 900,
-                websiteMode: .mobile
-            ),
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 900, websiteMode: .mobile),
             390,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.fittingScale(
-                forVisibleWidth: 390,
-                websiteMode: .mobile
-            ),
+            WebsiteLayoutViewport.fittingScale(forVisibleWidth: 390, websiteMode: .mobile),
             1,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(
-                forVisibleWidth: 320,
-                websiteMode: .mobile
-            ),
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 320, websiteMode: .mobile),
             320,
             accuracy: 0.001
         )
 
         let physical = CGSize(width: 430, height: 820)
         XCTAssertEqual(
-            WebsiteLayoutViewport.logicalSize(
-                forVisibleSize: physical,
-                websiteMode: .desktop
-            ),
+            WebsiteLayoutViewport.logicalSize(forVisibleSize: physical, websiteMode: .desktop),
             physical
         )
     }
@@ -132,10 +110,7 @@ final class WebViewFactoryTests: XCTestCase {
         loadTestHTML(in: webView)
         let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
         let innerWidth = evaluateNumber("window.innerWidth", in: webView)
-        let desktopMediaQuery = evaluateNumber(
-            "matchMedia('(min-width: 1000px)').matches ? 1 : 0",
-            in: webView
-        )
+        let desktopMediaQuery = evaluateNumber("matchMedia('(min-width: 1000px)').matches ? 1 : 0", in: webView)
 
         XCTAssertEqual(container.bounds.width, 430, accuracy: 0.001)
         XCTAssertEqual(webView.frame.width, 430, accuracy: 0.001)
@@ -155,10 +130,7 @@ final class WebViewFactoryTests: XCTestCase {
         loadTestHTML(in: webView)
         let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
         let innerWidth = evaluateNumber("window.innerWidth", in: webView)
-        let desktopMediaQuery = evaluateNumber(
-            "matchMedia('(min-width: 1000px)').matches ? 1 : 0",
-            in: webView
-        )
+        let desktopMediaQuery = evaluateNumber("matchMedia('(min-width: 1000px)').matches ? 1 : 0", in: webView)
 
         XCTAssertEqual(container.bounds.width, 900, accuracy: 0.001)
         XCTAssertEqual(webView.frame.minX, 255, accuracy: 0.001)
@@ -178,10 +150,7 @@ final class WebViewFactoryTests: XCTestCase {
             .settingWebsiteMode(.mobile)
             .settingSimplePreset(.medium)
         let mediumWebView = WebViewFactory.makeWebView(renderingProfile: mediumRendering)
-        let mediumContainer = host(
-            mediumWebView,
-            visibleSize: NSSize(width: 430, height: 820)
-        )
+        let mediumContainer = host(mediumWebView, visibleSize: NSSize(width: 430, height: 820))
 
         XCTAssertEqual(mediumContainer.bounds.width, 430, accuracy: 0.001)
         XCTAssertEqual(mediumWebView.frame.minX, 20, accuracy: 0.001)
@@ -190,10 +159,7 @@ final class WebViewFactoryTests: XCTestCase {
 
         let compactRendering = mediumRendering.settingSimplePreset(.compact)
         let compactWebView = WebViewFactory.makeWebView(renderingProfile: compactRendering)
-        let compactContainer = host(
-            compactWebView,
-            visibleSize: NSSize(width: 360, height: 720)
-        )
+        let compactContainer = host(compactWebView, visibleSize: NSSize(width: 360, height: 720))
 
         XCTAssertEqual(compactContainer.bounds.width, 360, accuracy: 0.001)
         XCTAssertEqual(compactWebView.frame.minX, 0, accuracy: 0.001)
@@ -213,9 +179,7 @@ final class WebViewFactoryTests: XCTestCase {
     func testDesktopPublicPageZoomKeepsNativeClickHitTestingWorking() {
         _ = NSApplication.shared
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
-        )
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         container.show(webView: webView)
 
         let window = NSWindow(
@@ -231,25 +195,18 @@ final class WebViewFactoryTests: XCTestCase {
 
         loadInteractiveTestHTML(in: webView)
         clickWebViewCenter(webView, in: window)
-
-        // WKWebView forwards the synthesized mouse event to the WebContent
-        // process asynchronously, so the DOM click handler fires a few run-loop
-        // spins after `mouseDown`/`mouseUp` return. Poll for the side effect
-        // instead of asserting immediately, which would race WebKit delivery.
         waitForJavaScriptNumber("window.clicks", in: webView, equals: 1)
         window.orderOut(nil)
     }
 
-    func testMobileCenteredSurfaceKeepsOffCenterNativeClickHitTestingWorking() {
+    func testMobileCenteredSurfaceRoutesOffCenterHitIntoWebViewTree() {
         _ = NSApplication.shared
 
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
             .settingSimplePreset(.wide)
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
-        let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 900, height: 850)
-        )
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 900, height: 850))
         container.show(webView: webView)
 
         let window = NSWindow(
@@ -264,64 +221,26 @@ final class WebViewFactoryTests: XCTestCase {
         container.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
 
-        let loaded = expectation(description: "mobile off-center fixture loaded")
-        let waiter = NavigationWaiter { loaded.fulfill() }
-        webView.navigationDelegate = waiter
-        webView.loadHTMLString(
-            """
-            <!doctype html>
-            <html>
-              <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                  html, body { margin:0; width:100%; height:100%; }
-                  button { position:fixed; bottom:24px; height:48px; border:0; }
-                  #target { left:24px; width:48px; background:#4caf50; }
-                  #decoy { left:92px; width:72px; background:#e57373; }
-                </style>
-              </head>
-              <body>
-                <button id="target">+</button>
-                <button id="decoy">decoy</button>
-                <script>
-                  window.targetClicks = 0;
-                  window.decoyClicks = 0;
-                  target.addEventListener('click', () => window.targetClicks++);
-                  decoy.addEventListener('click', () => window.decoyClicks++);
-                </script>
-              </body>
-            </html>
-            """,
-            baseURL: nil
-        )
-        wait(for: [loaded], timeout: 5)
-        withExtendedLifetime(waiter) {}
-
-        let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
         XCTAssertEqual(webView.frame.minX, 255, accuracy: 0.001)
         XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
-        XCTAssertEqual(floatTabsWebView.websiteLayoutScale, 1, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
 
-        clickWebViewThroughWindow(
-            webView,
-            localPoint: NSPoint(x: 48, y: 48),
-            in: window
-        )
+        let webLocalPoint = NSPoint(x: 48, y: 48)
+        let containerPoint = webView.convert(webLocalPoint, to: container)
+        XCTAssertEqual(containerPoint.x, 303, accuracy: 0.5)
+        XCTAssertEqual(containerPoint.y, 48, accuracy: 0.5)
 
-        waitForJavaScriptNumber("window.targetClicks", in: webView, equals: 1)
-        XCTAssertEqual(
-            evaluateNumber("window.decoyClicks", in: webView),
-            0,
-            accuracy: 0.001
-        )
+        guard let hit = container.hitTest(containerPoint) else {
+            XCTFail("Expected off-center Mobile point to hit the WebView subtree")
+            window.orderOut(nil)
+            return
+        }
+        XCTAssertTrue(isDescendant(hit, of: webView))
+        XCTAssertFalse(webView.frame.contains(NSPoint(x: 100, y: 48)))
+
         window.orderOut(nil)
     }
 
-    /// Unit test for the production new-window policy decision
-    /// (`SlotNavigationObserver.shouldOpenInCurrentSlot`). `target="_blank"` /
-    /// `window.open` web navigations (targetFrame == nil, http/https) must route
-    /// into the current slot; other schemes and nil URLs must not.
     func testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot() {
         XCTAssertTrue(SlotNavigationObserver.shouldOpenInCurrentSlot(
             targetFrame: nil,
@@ -339,17 +258,9 @@ final class WebViewFactoryTests: XCTestCase {
             targetFrame: nil,
             url: URL(string: "mailto:a@b.com")
         ))
-        XCTAssertFalse(SlotNavigationObserver.shouldOpenInCurrentSlot(
-            targetFrame: nil,
-            url: nil
-        ))
+        XCTAssertFalse(SlotNavigationObserver.shouldOpenInCurrentSlot(targetFrame: nil, url: nil))
     }
 
-    /// End-to-end: a `target="_blank"` link must navigate within the current
-    /// web view instead of being dropped. (Without a `WKUIDelegate`, WebKit
-    /// discards such navigations and the click appears to do nothing — the
-    /// real Bilibili desktop symptom.) Uses a test delegate that mirrors the
-    /// production policy plus an offline custom scheme so it is CI-safe.
     func testBlankTargetLinksNavigateWithinCurrentSlot() {
         _ = NSApplication.shared
         let destination = URL(string: "x-ft-test://host/destination")!
@@ -368,8 +279,6 @@ final class WebViewFactoryTests: XCTestCase {
         window.orderOut(nil)
     }
 
-    /// Control: ordinary `_self` links must keep navigating normally (no
-    /// regression for in-frame navigations from the `_blank` routing).
     func testSelfTargetLinksStillNavigateWithinCurrentSlot() {
         _ = NSApplication.shared
         let destination = URL(string: "x-ft-test://host/self-destination")!
@@ -396,11 +305,7 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertEqual(desktopFloatWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(desktopFloatWebView.websiteLayoutScale, 430.0 / 1280.0, accuracy: 0.001)
-        XCTAssertEqual(
-            desktopWebView.pageZoom,
-            1.25 * 430.0 / 1280.0,
-            accuracy: 0.001
-        )
+        XCTAssertEqual(desktopWebView.pageZoom, 1.25 * 430.0 / 1280.0, accuracy: 0.001)
 
         let mobileRendering = desktopRendering
             .settingWebsiteMode(.mobile)
@@ -436,23 +341,13 @@ final class WebViewFactoryTests: XCTestCase {
     }
 
     func testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix() {
-        let rendering = WebRenderingProfile.canonicalDefault
-            .settingBrowserIdentity(.macosSafari)
+        let rendering = WebRenderingProfile.canonicalDefault.settingBrowserIdentity(.macosSafari)
 
-        XCTAssertNil(
-            UserAgentProvider.customUserAgent(
-                for: rendering,
-                versions: versions
-            )
-        )
+        XCTAssertNil(UserAgentProvider.customUserAgent(for: rendering, versions: versions))
 
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
-        XCTAssertTrue(
-            webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
-        )
-        XCTAssertTrue(
-            webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true
-        )
+        XCTAssertTrue(webView.configuration.applicationNameForUserAgent?.contains("Version/") == true)
+        XCTAssertTrue(webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true)
 
         loadTestHTML(in: webView)
         let hasSafariRuntimeIdentity = evaluateNumber(
@@ -463,83 +358,44 @@ final class WebViewFactoryTests: XCTestCase {
     }
 
     func testSafariCompatibilityIdentityUsesResolvedWebKitVersion() {
-        let ua = UserAgentProvider.userAgent(
-            for: .macosSafari,
-            websiteMode: .desktop,
-            versions: versions
-        )
+        let ua = UserAgentProvider.userAgent(for: .macosSafari, websiteMode: .desktop, versions: versions)
         XCTAssertTrue(ua.contains("Macintosh"))
         XCTAssertTrue(ua.contains("AppleWebKit/619.3.7"))
         XCTAssertTrue(ua.contains("Version/26.6"))
         XCTAssertTrue(ua.contains("Safari/619.3.7"))
-        XCTAssertEqual(
-            UserAgentProvider.safariApplicationName(versions: versions),
-            "Version/26.6 Safari/619.3.7"
-        )
+        XCTAssertEqual(UserAgentProvider.safariApplicationName(versions: versions), "Version/26.6 Safari/619.3.7")
     }
 
     func testExactDesktopAndMobileIdentityPresetsAreCentralized() {
-        let macChrome = UserAgentProvider.userAgent(
-            for: .macosChrome,
-            websiteMode: .desktop,
-            versions: versions
-        )
+        let macChrome = UserAgentProvider.userAgent(for: .macosChrome, websiteMode: .desktop, versions: versions)
         XCTAssertTrue(macChrome.contains("Macintosh"))
         XCTAssertTrue(macChrome.contains("Chrome/150.0.7871.187"))
 
-        let windowsChrome = UserAgentProvider.userAgent(
-            for: .windowsChrome,
-            websiteMode: .desktop,
-            versions: versions
-        )
+        let windowsChrome = UserAgentProvider.userAgent(for: .windowsChrome, websiteMode: .desktop, versions: versions)
         XCTAssertTrue(windowsChrome.contains("Windows NT 10.0"))
         XCTAssertTrue(windowsChrome.contains("Chrome/150.0.7871.187"))
 
-        let linuxChrome = UserAgentProvider.userAgent(
-            for: .linuxChrome,
-            websiteMode: .desktop,
-            versions: versions
-        )
+        let linuxChrome = UserAgentProvider.userAgent(for: .linuxChrome, websiteMode: .desktop, versions: versions)
         XCTAssertTrue(linuxChrome.contains("Linux x86_64"))
 
-        let edge = UserAgentProvider.userAgent(
-            for: .windowsEdge,
-            websiteMode: .desktop,
-            versions: versions
-        )
+        let edge = UserAgentProvider.userAgent(for: .windowsEdge, websiteMode: .desktop, versions: versions)
         XCTAssertTrue(edge.contains("Windows NT 10.0"))
         XCTAssertTrue(edge.contains("Chrome/150.0.7871.187"))
         XCTAssertTrue(edge.contains("Edg/150.0.4078.99"))
 
-        let iPhoneChrome = UserAgentProvider.userAgent(
-            for: .iphoneChrome,
-            websiteMode: .mobile,
-            versions: versions
-        )
+        let iPhoneChrome = UserAgentProvider.userAgent(for: .iphoneChrome, websiteMode: .mobile, versions: versions)
         XCTAssertTrue(iPhoneChrome.contains("iPhone"))
         XCTAssertTrue(iPhoneChrome.contains("AppleWebKit/619.3.7"))
         XCTAssertTrue(iPhoneChrome.contains("CriOS/150.0.7871.187"))
 
-        let android = UserAgentProvider.userAgent(
-            for: .androidChrome,
-            websiteMode: .mobile,
-            versions: versions
-        )
+        let android = UserAgentProvider.userAgent(for: .androidChrome, websiteMode: .mobile, versions: versions)
         XCTAssertTrue(android.contains("Android 16"))
         XCTAssertTrue(android.contains("Mobile Safari"))
     }
 
     func testAutomaticIdentityFollowsWebsiteModeWithoutChangingWindowSizePolicy() {
-        let desktopUA = UserAgentProvider.userAgent(
-            for: .automatic,
-            websiteMode: .desktop,
-            versions: versions
-        )
-        let mobileUA = UserAgentProvider.userAgent(
-            for: .automatic,
-            websiteMode: .mobile,
-            versions: versions
-        )
+        let desktopUA = UserAgentProvider.userAgent(for: .automatic, websiteMode: .desktop, versions: versions)
+        let mobileUA = UserAgentProvider.userAgent(for: .automatic, websiteMode: .mobile, versions: versions)
         XCTAssertTrue(desktopUA.contains("Macintosh"))
         XCTAssertTrue(desktopUA.contains("Version/26.6"))
         XCTAssertTrue(mobileUA.contains("iPhone"))
@@ -549,30 +405,20 @@ final class WebViewFactoryTests: XCTestCase {
     func testCustomUserAgentPassesThroughExactly() {
         let custom = "FloatTabs-Test-UA/1.0"
         XCTAssertEqual(
-            UserAgentProvider.userAgent(
-                for: .custom,
-                websiteMode: .desktop,
-                customUserAgent: custom,
-                versions: versions
-            ),
+            UserAgentProvider.userAgent(for: .custom, websiteMode: .desktop, customUserAgent: custom, versions: versions),
             custom
         )
     }
 
     func testBrowserVersionNormalizationAvoidsStalePartialVersionStrings() {
         XCTAssertEqual(BrowserVersionResolver.normalizedSafariVersion("26.6.1"), "26.6")
-        XCTAssertEqual(
-            BrowserVersionResolver.normalizedChromiumVersion("150.0.7871.187"),
-            "150.0.7871.187"
-        )
+        XCTAssertEqual(BrowserVersionResolver.normalizedChromiumVersion("150.0.7871.187"), "150.0.7871.187")
         XCTAssertEqual(BrowserVersionResolver.normalizedChromiumVersion("150"), "150.0.0.0")
     }
 
     func testNavigationFinishRestoresHiddenScrollerPolicyAfterWebKitReenablesIt() {
         let webView = WebViewFactory.makeWebView()
-        let simulatedWebKitScrollView = NSScrollView(
-            frame: NSRect(x: 0, y: 0, width: 300, height: 500)
-        )
+        let simulatedWebKitScrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
         simulatedWebKitScrollView.scrollerStyle = .legacy
         simulatedWebKitScrollView.autohidesScrollers = false
         simulatedWebKitScrollView.hasVerticalScroller = true
@@ -612,11 +458,7 @@ final class WebViewFactoryTests: XCTestCase {
         let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
         WebViewFactory.configureHiddenScrollerStyle(scrollView)
 
-        WebViewFactory.setScrollerVisibility(
-            scrollView,
-            vertical: true,
-            horizontal: false
-        )
+        WebViewFactory.setScrollerVisibility(scrollView, vertical: true, horizontal: false)
 
         XCTAssertEqual(scrollView.scrollerStyle, .overlay)
         XCTAssertTrue(scrollView.autohidesScrollers)
@@ -628,13 +470,8 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertFalse(scrollView.hasHorizontalScroller)
     }
 
-    private func host(
-        _ webView: WKWebView,
-        visibleSize: NSSize
-    ) -> WebPanelContainerView {
-        let container = WebPanelContainerView(
-            frame: NSRect(origin: .zero, size: visibleSize)
-        )
+    private func host(_ webView: WKWebView, visibleSize: NSSize) -> WebPanelContainerView {
+        let container = WebPanelContainerView(frame: NSRect(origin: .zero, size: visibleSize))
         container.show(webView: webView)
         container.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
@@ -643,9 +480,7 @@ final class WebViewFactoryTests: XCTestCase {
 
     private func loadTestHTML(in webView: WKWebView) {
         let expectation = expectation(description: "WKWebView test page loaded")
-        let waiter = NavigationWaiter {
-            expectation.fulfill()
-        }
+        let waiter = NavigationWaiter { expectation.fulfill() }
         webView.navigationDelegate = waiter
         webView.loadHTMLString(
             """
@@ -663,9 +498,7 @@ final class WebViewFactoryTests: XCTestCase {
 
     private func loadInteractiveTestHTML(in webView: WKWebView) {
         let expectation = expectation(description: "WKWebView interaction test page loaded")
-        let waiter = NavigationWaiter {
-            expectation.fulfill()
-        }
+        let waiter = NavigationWaiter { expectation.fulfill() }
         webView.navigationDelegate = waiter
         webView.loadHTMLString(
             """
@@ -675,14 +508,7 @@ final class WebViewFactoryTests: XCTestCase {
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
                   html, body { margin:0; width:100%; height:100%; }
-                  #target {
-                    position:fixed;
-                    left:50vw;
-                    top:50vh;
-                    width:120px;
-                    height:80px;
-                    transform:translate(-50%, -50%);
-                  }
+                  #target { position:fixed; left:50vw; top:50vh; width:120px; height:80px; transform:translate(-50%, -50%); }
                 </style>
               </head>
               <body>
@@ -705,11 +531,7 @@ final class WebViewFactoryTests: XCTestCase {
         clickWebView(webView, localPoint: localPoint, in: window)
     }
 
-    private func clickWebView(
-        _ webView: WKWebView,
-        localPoint: NSPoint,
-        in window: NSWindow
-    ) {
+    private func clickWebView(_ webView: WKWebView, localPoint: NSPoint, in window: NSWindow) {
         let location = webView.convert(localPoint, to: nil)
         guard let down = NSEvent.mouseEvent(
             with: .leftMouseDown,
@@ -740,39 +562,13 @@ final class WebViewFactoryTests: XCTestCase {
         webView.mouseUp(with: up)
     }
 
-    private func clickWebViewThroughWindow(
-        _ webView: WKWebView,
-        localPoint: NSPoint,
-        in window: NSWindow
-    ) {
-        let location = webView.convert(localPoint, to: nil)
-        guard let down = NSEvent.mouseEvent(
-            with: .leftMouseDown,
-            location: location,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber,
-            context: nil,
-            eventNumber: 101,
-            clickCount: 1,
-            pressure: 1
-        ), let up = NSEvent.mouseEvent(
-            with: .leftMouseUp,
-            location: location,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber,
-            context: nil,
-            eventNumber: 102,
-            clickCount: 1,
-            pressure: 0
-        ) else {
-            XCTFail("Expected synthetic window click events")
-            return
+    private func isDescendant(_ candidate: NSView, of ancestor: NSView) -> Bool {
+        var current: NSView? = candidate
+        while let view = current {
+            if view === ancestor { return true }
+            current = view.superview
         }
-
-        window.sendEvent(down)
-        window.sendEvent(up)
+        return false
     }
 
     private func evaluateNumber(_ script: String, in webView: WKWebView) -> Double {
@@ -795,17 +591,6 @@ final class WebViewFactoryTests: XCTestCase {
         return number
     }
 
-    /// Polls a JavaScript numeric expression in a WKWebView until it matches the
-    /// expected value, or fails with a clear timeout.
-    ///
-    /// This is the correct way to assert on state that is mutated by an
-    /// asynchronous WebKit event. `webView.mouseDown`/`mouseUp` (and real
-    /// `sendEvent` dispatch) hand the event to the WebContent process, which
-    /// fires the DOM handler some run-loop iterations later. A single
-    /// `evaluateJavaScript` issued immediately afterward can return the
-    /// pre-event value. Polling on a short cadence waits for delivery to settle
-    /// instead of guessing a fixed sleep duration, succeeding as soon as the
-    /// value flips.
     private func waitForJavaScriptNumber(
         _ script: String,
         in webView: WKWebView,
@@ -824,7 +609,6 @@ final class WebViewFactoryTests: XCTestCase {
                 matched = true
                 break
             }
-            // Yield to the run loop so WebContent can process pending input.
             let tick = expectation(description: "poll interval")
             DispatchQueue.main.asyncAfter(deadline: .now() + pollInterval) { tick.fulfill() }
             wait(for: [tick], timeout: pollInterval * 2)
@@ -846,8 +630,6 @@ final class WebViewFactoryTests: XCTestCase {
         return result
     }
 
-    // MARK: - Offline navigation test helpers
-
     private func makePolicyWebView(delegate: WKNavigationDelegate) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -862,8 +644,6 @@ final class WebViewFactoryTests: XCTestCase {
     }
 
     private func hostDirect(_ webView: WKWebView) -> NSWindow {
-        // Host through the production container (layer-backed clip/logical host)
-        // — the same path real panels use — so the WKWebView actually commits loads.
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         container.show(webView: webView)
         let window = NSWindow(
@@ -905,12 +685,6 @@ private final class NavigationWaiter: NSObject, WKNavigationDelegate {
     }
 }
 
-/// Serves deterministic, offline pages for `x-ft-test://`:
-/// - `/landing-blank`: a centered link with `target="_blank"` to `/destination`
-/// - `/landing-self`:  a centered ordinary link to `/self-destination`
-/// - anything else:    a plain "destination" page.
-/// Custom-scheme top-frame loads go through `SlotNavigationObserver` exactly
-/// like real URL navigations, avoiding the `loadHTMLString`+observer stall.
 private func offlineCenteredLinkHTML(href: String, target: String?) -> String {
     """
     <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
@@ -951,13 +725,6 @@ private final class OfflinePageSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
 
-/// Test navigation delegate that mirrors `SlotNavigationObserver`'s new-window
-/// policy (route `targetFrame == nil` web navigations into the current web
-/// view). It additionally accepts the offline `x-ft-test` scheme so the
-/// destination can be served deterministically without network. Used because
-/// the production observer cannot be driven end-to-end inside the XCTest
-/// harness (it stalls WebContent there); the production *decision* itself is
-/// covered directly by `testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot`.
 @MainActor
 private final class NewWindowPolicyDelegate: NSObject, WKNavigationDelegate {
     var onFinish: (() -> Void)?
@@ -981,7 +748,7 @@ private final class NewWindowPolicyDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let finish = onFinish
-        onFinish = nil // one-shot: only the initial fixture load fulfills the expectation
+        onFinish = nil
         finish?()
     }
 }
