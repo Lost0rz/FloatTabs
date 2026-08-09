@@ -162,7 +162,7 @@ Bilibili Mobile remains interactive          PASS / FAIL
 YouTube ordinary interaction/fullscreen       PASS / FAIL
 ```
 
-One real login/OAuth smoke check may be recorded, but 4B does **not** require declaring any provider fully supported.
+**No real OAuth provider is required to pass 4B.** Authentication/session validation begins in 4C after the navigation mechanics are accepted and the app identity decision is frozen.
 
 ## What “OAuth/session validation” means
 
