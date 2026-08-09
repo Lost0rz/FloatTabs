@@ -65,7 +65,18 @@ final class WebViewPool {
 
         if let existing = webViews[profile.id],
            let appliedRendering = appliedRenderingProfiles[profile.id] {
-            if desiredRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
+            let compatibilityURL = Self.rebuildNavigationURL(
+                initialURL: nil,
+                visibleURL: existing.url,
+                storedCurrentURL: profile.currentURL,
+                homeURL: profile.homeURL
+            )
+            let desiredRuntimeRendering = SiteCompatibilityPolicy.runtimeRendering(
+                for: desiredRendering,
+                navigationURL: compatibilityURL
+            )
+
+            if desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
                 let navigationURL = Self.rebuildNavigationURL(
                     initialURL: existing.backForwardList.currentItem?.initialURL,
                     visibleURL: existing.url,
@@ -78,8 +89,11 @@ final class WebViewPool {
                 )
             }
 
-            WebViewFactory.applyRuntimeRendering(desiredRendering, to: existing)
-            appliedRenderingProfiles[profile.id] = desiredRendering
+            // Reapply the effective runtime profile, not the persisted base profile.
+            // Narrow compatibility overrides such as ChatGPT Automatic+Mobile must
+            // remain stable when a warm WKWebView is detached and later reused.
+            WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
+            appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
             return existing
         }
@@ -205,7 +219,9 @@ final class WebViewPool {
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
-        appliedRenderingProfiles[profile.id] = rendering
+        // Store the effective runtime profile so warm-slot reuse compares against
+        // the identity actually applied to this WKWebView.
+        appliedRenderingProfiles[profile.id] = runtimeRendering
         lastKnownURLs[profile.id] = navigationURL
         deferredReloadSlotIDs.remove(profile.id)
 
