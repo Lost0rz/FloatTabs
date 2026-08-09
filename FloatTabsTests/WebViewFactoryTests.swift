@@ -303,7 +303,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(floatTabsWebView.websiteLayoutScale, 1, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
 
-        clickWebView(
+        clickWebViewThroughWindow(
             webView,
             localPoint: NSPoint(x: 48, y: 48),
             in: window
@@ -738,6 +738,41 @@ final class WebViewFactoryTests: XCTestCase {
 
         webView.mouseDown(with: down)
         webView.mouseUp(with: up)
+    }
+
+    private func clickWebViewThroughWindow(
+        _ webView: WKWebView,
+        localPoint: NSPoint,
+        in window: NSWindow
+    ) {
+        let location = webView.convert(localPoint, to: nil)
+        guard let down = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 101,
+            clickCount: 1,
+            pressure: 1
+        ), let up = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: location,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 102,
+            clickCount: 1,
+            pressure: 0
+        ) else {
+            XCTFail("Expected synthetic window click events")
+            return
+        }
+
+        window.sendEvent(down)
+        window.sendEvent(up)
     }
 
     private func evaluateNumber(_ script: String, in webView: WKWebView) -> Double {
