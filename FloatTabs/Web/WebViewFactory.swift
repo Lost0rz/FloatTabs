@@ -419,10 +419,12 @@ enum WebViewFactory {
             webView.pageZoom = rendering.zoom
         }
 
-        webView.customUserAgent = UserAgentProvider.customUserAgent(
-            for: rendering,
-            versions: versions
-        )
+        if rendering.browserIdentity != .automatic {
+            webView.customUserAgent = UserAgentProvider.customUserAgent(
+                for: rendering,
+                versions: versions
+            )
+        }
     }
 
     /// At rest the WebView owns no visible AppKit scroller at all. This avoids
