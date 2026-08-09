@@ -1,23 +1,29 @@
 import KeyboardShortcuts
 
-extension KeyboardShortcuts.Name {
-    static let toggleFloatTabs = Self(
-        "toggleFloatTabs",
-        initial: .init(.space, modifiers: [.option])
-    )
-}
-
 @MainActor
 final class GlobalHotkeyController {
+    private static let summonShortcut = KeyboardShortcuts.Shortcut(
+        .space,
+        modifiers: [.option]
+    )
+
     private let onToggle: () -> Void
+    private var eventTask: Task<Void, Never>?
 
     init(onToggle: @escaping () -> Void) {
         self.onToggle = onToggle
 
-        KeyboardShortcuts.onKeyUp(for: .toggleFloatTabs) { [weak self] in
-            Task { @MainActor [weak self] in
+        let shortcut = Self.summonShortcut
+        eventTask = Task { [weak self] in
+            for await eventType in KeyboardShortcuts.events(for: shortcut)
+            where eventType == .keyUp {
+                guard !Task.isCancelled else { return }
                 self?.onToggle()
             }
         }
+    }
+
+    deinit {
+        eventTask?.cancel()
     }
 }
