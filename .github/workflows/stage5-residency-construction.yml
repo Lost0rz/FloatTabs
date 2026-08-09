@@ -25,23 +25,8 @@ jobs:
           from pathlib import Path
           path = Path('FloatTabs/Web/WebViewContainer.swift')
           text = path.read_text()
-          old = '''    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
-              for slotID in hotHostViews.keys where !validHotSlotIDs.contains(slotID) {
-                  guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
-                  host.webView?.removeFromSuperview()
-                  host.removeFromSuperview()
-              }
-          }
-          '''
-          new = '''    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
-              let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
-              for slotID in staleHotSlotIDs {
-                  guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
-                  host.webView?.removeFromSuperview()
-                  host.removeFromSuperview()
-              }
-          }
-          '''
+          old = "    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {\n        for slotID in hotHostViews.keys where !validHotSlotIDs.contains(slotID) {\n            guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }\n            host.webView?.removeFromSuperview()\n            host.removeFromSuperview()\n        }\n    }\n"
+          new = "    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {\n        let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }\n        for slotID in staleHotSlotIDs {\n            guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }\n            host.webView?.removeFromSuperview()\n            host.removeFromSuperview()\n        }\n    }\n"
           if text.count(old) != 1:
               raise SystemExit(f'expected one retainHotSlots match, found {text.count(old)}')
           path.write_text(text.replace(old, new, 1))
