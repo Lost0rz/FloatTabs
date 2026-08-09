@@ -278,8 +278,8 @@ struct WebRenderingProfile: Codable, Equatable {
     }
 
     /// Website Mode and Browser Identity are independent product layers.
-    /// Automatic follows FloatTabs' native macOS WKWebView identity; only an
-    /// explicit identity selection changes the platform/browser UA.
+    /// Automatic follows the requested Website Mode, while an explicit identity
+    /// remains independent and always wins.
     var effectiveWebsiteMode: WebsiteMode {
         websiteMode
     }
@@ -287,7 +287,7 @@ struct WebRenderingProfile: Codable, Equatable {
     var effectiveBrowserIdentity: BrowserIdentity {
         switch browserIdentity {
         case .automatic:
-            return .macosSafari
+            return websiteMode == .desktop ? .macosSafari : .iphoneSafari
         default:
             return browserIdentity
         }

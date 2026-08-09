@@ -133,11 +133,9 @@ enum UserAgentProvider {
         "Version/\(versions.safari) Safari/\(versions.webKit)"
     }
 
-    /// Runtime override. Desktop macOS Safari can stay `nil` so WebKit supplies
-    /// its native UA plus `applicationNameForUserAgent`. Mobile content mode is
-    /// different: WebKit synthesizes an iPhone UA when no override is present,
-    /// so keep Website Mode and browser identity independent by explicitly
-    /// restoring the macOS Safari identity there.
+    /// Runtime override. Automatic deliberately stays `nil` so WebKit can pair
+    /// the requested content mode with its native current UA. Explicit identities
+    /// remain compatibility overrides and may replace that native identity.
     static func customUserAgent(
         for renderingProfile: WebRenderingProfile
     ) -> String? {
@@ -149,6 +147,11 @@ enum UserAgentProvider {
         versions: BrowserVersionCatalog
     ) -> String? {
         let profile = renderingProfile.normalized()
+
+        if profile.browserIdentity == .automatic {
+            return nil
+        }
+
         let identity = resolvedIdentity(
             profile.effectiveBrowserIdentity,
             customUserAgent: profile.customUserAgent
@@ -201,14 +204,15 @@ enum UserAgentProvider {
 
     static func userAgent(
         for identity: BrowserIdentity,
-        websiteMode _: WebsiteMode,
+        websiteMode: WebsiteMode,
         customUserAgent: String? = nil,
         versions: BrowserVersionCatalog
     ) -> String {
-        switch resolvedIdentity(
-            identity,
-            customUserAgent: customUserAgent
-        ) {
+        let resolved = identity == .automatic
+            ? (websiteMode == .desktop ? BrowserIdentity.macosSafari : .iphoneSafari)
+            : resolvedIdentity(identity, customUserAgent: customUserAgent)
+
+        switch resolved {
         case .automatic, .macosSafari:
             return macOSSafari(
                 safariVersion: versions.safari,
@@ -255,19 +259,12 @@ enum UserAgentProvider {
         }
     }
 
-    /// Automatic follows the real browser engine/platform, not the requested
-    /// Website Mode. FloatTabs is a macOS WKWebView application, so Automatic
-    /// must stay on the native macOS Safari identity even when the page is laid
-    /// out at a phone-class CSS width. Explicit mobile identities remain
-    /// available when the user intentionally wants an iPhone/Android UA.
+    /// Normalizes explicit compatibility identities. Automatic is resolved by
+    /// Website Mode at the caller so WebKit can own its native current UA.
     private static func resolvedIdentity(
         _ identity: BrowserIdentity,
         customUserAgent: String?
     ) -> BrowserIdentity {
-        if identity == .automatic {
-            return .macosSafari
-        }
-
         if identity == .custom,
            customUserAgent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             return .macosSafari
@@ -612,16 +609,22 @@ private final class TransientWebScrollerController {
             )
         }
 
-        scheduleHide(for: scrollViews)
+        scheduleHide()
     }
 
-    private func scheduleHide(for scrollViews: [NSScrollView]) {
+    private func scheduleHide() {
         hideWorkItem?.cancel()
 
-        let item = DispatchWorkItem { [weak self, weak webView] in
-            guard self != nil, webView != nil else { return }
-            for scrollView in scrollViews {
-                WebViewFactory.configureHiddenScrollerStyle(scrollView)
+        let item = DispatchWorkItem { [weak self] in
+            guard let webView = self?.webView else { return }
+            WebViewFactory.configureHiddenScrollers(in: webView)
+
+            // WebKit can replace its internal scroll view during the same layout
+            // turn. Re-scan once more on the next main-queue turn so the current
+            // scroller, not a stale captured instance, is forced back to rest.
+            DispatchQueue.main.async { [weak webView] in
+                guard let webView else { return }
+                WebViewFactory.configureHiddenScrollers(in: webView)
             }
         }
 

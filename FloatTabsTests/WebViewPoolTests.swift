@@ -69,7 +69,7 @@ final class WebViewPoolTests: XCTestCase {
             2
         )
         XCTAssertEqual(loadedRequests.first?.cachePolicy, .useProtocolCachePolicy)
-        XCTAssertEqual(loadedRequests.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
         XCTAssertEqual(pool.count, 2)
     }
 
@@ -114,8 +114,7 @@ final class WebViewPoolTests: XCTestCase {
             mobile.configuration.defaultWebpagePreferences.preferredContentMode,
             .mobile
         )
-        XCTAssertTrue(mobile.customUserAgent?.contains("Macintosh") == true)
-        XCTAssertFalse(mobile.customUserAgent?.contains("iPhone") == true)
+        XCTAssertNil(mobile.customUserAgent)
 
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
         let desktopAgain = pool.webView(for: profile)
@@ -132,9 +131,27 @@ final class WebViewPoolTests: XCTestCase {
         )
         XCTAssertEqual(loadedRequests.count, 3)
         XCTAssertEqual(loadedRequests[0].cachePolicy, .useProtocolCachePolicy)
-        XCTAssertEqual(loadedRequests[1].cachePolicy, .reloadIgnoringLocalCacheData)
-        XCTAssertEqual(loadedRequests[2].cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(loadedRequests[1].cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(loadedRequests[2].cachePolicy, .useProtocolCachePolicy)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() {
+        let pool = makePool()
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let webView = pool.webView(for: profile)
+
+        XCTAssertEqual(
+            webView.configuration.defaultWebpagePreferences.preferredContentMode,
+            .mobile
+        )
+        XCTAssertTrue(webView.customUserAgent?.contains("Macintosh") == true)
+        XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
     }
 
     func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() {
@@ -331,11 +348,11 @@ final class WebViewPoolTests: XCTestCase {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
 
-    private func makeProfile(name: String) -> WebAppProfile {
+    private func makeProfile(name: String, homeURL: URL? = nil) -> WebAppProfile {
         WebAppProfile(
             order: 0,
             name: name,
-            homeURL: URL(string: "https://example.com/\(name)")!
+            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!
         )
     }
 }

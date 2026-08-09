@@ -1,6 +1,29 @@
 import Foundation
 import WebKit
 
+enum SiteCompatibilityPolicy {
+    static func runtimeRendering(
+        for renderingProfile: WebRenderingProfile,
+        navigationURL: URL
+    ) -> WebRenderingProfile {
+        let rendering = renderingProfile.normalized()
+        guard rendering.browserIdentity == .automatic,
+              rendering.websiteMode == .mobile,
+              requiresDesktopPointerIdentity(for: navigationURL) else {
+            return rendering
+        }
+
+        return rendering.settingBrowserIdentity(.macosSafari)
+    }
+
+    private static func requiresDesktopPointerIdentity(for url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "chatgpt.com"
+            || host.hasSuffix(".chatgpt.com")
+            || host == "chat.openai.com"
+    }
+}
+
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = (WKWebView, URLRequest) -> Void
@@ -105,7 +128,7 @@ final class WebViewPool {
         return createWebView(
             for: profile,
             navigationURL: navigationURL,
-            cachePolicy: .reloadIgnoringLocalCacheData
+            cachePolicy: .useProtocolCachePolicy
         )
     }
 
@@ -115,7 +138,11 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy
     ) -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
-        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
+            for: rendering,
+            navigationURL: navigationURL
+        )
+        let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
