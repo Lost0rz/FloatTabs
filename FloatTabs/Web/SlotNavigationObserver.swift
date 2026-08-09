@@ -115,14 +115,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         webView: WKWebView,
         websiteMode: WebsiteMode,
         navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
-        downloadCoordinator: DownloadCoordinator = DownloadCoordinator(),
+        downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void
     ) {
         self.slotID = slotID
         self.webView = webView
         self.websiteMode = websiteMode
         self.navigationCoordinator = navigationCoordinator
-        self.downloadCoordinator = downloadCoordinator
+        self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
         super.init()
 
