@@ -18,7 +18,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
-    func testAutomaticMobileLetsWebKitOwnMobileIdentity() {
+    func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
             .settingZoom(1.25)
@@ -27,7 +27,8 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
-        XCTAssertNil(webView.customUserAgent)
+        XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
+        XCTAssertTrue(webView.customUserAgent?.contains("Version/26.") == true)
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
         )

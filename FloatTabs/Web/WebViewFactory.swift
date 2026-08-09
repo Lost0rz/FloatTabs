@@ -149,7 +149,12 @@ enum UserAgentProvider {
         let profile = renderingProfile.normalized()
 
         if profile.browserIdentity == .automatic {
-            return nil
+            guard profile.effectiveWebsiteMode == .mobile else { return nil }
+            return userAgent(
+                for: .iphoneSafari,
+                websiteMode: .mobile,
+                versions: versions
+            )
         }
 
         let identity = resolvedIdentity(
@@ -419,11 +424,11 @@ enum WebViewFactory {
             webView.pageZoom = rendering.zoom
         }
 
-        if rendering.browserIdentity != .automatic {
-            webView.customUserAgent = UserAgentProvider.customUserAgent(
-                for: rendering,
-                versions: versions
-            )
+        if let customUserAgent = UserAgentProvider.customUserAgent(
+            for: rendering,
+            versions: versions
+        ) {
+            webView.customUserAgent = customUserAgent
         }
     }
 
