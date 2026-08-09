@@ -158,6 +158,13 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
     }
 
+    func testPooledWebViewsInstallPopupCoordinator() {
+        let pool = makePool()
+        let webView = pool.webView(for: makeProfile(name: "A"))
+
+        XCTAssertTrue(webView.uiDelegate is PopupCoordinator)
+    }
+
     func testRemovingOneSlotDoesNotAffectOtherWebViewIdentity() {
         let pool = makePool()
         let first = makeProfile(name: "A")
@@ -171,6 +178,86 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: second.id))
         XCTAssertTrue(pool.webView(for: second) === secondView)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: false,
+            sourceURL: URL(string: "https://www.bilibili.com/"),
+            targetURL: URL(string: "https://bilibili.com/video/BV123")
+        )
+
+        XCTAssertEqual(result, .loadInCurrentSlot)
+    }
+
+    func testNavigationCoordinatorLetsCrossSiteBlankReachUIDelegate() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: false,
+            sourceURL: URL(string: "https://example.com/article"),
+            targetURL: URL(string: "https://developer.apple.com/documentation")
+        )
+
+        XCTAssertEqual(result, .allow)
+    }
+
+    func testNavigationCoordinatorAllowsNormalInFrameNavigation() {
+        let result = WebNavigationCoordinator.disposition(
+            hasTargetFrame: true,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://example.com/next")
+        )
+
+        XCTAssertEqual(result, .allow)
+    }
+
+    func testPopupRoutingKeepsSameSiteContextInCurrentSlot() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://www.bilibili.com/"),
+            targetURL: URL(string: "https://bilibili.com/video/BV123")
+        )
+
+        XCTAssertEqual(result, .currentSlot)
+    }
+
+    func testPopupRoutingSendsCrossSiteUserLinkToDefaultBrowser() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://developer.apple.com")
+        )
+
+        XCTAssertEqual(result, .externalBrowser)
+    }
+
+    func testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "https://accounts.example-idp.com/oauth")
+        )
+
+        XCTAssertEqual(result, .temporaryPopup)
+    }
+
+    func testPopupRoutingTreatsAboutBlankAsTemporaryChild() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "about:blank")
+        )
+
+        XCTAssertEqual(result, .temporaryPopup)
+    }
+
+    func testPopupRoutingHandsNonWebSchemeToSystem() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .linkActivated,
+            sourceURL: URL(string: "https://example.com"),
+            targetURL: URL(string: "mailto:test@example.com")
+        )
+
+        XCTAssertEqual(result, .externalBrowser)
     }
 
     private func makePool() -> WebViewPool {

@@ -1,7 +1,7 @@
 # Stage 4 Acceptance — Web Compatibility, Navigation, Sessions & OAuth
 
 > Status: IN PROGRESS
-> Current slice: 4A Navigation Policy Ownership Foundation
+> Current slice: 4B Popup / OAuth / External-Link Routing
 > Base main: `d2def2bbe136345445b48c31de2a0b1fd4d60d4c`
 > Stage 3 accepted merge: `c7326a44cb3e8ebdda1b2aec4d147229f91a8332`
 > Product override: `docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`
@@ -28,63 +28,95 @@ UploadCoordinator / DownloadCoordinator
 
 ## 4A — Navigation policy ownership foundation
 
+Status: **AUTOMATED PASS**
+
+Implemented in:
+
+```text
+a5db50bd43b54c55d5365072187be6e01b70a182
+refactor: establish Stage 4 navigation policy ownership
+```
+
+Validated by macOS CI #162:
+
+```text
+Resolve Swift packages       PASS
+Package lock unchanged       PASS
+Debug Build                  PASS
+Full Unit Tests              PASS
+```
+
+4A established `WebNavigationCoordinator` while preserving the accepted Stage 3 behavior. No rendering, WebView-pool, Window Size, Browser Identity, Zoom or persistence semantics changed.
+
+## 4B — Popup/OAuth/external routing
+
+Status: **IMPLEMENTED FOR AUTOMATED + REAL-MAC RETEST**
+
+### Routing model
+
+For a new browsing context:
+
+```text
+same-site HTTP(S)
+→ current persistent Slot
+
+cross-site user-activated link
+→ default system browser
+
+cross-site scripted/window.open context
+→ temporary child WKWebView
+
+about:blank
+→ temporary child WKWebView
+
+mailto / non-web external scheme
+→ system handler
+```
+
+The classifier is semantic and deterministic. It does not use provider-specific host lists.
+
 ### Required implementation
 
-- `WebNavigationCoordinator` owns the decision for navigation actions;
-- `SlotNavigationObserver` delegates navigation decisions to it;
-- Stage 3 behavior is preserved exactly for the first slice:
-  - in-frame navigation → allow;
-  - `targetFrame == nil` + http/https → load request in current Slot;
-  - other schemes/nil URL continue through the existing allow path;
-- the existing Stage 3 navigation regression seam remains valid while tests migrate to the Stage 4 coordinator;
-- no rendering-profile, window, WebView-pool or persistence semantics change.
+- `WebNavigationCoordinator` distinguishes same-site new contexts from contexts that must reach `WKUIDelegate`;
+- `PopupCoordinator` owns `WKUIDelegate` new-window handling;
+- each warm Slot retains its popup coordinator for the lifetime of its WKWebView;
+- temporary popup WebViews are created with WebKit's supplied `WKWebViewConfiguration`;
+- temporary popups inherit explicit `customUserAgent` when one is set on the parent;
+- popup panels are temporary native child windows and do not create persistent FloatTabs Slots;
+- `webViewDidClose` / manual close remove the temporary popup and restore parent focus;
+- rebuilding/removing a Slot closes its temporary popup windows;
+- external links use `NSWorkspace` rather than loading research links into FloatTabs.
 
-### Automated gate
+### Deterministic coverage
 
-The maintained macOS workflow must pass:
+Automated tests must cover:
+
+- same-site `_blank` → current Slot;
+- cross-site `_blank` user link → UIDelegate/external-browser path;
+- ordinary in-frame navigation → allow;
+- same-site popup classifier → current Slot;
+- cross-site linkActivated → external browser;
+- cross-site scripted `.other` → temporary popup;
+- `about:blank` → temporary popup;
+- `mailto:` → external/system handler;
+- pooled WKWebViews retain a `PopupCoordinator`;
+- all existing Stage 0–3 tests remain green.
+
+### Real-Mac focused gate
+
+Before 4B is accepted, verify:
 
 ```text
-Resolve Swift packages
-Verify package lock unchanged
-Debug Build
-Full Unit Tests
+Bilibili Desktop new-window/card links       PASS / FAIL
+Bilibili Mobile remains interactive          PASS / FAIL
+ordinary cross-site user link opens browser  PASS / FAIL
+scripted/window.open popup appears            PASS / FAIL
+popup can close and parent regains focus      PASS / FAIL
+one real OAuth/login popup flow                PASS / FAIL
+YouTube ordinary interaction/fullscreen       PASS / FAIL
 ```
 
-Existing deterministic coverage for new-window web links must remain green, because its policy path now delegates into `WebNavigationCoordinator`.
-
-### Real-Mac smoke gate
-
-Before 4B changes runtime behavior, confirm at least:
-
-```text
-Bilibili Desktop card/link opens        PASS
-Bilibili Mobile remains interactive     PASS
-YouTube ordinary interaction            PASS
-YouTube element fullscreen               PASS
-normal same-frame navigation             PASS
-```
-
-No new 4A UI is expected.
-
-## 4B — Popup/OAuth/external routing gate
-
-Required before 4B acceptance:
-
-- `WKUIDelegate` is owned by a dedicated popup/compatibility component;
-- temporary child WebView can be created and closed;
-- same persistent website-data context is retained where WebKit permits;
-- normal external/research links open in the default browser;
-- same-site required popup behavior is defined and deterministic;
-- OAuth/login popup behavior is defined and deterministic;
-- no permanent FloatTabs Slot is auto-created;
-- Bilibili Desktop remains functional after the Stage 3 fallback is replaced.
-
-Focused real-Mac fixtures:
-
-- Bilibili new-window links;
-- at least one same-site popup fixture;
-- at least one working OAuth/login popup fixture;
-- one ordinary external link fixture.
+No provider is declared OAuth-supported based on the popup shell alone.
 
 ## 4C — Session/OAuth QA gate
 
@@ -124,6 +156,8 @@ not yet tested
 
 The deferred Sina/redirect-sensitive mode-switch case may be investigated in this compatibility phase. It is not retroactively part of Stage 3 acceptance.
 
+Before long-lived public session QA, the release app identity / Bundle Identifier must be treated as a deliberate freeze decision because changing it later can move the WebKit data container.
+
 ## 4D — Upload/download gate
 
 Upload must support:
@@ -157,4 +191,4 @@ Every Stage 4 slice must keep these green:
 
 ## Merge gate
 
-The Stage 4 PR remains Draft until all Stage 4 slices selected for the PR have their automated and real-Mac acceptance explicitly recorded. Do not mark Ready merely because 4A compiles.
+The Stage 4 PR remains Draft until all Stage 4 slices selected for the PR have their automated and real-Mac acceptance explicitly recorded. Do not mark Ready merely because 4B compiles.

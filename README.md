@@ -12,7 +12,7 @@ Stage 1 Core Native Shell: PASSED
 Stage 2 Persistent Web App Slots: PASSED
 Stage 3 Rendering Profiles: PASSED
 Stage 4 Web Compatibility, Navigation, Sessions & OAuth: IN PROGRESS
-→ current Stage 4 slice: 4A navigation-policy ownership foundation
+→ current Stage 4 slice: 4B popup / OAuth / external-link routing
 ```
 
 Stage 3 real-Mac acceptance includes:
@@ -20,11 +20,13 @@ Stage 3 real-Mac acceptance includes:
 - Desktop website layout in a narrow FloatTabs window;
 - Mobile website layout in a wide FloatTabs window;
 - Bilibili Desktop playback and interaction without the previous browser-version warning;
-- Bilibili Desktop links/new-window actions working through the current same-slot compatibility fallback;
+- Bilibili Desktop links/new-window actions working through the accepted compatibility path;
 - YouTube ordinary controls and enter/exit element fullscreen;
 - persistent per-Slot rendering values and the maintained macOS CI lane.
 
-Stage 4 now replaces the temporary navigation fallback with a structured compatibility stack. The first slice centralizes navigation-policy ownership without changing the accepted Stage 3 runtime behavior. Later Stage 4 slices will add popup/OAuth child WebViews, external-browser routing, session QA, and file upload/download handling.
+Stage 4A centralized navigation-policy ownership without changing accepted Stage 3 behavior. Stage 4B now adds structured new-context routing: same-site HTTP(S) stays in the current Slot, ordinary cross-site user links hand off to the default browser, and scripted cross-site/about:blank popups receive a temporary child WKWebView for login/OAuth-compatible flows.
+
+Later Stage 4 slices will record real-site session/OAuth compatibility and add file upload/download handling.
 
 Redirect-sensitive Website Mode switching such as the observed Sina case remains a compatibility follow-up and is not represented as solved.
 
