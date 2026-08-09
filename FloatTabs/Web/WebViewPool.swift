@@ -270,7 +270,6 @@ final class WebViewPool {
     }
 }
 
-
 /// Keeps every warm Slot's WKWebView attached to the same AppKit window.
 /// Switching Slots changes only sibling order. Existing WebViews are never
 /// removed/re-added merely because another Slot becomes active, so heavy SPA
@@ -314,15 +313,10 @@ final class WarmWebViewResidencyCoordinator {
             webView.autoresizingMask = [.width, .height]
         }
 
-        // Reordering the existing subviews keeps every resident WKWebView in the
-        // same window hierarchy. AppKit moves shared views without remove/re-add.
-        var orderedSubviews = host.subviews
-        if let index = orderedSubviews.firstIndex(where: { $0 === webView }) {
-            let selected = orderedSubviews.remove(at: index)
-            orderedSubviews.append(selected)
-            host.subviews = orderedSubviews
-        }
-
+        // Synchronize resident geometry before promoting the target WebView.
+        // Slots may have different preferred panel sizes; exposing the target at
+        // its stale previous frame causes the container background to appear at
+        // the edges until WebKit catches up.
         for resident in host.subviews.compactMap({ $0 as? WKWebView }) {
             resident.isHidden = false
             resident.alphaValue = 1
@@ -330,6 +324,16 @@ final class WarmWebViewResidencyCoordinator {
             if resident.frame != host.bounds {
                 resident.frame = host.bounds
             }
+        }
+        webView.layoutSubtreeIfNeeded()
+
+        // Reordering the existing subviews keeps every resident WKWebView in the
+        // same window hierarchy. AppKit moves shared views without remove/re-add.
+        var orderedSubviews = host.subviews
+        if let index = orderedSubviews.firstIndex(where: { $0 === webView }) {
+            let selected = orderedSubviews.remove(at: index)
+            orderedSubviews.append(selected)
+            host.subviews = orderedSubviews
         }
 
         active = webView
