@@ -3,8 +3,8 @@ import KeyboardShortcuts
 @MainActor
 final class GlobalHotkeyController {
     private static let summonShortcut = KeyboardShortcuts.Shortcut(
-        .space,
-        modifiers: [.option]
+        .backtick,
+        modifiers: [.command]
     )
 
     private let onToggle: () -> Void
