@@ -492,46 +492,6 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
-    func testWarmResidencyKeepsInactiveWebViewsAttachedToWindowAcrossSwitches() {
-        let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 600, height: 800)
-        )
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 800),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = container
-        container.frame = window.contentView?.bounds ?? container.frame
-        container.layoutSubtreeIfNeeded()
-
-        let residency = WarmWebViewResidencyCoordinator(container: container)
-        let first = WebViewFactory.makeWebView()
-        let second = WebViewFactory.makeWebView()
-
-        residency.show(webView: first)
-        let host = first.superview
-        XCTAssertNotNil(host)
-        XCTAssertTrue(first.window === window)
-
-        residency.show(webView: second)
-        XCTAssertTrue(first.superview === host)
-        XCTAssertTrue(second.superview === host)
-        XCTAssertTrue(first.window === window)
-        XCTAssertTrue(second.window === window)
-        XCTAssertTrue(residency.activeWebView === second)
-        XCTAssertTrue(host?.subviews.last === second)
-
-        residency.show(webView: first)
-        XCTAssertTrue(first.superview === host)
-        XCTAssertTrue(second.superview === host)
-        XCTAssertTrue(first.window === window)
-        XCTAssertTrue(second.window === window)
-        XCTAssertTrue(residency.activeWebView === first)
-        XCTAssertTrue(host?.subviews.last === first)
-    }
-
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }

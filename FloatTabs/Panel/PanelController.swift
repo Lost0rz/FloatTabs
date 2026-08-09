@@ -12,9 +12,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let frameStore: PanelFrameStore
     private let quickURLOverlayView = QuickURLOverlayView()
     private let zoomHUDView = ZoomHUDView()
-    private lazy var warmWebViewResidency = WarmWebViewResidencyCoordinator(
-        container: rootView.webPanelContainerView
-    )
 
     private var moveHoverController: PanelMoveHoverController?
     private var previousApplication: NSRunningApplication?
@@ -207,23 +204,17 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         guard let activeProfile = tabStore.activeProfile else {
             lastSynchronizedActiveID = nil
-            warmWebViewResidency.showEmptyState()
+            rootView.webPanelContainerView.showEmptyState()
             return
         }
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
         if activeChanged, hasPositionedPanel, followPreferredSize {
-            // Automatic Slot switching is a presentation transaction. Animating
-            // through intermediate window sizes exposes the container background
-            // while WebKit catches up, especially for heavy long-conversation SPAs.
-            applyPreferredViewport(
-                activeProfile.renderingProfile.viewportSize,
-                animated: false
-            )
+            applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
         let webView = webViewPool.webView(for: activeProfile)
-        warmWebViewResidency.show(webView: webView)
+        rootView.webPanelContainerView.show(webView: webView)
         WebViewFactory.configureHiddenScrollers(in: webView)
         lastSynchronizedActiveID = activeProfile.id
 
@@ -234,7 +225,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func focusActiveWebViewIfAvailable() {
         guard !quickURLOverlayView.isPresented,
-              let webView = warmWebViewResidency.activeWebView else { return }
+              let webView = rootView.webPanelContainerView.currentWebView else { return }
         _ = panel.makeFirstResponder(webView)
     }
 
@@ -408,10 +399,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
-    private func applyPreferredViewport(
-        _ viewportSize: CGSize,
-        animated: Bool = true
-    ) {
+    private func applyPreferredViewport(_ viewportSize: CGSize) {
         guard hasPositionedPanel else { return }
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
@@ -427,12 +415,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             visibleFrame: visibleFrame
         )
         guard target != panel.frame else { return }
-        panel.setFrame(target, display: true, animate: animated)
-        if !animated {
-            // Complete AppKit geometry before the resident target WebView is
-            // promoted, avoiding a stale-frame presentation during fast switches.
-            rootView.layoutSubtreeIfNeeded()
-        }
+        panel.setFrame(target, display: true, animate: true)
         persistPanelFrame()
     }
 

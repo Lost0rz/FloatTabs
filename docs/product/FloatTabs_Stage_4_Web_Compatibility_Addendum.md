@@ -2,7 +2,7 @@
 
 > Status: **Stage 4 architecture/code closeout implemented; final Real-Mac warm-slot + active recovery smoke pending**  
 > Base: merged Stage 4 + Navigation Intent / Slot Home on `main`  
-> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, WebContent process recovery, and warm Slot presentation continuity
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, and WebContent process recovery
 
 ## 1. Stage 4 intent
 
@@ -132,55 +132,11 @@ Automatic + Mobile
 
 The exception does not change Window Size or user Zoom and does not apply to Bilibili, YouTube, or unrelated sites.
 
-The **effective runtime rendering profile must remain stable across warm Slot reuse**. When an existing ChatGPT `WKWebView` is reselected, FloatTabs recomputes the site compatibility profile and reapplies that effective runtime profile; it must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
+The **effective runtime rendering profile must remain stable across warm Slot reuse**. When an existing ChatGPT `WKWebView` is detached and later reselected, FloatTabs recomputes the site compatibility profile and reapplies that effective runtime profile; it must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
 
 No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding experiments were rejected by Real-Mac testing and remain removed.
 
-## 7. Warm Slot residency and per-Slot viewport ownership
-
-Long, state-heavy SPAs such as a long ChatGPT conversation are not adequately represented by HTTP cache alone. Their useful warm state includes live DOM, JavaScript/React state, scroll/layout state, WebKit compositor state, and the currently resolved viewport/pageZoom relationship.
-
-FloatTabs therefore treats a warm Slot's live `WKWebView` as the primary in-memory presentation cache:
-
-```text
-ordinary Slot switch
-→ keep resident WKWebViews attached to the same FloatTabs window
-→ preserve the same WKWebView object
-→ preserve normal website data/cache
-→ preserve each inactive Slot's own last-valid viewport geometry
-→ promote only the selected Slot to the front
-```
-
-Ordinary Slot switching must not remove the inactive warm WebView from the AppKit window hierarchy merely because another Slot becomes active. Intentional Slot removal or a rendering-profile rebuild may still detach and replace the obsolete WebView.
-
-Each Slot also owns its own preferred Window Size. This is important because `FloatTabsWebView` derives Website Mode fitting/pageZoom from its own frame width. An inactive Slot must therefore **not** be resized simply because another Slot becomes active with a different Window Size preset.
-
-Canonical size-switch behavior is:
-
-```text
-Slot A inactive at A viewport
-Slot B inactive at B viewport
-        ↓
-select Slot B
-        ↓
-apply B panel size without intermediate resize animation
-        ↓
-only B adopts the current host bounds
-        ↓
-promote B to the front
-        ↓
-A keeps A's last-valid frame/pageZoom while remaining window-attached
-```
-
-The active WebView continues to follow ordinary panel resizing. Host-frame changes are coalesced to the next main-loop turn so an automatic Slot switch can promote the new target first; this prevents the outgoing Slot from inheriting the incoming Slot's dimensions.
-
-A Real-Mac closeout regression exposed why this ownership rule is required: resizing **all** resident WebViews to the current host bounds caused Bilibili to return with a stale/wrong WebKit viewport and compressed content while the outer panel had already switched size. That all-residents-resize strategy is rejected and must not be reintroduced.
-
-Explicit user-driven size edits may remain animated; the no-animation rule applies to automatic Slot-follow resizing so fast switching does not expose intermediate panel geometry.
-
-Stage 5 owns resource scheduling for inactive resident WebViews. Resource optimization must not silently destroy either the warm-state guarantee or per-Slot viewport ownership established here.
-
-## 8. Mode-switch loading performance
+## 7. Mode-switch loading performance
 
 Website Mode / Browser Identity changes still rebuild the affected `WKWebView` so configuration and identity changes are applied from a clean WebKit boundary.
 
@@ -192,7 +148,7 @@ URLRequest.CachePolicy.useProtocolCachePolicy
 
 instead of deliberately bypassing cache. Real-Mac acceptance found this materially faster. Removing the rebuild itself remains deferred unless a later regression establishes a real performance blocker.
 
-## 9. Permanent webpage scrollbar suppression
+## 8. Permanent webpage scrollbar suppression
 
 Accepted behavior:
 
@@ -208,7 +164,7 @@ Implementation uses two boundaries:
 
 Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY`.
 
-## 10. Slot Home boundary
+## 9. Slot Home boundary
 
 A persistent Slot has two different navigation values:
 
@@ -230,7 +186,7 @@ Return to Home performs normal navigation to `homeURL`; it does not explicitly c
 
 The Slot context menu intentionally does not expose a separate Rename action. Name editing is owned by **Edit Web App…**, which already edits the Slot name together with the rest of the Web App configuration.
 
-## 11. WebContent process recovery
+## 10. WebContent process recovery
 
 Fresh Stage 4 closeout audit found the one remaining architecture/code gap: `webViewWebContentProcessDidTerminate` was specified but not implemented.
 
@@ -263,7 +219,7 @@ Deterministic tests cover the active/immediate policy, inactive/deferred policy,
 
 Real-Mac closeout testing has additionally confirmed the inactive/deferred path: terminating a FloatTabs-owned inactive WebContent process leaves the current Slot unchanged, and the affected Slot recovers only when selected.
 
-## 12. Removed Stage 4 drift / dead seams
+## 11. Removed Stage 4 drift / dead seams
 
 The closeout also removes or corrects stale implementation/documentation that could cause future regressions:
 
@@ -274,7 +230,7 @@ The closeout also removes or corrects stale implementation/documentation that co
 - Architecture records the implemented WebContent recovery policy;
 - stale scrollbar comment describing the removed transient-scroller controller was corrected.
 
-## 13. Accepted evidence before closeout
+## 12. Accepted evidence before closeout
 
 Merged Stage 4 head before merge:
 
@@ -298,17 +254,15 @@ Real-Mac acceptance has already passed for Bilibili Mobile/Desktop, Bilibili Des
 
 The merge-to-main macOS CI after PR #7 also passed.
 
-## 14. Stage 4 closeout gate
+## 13. Stage 4 closeout gate
 
-Automated closeout coverage includes WebContent recovery and ChatGPT warm-slot runtime compatibility. macOS CI also passes after replacing the rejected all-residents-resize presentation with per-Slot warm viewport ownership.
+Automated closeout coverage now includes both WebContent recovery and ChatGPT warm-slot runtime compatibility. The ChatGPT regression test verifies repeated `webView(for:)` reuse preserves one `WKWebView`, one initial load, and the macOS Safari compatibility identity.
 
-Focused Real-Mac checks remain before PR #8 can be marked Ready:
+Two focused Real-Mac checks remain before PR #8 can be marked Ready:
 
 ```text
-1. ChatGPT long-conversation warm Slot switching
-   → repeated switch away/back avoids the prior long black/reload-like state
-   → different Slot size presets preserve each site's correct layout/scale
-   → no persistent gray container edge or compressed/stale viewport
+1. ChatGPT warm Slot switching
+   → repeated switch away/back does not fall into the prior long black/reload-like state
    → ChatGPT Mobile attachment interaction remains normal
 
 2. active Slot WebContent process terminates
