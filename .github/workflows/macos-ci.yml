@@ -36,6 +36,11 @@ jobs:
         run: >-
           xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
           -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build
+      - name: Targeted XCTest control
+        run: >-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/AppCommandControllerTests/testOnlyExplicitFloatTabsShortcutsAreMatched test
       - name: Mobile mode diagnostic
         run: >-
           xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
