@@ -391,51 +391,104 @@ Rules:
 
 # 5. WKWebView Ownership & Lifecycle
 
-Each active/warm Web App Slot owns its own `WKWebView`.
+`Active` is a presentation state, not a residency tier. Each `WebAppProfile` persists a user-selected residency policy that controls what FloatTabs does after the Slot becomes inactive:
 
-```text
-WebViewPool
-├── GPT     → WKWebView
-├── X       → WKWebView
-├── Claude  → WKWebView
-└── IG      → WKWebView
+```swift
+enum SlotResidencyPolicy: String, Codable {
+    case hot
+    case warm
+    case cold
+}
 ```
 
-Do not repeatedly load every Slot into one shared WebView.
+`WebViewPool` still owns one live `WKWebView` per resident Slot. FloatTabs never cycles every Slot through one shared WKWebView.
 
-Benefits while a WebView remains alive:
+## 5.1 Hot
 
-- instant warm switching;
-- scroll position remains;
-- SPA state remains;
-- unsent text can remain;
-- no network reload on every switch.
+Hot is for state-heavy Web Apps where return-to-interaction latency matters more than memory.
 
-Inactive WebViews:
+- once the Slot has been activated in the current app process, keep its live WKWebView attached;
+- each Hot Slot owns an independent `WebSlotHostView`;
+- when inactive, freeze that host's viewport before another Slot changes panel size;
+- only the active Hot host follows live panel resizing;
+- FloatTabs does not proactively detach or evict a Hot WebView;
+- Hot does not eagerly preload every configured Hot Slot at app launch;
+- macOS/WebKit may still terminate a content process under system pressure, in which case normal Stage 4 recovery applies.
 
-- detach from visible hierarchy;
-- use WebKit inactive scheduling where supported;
-- suspend background media by default;
-- restore scheduling when active.
+The independent host is mandatory. Do not reintroduce the rejected shared-variable-host experiment that resized multiple resident WebViews through one changing viewport; that polluted `frame → pageZoom → CSS viewport` state across Slots.
 
-Memory pressure handling is separate from authentication persistence.
+## 5.2 Warm
 
-Destroying a WKWebView must not clear its persistent website data.
+Warm is the default.
 
-## 5.1 Memory Strategy
+- keep the WKWebView object in `WebViewPool`;
+- detach it from visible presentation while inactive;
+- re-selection reuses the same WKWebView;
+- DOM / SPA / scroll / unsent text preservation remains best-effort because WebKit may throttle or suspend detached content;
+- do not proactively evict Warm WebViews merely because they are inactive.
 
-V1 baseline:
+## 5.3 Cold
+
+Cold trades state fidelity for memory.
 
 ```text
-1 visible WKWebView
-+ inactive warm WebViews detached/suspended
+inactive Cold Slot
+→ 30-second grace period
+→ release live WKWebView/runtime if still inactive
 ```
 
-Measure real usage with Instruments before implementing cold eviction.
+Cold release removes transient WebView/navigation/popup runtime only. It must retain:
 
-If later required, Memory Saver may keep the most recent N WebViews alive and cold-restore older Slots from their current URL. A cold-restored page can guarantee persistent login + URL, but not unsent text, exact scroll position, or SPA transient memory.
+- `WebAppProfile`;
+- `homeURL`;
+- `currentURL`;
+- rendering profile;
+- residency/media settings;
+- persistent `WKWebsiteDataStore.default()` data.
 
-No `Keep Active in Memory` control belongs in the Add/Edit Web App form in V1.
+Cold restore therefore guarantees only persistent login data where the site permits it plus the persisted current URL. It does not guarantee unsent text, exact scroll position, or SPA transient memory.
+
+Reactivating a Cold Slot during the grace period cancels the pending release.
+
+## 5.4 Background Media
+
+Background-media policy is persisted separately from residency:
+
+```swift
+enum BackgroundMediaPolicy: String, Codable {
+    case pauseWhenInactive
+    case allowBackgroundAudio
+}
+```
+
+`Pause When Inactive` uses `WKWebView.pauseAllMediaPlayback()` when the Slot becomes inactive. Do not use `setAllMediaPlaybackSuspended(true/false)` for routine Slot switching; Real-Mac testing showed the stronger suspension API can leave normal user Play interactions blocked after fast switching.
+
+`Allow Background Audio` means FloatTabs does not explicitly pause or suspend that resident WebView. It is a permission from FloatTabs, not a guarantee that the website will continue playback. Site implementation and Website Mode may still pause when the view is inactive/detached. Observed Real-Mac behavior includes:
+
+- Bilibili can continue in Warm/Cold-pending while resident;
+- YouTube Desktop can continue in Warm while resident;
+- YouTube Mobile pauses when Warm/detached;
+- YouTube Hot can continue because its WebView remains attached.
+
+Do not add site-specific JavaScript autoplay bypasses or broaden autoplay permissions merely to force parity.
+
+## 5.5 Resource Measurement
+
+The residency model is user-controlled; FloatTabs must not silently demote Hot → Warm/Cold.
+
+After functional acceptance, benchmark 1 / 3 / 6 Slot combinations with Instruments for:
+
+- host + WebContent memory;
+- CPU;
+- Energy Impact;
+- network activity;
+- switch latency.
+
+Use those measurements for future warnings/default tuning, not for hidden policy overrides.
+
+No `Keep Active in Memory` field belongs in the Add/Edit Web App form; residency is configured from the Slot context menu.
+
+Memory pressure handling remains separate from authentication persistence. Destroying a WKWebView must never clear the persistent website data store.
 
 ---
 
@@ -510,6 +563,8 @@ A Web App profile stores product metadata such as:
 - home URL;
 - current URL;
 - rendering profile;
+- residency policy;
+- background-media policy;
 - creation/last-used metadata.
 
 It does **not** store:

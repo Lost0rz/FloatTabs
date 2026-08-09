@@ -190,6 +190,45 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(webPoint.y, 410, accuracy: 0.5)
     }
 
+    func testHotHostsPreserveInactiveViewportAcrossDifferentSlotSizes() {
+        _ = NSApplication.shared
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        let window = NSWindow(
+            contentRect: container.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        container.layoutSubtreeIfNeeded()
+
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        let second = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+
+        container.show(webView: first, slotID: firstID, residencyPolicy: .hot)
+        container.layoutSubtreeIfNeeded()
+        let firstSize = first.frame.size
+        XCTAssertTrue(first.window === window)
+
+        container.deactivate(slotID: firstID, residencyPolicy: .hot)
+        container.setFrameSize(NSSize(width: 900, height: 850))
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(first.frame.size, firstSize)
+        XCTAssertTrue(first.window === window)
+
+        container.show(webView: second, slotID: secondID, residencyPolicy: .hot)
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(second.frame.size, NSSize(width: 900, height: 850))
+        XCTAssertEqual(first.frame.size, firstSize)
+        XCTAssertTrue(first.window === window)
+        XCTAssertTrue(second.window === window)
+    }
+
     func testDesktopPublicPageZoomKeepsNativeClickHitTestingWorking() {
         _ = NSApplication.shared
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)

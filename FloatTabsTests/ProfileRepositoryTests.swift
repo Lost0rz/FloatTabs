@@ -13,6 +13,8 @@ final class ProfileRepositoryTests: XCTestCase {
                 name: "Docs",
                 homeURL: URL(string: "https://example.com")!,
                 currentURL: URL(string: "https://example.com/current")!,
+                residencyPolicy: .hot,
+                backgroundMediaPolicy: .allowBackgroundAudio,
                 createdAt: Date(timeIntervalSince1970: 100),
                 lastUsedAt: Date(timeIntervalSince1970: 200)
             )
@@ -27,6 +29,8 @@ final class ProfileRepositoryTests: XCTestCase {
 
             XCTAssertEqual(restored, state)
             XCTAssertEqual(restored.profiles.first?.currentURL, profile.currentURL)
+            XCTAssertEqual(restored.profiles.first?.residencyPolicy, .hot)
+            XCTAssertEqual(restored.profiles.first?.backgroundMediaPolicy, .allowBackgroundAudio)
             XCTAssertEqual(restored.lastActiveTabID, id)
         }
     }
@@ -69,6 +73,8 @@ final class ProfileRepositoryTests: XCTestCase {
             XCTAssertEqual(profile.renderingProfile.sizePreset, .small)
             XCTAssertEqual(profile.renderingProfile.viewportSize, CGSize(width: 390, height: 780))
             XCTAssertEqual(profile.renderingProfile.zoom, 1.25, accuracy: 0.001)
+            XCTAssertEqual(profile.residencyPolicy, .warm)
+            XCTAssertEqual(profile.backgroundMediaPolicy, .pauseWhenInactive)
         }
     }
 

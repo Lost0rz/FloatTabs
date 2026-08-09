@@ -116,12 +116,28 @@ final class WebViewPool {
     }
 
     func remove(slotID: UUID) {
+        release(slotID: slotID)
+    }
+
+    /// Releases only the transient live WebView/runtime state for a Slot. The
+    /// persisted WebAppProfile, currentURL, cookies and shared website data stay
+    /// outside this pool and therefore survive Cold eviction.
+    func release(slotID: UUID) {
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
+        webViews[slotID]?.removeFromSuperview()
         webViews.removeValue(forKey: slotID)
+    }
+
+    /// Pauses currently playing media without putting the page into WebKit's
+    /// stronger suspended state. A paused page remains user-resumable when the
+    /// Slot becomes active again.
+    func pauseMediaPlayback(slotID: UUID) {
+        guard let webView = webViews[slotID] else { return }
+        webView.pauseAllMediaPlayback(completionHandler: nil)
     }
 
     func contains(slotID: UUID) -> Bool {

@@ -594,17 +594,65 @@ final class ResizeReadoutView: NSView {
 /// class frame, so WebKit sees the requested CSS viewport while ordinary AppKit
 /// ancestor coordinate conversion maps pointer events into WebKit coordinates.
 /// No NSScrollView magnification is involved.
+final class WebSlotHostView: NSView {
+    private(set) weak var webView: WKWebView?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        translatesAutoresizingMaskIntoConstraints = true
+        autoresizingMask = []
+    }
+
+    convenience init(webView: WKWebView) {
+        self.init(frame: .zero)
+        attach(webView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func attach(_ webView: WKWebView) {
+        if self.webView !== webView {
+            self.webView?.removeFromSuperview()
+            webView.removeFromSuperview()
+            webView.translatesAutoresizingMaskIntoConstraints = true
+            webView.autoresizingMask = [.width, .height]
+            addSubview(webView)
+            self.webView = webView
+        }
+        webView.frame = bounds
+    }
+
+    override func layout() {
+        super.layout()
+        if webView?.frame != bounds {
+            webView?.frame = bounds
+        }
+    }
+}
+
+/// Owns the visible FloatTabs web surface. Warm/Cold use the accepted Stage 4
+/// transient host. Hot Slots instead receive one independent host each, so an
+/// inactive Hot WebView can stay attached to the FloatTabs window without being
+/// resized when another Slot has a different Window Size preset.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
+    private weak var activeWebView: WKWebView?
+    private var activeSlotID: UUID?
+    private var hotHostViews: [UUID: WebSlotHostView] = [:]
 
     private(set) var websiteLayoutScale: CGFloat = 1
 
     var currentWebView: WKWebView? {
-        hostedWebView
+        activeWebView
     }
 
     override init(frame frameRect: NSRect) {
@@ -622,40 +670,84 @@ final class WebPanelContainerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// Compatibility seam used by existing Stage 4 tests and the Stage 0 helper.
+    /// Product Slot switching should call the policy-aware overload below.
     func show(webView: WKWebView) {
-        if hostedWebView === webView {
-            updateWebsiteLayoutIfNeeded()
-            return
+        showTransient(webView: webView, slotID: nil)
+    }
+
+    func show(
+        webView: WKWebView,
+        slotID: UUID,
+        residencyPolicy: SlotResidencyPolicy
+    ) {
+        switch residencyPolicy {
+        case .hot:
+            showHot(webView: webView, slotID: slotID)
+        case .warm, .cold:
+            showTransient(webView: webView, slotID: slotID)
+        }
+    }
+
+    func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
+        guard activeSlotID == slotID else { return }
+
+        switch residencyPolicy {
+        case .hot:
+            if let host = hotHostViews[slotID] {
+                // Freeze the outgoing Hot viewport before another Slot changes
+                // the panel size. Only an active Hot host follows live resizing.
+                host.autoresizingMask = []
+            }
+        case .warm, .cold:
+            hostedWebView?.removeFromSuperview()
+            hostedWebView = nil
         }
 
-        hostedWebView?.removeFromSuperview()
-        webView.removeFromSuperview()
-        webView.translatesAutoresizingMaskIntoConstraints = true
-        webView.autoresizingMask = []
-        logicalHostView.addSubview(webView)
-        hostedWebView = webView
+        activeSlotID = nil
+        activeWebView = nil
+    }
 
-        if currentContentView !== logicalHostView {
-            setContentView(logicalHostView)
+    func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
+        let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
+        for slotID in staleHotSlotIDs {
+            guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
+            host.webView?.removeFromSuperview()
+            host.removeFromSuperview()
         }
+    }
 
-        needsLayout = true
-        layoutSubtreeIfNeeded()
-        updateWebsiteLayoutIfNeeded()
+    func removeSlot(_ slotID: UUID) {
+        if activeSlotID == slotID {
+            hostedWebView?.removeFromSuperview()
+            hostedWebView = nil
+            activeWebView = nil
+            activeSlotID = nil
+        }
+        if let host = hotHostViews.removeValue(forKey: slotID) {
+            host.webView?.removeFromSuperview()
+            host.removeFromSuperview()
+        }
     }
 
     func showEmptyState() {
         guard currentContentView !== emptyView else { return }
         hostedWebView?.removeFromSuperview()
         hostedWebView = nil
+        activeWebView = nil
+        activeSlotID = nil
         websiteLayoutScale = 1
         logicalHostView.bounds = NSRect(origin: .zero, size: logicalHostView.frame.size)
         setContentView(emptyView)
+        emptyView.isHidden = false
+        bringToFront(emptyView)
     }
 
     override func layout() {
         super.layout()
-        updateWebsiteLayoutIfNeeded()
+        if activeSlotID == nil || hostedWebView != nil {
+            updateWebsiteLayoutIfNeeded()
+        }
         layer?.shadowPath = CGPath(
             roundedRect: bounds,
             cornerWidth: PanelMetrics.webPanelCornerRadius,
@@ -667,6 +759,59 @@ final class WebPanelContainerView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateSemanticColors()
+        for host in hotHostViews.values {
+            host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+
+    private func showHot(webView: WKWebView, slotID: UUID) {
+        hostedWebView?.removeFromSuperview()
+        hostedWebView = nil
+        currentContentView?.isHidden = true
+
+        let host: WebSlotHostView
+        if let existing = hotHostViews[slotID] {
+            host = existing
+            host.attach(webView)
+        } else {
+            host = WebSlotHostView(webView: webView)
+            hotHostViews[slotID] = host
+            host.frame = clipView.bounds
+            clipView.addSubview(host)
+        }
+
+        host.frame = clipView.bounds
+        host.autoresizingMask = [.width, .height]
+        host.isHidden = false
+        host.layoutSubtreeIfNeeded()
+        bringToFront(host)
+
+        websiteLayoutScale = 1
+        activeSlotID = slotID
+        activeWebView = webView
+    }
+
+    private func showTransient(webView: WKWebView, slotID: UUID?) {
+        if hostedWebView !== webView {
+            hostedWebView?.removeFromSuperview()
+            webView.removeFromSuperview()
+            webView.translatesAutoresizingMaskIntoConstraints = true
+            webView.autoresizingMask = []
+            logicalHostView.addSubview(webView)
+            hostedWebView = webView
+        }
+
+        if currentContentView !== logicalHostView {
+            setContentView(logicalHostView)
+        }
+        logicalHostView.isHidden = false
+        bringToFront(logicalHostView)
+
+        activeSlotID = slotID
+        activeWebView = webView
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        updateWebsiteLayoutIfNeeded()
     }
 
     private func configureShell() {
@@ -709,6 +854,17 @@ final class WebPanelContainerView: NSView {
         ])
 
         currentContentView = view
+    }
+
+    private func bringToFront(_ view: NSView) {
+        guard view.superview === clipView,
+              let index = clipView.subviews.firstIndex(where: { $0 === view }) else {
+            return
+        }
+        var ordered = clipView.subviews
+        let selected = ordered.remove(at: index)
+        ordered.append(selected)
+        clipView.subviews = ordered
     }
 
     private func updateWebsiteLayoutIfNeeded() {

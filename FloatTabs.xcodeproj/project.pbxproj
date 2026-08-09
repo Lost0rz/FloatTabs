@@ -27,6 +27,7 @@
 		A00000000000000000000012 /* TabStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* TabStore.swift */; };
 		A00000000000000000000013 /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
 		A00000000000000000000014 /* WebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* WebViewPool.swift */; };
+		A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SlotLifecycleCoordinator.swift */; };
 		A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* SlotNavigationObserver.swift */; };
 		A00000000000000000000016 /* ExternalTabRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* ExternalTabRail.swift */; };
 		A00000000000000000000017 /* WebAppEditorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* WebAppEditorController.swift */; };
@@ -72,6 +73,7 @@
 		B00000000000000000000013 /* TabStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000014 /* ProfileRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileRepository.swift; sourceTree = "<group>"; };
 		B00000000000000000000015 /* WebViewPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewPool.swift; sourceTree = "<group>"; };
+		B00000000000000000000021 /* SlotLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000016 /* SlotNavigationObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotNavigationObserver.swift; sourceTree = "<group>"; };
 		B00000000000000000000017 /* ExternalTabRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalTabRail.swift; sourceTree = "<group>"; };
 		B00000000000000000000018 /* WebAppEditorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppEditorController.swift; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 				B00000000000000000000009 /* WebViewFactory.swift */,
 				B0000000000000000000000A /* WebViewContainer.swift */,
 				B00000000000000000000015 /* WebViewPool.swift */,
+				B00000000000000000000021 /* SlotLifecycleCoordinator.swift */,
 				B0000000000000000000001F /* WebNavigationCoordinator.swift */,
 				B00000000000000000000020 /* PopupCoordinator.swift */,
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
@@ -365,6 +368,7 @@
 				A0000000000000000000000A /* WebViewContainer.swift in Sources */,
 				A00000000000000000000009 /* WebViewFactory.swift in Sources */,
 				A00000000000000000000014 /* WebViewPool.swift in Sources */,
+				A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

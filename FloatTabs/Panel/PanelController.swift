@@ -12,12 +12,17 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let frameStore: PanelFrameStore
     private let quickURLOverlayView = QuickURLOverlayView()
     private let zoomHUDView = ZoomHUDView()
+    private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
+        webViewPool: webViewPool,
+        container: rootView.webPanelContainerView
+    )
 
     private var moveHoverController: PanelMoveHoverController?
     private var previousApplication: NSRunningApplication?
     private var restoredFrame: NSRect?
     private var hasPositionedPanel = false
     private var lastSynchronizedActiveID: UUID?
+    private var lastSynchronizedActiveProfile: WebAppProfile?
     private var followPreferredSize: Bool
 
     var isVisible: Bool {
@@ -187,6 +192,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onRemove = { [weak self] id in
             self?.presentRemoveConfirmation(id: id)
         }
+        rail.onSetResidency = { [weak self] id, policy in
+            _ = self?.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy)
+        }
+        rail.onSetBackgroundMedia = { [weak self] id, policy in
+            _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
+        }
         rail.onReorder = { [weak self] id, destination in
             _ = self?.tabStore.move(id: id, toIndex: destination)
         }
@@ -201,22 +212,39 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
+        slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
         guard let activeProfile = tabStore.activeProfile else {
+            if let previous = lastSynchronizedActiveProfile {
+                slotLifecycleCoordinator.deactivate(profile: previous)
+            }
             lastSynchronizedActiveID = nil
+            lastSynchronizedActiveProfile = nil
             rootView.webPanelContainerView.showEmptyState()
             return
         }
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
+        if activeChanged,
+           let previous = lastSynchronizedActiveProfile,
+           previous.id != activeProfile.id {
+            slotLifecycleCoordinator.deactivate(profile: previous)
+        }
+
         if activeChanged, hasPositionedPanel, followPreferredSize {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
         let webView = webViewPool.webView(for: activeProfile)
-        rootView.webPanelContainerView.show(webView: webView)
+        rootView.webPanelContainerView.show(
+            webView: webView,
+            slotID: activeProfile.id,
+            residencyPolicy: activeProfile.residencyPolicy
+        )
+        slotLifecycleCoordinator.activate(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         lastSynchronizedActiveID = activeProfile.id
+        lastSynchronizedActiveProfile = activeProfile
 
         if panel.isKeyWindow {
             _ = panel.makeFirstResponder(webView)
@@ -345,6 +373,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             Task { @MainActor [weak self] in
                 guard let self, confirmed else { return }
                 _ = self.tabStore.remove(id: id)
+                self.slotLifecycleCoordinator.remove(slotID: id)
                 self.webViewPool.remove(slotID: id)
             }
         }
