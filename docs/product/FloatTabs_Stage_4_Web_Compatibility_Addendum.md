@@ -1,178 +1,161 @@
 # FloatTabs — Stage 4 Web Compatibility Addendum
 
-> Status: IN PROGRESS
-> Scope: Web compatibility, navigation, sessions, OAuth, upload/download
-> Base: accepted Stage 3 merge `c7326a44cb3e8ebdda1b2aec4d147229f91a8332`
-> Canonical base documents: Product v0.5 + Technical Architecture v1.2
+> Status: **DRAFT — automated gate green; Real-Mac regression acceptance pending**  
+> Base: accepted Stage 3 rendering profile  
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, and real-site compatibility boundaries
 
-## 1. Why Stage 4 exists
+## 1. Stage 4 intent
 
-Stage 3 established the rendering baseline and intentionally left one temporary navigation fallback in place:
-
-```text
-targetFrame == nil
-+ http/https
-→ load in current persistent Slot
-```
-
-That fallback fixed the real Bilibili Desktop symptom where trusted DOM clicks requested a new browsing context but FloatTabs had no auxiliary target. It is not the final V1 navigation policy.
-
-Stage 4 replaces that temporary behavior with a structured compatibility layer while preserving all accepted Stage 0–3 rendering and interaction behavior.
-
-## 2. Canonical Stage 4 ownership
-
-The Web layer must converge toward:
+Stage 4 hardens real-site WebKit behavior without changing the accepted Stage 3 four-layer rendering model:
 
 ```text
-WebNavigationCoordinator
-├── normal in-frame navigation
-├── new browsing-context classification
-├── current-Slot routing
-├── external-browser routing
-└── popup handoff
-
-PopupCoordinator
-├── WKUIDelegate
-├── temporary child WKWebView
-├── OAuth/login popup lifecycle
-└── same persistent website-data context
-
-UploadCoordinator
-└── WKUIDelegate open panel → NSOpenPanel
-
-DownloadCoordinator
-└── WKDownload / WKDownloadDelegate → NSSavePanel
+Website Mode
+Window Size
+Browser Identity
+Zoom
 ```
 
-`SlotNavigationObserver` remains responsible for per-Slot lifecycle concerns such as current URL observation, rendering restoration after navigation, and transient scroller restoration. It must not become the long-term owner of every compatibility policy.
+These remain independent product controls. Website Mode must represent a real desktop/mobile website experience, not merely a different FloatTabs window size.
 
-## 3. Stage 4 execution slices
+## 2. Navigation / popup baseline
 
-### 4A — Navigation policy ownership foundation
+Stage 4 centralizes navigation ownership so the Slot lifecycle and routing policy do not grow ad-hoc site fixes.
 
-Goal: establish one decision boundary without changing accepted Stage 3 runtime behavior.
-
-Required:
-
-- introduce `WebNavigationCoordinator` as the owner of navigation decisions;
-- have `SlotNavigationObserver` delegate navigation policy to it;
-- preserve the existing Stage 3 `targetFrame == nil` http/https current-Slot fallback;
-- preserve Bilibili Desktop behavior;
-- preserve current URL observation, reload behavior, rendering profile behavior and shared website data;
-- keep the decision model extensible for popup/external-browser actions.
-
-This slice is deliberately behavior-preserving. It is an architectural prerequisite for 4B.
-
-### 4B — Popup, OAuth and external-link routing
-
-Implement the canonical V1 split:
+Canonical routing:
 
 ```text
-normal in-frame navigation
-→ current Slot
-
-same-site new browsing context
-→ current Slot or temporary child WebView as required
-
-OAuth/login popup
-→ temporary child WKWebView
-
-ordinary external/research link
-→ default system browser
-
-permanent FloatTabs Slot creation
-→ never automatic
+same-site new context       → current Slot
+cross-site user link        → default browser
+scripted/window.open        → temporary child WKWebView
+about:blank                 → temporary child WKWebView
+non-web scheme              → system handler
 ```
 
-Requirements:
+The accepted Bilibili Desktop `targetFrame == nil` interaction regression remains covered by deterministic navigation tests.
 
-- implement `WKUIDelegate` handling;
-- add `PopupCoordinator` rather than growing `SlotNavigationObserver`;
-- child WebViews must use the originating WebKit configuration/data context where supported;
-- close child popups cleanly and return focus to the parent Slot;
-- do not use provider-specific security bypasses or cookie copying;
-- preserve the Bilibili Desktop new-window interaction that Stage 3 already validated.
+## 3. Session / OAuth baseline
 
-Classification must be explicit and testable. Do not scatter host-name special cases through delegates.
+Ordinary persistent Slots share `WKWebsiteDataStore.default()`.
 
-### 4C — Session and OAuth compatibility QA
+Accepted behavior includes:
 
-Validate the shared persistent profile:
+- stable bundle identity `com.lost0rz.FloatTabs`;
+- authenticated website data persists across Slot rebuilds and app relaunch;
+- shared Google/ChatGPT/YouTube authenticated state where WebKit permits it;
+- popup/OAuth child WebViews use the centralized popup policy.
 
-```swift
-WKWebsiteDataStore.default()
-```
+## 4. Upload / download baseline
 
-Required QA dimensions:
+Stage 4 owns native file interaction through WebKit delegates:
 
-- direct login;
-- popup login;
-- Google / Apple where offered;
-- quit/relaunch restore;
-- rendering-profile rebuild without session loss;
-- app update identity/data-location continuity when a signed update path exists.
+- file chooser → `NSOpenPanel`;
+- single / multiple file selection;
+- directory selection;
+- cancellation handling;
+- explicit and MIME-driven downloads;
+- `WKDownloadDelegate` routing;
+- destination selection with `NSSavePanel`;
+- cleanup on cancel/failure.
 
-Priority sites remain ChatGPT, Claude, Gemini, X, Instagram, TikTok and Facebook.
+## 5. Website Mode and Automatic browser identity
 
-No provider is declared supported until tested. A provider blocking embedded user-agents is recorded as a limitation, not bypassed.
+Real-Mac testing exposed two different site requirements that must not be collapsed into one global UA rule.
 
-The previously deferred Sina/redirect-sensitive same-Slot mode-switch case belongs to compatibility QA and may be investigated here without reopening Stage 3 rendering architecture.
+### Generic sites
 
-### 4D — Upload and download
-
-Upload:
+For ordinary sites, Automatic follows Website Mode:
 
 ```text
-WKUIDelegate open-panel request
-→ NSOpenPanel
+Automatic + Desktop → desktop content mode + macOS Safari identity
+Automatic + Mobile  → mobile content mode  + current iPhone Safari compatibility identity
 ```
 
-Support single file, multiple files, directories when requested, cancellation, and sandbox-compatible user selection. Critical QA: ChatGPT and Claude attachments.
+On macOS, `.preferredContentMode = .mobile` alone does not reliably produce the mobile server experience for sites that branch on User-Agent. Therefore Generic Mobile Automatic uses the centralized current-version iPhone Safari UA generated by `UserAgentProvider`.
 
-Download:
+This preserves the accepted Stage 3 behavior where Bilibili Mobile receives a real mobile website experience instead of a desktop document fitted into a narrow CSS layout.
+
+### ChatGPT compatibility boundary
+
+Authenticated Real-Mac testing found ChatGPT's `+` / attachment menu unstable when Mobile Website Mode was combined with an iPhone-class UA and macOS mouse/trackpad pointer semantics.
+
+A centralized `SiteCompatibilityPolicy` therefore applies a narrow runtime exception only for:
 
 ```text
-WKDownload
-→ WKDownloadDelegate
-→ NSSavePanel
+chatgpt.com
+*.chatgpt.com
+chat.openai.com
 ```
 
-No custom download manager is added in V1.
+For these hosts:
 
-## 4. Navigation invariants
+```text
+Automatic + Mobile
+→ mobile content mode
+→ macOS Safari compatibility identity
+```
 
-Stage 4 must preserve:
+The exception does not change Window Size or user Zoom and does not apply to Bilibili, YouTube, or unrelated sites.
 
-- one warm WKWebView per persistent Slot;
-- no automatic permanent Slot creation from links/popups;
-- same `WKWebsiteDataStore.default()` profile for normal Slots;
-- stable Browser Identity during one auth flow;
-- current URL persistence for the parent Slot;
-- Stage 3 Website Mode / Window Size / Browser Identity / Zoom independence;
-- Bilibili Desktop interaction;
-- YouTube element fullscreen;
-- website-owned right-edge and input behavior.
+No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding experiments were rejected by Real-Mac testing and remain removed.
 
-## 5. Security boundaries
+## 6. Mode-switch loading performance
 
-Do not:
+Website Mode / Browser Identity changes still rebuild the affected `WKWebView` in this Stage 4 implementation so configuration and identity changes are applied from a clean WebKit boundary.
 
-- import Safari/Chrome cookies;
-- manually serialize auth tokens/cookies;
-- inject OAuth bypass scripts;
-- spoof browser identity specifically to evade provider security policy;
-- upload browsing history or webpage content to a FloatTabs service;
-- silently create permanent browser-like tabs for external research links.
+The rebuild no longer deliberately bypasses HTTP/WebKit cache. Rebuilt navigation now uses:
 
-## 6. Stage 4 completion gate
+```text
+URLRequest.CachePolicy.useProtocolCachePolicy
+```
 
-Stage 4 is complete only when:
+instead of:
 
-- navigation classification is centralized and covered by deterministic tests;
-- popup/OAuth child WebView lifecycle works on real Mac;
-- ordinary external links use the default browser according to policy;
-- persistent session behavior has a recorded real-site matrix;
-- upload and download pass focused real-Mac QA;
-- Stage 0–3 automated regressions remain green.
+```text
+reloadIgnoringLocalCacheData
+```
 
-Until then the Stage 4 PR remains Draft.
+This removes the forced cold-cache penalty observed during Desktop ↔ Mobile switching while preserving the existing rebuild safety model.
+
+If Real-Mac acceptance still finds mode switching materially too slow, the next optimization boundary is to remove the rebuild itself and apply mode-specific navigation preferences to a warm WebView. That is not claimed complete in this PR.
+
+## 7. Transient webpage scrollbar behavior
+
+The accepted shell behavior is:
+
+```text
+scroll begins → relevant overlay scroller may appear
+scroll idle   → scroller disappears
+```
+
+The delayed hide must not retain stale `NSScrollView` references because WebKit can recreate/reconfigure internal scroll views during layout. The transient-scroller controller therefore re-enumerates the current WebKit descendant scroll views when the idle timer fires, and rechecks once on the next main-queue turn before returning them to the hidden-at-rest state.
+
+Real-Mac acceptance must verify that the webpage right-edge vertical scrollbar does not remain pinned after scrolling stops.
+
+## 8. Automated gate
+
+Final clean HEAD for this regression pass:
+
+```text
+68c85cc65e2a9dd913cb3d440658d6f7f383d59b
+```
+
+macOS CI #237: **PASS**
+
+- package resolution: PASS;
+- package lock unchanged: PASS;
+- Debug build: PASS;
+- full Unit Tests: PASS;
+- XCTest diagnostic artifact path retained for future failures.
+
+## 9. Remaining Real-Mac gate
+
+Before marking the PR Ready, validate:
+
+1. Bilibili — Automatic + Mobile renders the actual mobile site, not a zoomed/squeezed desktop document;
+2. Bilibili — Desktop links/content remain clickable;
+3. ChatGPT — Automatic + Mobile `+` / attachment menu remains stable and the file chooser opens;
+4. webpage right-edge scrollbar appears during scroll when appropriate and disappears after idle;
+5. Desktop ↔ Mobile switching is materially faster after restoring normal cache use;
+6. YouTube Desktop controls and element fullscreen remain normal.
+
+The PR remains Draft until these Real-Mac checks pass.
