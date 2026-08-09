@@ -15,6 +15,10 @@ xcuserdata/
 .build/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 
+# Python
+__pycache__/
+*.pyc
+
 # Distribution
 dist/
 *.dmg
