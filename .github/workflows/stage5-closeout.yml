@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply closeout patch
-        run: python3 .github/stage5_closeout_patch.py
+        run: |
+          python3 .github/stage5_closeout_fix.py
+          python3 .github/stage5_closeout_patch.py
 
       - name: Commit closeout
         run: |
