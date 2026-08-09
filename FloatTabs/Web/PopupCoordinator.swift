@@ -80,13 +80,13 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         openExternal: @escaping ExternalOpenHandler = { url in
             _ = NSWorkspace.shared.open(url)
         },
-        uploadCoordinator: UploadCoordinator = UploadCoordinator(),
-        downloadCoordinator: DownloadCoordinator = DownloadCoordinator()
+        uploadCoordinator: UploadCoordinator? = nil,
+        downloadCoordinator: DownloadCoordinator? = nil
     ) {
         self.parentWebView = parentWebView
         self.openExternal = openExternal
-        self.uploadCoordinator = uploadCoordinator
-        self.downloadCoordinator = downloadCoordinator
+        self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()
+        self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         super.init()
     }
 
