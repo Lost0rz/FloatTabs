@@ -24,134 +24,69 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-
       - name: Xcode version
         run: xcodebuild -version
-
       - name: Resolve Swift packages
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -resolvePackageDependencies
-          -onlyUsePackageVersionsFromResolvedFile
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs
+          -resolvePackageDependencies -onlyUsePackageVersionsFromResolvedFile
       - name: Verify package lock is unchanged
         run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-
       - name: Debug build
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          build
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build
+      - name: Mobile mode diagnostic
+        run: >-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebsiteModeIsMobile test
+      - name: Mobile width 430 probe
+        run: >-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebViewWidthIs430Probe test
       - name: Mobile attached medium width diagnostic
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumAttachedWebViewWidthIs390
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumAttachedWebViewWidthIs390 test
       - name: Mobile detached medium width diagnostic
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebViewWidthIs390
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebViewWidthIs390 test
       - name: Mobile medium origin diagnostic
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebViewOriginIs20
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumWebViewOriginIs20 test
       - name: Mobile medium page zoom diagnostic
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumPageZoomIsOne
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/MobileRenderingDiagnosticTests/testMediumPageZoomIsOne test
       - name: Mobile cap geometry regression
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileSurfaceCapsAt390WithoutChangingOuterWindowSize
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileSurfaceCapsAt390WithoutChangingOuterWindowSize test
       - name: Mobile AppKit hit-routing regression
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileCenteredSurfaceRoutesOffCenterHitIntoWebViewTree
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileCenteredSurfaceRoutesOffCenterHitIntoWebViewTree test
       - name: Mobile wide geometry and CSS regression
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileModeUsesCenteredPhysicalSurfaceWhileWindowStaysWide
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests/testMobileModeUsesCenteredPhysicalSurfaceWhileWindowStaysWide test
       - name: WebViewFactory test class
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          -only-testing:FloatTabsTests/WebViewFactoryTests
-          test
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests test
       - name: Unit tests
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          test
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug
+          -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0 test
