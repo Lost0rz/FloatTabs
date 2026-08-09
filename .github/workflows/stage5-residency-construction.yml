@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply residency implementation
-        run: python3 .github/stage5_residency_patch.py
+        run: |
+          python3 .github/stage5_residency_patch.py
+          sed -i '' 's/[[:blank:]]*$//' docs/product/FloatTabs_Stage_5_Residency_Policy.md
 
       - name: Validate project references
         run: |
