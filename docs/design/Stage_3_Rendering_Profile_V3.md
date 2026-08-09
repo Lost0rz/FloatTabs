@@ -1,104 +1,125 @@
-# Stage 3 Rendering Profile V3 — Two-Layer Website Layout
+# Stage 3 Rendering Profile V3 — Public WebKit Layout Fitting
 
-> Status: IMPLEMENTED FOR REAL-MAC RETEST
-> Product source: `docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`
+> Status: **IMPLEMENTED AND REAL-MAC ACCEPTED**  
+> Product source: `docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`  
 > Acceptance: `docs/validation/Stage_3_V3_Acceptance.md`
 
 ## 1. Problem found on real Mac
 
-V2 changed the effective UA and WebKit preferred content mode, but the visible WKWebView width was also the CSS layout viewport.
+A Website Mode switch must change the website's actual layout class without changing the FloatTabs window size.
 
-That meant a 430 px FloatTabs window could still cause responsive sites to render a narrow/mobile layout even after choosing Desktop.
+The accepted behavior is:
 
-V3 separates the physical FloatTabs surface from the website's logical layout viewport.
+```text
+Website Mode = website layout class
+Window Size  = visible Web surface
+Browser Identity = compatibility identity
+Zoom = user preference
+```
 
-## 2. Geometry model
+A narrow Desktop window still needs a desktop CSS layout; a wide Mobile window still needs a mobile CSS layout.
+
+## 2. Final geometry and WebKit model
+
+The current Stage 3 implementation keeps AppKit and WKWebView at the real visible geometry.
 
 ```text
 visible FloatTabs Web surface
-    frame = user Window Size
+    size = selected Window Size
 
-logicalHostView
-    frame  = visible Window Size
-    bounds = Website Mode logical size
+WebPanelContainerView
+    geometry = visible size
 
 WKWebView
-    frame = Website Mode logical size
+    frame = visible size
     bounds = ordinary frame-sized WebKit bounds
+
+WebsiteLayoutViewport
+    computes target CSS width + fitting scale
+
+FloatTabsWebView
+    effective pageZoom = fitting scale × stored user Zoom
 ```
 
-The outer container remains the actual on-screen Window Size. The WKWebView itself receives a real logical frame so WebKit and page CSS observe the requested Desktop/Mobile layout width.
-
-The parent `logicalHostView` performs the visual fit through standard AppKit frame/bounds coordinate mapping. The WKWebView is not embedded in a magnified `NSScrollView`, and `FloatTabsWebView` does not apply its own independent bounds transform.
-
-This keeps one presentation transform outside WebKit while preserving a real 1280/390-class WKWebView layout surface.
-
-### Desktop
+Canonical target widths:
 
 ```text
-logicalWidth = max(1280, visibleWidth)
+Desktop targetCSSWidth = max(1280, visibleWidth)
+Mobile targetCSSWidth  = min(390, visibleWidth)
 ```
 
-A 430 px visible window therefore still exposes a desktop-class logical width.
-
-### Mobile
+Fitting:
 
 ```text
-logicalWidth = min(390, visibleWidth)
+websiteLayoutScale = visibleWidth / targetCSSWidth
+effectivePageZoom  = websiteLayoutScale × userPageZoom
 ```
 
-A 900 px visible window therefore still exposes a phone-class logical width.
+The page therefore observes the requested Desktop/Mobile CSS width while the physical FloatTabs surface remains unchanged.
 
-### Logical height
+This is a public WebKit implementation. It does not use private layout SPI, `NSScrollView.magnification`, or an AppKit parent transform as the canonical layout mechanism.
 
-To keep the fit uniform:
+## 3. Ownership
+
+### `WebsiteLayoutViewport`
+
+Owns pure calculations for:
+
+- Desktop minimum CSS width;
+- Mobile maximum CSS width;
+- target CSS width;
+- internal fitting scale.
+
+Its compatibility `logicalSize` hook currently returns the real visible size because AppKit no longer owns website-layout scaling.
+
+### `FloatTabsWebView`
+
+Owns runtime composition of:
 
 ```text
-scale = logicalWidth / visibleWidth
-logicalHeight = visibleHeight × scale
+Website Mode
+stored user Zoom
+visible frame width
 ```
 
-The host uses the corresponding frame/bounds ratio so the logical website surface fills the visible surface without independent X/Y distortion.
+and applies the resulting effective value through public `WKWebView.pageZoom`.
 
-## 3. Implementation ownership
+Frame-size changes recompute only the fitting factor; they do not mutate Website Mode or the stored user Zoom.
 
-`WebsiteLayoutViewport` owns the pure logical-size calculation.
+### `WebPanelContainerView`
 
-`WebPanelContainerView` is the single owner of Stage 3 viewport presentation:
-
-- `clipView` owns the visible FloatTabs Web surface and clipping;
-- `logicalHostView.frame` stays equal to the visible Window Size;
-- `logicalHostView.bounds` becomes the logical Website Mode size;
-- the WKWebView receives that same real logical size as its frame;
-- visible-window resize recomputes both logical size and host coordinate mapping.
-
-`FloatTabsWebView` stores the effective Website Mode and retains WebKit/scroller behavior, but does not independently change its bounds scale.
-
-No private WebKit SPI is used.
+Owns visible clipping/presentation and WebView attachment. Under the accepted Stage 3 implementation it remains 1:1 with the visible surface. Historical `logicalHostView` naming is not a license to restore the rejected parent-scaling architecture.
 
 ## 4. Interaction requirement
 
-A DOM/CSS viewport test is not enough. The presentation host must also preserve real WebKit interaction semantics.
+A DOM width assertion is insufficient. Stage 3 requires real interaction to survive layout fitting.
 
-The host therefore avoids `NSScrollView.magnification` around WKWebView. Standard ancestor coordinate conversion must map visible pointer locations into the logical child coordinate system. Real-Mac acceptance includes links, buttons, player controls, text selection, scrolling, and right-edge interaction.
+Acceptance covers:
+
+- native mouse clicks;
+- links and buttons;
+- media controls;
+- text input/selection;
+- Command+A / Command+C;
+- scrolling;
+- right-edge website interaction.
+
+Controlled tests established that `pageZoom < 1` does not globally break WebKit native click delivery.
+
+The earlier failing native-click XCTest was a synchronization bug: mouse delivery to WebContent is asynchronous, so the test now polls the resulting DOM state until success/timeout.
 
 ## 5. Zoom separation
 
-Host frame/bounds mapping is internal layout fitting.
-
-User Zoom remains:
+The persisted product Zoom is never overwritten by internal fitting.
 
 ```text
-WKWebView.pageZoom
+stored user Zoom = user intent
+effective pageZoom = internal fit × stored user Zoom
 ```
 
-A stored 100% remains 100% user zoom even when a desktop layout is fitted into a narrow visible window.
+`⌘+`, `⌘-`, and `⌘0` change only the stored user Zoom step. They do not change Website Mode or Window Size.
 
-Changing Zoom does not change the logical website layout width or host fit ratio.
-
-## 6. WebKit content mode and browser identity
-
-V3 keeps the WebKit preferred content-mode request and User-Agent compatibility layer as additional site signals.
+## 6. Browser identity and content mode
 
 Automatic identity remains:
 
@@ -107,94 +128,76 @@ Desktop → macOS Safari
 Mobile  → iPhone Safari
 ```
 
-For macOS Safari compatibility, FloatTabs keeps the native WKWebView UA path and appends the resolved Safari/WebKit suffix through `applicationNameForUserAgent`. Chrome/Edge/mobile identities remain explicit compatibility UAs. The engine remains WebKit for every identity.
+macOS Safari compatibility uses WKWebView's native UA path plus the resolved Safari/WebKit suffix through `applicationNameForUserAgent`. Chrome/Edge/mobile identities remain explicit compatibility UAs.
+
+`WKWebpagePreferences.preferredContentMode` is still configured as an additional site signal. The rendering engine remains WebKit for all identities.
 
 ## 7. Element fullscreen
 
-Web content fullscreen is an explicit WebKit capability. `WebViewFactory` enables:
+Before WKWebView creation:
 
-```text
-WKWebViewConfiguration.preferences.isElementFullscreenEnabled = true
+```swift
+configuration.preferences.isElementFullscreenEnabled = true
 ```
 
-before WKWebView creation.
+Real-Mac acceptance confirms YouTube can enter and exit video/element fullscreen and returns to a usable panel afterward.
 
-This is required for sites such as YouTube to request element/video fullscreen through WebKit. Real-Mac acceptance must verify both entering and leaving fullscreen and returning to the FloatTabs panel correctly.
+## 8. Website Mode rebuild and redirects
 
-## 8. Website Mode rebuild and redirect handling
+Website Mode or Browser Identity changes may rebuild only the affected Slot.
 
-Website Mode or Browser Identity changes rebuild only the affected Slot because these settings affect WebKit configuration and request identity.
-
-For a rebuild, FloatTabs chooses the navigation URL in this order:
+For rebuild navigation, FloatTabs chooses:
 
 ```text
-1. existing back/forward current item's initialURL
-2. existing visible URL
+1. back/forward current item's initialURL
+2. visible URL
 3. persisted current URL
 4. Slot home URL
 ```
 
-`initialURL` is preferred so a server redirect from a canonical URL to a mobile/desktop-specific URL does not permanently pin the next Website Mode to the previous variant.
+The rebuild request ignores local HTTP cache while shared persistent website data remains intact.
 
-Mode/identity rebuild navigation uses `reloadIgnoringLocalCacheData`, while ordinary initial Slot creation keeps normal protocol cache behavior. Shared `WKWebsiteDataStore.default()` remains unchanged, so cookies and sessions survive the rebuild.
+The observed Sina redirect-sensitive Desktop → Mobile → Desktop case is deferred compatibility work. It is intentionally not treated as a Stage 3 merge blocker.
 
-## 9. Expected examples
+## 9. Bilibili interaction / new-window compatibility
 
-### Narrow Desktop
+Bilibili Desktop hover and trusted DOM clicks worked, but ordinary link actions could appear inert because desktop content used a new browsing context while FloatTabs had no window target to receive it.
 
-```text
-Window Size: 430 × 820
-Website Mode: Desktop
-visible surface width: 430
-WKWebView logical/CSS width: 1280
-```
+Stage 3 therefore adds a generic current-slot fallback for HTTP/HTTPS `targetFrame == nil` navigation. Real-Mac testing confirms Bilibili Desktop interaction is restored.
 
-### Wide Mobile
-
-```text
-Window Size: 900 × 850
-Website Mode: Mobile
-visible surface width: 900
-WKWebView logical/CSS width: 390
-```
-
-Switching between those modes does not alter the stored Window Size.
+This fallback is deliberately narrower than the final navigation architecture. The next compatibility/navigation stage must centralize classification for OAuth/login popups, same-site popups, and external/research links.
 
 ## 10. Automated evidence
 
-The maintained tests verify:
+Maintained tests cover:
 
-- narrow Desktop: real WKWebView frame and `document.body.clientWidth` are approximately 1280 CSS px;
-- wide Mobile: real WKWebView frame and `document.body.clientWidth` are approximately 390 CSS px;
-- visible container size remains independent;
-- visible-to-logical coordinate conversion remains consistent through the logical host;
-- user `pageZoom` remains independent from layout fitting;
-- element fullscreen support is enabled before WKWebView creation;
-- mode/identity rebuild prefers the original request URL and bypasses local HTTP cache;
-- pooled WebViews rebuild only the affected Slot while retaining persistent website data.
+- narrow Desktop → approximately 1280 CSS px;
+- wide Mobile → approximately 390 CSS px;
+- visible Window Size independence;
+- fitting scale composition with stored user Zoom;
+- native click delivery at public pageZoom values;
+- async click-test synchronization;
+- WebKit element fullscreen capability;
+- mode/identity rebuild isolation;
+- persistent website data;
+- targetFrame=nil current-slot compatibility fallback;
+- Stage 0–2 regressions.
 
-## 11. Real-Mac findings and remaining gate
+## 11. Real-Mac result
 
-Real-Mac testing has already shown that Bilibili's previous “browser version too low” warning no longer appears and that Bilibili/YouTube visibly change layout between Desktop and Mobile.
+Accepted:
 
-The same retest also exposed three remaining acceptance issues that this revision targets:
+```text
+Bilibili Desktop layout + interaction + playback  PASS
+Bilibili browser-version warning                  ABSENT
+Bilibili Mobile                                   PASS
+YouTube controls                                  PASS
+YouTube enter/exit element fullscreen             PASS
+```
 
-- Bilibili Desktop controls must remain clickable after logical viewport fitting;
-- YouTube element/video fullscreen must enter and exit correctly;
-- redirect-sensitive sites such as Sina must switch Desktop → Mobile → Desktop in the same Slot without deleting/recreating it.
+Deferred:
 
-These are not considered accepted until the revised build passes real-Mac retest.
-
-## 12. Regression requirements
-
-Retest:
-
-- pointer hit testing and text selection;
-- vertical/horizontal scrolling;
-- reload/navigation;
-- right-edge website interaction;
-- transient scrollers;
-- page Zoom shortcuts;
-- Slot switching and WebView reuse;
-- YouTube/video element fullscreen;
-- native-full-screen overlay and focus restore.
+```text
+Sina redirect-sensitive mode-switch edge case
+full popup/OAuth/external-link navigation policy
+```

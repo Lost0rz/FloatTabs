@@ -1,39 +1,66 @@
 # Stage 3 V3 Acceptance — Website Layout vs Window Size
 
-> Status: REAL-MAC RETEST REQUIRED
-> Scope: Stage 3 V3 correction after V2 real-Mac rejection
-> Product: `docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`
+> Status: **PASSED — DEFERRED COMPATIBILITY ITEMS RECORDED**  
+> Scope: Stage 3 V3 rendering correction and real-Mac acceptance  
+> Product: `docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`  
 > Design: `docs/design/Stage_3_Rendering_Profile_V3.md`
 
 ## Acceptance principle
 
 Website Mode and Window Size must be visibly and technically independent.
 
-A mode switch is not accepted merely because the User-Agent or CSS width changes. The resulting page must also remain fully interactive and reversible in the same Slot.
+A mode switch is accepted only when the requested website layout remains interactive in the same persistent Slot and does not resize FloatTabs.
+
+## Final implementation baseline
+
+The accepted runtime model is:
+
+```text
+WKWebView physical frame = visible FloatTabs Web surface
+
+Desktop target CSS width = max(1280, visibleWidth)
+Mobile target CSS width  = min(390, visibleWidth)
+
+websiteLayoutScale = visibleWidth / targetCSSWidth
+effective pageZoom = websiteLayoutScale × stored user Zoom
+```
+
+Public `WKWebView.pageZoom` is the final fitting boundary. AppKit parent-view magnification/frame-bounds scaling is not the canonical Stage 3 website-layout mechanism.
 
 ## Automated acceptance
 
-Required before real-Mac retest:
+The maintained macOS lane passes:
 
-- Debug build passes;
-- full unit tests pass;
-- package lock remains unchanged;
-- Desktop logical layout width is at least 1280 CSS px for a narrow window;
-- Mobile logical layout width is at most 390 CSS px for a wide window;
-- the outer visible surface remains the selected Window Size;
-- the WKWebView receives the real logical frame corresponding to Website Mode;
-- page-observed CSS width matches the logical frame;
-- the parent logical host maps visible coordinates into the logical WKWebView coordinate system without `NSScrollView.magnification`;
-- user `pageZoom` remains independent from layout fitting;
-- WebKit element fullscreen is enabled before WKWebView creation;
-- Website Mode/Browser Identity rebuild prefers the original request URL and bypasses local HTTP cache;
-- existing WebView lifecycle and Stage 0–2 tests remain green.
+```text
+Resolve Swift packages       PASS
+Package lock unchanged       PASS
+Debug Build                  PASS
+Full Unit Tests              PASS
+```
 
-## Real-Mac retest
+Automated coverage includes:
 
-### 1. Narrow Desktop is truly Desktop
+- canonical rendering-profile defaults and Codable persistence;
+- Website Mode / visible Window Size independence;
+- 430 px visible Desktop surface → approximately 1280 CSS px;
+- 900 px visible Mobile surface → approximately 390 CSS px;
+- fitting-factor recomputation on visible resize;
+- stored user Zoom composed independently at the pageZoom boundary;
+- browser identity generation and preferred-content-mode mapping;
+- WebKit element fullscreen enabled before creation;
+- mode/identity rebuild isolation and persistent website data;
+- original request URL preference for rebuilds;
+- transient scroll-bar and Quick URL regressions;
+- native click delivery at pageZoom < 1;
+- asynchronous native-click test stabilization via observable-state polling;
+- `targetFrame == nil` HTTP/HTTPS current-slot compatibility fallback;
+- Stage 0–2 test suite.
 
-Use:
+## Real-Mac acceptance
+
+### 1. Narrow Desktop
+
+Configuration:
 
 ```text
 Website Mode = Desktop
@@ -41,13 +68,13 @@ Window Size = Medium 430 × 820
 Zoom = 100%
 ```
 
-Pass only if the site renders its desktop-class layout rather than falling into a narrow/mobile responsive layout.
+Result: **PASS**.
 
-The visible FloatTabs Web area must remain 430 × 820, with no black or unfilled fitting region.
+The site remains desktop-class while the visible FloatTabs Web surface remains the selected narrow size.
 
-### 2. Wide Mobile is truly Mobile
+### 2. Wide Mobile
 
-Use:
+Configuration:
 
 ```text
 Website Mode = Mobile
@@ -55,136 +82,117 @@ Window Size = Wide 900 × 850
 Zoom = 100%
 ```
 
-Pass only if the site remains mobile-class even though the visible FloatTabs window is wide.
+Result: **PASS** for the accepted Website Mode / Window Size separation behavior.
 
-The visible FloatTabs Web area must remain 900 × 850.
+### 3. Window Size and Zoom independence
 
-### 3. Reversible mode switching
+Result: **PASS** through automated and real-Mac evidence.
 
-At a fixed Window Size:
+Window resizing does not implicitly change Website Mode. User Zoom remains a persisted independent setting and is composed with internal fitting only at runtime.
 
-```text
-Desktop → Mobile → Desktop
-```
+### 4. Pointer and input regression
 
-must produce reversible website-layout changes without resizing FloatTabs and without deleting/recreating the Slot.
+Result: **PASS**.
 
-For redirect-sensitive sites, test a page that may move between canonical and mobile/desktop-specific URLs. The new mode must be evaluated from the original request path rather than remaining pinned to the previous redirect target.
-
-### 4. Window Size does not change mode
-
-At fixed Desktop mode:
+Controlled probes showed:
 
 ```text
-Small → Medium → Wide → Custom
+pageZoom=1.000 + direct mouseDown/up   PASS
+pageZoom≈0.336 + direct mouseDown/up   PASS
+pageZoom=1.000 + NSWindow.sendEvent    PASS
+pageZoom≈0.336 + NSWindow.sendEvent    PASS
 ```
 
-must remain Desktop.
+The earlier failing click XCTest was a test race, not a production pageZoom bug. WebContent handles native mouse delivery asynchronously; the test now waits for the resulting DOM state instead of reading immediately.
 
-At fixed Mobile mode the same size changes must remain Mobile.
+### 5. Bilibili Desktop
 
-The Web surface must follow each selected visible size rather than leaving stale content dimensions or black space.
+Result: **PASS**.
 
-### 5. Zoom stays separate
+Confirmed on real Mac:
 
-At fixed mode and size:
+- desktop layout is correct;
+- previous browser-version warning remains absent;
+- playback works;
+- hover feedback works;
+- page interaction works after the new-window compatibility fallback;
+- Mobile mode remains interactive.
+
+Root cause of the apparent inert Desktop links: trusted DOM clicks were delivered, but desktop content could request a new browsing context (`targetFrame == nil`) while FloatTabs had no auxiliary target. Stage 3 routes ordinary HTTP/HTTPS requests of that form into the current Slot.
+
+This is a temporary compatibility fallback, not the final popup/external-link architecture.
+
+### 6. YouTube element fullscreen
+
+Result: **PASS**.
+
+Real-Mac retest confirmed:
+
+- ordinary controls work;
+- video/element fullscreen can be entered;
+- fullscreen can be exited;
+- FloatTabs returns to an interactive panel state.
+
+### 7. Navigation and reload
+
+Result: **PASS** for the Stage 3 rendering scope.
+
+Website Mode survives normal navigation/reload and persistent website data remains shared across required WebView rebuilds.
+
+## Deferred compatibility items
+
+The following are deliberately **not claimed as fixed** and do not block Stage 3 acceptance by current product decision:
+
+### Sina / redirect-sensitive mode switching
+
+Observed edge case:
 
 ```text
-⌘+
-⌘-
-⌘0
+same Slot: Desktop → Mobile → Desktop
 ```
 
-must change user zoom only. It must not silently change Website Mode, Window Size, or logical layout fitting.
+may remain sensitive to site redirect/canonical URL behavior.
 
-### 6. Pointer and input regression
+Status: **DEFERRED**.
 
-Because V3 presents a real logical WKWebView through a parent logical host, verify on actual sites:
+Carry this into later web-compatibility work rather than adding more rendering hacks to Stage 3.
 
-- clicking links targets the correct visual point;
-- buttons, menus and media controls respond;
-- text input works;
-- text selection works;
-- Command+A / Command+C work;
-- vertical and horizontal scrolling track the pointer correctly;
-- website right-edge interaction remains owned by the website.
+### Final popup / external-link / OAuth policy
 
-Bilibili Desktop is a required interaction fixture because an earlier magnified-host build rendered the correct layout but page controls were not reliably clickable.
+Current Stage 3 behavior routes HTTP/HTTPS `targetFrame == nil` requests into the current Slot so normal desktop links are not silently dropped.
 
-### 7. YouTube element fullscreen
+The canonical V1 architecture still requires a centralized policy that distinguishes:
 
-On YouTube:
+```text
+OAuth/login popup      → temporary child WKWebView when appropriate
+same-site popup        → current Slot or child WebView
+external/research link → default system browser by default
+```
 
-- start video playback;
-- click the player's fullscreen control;
-- verify element/video fullscreen is entered;
-- exit fullscreen;
-- verify the FloatTabs panel returns correctly and remains interactive;
-- repeat after Desktop/Mobile switching.
+Status: **DEFERRED TO WEB COMPATIBILITY / NAVIGATION STAGE**.
 
-Failure to enter WebKit element fullscreen is a Stage 3 acceptance failure.
+## Stage 0–2 invariants
 
-### 8. Navigation and reload
+No accepted regression is recorded for:
 
-Navigate between pages and reload.
-
-Website Mode must remain stable and idle scroll bars must return to hidden state.
-
-After a Website Mode change, the affected Slot may rebuild, but cookies/session state must remain available through the persistent website data store.
-
-### 9. Browser identity runtime check
-
-For Automatic Desktop/macOS Safari identity, verify the effective page-observed UA contains Safari-compatible `Version/... Safari/...` tokens. Do not require the identity to be stored in `WKWebView.customUserAgent`; the supported Safari path uses native WKWebView UA plus `applicationNameForUserAgent`.
-
-For explicit Chrome/Edge/mobile compatibility identities, verify the selected identity is reflected in the effective UA while the engine remains WebKit.
-
-### 10. Current Bilibili compatibility evidence
-
-The previously observed Bilibili “browser version too low” warning no longer appeared in the latest real-Mac retest and normal playback became available.
-
-This is positive real-site evidence. The next retest must confirm that the warning remains absent after the interaction-host changes; it must not be reintroduced while fixing click behavior.
-
-### 11. Slot persistence
-
-Quit and reopen.
-
-Preserve:
-
-- Website Mode;
-- Window Size;
-- Zoom;
-- Browser Identity;
-- current URL;
-- active Slot and order.
-
-### 12. Stage 0–2 regression
-
-Recheck:
-
-- native-full-screen Obsidian overlay;
+- Menu Bar-only lifecycle;
+- native-full-screen visibility;
 - show/type/hide/focus restore;
 - inactive-app first-drag movement;
-- bottom-right resize;
-- external tabs and current-app controls.
-
-## Required focused fixtures for this revision
-
-Before acceptance, explicitly retest:
-
-```text
-Bilibili Desktop
-  layout correct + controls clickable + warning stays absent
-
-YouTube
-  Desktop/Mobile layout switch + ordinary controls + enter/exit video fullscreen
-
-Sina / redirect-sensitive site
-  same Slot: Desktop → Mobile → Desktop
-  no delete/recreate workaround
-```
+- movement/resize separation;
+- protected right-edge website interaction;
+- external Slot / `+` interaction priority;
+- persistent Slot identity/order/current URL;
+- persistent website data;
+- Quick URL and keyboard shortcuts.
 
 ## Merge gate
 
-PR #4 remains Draft.
+Stage 3 V3 is **accepted for merge**.
 
-Do not merge and do not begin Stage 4 until this V3 real-Mac acceptance is explicitly approved.
+Requirements before merge:
+
+1. cleanup commit lands on the Stage 3 branch;
+2. maintained macOS CI is green on the cleanup head;
+3. PR description reflects the accepted public-pageZoom architecture and deferred items;
+4. PR may then be marked Ready and merged.

@@ -9,21 +9,30 @@ The product is intentionally not a full browser. It keeps a small number of freq
 ```text
 Stage 0 Window Feasibility Spike: PASSED
 Stage 1 Core Native Shell: PASSED
-→ current baseline: native floating shell + frame/multi-display/window-movement foundation
-→ next engineering line: Stage 2 Persistent Web App Slots
+Stage 2 Persistent Web App Slots: PASSED
+Stage 3 Rendering Profiles: PASSED
+→ current baseline: persistent Slots + independent Website Mode / Window Size / Browser Identity / Zoom
+→ next engineering line: Stage 4 Web Compatibility, Navigation, Sessions & OAuth
 ```
 
-Stage 0 validated the critical real-Mac window path: FloatTabs can be summoned with the global shortcut above a native full-screen Obsidian window, become interactive, accept WKWebView keyboard input, hide again, and restore the previous app workflow.
+Stage 3 real-Mac acceptance now includes:
 
-Stage 1 adds the production-facing native shell foundation: separate WKWebView viewport semantics, the `76 pt` external control zone, resize/frame restore, multi-display recovery, Menu Bar toggle behavior, and the accepted four-sided perimeter movement model. The audited Stage 1 baseline passes the maintained GitHub-hosted macOS build/test lane.
+- Desktop website layout in a narrow FloatTabs window;
+- Mobile website layout in a wide FloatTabs window;
+- Bilibili Desktop playback and interaction without the previous browser-version warning;
+- Bilibili Desktop links/new-window actions working through the current Stage 3 same-slot fallback;
+- YouTube ordinary controls and enter/exit element fullscreen;
+- persistent per-Slot rendering values and the maintained macOS CI lane.
+
+Redirect-sensitive Website Mode switching such as the observed Sina case is explicitly deferred to compatibility follow-up and is not represented as solved.
 
 Recorded evidence and interaction decisions:
 
 - [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md)
 - [`docs/validation/Stage_1_Acceptance.md`](docs/validation/Stage_1_Acceptance.md)
+- [`docs/validation/Stage_2_Acceptance.md`](docs/validation/Stage_2_Acceptance.md)
+- [`docs/validation/Stage_3_V3_Acceptance.md`](docs/validation/Stage_3_V3_Acceptance.md)
 - [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
-
-The Stage 1 perimeter drag model must be revalidated against real website edge controls/scrollbars once Stage 2 introduces actual Web App slots and the visible external shell. Website interaction has priority over drag convenience.
 
 ## Canonical Documentation
 
@@ -38,8 +47,8 @@ Read these before changing product behavior, architecture, or UI:
 3. **UI Design System**  
    [`docs/design/FloatTabs_UI_Design_System_v1.2.md`](docs/design/FloatTabs_UI_Design_System_v1.2.md)
 
-4. **Accepted Stage Interaction Addenda**  
-   [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
+4. **Stage 3 Rendering Override**  
+   [`docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`](docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md)
 
 5. **Generated UI/UX References**  
    [`docs/uiux/README.md`](docs/uiux/README.md)
@@ -52,7 +61,7 @@ If materials conflict:
 Design/System rule for UI
 + Product scope
 + Technical Architecture
-+ accepted Stage interaction addenda
++ accepted Stage addenda / validation
         ↓
 override generated Stitch screenshots / code.html
 ```
@@ -98,13 +107,15 @@ V1 uses one real embedded engine: **WebKit**.
 Per Web App Slot, users can independently configure:
 
 ```text
-Browser Compatibility: Safari / Chrome-UA
-View Mode: Responsive / Desktop / Mobile
-Viewport Size
+Website Mode
+Window Size
+Browser Identity / Compatibility
 Zoom
 ```
 
-`Safari / Chrome` is browser compatibility identity, not a WebKit/Blink engine switch.
+Website Mode controls the requested website layout class. Window Size controls only the visible FloatTabs Web surface. Browser Identity is compatibility identity, not an engine switch. User Zoom remains a persisted per-Slot value.
+
+Stage 3 uses public `WKWebView.pageZoom` as the final presentation boundary: internal website-layout fitting is composed with the independent user Zoom while the AppKit/WKWebView geometry remains at the real visible size.
 
 Website sessions use a shared persistent `WKWebsiteDataStore` profile. FloatTabs does not store passwords or manually copy browser cookies.
 

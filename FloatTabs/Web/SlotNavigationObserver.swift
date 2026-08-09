@@ -59,18 +59,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         decisionHandler(.allow, preferences)
     }
 
-    /// A navigation whose target frame is nil is a request for a new browsing
-    /// context (`target="_blank"` or `window.open`). FloatTabs is a single-slot
-    /// floating surface with no auxiliary window and no `WKUIDelegate` to create
-    /// one, so WebKit would silently drop these — making clicks on `_blank`
-    /// links appear to fire (they produce a trusted DOM click) yet do nothing.
+    /// Stage 3 compatibility fallback for a new browsing context (`target="_blank"`
+    /// or `window.open`). Without an auxiliary WKWebView target, WebKit can deliver
+    /// a trusted DOM click while the requested page appears not to open. Until the
+    /// full WebNavigationCoordinator policy is implemented, ordinary http/https
+    /// requests with no target frame are loaded into the current persistent Slot.
     ///
-    /// Such http/https requests should instead be routed into the current slot.
-    /// This is generic web compatibility (any site that opens content via
-    /// `_blank`, e.g. Bilibili's desktop video cards, benefits) and is the
-    /// Stage 3 policy: there is no new-tab/window API yet, so the same-slot
-    /// fallback is the correct, spec-aligned handling. Extracted as a pure
-    /// function so the decision can be unit-tested directly.
+    /// This fallback does not supersede the canonical V1 navigation policy. The
+    /// next compatibility/navigation stage must classify OAuth/login popups,
+    /// same-site popups, and ordinary external/research links separately.
     static func shouldOpenInCurrentSlot(targetFrame: WKFrameInfo?, url: URL?) -> Bool {
         guard targetFrame == nil,
               let url,
