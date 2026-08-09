@@ -1,6 +1,6 @@
 # FloatTabs — Stage 4 Web Compatibility Addendum
 
-> Status: **Stage 4 architecture/code closeout implemented; final Real-Mac recovery smoke pending**  
+> Status: **Stage 4 architecture/code closeout implemented; final Real-Mac warm-slot + active recovery smoke pending**  
 > Base: merged Stage 4 + Navigation Intent / Slot Home on `main`  
 > Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, Slot Home, and WebContent process recovery
 
@@ -132,6 +132,8 @@ Automatic + Mobile
 
 The exception does not change Window Size or user Zoom and does not apply to Bilibili, YouTube, or unrelated sites.
 
+The **effective runtime rendering profile must remain stable across warm Slot reuse**. When an existing ChatGPT `WKWebView` is detached and later reselected, FloatTabs recomputes the site compatibility profile and reapplies that effective runtime profile; it must not overwrite the active macOS Safari compatibility identity with the persisted base `Automatic + Mobile` iPhone identity. Deterministic regression coverage verifies repeated warm reuse keeps the same `WKWebView`, preserves the same macOS Safari UA, and does not create an additional load request.
+
 No app-level mouse-coordinate rewrite is used. Earlier coordinate-forwarding experiments were rejected by Real-Mac testing and remain removed.
 
 ## 7. Mode-switch loading performance
@@ -215,6 +217,8 @@ Recovery rules:
 
 Deterministic tests cover the active/immediate policy, inactive/deferred policy, same-WebView deferred recovery, current-URL restoration, and observer-to-pool termination signal.
 
+Real-Mac closeout testing has additionally confirmed the inactive/deferred path: terminating a FloatTabs-owned inactive WebContent process leaves the current Slot unchanged, and the affected Slot recovers only when selected.
+
 ## 11. Removed Stage 4 drift / dead seams
 
 The closeout also removes or corrects stale implementation/documentation that could cause future regressions:
@@ -246,23 +250,25 @@ Navigation Intent + Slot Home merge on `main`:
 4e8266ca95751dd4daaccc4afe20ddb8d3895918
 ```
 
-Real-Mac acceptance has already passed for Bilibili Mobile/Desktop, Bilibili Desktop clicks, ChatGPT Mobile attachment interaction, hidden webpage scrollbar with preserved scrolling, materially faster Website Mode switching, explicit Floating/Default Browser actions, Return Home/history behavior, and YouTube fullscreen.
+Real-Mac acceptance has already passed for Bilibili Mobile/Desktop, Bilibili Desktop clicks, ChatGPT Mobile attachment interaction, hidden webpage scrollbar with preserved scrolling, materially faster Website Mode switching, explicit Floating/Default Browser actions, Return Home/history behavior, YouTube fullscreen, and inactive/deferred WebContent recovery.
 
 The merge-to-main macOS CI after PR #7 also passed.
 
 ## 13. Stage 4 closeout gate
 
-Automated closeout code gate has passed on the recovery implementation, including full Debug build and Unit Tests. A final clean PR CI is required after all documentation synchronization and removal of temporary construction tooling.
+Automated closeout coverage now includes both WebContent recovery and ChatGPT warm-slot runtime compatibility. The ChatGPT regression test verifies repeated `webView(for:)` reuse preserves one `WKWebView`, one initial load, and the macOS Safari compatibility identity.
 
-One new Real-Mac smoke test remains before PR #8 can be marked Ready:
+Two focused Real-Mac checks remain before PR #8 can be marked Ready:
 
 ```text
-active Slot WebContent process terminates
-→ FloatTabs host stays alive
-→ current page reloads automatically
-→ persistent login/session is not cleared
+1. ChatGPT warm Slot switching
+   → repeated switch away/back does not fall into the prior long black/reload-like state
+   → ChatGPT Mobile attachment interaction remains normal
+
+2. active Slot WebContent process terminates
+   → FloatTabs host stays alive
+   → current page reloads automatically
+   → persistent login/session is not cleared
 ```
 
-The inactive/deferred branch is covered deterministically because reliably targeting the WebContent process for one specific inactive Slot from Activity Monitor is not guaranteed by WebKit process sharing.
-
-After that smoke test passes, Stage 4 architecture/code can be frozen and Stage 5 Resource Optimization can begin. The full provider compatibility matrix remains a separate V1 release QA gate.
+After those checks pass, Stage 4 architecture/code can be frozen and Stage 5 Resource Optimization can begin. The full provider compatibility matrix remains a separate V1 release QA gate.
