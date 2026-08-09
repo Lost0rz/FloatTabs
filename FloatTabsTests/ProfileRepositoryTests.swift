@@ -13,6 +13,8 @@ final class ProfileRepositoryTests: XCTestCase {
                 name: "Docs",
                 homeURL: URL(string: "https://example.com")!,
                 currentURL: URL(string: "https://example.com/current")!,
+                residencyPolicy: .hot,
+                backgroundMediaPolicy: .allowBackgroundAudio,
                 createdAt: Date(timeIntervalSince1970: 100),
                 lastUsedAt: Date(timeIntervalSince1970: 200)
             )
@@ -27,6 +29,8 @@ final class ProfileRepositoryTests: XCTestCase {
 
             XCTAssertEqual(restored, state)
             XCTAssertEqual(restored.profiles.first?.currentURL, profile.currentURL)
+            XCTAssertEqual(restored.profiles.first?.residencyPolicy, .hot)
+            XCTAssertEqual(restored.profiles.first?.backgroundMediaPolicy, .allowBackgroundAudio)
             XCTAssertEqual(restored.lastActiveTabID, id)
         }
     }

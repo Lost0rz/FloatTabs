@@ -314,10 +314,18 @@ Drag reorder 后 shortcut mapping 同步更新。
 
 ## 6.1 Slot Context Menu
 
-Slot 右键菜单保持精简，管理的是 Slot 本身而不是模拟完整浏览器：
+Slot 右键菜单管理 Slot 身份与资源策略，不模拟完整浏览器：
 
 ```text
 Return to Home
+────────────
+Residency
+  Hot
+  Warm
+  Cold
+Background Media
+  Pause When Inactive
+  Allow Background Audio
 ────────────
 Edit Web App…
 ────────────
@@ -325,6 +333,8 @@ Remove Web App…
 ```
 
 `Edit Web App…` 已包含 Name，因此不再提供独立 `Rename` 动作。排序继续使用拖拽；`⌘1…⌘9` 始终跟随当前排序。
+
+`Residency` 不参与排序：拖拽只改变 Slot 顺序，右键设置只改变资源生命周期。
 
 `Return to Home` 导航到稳定的 `homeURL`，不主动清空 WebKit back/forward history。熟练用户也可使用 `⌘⇧H`。
 
@@ -654,25 +664,50 @@ Copy Link               → clipboard
 
 # 13. WebView / Website Data
 
-## 13.1 One Warm WebView per Slot
+## 13.1 Slot Residency Policy
 
-每个 active/warm Slot 保留自己的 WKWebView：
+`Active` 不是资源等级；当前选中的 Slot 永远是 Active / 可交互状态。每个 Slot 另外持久化：
 
 ```text
-GPT    → WKWebView
-X      → WKWebView
-Claude → WKWebView
-IG     → WKWebView
+Residency: Hot / Warm / Cold
+Background Media: Pause When Inactive / Allow Background Audio
 ```
 
-不使用一个 WebView 来回 load 所有 Slot。
+### Hot
 
-Warm state 可保留：
+- 第一次在当前 app process 中激活后，live WKWebView 保持 attached；
+- 每个 Hot Slot 使用独立 presentation host；
+- inactive 时冻结自己的 viewport，不跟随其他 Slot 的 Window Size 改变；
+- FloatTabs 不主动 detach / evict；
+- 不要求 app launch 时预加载所有 Hot Slot；
+- 适合长 ChatGPT conversation 等重型 SPA。
 
-- scroll position；
-- SPA state；
-- unsent text；
-- instant switching。
+### Warm
+
+- 默认值；
+- WKWebView 保留在 pool；
+- inactive 时从 visible presentation detach；
+- 再次选择时复用同一个 WKWebView；
+- 页面内存状态由 WebKit best-effort 保留，不做强保证。
+
+### Cold
+
+```text
+inactive
+→ 30 秒 grace period
+→ 仍未激活则 release live WKWebView
+```
+
+Cold release 保留：
+
+- WebAppProfile；
+- Home URL；
+- Current URL；
+- Rendering Profile；
+- Residency / Background Media；
+- persistent WebKit website data。
+
+30 秒内重新激活必须取消 pending release。
 
 ## 13.2 Persistent Website Data
 
@@ -698,34 +733,53 @@ V1 = 一个 FloatTabs browser profile。
 
 FloatTabs 不保存密码，不手工 serialize auth Cookie/token。
 
-## 13.3 Inactive WebViews
+## 13.3 Background Media
 
-切离 Slot：
+`Pause When Inactive`：
 
-- detach from visible hierarchy；
-- use inactive scheduling where appropriate；
-- pause background media by default。
+```text
+inactive
+→ WKWebView.pauseAllMediaPlayback()
+```
 
-不要为了省少量内存立即销毁所有 inactive WebViews。
+只执行可由用户重新 Play 的普通暂停。不要在常规 Slot switching 使用 `setAllMediaPlaybackSuspended(true/false)`；Real-Mac 已验证强 suspension 会造成 YouTube/B站播放按钮恢复异常。
 
-## 13.4 Memory Saver
+`Allow Background Audio`：
 
-先通过 Instruments 测量 1/3/6 个重型 Web App。
+> FloatTabs 不主动 pause / suspend；**不等于网站一定会继续后台播放。**
 
-只有测量证明必要后才增加 cold eviction。
+是否继续由站点 + Website Mode 决定。当前 Real-Mac 观察：
 
-Cold restore 只能保证：
+- B站 Warm / Cold-pending 可继续；Cold eviction 后停止；
+- YouTube Desktop + Warm 可继续；
+- YouTube Mobile + Warm 会自行暂停；
+- YouTube Hot 因 WebView 保持 attached 可继续。
 
-- persistent login data；
-- current URL。
+不为此增加 YouTube/B站域名特判、JS 强制 `play()` 或 autoplay bypass。
 
-不能保证：
+## 13.4 Resource Measurement
 
-- unsent form text；
-- exact scroll position；
-- SPA transient memory。
+Hot/Warm/Cold 是用户显式策略，FloatTabs 不静默自动降级 Hot。
 
-V1 Add/Edit form 没有 `Keep Active in Memory`。
+功能验收后再用 Instruments 测量：
+
+```text
+1 Slot
+3 Slots
+6 Slots
+```
+
+记录：
+
+- Memory；
+- CPU；
+- Energy；
+- Network；
+- switch latency。
+
+测量结果用于默认值、提示和后续优化，不用于破坏用户显式 Residency 选择。
+
+V1 Add/Edit form 仍不放 `Keep Active in Memory`；Residency 由 Slot context menu 管理。
 
 ---
 
@@ -1152,13 +1206,17 @@ No Global Settings work is required here。
 - download；
 - content-process recovery。
 
-## Stage 5 — Resource Optimization
+## Stage 5 — Slot Residency & Resource Optimization
 
-- inactive scheduling；
-- background media suspension；
-- Instruments baseline；
-- 1/3/6 Slot benchmark；
-- decide whether cold eviction is necessary。
+- per-Slot `Hot / Warm / Cold` Residency Policy；
+- Hot independent presentation host，禁止 shared variable viewport；
+- Warm pooled/detached reuse；
+- Cold 30 秒 grace + live WebView eviction；
+- `Pause When Inactive` 使用 user-resumable media pause；
+- `Allow Background Audio` 作为 FloatTabs permission，实际能力由站点 / Website Mode 决定；
+- Real-Mac compatibility acceptance；
+- Instruments 1/3/6 Slot Memory / CPU / Energy / Network / switch-latency benchmark；
+- 根据测量决定是否需要 Hot-count warning / Cold timing tuning，不静默覆盖用户策略。
 
 ## Stage 6 — Polish / Release
 
@@ -1201,7 +1259,7 @@ Recommended dependency order：
 #17 Implement upload panel
 #18 Implement WKDownload
 #19 Persistent session/OAuth compatibility matrix
-#20 Suspend background WebViews/media + benchmark
+#20 Add Hot/Warm/Cold residency + background-media policy + benchmark
 #21 Add native Global Settings
 #22 Multi-screen/full-screen regression + release polish
 ```

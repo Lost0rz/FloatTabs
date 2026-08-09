@@ -9,7 +9,8 @@
 
 ### Hot
 
-- FloatTabs does not proactively detach or evict the live `WKWebView`.
+- FloatTabs does not proactively detach or evict the live `WKWebView` after that Slot has been activated in the current app process.
+- Hot does not eagerly preload every configured Hot Slot at app launch.
 - Each Hot Slot owns an independent AppKit presentation host.
 - The inactive Hot host freezes its last active viewport before another Slot changes panel size.
 - Only the active Hot host follows live panel resizing.
@@ -34,7 +35,8 @@
 This is independent from residency:
 
 - `Pause When Inactive` calls WebKit's `pauseAllMediaPlayback` for the inactive Slot. This pauses current media but deliberately does **not** put the page into WebKit's stronger playback-suspended state, so the website and user remain free to start playback again after returning.
-- `Allow Background Audio` does not issue any FloatTabs media pause/suspend command while the WebView remains resident.
+- `Allow Background Audio` leaves media untouched while the WebView remains resident; FloatTabs does not force playback.
+- Background continuation is website/Website-Mode dependent. Real-Mac observations: Bilibili Warm/Cold-pending can continue; YouTube Desktop Warm can continue; YouTube Mobile Warm pauses itself; YouTube Hot can continue while attached.
 - A Cold Slot can still be released after its grace period; release ends any remaining media runtime.
 
 `setAllMediaPlaybackSuspended` is intentionally not used for Slot switching. Real-Mac testing showed that repeated asynchronous suspend/unsuspend transitions could leave YouTube/Bilibili unable to accept a normal user play action and could surface autoplay-blocked errors.

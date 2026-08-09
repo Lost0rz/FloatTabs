@@ -1,3 +1,4 @@
+import AppKit
 import WebKit
 import XCTest
 @testable import FloatTabs
@@ -238,6 +239,70 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: second.id))
         XCTAssertTrue(pool.webView(for: second) === secondView)
         XCTAssertEqual(pool.count, 1)
+    }
+
+    func testColdLifecycleReleasesAfterGracePeriod() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "Cold")
+        profile.residencyPolicy = .cold
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01
+        )
+
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+    }
+
+    func testColdLifecycleActivationCancelsPendingRelease() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "ColdCancel")
+        profile.residencyPolicy = .cold
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01
+        )
+
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+
+        lifecycle.activate(profile: profile)
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+    }
+
+    func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "Warm")
+        profile.residencyPolicy = .warm
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01
+        )
+
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
     func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() {
