@@ -26,7 +26,10 @@ final class SlotLifecycleCoordinator {
 
         container.retainHotSlots(hotIDs)
 
-        for slotID in coldReleaseTokens.keys where !validIDs.contains(slotID) || !coldIDs.contains(slotID) {
+        let staleColdReleaseIDs = coldReleaseTokens.keys.filter {
+            !validIDs.contains($0) || !coldIDs.contains($0)
+        }
+        for slotID in staleColdReleaseIDs {
             coldReleaseTokens.removeValue(forKey: slotID)
         }
     }
