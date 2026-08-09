@@ -19,68 +19,11 @@ on:
       - '.github/workflows/macos-ci.yml'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-and-test:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: feat/stage-4-web-compatibility-sessions
-
-      - name: Apply guarded mobile automatic UA repair
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          def replace(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected 1 guarded match, found {count}")
-              p.write_text(text.replace(old, new, 1))
-
-          replace(
-              'FloatTabs/Web/WebViewFactory.swift',
-              '''        if profile.browserIdentity == .automatic {\n            return nil\n        }\n\n        let identity = resolvedIdentity(\n''',
-              '''        if profile.browserIdentity == .automatic {\n            guard profile.effectiveWebsiteMode == .mobile else { return nil }\n            return userAgent(\n                for: .iphoneSafari,\n                websiteMode: .mobile,\n                versions: versions\n            )\n        }\n\n        let identity = resolvedIdentity(\n'''
-          )
-
-          replace(
-              'FloatTabs/Web/WebViewFactory.swift',
-              '''        if rendering.browserIdentity != .automatic {\n            webView.customUserAgent = UserAgentProvider.customUserAgent(\n                for: rendering,\n                versions: versions\n            )\n        }\n''',
-              '''        if let customUserAgent = UserAgentProvider.customUserAgent(\n            for: rendering,\n            versions: versions\n        ) {\n            webView.customUserAgent = customUserAgent\n        }\n'''
-          )
-
-          replace(
-              'FloatTabsTests/WebViewFactoryTests.swift',
-              '''    func testAutomaticMobileLetsWebKitOwnMobileIdentity() {\n''',
-              '''    func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {\n'''
-          )
-
-          replace(
-              'FloatTabsTests/WebViewFactoryTests.swift',
-              '''        XCTAssertNil(webView.customUserAgent)\n''',
-              '''        XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)\n        XCTAssertTrue(webView.customUserAgent?.contains("Version/26.") == true)\n'''
-          )
-
-          replace(
-              'FloatTabsTests/WebViewPoolTests.swift',
-              '''        XCTAssertNil(mobile.customUserAgent)\n''',
-              '''        XCTAssertTrue(mobile.customUserAgent?.contains("iPhone") == true)\n        XCTAssertFalse(mobile.customUserAgent?.contains("Macintosh") == true)\n'''
-          )
-          PY
-
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add FloatTabs/Web/WebViewFactory.swift FloatTabsTests/WebViewFactoryTests.swift FloatTabsTests/WebViewPoolTests.swift
-          git commit -m "fix: use mobile Safari identity for automatic mobile sites"
-          git push origin HEAD:feat/stage-4-web-compatibility-sessions
 
       - name: Xcode version
         run: xcodebuild -version
@@ -129,9 +72,11 @@ jobs:
             grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
           fi
           echo '::endgroup::'
+
           if [ -d "$RUNNER_TEMP/FloatTabsTests.xcresult" ]; then
             echo '::group::XCResult test summary'
-            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
+            xcrun xcresulttool get test-results summary \
+              --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
             echo '::endgroup::'
           fi
 
