@@ -49,6 +49,208 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
+      - name: Write Mobile hit-test strategy probe
+        shell: bash
+        run: |
+          cat > /tmp/FloatTabsMobileHitProbe.swift <<'SWIFT'
+          import AppKit
+          import Foundation
+          import WebKit
+
+          final class Waiter: NSObject, WKNavigationDelegate {
+              var finished = false
+              var failed = false
+
+              func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+                  finished = true
+              }
+
+              func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+                  failed = true
+              }
+
+              func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+                  failed = true
+              }
+          }
+
+          enum Strategy: String {
+              case pageZoom
+              case logicalHost
+          }
+
+          func spin(until condition: () -> Bool, timeout: TimeInterval = 5) -> Bool {
+              let deadline = Date(timeIntervalSinceNow: timeout)
+              while Date() < deadline {
+                  if condition() { return true }
+                  RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+              }
+              return condition()
+          }
+
+          func evaluate(_ script: String, in webView: WKWebView) -> Any? {
+              var done = false
+              var value: Any?
+              webView.evaluateJavaScript(script) { result, _ in
+                  value = result
+                  done = true
+              }
+              _ = spin(until: { done })
+              return value
+          }
+
+          guard CommandLine.arguments.count == 2,
+                let strategy = Strategy(rawValue: CommandLine.arguments[1]) else {
+              fatalError("usage: probe pageZoom|logicalHost")
+          }
+
+          _ = NSApplication.shared
+
+          let physicalSize = NSSize(width: 900, height: 850)
+          let logicalWidth: CGFloat = 390
+          let visibleScale = physicalSize.width / logicalWidth
+          let logicalSize = NSSize(
+              width: logicalWidth,
+              height: physicalSize.height / visibleScale
+          )
+
+          let configuration = WKWebViewConfiguration()
+          configuration.websiteDataStore = .nonPersistent()
+          let webView = WKWebView(frame: .zero, configuration: configuration)
+          let window = NSWindow(
+              contentRect: NSRect(origin: .zero, size: physicalSize),
+              styleMask: [.borderless],
+              backing: .buffered,
+              defer: false
+          )
+          window.isReleasedWhenClosed = false
+
+          var logicalHost: NSView?
+          switch strategy {
+          case .pageZoom:
+              webView.frame = NSRect(origin: .zero, size: physicalSize)
+              webView.pageZoom = visibleScale
+              window.contentView = webView
+
+          case .logicalHost:
+              let host = NSView(frame: NSRect(origin: .zero, size: physicalSize))
+              host.bounds = NSRect(origin: .zero, size: logicalSize)
+              webView.frame = NSRect(origin: .zero, size: logicalSize)
+              webView.autoresizingMask = []
+              host.addSubview(webView)
+              window.contentView = host
+              logicalHost = host
+          }
+
+          window.makeKeyAndOrderFront(nil)
+          window.contentView?.layoutSubtreeIfNeeded()
+          webView.layoutSubtreeIfNeeded()
+
+          let waiter = Waiter()
+          webView.navigationDelegate = waiter
+          webView.loadHTMLString(
+              """
+              <!doctype html>
+              <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                  <style>
+                    html, body { margin:0; width:100%; height:100%; overflow:hidden; }
+                    #target {
+                      position:fixed;
+                      left:20px;
+                      bottom:20px;
+                      width:80px;
+                      height:60px;
+                      border:0;
+                    }
+                    #decoy {
+                      position:fixed;
+                      inset:0;
+                      z-index:-1;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div id="decoy"></div>
+                  <button id="target">target</button>
+                  <script>
+                    window.events = [];
+                    for (const name of ['mousedown', 'mouseup', 'click']) {
+                      document.addEventListener(name, e => {
+                        window.events.push({type:name, target:e.target.id || e.target.tagName, x:e.clientX, y:e.clientY});
+                      }, true);
+                    }
+                  </script>
+                </body>
+              </html>
+              """,
+              baseURL: nil
+          )
+
+          guard spin(until: { waiter.finished || waiter.failed }), waiter.finished else {
+              fatalError("navigation failed")
+          }
+
+          let innerWidth = (evaluate("window.innerWidth", in: webView) as? NSNumber)?.doubleValue ?? -1
+          let innerHeight = (evaluate("window.innerHeight", in: webView) as? NSNumber)?.doubleValue ?? -1
+
+          // The target center is 60 CSS px from the logical left edge and
+          // 50 CSS px from the logical bottom edge. Both strategies should
+          // present that point at the same physical Window coordinate.
+          let physicalPoint = NSPoint(
+              x: 60 * visibleScale,
+              y: 50 * visibleScale
+          )
+
+          func mouseEvent(_ type: NSEvent.EventType, pressure: Float, number: Int) -> NSEvent {
+              NSEvent.mouseEvent(
+                  with: type,
+                  location: physicalPoint,
+                  modifierFlags: [],
+                  timestamp: ProcessInfo.processInfo.systemUptime,
+                  windowNumber: window.windowNumber,
+                  context: nil,
+                  eventNumber: number,
+                  clickCount: 1,
+                  pressure: pressure
+              )!
+          }
+
+          window.sendEvent(mouseEvent(.leftMouseDown, pressure: 1, number: 1))
+          window.sendEvent(mouseEvent(.leftMouseUp, pressure: 0, number: 2))
+
+          _ = spin(until: {
+              ((evaluate("window.events.length", in: webView) as? NSNumber)?.intValue ?? 0) >= 3
+          }, timeout: 2)
+
+          let eventsJSON = evaluate("JSON.stringify(window.events)", in: webView) as? String ?? "[]"
+          let targetEvents = (evaluate(
+              "window.events.filter(e => e.target === 'target').length",
+              in: webView
+          ) as? NSNumber)?.intValue ?? 0
+
+          print("RESULT strategy=\(strategy.rawValue) innerWidth=\(innerWidth) innerHeight=\(innerHeight) physicalPoint=\(physicalPoint) events=\(eventsJSON)")
+
+          // A valid Mobile strategy must expose a phone-class CSS width and
+          // route down/up/click at an off-center physical point to the target.
+          guard (360...420).contains(innerWidth), targetEvents >= 3 else {
+              fatalError("off-center Mobile viewport/hit-test contract failed")
+          }
+
+          withExtendedLifetime(logicalHost) {}
+          window.orderOut(nil)
+          SWIFT
+
+      - name: Probe Mobile pageZoom off-center hit testing
+        continue-on-error: true
+        run: xcrun swift /tmp/FloatTabsMobileHitProbe.swift pageZoom
+
+      - name: Probe Mobile logical-host off-center hit testing
+        if: always()
+        continue-on-error: true
+        run: xcrun swift /tmp/FloatTabsMobileHitProbe.swift logicalHost
+
       - name: Unit tests
         run: >-
           xcodebuild
