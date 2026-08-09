@@ -1,8 +1,8 @@
 # FloatTabs — Stage 4 Web Compatibility Addendum
 
-> Status: **DRAFT — automated gate green; Real-Mac regression acceptance pending**  
+> Status: **Stage 4 baseline accepted; Navigation Intent + Slot Home extension under validation**  
 > Base: accepted Stage 3 rendering profile  
-> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, and real-site compatibility boundaries
+> Scope: navigation ownership, popup routing, sessions/OAuth, upload/download, real-site compatibility boundaries, explicit link routing, and Slot Home
 
 ## 1. Stage 4 intent
 
@@ -21,15 +21,27 @@ These remain independent product controls. Website Mode must represent a real de
 
 Stage 4 centralizes navigation ownership so the Slot lifecycle and routing policy do not grow ad-hoc site fixes.
 
+The Navigation Intent extension makes FloatTabs the default browsing container. Browser boundaries are selected by explicit user intent rather than by comparing URL hosts.
+
 Canonical routing:
 
 ```text
-same-site new context       → current Slot
-cross-site user link        → default browser
-scripted/window.open        → temporary child WKWebView
-about:blank                 → temporary child WKWebView
-non-web scheme              → system handler
+ordinary HTTP(S) user navigation     → current Slot
+user target=_blank HTTP(S) link      → current Slot
+right click: Open in Floating Window → user FloatTabs floating window
+right click: Open in Default Browser → system default browser
+scripted/window.open                 → temporary child WKWebView
+about:blank                          → temporary child WKWebView
+non-web scheme                       → system handler
 ```
+
+Important boundaries:
+
+- ordinary cross-site links are no longer sent to the default browser automatically;
+- same-host / cross-host classification does not control ordinary user navigation;
+- website-owned scripted popups remain separate from user-created floating windows so OAuth/login flows keep their temporary-window semantics;
+- explicit floating windows share the persistent FloatTabs WebKit website-data context and inherit the originating WebView rendering identity;
+- FloatTabs does not add a permanent browser toolbar or Home button inside the webpage rectangle.
 
 The accepted Bilibili Desktop `targetFrame == nil` interaction regression remains covered by deterministic navigation tests.
 
@@ -116,7 +128,7 @@ reloadIgnoringLocalCacheData
 
 This removes the forced cold-cache penalty observed during Desktop ↔ Mobile switching while preserving the existing rebuild safety model.
 
-If Real-Mac acceptance still finds mode switching materially too slow, the next optimization boundary is to remove the rebuild itself and apply mode-specific navigation preferences to a warm WebView. That is not claimed complete in this PR.
+Real-Mac acceptance found this materially faster. Removing the rebuild itself remains deferred unless a later regression establishes a real performance blocker.
 
 ## 7. Permanent webpage scrollbar suppression
 
@@ -136,9 +148,29 @@ Implementation uses two boundaries:
 
 Automated tests verify both that the suppression script is installed at document start and that `window.scrollTo(...)` still changes `window.scrollY` after the visual scrollbar is suppressed.
 
-## 8. Automated gate
+## 8. Slot Home boundary
 
-Final clean code/workflow HEAD for this scrollbar regression pass:
+A persistent Slot has two different navigation values:
+
+```text
+homeURL    → stable identity / return point for the Slot
+currentURL → current browsing position and may change continuously
+```
+
+Ordinary navigation updates `currentURL` but never changes `homeURL`.
+
+The user can explicitly return to the stable Slot Home through:
+
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return to Home performs a normal navigation to `homeURL`; it does not clear WebKit back/forward history. No permanent Home control is added to the webpage surface.
+
+## 9. Automated baseline evidence
+
+Final clean code/workflow HEAD for the accepted Stage 4 scrollbar regression pass:
 
 ```text
 713a8bd4e7119dd170a9b9e0d82b2f41dde21509
@@ -155,15 +187,19 @@ macOS CI #242: **PASS**
 - existing Mobile/Desktop identity tests remain green;
 - XCTest diagnostic artifact path retained for future failures.
 
-## 9. Remaining Real-Mac gate
+## 10. Navigation Intent + Slot Home validation gate
 
-Before marking the PR Ready, validate:
+Before this extension is accepted on Real Mac, validate:
 
-1. Bilibili — Automatic + Mobile renders the actual mobile site, not a zoomed/squeezed desktop document;
-2. Bilibili — Desktop links/content remain clickable;
-3. ChatGPT — Automatic + Mobile `+` / attachment menu remains stable and the file chooser opens;
-4. webpage right-edge root scrollbar remains visually hidden while trackpad/mouse scrolling continues to work normally;
-5. Desktop ↔ Mobile switching remains materially faster after restoring normal cache use;
-6. YouTube Desktop controls and element fullscreen remain normal.
+1. ordinary Bilibili links, including cross-host links, remain in the current Slot;
+2. a user-activated `target=_blank` HTTP(S) link remains in the current Slot;
+3. webpage-link **Open in Floating Window** creates a FloatTabs floating window and leaves the source Slot unchanged;
+4. webpage-link **Open in Default Browser** opens the system default browser only when explicitly selected;
+5. scripted `window.open`, OAuth/login and `about:blank` popup flows retain temporary-popup behavior;
+6. Tab **Return to Home** navigates that Slot to its stable `homeURL`;
+7. `⌘⇧H` returns the active Slot to its stable `homeURL`;
+8. returning Home does not erase back/forward history;
+9. no permanent browser/Home chrome is added;
+10. accepted Bilibili Desktop clicks, ChatGPT Mobile attachment interaction, YouTube fullscreen, Website Mode identity, and hidden-scrollbar behavior do not regress.
 
-The PR remains Draft until these Real-Mac checks pass.
+This extension remains Draft until its automated gate is green and these Real-Mac checks pass.
