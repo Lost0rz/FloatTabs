@@ -52,13 +52,13 @@ Existing all-spaces / full-screen auxiliary behavior remains unchanged. Pin cont
 Until the Settings redesign introduces a dedicated Hotkeys page, Stage 5C uses this temporary default:
 
 ```text
-⌥ Space
+⌘ + `
 ```
 
 Behavior:
 
-- Hidden → `⌥ Space` shows FloatTabs.
-- Visible → `⌥ Space` explicitly hides FloatTabs.
+- Hidden → `⌘ + \`` shows FloatTabs.
+- Visible → `⌘ + \`` explicitly hides FloatTabs.
 
 The summon shortcut is registered as a hard-coded `KeyboardShortcuts.Shortcut` event stream in Stage 5C. It intentionally does not use the persisted `KeyboardShortcuts.Name("toggleFloatTabs", initial: ...)` path, because earlier builds already stored that Name in `UserDefaults` and changing only the `initial` value does not replace an existing stored shortcut.
 
@@ -141,12 +141,12 @@ Automated:
 - reactivating the same Hot Slot unhides the same host/WebView;
 - Pin control and `⌘⇧P` mapping are present;
 - Auto-hide requires a different frontmost process and Pin OFF;
-- `⌥ Space` uses the hard-coded KeyboardShortcuts event path rather than the persisted Name/initial path;
+- `⌘ + \`` uses the hard-coded KeyboardShortcuts event path rather than the persisted Name/initial path;
 - existing Stage 4/5 unit tests remain green.
 
 Real Mac:
 
-1. `⌥ Space` summons FloatTabs from another application and explicitly hides it when pressed again.
+1. `⌘ + \`` summons FloatTabs from another application and explicitly hides it when pressed again.
 2. Pin OFF: clicking another application makes that app frontmost and FloatTabs disappears.
 3. Pin ON: clicking another application leaves FloatTabs visible while the other application remains usable.
 4. `⌘1 … ⌘9` continues to switch Slots while FloatTabs is active.
