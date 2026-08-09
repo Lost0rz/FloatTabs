@@ -1,7 +1,7 @@
 # Stage 4 Acceptance — Web Compatibility, Navigation, Sessions & OAuth
 
 > Status: IN PROGRESS
-> Current slice: 4C preparation after 4B Real-Mac acceptance
+> Current slice: 4C Session/OAuth QA
 > Base main: `d2def2bbe136345445b48c31de2a0b1fd4d60d4c`
 > Stage 3 accepted merge: `c7326a44cb3e8ebdda1b2aec4d147229f91a8332`
 > Product override: `docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`
@@ -162,16 +162,43 @@ A real OAuth provider is deliberately not required for 4B acceptance. Provider l
 
 ## 4C preparation gate
 
-Before long-lived login/session QA begins:
+Status: **PASS**
 
-1. freeze the release application identity / Bundle Identifier once;
-2. physically separate `WebNavigationCoordinator` and `PopupCoordinator` into focused Web-layer files before adding more responsibilities;
-3. keep the accepted 4B routing behavior unchanged during that cleanup;
-4. rerun the full automated gate after the preparation commit.
+Implemented in:
 
-Changing the Bundle Identifier can move the WebKit data container, so the identity freeze must happen **before** recording restart/session-persistence results, not during or after them.
+```text
+8758cc587f9e74665126f3ebdcbf78c8e130bce5
+refactor: prepare Stage 4 session identity
+```
+
+Preparation changes:
+
+- app Bundle Identifier frozen from `com.lost0rz.FloatTabs.stage0` to `com.lost0rz.FloatTabs` for Debug and Release;
+- `WebNavigationCoordinator` moved to `FloatTabs/Web/WebNavigationCoordinator.swift`;
+- `PopupCoordinator` moved to `FloatTabs/Web/PopupCoordinator.swift`;
+- `SlotNavigationObserver.swift` and `WebViewPool.swift` now retain only their own responsibilities;
+- accepted 4B routing behavior is unchanged;
+- persistent Slot configuration remains at `~/Library/Application Support/FloatTabs/WebAppProfiles.json`, so the identity freeze does not reset the saved Slot list/order/current URLs;
+- WebKit website/session data may begin with a new container after the Bundle Identifier change; that is intentional and establishes the baseline for 4C persistence QA.
+
+Validated by macOS CI #170:
+
+```text
+Resolve Swift packages       PASS
+Package lock unchanged       PASS
+Debug Build                  PASS
+Full Unit Tests              PASS
+```
+
+From this commit onward, do not change the application Bundle Identifier during Stage 4 session/OAuth acceptance unless a release-blocking reason is documented first.
 
 ## 4C — Session/OAuth QA gate
+
+Use:
+
+```text
+docs/validation/Stage_4_Session_OAuth_Matrix.md
+```
 
 Record a compatibility matrix for:
 
