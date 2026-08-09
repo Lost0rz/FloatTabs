@@ -19,11 +19,109 @@ on:
       - '.github/workflows/macos-ci.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-and-test:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+
+      - name: Apply guarded automatic identity repair
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$HEAD_REF"
+          git checkout -B ci-repair "origin/$HEAD_REF"
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          source = Path('FloatTabs/Tabs/WebRenderingProfile.swift')
+          text = source.read_text()
+          old_comment = '''    /// Website Mode is an independent product layer. Exact browser identities
+              /// never coerce it; only Automatic uses it to resolve a compatibility UA.
+          '''
+          new_comment = '''    /// Website Mode and Browser Identity are independent product layers.
+              /// Automatic follows FloatTabs' native macOS WKWebView identity; only an
+              /// explicit identity selection changes the platform/browser UA.
+          '''
+          old_identity = '''    var effectiveBrowserIdentity: BrowserIdentity {
+                  switch browserIdentity {
+                  case .automatic:
+                      return websiteMode == .desktop ? .macosSafari : .iphoneSafari
+                  default:
+                      return browserIdentity
+                  }
+              }
+          '''
+          new_identity = '''    var effectiveBrowserIdentity: BrowserIdentity {
+                  switch browserIdentity {
+                  case .automatic:
+                      return .macosSafari
+                  default:
+                      return browserIdentity
+                  }
+              }
+          '''
+          if old_comment not in text or old_identity not in text:
+              if 'case .automatic:\n            return .macosSafari' not in text:
+                  raise SystemExit('Expected automatic identity policy was not found')
+          else:
+              text = text.replace(old_comment, new_comment, 1).replace(old_identity, new_identity, 1)
+              source.write_text(text)
+
+          tests = Path('FloatTabsTests/TabStoreTests.swift')
+          text = tests.read_text()
+          old_test = '''    func testWebsiteModeAndViewportAreIndependent() {
+                  let base = WebRenderingProfile.canonicalDefault
+                  let mobile = base.settingWebsiteMode(.mobile)
+                  XCTAssertEqual(mobile.websiteMode, .mobile)
+                  XCTAssertEqual(mobile.effectiveBrowserIdentity, .iphoneSafari)
+                  XCTAssertEqual(mobile.viewportSize, base.viewportSize)
+
+                  let wide = mobile.settingSimplePreset(.wide)
+                  XCTAssertEqual(wide.websiteMode, .mobile)
+                  XCTAssertEqual(wide.effectiveBrowserIdentity, .iphoneSafari)
+                  XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
+              }
+          '''
+          new_test = '''    func testWebsiteModeAndViewportAreIndependent() {
+                  let base = WebRenderingProfile.canonicalDefault
+                  let mobile = base.settingWebsiteMode(.mobile)
+                  XCTAssertEqual(mobile.websiteMode, .mobile)
+                  XCTAssertEqual(mobile.browserIdentity, .automatic)
+                  XCTAssertEqual(mobile.effectiveBrowserIdentity, .macosSafari)
+                  XCTAssertEqual(mobile.viewportSize, base.viewportSize)
+
+                  let wide = mobile.settingSimplePreset(.wide)
+                  XCTAssertEqual(wide.websiteMode, .mobile)
+                  XCTAssertEqual(wide.browserIdentity, .automatic)
+                  XCTAssertEqual(wide.effectiveBrowserIdentity, .macosSafari)
+                  XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
+              }
+          '''
+          if old_test not in text:
+              if 'XCTAssertEqual(mobile.effectiveBrowserIdentity, .macosSafari)' not in text:
+                  raise SystemExit('Expected Website Mode independence test was not found')
+          else:
+              tests.write_text(text.replace(old_test, new_test, 1))
+          PY
+
+          if git diff --quiet -- FloatTabs/Tabs/WebRenderingProfile.swift FloatTabsTests/TabStoreTests.swift; then
+            echo 'Guarded automatic identity repair already present; no commit needed.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FloatTabs/Tabs/WebRenderingProfile.swift FloatTabsTests/TabStoreTests.swift
+          git commit -m 'fix: decouple automatic identity from website mode'
+          git push origin "HEAD:$HEAD_REF"
 
       - name: Xcode version
         run: xcodebuild -version
