@@ -125,6 +125,31 @@ final class AppCommandControllerTests: XCTestCase {
 
 @MainActor
 final class MobileRenderingDiagnosticTests: XCTestCase {
+    func testMediumAttachedWebViewWidthIs390() {
+        let rendering = WebRenderingProfile.canonicalDefault.settingWebsiteMode(.mobile)
+        guard let webView = WebViewFactory.makeWebView(renderingProfile: rendering) as? FloatTabsWebView else {
+            fatalError("Expected FloatTabsWebView")
+        }
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        container.show(webView: webView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 820),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        container.layoutSubtreeIfNeeded()
+        webView.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
+        window.orderOut(nil)
+    }
+
     func testMediumWebViewWidthIs390() {
         let (_, webView) = makeMobileSurface(width: 430, height: 820)
         XCTAssertEqual(webView.frame.width, 390, accuracy: 0.001)
