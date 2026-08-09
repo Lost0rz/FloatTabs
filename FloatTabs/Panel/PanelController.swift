@@ -12,6 +12,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let frameStore: PanelFrameStore
     private let quickURLOverlayView = QuickURLOverlayView()
     private let zoomHUDView = ZoomHUDView()
+    private lazy var warmWebViewResidency = WarmWebViewResidencyCoordinator(
+        container: rootView.webPanelContainerView
+    )
 
     private var moveHoverController: PanelMoveHoverController?
     private var previousApplication: NSRunningApplication?
@@ -204,7 +207,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         guard let activeProfile = tabStore.activeProfile else {
             lastSynchronizedActiveID = nil
-            rootView.webPanelContainerView.showEmptyState()
+            warmWebViewResidency.showEmptyState()
             return
         }
 
@@ -214,7 +217,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         let webView = webViewPool.webView(for: activeProfile)
-        rootView.webPanelContainerView.show(webView: webView)
+        warmWebViewResidency.show(webView: webView)
         WebViewFactory.configureHiddenScrollers(in: webView)
         lastSynchronizedActiveID = activeProfile.id
 
@@ -225,7 +228,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func focusActiveWebViewIfAvailable() {
         guard !quickURLOverlayView.isPresented,
-              let webView = rootView.webPanelContainerView.currentWebView else { return }
+              let webView = warmWebViewResidency.activeWebView else { return }
         _ = panel.makeFirstResponder(webView)
     }
 

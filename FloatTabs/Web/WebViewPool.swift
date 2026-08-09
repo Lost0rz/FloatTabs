@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import WebKit
 
@@ -91,7 +92,7 @@ final class WebViewPool {
 
             // Reapply the effective runtime profile, not the persisted base profile.
             // Narrow compatibility overrides such as ChatGPT Automatic+Mobile must
-            // remain stable when a warm WKWebView is detached and later reused.
+            // remain stable whenever a warm WKWebView is selected again.
             WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
             appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
@@ -121,6 +122,7 @@ final class WebViewPool {
         appliedRenderingProfiles.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
+        webViews[slotID]?.removeFromSuperview()
         webViews.removeValue(forKey: slotID)
     }
 
@@ -177,6 +179,7 @@ final class WebViewPool {
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
         deferredReloadSlotIDs.remove(profile.id)
+        webViews[profile.id]?.removeFromSuperview()
         webViews.removeValue(forKey: profile.id)
         return createWebView(
             for: profile,
@@ -264,5 +267,82 @@ final class WebViewPool {
 
     private func discardPopupCoordinator(slotID: UUID) {
         popupCoordinators.removeValue(forKey: slotID)?.closeAll()
+    }
+}
+
+
+/// Keeps every warm Slot's WKWebView attached to the same AppKit window.
+/// Switching Slots changes only sibling order. Existing WebViews are never
+/// removed/re-added merely because another Slot becomes active, so heavy SPA
+/// DOM/JS/compositor state can remain warm across ordinary Slot switches.
+///
+/// Stage 5 owns resource scheduling for these resident inactive views; this
+/// Stage 4 boundary is intentionally about state continuity and switch latency.
+@MainActor
+final class WarmWebViewResidencyCoordinator {
+    private unowned let container: WebPanelContainerView
+    private weak var hostView: NSView?
+    private weak var active: WKWebView?
+
+    init(container: WebPanelContainerView) {
+        self.container = container
+    }
+
+    var activeWebView: WKWebView? {
+        active
+    }
+
+    func show(webView: WKWebView) {
+        let host: NSView
+        if let existingHost = hostView {
+            host = existingHost
+        } else {
+            container.show(webView: webView)
+            guard let attachedHost = webView.superview else { return }
+            hostView = attachedHost
+            host = attachedHost
+        }
+
+        if webView.superview !== host {
+            webView.removeFromSuperview()
+            webView.translatesAutoresizingMaskIntoConstraints = true
+            webView.autoresizingMask = [.width, .height]
+            webView.frame = host.bounds
+            host.addSubview(webView)
+        } else {
+            webView.translatesAutoresizingMaskIntoConstraints = true
+            webView.autoresizingMask = [.width, .height]
+        }
+
+        // Reordering the existing subviews keeps every resident WKWebView in the
+        // same window hierarchy. AppKit moves shared views without remove/re-add.
+        var orderedSubviews = host.subviews
+        if let index = orderedSubviews.firstIndex(where: { $0 === webView }) {
+            let selected = orderedSubviews.remove(at: index)
+            orderedSubviews.append(selected)
+            host.subviews = orderedSubviews
+        }
+
+        for resident in host.subviews.compactMap({ $0 as? WKWebView }) {
+            resident.isHidden = false
+            resident.alphaValue = 1
+            resident.autoresizingMask = [.width, .height]
+            if resident.frame != host.bounds {
+                resident.frame = host.bounds
+            }
+        }
+
+        active = webView
+    }
+
+    func showEmptyState() {
+        if let hostView {
+            for resident in hostView.subviews.compactMap({ $0 as? WKWebView }) {
+                resident.removeFromSuperview()
+            }
+        }
+        active = nil
+        hostView = nil
+        container.showEmptyState()
     }
 }
