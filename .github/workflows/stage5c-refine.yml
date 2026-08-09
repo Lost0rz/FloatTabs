@@ -29,25 +29,6 @@ jobs:
             FloatTabsTests/AppCommandControllerTests.swift \
             FloatTabsTests/ExternalShellTests.swift
 
-      - name: Change global panel toggle to Command-backtick
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('FloatTabs/Hotkeys/GlobalHotkeyController.swift')
-          text = p.read_text()
-          old = '''    static let toggleFloatTabs = Self(
-              "toggleFloatTabs",
-              initial: .init(.f, modifiers: [.control, .option, .command])
-          )'''
-          new = '''    static let toggleFloatTabs = Self(
-              "toggleFloatTabs",
-              initial: .init(.backtick, modifiers: [.command])
-          )'''
-          if old not in text:
-              raise SystemExit('expected global shortcut declaration not found')
-          p.write_text(text.replace(old, new))
-          PY
-
       - name: Validate intended diff
         run: |
           git diff --check
@@ -91,9 +72,8 @@ jobs:
       - name: Commit refinement
         run: |
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+Lost0rz@users.noreply.github.com'
           git add \
-            FloatTabs/Hotkeys/GlobalHotkeyController.swift \
             FloatTabs/Hotkeys/AppCommandController.swift \
             FloatTabs/Panel/PanelController.swift \
             FloatTabs/UI/ExternalTabRail.swift \
