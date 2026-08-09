@@ -125,6 +125,30 @@ final class TabStore {
     }
 
     @discardableResult
+    func updateResourcePolicy(
+        id: UUID,
+        residencyPolicy: SlotResidencyPolicy? = nil,
+        backgroundMediaPolicy: BackgroundMediaPolicy? = nil
+    ) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        var changed = false
+
+        if let residencyPolicy, profiles[index].residencyPolicy != residencyPolicy {
+            profiles[index].residencyPolicy = residencyPolicy
+            changed = true
+        }
+        if let backgroundMediaPolicy,
+           profiles[index].backgroundMediaPolicy != backgroundMediaPolicy {
+            profiles[index].backgroundMediaPolicy = backgroundMediaPolicy
+            changed = true
+        }
+
+        guard changed else { return true }
+        persistAndNotify()
+        return true
+    }
+
+    @discardableResult
     func updatePreferredViewport(id: UUID, size: CGSize) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let updated = profiles[index].renderingProfile.settingViewport(size)

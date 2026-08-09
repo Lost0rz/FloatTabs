@@ -69,6 +69,8 @@ final class ProfileRepositoryTests: XCTestCase {
             XCTAssertEqual(profile.renderingProfile.sizePreset, .small)
             XCTAssertEqual(profile.renderingProfile.viewportSize, CGSize(width: 390, height: 780))
             XCTAssertEqual(profile.renderingProfile.zoom, 1.25, accuracy: 0.001)
+            XCTAssertEqual(profile.residencyPolicy, .warm)
+            XCTAssertEqual(profile.backgroundMediaPolicy, .pauseWhenInactive)
         }
     }
 

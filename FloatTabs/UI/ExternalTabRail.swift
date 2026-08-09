@@ -63,6 +63,8 @@ final class ExternalControlZoneView: NSView {
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
+    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
+    var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onCurrentControls: (() -> Void)?
 
@@ -196,6 +198,12 @@ final class ExternalControlZoneView: NSView {
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
+        view.onSetResidency = { [weak self] slotID, policy in
+            self?.onSetResidency?(slotID, policy)
+        }
+        view.onSetBackgroundMedia = { [weak self] slotID, policy in
+            self?.onSetBackgroundMedia?(slotID, policy)
+        }
         view.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
@@ -338,6 +346,8 @@ final class ExternalWebAppTabView: NSView {
     var onReturnHome: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
+    var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
+    var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
@@ -349,6 +359,8 @@ final class ExternalWebAppTabView: NSView {
     private var dockInfluence: CGFloat = 0
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
+    private var residencyPolicy: SlotResidencyPolicy = .warm
+    private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
 
     var preferredWidth: CGFloat {
         ExternalTabMetrics.width(isActive: isActive, dockInfluence: dockInfluence)
@@ -391,7 +403,9 @@ final class ExternalWebAppTabView: NSView {
 
     func update(profile: WebAppProfile, isActive: Bool) {
         label.stringValue = profile.name
-        toolTip = profile.name
+        residencyPolicy = profile.residencyPolicy
+        backgroundMediaPolicy = profile.backgroundMediaPolicy
+        toolTip = "\(profile.name) · \(profile.residencyPolicy.displayName)"
         self.isActive = isActive
         updateAppearance()
     }
@@ -481,6 +495,39 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(home)
         menu.addItem(.separator())
 
+        let residency = NSMenuItem(title: "Residency", action: nil, keyEquivalent: "")
+        let residencyMenu = NSMenu(title: "Residency")
+        for policy in SlotResidencyPolicy.allCases {
+            let item = NSMenuItem(
+                title: policy.displayName,
+                action: #selector(setResidencyFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = policy.rawValue
+            item.state = policy == residencyPolicy ? .on : .off
+            residencyMenu.addItem(item)
+        }
+        residency.submenu = residencyMenu
+        menu.addItem(residency)
+
+        let media = NSMenuItem(title: "Background Media", action: nil, keyEquivalent: "")
+        let mediaMenu = NSMenu(title: "Background Media")
+        for policy in BackgroundMediaPolicy.allCases {
+            let item = NSMenuItem(
+                title: policy.displayName,
+                action: #selector(setBackgroundMediaFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = policy.rawValue
+            item.state = policy == backgroundMediaPolicy ? .on : .off
+            mediaMenu.addItem(item)
+        }
+        media.submenu = mediaMenu
+        menu.addItem(media)
+        menu.addItem(.separator())
+
         let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu), keyEquivalent: "")
         edit.target = self
         menu.addItem(edit)
@@ -504,6 +551,18 @@ final class ExternalWebAppTabView: NSView {
 
     @objc private func editFromMenu() {
         onEdit?(slotID)
+    }
+
+    @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let policy = SlotResidencyPolicy(rawValue: rawValue) else { return }
+        onSetResidency?(slotID, policy)
+    }
+
+    @objc private func setBackgroundMediaFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let policy = BackgroundMediaPolicy(rawValue: rawValue) else { return }
+        onSetBackgroundMedia?(slotID, policy)
     }
 
     @objc private func removeFromMenu() {

@@ -225,6 +225,21 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testColdReleaseDropsOnlyRequestedLiveWebView() {
+        let pool = makePool()
+        let first = makeProfile(name: "A")
+        let second = makeProfile(name: "B")
+        _ = pool.webView(for: first)
+        let secondView = pool.webView(for: second)
+
+        pool.release(slotID: first.id)
+
+        XCTAssertFalse(pool.contains(slotID: first.id))
+        XCTAssertTrue(pool.contains(slotID: second.id))
+        XCTAssertTrue(pool.webView(for: second) === secondView)
+        XCTAssertEqual(pool.count, 1)
+    }
+
     func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() {
         XCTAssertEqual(
             WebViewPool.recoveryDisposition(isActive: true),

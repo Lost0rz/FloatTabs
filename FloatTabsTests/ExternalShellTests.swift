@@ -82,7 +82,12 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+        )
+        XCTAssertEqual(menu.item(withTitle: "Residency")?.submenu?.items.map(\.title), ["Hot", "Warm", "Cold"])
+        XCTAssertEqual(
+            menu.item(withTitle: "Background Media")?.submenu?.items.map(\.title),
+            ["Pause When Inactive", "Allow Background Audio"]
         )
         XCTAssertFalse(actionTitles.contains("Rename…"))
     }
