@@ -21,7 +21,298 @@ jobs:
       - name: Apply guarded closeout sync
         shell: bash
         run: |
-          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpkZWYgcmVwbGFjZV9vbmNlKHBhdGgsIG9sZCwgbmV3KToKICAgIHAgPSBQYXRoKHBhdGgpCiAgICB0ZXh0ID0gcC5yZWFkX3RleHQoKQogICAgY291bnQgPSB0ZXh0LmNvdW50KG9sZCkKICAgIGlmIGNvdW50ICE9IDE6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdChmIntwYXRofTogZXhwZWN0ZWQgZXhhY3RseSBvbmUgbWF0Y2gsIGZvdW5kIHtjb3VudH0iKQogICAgcC53cml0ZV90ZXh0KHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkpCgpwcm9kdWN0ID0gImRvY3MvcHJvZHVjdC9GbG9hdFRhYnNfUHJvZHVjdF9EZXZlbG9wbWVudF9TcGVjX3YwLjUubWQiCmFyY2hpdGVjdHVyZSA9ICJkb2NzL2FyY2hpdGVjdHVyZS9GbG9hdFRhYnNfVGVjaG5pY2FsX0FyY2hpdGVjdHVyZV92MS4yLm1kIgpmYWN0b3J5ID0gIkZsb2F0VGFicy9XZWIvV2ViVmlld0ZhY3Rvcnkuc3dpZnQiCgpyZXBsYWNlX29uY2UoCiAgICBwcm9kdWN0LAogICAgIiIiIyMgNi4xIFNsb3QgQ29udGV4dCBNZW51Cgrlj6/ku6Xmj5Dkvps6CgpgYGB0ZXh0ClJlbmFtZQpFZGl0IFdlYiBBcHDigKYKTW92ZSBVcApNb3ZlIERvd24K4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pClJlbG9hZApPcGVuIGluIERlZmF1bHQgQnJvd3NlcgrilJTilkTilJTilJTilJTilJTilJTilJTilJTilJTilJTilJTilJQClJlbW92ZSBXZWIgQXBw4oCmCmBgYAoK5Yig6Zmk5LiN57uR5a6aIGDigIzih6bXn2DigJ0uCiIiIiwKICAgICIiIiMjIDYuMSBTbG90IENvbnRleHQgTWVudQoKU2xvdCDlj7PplK7oj5zljZXkv53mjIHnsr7nroKzvvIznrqHnkIYgU2xvdCDoh6rourvogIzkuI3mmK/mqKHmi5/lrozmlbTmtY/op4jlmajvvJoKCmBgYHRleHQKUmV0dXJuIHRvIEhvbWUK4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pSU4pCkVkaXQgV2ViIEFwcOKApiDilJTilJTilJTilJTilJTilJTilJTilJTilJTilJTilJTilJQKUmVtb3ZlIFdlYiBBcHDigKYKYGBgCgpgRWRpdCBXZWIgQXBw4oCmYCDlt7LljIXlkKsgTmFtZe+8jOWboOatpOS4jeWGjeaPkOS+m+eLrOeriSBgUmVuYW1lYCDliqjkvZzjgILmjZLluo/nu6fnu63kvb/nlKjmipbmi5bvvJvlhK/pmYTkuI3nu5HlrprgIzih6bXn2DigJ0uCiIiIiwKKQoKcmVwbGFjZV9vbmNlKAogICAgcHJvZHVjdCwKICAgICIiIiMgMTIuIE5hdmlnYXRpb24gUG9saWN5CgojIyAxMi4xIEN1cnJlbnQgU2xvdArmraPluLjlkIznq5nngrnlr7zoiKrkv53nlZnlnKjlvZPliY0gU2xvdO+8jOW5tuaMgOe7reaWsOW9kSBgY3VycmVudFVSTGAuCgojIyAxMi4yIGB0YXJnZXQ9X2JsYW5rYCAvIFBvcHVwCgpEZWZhdWx06KeSIgoKLSBsb2dpbi9PQXV0aCBwb3B1cCDihpIgdGVtcG9yYXJ5IGNoaWxkIFdLV2ViVmlld++8mwotIHNhbWUtc2l0ZSBuZWNlc3NhcnkgcG9wdXAg4oaSIGN1cnJlbnQgU2xvdCAvIGNoaWxkIFdlYlZpZXfvvJsKLSBub3JtYWwgZXh0ZXJuYWwvcmVzZWFyY2ggbGluayDihpIgZGVmYXVsdCBicm93c2Vy77yaCi0gbmV2ZXIgYXV0by1jcmVhdGUgcGVybWFuZW50IEZsb2F0VGFicyBTbG9044CCCgpgT3BlbiBpbiBEZWZhdWx0IEJyb3dzZXJgIOWPr+S7ju+8mgoKLSBg4pqZZyBDdXJyZW50IFdlYiBBcHAgQ29udHJvbHPvvJsKLSBUYWIgY29udGV4dCBtZW5177yaCi0gZXh0ZXJuYWwtbGluayBwb2xpY3nvvJoKCuKaoOaYr+S4jeWtmOWPs+S4iOinkuS8jCBGbG9hdFRhYnMgYOKApiBg44CCCiIiIiwKICAgICIiIiMgMTIuIE5hdmlnYXRpb24gUG9saWN5CgojIyAxMi4xIEN1cnJlbnQgU2xvdCDigJQg6buY6K6k5rWP6KeI5a655ZmoCuaZrumAmk1UVFAoUykgeCUCEOeUqOaIt+WvvOiIqum7mOiupOS/neeVmeWcqOW9k+WJjCBTbG9044CC5LiN5oyJ5Z+f5ZCNL+WtkOWfn+WQjeiHquWKqOWIh+aNouWIsOezu+e7n+a1j+iniOWZqO+8mgoKYGBgdGV4dApvcmRpbmFyeSBsZWZ0IGNsaWNrICAgICAgICAgICAgICDihpIgY3VycmVudCBTbG90CnVzZXIgdGFyZ2V0PV9ibGFuayBIVFRQKFMpIGxpbmsgIOKGkiBjdXJyZW50IFNsb3QKYGBgCua1j+iniOi/h+eoi+S4reWPquaMgOe7reaWsOW9kSBgY3VycmVudFVSTGDvvJtg aG9tZVVSTGA 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mRvdy5vcGVuYCAvIHBvcHVwL09BdXRoIGNoaWxkIFdlYlZpZXfvvJsKLSByZXByZXNlbnRhdGl2ZSByZWFsLXNpdGUgc2Vzc2lvbi9PQXV0aCBRQTvlrozmlbQg cHJpb3JpdHktc2l0ZSBwcm92aWRlciBtYXRyaXgg5L+d55WZ5Li6IFYxIHJlbGVhc2UgUUEgZ2F0Ze+8mwotIHVwbG9hZO+8mwotIGRvd25sb2Fk77ybCi0gY29udGVudC1wcm9jZXNzIHJlY292ZXJ544CCCiIiIiwKKQoKcmVwbGFjZV9vbmNlKAogICAgcHJvZHVjdCwKICAgICIiIiMxNSBIYW5kbGUgdGFyZ2V0PV9ibGFuayAvIGRlZmF1bHQgYnJvd3NlciByb3V0aW5nCiIiIiwKICAgICIiIiMxNSBJbXBsZW1lbnQgTmF2aWdhdGlvbiBJbnRlbnQgLyB0YXJnZXQ9X2JsYW5rIC8gZXhwbGljaXQgZmxvYXRpbmcgKyBkZWZhdWx0LWJyb3dzZXIgcm91dGluZwoiIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgIHByb2R1Y3QsCiAgICAiIiItIFsgXSBBZGQvRWRpdC9SZW5hbWUvUmVtb3ZlCiIiIiwKICAgICIiIi0gWyBdIEFkZC9FZGl0L1JlbW92ZQotIFsgXSBSZXR1cm4gdG8gSG9tZSArIGDigIzih6bXn0hgYAoiIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgIHByb2R1Y3QsCiAgICAiIiItIFsgXSBzYW1lLXNpdGUgbmF2aWdhdGlvbgotIFsgXSB0YXJnZXQ9X2JsYW5rIHBvbGljeQotIFsgXSBwb3B1cC9PQXV0aCBjaGlsZCBXZWJWaWV3Ci0gWyBdIEdvb2dsZS9BcHBsZSBjb21wYXRpYmlsaXR5IHJlY29yZGVkIHBlciBwcmlvcml0eSBzaXRlCi0gWyBdIGRlZmF1bHQtYnJvd3NlciBmYWxsYmFjawo iIiIsCiAgICAiIiItIFsgXSBvcmRpbmFyeSBIVFRQKFMpIG5hdmlnYXRpb24gc3RheXMgaW4gY3VycmVudCBTbG90Ci0gWyBdIHRhcmdldD1fYmxhbmsgLyBOYXZpZ2F0aW9uIEludGVudCBwb2xpY3kKLSBbIF0gcG9wdXAvT0F1dGggY2hpbGQgV2ViVmlldwotIFsgXSBHb29nbGUvQXBwbGUgY29tcGF0aWJpbGl0eSByZWNvcmRlZCBwZXIgcHJpb3JpdHkgc2l0ZSBiZWZvcmUgVjEgcmVsZWFzZQotIFsgXSBleHBsaWNpdCBkZWZhdWx0LWJyb3dzZXIgYWN0aW9uCiIiIiwKKQoKcmVwbGFjZV9vbmNlKAogICAgYXJjaGl0ZWN0dXJlLAogICAgIiIiIyA4LiBOYXZpZ2F0aW9uIFBvbGljeQoKRmxvYXRUYWJzIGlzIG5vdCBhIGdlbmVyYWwgcmVzZWFyY2ggYnJvd3Nlci4KCiMjIDguMSBTYW1lLVNpdGUgTmF2aWdhdGlvbgoKTm9ybWFsIG5hdmlnYXRpb24gaW5zaWRlIHRoZSBXZWIgQXBwIHJlbWFpbnMgaW4gdGhlIGN1cnJlbnQgU2xvdCBhbmQgY29udGludW91c2x5IHVwZGF0ZXMgYGN1cnJlbnRVUkxgLgoKIyMgOC4yIE5ldyBXaW5kb3dzIC8gRXh0ZXJuYWwgTGlua3MKClVzZSBgV0tVSURlbGVnYXRlYCAvIG5hdmlnYXRpb24gcG9saWN5OgoKLSBPQXV0aC9sb2dpbiBwb3B1cCDihpIgdGVtcG9yYXJ5IGNoaWxkIFdlYlZpZXcgd2hlbiBhcHByb3ByaWF0ZTsKLSBzYW1lLXNpdGUgcmVxdWlyZWQgcG9wdXAg4oaSIGN1cnJlbnQgU2xvdCBvciBjaGlsZCBXZWJWaWV3OwotIG9yZGluYXJ5IGV4dGVybmFsL3Jlc2VhcmNoIGxpbmsg4oaSIGRlZmF1bHQgc3lzdGVtIGJyb3dzZXIgYnkgZGVmYXVsdDsKLSBuZXZlciBhdXRvLWNyZWF0ZSBhIHBlcm1hbmVudCBGbG9hdFRhYnMgU2xvdC4KCmBPcGVuIGluIERlZmF1bHQgQnJvd3NlcmAgbXVzdCBiZSBhdmFpbGFibGUgZnJvbSB0aGUgY3VycmVudCBXZWIgQXBwIGNvbnRyb2xzIGFuZCBUYWIgY29udGV4dCBtZW51LgoKVGhlcmUgaXMgbm8gdG9wLXJpZ2h0IEZsb2F0VGFicyBg4oCmYCBtZW51Lgo iIiIsCiAgICAiIiIjIDguIE5hdmlnYXRpb24gUG9saWN5CgpGbG9hdFRhYnMgcmVtYWlucyBhIGxpZ2h0d2VpZ2h0IFdlYiBBcHAgY29udGFpbmVyIHJhdGhlciB0aGFuIGEgdHJhZGl0aW9uYWwgcmVzZWFyY2ggYnJvd3NlciwgYnV0IG9yZGluYXJ5IHVzZXIgbmF2aWdhdGlvbiBzdGF5cyBpbnNpZGUgdGhlIGFjdGl2ZSBTbG90IHVubGVzcyB0aGUgdXNlciBleHBsaWNpdGx5IGNob29zZXMgYW5vdGhlciBkZXN0aW5hdGlvbi4KCiMjIDguMSBPcmRpbmFyeSBVc2VyIE5hdmlnYXRpb24KSG9zdCBjb21wYXJpc29uIGlzIG5vdCBhIGJyb3dzZXItYm91bmRhcnkgcnVsZS4KCmBgYHRleHQKb3JkaW5hcnkgSFRUUChTKSBsZWZ0IGNsaWNrICAgICAg4oaSIGN1cnJlbnQgU2xvdAp1c2VyIHRhcmdldD1fYmxhbmsgSFRUUChTKSBsaW5rICDihpIgY3VycmVudCBTbG90CmBgYAoKTm9ybWFsIG5hdmlnYXRpb24gY29udGludW91c2x5IHVwZGF0ZXMgYGN1cnJlbnRVUkxgIHdoaWxlIHByZXNlcnZpbmcgdGhlIHN0YWJsZSBTbG90IGBob21lVVJMYC4KCiMjIDguMiBFeHBsaWNpdCBEZXN0aW5hdGlvbnMgLyBXZWJzaXRlIFBvcHVwcwoKSFRUUChTKSBsaW5rIGNvbnRleHQgYWN0aW9ucyBleHBvc2UgZXhwbGljaXQgdXNlciBpbnRlbnQ6CgpgYGB0ZXh0Ck9wZW4gaW4gRmxvYXRpbmcgV2luZG93IOKGkiB1c2VyLWNyZWF0ZWQgRmxvYXRUYWJzIGZsb2F0aW5nIHdpbmRvdwpPcGVuIGluIERlZmF1bHQgQnJvd3NlciDihpIgc3lzdGVtIGRlZmF1bHQgYnJvd3NlcgpDb3B5IExpbmsgICAgICAgICAgICAgICAg4oaSIGNsaXBib2FyZApiYGAKCldlYnNpdGUtY3JlYXRlZCBjb250ZXh0cyByZW1haW4gc2VwYXJhdGU6CgotIHNjcmlwdGVkIGB3aW5kb3cub3BlbmAgLyBPQXV0aC9sb2dpbiBwb3B1cCDihpIgdGVtcG9yYXJ5IGNoaWxkIFdlYlZpZXcgd2hlbiBhcHByb3ByaWF0ZTsKLSBgYWJvdXQ6YmxhbmtgIGF1dGggYm9vdHN0cmFwIOKGkiB0ZW1wb3JhcnkgY2hpbGQgV2ViVmlldzsKLSBub24td2ViIHNjaGVtZSDihpIgc3lzdGVtIGhhbmRsZXI7Ci0gbmV2ZXIgYXV0by1jcmVhdGUgYSBwZXJtYW5lbnQgRmxvYXRUYWJzIFNsb3QuCgpUaGUgZGVmYXVsdCBicm93c2VyIGlzIHRoZXJlZm9yZSBhbiBleHBsaWNpdCB1c2VyLXNlbGVjdGVkIGRlc3RpbmF0aW9uLCBub3QgYW4gYXV0b21hdGljIGNyb3NzLXNpdGUgcG9saWN5LgoKVGhlcmUgaXMgbm8gdG9wLXJpZ2h0IEZsb2F0VGFicyBg4oCmYCBtZW51Lgo iIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgIGFyY2hpdGVjdHVyZSwKICAgICIiIiMjIDE0LjEgV2ViIENvbnRlbnQgUHJvY2VzcyBUZXJtaW5hdGlvbgoKSW1wbGVtZW50IGB3ZWJWaWV3V2ViQ29udGVudFByb2Nlc3NEaWRUZXJtaW5hdGVgLgoKLSBjdXJyZW50IFNsb3Qg4oaSIHJlbG9hZCBjdXJyZW50IFVSTDsKLSBpbmFjdGl2ZSBTbG90IOKGkiBtYXJrIGBuZWVkc1JlbG9hZGAgYW5kIHJlc3RvcmUgb24gbmV4dCBhY3RpdmF0aW9uOwotIGRvIG5vdCBjcmFzaCB0aGUgaG9zdCBhcHA7Ci0gZG8gbm90IGNsZWFyIHBlcnNpc3RlbnQgd2Vic2l0ZSBkYXRhLgo iIiIsCiAgICAiIiIjIyAxNC4xIFdlYiBDb250ZW50IFByb2Nlc3MgVGVybWluYXRpb24KClNsb3ROYXZpZ2F0aW9uT2JzZXJ2ZXJgIHN1cmZhY2VzIGB3ZWJWaWV3V2ViQ29udGVudFByb2Nlc3NEaWRUZXJtaW5hdGVgIHRvIGBXZWJWaWV3UG9vbGAuCgpSZWNvdmVyeSBwb2xpY3k6CgotIGFjdGl2ZSBTbG90IOKGkiBpbW1lZGlhdGVseSByZWxvYWQgdGhlIGxhc3Qga25vd24gc2FmZS9jdXJyZW50IFVSTCB3aXRoIG5vcm1hbCBwcm90b2NvbCBjYWNoZSBwb2xpY3k7Ci0gaW5hY3RpdmUgU2xvdCDihpIgcmVjb3JkIGRlZmVycmVkIHJlY292ZXJ5IGFuZCByZWxvYWQgaXRzIHBlcnNpc3RlZCBgY3VycmVudFVSTGAgKGZhbGxpbmcgYmFjayB0byBgaG9tZVVSTGApIHdoZW4gdGhlIFNsb3QgaXMgbmV4dCBhY3RpdmF0ZWQ7Ci0gcmV1c2UgdGhlIHNhbWUgYFdLV2ViVmlld2Agd2hlbiBkZWZlcnJlZCByZWNvdmVyeSBpcyBzdWZmaWNpZW50OwotIGRvIG5vdCBjcmFzaCB0aGUgaG9zdCBhcHA7Ci0gZG8gbm90IGNsZWFyIG9yIHJlcGxhY2UgYFdLV2Vic2l0ZURhdGFTdG9yZS5kZWZhdWx0KClgLgo iIiIsCikKCnJlcGxhY2Vfb25jZSgKICAgIGZhY3RvcnksCiAgICAiIiIgICAgLy8vIEF0IHJlc3QgdGhlIFdlYlZpZXcgb3ducyBubyB2aXNpYmxlIEFwcEtpdCBzY3JvbGxlciBhdCBhbGwuIFRoaXMgYXZvaWRzCiAgICAvLy8gaW5oZXJpdGluZyB0aGUgdXNlcidzIGdsb2JhbCAiU2hvdyBzY3JvbGwgYmFyczogQWx3YXlzIiBwcmVmZXJlbmNlLgogICAgLy8vIFNjcm9sbGVycyBhcmUgZW5hYmxlZCBvbmx5IGR1cmluZyBhY3RpdmUgd2hlZWwvdHJhY2twYWQgc2Nyb2xsaW5nIGJ5IHRoZQogICAgLy8vIHRyYW5zaWVudC1zY3JvbGxlciBjb250cm9sbGVyIGJlbG93Lgo iIiIsCiAgICAiIiIgICAgLy8vIEFwcEtpdCBzY3JvbGxlcnMgc3RheSB2aXN1YWxseSBkaXNhYmxlZCBldmVuIHdoaWxlIHRoZSBkb2N1bWVudCBzY3JvbGxzLgogICAgLy8vIFRoaXMgYXZvaWRzIGluaGVyaXRpbmcgdGhlIHVzZXIncyBnbG9iYWwgIlNob3cgc2Nyb2xsIGJhcnM6IEFsd2F5cyIKICAgIC8vLyBwcmVmZXJlbmNlIGFuZCBmb3JtcyB0aGUgbmF0aXZlIGhhbGYgb2YgdGhlIHBlcm1hbmVudCBzY3JvbGxiYXIKICAgIC8vLyBzdXBwcmVzc2lvbiBwb2xpY3kgd2l0aG91dCBkaXNhYmxpbmcgZG9jdW1lbnQgc2Nyb2xsaW5nLgo iIiIsCikK' | base64 --decode | python3
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_section(text, pattern, replacement, label):
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one section, found {count}")
+              return updated
+
+          product_path = Path("docs/product/FloatTabs_Product_Development_Spec_v0.5.md")
+          product = product_path.read_text()
+
+          product = replace_section(
+              product,
+              r"## 6\.1 Slot Context Menu\n.*?(?=\n---\n\n# 7\.)",
+              """## 6.1 Slot Context Menu
+
+Slot 右键菜单保持精简，管理的是 Slot 本身而不是模拟完整浏览器：
+
+```text
+Return to Home
+────────────
+Edit Web App…
+────────────
+Remove Web App…
+```
+
+`Edit Web App…` 已包含 Name，因此不再提供独立 `Rename` 动作。排序继续使用拖拽；`⌘1…⌘9` 始终跟随当前排序。
+
+`Return to Home` 导航到稳定的 `homeURL`，不主动清空 WebKit back/forward history。熟练用户也可使用 `⌘⇧H`。
+""",
+              "Product §6.1",
+          )
+
+          product = replace_section(
+              product,
+              r"# 10\. Keyboard Model\n.*?(?=\n---\n\n# 11\.)",
+              """# 10. Keyboard Model
+
+FloatTabs 激活时：
+
+| Shortcut | Action |
+|---|---|
+| `⌘1…⌘9` | Select Slot by order |
+| `⌃Tab` | Next Slot |
+| `⌃⇧Tab` | Previous Slot |
+| `⌘T` | Add Web App |
+| `⌘L` | Quick URL |
+| `⌘⇧H` | Return active Slot to Home |
+| `⌘R` | Reload |
+| `⌘+` | Zoom In |
+| `⌘-` | Zoom Out |
+| `⌘0` | Reset Zoom |
+| `Esc` | Dismiss current transient UI |
+| `⌘,` | Global Settings |
+
+`⌘W` 不删除 persistent Slot。V1 可保持未绑定，避免误删/语义冲突。
+""",
+              "Product §10",
+          )
+
+          product = replace_section(
+              product,
+              r"# 12\. Navigation Policy\n.*?(?=\n---\n\n# 13\.)",
+              """# 12. Navigation Policy
+
+## 12.1 Current Slot — 默认浏览容器
+
+普通 HTTP(S) 用户导航默认保留在当前 Slot，不再按 Host / 跨站与否自动跳到系统浏览器：
+
+```text
+ordinary left click              → current Slot
+user target=_blank HTTP(S) link  → current Slot
+```
+
+浏览过程中持续更新 `currentURL`；稳定的 `homeURL` 代表该 Slot 的回归点，不随深度浏览漂移。
+
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return Home 是普通导航，不主动清空 WebKit back/forward history。
+
+## 12.2 Explicit Destinations / Website Popups
+
+HTTP(S) 链接右键提供显式用户意图：
+
+```text
+Open in Floating Window → user-created FloatTabs floating window
+Open in Default Browser → system default browser
+Copy Link               → clipboard
+```
+
+网站自身创建的新上下文保持独立语义：
+
+- scripted `window.open` / OAuth/login popup → temporary child WKWebView；
+- `about:blank` auth bootstrap → temporary child WKWebView；
+- non-HTTP(S) scheme → system handler；
+- never auto-create permanent FloatTabs Slot。
+
+因此默认浏览器是“用户显式选择的目的地”，不是“cross-site URL 自动分类结果”。
+
+**不存在右上角 FloatTabs `…`。**
+""",
+              "Product §12",
+          )
+
+          product = replace_section(
+              product,
+              r"## Stage 2 — Persistent Web App Slots\n.*?(?=\n## Stage 3 —)",
+              """## Stage 2 — Persistent Web App Slots
+
+- TabStore；
+- External Index Tabs；
+- `+` Add；
+- Edit/Remove；
+- drag reorder；
+- `⌘1…⌘9`；
+- `⌃Tab`；
+- current URL；
+- relaunch restore。
+
+""",
+              "Product Stage 2",
+          )
+
+          product = replace_section(
+              product,
+              r"## Stage 4 — Web Compatibility & Sessions\n.*?(?=\n## Stage 5 —)",
+              """## Stage 4 — Web Compatibility & Sessions
+
+- persistent website-data QA；
+- direct login restore；
+- Navigation Intent：普通 HTTP(S) 用户导航留在当前 Slot；
+- explicit Floating Window / Default Browser link actions；
+- scripted `window.open` / popup/OAuth child WebView；
+- representative real-site session/OAuth QA；
+- full priority-site Google/Apple/provider compatibility matrix remains a V1 release QA gate；
+- upload；
+- download；
+- content-process recovery。
+
+""",
+              "Product Stage 4",
+          )
+
+          product, count = re.subn(
+              r"#15\s+Handle target=_blank / default browser routing",
+              "#15 Implement Navigation Intent / target=_blank / explicit floating + default-browser routing",
+              product,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"Product issue #15: expected one match, found {count}")
+
+          product = replace_section(
+              product,
+              r"## Slots\n.*?(?=\n## Rendering)",
+              """## Slots
+
+- [ ] persistent left-edge Slots
+- [ ] Add/Edit/Remove
+- [ ] Return to Home + `⌘⇧H`
+- [ ] drag reorder
+- [ ] `⌘1…⌘9`
+- [ ] `⌃Tab`
+- [ ] current URL persisted
+- [ ] last active restored
+
+""",
+              "Product DoD Slots",
+          )
+
+          product = replace_section(
+              product,
+              r"## Web / Login\n.*?(?=\n## Resource)",
+              """## Web / Login
+
+- [ ] persistent login across restart
+- [ ] session survives normal in-place update
+- [ ] ordinary HTTP(S) navigation remains in current Slot
+- [ ] target=_blank / Navigation Intent policy
+- [ ] popup/OAuth child WebView
+- [ ] Google/Apple/provider compatibility recorded per priority site before V1 release
+- [ ] explicit default-browser action
+- [ ] file upload
+- [ ] download
+- [ ] process termination recovery
+
+""",
+              "Product DoD Web/Login",
+          )
+
+          product_path.write_text(product)
+
+          architecture_path = Path("docs/architecture/FloatTabs_Technical_Architecture_v1.2.md")
+          architecture = architecture_path.read_text()
+
+          architecture = replace_section(
+              architecture,
+              r"# 8\. Navigation Policy\n.*?(?=\n---\n\n# 9\.)",
+              """# 8. Navigation Policy
+
+FloatTabs remains a lightweight persistent Web App container rather than a traditional research browser, but ordinary user navigation stays inside the active Slot unless the user explicitly chooses another destination.
+
+## 8.1 Ordinary User Navigation
+
+Host comparison is not a browser-boundary rule.
+
+```text
+ordinary HTTP(S) left click       → current Slot
+user target=_blank HTTP(S) link   → current Slot
+```
+
+Normal navigation continuously updates `currentURL` while preserving the stable Slot `homeURL`.
+
+## 8.2 Explicit Destinations / Website Popups
+
+HTTP(S) link context actions expose explicit user intent:
+
+```text
+Open in Floating Window → user-created FloatTabs floating window
+Open in Default Browser → system default browser
+Copy Link               → clipboard
+```
+
+Website-created contexts remain separate:
+
+- scripted `window.open` / OAuth/login popup → temporary child WebView when appropriate;
+- `about:blank` auth bootstrap → temporary child WebView;
+- non-web schemes → system handler;
+- never auto-create a permanent FloatTabs Slot.
+
+The system default browser is therefore an explicit user-selected destination, not an automatic cross-site policy.
+
+## 8.3 Slot Home / Quick URL
+
+`homeURL` is stable Slot identity; `currentURL` is mutable browsing position.
+
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return Home performs normal navigation and does not explicitly clear WebKit back/forward history.
+
+There is no permanent address bar. `⌘L` opens a temporary URL overlay; V1 has no history/search suggestions.
+
+There is no top-right FloatTabs `…` menu.
+""",
+              "Architecture §8",
+          )
+
+          architecture = replace_section(
+              architecture,
+              r"## 14\.1 Web Content Process Termination\n.*?(?=\n## 14\.2)",
+              """## 14.1 Web Content Process Termination
+
+`SlotNavigationObserver` surfaces `webViewWebContentProcessDidTerminate` to `WebViewPool`.
+
+Recovery policy:
+
+- active Slot → immediately reload the last known safe/current URL with normal protocol cache policy;
+- inactive Slot → record deferred recovery and reload its persisted `currentURL` (falling back to `homeURL`) when that Slot is next activated;
+- reuse the same `WKWebView` for deferred recovery when sufficient;
+- do not crash the host app;
+- do not clear or replace `WKWebsiteDataStore.default()`.
+
+""",
+              "Architecture §14.1",
+          )
+
+          architecture_path.write_text(architecture)
+
+          factory_path = Path("FloatTabs/Web/WebViewFactory.swift")
+          factory = factory_path.read_text()
+          old_comment = '''    /// At rest the WebView owns no visible AppKit scroller at all. This avoids
+    /// inheriting the user's global "Show scroll bars: Always" preference.
+    /// Scrollers are enabled only during active wheel/trackpad scrolling by the
+    /// transient-scroller controller below.
+'''
+          new_comment = '''    /// AppKit scrollers stay visually disabled even while the document scrolls.
+    /// This avoids inheriting the user's global "Show scroll bars: Always"
+    /// preference and forms the native half of the permanent scrollbar
+    /// suppression policy without disabling document scrolling.
+'''
+          if factory.count(old_comment) != 1:
+              raise SystemExit("WebViewFactory scrollbar comment: expected one match")
+          factory_path.write_text(factory.replace(old_comment, new_comment, 1))
+          PY
 
       - name: Commit closeout sync
         shell: bash
