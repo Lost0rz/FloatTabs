@@ -76,6 +76,15 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(first.title, "Return to Home")
         XCTAssertEqual(first.keyEquivalent, "h")
         XCTAssertEqual(first.keyEquivalentModifierMask, [.command, .shift])
+
+        let actionTitles = menu.items
+            .filter { !$0.isSeparatorItem }
+            .map(\.title)
+        XCTAssertEqual(
+            actionTitles,
+            ["Return to Home", "Edit Web App…", "Remove Web App…"]
+        )
+        XCTAssertFalse(actionTitles.contains("Rename…"))
     }
 
     func testActiveInactiveAndAddGeometryMatchDesignTokens() {

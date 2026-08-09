@@ -62,7 +62,6 @@ final class ExternalControlZoneView: NSView {
     var onReturnHome: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
-    var onRename: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onCurrentControls: (() -> Void)?
@@ -196,7 +195,6 @@ final class ExternalControlZoneView: NSView {
         view.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
-        view.onRename = { [weak self] slotID in self?.onRename?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
         view.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
@@ -339,7 +337,6 @@ final class ExternalWebAppTabView: NSView {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
-    var onRename: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
@@ -484,10 +481,6 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(home)
         menu.addItem(.separator())
 
-        let rename = NSMenuItem(title: "Rename…", action: #selector(renameFromMenu), keyEquivalent: "")
-        rename.target = self
-        menu.addItem(rename)
-
         let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu), keyEquivalent: "")
         edit.target = self
         menu.addItem(edit)
@@ -507,10 +500,6 @@ final class ExternalWebAppTabView: NSView {
 
     @objc private func returnHomeFromMenu() {
         onReturnHome?(slotID)
-    }
-
-    @objc private func renameFromMenu() {
-        onRename?(slotID)
     }
 
     @objc private func editFromMenu() {

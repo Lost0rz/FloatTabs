@@ -184,9 +184,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onEdit = { [weak self] id in
             self?.presentEditWebAppEditor(id: id)
         }
-        rail.onRename = { [weak self] id in
-            self?.presentRenameEditor(id: id)
-        }
         rail.onRemove = { [weak self] id in
             self?.presentRemoveConfirmation(id: id)
         }
@@ -334,20 +331,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 // Applying settings to the current Slot is explicit user intent.
                 // `followPreferredSize` only controls automatic resize on Slot switch.
                 self.applyPreferredViewport(value.renderingProfile.viewportSize)
-            }
-        }
-    }
-
-    private func presentRenameEditor(id: UUID) {
-        guard panel.attachedSheet == nil,
-              let profile = tabStore.profiles.first(where: { $0.id == id }) else {
-            return
-        }
-
-        WebAppEditorController.presentRename(profile: profile, attachedTo: panel) { [weak self] name in
-            Task { @MainActor [weak self] in
-                guard let self, let name else { return }
-                _ = self.tabStore.rename(id: id, name: name)
             }
         }
     }
