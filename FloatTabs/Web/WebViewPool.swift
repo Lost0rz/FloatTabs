@@ -19,11 +19,11 @@ final class WebViewPool {
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
         },
-        downloadCoordinator: DownloadCoordinator = DownloadCoordinator()
+        downloadCoordinator: DownloadCoordinator? = nil
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
-        self.downloadCoordinator = downloadCoordinator
+        self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
