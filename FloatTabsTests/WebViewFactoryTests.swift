@@ -18,7 +18,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
-    func testRenderingProfileAppliesMobileIdentityContentModeAndUserZoom() {
+    func testRenderingProfileAppliesMobileContentModeWithoutForcingMobileIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
             .settingZoom(1.25)
@@ -27,8 +27,13 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
-        XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
-        XCTAssertTrue(webView.customUserAgent?.contains("Version/") == true)
+        XCTAssertNil(webView.customUserAgent)
+        XCTAssertTrue(
+            webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
+        )
+        XCTAssertTrue(
+            webView.configuration.applicationNameForUserAgent?.contains("Safari/") == true
+        )
         XCTAssertEqual(floatTabsWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }
@@ -404,6 +409,14 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(edge.contains("Chrome/150.0.7871.187"))
         XCTAssertTrue(edge.contains("Edg/150.0.4078.99"))
 
+        let iPhoneSafari = UserAgentProvider.userAgent(
+            for: .iphoneSafari,
+            websiteMode: .mobile,
+            versions: versions
+        )
+        XCTAssertTrue(iPhoneSafari.contains("iPhone"))
+        XCTAssertTrue(iPhoneSafari.contains("Version/26.6"))
+
         let iPhoneChrome = UserAgentProvider.userAgent(
             for: .iphoneChrome,
             websiteMode: .mobile,
@@ -422,7 +435,7 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(android.contains("Mobile Safari"))
     }
 
-    func testAutomaticIdentityFollowsWebsiteModeWithoutChangingWindowSizePolicy() {
+    func testAutomaticIdentityRemainsNativeMacAcrossWebsiteModes() {
         let desktopUA = UserAgentProvider.userAgent(
             for: .automatic,
             websiteMode: .desktop,
@@ -433,10 +446,11 @@ final class WebViewFactoryTests: XCTestCase {
             websiteMode: .mobile,
             versions: versions
         )
+        XCTAssertEqual(mobileUA, desktopUA)
         XCTAssertTrue(desktopUA.contains("Macintosh"))
         XCTAssertTrue(desktopUA.contains("Version/26.6"))
-        XCTAssertTrue(mobileUA.contains("iPhone"))
-        XCTAssertTrue(mobileUA.contains("Version/26.6"))
+        XCTAssertTrue(mobileUA.contains("Macintosh"))
+        XCTAssertFalse(mobileUA.contains("iPhone"))
     }
 
     func testCustomUserAgentPassesThroughExactly() {
