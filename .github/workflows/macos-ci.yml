@@ -50,12 +50,42 @@ jobs:
           build
 
       - name: Unit tests
-        run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          MACOSX_DEPLOYMENT_TARGET=14.0
-          test
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
+
+      - name: Report XCTest failures
+        if: failure()
+        shell: bash
+        run: |
+          echo '::group::Filtered xcodebuild failures'
+          if [ -f "$RUNNER_TEMP/xcodebuild-test.log" ]; then
+            grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
+          fi
+          echo '::endgroup::'
+
+          if [ -d "$RUNNER_TEMP/FloatTabsTests.xcresult" ]; then
+            echo '::group::XCResult test summary'
+            xcrun xcresulttool get test-results summary \
+              --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
+            echo '::endgroup::'
+          fi
+
+      - name: Upload XCTest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatTabs-XCTest-diagnostics
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/xcodebuild-test.log
+            ${{ runner.temp }}/FloatTabsTests.xcresult
