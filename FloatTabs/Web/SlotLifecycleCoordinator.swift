@@ -41,11 +41,8 @@ final class SlotLifecycleCoordinator {
         for profile in profiles where profile.id != activeSlotID {
             guard webViewPool.contains(slotID: profile.id) else { continue }
 
-            switch profile.backgroundMediaPolicy {
-            case .pauseWhenInactive:
-                webViewPool.setMediaPlaybackSuspended(slotID: profile.id, suspended: true)
-            case .allowBackgroundAudio:
-                webViewPool.setMediaPlaybackSuspended(slotID: profile.id, suspended: false)
+            if profile.backgroundMediaPolicy == .pauseWhenInactive {
+                webViewPool.pauseMediaPlayback(slotID: profile.id)
             }
 
             switch profile.residencyPolicy {
@@ -62,7 +59,6 @@ final class SlotLifecycleCoordinator {
     func activate(profile: WebAppProfile) {
         activeSlotID = profile.id
         coldReleaseTokens.removeValue(forKey: profile.id)
-        webViewPool.setMediaPlaybackSuspended(slotID: profile.id, suspended: false)
     }
 
     func deactivate(profile: WebAppProfile) {
@@ -71,11 +67,8 @@ final class SlotLifecycleCoordinator {
         }
         container.deactivate(slotID: profile.id, residencyPolicy: profile.residencyPolicy)
 
-        switch profile.backgroundMediaPolicy {
-        case .pauseWhenInactive:
-            webViewPool.setMediaPlaybackSuspended(slotID: profile.id, suspended: true)
-        case .allowBackgroundAudio:
-            webViewPool.setMediaPlaybackSuspended(slotID: profile.id, suspended: false)
+        if profile.backgroundMediaPolicy == .pauseWhenInactive {
+            webViewPool.pauseMediaPlayback(slotID: profile.id)
         }
 
         switch profile.residencyPolicy {
