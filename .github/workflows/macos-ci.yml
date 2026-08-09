@@ -25,6 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Upload repair source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatTabs-UA-repair-source
+          path: |
+            FloatTabs/Web/WebViewFactory.swift
+            FloatTabsTests/WebViewFactoryTests.swift
+
       - name: Xcode version
         run: xcodebuild -version
 
