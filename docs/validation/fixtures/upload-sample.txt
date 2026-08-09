@@ -1,0 +1,2 @@
+FloatTabs Stage 4 upload sample.
+Select this file in the single-file or multiple-file upload control.
