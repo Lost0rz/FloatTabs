@@ -1,6 +1,41 @@
 import Foundation
 import WebKit
 
+enum WebNavigationDisposition: Equatable {
+    case allow
+    case loadInCurrentSlot
+}
+
+/// Owns navigation-policy decisions independently from per-Slot WebView
+/// lifecycle observation. Stage 4A intentionally preserves the accepted Stage 3
+/// behavior while establishing the decision boundary that later popup/OAuth and
+/// external-browser routing will extend.
+final class WebNavigationCoordinator {
+    func disposition(for navigationAction: WKNavigationAction) -> WebNavigationDisposition {
+        Self.disposition(
+            hasTargetFrame: navigationAction.targetFrame != nil,
+            url: navigationAction.request.url
+        )
+    }
+
+    static func disposition(
+        hasTargetFrame: Bool,
+        url: URL?
+    ) -> WebNavigationDisposition {
+        guard !hasTargetFrame,
+              let url,
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return .allow
+        }
+
+        // Stage 4A is an ownership refactor, not a behavior change. Keep the
+        // accepted Stage 3 current-slot fallback until Stage 4B can distinguish
+        // same-site links, OAuth/login popups, and ordinary external links.
+        return .loadInCurrentSlot
+    }
+}
+
 /// Owns the per-Slot navigation lifecycle that must survive reloads and redirects.
 ///
 /// On macOS, Website Mode is implemented by FloatTabsWebView's WebKit layout
@@ -13,17 +48,20 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var observation: NSKeyValueObservation?
     private let slotID: UUID
     private let websiteMode: WebsiteMode
+    private let navigationCoordinator: WebNavigationCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
 
     init(
         slotID: UUID,
         webView: WKWebView,
         websiteMode: WebsiteMode,
+        navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
         onURLChange: @escaping @MainActor (UUID, URL) -> Void
     ) {
         self.slotID = slotID
         self.webView = webView
         self.websiteMode = websiteMode
+        self.navigationCoordinator = navigationCoordinator
         self.onURLChange = onURLChange
         super.init()
 
@@ -51,29 +89,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
     ) {
         restoreWebsiteMode(in: webView)
-        if Self.shouldOpenInCurrentSlot(targetFrame: navigationAction.targetFrame, url: navigationAction.request.url) {
+
+        switch navigationCoordinator.disposition(for: navigationAction) {
+        case .allow:
+            decisionHandler(.allow, preferences)
+
+        case .loadInCurrentSlot:
             decisionHandler(.cancel, preferences)
             webView.load(navigationAction.request)
-            return
         }
-        decisionHandler(.allow, preferences)
     }
 
-    /// Stage 3 compatibility fallback for a new browsing context (`target="_blank"`
-    /// or `window.open`). Without an auxiliary WKWebView target, WebKit can deliver
-    /// a trusted DOM click while the requested page appears not to open. Until the
-    /// full WebNavigationCoordinator policy is implemented, ordinary http/https
-    /// requests with no target frame are loaded into the current persistent Slot.
-    ///
-    /// This fallback does not supersede the canonical V1 navigation policy. The
-    /// next compatibility/navigation stage must classify OAuth/login popups,
-    /// same-site popups, and ordinary external/research links separately.
+    /// Stage 3 regression seam retained while its existing test is migrated to
+    /// the Stage 4 coordinator. Policy ownership now lives in
+    /// `WebNavigationCoordinator`; this method contains no independent rules.
     static func shouldOpenInCurrentSlot(targetFrame: WKFrameInfo?, url: URL?) -> Bool {
-        guard targetFrame == nil,
-              let url,
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else { return false }
-        return true
+        WebNavigationCoordinator.disposition(
+            hasTargetFrame: targetFrame != nil,
+            url: url
+        ) == .loadInCurrentSlot
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
