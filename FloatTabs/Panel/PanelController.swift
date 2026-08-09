@@ -102,6 +102,63 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
+#if DEBUG
+    func benchmarkControlSnapshot() -> [String: Any] {
+        let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
+            [
+                "id": profile.id.uuidString,
+                "order": profile.order,
+                "name": profile.name,
+                "residency": profile.residencyPolicy.rawValue,
+                "background_media": profile.backgroundMediaPolicy.rawValue,
+                "website_mode": profile.renderingProfile.websiteMode.rawValue,
+                "viewport_width": Double(profile.renderingProfile.viewportWidth),
+                "viewport_height": Double(profile.renderingProfile.viewportHeight),
+                "zoom": Double(profile.renderingProfile.zoom),
+            ]
+        }
+        var snapshot: [String: Any] = [
+            "visible": isVisible,
+            "profiles": profiles,
+        ]
+        snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
+        return snapshot
+    }
+
+    func benchmarkSetResourcePolicy(
+        slotIDStrings: [String],
+        residencyRawValue: String?,
+        backgroundMediaRawValue: String?
+    ) -> Bool {
+        let ids = slotIDStrings.compactMap(UUID.init(uuidString:))
+        guard ids.count == slotIDStrings.count, !ids.isEmpty else { return false }
+        let validIDs = Set(tabStore.profiles.map(\.id))
+        guard ids.allSatisfy(validIDs.contains) else { return false }
+
+        let residency = residencyRawValue.flatMap(SlotResidencyPolicy.init(rawValue:))
+        let media = backgroundMediaRawValue.flatMap(BackgroundMediaPolicy.init(rawValue:))
+        if residencyRawValue != nil, residency == nil { return false }
+        if backgroundMediaRawValue != nil, media == nil { return false }
+        guard residency != nil || media != nil else { return false }
+
+        for id in ids {
+            guard tabStore.updateResourcePolicy(
+                id: id,
+                residencyPolicy: residency,
+                backgroundMediaPolicy: media
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func benchmarkSelect(slotIDString: String) -> Bool {
+        guard let id = UUID(uuidString: slotIDString) else { return false }
+        return tabStore.select(id: id)
+    }
+#endif
+
     func handle(_ command: AppCommand) {
         switch command {
         case let .selectSlot(index):

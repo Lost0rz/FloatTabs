@@ -10,6 +10,7 @@
 		A00000000000000000000001 /* FloatTabsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* FloatTabsApp.swift */; };
 		A00000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* AppDelegate.swift */; };
 		A00000000000000000000003 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* AppCoordinator.swift */; };
+		A00000000000000000000022 /* BenchmarkControlServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000022 /* BenchmarkControlServer.swift */; };
 		A00000000000000000000004 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* FloatingPanel.swift */; };
 		A00000000000000000000005 /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* PanelController.swift */; };
 		A00000000000000000000006 /* ScreenPositioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000006 /* ScreenPositioning.swift */; };
@@ -55,6 +56,7 @@
 		B00000000000000000000001 /* FloatTabsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsApp.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000022 /* BenchmarkControlServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarkControlServer.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
 		B00000000000000000000006 /* ScreenPositioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPositioning.swift; sourceTree = "<group>"; };
@@ -137,6 +139,7 @@
 				B00000000000000000000001 /* FloatTabsApp.swift */,
 				B00000000000000000000002 /* AppDelegate.swift */,
 				B00000000000000000000003 /* AppCoordinator.swift */,
+				B00000000000000000000022 /* BenchmarkControlServer.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -347,6 +350,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
+				A00000000000000000000022 /* BenchmarkControlServer.swift in Sources */,
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
 				A0000000000000000000000F /* AppCommandController.swift in Sources */,
 				A00000000000000000000018 /* EmptyWebAppView.swift in Sources */,

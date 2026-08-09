@@ -26,6 +26,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import statistics
 import subprocess
 import sys
@@ -37,6 +38,7 @@ SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[2]
 DEFAULT_RESULTS_ROOT = REPO_ROOT / ".benchmark-results"
 PROFILE_FILE = Path.home() / "Library" / "Application Support" / "FloatTabs" / "WebAppProfiles.json"
+CONTROL_INFO_FILE = Path.home() / "Library" / "Application Support" / "FloatTabs" / "BenchmarkControl.json"
 DEFAULT_SAMPLE_SECONDS = 15
 DEFAULT_SAMPLE_INTERVAL = 1.0
 DEFAULT_SETTLE_SECONDS = 5
@@ -200,6 +202,103 @@ def print_profiles(profiles: Sequence[Dict[str, object]]) -> None:
         zoom = profile.get("zoom")
         zoom_text = f"{float(zoom) * 100:.0f}%" if isinstance(zoom, (int, float)) else "?"
         print(f"  {index:>2} {name:<24} {residency:<10} {media:<22} {mode:<9} {viewport:<11} {zoom_text:>5}")
+
+
+
+def load_control_info(host_pid: int) -> Dict[str, object]:
+    if not CONTROL_INFO_FILE.exists():
+        raise RuntimeError(
+            "FloatTabs Debug benchmark control is unavailable. Rebuild/restart the Debug app from this PR branch."
+        )
+    try:
+        payload = json.loads(CONTROL_INFO_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Unable to read benchmark control info: {exc}") from exc
+    if int(payload.get("pid", -1)) != host_pid:
+        raise RuntimeError(
+            f"Benchmark control belongs to PID {payload.get('pid')}, but current FloatTabs PID is {host_pid}. "
+            "Quit duplicate/stale FloatTabs builds and restart the current Debug build."
+        )
+    if int(payload.get("protocol_version", 0)) != 1:
+        raise RuntimeError("Unsupported FloatTabs benchmark control protocol version.")
+    return payload
+
+
+class BenchmarkControlClient:
+    def __init__(self, host_pid: int) -> None:
+        info = load_control_info(host_pid)
+        self.host = str(info.get("host", "127.0.0.1"))
+        self.port = int(info["port"])
+        self.token = str(info["token"])
+
+    def request(self, action: str, **payload: object) -> Dict[str, object]:
+        request_payload = {"token": self.token, "action": action, **payload}
+        encoded = (json.dumps(request_payload, separators=(",", ":")) + "\n").encode("utf-8")
+        chunks: List[bytes] = []
+        try:
+            with socket.create_connection((self.host, self.port), timeout=5) as connection:
+                connection.sendall(encoded)
+                while True:
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    if b"\n" in chunk:
+                        break
+        except OSError as exc:
+            raise RuntimeError(f"FloatTabs benchmark control connection failed: {exc}") from exc
+        try:
+            response = json.loads(b"".join(chunks).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Invalid response from FloatTabs benchmark control: {exc}") from exc
+        if not response.get("ok"):
+            raise RuntimeError(f"FloatTabs benchmark control rejected {action}: {response.get('error', 'unknown error')}")
+        return response
+
+    def status(self) -> Dict[str, object]:
+        return dict(self.request("status").get("status") or {})
+
+    def configure(self, slot_ids: Sequence[str], residency: str, media: str = "pauseWhenInactive") -> Dict[str, object]:
+        return dict(self.request(
+            "configure",
+            slot_ids=list(slot_ids),
+            residency=residency,
+            background_media=media,
+        ).get("status") or {})
+
+    def configure_one(self, slot_id: str, residency: str, media: str) -> Dict[str, object]:
+        return self.configure([slot_id], residency, media)
+
+    def activate(self, slot_id: str) -> Dict[str, object]:
+        return dict(self.request("activate", slot_id=slot_id).get("status") or {})
+
+    def show(self) -> Dict[str, object]:
+        return dict(self.request("show").get("status") or {})
+
+    def hide(self) -> Dict[str, object]:
+        return dict(self.request("hide").get("status") or {})
+
+
+def control_profiles(status: Dict[str, object]) -> List[Dict[str, object]]:
+    profiles = list(status.get("profiles") or [])
+    profiles.sort(key=lambda item: (item.get("order", 0), item.get("name", "")))
+    return profiles
+
+
+def verify_control_policy(status: Dict[str, object], selected_ids: Sequence[str], expected: str) -> None:
+    profiles = {str(item.get("id")): item for item in control_profiles(status)}
+    mismatches = []
+    for slot_id in selected_ids:
+        profile = profiles.get(slot_id)
+        if not profile:
+            mismatches.append(f"missing {slot_id}")
+            continue
+        if profile.get("residency") != expected:
+            mismatches.append(f"{profile.get('name')}: {profile.get('residency')}")
+        if profile.get("background_media") != "pauseWhenInactive":
+            mismatches.append(f"{profile.get('name')}: media={profile.get('background_media')}")
+    if mismatches:
+        raise RuntimeError("Automated policy verification failed: " + "; ".join(mismatches))
 
 
 def find_floattabs_pids() -> List[int]:
@@ -609,8 +708,9 @@ def automated_observations(
     ram_bytes = int((session_meta.get("system") or {}).get("ram_bytes", 0) or 0)
     hot = latest_by_policy(captures, "hot")
     warm = latest_by_policy(captures, "warm")
-    cold = latest_by_policy(captures, "cold")
-    hidden = next((capture for capture in reversed(captures) if capture.get("state") == "hidden"), None)
+    cold = next((capture for capture in captures if capture.get("state") == "cold-evicted"), None) or latest_by_policy(captures, "cold")
+    warm_hidden = next((capture for capture in captures if capture.get("policy") == "warm" and capture.get("state") == "hidden"), None)
+    hot_hidden = next((capture for capture in captures if capture.get("policy") == "hot" and capture.get("state") == "hidden"), None)
 
     if hot and warm:
         hot_total = capture_metric(hot, "total_rss_kb_median")
@@ -633,7 +733,7 @@ def automated_observations(
         warm_total = capture_metric(warm, "total_rss_kb_median")
         cold_total = capture_metric(cold, "total_rss_kb_median")
         reclaimed = warm_total - cold_total
-        eligible = max(int(cold.get("slot_count", 0)) - 1, 0)
+        eligible = int(cold.get("inactive_selected_slot_count", max(int(cold.get("slot_count", 0)) - 1, 0)))
         if reclaimed > 0:
             percentage = reclaimed / warm_total * 100.0 if warm_total else 0.0
             per_slot = reclaimed / eligible / 1024.0 if eligible else 0.0
@@ -653,10 +753,15 @@ def automated_observations(
             f"Median WebContent process count Warm → Cold: {warm_wc:.0f} → {cold_wc:.0f}."
         )
 
-    for capture in [hidden] if hidden else []:
-        idle_cpu = capture_metric(capture, "total_cpu_avg")
+    if hot_hidden:
+        hot_hidden_cpu = capture_metric(hot_hidden, "total_cpu_avg")
         notes.append(
-            f"Hidden-panel aggregate CPU: {idle_cpu:.2f}% — diagnostic rating **{cpu_idle_rating(idle_cpu)}** "
+            f"Hot + hidden aggregate CPU: {hot_hidden_cpu:.2f}% — diagnostic rating **{cpu_idle_rating(hot_hidden_cpu)}**."
+        )
+    if warm_hidden:
+        warm_hidden_cpu = capture_metric(warm_hidden, "total_cpu_avg")
+        notes.append(
+            f"Warm + hidden aggregate CPU: {warm_hidden_cpu:.2f}% — diagnostic rating **{cpu_idle_rating(warm_hidden_cpu)}** "
             f"(≤1% Good, 1–3% Watch, >3% Investigate)."
         )
 
@@ -838,6 +943,192 @@ def prompt_selected_profiles(profiles: Sequence[Dict[str, object]], requested_co
     return selected
 
 
+
+def persist_capture_metadata(session_dir: Path, capture: Dict[str, object], **metadata: object) -> None:
+    capture.update(metadata)
+    label = str(capture["label"])
+    path = session_dir / "captures" / f"{label}.summary.json"
+    path.write_text(json.dumps(capture, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_report(session_dir)
+
+
+def automatic_mode(args: argparse.Namespace) -> int:
+    ensure_macos()
+    host_pid, warnings = choose_host_pid(args.pid)
+    validate_sudo()
+    resolver = OwnershipResolver(host_pid)
+    resolver.refresh(force=True)
+    client = BenchmarkControlClient(host_pid)
+    initial_status = client.status()
+    live_profiles = control_profiles(initial_status)
+    if len(live_profiles) < 2:
+        raise RuntimeError("Automatic benchmark needs at least two configured Slots: test Slot(s) plus one control Slot.")
+
+    print("\nFloatTabs automatic benchmark control: CONNECTED")
+    print_profiles(all_profile_summaries())
+    selected = prompt_selected_profiles(all_profile_summaries(), args.slots)
+    selected_ids = [str(profile.get("id")) for profile in selected]
+    selected_names = [str(profile.get("name")) for profile in selected]
+    unselected = [profile for profile in live_profiles if str(profile.get("id")) not in selected_ids]
+    if not unselected:
+        raise RuntimeError(
+            "All configured Slots were selected. Leave at least one extra Slot unselected so it can stay Active while every test Slot becomes truly inactive."
+        )
+
+    initial_active = initial_status.get("active_slot_id")
+    control = next(
+        (profile for profile in unselected if str(profile.get("id")) == str(initial_active)),
+        unselected[0],
+    )
+    control_id = str(control.get("id"))
+    control_name = str(control.get("name", "Control"))
+    original_by_id = {str(profile.get("id")): profile for profile in live_profiles}
+    original_visible = bool(initial_status.get("visible", False))
+
+    session_dir = create_session(Path(args.results_root), args.session)
+    meta_path = session_dir / "session.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["automatic"] = True
+    meta["automatic_selected_slots"] = selected
+    meta["control_slot"] = {"id": control_id, "name": control_name}
+    meta["original_active_slot_id"] = initial_active
+    meta["original_panel_visible"] = original_visible
+    meta["warnings"] = warnings
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print("\n=== Fully automatic Residency benchmark ===")
+    print("Test Slots: " + ", ".join(selected_names))
+    print(f"Control Slot kept Active during steady-state captures: {control_name}")
+    print("The harness will change only the selected Slots and will restore their original policies at the end.")
+
+    def configure(policy: str) -> None:
+        status = client.configure(selected_ids, policy, "pauseWhenInactive")
+        verify_control_policy(status, selected_ids, policy)
+
+    def activate_test_slots_then_control() -> float:
+        for slot_id, name in zip(selected_ids, selected_names):
+            client.activate(slot_id)
+            print(f"  activated: {name}")
+            time.sleep(max(args.activation_wait, 0.0))
+        client.activate(control_id)
+        started = time.monotonic()
+        print(f"  active control: {control_name} — all selected test Slots are now inactive")
+        return started
+
+    def capture_auto(label: str, policy: str, state: str, seconds: Optional[int] = None) -> Dict[str, object]:
+        capture = collect_capture(
+            session_dir=session_dir,
+            label=label,
+            seconds=seconds if seconds is not None else args.seconds,
+            interval=args.interval,
+            host_pid=host_pid,
+            resolver=resolver,
+            policy=policy,
+            state=state,
+            slots=len(selected),
+            selected_slot_ids=selected_ids,
+            warnings=warnings,
+        )
+        persist_capture_metadata(
+            session_dir,
+            capture,
+            inactive_selected_slot_count=len(selected),
+            control_slot_id=control_id,
+            control_slot_name=control_name,
+        )
+        return capture
+
+    def settle(label: str) -> None:
+        if args.settle > 0:
+            countdown(args.settle, label)
+
+    def restore() -> None:
+        print("\nRestoring original FloatTabs state...")
+        for slot_id in selected_ids:
+            original = original_by_id.get(slot_id) or {}
+            residency = str(original.get("residency", "warm"))
+            media = str(original.get("background_media", "pauseWhenInactive"))
+            try:
+                client.configure_one(slot_id, residency, media)
+            except RuntimeError as exc:
+                print(f"WARNING: could not restore policy for {original.get('name', slot_id)}: {exc}")
+        if initial_active:
+            try:
+                client.activate(str(initial_active))
+            except RuntimeError as exc:
+                print(f"WARNING: could not restore original active Slot: {exc}")
+        try:
+            if original_visible:
+                client.show()
+            else:
+                client.hide()
+        except RuntimeError as exc:
+            print(f"WARNING: could not restore panel visibility: {exc}")
+
+    try:
+        client.show()
+
+        print("\n[1/6] HOT visible")
+        configure("hot")
+        activate_test_slots_then_control()
+        settle("Settling Hot resident state...")
+        capture_auto("hot", "hot", "steady")
+
+        print("\n[2/6] HOT hidden")
+        client.hide()
+        settle("Settling hidden Hot state...")
+        capture_auto("hot-hidden", "hot", "hidden")
+        client.show()
+
+        print("\n[3/6] WARM visible")
+        configure("warm")
+        activate_test_slots_then_control()
+        settle("Settling Warm detached state...")
+        capture_auto("warm", "warm", "steady")
+
+        print("\n[4/6] WARM hidden")
+        client.hide()
+        settle("Settling hidden Warm state...")
+        capture_auto("warm-hidden", "warm", "hidden")
+        client.show()
+
+        print("\n[5/6] COLD pending")
+        configure("cold")
+        cold_inactive_started = activate_test_slots_then_control()
+        cold_started_wall = iso_now()
+        settle("Settling Cold-pending state while all selected Slots remain inactive...")
+        pending_seconds = min(args.pending_seconds, max(COLD_GRACE_SECONDS - args.settle - 5, 1))
+        capture = capture_auto("cold-pending", "cold", "cold-pending", pending_seconds)
+        persist_capture_metadata(session_dir, capture, cold_all_inactive_started_at=cold_started_wall)
+
+        print("\n[6/6] COLD evicted")
+        target_wait = COLD_GRACE_SECONDS + args.cold_margin
+        elapsed = time.monotonic() - cold_inactive_started
+        remaining = max(target_wait - elapsed, 0.0)
+        if remaining > 0:
+            countdown(int(math.ceil(remaining)), (
+                f"Waiting until every selected Cold Slot has been inactive for >{COLD_GRACE_SECONDS}s "
+                f"(target {target_wait:.0f}s from final control activation)..."
+            ))
+        resolver.refresh(force=True)
+        capture = capture_auto("cold-evicted", "cold", "cold-evicted")
+        persist_capture_metadata(
+            session_dir,
+            capture,
+            cold_all_inactive_started_at=cold_started_wall,
+            cold_inactive_elapsed_before_capture_s=round(time.monotonic() - cold_inactive_started, 2),
+        )
+    finally:
+        restore()
+
+    report_path = write_report(session_dir)
+    print("\n=== Automatic benchmark complete ===")
+    print(f"Report: {report_path}")
+    print(f"Raw data: {session_dir / 'captures'}")
+    print("Original Residency / media / active Slot / panel visibility have been restored best-effort.")
+    return 0
+
+
 def guided_mode(args: argparse.Namespace) -> int:
     ensure_macos()
     host_pid, warnings = choose_host_pid(args.pid)
@@ -974,6 +1265,12 @@ def doctor_mode(args: argparse.Namespace) -> int:
         print(f"WARNING: {warning}")
     print(f"Profile file: {PROFILE_FILE} ({'found' if PROFILE_FILE.exists() else 'missing'})")
     print_profiles(all_profile_summaries())
+    try:
+        control = BenchmarkControlClient(host_pid)
+        status = control.status()
+        print(f"\nDebug benchmark control: CONNECTED (active={status.get('active_slot_id')}, visible={status.get('visible')})")
+    except RuntimeError as exc:
+        print(f"\nDebug benchmark control: unavailable ({exc})")
     if args.sudo:
         validate_sudo()
         resolver = OwnershipResolver(host_pid)
@@ -1036,6 +1333,8 @@ def self_test_mode() -> int:
     assert parsed["bundle_id"] == "com.apple.WebKit.WebContent"
     assert webkit_kind(str(parsed["bundle_id"]), "") == "webcontent"
     assert percentile([1, 2, 3, 4, 5], 0.95) == 4.8
+    framed = (json.dumps({"token": "x", "action": "status"}, separators=(",", ":")) + "\n").encode("utf-8")
+    assert framed.endswith(b"\n")
 
     sample = {
         "elapsed_s": 0,
@@ -1086,7 +1385,19 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--state", choices=["active", "steady", "hidden", "cold-evicted", "other"], default="steady")
     capture.add_argument("--slots", type=int, default=0, help="Number of Slots represented by this capture.")
 
-    guided = subparsers.add_parser("guided", help="Guided Hot → Warm → hidden → Cold comparison with one final report.")
+    automatic = subparsers.add_parser("auto", help="Fully automatic Hot/Warm/Cold benchmark through the Debug in-app control channel.")
+    automatic.add_argument("--session", default=None, help="Optional stable session name. Defaults to timestamp.")
+    automatic.add_argument("--results-root", default=str(DEFAULT_RESULTS_ROOT))
+    automatic.add_argument("--slots", type=int, default=2, help="Default number of test Slots to preselect; one extra unselected control Slot is required.")
+    automatic.add_argument("--seconds", type=int, default=DEFAULT_SAMPLE_SECONDS)
+    automatic.add_argument("--interval", type=float, default=DEFAULT_SAMPLE_INTERVAL)
+    automatic.add_argument("--settle", type=int, default=DEFAULT_SETTLE_SECONDS)
+    automatic.add_argument("--activation-wait", type=float, default=1.0, help="Seconds to wait after automatically activating each test Slot.")
+    automatic.add_argument("--pending-seconds", type=int, default=8, help="Short capture window before Cold eviction.")
+    automatic.add_argument("--cold-margin", type=int, default=7, help="Extra seconds beyond the 30s Cold grace before the evicted capture.")
+    automatic.add_argument("--pid", type=int, default=None)
+
+    guided = subparsers.add_parser("guided", help="Legacy manual Hot → Warm → hidden → Cold comparison.")
     guided.add_argument("--session", default=None, help="Optional stable session name. Defaults to timestamp.")
     guided.add_argument("--results-root", default=str(DEFAULT_RESULTS_ROOT))
     guided.add_argument("--slots", type=int, default=3, help="Default number of test Slots to preselect in the prompt.")
@@ -1111,6 +1422,8 @@ def main() -> int:
             return doctor_mode(args)
         if args.command == "capture":
             return capture_mode(args)
+        if args.command == "auto":
+            return automatic_mode(args)
         if args.command == "guided":
             return guided_mode(args)
         if args.command == "report":

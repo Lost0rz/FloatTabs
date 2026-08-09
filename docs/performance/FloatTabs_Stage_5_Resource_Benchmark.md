@@ -341,3 +341,58 @@ Hidden aggregate CPU diagnostic:
 ```
 
 These are diagnostic heuristics, not product/release thresholds. They exist to make the first local report easy to read without requiring manual arithmetic. Any tuning still requires repeatable Real-Mac evidence.
+
+## 12. Automated Real-Mac control channel
+
+PR #10 adds a Debug-only loopback benchmark control channel. The Python harness must use this channel for automated policy transitions instead of editing `WebAppProfiles.json` directly.
+
+Properties:
+
+- compiled/started only under `DEBUG`;
+- binds to `127.0.0.1` on an ephemeral port;
+- publishes PID/port plus a random per-process token in `~/Library/Application Support/FloatTabs/BenchmarkControl.json` with user-only file permissions;
+- mutates Residency/media only through `TabStore.updateResourcePolicy`;
+- activates Slots only through `TabStore.select`;
+- hides/shows only through `PanelController` product paths;
+- Release behavior is unchanged.
+
+### Cold timing correctness
+
+An automatic Cold measurement requires at least one unselected control Slot.
+
+For each selected test Slot the harness:
+
+```text
+configure selected Slots = Cold
+→ activate every selected Slot once
+→ activate one unselected control Slot
+→ NOW every selected test Slot is inactive
+→ start authoritative Cold inactivity timer
+→ optional short Cold-pending capture
+→ wait >30 s from final control activation
+→ Cold-evicted capture
+```
+
+The harness must not treat a selected Slot that remains Active as Cold-eligible. The report records the exact count of inactive selected Slots and uses that count for per-Slot reclaimed-memory estimates.
+
+### Automatic first-pass sequence
+
+```text
+Hot visible
+→ Hot hidden
+→ Warm visible
+→ Warm hidden
+→ Cold pending
+→ Cold evicted
+→ restore original selected-Slot Residency/media
+→ restore original active Slot
+→ restore original panel visibility
+```
+
+Use:
+
+```bash
+python3 tools/benchmark/floattabs_benchmark.py auto --slots 2
+```
+
+`guided` remains only as a legacy/manual fallback.
