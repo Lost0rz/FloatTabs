@@ -23,6 +23,11 @@ jobs:
         run: |
           python3 .github/benchmark_auto_control_fix.py
           python3 .github/benchmark_auto_control_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('docs/performance/FloatTabs_Stage_5_Resource_Benchmark.md')
+          path.write_text(path.read_text().rstrip() + '\n')
+          PY
 
       - name: Validate generated sources
         run: |
