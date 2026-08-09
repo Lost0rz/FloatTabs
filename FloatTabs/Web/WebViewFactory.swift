@@ -472,10 +472,10 @@ enum WebViewFactory {
         }
     }
 
-    /// At rest the WebView owns no visible AppKit scroller at all. This avoids
-    /// inheriting the user's global "Show scroll bars: Always" preference.
-    /// Scrollers are enabled only during active wheel/trackpad scrolling by the
-    /// transient-scroller controller below.
+    /// AppKit scrollers stay visually disabled even while the document scrolls.
+    /// This avoids inheriting the user's global "Show scroll bars: Always"
+    /// preference and forms the native half of the permanent scrollbar
+    /// suppression policy without disabling document scrolling.
     static func configureHiddenScrollers(in webView: WKWebView) {
         for scrollView in descendantScrollViews(in: webView) {
             configureHiddenScrollerStyle(scrollView)

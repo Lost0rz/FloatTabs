@@ -314,21 +314,19 @@ Drag reorder 后 shortcut mapping 同步更新。
 
 ## 6.1 Slot Context Menu
 
-可以提供：
+Slot 右键菜单保持精简，管理的是 Slot 本身而不是模拟完整浏览器：
 
 ```text
-Rename
-Edit Web App…
-Move Up
-Move Down
+Return to Home
 ────────────
-Reload
-Open in Default Browser
+Edit Web App…
 ────────────
 Remove Web App…
 ```
 
-删除不绑定 `⌘W`。
+`Edit Web App…` 已包含 Name，因此不再提供独立 `Rename` 动作。排序继续使用拖拽；`⌘1…⌘9` 始终跟随当前排序。
+
+`Return to Home` 导航到稳定的 `homeURL`，不主动清空 WebKit back/forward history。熟练用户也可使用 `⌘⇧H`。
 
 ---
 
@@ -582,6 +580,7 @@ FloatTabs 激活时：
 | `⌃⇧Tab` | Previous Slot |
 | `⌘T` | Add Web App |
 | `⌘L` | Quick URL |
+| `⌘⇧H` | Return active Slot to Home |
 | `⌘R` | Reload |
 | `⌘+` | Zoom In |
 | `⌘-` | Zoom Out |
@@ -612,24 +611,42 @@ V1 不提供搜索建议、history autocomplete、search-engine suggestions。
 
 # 12. Navigation Policy
 
-## 12.1 Current Slot
+## 12.1 Current Slot — 默认浏览容器
 
-正常同站点导航保留在当前 Slot，并持续更新 `currentURL`。
+普通 HTTP(S) 用户导航默认保留在当前 Slot，不再按 Host / 跨站与否自动跳到系统浏览器：
 
-## 12.2 `target=_blank` / Popup
+```text
+ordinary left click              → current Slot
+user target=_blank HTTP(S) link  → current Slot
+```
 
-Default：
+浏览过程中持续更新 `currentURL`；稳定的 `homeURL` 代表该 Slot 的回归点，不随深度浏览漂移。
 
-- login/OAuth popup → temporary child WKWebView；
-- same-site necessary popup → current Slot / child WebView；
-- normal external/research link → default browser；
+```text
+Tab context menu → Return to Home
+⌘⇧H             → Return active Slot to Home
+```
+
+Return Home 是普通导航，不主动清空 WebKit back/forward history。
+
+## 12.2 Explicit Destinations / Website Popups
+
+HTTP(S) 链接右键提供显式用户意图：
+
+```text
+Open in Floating Window → user-created FloatTabs floating window
+Open in Default Browser → system default browser
+Copy Link               → clipboard
+```
+
+网站自身创建的新上下文保持独立语义：
+
+- scripted `window.open` / OAuth/login popup → temporary child WKWebView；
+- `about:blank` auth bootstrap → temporary child WKWebView；
+- non-HTTP(S) scheme → system handler；
 - never auto-create permanent FloatTabs Slot。
 
-`Open in Default Browser` 可从：
-
-- `⚙` Current Web App Controls；
-- Tab context menu；
-- external-link policy。
+因此默认浏览器是“用户显式选择的目的地”，不是“cross-site URL 自动分类结果”。
 
 **不存在右上角 FloatTabs `…`。**
 
@@ -1104,7 +1121,7 @@ No Global Settings work is required here。
 - TabStore；
 - External Index Tabs；
 - `+` Add；
-- Edit/Rename/Remove；
+- Edit/Remove；
 - drag reorder；
 - `⌘1…⌘9`；
 - `⌃Tab`；
@@ -1126,10 +1143,11 @@ No Global Settings work is required here。
 
 - persistent website-data QA；
 - direct login restore；
-- `target=_blank`；
-- popup/OAuth child WebView；
-- default-browser routing；
-- Google/Apple OAuth matrix；
+- Navigation Intent：普通 HTTP(S) 用户导航留在当前 Slot；
+- explicit Floating Window / Default Browser link actions；
+- scripted `window.open` / popup/OAuth child WebView；
+- representative real-site session/OAuth QA；
+- full priority-site Google/Apple/provider compatibility matrix remains a V1 release QA gate；
 - upload；
 - download；
 - content-process recovery。
@@ -1178,7 +1196,7 @@ Recommended dependency order：
 #12 Add Responsive/Desktop/Mobile content modes
 #13 Add per-Slot pageZoom + Zoom HUD
 #14 Add temporary ⌘L URL overlay
-#15 Handle target=_blank / default browser routing
+#15 Implement Navigation Intent / target=_blank / explicit floating + default-browser routing
 #16 Implement OAuth/login child WKWebView
 #17 Implement upload panel
 #18 Implement WKDownload
@@ -1209,7 +1227,8 @@ Recommended dependency order：
 ## Slots
 
 - [ ] persistent left-edge Slots
-- [ ] Add/Edit/Rename/Remove
+- [ ] Add/Edit/Remove
+- [ ] Return to Home + `⌘⇧H`
 - [ ] drag reorder
 - [ ] `⌘1…⌘9`
 - [ ] `⌃Tab`
@@ -1232,11 +1251,11 @@ Recommended dependency order：
 
 - [ ] persistent login across restart
 - [ ] session survives normal in-place update
-- [ ] same-site navigation
-- [ ] target=_blank policy
+- [ ] ordinary HTTP(S) navigation remains in current Slot
+- [ ] target=_blank / Navigation Intent policy
 - [ ] popup/OAuth child WebView
-- [ ] Google/Apple compatibility recorded per priority site
-- [ ] default-browser fallback
+- [ ] Google/Apple/provider compatibility recorded per priority site before V1 release
+- [ ] explicit default-browser action
 - [ ] file upload
 - [ ] download
 - [ ] process termination recovery
