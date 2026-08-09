@@ -121,4 +121,32 @@ final class AppCommandControllerTests: XCTestCase {
         )!
         XCTAssertTrue(AppCommandController.shouldDismissQuickURL(for: outsideClick, overlay: overlay))
     }
+
+    func testMobileClickCorrectionIsNoOpWithoutEnlargement() {
+        let point = NSPoint(x: 120, y: 80)
+        XCTAssertEqual(
+            AppCommandController.correctedMobileWebPoint(
+                point,
+                webViewSize: NSSize(width: 390, height: 800),
+                layoutScale: 1
+            ),
+            point
+        )
+    }
+
+    func testMobileClickCorrectionMapsFromTopLeftZoomedSpace() {
+        let scale: CGFloat = 900.0 / 390.0
+        let corrected = AppCommandController.correctedMobileWebPoint(
+            NSPoint(x: 230, y: 110),
+            webViewSize: NSSize(width: 900, height: 850),
+            layoutScale: scale
+        )
+
+        XCTAssertEqual(corrected.x, 230 / scale, accuracy: 0.001)
+        XCTAssertEqual(
+            corrected.y,
+            850 - ((850 - 110) / scale),
+            accuracy: 0.001
+        )
+    }
 }
