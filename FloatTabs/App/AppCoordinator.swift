@@ -12,9 +12,14 @@ final class AppCoordinator {
             self.panelController = panelController
         } else {
             let tabStore = TabStore(repository: ProfileRepository())
-            let webViewPool = WebViewPool(onURLChange: { slotID, url in
-                tabStore.updateCurrentURL(id: slotID, url: url)
-            })
+            let webViewPool = WebViewPool(
+                onURLChange: { slotID, url in
+                    tabStore.updateCurrentURL(id: slotID, url: url)
+                },
+                isSlotActive: { slotID in
+                    tabStore.activeTabID == slotID
+                }
+            )
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool
