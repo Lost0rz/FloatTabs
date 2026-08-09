@@ -1,0 +1,39 @@
+name: Benchmark Auto Control Construction
+
+on:
+  push:
+    branches:
+      - perf/stage-5-resource-benchmark
+    paths:
+      - .github/benchmark-auto-control.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: perf/stage-5-resource-benchmark
+          fetch-depth: 0
+
+      - name: Apply automatic benchmark control patch
+        run: python3 .github/benchmark_auto_control_patch.py
+
+      - name: Validate generated sources
+        run: |
+          python3 -m py_compile tools/benchmark/floattabs_benchmark.py
+          python3 tools/benchmark/floattabs_benchmark.py --self-test
+          test -f FloatTabs/App/BenchmarkControlServer.swift
+          grep -q 'BenchmarkControlServer.swift in Sources' FloatTabs.xcodeproj/project.pbxproj
+          git diff --check
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FloatTabs FloatTabs.xcodeproj tools/benchmark docs/performance
+          git commit -m 'perf: automate local residency benchmark control'
+          git push origin HEAD:perf/stage-5-resource-benchmark
