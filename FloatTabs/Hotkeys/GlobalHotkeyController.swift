@@ -3,7 +3,7 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let toggleFloatTabs = Self(
         "toggleFloatTabs",
-        initial: .init(.backtick, modifiers: [.command])
+        initial: .init(.space, modifiers: [.option])
     )
 }
 
