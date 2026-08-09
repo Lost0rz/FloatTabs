@@ -148,7 +148,6 @@ enum UserAgentProvider {
         let profile = renderingProfile.normalized()
         let identity = resolvedIdentity(
             profile.effectiveBrowserIdentity,
-            websiteMode: profile.effectiveWebsiteMode,
             customUserAgent: profile.customUserAgent
         )
 
@@ -198,13 +197,12 @@ enum UserAgentProvider {
 
     static func userAgent(
         for identity: BrowserIdentity,
-        websiteMode: WebsiteMode,
+        websiteMode _: WebsiteMode,
         customUserAgent: String? = nil,
         versions: BrowserVersionCatalog
     ) -> String {
         switch resolvedIdentity(
             identity,
-            websiteMode: websiteMode,
             customUserAgent: customUserAgent
         ) {
         case .automatic, .macosSafari:
@@ -253,18 +251,22 @@ enum UserAgentProvider {
         }
     }
 
+    /// Automatic follows the real browser engine/platform, not the requested
+    /// Website Mode. FloatTabs is a macOS WKWebView application, so Automatic
+    /// must stay on the native macOS Safari identity even when the page is laid
+    /// out at a phone-class CSS width. Explicit mobile identities remain
+    /// available when the user intentionally wants an iPhone/Android UA.
     private static func resolvedIdentity(
         _ identity: BrowserIdentity,
-        websiteMode: WebsiteMode,
         customUserAgent: String?
     ) -> BrowserIdentity {
         if identity == .automatic {
-            return websiteMode == .desktop ? .macosSafari : .iphoneSafari
+            return .macosSafari
         }
 
         if identity == .custom,
            customUserAgent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-            return websiteMode == .desktop ? .macosSafari : .iphoneSafari
+            return .macosSafari
         }
 
         return identity
