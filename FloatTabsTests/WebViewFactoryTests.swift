@@ -207,6 +207,76 @@ final class WebViewFactoryTests: XCTestCase {
         window.orderOut(nil)
     }
 
+    /// Unit test for the production new-window policy decision
+    /// (`SlotNavigationObserver.shouldOpenInCurrentSlot`). `target="_blank"` /
+    /// `window.open` web navigations (targetFrame == nil, http/https) must route
+    /// into the current slot; other schemes and nil URLs must not.
+    func testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot() {
+        XCTAssertTrue(SlotNavigationObserver.shouldOpenInCurrentSlot(
+            targetFrame: nil,
+            url: URL(string: "https://www.bilibili.com/video/BV1234")
+        ))
+        XCTAssertTrue(SlotNavigationObserver.shouldOpenInCurrentSlot(
+            targetFrame: nil,
+            url: URL(string: "http://example.com")
+        ))
+        XCTAssertFalse(SlotNavigationObserver.shouldOpenInCurrentSlot(
+            targetFrame: nil,
+            url: URL(string: "about:blank")
+        ))
+        XCTAssertFalse(SlotNavigationObserver.shouldOpenInCurrentSlot(
+            targetFrame: nil,
+            url: URL(string: "mailto:a@b.com")
+        ))
+        XCTAssertFalse(SlotNavigationObserver.shouldOpenInCurrentSlot(
+            targetFrame: nil,
+            url: nil
+        ))
+    }
+
+    /// End-to-end: a `target="_blank"` link must navigate within the current
+    /// web view instead of being dropped. (Without a `WKUIDelegate`, WebKit
+    /// discards such navigations and the click appears to do nothing — the
+    /// real Bilibili desktop symptom.) Uses a test delegate that mirrors the
+    /// production policy plus an offline custom scheme so it is CI-safe.
+    func testBlankTargetLinksNavigateWithinCurrentSlot() {
+        _ = NSApplication.shared
+        let destination = URL(string: "x-ft-test://host/destination")!
+        let delegate = NewWindowPolicyDelegate()
+        let webView = makePolicyWebView(delegate: delegate)
+        let window = hostDirect(webView)
+
+        let loaded = expectation(description: "loaded")
+        delegate.onFinish = { loaded.fulfill() }
+        webView.loadHTMLString(offlineCenteredLinkHTML(href: destination.absoluteString, target: "_blank"), baseURL: nil)
+        wait(for: [loaded], timeout: 5)
+        clickWebViewCenter(webView, in: window)
+        waitForURL(webView, toBecome: destination, timeout: 3)
+
+        XCTAssertEqual(webView.url, destination)
+        window.orderOut(nil)
+    }
+
+    /// Control: ordinary `_self` links must keep navigating normally (no
+    /// regression for in-frame navigations from the `_blank` routing).
+    func testSelfTargetLinksStillNavigateWithinCurrentSlot() {
+        _ = NSApplication.shared
+        let destination = URL(string: "x-ft-test://host/self-destination")!
+        let delegate = NewWindowPolicyDelegate()
+        let webView = makePolicyWebView(delegate: delegate)
+        let window = hostDirect(webView)
+
+        let loaded = expectation(description: "loaded")
+        delegate.onFinish = { loaded.fulfill() }
+        webView.loadHTMLString(offlineCenteredLinkHTML(href: destination.absoluteString, target: nil), baseURL: nil)
+        wait(for: [loaded], timeout: 5)
+        clickWebViewCenter(webView, in: window)
+        waitForURL(webView, toBecome: destination, timeout: 3)
+
+        XCTAssertEqual(webView.url, destination)
+        window.orderOut(nil)
+    }
+
     func testWebsiteFitComposesWithIndependentUserZoomState() {
         let desktopRendering = WebRenderingProfile.canonicalDefault.settingZoom(1.25)
         let desktopWebView = WebViewFactory.makeWebView(renderingProfile: desktopRendering)
@@ -624,6 +694,51 @@ final class WebViewFactoryTests: XCTestCase {
         }
         return result
     }
+
+    // MARK: - Offline navigation test helpers
+
+    private func makePolicyWebView(delegate: WKNavigationDelegate) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        configuration.preferences.isElementFullscreenEnabled = true
+        configuration.setURLSchemeHandler(OfflinePageSchemeHandler(), forURLScheme: "x-ft-test")
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820),
+            configuration: configuration
+        )
+        webView.navigationDelegate = delegate
+        return webView
+    }
+
+    private func hostDirect(_ webView: WKWebView) -> NSWindow {
+        // Host through the production container (layer-backed clip/logical host)
+        // — the same path real panels use — so the WKWebView actually commits loads.
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        container.show(webView: webView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 820),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        container.layoutSubtreeIfNeeded()
+        webView.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    private func waitForURL(_ webView: WKWebView, toBecome expected: URL, timeout: TimeInterval) {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while Date() < deadline {
+            let tick = expectation(description: "url tick")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { tick.fulfill() }
+            wait(for: [tick], timeout: 0.2)
+            if webView.url == expected { return }
+        }
+        XCTFail("Timed out waiting for url to become \(expected); was \(webView.url?.absoluteString ?? "nil")")
+    }
 }
 
 @MainActor
@@ -636,5 +751,86 @@ private final class NavigationWaiter: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         onFinish()
+    }
+}
+
+/// Serves deterministic, offline pages for `x-ft-test://`:
+/// - `/landing-blank`: a centered link with `target="_blank"` to `/destination`
+/// - `/landing-self`:  a centered ordinary link to `/self-destination`
+/// - anything else:    a plain "destination" page.
+/// Custom-scheme top-frame loads go through `SlotNavigationObserver` exactly
+/// like real URL navigations, avoiding the `loadHTMLString`+observer stall.
+private func offlineCenteredLinkHTML(href: String, target: String?) -> String {
+    """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
+    <style>html,body{margin:0;width:100%;height:100%;}
+    a{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:280px;height:100px;
+      display:flex;align-items:center;justify-content:center;background:#ddd;font-size:22px;}</style>
+    <a id="link" href="\(href)"\(target.map { " target=\"\($0)\"" } ?? "")>open</a>
+    </body></html>
+    """
+}
+
+private final class OfflinePageSchemeHandler: NSObject, WKURLSchemeHandler {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        let url = urlSchemeTask.request.url ?? URL(string: "x-ft-test://host")!
+        let path = url.path
+        let body: String
+        if path.contains("landing-blank") {
+            body = offlineCenteredLinkHTML(href: "x-ft-test://host/destination", target: "_blank")
+        } else if path.contains("landing-self") {
+            body = offlineCenteredLinkHTML(href: "x-ft-test://host/self-destination", target: nil)
+        } else {
+            body = "<!doctype html><html><body>destination reached</body></html>"
+        }
+        guard let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/html; charset=utf-8"]
+        ) else {
+            urlSchemeTask.didFailWithError(NSError(domain: "OfflinePageSchemeHandler", code: 1))
+            return
+        }
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(Data(body.utf8))
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+}
+
+/// Test navigation delegate that mirrors `SlotNavigationObserver`'s new-window
+/// policy (route `targetFrame == nil` web navigations into the current web
+/// view). It additionally accepts the offline `x-ft-test` scheme so the
+/// destination can be served deterministically without network. Used because
+/// the production observer cannot be driven end-to-end inside the XCTest
+/// harness (it stalls WebContent there); the production *decision* itself is
+/// covered directly by `testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot`.
+@MainActor
+private final class NewWindowPolicyDelegate: NSObject, WKNavigationDelegate {
+    var onFinish: (() -> Void)?
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        if navigationAction.targetFrame == nil,
+           let url = navigationAction.request.url,
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" || scheme == "x-ft-test" {
+            decisionHandler(.cancel, preferences)
+            webView.load(navigationAction.request)
+            return
+        }
+        decisionHandler(.allow, preferences)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let finish = onFinish
+        onFinish = nil // one-shot: only the initial fixture load fulfills the expectation
+        finish?()
     }
 }
