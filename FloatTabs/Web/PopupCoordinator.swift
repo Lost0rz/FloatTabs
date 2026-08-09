@@ -8,6 +8,54 @@ enum NewBrowsingContextDisposition: Equatable {
     case externalBrowser
 }
 
+struct UploadPanelPolicy: Equatable {
+    let allowsMultipleSelection: Bool
+    let canChooseFiles: Bool
+    let canChooseDirectories: Bool
+
+    static func make(
+        allowsMultipleSelection: Bool,
+        allowsDirectories: Bool
+    ) -> UploadPanelPolicy {
+        UploadPanelPolicy(
+            allowsMultipleSelection: allowsMultipleSelection,
+            canChooseFiles: !allowsDirectories,
+            canChooseDirectories: allowsDirectories
+        )
+    }
+}
+
+@MainActor
+final class UploadCoordinator {
+    func presentOpenPanel(
+        parameters: WKOpenPanelParameters,
+        for webView: WKWebView,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: parameters.allowsMultipleSelection,
+            allowsDirectories: parameters.allowsDirectories
+        )
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = policy.allowsMultipleSelection
+        panel.canChooseFiles = policy.canChooseFiles
+        panel.canChooseDirectories = policy.canChooseDirectories
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = true
+
+        let finish: (NSApplication.ModalResponse) -> Void = { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
+
+        if let window = webView.window {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
+        }
+    }
+}
+
 /// Owns temporary browsing contexts created through `target=_blank` or
 /// `window.open`. The classifier deliberately uses interaction semantics rather
 /// than provider-specific host lists:
@@ -18,21 +66,27 @@ enum NewBrowsingContextDisposition: Equatable {
 /// - `about:blank` is a temporary popup because many auth flows create it first;
 /// - non-web schemes are handed to the system.
 @MainActor
-final class PopupCoordinator: NSObject, WKUIDelegate, NSWindowDelegate {
+final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
     typealias ExternalOpenHandler = (URL) -> Void
 
     private weak var parentWebView: WKWebView?
     private var childPanels: [ObjectIdentifier: NSPanel] = [:]
     private let openExternal: ExternalOpenHandler
+    private let uploadCoordinator: UploadCoordinator
+    private let downloadCoordinator: DownloadCoordinator
 
     init(
         parentWebView: WKWebView,
         openExternal: @escaping ExternalOpenHandler = { url in
             _ = NSWorkspace.shared.open(url)
-        }
+        },
+        uploadCoordinator: UploadCoordinator = UploadCoordinator(),
+        downloadCoordinator: DownloadCoordinator = DownloadCoordinator()
     ) {
         self.parentWebView = parentWebView
         self.openExternal = openExternal
+        self.uploadCoordinator = uploadCoordinator
+        self.downloadCoordinator = downloadCoordinator
         super.init()
     }
 
@@ -96,6 +150,61 @@ final class PopupCoordinator: NSObject, WKUIDelegate, NSWindowDelegate {
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        uploadCoordinator.presentOpenPanel(
+            parameters: parameters,
+            for: webView,
+            completionHandler: completionHandler
+        )
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        decisionHandler(
+            DownloadCoordinator.actionPolicy(
+                shouldPerformDownload: navigationAction.shouldPerformDownload
+            ),
+            preferences
+        )
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        decisionHandler(
+            DownloadCoordinator.responsePolicy(
+                canShowMIMEType: navigationResponse.canShowMIMEType
+            )
+        )
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        downloadCoordinator.attach(download, presentingWindow: webView.window)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        downloadCoordinator.attach(download, presentingWindow: webView.window)
+    }
+
     func webViewDidClose(_ webView: WKWebView) {
         close(webView: webView, restoreFocus: true)
     }
@@ -128,6 +237,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, NSWindowDelegate {
         popupWebView.allowsBackForwardNavigationGestures = true
         popupWebView.customUserAgent = sourceWebView.customUserAgent
         popupWebView.uiDelegate = self
+        popupWebView.navigationDelegate = self
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),

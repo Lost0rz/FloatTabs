@@ -260,6 +260,72 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .externalBrowser)
     }
 
+    func testUploadPanelPolicyForSingleFile() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: false,
+            allowsDirectories: false
+        )
+
+        XCTAssertFalse(policy.allowsMultipleSelection)
+        XCTAssertTrue(policy.canChooseFiles)
+        XCTAssertFalse(policy.canChooseDirectories)
+    }
+
+    func testUploadPanelPolicyForMultipleFiles() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: true,
+            allowsDirectories: false
+        )
+
+        XCTAssertTrue(policy.allowsMultipleSelection)
+        XCTAssertTrue(policy.canChooseFiles)
+        XCTAssertFalse(policy.canChooseDirectories)
+    }
+
+    func testUploadPanelPolicyForDirectory() {
+        let policy = UploadPanelPolicy.make(
+            allowsMultipleSelection: true,
+            allowsDirectories: true
+        )
+
+        XCTAssertTrue(policy.allowsMultipleSelection)
+        XCTAssertFalse(policy.canChooseFiles)
+        XCTAssertTrue(policy.canChooseDirectories)
+    }
+
+    func testExplicitDownloadActionUsesDownloadPolicy() {
+        XCTAssertEqual(
+            DownloadCoordinator.actionPolicy(shouldPerformDownload: true),
+            .download
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.actionPolicy(shouldPerformDownload: false),
+            .allow
+        )
+    }
+
+    func testUnshowableMimeResponseUsesDownloadPolicy() {
+        XCTAssertEqual(
+            DownloadCoordinator.responsePolicy(canShowMIMEType: false),
+            .download
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.responsePolicy(canShowMIMEType: true),
+            .allow
+        )
+    }
+
+    func testDownloadSuggestedFilenameDropsPathComponents() {
+        XCTAssertEqual(
+            DownloadCoordinator.safeSuggestedFilename("nested/path/report.txt"),
+            "report.txt"
+        )
+        XCTAssertEqual(
+            DownloadCoordinator.safeSuggestedFilename(""),
+            "Download"
+        )
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }

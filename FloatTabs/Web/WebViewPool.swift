@@ -12,15 +12,18 @@ final class WebViewPool {
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let downloadCoordinator: DownloadCoordinator
 
     init(
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
-        }
+        },
+        downloadCoordinator: DownloadCoordinator = DownloadCoordinator()
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.downloadCoordinator = downloadCoordinator
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
@@ -117,9 +120,13 @@ final class WebViewPool {
             slotID: profile.id,
             webView: webView,
             websiteMode: rendering.effectiveWebsiteMode,
+            downloadCoordinator: downloadCoordinator,
             onURLChange: onURLChange
         )
-        let popupCoordinator = PopupCoordinator(parentWebView: webView)
+        let popupCoordinator = PopupCoordinator(
+            parentWebView: webView,
+            downloadCoordinator: downloadCoordinator
+        )
         webView.uiDelegate = popupCoordinator
 
         webViews[profile.id] = webView
