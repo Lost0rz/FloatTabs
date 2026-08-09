@@ -12,18 +12,21 @@ final class WebNavigationCoordinator {
     func disposition(for navigationAction: WKNavigationAction) -> WebNavigationDisposition {
         Self.disposition(
             hasTargetFrame: navigationAction.targetFrame != nil,
+            navigationType: navigationAction.navigationType,
             sourceURL: navigationAction.sourceFrame.request.url,
             targetURL: navigationAction.request.url
         )
     }
 
-    /// Stage 4B production policy for new browsing contexts.
+    /// Navigation Intent policy for new browsing contexts.
     ///
-    /// Same-site HTTP(S) links continue in the persistent Slot. Cross-site and
-    /// non-web new contexts are allowed through so `WKUIDelegate` can classify
-    /// them as temporary popups or external-browser handoffs.
+    /// Ordinary user HTTP(S) links remain in the persistent Slot regardless of
+    /// host. Script-created contexts are allowed through to `WKUIDelegate`,
+    /// where popup/OAuth semantics are preserved. This deliberately removes
+    /// host comparison from the ordinary user-navigation boundary.
     static func disposition(
         hasTargetFrame: Bool,
+        navigationType: WKNavigationType = .linkActivated,
         sourceURL: URL?,
         targetURL: URL?
     ) -> WebNavigationDisposition {
@@ -33,7 +36,7 @@ final class WebNavigationCoordinator {
             return .allow
         }
 
-        return isSameSite(sourceURL, targetURL)
+        return navigationType == .linkActivated
             ? .loadInCurrentSlot
             : .allow
     }
