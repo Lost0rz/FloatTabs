@@ -19,6 +19,9 @@ jobs:
           ref: perf/stage-5-resource-benchmark
           fetch-depth: 0
 
+      - name: Repair helper anchor
+        run: python3 .github/stage5d-core-refinement-fix.py
+
       - name: Apply Stage 5D core patch
         run: python3 .github/stage5d-core-refinement.py
 
