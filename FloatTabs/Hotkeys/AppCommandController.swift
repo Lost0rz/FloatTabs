@@ -41,12 +41,21 @@ final class AppCommandController {
                 }
             }
 
-            let routedEvent = Self.correctedMobileWebClickEvent(event) ?? event
+            // Mobile page fitting can require a coordinate correction when the
+            // public WKWebView.pageZoom is greater than 1. Do not return a newly
+            // synthesized NSEvent to NSWindow for another hit-test: dynamic web
+            // UIs may mutate between mouseDown and mouseUp (for example opening
+            // a popover), which can make one physical click act like two. Consume
+            // the physical event and forward exactly one corrected event to the
+            // WKWebView that was hit before the page changed.
+            if Self.forwardCorrectedMobileWebClickIfNeeded(event) {
+                return nil
+            }
 
             guard event.type == .keyDown,
                   self.isEnabled(),
                   let command = Self.command(for: event) else {
-                return routedEvent
+                return event
             }
 
             self.onCommand(command)
@@ -170,11 +179,11 @@ final class AppCommandController {
         return !overlay.frame.contains(point)
     }
 
-    private static func correctedMobileWebClickEvent(_ event: NSEvent) -> NSEvent? {
+    private static func forwardCorrectedMobileWebClickIfNeeded(_ event: NSEvent) -> Bool {
         guard event.type == .leftMouseDown || event.type == .leftMouseUp,
               let window = event.window,
               let contentView = window.contentView else {
-            return nil
+            return false
         }
 
         let pointInContent = contentView.convert(event.locationInWindow, from: nil)
@@ -182,7 +191,7 @@ final class AppCommandController {
               let webView = containingFloatTabsWebView(startingAt: hitView),
               webView.websiteMode == .mobile,
               webView.websiteLayoutScale > 1.0001 else {
-            return nil
+            return false
         }
 
         let localPoint = webView.convert(event.locationInWindow, from: nil)
@@ -193,7 +202,7 @@ final class AppCommandController {
         )
         let correctedWindowPoint = webView.convert(correctedLocalPoint, to: nil)
 
-        return NSEvent.mouseEvent(
+        guard let correctedEvent = NSEvent.mouseEvent(
             with: event.type,
             location: correctedWindowPoint,
             modifierFlags: event.modifierFlags,
@@ -203,7 +212,20 @@ final class AppCommandController {
             eventNumber: event.eventNumber,
             clickCount: event.clickCount,
             pressure: event.pressure
-        )
+        ) else {
+            return false
+        }
+
+        switch event.type {
+        case .leftMouseDown:
+            webView.mouseDown(with: correctedEvent)
+        case .leftMouseUp:
+            webView.mouseUp(with: correctedEvent)
+        default:
+            return false
+        }
+
+        return true
     }
 
     private static func containingFloatTabsWebView(startingAt view: NSView) -> FloatTabsWebView? {
