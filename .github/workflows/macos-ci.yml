@@ -27,6 +27,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-4-web-compatibility-sessions
 
       - name: Apply guarded compatibility regression repair
         shell: bash
