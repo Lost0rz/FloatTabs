@@ -7,13 +7,20 @@
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 32px; line-height: 1.5; }
     .row { margin: 16px 0; padding: 16px; border: 1px solid #ccc; border-radius: 12px; }
-    a, button { font: inherit; padding: 10px 14px; }
+    a, button, input { font: inherit; padding: 10px 14px; }
+    input { width: min(520px, calc(100% - 32px)); }
     code { background: #f2f2f2; padding: 2px 5px; border-radius: 4px; }
   </style>
 </head>
 <body>
   <h1>FloatTabs Stage 4 Navigation Test</h1>
   <p>Serve this directory over HTTP and open this page in a FloatTabs Slot.</p>
+
+  <div class="row">
+    <h2>Focus-return check</h2>
+    <p>After closing any temporary popup, click this field once and type. Input must work immediately.</p>
+    <input id="focus-check" placeholder="Type here after closing a popup" />
+  </div>
 
   <div class="row">
     <h2>1. Same-site target=_blank</h2>
