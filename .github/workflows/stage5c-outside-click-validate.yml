@@ -1,0 +1,73 @@
+name: Stage 5C Outside Click Validate
+
+on:
+  push:
+    branches:
+      - feat/stage-5c-presentation-pin
+    paths:
+      - .github/stage5c-outside-click.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-5c-presentation-pin
+          fetch-depth: 0
+
+      - name: Apply same-frontmost-app outside-click fix
+        run: python3 .github/stage5c-outside-click-patch.py
+
+      - name: Validate intended implementation
+        run: |
+          git diff --check
+          grep -q 'addGlobalMonitorForEvents' FloatTabs/Panel/PanelController.swift
+          grep -q 'shouldAutoHideForExternalMouseDown' FloatTabs/Panel/PanelController.swift
+          grep -q 'testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange' FloatTabsTests/ExternalShellTests.swift
+          grep -q '\.backtick' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+          grep -q 'modifiers: \[.command\]' FloatTabs/Hotkeys/GlobalHotkeyController.swift
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -resolvePackageDependencies \
+            -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Debug build
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test
+
+      - name: Commit validated fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            FloatTabs/Panel/PanelController.swift \
+            FloatTabsTests/ExternalShellTests.swift
+          git commit -m 'fix: auto-hide after same-app outside click'
+          git push origin HEAD:feat/stage-5c-presentation-pin
