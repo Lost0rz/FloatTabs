@@ -50,7 +50,7 @@ Full Unit Tests              PASS
 
 ## 4B — Popup/OAuth/external routing
 
-Status: **IMPLEMENTED FOR AUTOMATED + REAL-MAC RETEST**
+Status: **AUTOMATED PASS / REAL-MAC RETEST REQUIRED**
 
 ### Routing model
 
@@ -89,7 +89,7 @@ The classifier is semantic and deterministic. It does not use provider-specific 
 
 ### Deterministic coverage
 
-Automated tests must cover:
+Automated tests cover:
 
 - same-site `_blank` → current Slot;
 - cross-site `_blank` user link → UIDelegate/external-browser path;
@@ -102,21 +102,86 @@ Automated tests must cover:
 - pooled WKWebViews retain a `PopupCoordinator`;
 - all existing Stage 0–3 tests remain green.
 
-### Real-Mac focused gate
+### Reproducible real-Mac fixture
 
-Before 4B is accepted, verify:
+Do not hunt for a third-party website to exercise routing. Use the repository fixture:
+
+```text
+docs/validation/fixtures/Stage4NavigationTest.html
+docs/validation/fixtures/same.html
+```
+
+From the repository root run:
+
+```bash
+python3 -m http.server 8765 --directory docs/validation/fixtures
+```
+
+Then add a temporary FloatTabs Slot with:
+
+```text
+http://127.0.0.1:8765/Stage4NavigationTest.html
+```
+
+Run these four controls in order:
+
+1. **Same-site `target=_blank`**
+   - click `Open same-site page`;
+   - expected: `same.html` replaces the current FloatTabs Slot content;
+   - expected: no Safari/default-browser window;
+   - expected: no temporary popup.
+
+2. **Cross-site `target=_blank`**
+   - return to the fixture page and click `Open cross-site link`;
+   - expected: `example.com` opens in the macOS default browser;
+   - expected: FloatTabs stays on the fixture page;
+   - expected: no permanent FloatTabs Slot is created.
+
+3. **Scripted `window.open`**
+   - click `Open temporary popup`;
+   - expected: a separate temporary child panel appears above FloatTabs and loads `example.org`;
+   - expected: the left FloatTabs rail does not gain a new Slot;
+   - close the popup with its normal window close button;
+   - expected: the parent FloatTabs window becomes key again and its WebView accepts click/keyboard input immediately.
+
+4. **`about:blank` popup**
+   - click `Open about:blank popup`;
+   - expected: a temporary blank child panel appears;
+   - close it;
+   - expected: parent focus returns and no persistent Slot remains.
+
+The local fixture validates routing mechanics only. It is not OAuth support certification.
+
+### Real-site regression gate
+
+After the fixture passes, verify only the already-known real pages:
 
 ```text
 Bilibili Desktop new-window/card links       PASS / FAIL
 Bilibili Mobile remains interactive          PASS / FAIL
-ordinary cross-site user link opens browser  PASS / FAIL
-scripted/window.open popup appears            PASS / FAIL
-popup can close and parent regains focus      PASS / FAIL
-one real OAuth/login popup flow                PASS / FAIL
 YouTube ordinary interaction/fullscreen       PASS / FAIL
 ```
 
-No provider is declared OAuth-supported based on the popup shell alone.
+One real login/OAuth smoke check may be recorded, but 4B does **not** require declaring any provider fully supported.
+
+## What “OAuth/session validation” means
+
+Stage 4C authentication validation is not code-signing certification and is not “does a popup exist.” It verifies the full website session lifecycle.
+
+For one provider/site, record separately:
+
+```text
+1. Can the normal login UI start?
+2. If login uses a popup, does the temporary child WebView appear correctly?
+3. Can the user complete or cancel that flow without losing the parent page?
+4. After successful login, is the parent Slot authenticated?
+5. Quit FloatTabs completely and relaunch: is the session still authenticated?
+6. Change a rendering setting that rebuilds the Slot WebView: is the same login session still available?
+```
+
+A site that performs OAuth through a same-window redirect is also valid; it does not need to create a popup. The QA record should describe the actual flow rather than forcing every provider into the popup path.
+
+No provider is declared supported until the complete sequence above is tested.
 
 ## 4C — Session/OAuth QA gate
 
