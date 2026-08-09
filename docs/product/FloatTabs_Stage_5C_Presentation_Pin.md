@@ -60,9 +60,7 @@ Behavior:
 - Hidden → `⌥ Space` shows FloatTabs.
 - Visible → `⌥ Space` explicitly hides FloatTabs.
 
-This default is intentionally provisional. A later Settings rebuild will provide a dedicated Hotkeys section with user-recordable shortcuts, alongside Appearance, global preferences, About/help, and other application-level settings. That Settings redesign is outside Stage 5C.
-
-Existing app-local direct Slot shortcuts remain:
+This default is intentionally provisional. Existing app-local direct Slot shortcuts remain:
 
 ```text
 ⌘1 … ⌘9
@@ -70,7 +68,20 @@ Existing app-local direct Slot shortcuts remain:
 
 Bare `1 … 9` are not intercepted because WKWebView text fields, forms, search boxes and chat editors must retain normal numeric input.
 
-## 4. Slot Presentation
+## 4. Deferred Settings Rebuild
+
+The current SwiftUI `Settings` scene is only a placeholder and is **not** rebuilt in Stage 5C.
+
+A later dedicated Settings stage should create an application-level Settings experience separate from per-Slot/Web-App controls. The intended information architecture includes at least:
+
+- **Appearance**;
+- **Hotkeys** with user-recordable shortcuts, including global Show/Hide and direct Slot shortcuts;
+- **Global behavior/preferences**;
+- **About / help / explanatory content**.
+
+Settings should be reachable from normal macOS application entry points, including the application menu / app-name menu, and from an explicit Settings entry in the product shell where appropriate. Per-Slot settings remain separate and should not be conflated with application Settings.
+
+## 5. Slot Presentation
 
 The Active Slot is the only Slot that should be visually presented.
 
@@ -104,7 +115,7 @@ Existing accepted behavior remains unchanged: retain the WKWebView in the pool a
 
 Existing accepted behavior remains unchanged: detach, start the inactivity grace period, then release the runtime after the grace period.
 
-## 5. Background Media Risk Boundary
+## 6. Background Media Risk Boundary
 
 Presentation hiding may cause a site or WebKit to pause media even when `Background Media = Allow Background Audio`.
 
@@ -116,7 +127,7 @@ Stage 5C does not add site-specific workarounds. Real-Mac acceptance must explic
 
 If hiding an inactive Hot host breaks an explicitly allowed background-media use case, media policy and presentation policy must be reconciled explicitly rather than masked with autoplay overrides or JavaScript `play()` forcing.
 
-## 6. Non-goals
+## 7. Non-goals
 
 Stage 5C does not:
 
@@ -130,7 +141,7 @@ Stage 5C does not:
 - add site-specific background-media hacks;
 - make Safari/Chrome comparison a release blocker.
 
-## 7. Acceptance Gates
+## 8. Acceptance Gates
 
 Automated:
 
