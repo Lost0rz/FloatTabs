@@ -49,10 +49,10 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Write Mobile hit-test strategy probe
+      - name: Write dynamic Mobile popover probe
         shell: bash
         run: |
-          cat > /tmp/FloatTabsMobileHitProbe.swift <<'SWIFT'
+          cat > /tmp/FloatTabsMobilePopoverProbe.swift <<'SWIFT'
           import AppKit
           import Foundation
           import WebKit
@@ -91,11 +91,16 @@ jobs:
           func evaluate(_ script: String, in webView: WKWebView) -> Any? {
               var done = false
               var value: Any?
-              webView.evaluateJavaScript(script) { result, _ in
+              var error: Error?
+              webView.evaluateJavaScript(script) { result, evaluationError in
                   value = result
+                  error = evaluationError
                   done = true
               }
               _ = spin(until: { done })
+              if let error {
+                  fputs("JavaScript error: \(error)\n", stderr)
+              }
               return value
           }
 
@@ -155,31 +160,119 @@ jobs:
                 <head>
                   <meta name="viewport" content="width=device-width, initial-scale=1">
                   <style>
-                    html, body { margin:0; width:100%; height:100%; overflow:hidden; }
-                    #target {
+                    html, body { margin:0; width:100%; height:100%; overflow:hidden; font-family:system-ui; }
+                    #trigger {
                       position:fixed;
                       left:20px;
                       bottom:20px;
-                      width:80px;
-                      height:60px;
+                      width:64px;
+                      height:64px;
                       border:0;
+                      border-radius:32px;
                     }
-                    #decoy {
+                    #menu {
                       position:fixed;
-                      inset:0;
-                      z-index:-1;
+                      width:220px;
+                      height:156px;
+                      border:1px solid #999;
+                      background:white;
+                      z-index:1000;
+                    }
+                    .item {
+                      display:block;
+                      box-sizing:border-box;
+                      width:100%;
+                      height:52px;
+                      border:0;
                     }
                   </style>
                 </head>
                 <body>
-                  <div id="decoy"></div>
-                  <button id="target">target</button>
+                  <button id="trigger">+</button>
                   <script>
-                    window.events = [];
-                    for (const name of ['mousedown', 'mouseup', 'click']) {
-                      document.addEventListener(name, e => {
-                        window.events.push({type:name, target:e.target.id || e.target.tagName, x:e.clientX, y:e.clientY});
-                      }, true);
+                    window.trace = [];
+                    window.selected = 0;
+                    window.closedByOutside = 0;
+                    window.openCount = 0;
+                    window.triggerRectAtOpen = null;
+                    window.menuRectAtOpen = null;
+
+                    function label(node) {
+                      return node?.id || node?.className || node?.tagName || 'unknown';
+                    }
+
+                    function record(phase, event) {
+                      window.trace.push({
+                        phase,
+                        type:event.type,
+                        target:label(event.target),
+                        x:event.clientX,
+                        y:event.clientY,
+                        buttons:event.buttons,
+                        pointerType:event.pointerType || null
+                      });
+                    }
+
+                    function closeMenu(reason) {
+                      const menu = document.getElementById('menu');
+                      if (!menu) return;
+                      window.trace.push({phase:'close', reason});
+                      menu.remove();
+                    }
+
+                    function openMenu(event) {
+                      if (document.getElementById('menu')) return;
+                      const trigger = document.getElementById('trigger');
+                      const rect = trigger.getBoundingClientRect();
+                      window.triggerRectAtOpen = {
+                        left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom,
+                        width:rect.width, height:rect.height
+                      };
+
+                      const menu = document.createElement('div');
+                      menu.id = 'menu';
+                      menu.style.left = `${Math.max(8, rect.left)}px`;
+                      menu.style.top = `${Math.max(8, rect.top - 168)}px`;
+                      for (let i = 0; i < 3; i++) {
+                        const item = document.createElement('button');
+                        item.className = 'item';
+                        item.id = `item-${i + 1}`;
+                        item.textContent = `item ${i + 1}`;
+                        item.addEventListener('pointerup', e => {
+                          record('item-pointerup', e);
+                          window.selected += 1;
+                          closeMenu('selected');
+                        });
+                        menu.appendChild(item);
+                      }
+                      document.body.appendChild(menu);
+                      const mr = menu.getBoundingClientRect();
+                      window.menuRectAtOpen = {
+                        left:mr.left, top:mr.top, right:mr.right, bottom:mr.bottom,
+                        width:mr.width, height:mr.height
+                      };
+                      window.openCount += 1;
+                      window.trace.push({phase:'open', triggerRect:window.triggerRectAtOpen, menuRect:window.menuRectAtOpen});
+                    }
+
+                    const trigger = document.getElementById('trigger');
+                    trigger.addEventListener('pointerdown', e => {
+                      record('trigger-pointerdown', e);
+                      openMenu(e);
+                    });
+
+                    document.addEventListener('pointerdown', e => {
+                      record('document-pointerdown', e);
+                      const menu = document.getElementById('menu');
+                      if (!menu) return;
+                      if (!menu.contains(e.target) && !trigger.contains(e.target)) {
+                        window.closedByOutside += 1;
+                        closeMenu('outside-pointerdown');
+                      }
+                    }, true);
+
+                    for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {
+                      document.addEventListener(type, e => record('capture', e), true);
                     }
                   </script>
                 </body>
@@ -195,12 +288,10 @@ jobs:
           let innerWidth = (evaluate("window.innerWidth", in: webView) as? NSNumber)?.doubleValue ?? -1
           let innerHeight = (evaluate("window.innerHeight", in: webView) as? NSNumber)?.doubleValue ?? -1
 
-          // The target center is 60 CSS px from the logical left edge and
-          // 50 CSS px from the logical bottom edge. Both strategies should
-          // present that point at the same physical Window coordinate.
+          // Trigger center: left=20, bottom=20, 64x64 in logical CSS space.
           let physicalPoint = NSPoint(
-              x: 60 * visibleScale,
-              y: 50 * visibleScale
+              x: 52 * visibleScale,
+              y: 52 * visibleScale
           )
 
           func mouseEvent(_ type: NSEvent.EventType, pressure: Float, number: Int) -> NSEvent {
@@ -217,39 +308,55 @@ jobs:
               )!
           }
 
+          // Deliberately split down/up with a run-loop gap. This allows the page
+          // to mount and position a popover after pointerdown, matching modern
+          // dropdown primitives more closely than a static click target.
           window.sendEvent(mouseEvent(.leftMouseDown, pressure: 1, number: 1))
-          window.sendEvent(mouseEvent(.leftMouseUp, pressure: 0, number: 2))
+          guard spin(until: {
+              ((evaluate("window.openCount", in: webView) as? NSNumber)?.intValue ?? 0) == 1
+          }, timeout: 2) else {
+              fatalError("trigger pointerdown did not open menu")
+          }
 
-          _ = spin(until: {
-              ((evaluate("window.events.length", in: webView) as? NSNumber)?.intValue ?? 0) >= 3
-          }, timeout: 2)
-
-          let eventsJSON = evaluate("JSON.stringify(window.events)", in: webView) as? String ?? "[]"
-          let targetEvents = (evaluate(
-              "window.events.filter(e => e.target === 'target').length",
+          let elementAtRelease = evaluate(
+              "document.elementFromPoint(52, window.innerHeight - 52)?.id || document.elementFromPoint(52, window.innerHeight - 52)?.className || 'none'",
               in: webView
-          ) as? NSNumber)?.intValue ?? 0
+          ) as? String ?? "unknown"
 
-          print("RESULT strategy=\(strategy.rawValue) innerWidth=\(innerWidth) innerHeight=\(innerHeight) physicalPoint=\(physicalPoint) events=\(eventsJSON)")
+          window.sendEvent(mouseEvent(.leftMouseUp, pressure: 0, number: 2))
+          RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.15))
 
-          // A valid Mobile strategy must expose a phone-class CSS width and
-          // route down/up/click at an off-center physical point to the target.
-          guard (360...420).contains(innerWidth), targetEvents >= 3 else {
-              fatalError("off-center Mobile viewport/hit-test contract failed")
+          let menuOpen = (evaluate("document.getElementById('menu') ? 1 : 0", in: webView) as? NSNumber)?.intValue ?? -1
+          let selected = (evaluate("window.selected", in: webView) as? NSNumber)?.intValue ?? -1
+          let closedByOutside = (evaluate("window.closedByOutside", in: webView) as? NSNumber)?.intValue ?? -1
+          let traceJSON = evaluate("JSON.stringify(window.trace)", in: webView) as? String ?? "[]"
+          let triggerRectJSON = evaluate("JSON.stringify(window.triggerRectAtOpen)", in: webView) as? String ?? "null"
+          let menuRectJSON = evaluate("JSON.stringify(window.menuRectAtOpen)", in: webView) as? String ?? "null"
+
+          print("RESULT strategy=\(strategy.rawValue) innerWidth=\(innerWidth) innerHeight=\(innerHeight) physicalPoint=\(physicalPoint) elementAtRelease=\(elementAtRelease) menuOpen=\(menuOpen) selected=\(selected) closedByOutside=\(closedByOutside) triggerRect=\(triggerRectJSON) menuRect=\(menuRectJSON) trace=\(traceJSON)")
+
+          // Expected one-click dropdown semantics: pointerdown opens the menu,
+          // pointerup at the unchanged trigger position must not auto-select an
+          // item or dismiss the menu.
+          guard (360...420).contains(innerWidth),
+                menuOpen == 1,
+                selected == 0,
+                closedByOutside == 0 else {
+              fatalError("dynamic Mobile popover interaction contract failed")
           }
 
           withExtendedLifetime(logicalHost) {}
           window.orderOut(nil)
           SWIFT
 
-      - name: Probe Mobile pageZoom off-center hit testing
+      - name: Probe dynamic Mobile popover with pageZoom
         continue-on-error: true
-        run: xcrun swift /tmp/FloatTabsMobileHitProbe.swift pageZoom
+        run: xcrun swift /tmp/FloatTabsMobilePopoverProbe.swift pageZoom
 
-      - name: Probe Mobile logical-host off-center hit testing
+      - name: Probe dynamic Mobile popover with logical host
         if: always()
         continue-on-error: true
-        run: xcrun swift /tmp/FloatTabsMobileHitProbe.swift logicalHost
+        run: xcrun swift /tmp/FloatTabsMobilePopoverProbe.swift logicalHost
 
       - name: Unit tests
         run: >-
