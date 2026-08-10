@@ -1,0 +1,49 @@
+name: Lifecycle Tail Upgrade
+
+on:
+  push:
+    branches:
+      - perf/stage-5-resource-benchmark
+    paths:
+      - '.github/lifecycle_tail_metrics_patch.py'
+      - '.github/workflows/lifecycle-tail-upgrade.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: perf/stage-5-resource-benchmark
+          fetch-depth: 0
+
+      - name: Apply benchmark upgrade
+        run: python3 .github/lifecycle_tail_metrics_patch.py
+
+      - name: Check diff
+        run: git diff --check
+
+      - name: Compile harnesses
+        run: |
+          python3 -m py_compile tools/benchmark/floattabs_benchmark.py
+          python3 -m py_compile tools/benchmark/floattabs_lifecycle_benchmark.py
+
+      - name: Run harness self-tests
+        run: |
+          python3 tools/benchmark/floattabs_benchmark.py --self-test
+          python3 tools/benchmark/floattabs_lifecycle_benchmark.py --self-test
+
+      - name: Commit validated benchmark upgrade
+        run: |
+          if git diff --quiet; then
+            echo 'No benchmark changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/benchmark/floattabs_lifecycle_benchmark.py tools/benchmark/README.md
+          git commit -m 'perf: add lifecycle steady-state benchmark metrics'
+          git push origin HEAD:perf/stage-5-resource-benchmark
