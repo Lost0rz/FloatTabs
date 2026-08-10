@@ -6,6 +6,7 @@ on:
       - feat/stage-6d-global-settings
     paths:
       - '.github/stage6d_patch.py'
+      - '.github/stage6d_fix1.py'
       - '.github/stage6d-trigger'
 
 permissions:
@@ -20,7 +21,9 @@ jobs:
           ref: feat/stage-6d-global-settings
 
       - name: Apply Stage 6D patch
-        run: python3 .github/stage6d_patch.py
+        run: |
+          python3 .github/stage6d_patch.py
+          python3 .github/stage6d_fix1.py
 
       - name: Check diff
         run: git diff --check
