@@ -1,0 +1,366 @@
+Stage 5D product helper test diagnostics
+========================================
+
+Filtered failure lines:
+Test Case '-[FloatTabsTests.ScreenPositioningTests testCenteredFrameClampsOversizedPanelToVisibleFrame]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testCenteredFrameClampsOversizedPanelToVisibleFrame]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testCenteredFrameUsesRequestedSizeWhenItFits]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testCenteredFrameUsesRequestedSizeWhenItFits]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testClampedFrameKeepsPanelInsideVisibleFrameAndMinimumSize]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testClampedFrameKeepsPanelInsideVisibleFrameAndMinimumSize]' passed (0.037 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testDisabledPreferredViewportFollowLeavesFrameUntouched]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testDisabledPreferredViewportFollowLeavesFrameUntouched]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testRestoredFrameStaysOnConnectedDisplayWhenItStillIntersects]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testRestoredFrameStaysOnConnectedDisplayWhenItStillIntersects]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.ScreenPositioningTests testSavedFrameOutsideAllDisplaysFallsBackAndClamps]' started.
+Test Case '-[FloatTabsTests.ScreenPositioningTests testSavedFrameOutsideAllDisplaysFallsBackAndClamps]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testActiveSelectionUpdatesIdentity]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testActiveSelectionUpdatesIdentity]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testAddAndEditPersistRenderingProfileAcrossRelaunch]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testAddAndEditPersistRenderingProfileAcrossRelaunch]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testAddProducesStableContinuousOrderAndSelectsNewSlot]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testAddProducesStableContinuousOrderAndSelectsNewSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testCurrentNavigationNeverMutatesStableHomeURL]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testCurrentNavigationNeverMutatesStableHomeURL]' passed (0.005 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testDuplicatePersistedSlotIDsAreDeduplicatedBeforeUse]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testDuplicatePersistedSlotIDsAreDeduplicatedBeforeUse]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testInvalidPersistedActiveIDIsRepairedAndPersisted]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testInvalidPersistedActiveIDIsRepairedAndPersisted]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testKeyboardIndexMappingFollowsVisibleOrderImmediately]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testKeyboardIndexMappingFollowsVisibleOrderImmediately]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testNextAndPreviousWrapAround]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testNextAndPreviousWrapAround]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testPersistedDuplicateAndInvalidOrdersAreNormalizedContinuously]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testPersistedDuplicateAndInvalidOrdersAreNormalizedContinuously]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testPreferredViewportAndZoomUpdatesPersistPerSlot]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testPreferredViewportAndZoomUpdatesPersistPerSlot]' passed (0.012 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testRemovingActiveSlotSelectsNearestNeighborAtOriginalPosition]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testRemovingActiveSlotSelectsNearestNeighborAtOriginalPosition]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testRemovingFinalSlotProducesValidEmptyState]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testRemovingFinalSlotProducesValidEmptyState]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.TabStoreTests testReorderNormalizesOrderWithoutChangingSlotIDs]' started.
+Test Case '-[FloatTabsTests.TabStoreTests testReorderNormalizesOrderWithoutChangingSlotIDs]' passed (0.005 seconds).
+Test Case '-[FloatTabsTests.WebAppURLTests testNormalizesBareHostToHTTPSAndRejectsUnsafeSchemes]' started.
+Test Case '-[FloatTabsTests.WebAppURLTests testNormalizesBareHostToHTTPSAndRejectsUnsafeSchemes]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testCanonicalDefaultsAndCodableRoundTrip]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testCanonicalDefaultsAndCodableRoundTrip]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testDeviceCatalogContainsCurrentPhoneAndTabletClasses]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testDeviceCatalogContainsCurrentPhoneAndTabletClasses]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testDevicePresetIsAdvancedViewportShortcutAndManualResizeClearsIt]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testDevicePresetIsAdvancedViewportShortcutAndManualResizeClearsIt]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testExplicitBrowserIdentityAndWebsiteModeRemainIndependent]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testExplicitBrowserIdentityAndWebsiteModeRemainIndependent]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testLegacyStage3RenderingJSONMigratesWithoutLosingSizeOrZoom]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testLegacyStage3RenderingJSONMigratesWithoutLosingSizeOrZoom]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testSimpleViewportPresetsAndMinimumClamp]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testSimpleViewportPresetsAndMinimumClamp]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testWebsiteModeAndViewportAreIndependent]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testWebsiteModeAndViewportAreIndependent]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testZoomStepTraversalAndResetHelpers]' started.
+Test Case '-[FloatTabsTests.WebRenderingProfileTests testZoomStepTraversalAndResetHelpers]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testAutomaticIdentityFollowsWebsiteModeWhenMaterialized]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testAutomaticIdentityFollowsWebsiteModeWhenMaterialized]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testAutomaticMobileUsesCurrentIPhoneSafariIdentity]' started.
+2026-08-10 01:56:22.690915+0000 FloatTabs[15110:43859] [general] WebContent[15127] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:23.490136+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15127] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testAutomaticMobileUsesCurrentIPhoneSafariIdentity]' passed (2.077 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testBlankTargetLinksNavigateWithinCurrentSlot]' started.
+2026-08-10 01:56:23.831737+0000 FloatTabs[15110:43886] [assertion] Error acquiring assertion: <Error Domain=RBSServiceErrorDomain Code=1 "(target is not running or doesn't have entitlement com.apple.runningboard.assertions.webkit AND originator doesn't have entitlement com.apple.runningboard.assertions.webkit)" UserInfo={NSLocalizedFailureReason=(target is not running or doesn't have entitlement com.apple.runningboard.assertions.webkit AND originator doesn't have entitlement com.apple.runningboard.assertions.webkit)}>
+2026-08-10 01:56:23.831835+0000 FloatTabs[15110:43886] [ProcessSuspension] 0x120190240 - ProcessAssertion::acquireSync Failed to acquire RBS assertion 'XPCConnectionTerminationWatchdog' for process with PID=15127, error: Error Domain=RBSServiceErrorDomain Code=1 "(target is not running or doesn't have entitlement com.apple.runningboard.assertions.webkit AND originator doesn't have entitlement com.apple.runningboard.assertions.webkit)" UserInfo={NSLocalizedFailureReason=(target is not running or doesn't have entitlement com.apple.runningboard.assertions.webkit AND originator doesn't have entitlement com.apple.runningboard.assertions.webkit)}
+2026-08-10 01:56:23.843678+0000 FloatTabs[15110:43859] [general] WebContent[15136] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:23.903059+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15136] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+2026-08-10 01:56:24.017085+0000 FloatTabs[15110:44052] WebContent[15136] fopen failed for data file: errno = 2 (No such file or directory)
+2026-08-10 01:56:24.130884+0000 FloatTabs[15110:44052] WebContent[15136] fopen failed for data file: errno = 2 (No such file or directory)
+Test Case '-[FloatTabsTests.WebViewFactoryTests testBlankTargetLinksNavigateWithinCurrentSlot]' passed (0.621 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testBrowserVersionNormalizationAvoidsStalePartialVersionStrings]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testBrowserVersionNormalizationAvoidsStalePartialVersionStrings]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testConfiguredScrollerIsCompletelyHiddenAtRest]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testConfiguredScrollerIsCompletelyHiddenAtRest]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testContentScrollbarSuppressionPreservesDocumentScrolling]' started.
+2026-08-10 01:56:24.428925+0000 FloatTabs[15110:43859] [general] WebContent[15139] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:24.484694+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15139] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testContentScrollbarSuppressionPreservesDocumentScrolling]' passed (0.197 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testCustomUserAgentPassesThroughExactly]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testCustomUserAgentPassesThroughExactly]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopHostKeepsWebViewOneToOneWithVisibleSurface]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopHostKeepsWebViewOneToOneWithVisibleSurface]' passed (0.010 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopModeDoesNotSynthesizeHiddenCSSWidth]' started.
+2026-08-10 01:56:24.617011+0000 FloatTabs[15110:43859] [general] WebContent[15140] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:24.677734+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15140] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopModeDoesNotSynthesizeHiddenCSSWidth]' passed (0.157 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopPublicPageZoomKeepsNativeClickHitTestingWorking]' started.
+2026-08-10 01:56:24.786887+0000 FloatTabs[15110:43859] [general] WebContent[15143] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:24.832561+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15143] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testDesktopPublicPageZoomKeepsNativeClickHitTestingWorking]' passed (0.382 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testExactDesktopAndMobileIdentityPresetsAreCentralized]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testExactDesktopAndMobileIdentityPresetsAreCentralized]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testExplicitMacOSSafariCanOverrideMobileAutomaticIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testExplicitMacOSSafariCanOverrideMobileAutomaticIdentity]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testHotHostsPreserveInactiveViewportAcrossDifferentSlotSizes]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testHotHostsPreserveInactiveViewportAcrossDifferentSlotSizes]' passed (0.029 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix]' started.
+2026-08-10 01:56:25.189869+0000 FloatTabs[15110:43859] [general] WebContent[15147] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:25.244105+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15147] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix]' passed (0.144 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testMobileModeDoesNotSynthesizeHiddenCSSWidth]' started.
+2026-08-10 01:56:25.334535+0000 FloatTabs[15110:43859] [general] WebContent[15150] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:25.398799+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15150] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[FloatTabsTests.WebViewFactoryTests testMobileModeDoesNotSynthesizeHiddenCSSWidth]' passed (0.157 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNativeWebCoordinatesRemainOneToOneWithVisibleCoordinates]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNativeWebCoordinatesRemainOneToOneWithVisibleCoordinates]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNavigationFinishRestoresHiddenScrollerPolicyAfterWebKitReenablesIt]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNavigationFinishRestoresHiddenScrollerPolicyAfterWebKitReenablesIt]' passed (0.012 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNavigationObserverRestoresWebsiteModeWithoutDiscardingUserZoom]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNavigationObserverRestoresWebsiteModeWithoutDiscardingUserZoom]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testNewWindowPolicyRoutesBlankWebLinksIntoCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testSafariCompatibilityIdentityUsesResolvedWebKitVersion]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testSafariCompatibilityIdentityUsesResolvedWebKitVersion]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testSelfTargetLinksStillNavigateWithinCurrentSlot]' started.
+2026-08-10 01:56:25.536554+0000 FloatTabs[15110:43859] [general] WebContent[15161] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:25.598262+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15161] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+2026-08-10 01:56:25.622735+0000 FloatTabs[15110:44052] WebContent[15161] fopen failed for data file: errno = 2 (No such file or directory)
+2026-08-10 01:56:25.692595+0000 FloatTabs[15110:44052] WebContent[15161] fopen failed for data file: errno = 2 (No such file or directory)
+Test Case '-[FloatTabsTests.WebViewFactoryTests testSelfTargetLinksStillNavigateWithinCurrentSlot]' passed (0.322 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testStageZeroWebViewUsesPersistentWebsiteDataStore]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testStageZeroWebViewUsesPersistentWebsiteDataStore]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testUserZoomIsOnlyPageZoomInputAcrossWebsiteModes]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testUserZoomIsOnlyPageZoomInputAcrossWebsiteModes]' passed (0.020 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testVisibleResizeKeepsNativeOneToOneGeometry]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testVisibleResizeKeepsNativeOneToOneGeometry]' passed (0.021 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testWebsiteLayoutViewportUsesRealVisibleWidthForBothModes]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testWebsiteLayoutViewportUsesRealVisibleWidthForBothModes]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewFactoryTests testWebViewInstallsPermanentContentScrollbarSuppression]' started.
+Test Case '-[FloatTabsTests.WebViewFactoryTests testWebViewInstallsPermanentContentScrollbarSuppression]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testActiveWebContentTerminationReloadsLastKnownURLImmediately]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testActiveWebContentTerminationReloadsLastKnownURLImmediately]' passed (0.027 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking]' passed (0.024 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL]' passed (0.031 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity]' passed (0.009 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleActivationCancelsPendingRelease]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleActivationCancelsPendingRelease]' passed (0.081 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' passed (0.065 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' passed (0.020 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' passed (0.011 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' passed (0.004 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' passed (0.010 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' passed (0.151 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' passed (0.010 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' passed (0.016 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' started.
+2026-08-10 01:56:26.392042+0000 FloatTabs[15110:44052] [Proce2026-08-10 01:56:26.436868+0000 FloatTabs[15110:43859] [general] WebContent[15226] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' passed (0.103 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' passed (0.019 seconds).
+Test Suite 'FloatTabsTests.xctest' failed at 2026-08-10 01:56:26.514.
+Test Suite 'All tests' failed at 2026-08-10 01:56:26.514.
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:26.559265+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15226] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+** TEST FAILED **
+
+Last 120 log lines:
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleActivationCancelsPendingRelease]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleActivationCancelsPendingRelease]' passed (0.081 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' passed (0.065 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' passed (0.020 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' passed (0.011 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' passed (0.004 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' passed (0.010 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' passed (0.151 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' passed (0.010 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' passed (0.016 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' started.
+2026-08-10 01:56:26.392042+0000 FloatTabs[15110:44052] [Proce2026-08-10 01:56:26.436868+0000 FloatTabs[15110:43859] [general] WebContent[15226] Connection to 'pboard' server had an error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1fc7bd730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+ssSuspension] WebContent[15143] 0x10e070100 - [sessionID=1] WebProcess::markAllLayersVolatile: Failed to mark layers as volatile for webPageID=111
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' passed (0.103 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' passed (0.019 seconds).
+Test Suite 'WebViewPoolTests' passed at 2026-08-10 01:56:26.514.
+	 Executed 37 tests, with 0 failures (0 unexpected) in 0.652 (0.684) seconds
+Test Suite 'FloatTabsTests.xctest' failed at 2026-08-10 01:56:26.514.
+	 Executed 139 tests, with 1 failure (0 unexpected) in 5.725 (5.860) seconds
+Test Suite 'All tests' failed at 2026-08-10 01:56:26.514.
+	 Executed 139 tests, with 1 failure (0 unexpected) in 5.725 (5.861) seconds
+2026-08-10 01:56:26.514589+0000 FloatTabs[15110:43859] [general] WebContent[15226] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1fc7bd730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:26.514615+0000 FloatTabs[15110:43859] [general] WebContent[15226] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1fc7bd5f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1fc7bd730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 01:56:26.542516+0000 FloatTabs[15110:43859] [access] WebContent[15226] send_message_with_reply_sync(): XPC_ERROR_CONNECTION_INVALID for message 0x74d118480
+2026-08-10 01:56:26.542534+0000 FloatTabs[15110:43859] [access] WebContent[15226] TCCAccessRequest_block_invoke: Connection invalid
+2026-08-10 01:56:26.542544+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.542550+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.542555+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.542560+0000 FloatTabs[15110:43859] [cas] WebContent[15226] CONNECT: Attempt to connect to launchservicesd prohibited because kLSServerConnectionStatusProcessIsDaemonMask is set.
+2026-08-10 01:56:26.544204+0000 FloatTabs[15110:43859] [cas] WebContent[15226] CRASHSTRING: rdar://problem/28724618 Couldn't connect to launchservicesd.
+2026-08-10 01:56:26.544305+0000 FloatTabs[15110:43859] WebContent[15226] invalid product id '(null)'
+2026-08-10 01:56:26.544426+0000 FloatTabs[15110:43859] [sharedcache] WebContent[15226] checkinWithServer Failed bootstrap_lookup2 for name of coreservicesd, kern_return_t=#1100/0x44c Permission denied name=com.apple.CoreServices.coreservicesd
+2026-08-10 01:56:26.544455+0000 FloatTabs[15110:43859] [connection] WebContent[15226] The sandbox in this process does not allow access to RunningBoard.
+2026-08-10 01:56:26.544510+0000 FloatTabs[15110:43859] [connection] WebContent[15226] Handshake aborted as the connection has been invalidated
+2026-08-10 01:56:26.544540+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555117+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555348+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555357+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555372+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555380+0000 FloatTabs[15110:43859] [default] WebContent[15226] Conn 0x0 is not a valid connection ID.
+2026-08-10 01:56:26.555465+0000 FloatTabs[15110:43859] [Connection] WebContent[15226] Missing com.apple.linkd.application-service / com.apple.linkd.autoShortcut mach-lookup entitlement, will NOT register the process
+2026-08-10 01:56:26.555474+0000 FloatTabs[15110:43859] [Application] WebContent[15226] Error registering app with intents framework: Error Domain=LNProcessInstanceRegistryClientErrorDomain Code=1
+2026-08-10 01:56:26.559198+0000 FloatTabs[15110:43859] WebContent[15226] networkd_settings_read_from_file_locked Sandbox is preventing this process from reading networkd settings file at "/Library/Preferences/com.apple.networkd.plist", please add an exception.
+2026-08-10 01:56:26.559243+0000 FloatTabs[15110:43859] WebContent[15226] networkd_settings_read_from_file_locked Sandbox is preventing this process from reading networkd settings file at "/Library/Preferences/com.apple.networkd.plist", please add an exception.
+2026-08-10 01:56:26.559265+0000 FloatTabs[15110:43859] [audiocomp] WebContent[15226] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+2026-08-10 01:56:32.490 xcodebuild[14013:41089] [MT] IDETestOperationsObserverDebug: 14.946 elapsed -- Testing started completed.
+2026-08-10 01:56:32.490 xcodebuild[14013:41089] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-08-10 01:56:32.490 xcodebuild[14013:41089] [MT] IDETestOperationsObserverDebug: 14.947 sec, +14.947 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Logs/Test/Test-FloatTabs-2026.08.10_01-56-03-+0000.xcresult
+
+Failing tests:
+	PanelPerimeterDragHitTestingTests.testRightOuterGutterIsNotMovementTarget()
+
+** TEST FAILED **
+
+Testing started
