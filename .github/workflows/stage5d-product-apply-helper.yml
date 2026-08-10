@@ -52,19 +52,14 @@ jobs:
           PY
           bash /tmp/stage5d-apply.sh
 
+          # Keep the historical PanelRootView safety net intact: transparent pixels
+          # that are still inside the FloatTabs window must remain owned by FloatTabs.
+          # Returning nil for root-only hits reintroduces desktop click-through in the
+          # narrow shell gaps around move/resize controls.
           python3 <<'PY'
           from pathlib import Path
 
           source = Path('FloatTabs/Web/WebViewContainer.swift')
-          text = source.read_text()
-
-          old_root_hit_test = '''    override var mouseDownCanMoveWindow: Bool { false }\n\n    override func hitTest(_ point: NSPoint) -> NSView? {\n        // A transparent pixel that is still inside the FloatTabs window belongs to\n        // FloatTabs. Returning self here is a safety net against accidental desktop\n        // click-through; functional move/resize/tab views still win through normal\n        // subview hit testing.\n        return super.hitTest(point)\n    }\n'''
-          corrected_root_hit_test = '''    override var mouseDownCanMoveWindow: Bool { false }\n\n    override func hitTest(_ point: NSPoint) -> NSView? {\n        // Functional FloatTabs controls and drag/resize surfaces win through normal\n        // subview hit testing. A root-only hit is visually transparent shell space,\n        // so it must not create an invisible click-blocking surface.\n        let candidate = super.hitTest(point)\n        return candidate === self ? nil : candidate\n    }\n'''
-          if text.count(old_root_hit_test) != 1:
-              raise SystemExit(f'expected one historical root hit-test block, found {text.count(old_root_hit_test)}')
-          text = text.replace(old_root_hit_test, corrected_root_hit_test)
-          source.write_text(text)
-
           tests = Path('FloatTabsTests/ExternalShellTests.swift')
           text = tests.read_text()
           old = '''        XCTAssertLessThan(path.boundingBoxOfPath.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBoxOfPath.maxX, web.maxX)\n'''
