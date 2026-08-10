@@ -172,16 +172,22 @@ GlobalSettingsController
 
 `PanelController` owns runtime teardown/re-synchronization when imported Slot state replaces the live Slot set.
 
-## 7. Automatic rollback backup
+## 7. Local automatic safety backups
 
 Before every successful manual restore, write the current configuration to:
 
 ```text
 ~/Library/Application Support/FloatTabs/Backups/
-FloatTabs-before-restore-<timestamp>.floattabsbackup
+FloatTabs-before-restore-<timestamp>-<id>.floattabsbackup
 ```
 
-Keep rollback backups local. RC1 does not implement background cloud sync.
+In addition, on app start and clean termination, update one local configuration snapshot for the current app version/build:
+
+```text
+FloatTabs-auto-<version>-<build>.floattabsbackup
+```
+
+A newer build uses a different filename, so the previous version's latest snapshot remains available during upgrades. These are local configuration backups only; RC1 does not implement background cloud sync or website credential/session migration.
 
 ## 8. Release build
 

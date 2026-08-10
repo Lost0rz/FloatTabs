@@ -1,7 +1,7 @@
 import AppKit
 
 
-enum AppAppearanceMode: String, CaseIterable, Equatable {
+enum AppAppearanceMode: String, CaseIterable, Equatable, Codable {
     case system
     case light
     case dark
@@ -29,6 +29,7 @@ enum AppAppearanceMode: String, CaseIterable, Equatable {
 @MainActor
 final class AppPreferencesStore {
     static let appearanceKey = "FloatTabs.appearanceMode"
+    static let followPreferredSizeKey = "FloatTabs.followTabPreferredSize"
 
     private let defaults: UserDefaults
 
@@ -47,6 +48,18 @@ final class AppPreferencesStore {
         set {
             defaults.set(newValue.rawValue, forKey: Self.appearanceKey)
             applyAppearance(newValue)
+        }
+    }
+
+    var followPreferredSize: Bool {
+        get {
+            guard defaults.object(forKey: Self.followPreferredSizeKey) != nil else {
+                return true
+            }
+            return defaults.bool(forKey: Self.followPreferredSizeKey)
+        }
+        set {
+            defaults.set(newValue, forKey: Self.followPreferredSizeKey)
         }
     }
 

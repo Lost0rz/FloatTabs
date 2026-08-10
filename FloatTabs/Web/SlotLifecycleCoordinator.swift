@@ -151,6 +151,18 @@ final class SlotLifecycleCoordinator {
         container.removeSlot(slotID)
     }
 
+    func reset(slotIDs: Set<UUID>) {
+        hiddenActiveToken = nil
+        activeSlotID = nil
+        inactivePlans.removeAll()
+        mediaProtectedSlotIDs.removeAll()
+        inactiveWarmRecency.removeAll()
+        warmRecencyCounter = 0
+        for slotID in slotIDs {
+            container.removeSlot(slotID)
+        }
+    }
+
     func handleMemoryPressure(_ level: SlotMemoryPressureLevel) {
         switch level {
         case .warning:

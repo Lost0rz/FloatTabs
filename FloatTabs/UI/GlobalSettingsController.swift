@@ -1,13 +1,25 @@
 import AppKit
 import KeyboardShortcuts
+import UniformTypeIdentifiers
 
 @MainActor
 final class GlobalSettingsController: NSObject, NSWindowDelegate {
+    typealias ExportBackupHandler = (URL) throws -> Void
+    typealias RestoreBackupHandler = (URL) throws -> URL
+
     private let preferencesStore: AppPreferencesStore
+    private let onExportBackup: ExportBackupHandler
+    private let onRestoreBackup: RestoreBackupHandler
     private lazy var settingsWindow: NSWindow = makeWindow()
 
-    init(preferencesStore: AppPreferencesStore) {
+    init(
+        preferencesStore: AppPreferencesStore,
+        onExportBackup: @escaping ExportBackupHandler = { _ in },
+        onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed }
+    ) {
         self.preferencesStore = preferencesStore
+        self.onExportBackup = onExportBackup
+        self.onRestoreBackup = onRestoreBackup
         super.init()
     }
 
@@ -43,15 +55,18 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         addTab(
             title: "Account & Language",
             symbol: "person.crop.circle",
-            controller: AccountLanguageSettingsViewController(),
+            controller: AccountLanguageSettingsViewController(
+                onExportBackup: onExportBackup,
+                onRestoreBackup: onRestoreBackup
+            ),
             to: tabs
         )
 
         let window = NSWindow(contentViewController: tabs)
         window.title = "FloatTabs Settings"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 560, height: 390))
-        window.minSize = NSSize(width: 520, height: 360)
+        window.setContentSize(NSSize(width: 580, height: 440))
+        window.minSize = NSSize(width: 540, height: 400)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -102,9 +117,7 @@ private final class AppearanceSettingsViewController: NSViewController {
         appearanceControl.segmentStyle = .rounded
         appearanceControl.target = self
         appearanceControl.action = #selector(appearanceChanged(_:))
-        appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
-            of: preferencesStore.appearanceMode
-        ) ?? 0
+        synchronizeControl()
 
         let stack = NSStackView(views: [titleLabel, detail, appearanceControl])
         stack.orientation = .vertical
@@ -122,9 +135,20 @@ private final class AppearanceSettingsViewController: NSViewController {
         view = root
     }
 
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        synchronizeControl()
+    }
+
     @objc private func appearanceChanged(_ sender: NSSegmentedControl) {
         guard AppAppearanceMode.allCases.indices.contains(sender.selectedSegment) else { return }
         preferencesStore.appearanceMode = AppAppearanceMode.allCases[sender.selectedSegment]
+    }
+
+    private func synchronizeControl() {
+        appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
+            of: preferencesStore.appearanceMode
+        ) ?? 0
     }
 
     private static func titleLabel(_ text: String) -> NSTextField {
@@ -138,7 +162,7 @@ private final class AppearanceSettingsViewController: NSViewController {
         label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabelColor
         label.maximumNumberOfLines = 0
-        label.widthAnchor.constraint(lessThanOrEqualToConstant: 470).isActive = true
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 500).isActive = true
         return label
     }
 }
@@ -214,7 +238,7 @@ private final class ShortcutsSettingsViewController: NSViewController {
         value.font = .systemFont(ofSize: 11.5)
         value.textColor = .secondaryLabelColor
         value.maximumNumberOfLines = 0
-        value.widthAnchor.constraint(lessThanOrEqualToConstant: 490).isActive = true
+        value.widthAnchor.constraint(lessThanOrEqualToConstant: 500).isActive = true
         return value
     }
 
@@ -233,34 +257,148 @@ private final class ShortcutsSettingsViewController: NSViewController {
 
 @MainActor
 private final class AccountLanguageSettingsViewController: NSViewController {
+    private let onExportBackup: GlobalSettingsController.ExportBackupHandler
+    private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
+
+    init(
+        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
+        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler
+    ) {
+        self.onExportBackup = onExportBackup
+        self.onRestoreBackup = onRestoreBackup
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func loadView() {
         let root = NSView()
+        let exportButton = NSButton(
+            title: "Export Backup…",
+            target: self,
+            action: #selector(exportBackup)
+        )
+        let restoreButton = NSButton(
+            title: "Restore Backup…",
+            target: self,
+            action: #selector(restoreBackup)
+        )
+        let actions = NSStackView(views: [exportButton, restoreButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 10
+
         let stack = NSStackView(views: [
             sectionTitle("Account"),
             detailLabel(
                 "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
             ),
+            spacer(8),
+            sectionTitle("Backup & Restore"),
             detailLabel(
-                "Web App profiles and app preferences stay on this Mac. Website login/session data remains in the persistent WebKit website data store."
+                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, window-size switching preference, and the global Show/Hide shortcut."
             ),
-            spacer(12),
+            detailLabel(
+                "Website passwords, cookies, OAuth/login sessions, WebKit caches, and page runtime state are not exported. A new Mac may require website sign-in again."
+            ),
+            actions,
+            detailLabel(
+                "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
+            ),
+            spacer(10),
             sectionTitle("Language"),
             detailLabel(
-                "A per-app language override is not exposed in this stage. No non-functional language selector is shown."
+                "A per-app language override is not exposed in V1. No non-functional language selector is shown."
             ),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 9
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
         ])
         view = root
+    }
+
+    @objc private func exportBackup() {
+        guard let window = view.window else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export FloatTabs Backup"
+        panel.nameFieldStringValue = FloatTabsBackupService.suggestedExportFileName()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [backupContentType]
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            do {
+                try self.onExportBackup(url)
+                self.showMessage(
+                    title: "Backup Exported",
+                    detail: "Your FloatTabs configuration backup was saved successfully."
+                )
+            } catch {
+                self.showError(error)
+            }
+        }
+    }
+
+    @objc private func restoreBackup() {
+        guard let window = view.window else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Restore FloatTabs Backup"
+        panel.allowedContentTypes = [backupContentType]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.confirmRestore(url: url)
+        }
+    }
+
+    private var backupContentType: UTType {
+        UTType(filenameExtension: FloatTabsBackupService.fileExtension) ?? .json
+    }
+
+    private func confirmRestore(url: URL) {
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Replace current FloatTabs configuration?"
+        alert.informativeText = "FloatTabs will create a local rollback backup first, then replace current Slot and global settings with the selected backup. Website login/session data is not changed or restored."
+        alert.addButton(withTitle: "Restore and Replace")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            do {
+                let rollbackURL = try self.onRestoreBackup(url)
+                self.showMessage(
+                    title: "Backup Restored",
+                    detail: "FloatTabs configuration was restored. A rollback backup was saved at:\n\(rollbackURL.path)"
+                )
+            } catch {
+                self.showError(error)
+            }
+        }
+    }
+
+    private func showMessage(title: String, detail: String) {
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    private func showError(_ error: Error) {
+        showMessage(title: "Backup Operation Failed", detail: error.localizedDescription)
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {
@@ -274,7 +412,7 @@ private final class AccountLanguageSettingsViewController: NSViewController {
         value.font = .systemFont(ofSize: 12)
         value.textColor = .secondaryLabelColor
         value.maximumNumberOfLines = 0
-        value.widthAnchor.constraint(lessThanOrEqualToConstant: 490).isActive = true
+        value.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
         return value
     }
 

@@ -41,4 +41,15 @@ final class AppPreferencesStoreTests: XCTestCase {
         defaults.set("future-value", forKey: AppPreferencesStore.appearanceKey)
         XCTAssertEqual(AppPreferencesStore(defaults: defaults).appearanceMode, .system)
     }
+
+    func testFollowPreferredSizeDefaultsTrueAndPersists() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertTrue(first.followPreferredSize)
+
+        first.followPreferredSize = false
+        XCTAssertFalse(AppPreferencesStore(defaults: defaults).followPreferredSize)
+
+        first.followPreferredSize = true
+        XCTAssertTrue(AppPreferencesStore(defaults: defaults).followPreferredSize)
+    }
 }

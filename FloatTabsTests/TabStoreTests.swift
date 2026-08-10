@@ -284,6 +284,54 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(repository.savedStates.last?.profiles.map(\.order), [0, 1])
     }
 
+    func testStoredStateSnapshotAndReplaceSanitizeImportedState() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let original = store.add(name: "Original", homeURL: urlA)!
+        XCTAssertEqual(store.storedStateSnapshot().lastActiveTabID, original.id)
+
+        var safe = WebAppProfile(
+            order: 9,
+            name: "Safe",
+            homeURL: urlB,
+            currentURL: URL(string: "file:///tmp/not-safe")!
+        )
+        safe.currentURL = URL(string: "file:///tmp/not-safe")
+        let invalidHome = WebAppProfile(
+            order: 0,
+            name: "Invalid",
+            homeURL: URL(string: "file:///tmp/invalid")!
+        )
+        let imported = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [safe, invalidHome],
+            lastActiveTabID: UUID()
+        )
+
+        XCTAssertTrue(store.replaceStoredState(imported))
+        XCTAssertEqual(store.orderedProfiles.map(\.id), [safe.id])
+        XCTAssertEqual(store.orderedProfiles.map(\.order), [0])
+        XCTAssertNil(store.orderedProfiles.first?.currentURL)
+        XCTAssertEqual(store.activeTabID, safe.id)
+        XCTAssertEqual(repository.state.lastActiveTabID, safe.id)
+    }
+
+    func testReplaceStoredStateRejectsUnsupportedVersionWithoutMutation() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let original = store.add(name: "Original", homeURL: urlA)!
+        let before = store.storedStateSnapshot()
+        let unsupported = StoredWebAppState(
+            version: StoredWebAppState.currentVersion + 1,
+            profiles: [],
+            lastActiveTabID: nil
+        )
+
+        XCTAssertFalse(store.replaceStoredState(unsupported))
+        XCTAssertEqual(store.storedStateSnapshot(), before)
+        XCTAssertEqual(store.activeTabID, original.id)
+    }
+
     private func makeProfile(order: Int, name: String, url: URL) -> WebAppProfile {
         WebAppProfile(
             order: order,

@@ -43,6 +43,8 @@
 		A00000000000000000000023 /* AppPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023 /* AppPreferencesStore.swift */; };
 		A00000000000000000000024 /* GlobalSettingsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000024 /* GlobalSettingsController.swift */; };
 		A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* AppPreferencesStoreTests.swift */; };
+		A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000026 /* FloatTabsBackupService.swift */; };
+		A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +95,8 @@
 		B00000000000000000000023 /* AppPreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000024 /* GlobalSettingsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSettingsController.swift; sourceTree = "<group>"; };
 		B00000000000000000000025 /* AppPreferencesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStoreTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000026 /* FloatTabsBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupService.swift; sourceTree = "<group>"; };
+		B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -192,6 +196,7 @@
 			children = (
 				B00000000000000000000014 /* ProfileRepository.swift */,
 				B00000000000000000000023 /* AppPreferencesStore.swift */,
+				B00000000000000000000026 /* FloatTabsBackupService.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -240,6 +245,7 @@
 				B0000000000000000000001D /* ExternalShellTests.swift */,
 				B0000000000000000000001E /* AppCommandControllerTests.swift */,
 				B00000000000000000000025 /* AppPreferencesStoreTests.swift */,
+				B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -361,6 +367,7 @@
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
 				A00000000000000000000024 /* GlobalSettingsController.swift in Sources */,
+				A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */,
 				A00000000000000000000022 /* BenchmarkControlServer.swift in Sources */,
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
 				A0000000000000000000000F /* AppCommandController.swift in Sources */,
@@ -393,6 +400,7 @@
 			files = (
 				A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */,
 				A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */,
+				A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */,
 				A0000000000000000000001C /* ExternalShellTests.swift in Sources */,
 				A0000000000000000000001A /* ProfileRepositoryTests.swift in Sources */,
 				A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */,
