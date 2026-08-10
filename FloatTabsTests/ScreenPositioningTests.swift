@@ -37,10 +37,10 @@ final class PanelMetricsTests: XCTestCase {
 
     func testMovementFrameUsesLargeInvisibleTargetAndThinVisibleOutline() {
         XCTAssertEqual(PanelMetrics.outerInteractionGutter, 12)
-        XCTAssertEqual(PanelMetrics.innerMovementOverlap, 4)
+        XCTAssertEqual(PanelMetrics.innerMovementOverlap, 10)
         XCTAssertEqual(
             PanelMetrics.outerInteractionGutter + PanelMetrics.innerMovementOverlap,
-            16
+            22
         )
         XCTAssertGreaterThan(
             PanelMetrics.outerInteractionGutter,
@@ -233,8 +233,16 @@ final class PanelRootViewLayoutTests: XCTestCase {
         XCTAssertEqual(root.interactionBorderView.frame, root.bounds)
         XCTAssertEqual(root.resizeHandleView.frame.width, PanelMetrics.resizeHandleSize, accuracy: 0.001)
         XCTAssertEqual(root.resizeHandleView.frame.height, PanelMetrics.resizeHandleSize, accuracy: 0.001)
-        XCTAssertEqual(root.resizeHandleView.frame.maxX, root.bounds.maxX, accuracy: 0.001)
-        XCTAssertEqual(root.resizeHandleView.frame.minY, root.bounds.minY, accuracy: 0.001)
+        XCTAssertEqual(
+            root.resizeHandleView.frame.maxX,
+            root.webPanelContainerView.frame.maxX,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.resizeHandleView.frame.minY,
+            root.webPanelContainerView.frame.minY,
+            accuracy: 0.001
+        )
     }
 
     func testAnimatedBorderNeverConsumesMouseInput() {
@@ -381,9 +389,10 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let point = NSPoint(
-            x: root.bounds.maxX - PanelMetrics.resizeHandleSize / 2,
-            y: root.bounds.minY + PanelMetrics.resizeHandleSize / 2
+            x: root.resizeHandleView.frame.midX,
+            y: root.resizeHandleView.frame.midY
         )
+        XCTAssertTrue(root.webPanelContainerView.frame.contains(point))
         XCTAssertTrue(root.hitTest(point) is PanelResizeHandleView)
     }
 
