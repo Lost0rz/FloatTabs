@@ -1,0 +1,55 @@
+name: RC1 DMG Diagnostic
+
+on:
+  push:
+    branches:
+      - release/v0.1.0-rc1
+    paths:
+      - '.github/rc1-dmg-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose-dmg:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/v0.1.0-rc1
+
+      - name: Apply already validated RC1 product patch
+        run: |
+          python3 .github/rc1_patch.py
+          python3 .github/rc1_fix1.py
+          python3 .github/rc1_fix2.py
+
+      - name: Diagnose DMG build
+        id: diagnose
+        shell: bash
+        env:
+          FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRC1
+        run: |
+          set +e
+          chmod +x tools/release/build_dmg.sh
+          bash -x tools/release/build_dmg.sh > "$RUNNER_TEMP/rc1-dmg-full.log" 2>&1
+          status=$?
+          {
+            echo "exit_status=$status"
+            echo "runner_temp=$RUNNER_TEMP"
+            echo "output_dir=$FLOATTABS_OUTPUT_DIR"
+            echo "=== output tree ==="
+            find "$FLOATTABS_OUTPUT_DIR" -maxdepth 5 -print 2>&1 || true
+            echo "=== last 120 log lines ==="
+            tail -n 120 "$RUNNER_TEMP/rc1-dmg-full.log" 2>&1 || true
+          } > .github/rc1-dmg-diagnostic.txt
+          cat .github/rc1-dmg-diagnostic.txt
+          exit 0
+
+      - name: Commit diagnostic result
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/rc1-dmg-diagnostic.txt
+          git commit -m 'chore: capture RC1 DMG diagnostic'
+          git push origin HEAD:release/v0.1.0-rc1
