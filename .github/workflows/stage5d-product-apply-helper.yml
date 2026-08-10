@@ -58,7 +58,7 @@ jobs:
           tests = Path('FloatTabsTests/ExternalShellTests.swift')
           text = tests.read_text()
           old = '''        XCTAssertLessThan(path.boundingBoxOfPath.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBoxOfPath.maxX, web.maxX)\n'''
-          new = '''        XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)\n'''
+          new = '''        print("STAGE5D_TEST_BOUND path=\\(path.boundingBox) web=\\(web) active=\\(activeTab)")\n        XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)\n'''
           if text.count(old) != 1:
               raise SystemExit(f'expected one composite-outline assertion block, found {text.count(old)}')
           tests.write_text(text.replace(old, new))
@@ -94,7 +94,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Unit tests with persisted failure diagnostics
+      - name: Focused ExternalShell regression tests
         shell: bash
         run: |
           set +e
@@ -106,46 +106,64 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
-            test 2>&1 | tee /tmp/stage5d-tests.log
+            -only-testing:FloatTabsTests/ExternalShellTests \
+            test 2>&1 | tee /tmp/stage5d-shell-tests.log
           status=${PIPESTATUS[0]}
 
           if [ "$status" -ne 0 ]; then
             mkdir -p .ci-diagnostics
             python3 <<'PY'
           from pathlib import Path
-          source = Path('/tmp/stage5d-tests.log').read_text(errors='replace').splitlines()
-          needles = (
-              'STAGE5D_OUTLINE',
-              'Test Case',
-              'XCTAssert',
-              'error:',
-              'failed',
-              'Failure',
-              '** TEST',
+          lines = Path('/tmp/stage5d-shell-tests.log').read_text(errors='replace').splitlines()
+          selected = []
+          for i, line in enumerate(lines):
+              if (
+                  'ExternalShellTests' in line
+                  or 'STAGE5D_' in line
+                  or 'XCTAssert' in line
+                  or ' error: ' in line
+                  or '** TEST' in line
+              ):
+                  start = max(0, i - 2)
+                  end = min(len(lines), i + 3)
+                  selected.extend(lines[start:end])
+          deduped = []
+          seen = set()
+          for line in selected:
+              if line not in seen:
+                  deduped.append(line)
+                  seen.add(line)
+          Path('.ci-diagnostics/stage5d-product-apply-failure.txt').write_text(
+              '\n'.join([
+                  'Stage 5D focused shell diagnostics',
+                  '=================================',
+                  '',
+                  *deduped,
+                  '',
+              ])
           )
-          selected = [line for line in source if any(needle in line for needle in needles)]
-          tail = source[-120:]
-          out = [
-              'Stage 5D product helper test diagnostics',
-              '========================================',
-              '',
-              'Filtered failure lines:',
-              *selected[-240:],
-              '',
-              'Last 120 log lines:',
-              *tail,
-              '',
-          ]
-          Path('.ci-diagnostics/stage5d-product-apply-failure.txt').write_text('\n'.join(out))
           PY
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .ci-diagnostics/stage5d-product-apply-failure.txt
-            git commit -m "ci: persist Stage 5D failing test diagnostics"
+            git commit -m "ci: persist focused Stage 5D shell diagnostics"
             git push origin HEAD:perf/stage-5-resource-benchmark
           fi
 
           exit "$status"
+
+      - name: Full unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test
 
       - name: Commit validated product changes
         shell: bash
@@ -154,12 +172,20 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python3 <<'PY'
           from pathlib import Path
-          p = Path('FloatTabs/Web/WebViewContainer.swift')
-          text = p.read_text()
+
+          source = Path('FloatTabs/Web/WebViewContainer.swift')
+          text = source.read_text()
           diagnostic = '''        print("STAGE5D_OUTLINE web=\\(webRect) tab=\\(tabRect) join=\\(joinBottom)...\\(joinTop) active=\\(String(describing: activeTabFrame))")\n'''
           if text.count(diagnostic) != 1:
-              raise SystemExit(f'expected one temporary diagnostic, found {text.count(diagnostic)}')
-          p.write_text(text.replace(diagnostic, ''))
+              raise SystemExit(f'expected one temporary outline diagnostic, found {text.count(diagnostic)}')
+          source.write_text(text.replace(diagnostic, ''))
+
+          tests = Path('FloatTabsTests/ExternalShellTests.swift')
+          text = tests.read_text()
+          test_diagnostic = '''        print("STAGE5D_TEST_BOUND path=\\(path.boundingBox) web=\\(web) active=\\(activeTab)")\n'''
+          if text.count(test_diagnostic) != 1:
+              raise SystemExit(f'expected one temporary test diagnostic, found {text.count(test_diagnostic)}')
+          tests.write_text(text.replace(test_diagnostic, ''))
           PY
           if [ -f .ci-diagnostics/stage5d-product-apply-failure.txt ]; then
             git rm .ci-diagnostics/stage5d-product-apply-failure.txt
