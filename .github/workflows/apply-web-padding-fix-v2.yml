@@ -6,6 +6,7 @@ on:
       - agent/fix-web-content-padding
     paths:
       - '.github/fix_web_padding_v2.py'
+      - '.github/fix_web_click_helper_v2.py'
       - '.github/web-padding-v2-trigger'
 
 permissions:
@@ -21,7 +22,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply host-scaled Desktop layout repair
-        run: python3 .github/fix_web_padding_v2.py
+        run: |
+          python3 .github/fix_web_padding_v2.py
+          python3 .github/fix_web_click_helper_v2.py
 
       - name: Check patch
         run: |
