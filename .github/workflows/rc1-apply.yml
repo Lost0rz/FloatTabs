@@ -88,8 +88,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             .gitignore \
-            .github/workflows/macos-ci.yml \
-            .github/workflows/qa-dmg.yml \
             FloatTabs.xcodeproj/project.pbxproj \
             FloatTabs/App/AppCoordinator.swift \
             FloatTabs/Panel/PanelController.swift \
