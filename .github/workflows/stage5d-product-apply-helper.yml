@@ -97,7 +97,6 @@ jobs:
       - name: Focused ExternalShell regression tests
         shell: bash
         run: |
-          set +e
           set -o pipefail
           xcodebuild \
             -project FloatTabs.xcodeproj \
@@ -107,54 +106,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
             -only-testing:FloatTabsTests/ExternalShellTests \
-            test 2>&1 | tee /tmp/stage5d-shell-tests.log
-          status=${PIPESTATUS[0]}
+            test
 
-          if [ "$status" -ne 0 ]; then
-            mkdir -p .ci-diagnostics
-            python3 <<'PY'
-          from pathlib import Path
-          lines = Path('/tmp/stage5d-shell-tests.log').read_text(errors='replace').splitlines()
-          selected = []
-          for i, line in enumerate(lines):
-              if (
-                  'ExternalShellTests' in line
-                  or 'STAGE5D_' in line
-                  or 'XCTAssert' in line
-                  or ' error: ' in line
-                  or '** TEST' in line
-              ):
-                  start = max(0, i - 2)
-                  end = min(len(lines), i + 3)
-                  selected.extend(lines[start:end])
-          deduped = []
-          seen = set()
-          for line in selected:
-              if line not in seen:
-                  deduped.append(line)
-                  seen.add(line)
-          Path('.ci-diagnostics/stage5d-product-apply-failure.txt').write_text(
-              '\n'.join([
-                  'Stage 5D focused shell diagnostics',
-                  '=================================',
-                  '',
-                  *deduped,
-                  '',
-              ])
-          )
-          PY
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .ci-diagnostics/stage5d-product-apply-failure.txt
-            git commit -m "ci: persist focused Stage 5D shell diagnostics"
-            git push origin HEAD:perf/stage-5-resource-benchmark
-          fi
-
-          exit "$status"
-
-      - name: Full unit tests
+      - name: Full unit tests with exact failure diagnostics
         shell: bash
         run: |
+          set +e
           set -o pipefail
           xcodebuild \
             -project FloatTabs.xcodeproj \
@@ -163,7 +120,60 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
-            test
+            test 2>&1 | tee /tmp/stage5d-full-tests.log
+          status=${PIPESTATUS[0]}
+
+          if [ "$status" -ne 0 ]; then
+            mkdir -p .ci-diagnostics
+            python3 <<'PY'
+          from pathlib import Path
+
+          lines = Path('/tmp/stage5d-full-tests.log').read_text(errors='replace').splitlines()
+          hit_indexes = []
+          for i, line in enumerate(lines):
+              lowered = line.lower()
+              if (
+                  ('test case' in lowered and ' failed ' in lowered)
+                  or ('xctassert' in lowered)
+                  or ('floattabstests/' in lowered and 'error:' in lowered)
+                  or ('externalShellTests.swift:' in line and 'error:' in lowered)
+                  or (' error: ' in lowered and 'sandbox restriction' not in lowered)
+                  or ('stage5d_' in lowered)
+              ):
+                  hit_indexes.append(i)
+
+          selected = []
+          for i in hit_indexes:
+              selected.extend(lines[max(0, i - 5):min(len(lines), i + 6)])
+
+          # If xcodebuild reported a failure but the narrow matcher missed it,
+          # retain the last 220 lines rather than losing the evidence again.
+          if not selected:
+              selected = lines[-220:]
+
+          deduped = []
+          for line in selected:
+              if not deduped or deduped[-1] != line:
+                  deduped.append(line)
+
+          Path('.ci-diagnostics/stage5d-full-suite-failure.txt').write_text(
+              '\n'.join([
+                  'Stage 5D full-suite failure diagnostics',
+                  '=======================================',
+                  '',
+                  *deduped,
+                  '',
+              ])
+          )
+          PY
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .ci-diagnostics/stage5d-full-suite-failure.txt
+            git commit -m "ci: persist Stage 5D full-suite failure"
+            git push origin HEAD:perf/stage-5-resource-benchmark
+          fi
+
+          exit "$status"
 
       - name: Commit validated product changes
         shell: bash
@@ -189,6 +199,9 @@ jobs:
           PY
           if [ -f .ci-diagnostics/stage5d-product-apply-failure.txt ]; then
             git rm .ci-diagnostics/stage5d-product-apply-failure.txt
+          fi
+          if [ -f .ci-diagnostics/stage5d-full-suite-failure.txt ]; then
+            git rm .ci-diagnostics/stage5d-full-suite-failure.txt
           fi
           git add \
             FloatTabs/Panel/ScreenPositioning.swift \
