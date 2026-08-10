@@ -16,9 +16,12 @@ struct PanelMetrics {
     static let webRightInteractionSafety: CGFloat = 24
 
     /// The visible frame is deliberately much thinner than its hit target.
+    /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt
+    /// stroke this deliberately overlaps the Web edge by 0.75 pt, eliminating
+    /// subpixel / antialiasing hairline gaps between the rainbow frame and page.
     /// It is presentation-only and never participates in hit testing.
-    static let interactionBorderOutset: CGFloat = 2
     static let interactionBorderLineWidth: CGFloat = 2.5
+    static let interactionBorderOutset: CGFloat = 0.5
 
     /// Bottom-right remains the only resize affordance.
     static let resizeHandleSize: CGFloat = 40
