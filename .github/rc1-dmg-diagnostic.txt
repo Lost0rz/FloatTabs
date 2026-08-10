@@ -1,0 +1,488 @@
+exit_status=0
+runner_temp=/Users/runner/work/_temp
+output_dir=/Users/runner/work/_temp/FloatTabsRC1
+=== output tree ===
+/Users/runner/work/_temp/FloatTabsRC1
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/Applications
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/MacOS
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/MacOS/FloatTabs
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/Resources
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/Resources/StageZeroTestPage.html
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/Info.plist
+/Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app/Contents/PkgInfo
+/Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SDKStatCaches.noindex
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SDKStatCaches.noindex/macosx26.5-25F70-688ef53f1462e2c8f657fdc38a81448fee0e6409aa6676c5e6c013d148225433.sdkstatcache
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/artifacts
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/workspace-state.json
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/logo-dark.png
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/license
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.swiftlint.yml
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/Example
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/Tests
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/screenshot.png
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.editorconfig
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/readme.md
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.gitignore
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.github
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.gitattributes
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/Package.swift
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.spi.yml
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/Sources
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.git
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/.swiftpm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/checkouts/KeyboardShortcuts/logo-light.png
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/config
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/objects
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/HEAD
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/info
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/description
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/hooks
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/refs
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/packed-refs
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/SourcePackages/repositories/KeyboardShortcuts-238420bc/FETCH_HEAD
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Test
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Test/LogStoreManifest.plist
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Launch
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Launch/LogStoreManifest.plist
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Build
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Build/LogStoreManifest.plist
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Package
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Package/LogStoreManifest.plist
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Package/6190D24D-674F-4D83-BA8C-0758EAC6004D.xcactivitylog
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Localization
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Logs/Localization/LogStoreManifest.plist
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ImageIO-Z13UUYMMMRG6U763XFRHYG7K.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreImage-3QPNKR4EDRZL9DF4WE322W52P.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CUPS-5UKHGWP5ODM8Z8IS4AYVRSVPV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftShims-39AN9L9LFE24WCILB8VZIJJS7.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Foundation-38YXKN0YIMIG0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreGraphics-QDUS8ED3F705.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/launch-ARXHOZ7J3W5M.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreText-2T2IOK0SNFZNV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/os_object-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/dnssd-DEFY48CA9N51.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreTransferable-3SSPXPAJU78ZB.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_intrinsics-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreFoundation-4PRADGP6YP3X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/IOSurface-1JC6RAB0YSTD4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/libkern-L1T1GEFMK28X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/DiskArbitration-1O0FLMNBJTG9J.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/SwiftUICore-2L1UWP46UWBS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_DarwinFoundation3-2S9LVQYWOOAP0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/os-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreVideo-1YKI1FAGW2OUV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreImage-2RT2F3TRXLIZP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/QuartzCore-MLKK3TF0HB69.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/os_workgroup-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/libDER-39H4PFZCUIQOD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_float-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ColorSync-1CFFIB8NX9PA6.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_stddef-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_stdarg-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/simd-2KZRGNXIHSGUO.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Metal-2R2BMTELV7IT4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_tgmath-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/SwiftShims-9NQJOJM4OLX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Carbon-2335V577P5U9X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Symbols-TRI3M9O68AEH.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CFNetwork-2BQ3Y1UMG0TX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/OSLog-2CMBXQIC8NG2F.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_limits-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Darwin-37WIDF19QD7Z8.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/sys_types-1MZ4YW41NCYUI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_SwiftConcurrencyShims-9NQJOJM4OLX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ObjectiveC-E5A4PH5UJSV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/MachO-1GVAMZFVHQO4H.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Security-234VW12JIG8K3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Dispatch-37NRPBCG6NSUK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/OpenGL-3V2IAVYT90GVP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/IOKit-2EKXTV39WFUC3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreServices-29ELJH9SVM9VY.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_stdbool-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_stdint-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ApplicationServices-3JC0IEGYNQC9P.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_DarwinFoundation1-1Q1A85WUL9TYW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/DataDetection-1IPUQOLZFG7E9.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/WebKit-39LVHEZXC1778.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CUPS-2OT9T3O9FNF6D.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/SwiftUI-7YEWJY5SCVAJ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Spatial-2FR79IW1JOAT4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/UniformTypeIdentifiers-4KQL35JFJIUT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/CoreData-2NPKLUPL1922D.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/XPC-3EU30L45L5WFT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ImageIO-1ZAMJW0K7GNMW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/DeveloperToolsSupport-1F1JZG4QA3MN0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_AvailabilityInternal-1Q1A85WUL9TYW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ptrcheck-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Accessibility-AK710EMG4PX3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/JavaScriptCore-225E8B0NQ4UJ0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/ptrauth-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_stdatomic-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/AppKit-1YB4H1K2T9X2K.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_DarwinFoundation2-1MZ4YW41NCYUI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/_Builtin_inttypes-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/2V04VAPODX9DI/Network-1J4272M09T5PK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Accessibility-A0XE063STIOD2SY5K9Y8587Q2.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stddef-7QKF4QE4ESNLGX4YZSJR86I7C.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Session.modulevalidation
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os-BFB56TY4TV7OLBNLOUWZRPUUI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/XPC-A8SQCKL3QMEKD1Q1VKS83A890.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DataDetection-AGDIF8R8LKE6N3O7K2HR8XW8O.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_limits-E2F12KC4HAODG06CJHH08WN35.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os-JI2TYRILKN0OD8WPO1VSDQ6A.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftUI-1GR1NNPYF3POENIK65SP004ZI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreGraphics-7T4USRAJS1VBBPX9ZV923QJVC.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/sys_types-4IYDWY6TDIG45GQDBSOVEQUGZ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreTransferable-4QKI6X7IYY583R40JMKS2EN8V.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdarg-1ZABMBOCQQKIWMN0YOAN0WNN9.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/sys_types-2URWXWLPLK3YEHAZF1S9ZNEUT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/OSLog-75DMKURPKFNMZD1J46EDVERH.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdint-F3LTUA453SEA3W089LPYIZVHN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/launch-2PFX0OUJ69DFR4LYFPZ34SIQR.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/dnssd-14JLULBIAN6MIYX24T2YRZFO9.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Spatial-AH8IBMW9BHCNOLA3W1101LY10.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/AppKit-81DUG5C6K04XJLYRDAXKZA3OO.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/UniformTypeIdentifiers-3M7576JXDFK09NI8I5IBTZBWW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_inttypes-308J0SW8PCA4J23TRJLQOFNES.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Foundation-A8Y7KZ3IGNJUBIVYH1ONIRPQL.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/simd-9S1I4QRJT8DQ9H1O6FRPSMQGG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ObjectiveC-CMY4V6QP0Z5IFOTPP9BK4JBFW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation3-BCIL21PG022MAU9KOFCSV9DAK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Network-3TA4WM8TD24XNPGLX0KHTWWXM.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/JavaScriptCore-CTLSJ09N3O92D4F9H0JF4ZRJ2.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DiskArbitration-4XJBVKLOE3AXLH5IY933CDM2H.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreGraphics-1NQK70W4T7W0MJJL9H2DYCYFS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ptrcheck-7N4V8SYYJDK1A3PD7K6FMIH3H.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftShims-CE78XZ3N2RBLEH72946FKCPB0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ApplicationServices-4SXAQOAJN9DSE5H2DGTO1JP6R.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CFNetwork-AO92OZE7MG90T87NJYEP9V9Z7.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ImageIO-297TR0I1GH62RYN2HWOD5EFV0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreFoundation-7N28BLN7ISBHGGM1QQ3UQ0BFB.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_AvailabilityInternal-6SOBB2O9IXRFYHS37VZSJ8LCV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Symbols-48ERKPT18BUVNPH2GJOC5EJKP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DeveloperToolsSupport-EC9J5EC6ET4ZTB924FN1IEHBP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation3-58RF08YJQSGQHMJBTAPHSX32M.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreImage-1YKSETTWFPXNVR4X4FQU2HTXG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_SwiftConcurrencyShims-7J0GHY287CS4Y48N0EXJBSP1K.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation2-ENKL8XT4P0RK2QAM6TEPH0PZT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdbool-7J4H797MV8ASQA2QWVFMJ71QK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ptrauth-2R2RSSW89Q6267B8HJ8PYOSRX.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_intrinsics-7GPBL84W1PQOIDJIEISFI4B9C.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os_object-C7ED40LDXF9D217YH2AI2MT9B.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/QuartzCore-6TNLOT3T3ZEOLK5Q179A68C6V.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/simd-F2AOCTR4X2GUQR4GA78QGIU9T.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/UniformTypeIdentifiers-9CKN08K6PLK8S3JUK6BM3BPWS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DiskArbitration-39EKARLQZOZA8IOQXCOFLK3BZ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Carbon-83U61KWDLW4LDFJLP833J3WFO.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreTransferable-6NYDJ64MUIWUMBOYYVO4NG9K7.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation1-1DGG25IIM1RV8D58BL7ZF7I3N.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdatomic-753BYS2QRH9DEL2YOCC7VADTM.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/libDER-321JBZ2ECQR5WZK7I3D1IPGJ0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_intrinsics-3SM3HZNY4G9POXBPPS7D7ZTX5.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreFoundation-9Y76ORVG4PAAT3B403I10RHF4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/QuartzCore-4YM7YLIL4GZVUVRX1ZVD05ETF.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreServices-3VE2RYGR1B6LSMGSKARYMR5W8.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_SwiftConcurrencyShims-2HTFEMMC7DX2GH6IMB3F4O9N6.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/MachO-6M87RNGOMD3BNELGT79CYNZEF.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_limits-5QAIO4X4MXIMYDKKL4YPC0AGG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_tgmath-BISHZ7OV2RJT9AXJ7L55PI666.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreVideo-ED4066J99CQ2IN9VN96GQ9FAU.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os_object-82N5VNWR0C2V7FJPRFQK6FTVD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Accessibility-11BDU0K2HA6AQAWDW674BBQIZ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stddef-81RHZBCMWT40D1S36UCMNEW18.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/OpenGL-4ZNWYR7DTCDG97EUDABACVAAR.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_AvailabilityInternal-9T5WCWMP31IB5WCO44W3W49T5.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/OSLog-1RZOV6W3ED6379CYBF1GBT972.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreData-88UPP0IPSF1JDR8BR5APWHRN9.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Symbols-BVCYR6LNFUZJDEV5GZ17XPJSP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreData-7S3J7WY4KA7A9YPX9QICLKVZ2.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/libkern-3HI8U5KIS6964780NOBHWBPIJ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_inttypes-7PD4ITGX88Q3U4BZU8O2J77SB.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os_workgroup-2V4OSTYLU7SP7ZYCQXQYII8OW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/OpenGL-D781UJ4P1E8B7Q9YQKL59V47E.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/libDER-5LRRL4MFAR7MYNXMDPDO26MC0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Foundation-ES68URO53PNWKH6J109QFJUWS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Darwin-AL4JXXKS6EXWYCG7RI7UMIFMD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdbool-5X20F60DSQ3PQ0YEVP1RIE0OO.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ApplicationServices-52YMPOMNOTEQDIQ4HGEMKOBBC.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ptrcheck-CTK3QD70UJH3TZOCXHL8PLRWD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ColorSync-S0C868WVMU176NVGBN89HVPN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Darwin-C8IB6V7R974A31GU9BEWWFMH6.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation2-44IJ1PU8YHYGWB98QBLUS86NS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ptrauth-F4CMFCTPITVGOWFFFYND69HZV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/IOSurface-ADLZHBGGP3K6DLAO6D9EKJUJJ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/libkern-5DBF4ANZWBKLBX1BPFTWZLUU8.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreServices-AP64Y4HIXQ53O778I6GZBV6GF.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdint-1TYYWABT0R86V9F91FY9VLRMI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/IOSurface-5O45ZL639235OY06E3HDA6OLG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Dispatch-60CXGMGD0RZDRJ5VORTYGB9GG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Security-5IUVOBLW0DXRG0VWN8A98YIWQ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/os_workgroup-52YTYJHDEZF93898J21OQ90HV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Dispatch-DLCNI0TQ9WZ1VSO2MZ30HP0ZH.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_tgmath-6L7PQBW7Q27CEL6Y1LGA4DSL6.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreVideo-20BP9XK527PVV58Q4GSKJ1MNX.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdatomic-1C4Q43QOVLLVTDVD7JHT8ADGT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_float-84YYPT8YE6IEE1L8WF4YW2P0V.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/launch-DUDMCSLC7ZL1LTTACS9SVXZDU.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Foundation-38YXKN0YIMIG0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreGraphics-QDUS8ED3F705.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/launch-ARXHOZ7J3W5M.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreText-2T2IOK0SNFZNV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/os_object-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreTransferable-3SSPXPAJU78ZB.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_intrinsics-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreFoundation-4PRADGP6YP3X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/IOSurface-1JC6RAB0YSTD4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/libkern-L1T1GEFMK28X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/DiskArbitration-1O0FLMNBJTG9J.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/SwiftUICore-2L1UWP46UWBS.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_DarwinFoundation3-2S9LVQYWOOAP0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/os-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreVideo-1YKI1FAGW2OUV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreImage-2RT2F3TRXLIZP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/QuartzCore-MLKK3TF0HB69.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/os_workgroup-WNL2BH0S0848.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/libDER-39H4PFZCUIQOD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_float-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ColorSync-1CFFIB8NX9PA6.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_stddef-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_stdarg-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/simd-2KZRGNXIHSGUO.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Metal-2R2BMTELV7IT4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_tgmath-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/SwiftShims-9NQJOJM4OLX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Carbon-2335V577P5U9X.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Symbols-TRI3M9O68AEH.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CFNetwork-2BQ3Y1UMG0TX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/OSLog-2CMBXQIC8NG2F.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_limits-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Darwin-37WIDF19QD7Z8.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/sys_types-1MZ4YW41NCYUI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_SwiftConcurrencyShims-9NQJOJM4OLX0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ObjectiveC-E5A4PH5UJSV.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/MachO-1GVAMZFVHQO4H.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Security-234VW12JIG8K3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Dispatch-37NRPBCG6NSUK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/OpenGL-3V2IAVYT90GVP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/IOKit-2EKXTV39WFUC3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreServices-29ELJH9SVM9VY.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_stdbool-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_stdint-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ApplicationServices-3JC0IEGYNQC9P.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_DarwinFoundation1-1Q1A85WUL9TYW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/DataDetection-1IPUQOLZFG7E9.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CUPS-2OT9T3O9FNF6D.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/SwiftUI-7YEWJY5SCVAJ.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Spatial-2FR79IW1JOAT4.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/UniformTypeIdentifiers-4KQL35JFJIUT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/CoreData-2NPKLUPL1922D.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/XPC-3EU30L45L5WFT.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ImageIO-1ZAMJW0K7GNMW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/DeveloperToolsSupport-1F1JZG4QA3MN0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_AvailabilityInternal-1Q1A85WUL9TYW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ptrcheck-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/Accessibility-AK710EMG4PX3.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/ptrauth-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_stdatomic-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/AppKit-1YB4H1K2T9X2K.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_DarwinFoundation2-1MZ4YW41NCYUI.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/1CH077UNG6THX/_Builtin_inttypes-31K11RKQG7APN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreText-A2NP1BR16BBWUJW7DEQ7H20QB.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/modules.timestamp
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DataDetection-1V50JF0MEN9GZ0YNV4R9HDHQ5.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Security-8J0S6RFW2JNUMEYRS0XQIR3PN.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Spatial-58MRVMZ0GT4DRQ46DA7F9P71G.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/IOKit-HR2IP9ECK98JP43EMACM8CXR.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CFNetwork-1OAP83MPXEGEGXDG12AE3QCJ7.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/XPC-DYV2D31S4DV7H8K2XQ7NIDXA0.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Metal-EEIIBGVDD1X29X46LJ1LGXYLA.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/DeveloperToolsSupport-9VSOI4CGXLXWGQRATI208VG4O.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Metal-6F1ELP0K0NKUQLOS1K2KP4PAU.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ObjectiveC-9PDS8ZIR77KD03V26MS1UPA1O.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/MachO-39556RKXMD3YAEJ2VW97BSAPY.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftUI-9YOVN6WWLCQJJDB1TK8NIJ91B.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftUICore-EWCP65WA8G6DPW7OMNULT3D62.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/AppKit-9U7VCEJEHKCFGYE1EM1PQ45FU.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/SwiftUICore-7VXX26QJYMEM6KGTPLHO5H61I.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/WebKit-5DOFDEZW0BQ53UHTMILWSGFQW.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_stdarg-6PYWDZ7DB0INU2KUEYAD7E2SH.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CoreText-2KCKSIRCGP2836YKAUL4GSDQP.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/IOKit-BC9TMD8SEAZE7KID0SSXKY0LD.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/CUPS-511G7JJ7BKNIGO0BIDNX36L98.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_DarwinFoundation1-14X31E8F8G2CKBNR0XL2IUF1Y.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Carbon-3UG9H7IJ829Z3B2D6RODHZRDG.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/_Builtin_float-A0YIM88L8OHD7VYTMAKW9GCDK.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/ColorSync-ARWXC3D4LISZ3864QUPT4B06F.pcm
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/lock
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v3.actions
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v8.index.shared
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v8.data.shared
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v8.index
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v8.data
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/CompilationCache.noindex/generic/v1.1/v3.actions.shared
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/XCBuildData
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/XCBuildData/build.db
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/XCBuildData/PIFCache
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/XCBuildData/e8a23c727a4bc74a344c6209ed2a77ef.xcbuilddata
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/EagerLinkingTBDs
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/EagerLinkingTBDs/Release
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/KeyboardShortcuts.build
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/KeyboardShortcuts.build/Release
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/GeneratedModuleMaps
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/GeneratedModuleMaps/KeyboardShortcuts-Swift.h
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/GeneratedModuleMaps/KeyboardShortcuts.modulemap
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/ExplicitPrecompiledModules
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/KeyboardShortcuts.swiftmodule
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/KeyboardShortcuts.o
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/KeyboardShortcuts_KeyboardShortcuts.bundle
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app.dSYM
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/PackageFrameworks
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app
+/Users/runner/work/_temp/FloatTabsRC1/DerivedData/info.plist
+=== last 120 log lines ===
+               ^
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabs/Web/SlotLifecycleCoordinator.swift:50:59: warning: main actor-isolated static property 'defaultWarmResidentLimit' can not be referenced from a nonisolated context; this is an error in the Swift 6 language mode
+        warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
+                                                          ^
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabs/Web/SlotLifecycleCoordinator.swift:15:16: note: static property declared here
+    static let defaultWarmResidentLimit = 2
+               ^
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabs/Panel/PanelController.swift:900:18: warning: call to main actor-isolated instance method 'removeTrackingArea' in a synchronous nonisolated context
+            view.removeTrackingArea(trackingArea)
+                 ^
+AppKit.NSView.removeTrackingArea:3:24: note: calls to instance method 'removeTrackingArea' from outside of its actor context are implicitly asynchronous
+  @MainActor open func removeTrackingArea(_ trackingArea: NSTrackingArea)}
+                       ^
+AppKit.NSView.removeTrackingArea:3:24: note: main actor isolation inferred from inheritance from class 'NSResponder'
+  @MainActor open func removeTrackingArea(_ trackingArea: NSTrackingArea)}
+                       ^
+
+SwiftDriverJobDiscovery normal arm64 Compiling AppCoordinator.swift, AppPreferencesStore.swift, GlobalSettingsController.swift, FloatTabsBackupService.swift, BenchmarkControlServer.swift, AppDelegate.swift, AppCommandController.swift, EmptyWebAppView.swift, ExternalTabRail.swift, FloatTabsApp.swift, FloatingPanel.swift, GlobalHotkeyController.swift, PanelController.swift, ProfileRepository.swift, ScreenPositioning.swift, SlotNavigationObserver.swift, WebNavigationCoordinator.swift, PopupCoordinator.swift, StatusItemController.swift, TabStore.swift, WebAppProfile.swift, WebAppEditorController.swift, WebRenderingProfile.swift, WebViewContainer.swift, WebViewFactory.swift, WebViewPool.swift, SlotLifecycleCoordinator.swift (in target 'FloatTabs' from project 'FloatTabs')
+
+SwiftDriver\ Compilation\ Requirements FloatTabs normal arm64 com.apple.xcode.tools.swift.compiler (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name FloatTabs -O -whole-module-optimization @/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.SwiftFileList -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -target arm64-apple-macos13.0 -g -module-cache-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -swift-version 5 -I /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release -F /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/PackageFrameworks -F /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release -emit-localized-strings -emit-localized-strings-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64 -c -num-threads 3 -Xcc -ivfsstatcache -Xcc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/SDKStatCaches.noindex/macosx26.5-25F70-688ef53f1462e2c8f657fdc38a81448fee0e6409aa6676c5e6c013d148225433.sdkstatcache -output-file-map /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/runner/work/_temp/FloatTabsRC1/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs_const_extract_protocols.json -Xcc -iquote -Xcc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs-generated-files.hmap -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs-own-target-headers.hmap -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs-all-non-framework-target-headers.hmap -Xcc -ivfsoverlay -Xcc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs-fe68d2001d27d336ee633b25705151b4-VFS/all-product-headers.yaml -Xcc -iquote -Xcc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs-project-headers.hmap -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/include -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/DerivedSources-normal/arm64 -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/DerivedSources/arm64 -Xcc -I/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/DerivedSources -emit-objc-header -emit-objc-header-path /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs-Swift.h -working-directory /Users/runner/work/FloatTabs/FloatTabs -no-emit-module-separately-wmo
+
+SwiftMergeGeneratedHeaders /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/DerivedSources/FloatTabs-Swift.h /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs-Swift.h (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-swiftHeaderTool -arch arm64 /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs-Swift.h -o /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/DerivedSources/FloatTabs-Swift.h
+
+Copy /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.swiftmodule /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftmodule (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftmodule /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.swiftmodule
+
+Copy /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.swiftdoc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftdoc (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftdoc /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.swiftdoc
+
+Copy /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.abi.json /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.abi.json (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.abi.json /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/arm64-apple-macos.abi.json
+
+Copy /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftsourceinfo (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftsourceinfo /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.swiftmodule/Project/arm64-apple-macos.swiftsourceinfo
+
+Ld /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs normal (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-macos13.0 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -Os -L/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/EagerLinkingTBDs/Release -L/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release -F/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/EagerLinkingTBDs/Release -F/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/PackageFrameworks -F/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release -filelist /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/../Frameworks -Xlinker -object_path_lto -Xlinker /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs_lto.o -Xlinker -dependency_info -Xlinker /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.swiftmodule @/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs-linker-args.resp -Wl,-no_warn_duplicate_libraries -o /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs -Xlinker -add_ast_path -Xlinker /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/KeyboardShortcuts.build/Release/KeyboardShortcuts.build/Objects-normal/arm64/KeyboardShortcuts.swiftmodule @/Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/KeyboardShortcuts.build/Release/KeyboardShortcuts.build/Objects-normal/arm64/KeyboardShortcuts-linker-args.resp
+
+CopySwiftLibs /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs --scan-folder /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Frameworks --scan-folder /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/PlugIns --scan-folder /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Library/SystemExtensions --scan-folder /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Extensions --platform macosx --toolchain /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.mjcmMv/Metal.xctoolchain --toolchain /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+Ignoring --strip-bitcode because --sign was not passed
+
+ExtractAppIntentsMetadata (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.6.109.0.mjcmMv/Metal.xctoolchain --module-name FloatTabs --sdk-root /Applications/Xcode_26.6.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk --xcode-version 17F113 --platform-family macOS --deployment-target 13.0 --bundle-identifier com.lost0rz.FloatTabs --output /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Resources --target-triple arm64-apple-macos13.0 --binary-file /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs --dependency-file /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs_dependency_info.dat --stringsdata-file /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.SwiftFileList --metadata-file-list /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs.DependencyMetadataFileList --static-metadata-file-list /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/FloatTabs.DependencyStaticMetadataFileList --swift-const-vals-list /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Intermediates.noindex/FloatTabs.build/Release/FloatTabs.build/Objects-normal/arm64/FloatTabs.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-08-10 12:16:39.290 appintentsmetadataprocessor[2499:11260] Starting appintentsmetadataprocessor export
+2026-08-10 12:16:39.294 appintentsmetadataprocessor[2499:11260] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+GenerateDSYMFile /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app.dSYM /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/dsymutil /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs -o /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app.dSYM
+
+RegisterExecutionPolicyException /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-RegisterExecutionPolicyException /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app
+
+Validate /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    builtin-validationUtility /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app -no-validate-extension -infoplist-subpath Contents/Info.plist
+
+Touch /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    /usr/bin/touch -c /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app
+
+RegisterWithLaunchServices /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+    cd /Users/runner/work/FloatTabs/FloatTabs
+    /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app
+
+** BUILD SUCCEEDED **
+
++ [[ ! -d /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app ]]
+++ /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Info.plist
++ VERSION=0.1.0
+++ /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app/Contents/Info.plist
++ BUILD=1
++ DMG_PATH=/Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
++ [[ -n '' ]]
++ echo 'Building unsigned QA app (no FLOATTABS_SIGN_IDENTITY supplied).'
+Building unsigned QA app (no FLOATTABS_SIGN_IDENTITY supplied).
++ /usr/bin/ditto /Users/runner/work/_temp/FloatTabsRC1/DerivedData/Build/Products/Release/FloatTabs.app /Users/runner/work/_temp/FloatTabsRC1/dmg-root/FloatTabs.app
++ ln -s /Applications /Users/runner/work/_temp/FloatTabsRC1/dmg-root/Applications
++ rm -f /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
++ hdiutil create -volname 'FloatTabs 0.1.0' -srcfolder /Users/runner/work/_temp/FloatTabsRC1/dmg-root -ov -format UDZO /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
+created: /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
++ hdiutil verify /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
+Checksumming Protective Master Boot Record (MBR : 0)…
+Protective Master Boot Record (MBR :: verified   CRC32 $EADD2526
+Checksumming GPT Header (Primary GPT Header : 1)…
+ GPT Header (Primary GPT Header : 1): verified   CRC32 $132C3D79
+Checksumming GPT Partition Data (Primary GPT Table : 2)…
+GPT Partition Data (Primary GPT Tabl: verified   CRC32 $40DCC8E9
+Checksumming  (Apple_Free : 3)…
+                    (Apple_Free : 3): verified   CRC32 $00000000
+Checksumming disk image (Apple_APFS : 4)…
+         disk image (Apple_APFS : 4): verified   CRC32 $E9E56D9E
+Checksumming  (Apple_Free : 5)…
+                    (Apple_Free : 5): verified   CRC32 $00000000
+Checksumming GPT Partition Data (Backup GPT Table : 6)…
+GPT Partition Data (Backup GPT Table: verified   CRC32 $40DCC8E9
+Checksumming GPT Header (Backup GPT Header : 7)…
+  GPT Header (Backup GPT Header : 7): verified   CRC32 $D476CEA9
+verified   CRC32 $E2DE8737
+hdiutil: verify: checksum of "/Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg" is VALID
++ [[ -n '' ]]
++ echo 'QA DMG ready: /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg'
+QA DMG ready: /Users/runner/work/_temp/FloatTabsRC1/FloatTabs-0.1.0.dmg
++ echo 'Version: 0.1.0 (1)'
+Version: 0.1.0 (1)
++ echo 'NOTE: This is not a public notarized release unless Developer ID + notary credentials were supplied.'
+NOTE: This is not a public notarized release unless Developer ID + notary credentials were supplied.
