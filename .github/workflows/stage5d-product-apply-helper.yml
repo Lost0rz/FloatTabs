@@ -52,19 +52,26 @@ jobs:
           PY
           bash /tmp/stage5d-apply.sh
 
-          # CGPath.boundingBoxOfPath produced the rounded-Web bound despite the
-          # active-tab detour. Validate the complete constructed path bound instead;
-          # keep the same strict threshold so this cannot pass unless the path
-          # actually enters the external tab rail.
           python3 <<'PY'
           from pathlib import Path
-          p = Path('FloatTabsTests/ExternalShellTests.swift')
-          text = p.read_text()
+
+          # Keep the strict composite-outline regression, using the complete path bound.
+          tests = Path('FloatTabsTests/ExternalShellTests.swift')
+          text = tests.read_text()
           old = '''        XCTAssertLessThan(path.boundingBoxOfPath.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBoxOfPath.maxX, web.maxX)\n'''
           new = '''        XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)\n'''
           if text.count(old) != 1:
               raise SystemExit(f'expected one composite-outline assertion block, found {text.count(old)}')
-          p.write_text(text.replace(old, new))
+          tests.write_text(text.replace(old, new))
+
+          # Temporary diagnostic only; it is never staged by this helper.
+          source = Path('FloatTabs/Web/WebViewContainer.swift')
+          text = source.read_text()
+          needle = '''        let joinTop = min(tabRect.maxY, webRect.maxY - webRadius - 1)\n        guard joinTop - joinBottom >= 8 else {\n'''
+          diagnostic = '''        let joinTop = min(tabRect.maxY, webRect.maxY - webRadius - 1)\n        print("STAGE5D_OUTLINE web=\\(webRect) tab=\\(tabRect) join=\\(joinBottom)...\\(joinTop) active=\\(String(describing: activeTabFrame))")\n        guard joinTop - joinBottom >= 8 else {\n'''
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected one outline diagnostic insertion point, found {text.count(needle)}')
+          source.write_text(text.replace(needle, diagnostic))
           PY
           git diff --check
 
@@ -107,6 +114,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Remove temporary diagnostic before staging.
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('FloatTabs/Web/WebViewContainer.swift')
+          text = p.read_text()
+          diagnostic = '''        print("STAGE5D_OUTLINE web=\\(webRect) tab=\\(tabRect) join=\\(joinBottom)...\\(joinTop) active=\\(String(describing: activeTabFrame))")\n'''
+          if text.count(diagnostic) != 1:
+              raise SystemExit(f'expected one temporary diagnostic, found {text.count(diagnostic)}')
+          p.write_text(text.replace(diagnostic, ''))
+          PY
           git add \
             FloatTabs/Panel/ScreenPositioning.swift \
             FloatTabs/Web/WebViewContainer.swift \
