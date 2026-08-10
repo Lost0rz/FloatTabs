@@ -1,6 +1,8 @@
 # FloatTabs Stage 6D — Global Settings Contract
 
-Status: implemented and automated-validated; awaiting Real-Mac acceptance.
+Status: **FROZEN after automated validation and Real-Mac acceptance.**
+
+Accepted on Real Mac: 2026-08-10.
 
 Base: `feat/stage-6c-page-context-menu @ 545e99180afb35d52bb995aa5d838b6a4006af4e`.
 
@@ -222,3 +224,20 @@ Real-Mac acceptance:
 8. page shortcuts still work and remain unchanged;
 9. Account & Language contains no fake controls;
 10. resize/move/tab hover/rainbow seam/Pin/residency behavior remains unchanged.
+
+Result: **PASS on Real Mac.**
+
+## 10. Frozen boundary
+
+After acceptance, Stage 6D is frozen for:
+
+- Gear = Global Settings semantics;
+- one reusable native Settings window;
+- `⚙` / Menu Bar / `⌘,` converging on the same Settings controller;
+- Appearance = System / Light / Dark persistence and application behavior;
+- configurable Global Show/Hide shortcut using `KeyboardShortcuts.Name.toggleFloatTabs`;
+- fixed page shortcuts remaining unchanged;
+- Account & Language staying truthful/local-only until real account, sync, or language-override data flows exist;
+- separation between Global Settings and per-Slot page controls.
+
+Future work must not reopen this stage merely to add unrelated settings. Launch at Login, Website Data clearing, updater, account/cloud sync, language override, and Accent customization require their own scoped stage and data/behavior contract.
