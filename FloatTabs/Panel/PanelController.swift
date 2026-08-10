@@ -35,7 +35,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.name
     }
 
-    var onSelectedSlotNameChange: ((String?) -> Void)?
+    var selectedSlotHomeURL: URL? {
+        tabStore.activeProfile?.homeURL
+    }
+
+    var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
 
     init(
         tabStore: TabStore,
@@ -406,7 +410,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             lastSynchronizedActiveProfile = nil
             rootView.webPanelContainerView.showEmptyState()
             synchronizeResidentIndicators()
-            onSelectedSlotNameChange?(nil)
+            onSelectedSlotPresentationChange?(nil, nil)
             return
         }
 
@@ -432,7 +436,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
         synchronizeResidentIndicators()
-        onSelectedSlotNameChange?(activeProfile.name)
+        onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
 
         if panel.isKeyWindow {
             _ = panel.makeFirstResponder(webView)

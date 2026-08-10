@@ -36,9 +36,12 @@ final class AppCoordinator {
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onQuit: { NSApp.terminate(nil) }
         )
-        statusItemController?.setActiveWebAppName(panelController.selectedSlotName)
-        panelController.onSelectedSlotNameChange = { [weak self] name in
-            self?.statusItemController?.setActiveWebAppName(name)
+        statusItemController?.setActiveWebApp(
+            name: panelController.selectedSlotName,
+            homeURL: panelController.selectedSlotHomeURL
+        )
+        panelController.onSelectedSlotPresentationChange = { [weak self] name, homeURL in
+            self?.statusItemController?.setActiveWebApp(name: name, homeURL: homeURL)
         }
 
         globalHotkeyController = GlobalHotkeyController(

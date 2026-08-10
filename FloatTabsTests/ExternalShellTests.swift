@@ -347,6 +347,18 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(StatusItemController.displayTitle(for: nil), "FloatTabs")
     }
 
+    func testStatusItemFaviconIdentityUsesSelectedWebsiteOrigin() {
+        XCTAssertEqual(
+            StatusItemController.faviconOriginKey(for: URL(string: "https://x.com/home")),
+            "https://x.com"
+        )
+        XCTAssertEqual(
+            StatusItemController.faviconOriginKey(for: URL(string: "https://chatgpt.com/c/123")),
+            "https://chatgpt.com"
+        )
+        XCTAssertNil(StatusItemController.faviconOriginKey(for: nil))
+    }
+
     func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {
         let input = URL(string: "https://example.com/a/b?q=1")!
         XCTAssertEqual(
