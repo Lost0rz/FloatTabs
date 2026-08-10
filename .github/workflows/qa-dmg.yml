@@ -1,0 +1,32 @@
+name: QA DMG
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'FloatTabs/**'
+      - 'FloatTabs.xcodeproj/**'
+      - 'tools/release/**'
+      - '.github/workflows/qa-dmg.yml'
+
+jobs:
+  build-dmg:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and verify QA DMG
+        env:
+          FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
+        run: |
+          chmod +x tools/release/build_dmg.sh
+          tools/release/build_dmg.sh
+
+      - name: Upload QA DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatTabs-0.1.0-QA-DMG
+          if-no-files-found: error
+          path: ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg

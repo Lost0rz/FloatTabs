@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 
 @MainActor
 final class AppCoordinator {
@@ -6,13 +7,22 @@ final class AppCoordinator {
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
-    private let preferencesStore = AppPreferencesStore()
+    private let preferencesStore: AppPreferencesStore
+    private let backupService: FloatTabsBackupService
     private var globalSettingsController: GlobalSettingsController?
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
 
-    init(panelController: PanelController? = nil) {
+    init(
+        panelController: PanelController? = nil,
+        preferencesStore: AppPreferencesStore? = nil,
+        backupService: FloatTabsBackupService = FloatTabsBackupService()
+    ) {
+        let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
+        self.preferencesStore = resolvedPreferencesStore
+        self.backupService = backupService
+
         if let panelController {
             self.panelController = panelController
         } else {
@@ -27,14 +37,25 @@ final class AppCoordinator {
             )
             self.panelController = PanelController(
                 tabStore: tabStore,
-                webViewPool: webViewPool
+                webViewPool: webViewPool,
+                preferencesStore: resolvedPreferencesStore
             )
         }
     }
 
     func start() {
         preferencesStore.applyStoredAppearance()
-        globalSettingsController = GlobalSettingsController(preferencesStore: preferencesStore)
+        globalSettingsController = GlobalSettingsController(
+            preferencesStore: preferencesStore,
+            onExportBackup: { [weak self] url in
+                guard let self else { throw FloatTabsBackupError.restoreFailed }
+                try self.exportBackup(to: url)
+            },
+            onRestoreBackup: { [weak self] url in
+                guard let self else { throw FloatTabsBackupError.restoreFailed }
+                return try self.restoreBackup(from: url)
+            }
+        )
         panelController.onOpenGlobalSettings = { [weak self] in
             self?.showGlobalSettings()
         }
@@ -71,6 +92,11 @@ final class AppCoordinator {
             }
         )
 
+        // Keep one local snapshot per app version/build. It is overwritten by
+        // the same version on clean starts/exits, while older-version snapshots
+        // remain available when a newer app build is installed.
+        try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+
 #if DEBUG
         let benchmarkControlServer = BenchmarkControlServer { [weak self] request in
             self?.handleBenchmarkControl(request) ?? ["ok": false, "error": "coordinator_unavailable"]
@@ -85,6 +111,7 @@ final class AppCoordinator {
         benchmarkControlServer?.stop()
 #endif
         panelController.prepareForTermination()
+        try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
     }
 
 #if DEBUG
@@ -134,6 +161,60 @@ final class AppCoordinator {
         }
     }
 #endif
+
+    private func makeBackupDocument(now: Date = Date()) -> FloatTabsBackupDocument {
+        let shortcut = KeyboardShortcuts.getShortcut(for: .toggleFloatTabs)
+        let shortcutBackup = shortcut.map {
+            FloatTabsBackupShortcut(
+                carbonKeyCode: $0.carbonKeyCode,
+                carbonModifiers: $0.carbonModifiers
+            )
+        }
+        let appVersion = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "unknown"
+        let build = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String ?? "unknown"
+
+        return FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: now,
+            sourceAppVersion: appVersion,
+            sourceBuild: build,
+            webAppState: panelController.storedWebAppStateSnapshot(),
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: preferencesStore.appearanceMode,
+                followPreferredSize: preferencesStore.followPreferredSize
+            ),
+            globalShowHideShortcut: shortcutBackup
+        )
+    }
+
+    private func exportBackup(to url: URL) throws {
+        try backupService.write(makeBackupDocument(), to: url)
+    }
+
+    private func restoreBackup(from url: URL) throws -> URL {
+        let imported = try backupService.load(from: url)
+        let rollbackURL = try backupService.writeRollback(makeBackupDocument())
+
+        guard panelController.restoreStoredWebAppState(imported.webAppState) else {
+            throw FloatTabsBackupError.restoreFailed
+        }
+
+        preferencesStore.followPreferredSize = imported.globalPreferences.followPreferredSize
+        preferencesStore.appearanceMode = imported.globalPreferences.appearanceMode
+
+        let shortcut = imported.globalShowHideShortcut.map {
+            KeyboardShortcuts.Shortcut(
+                carbonKeyCode: $0.carbonKeyCode,
+                carbonModifiers: $0.carbonModifiers
+            )
+        }
+        KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
+        return rollbackURL
+    }
 
     private func showGlobalSettings() {
         globalSettingsController?.show()

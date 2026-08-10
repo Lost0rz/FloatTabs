@@ -11,8 +11,10 @@ Stage 0 Window Feasibility Spike: PASSED
 Stage 1 Core Native Shell: PASSED
 Stage 2 Persistent Web App Slots: PASSED
 Stage 3 Rendering Profiles: PASSED
-Stage 4 Web Compatibility, Navigation, Sessions & OAuth: IN PROGRESS
-→ current Stage 4 slice: 4B popup / OAuth / external-link routing
+Stage 4 Web Compatibility, Navigation, Sessions & OAuth: PASSED
+Stage 5 Resource Lifecycle & Interaction Refinement: PASSED
+Stage 6 Menus, Commands & Global Settings: PASSED
+v0.1.0 Release Candidate: IN PROGRESS
 ```
 
 Stage 3 real-Mac acceptance includes:
@@ -136,7 +138,9 @@ FloatTabs-x.y.z.dmg
 └── FloatTabs.app
 ```
 
-Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling, and Gatekeeper validation.
+Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling, and Gatekeeper validation. `tools/release/build_dmg.sh` also supports an unsigned QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
+
+FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 RC1 adds explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
 
 ## Development Workflow
 

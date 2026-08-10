@@ -52,12 +52,7 @@ final class ProfileRepository: ProfileRepositoryProtocol {
             throw ProfileRepositoryError.unsupportedVersion(decoded.version)
         }
 
-        let sanitizedProfiles = decoded.profiles.compactMap(Self.sanitizedProfile)
-        return StoredWebAppState(
-            version: StoredWebAppState.currentVersion,
-            profiles: sanitizedProfiles,
-            lastActiveTabID: decoded.lastActiveTabID
-        )
+        return decoded.sanitizedForUse()
     }
 
     func save(_ state: StoredWebAppState) throws {
@@ -90,13 +85,23 @@ final class ProfileRepository: ProfileRepositoryProtocol {
             .appendingPathComponent("WebAppProfiles.json", isDirectory: false)
     }
 
-    private static func sanitizedProfile(_ profile: WebAppProfile) -> WebAppProfile? {
-        guard WebAppURL.isSafe(profile.homeURL) else { return nil }
+}
 
-        var sanitized = profile
-        if let currentURL = sanitized.currentURL, !WebAppURL.isSafe(currentURL) {
-            sanitized.currentURL = nil
+extension StoredWebAppState {
+    func sanitizedForUse() -> StoredWebAppState {
+        let sanitizedProfiles = profiles.compactMap { profile -> WebAppProfile? in
+            guard WebAppURL.isSafe(profile.homeURL) else { return nil }
+            var sanitized = profile
+            if let currentURL = sanitized.currentURL, !WebAppURL.isSafe(currentURL) {
+                sanitized.currentURL = nil
+            }
+            return sanitized
         }
-        return sanitized
+
+        return StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: sanitizedProfiles,
+            lastActiveTabID: lastActiveTabID
+        )
     }
 }

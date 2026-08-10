@@ -295,6 +295,46 @@ final class TabStore {
         persist()
     }
 
+    func storedStateSnapshot() -> StoredWebAppState {
+        StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: orderedProfiles,
+            lastActiveTabID: activeTabID
+        )
+    }
+
+    @discardableResult
+    func replaceStoredState(_ state: StoredWebAppState) -> Bool {
+        guard state.version == StoredWebAppState.currentVersion else { return false }
+
+        let sanitized = state.sanitizedForUse()
+        let normalized = Self.normalizedProfiles(sanitized.profiles)
+        let restoredActiveID: UUID?
+        if let requested = sanitized.lastActiveTabID,
+           normalized.contains(where: { $0.id == requested }) {
+            restoredActiveID = requested
+        } else {
+            restoredActiveID = normalized.first?.id
+        }
+
+        let replacement = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: normalized,
+            lastActiveTabID: restoredActiveID
+        )
+
+        do {
+            try repository.save(replacement)
+        } catch {
+            return false
+        }
+
+        profiles = normalized
+        activeTabID = restoredActiveID
+        onChange?()
+        return true
+    }
+
     private func touchLastUsed(id: UUID?, now: Date = Date()) {
         guard let id,
               let index = profiles.firstIndex(where: { $0.id == id }) else {

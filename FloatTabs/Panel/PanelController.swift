@@ -3,8 +3,6 @@ import WebKit
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
-    private static let followPreferredSizeKey = "FloatTabs.followTabPreferredSize"
-
     private let panel: FloatingPanel
     private let rootView: PanelRootView
     private let tabStore: TabStore
@@ -23,7 +21,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var hasPositionedPanel = false
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
-    private var followPreferredSize: Bool
+    private let preferencesStore: AppPreferencesStore
     private(set) var isPinned = false
     private var externalMouseMonitor: Any?
 
@@ -45,17 +43,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     init(
         tabStore: TabStore,
         webViewPool: WebViewPool,
-        frameStore: PanelFrameStore = PanelFrameStore()
+        frameStore: PanelFrameStore = PanelFrameStore(),
+        preferencesStore: AppPreferencesStore? = nil
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.frameStore = frameStore
+        self.preferencesStore = preferencesStore ?? AppPreferencesStore()
         restoredFrame = frameStore.loadFrame()
-        if UserDefaults.standard.object(forKey: Self.followPreferredSizeKey) == nil {
-            followPreferredSize = true
-        } else {
-            followPreferredSize = UserDefaults.standard.bool(forKey: Self.followPreferredSizeKey)
-        }
 
         let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
@@ -132,6 +127,27 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func prepareForTermination() {
         persistPanelFrame()
+    }
+
+    func storedWebAppStateSnapshot() -> StoredWebAppState {
+        tabStore.storedStateSnapshot()
+    }
+
+    @discardableResult
+    func restoreStoredWebAppState(_ state: StoredWebAppState) -> Bool {
+        let existingIDs = Set(tabStore.profiles.map(\.id))
+        slotLifecycleCoordinator.reset(slotIDs: existingIDs)
+        for slotID in existingIDs {
+            webViewPool.release(slotID: slotID)
+        }
+        lastSynchronizedActiveID = nil
+        lastSynchronizedActiveProfile = nil
+
+        guard tabStore.replaceStoredState(state) else {
+            synchronizeSlotState()
+            return false
+        }
+        return true
     }
 
     static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
@@ -431,7 +447,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotLifecycleCoordinator.deactivate(profile: previous)
         }
 
-        if activeChanged, hasPositionedPanel, followPreferredSize {
+        if activeChanged, hasPositionedPanel, preferencesStore.followPreferredSize {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
