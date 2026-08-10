@@ -20,13 +20,15 @@ jobs:
           fetch-depth: 0
 
       - name: Apply complete Stage 5D patch
-        run: python3 .github/stage5d-finalize.py
+        run: |
+          python3 .github/stage5d-finalize.py
+          python3 .github/stage5d-finalize-fix.py
 
       - name: Validate intended boundaries
         run: |
           git diff --check
           grep -q 'resizeHandleSize: CGFloat = 32' FloatTabs/Panel/ScreenPositioning.swift
-          grep -q 'bounds.contains(point) ? self : nil' FloatTabs/Web/WebViewContainer.swift
+          grep -q 'frame.contains(point) ? self : nil' FloatTabs/Web/WebViewContainer.swift
           grep -q 'activeAlways' FloatTabs/Web/WebViewContainer.swift
           grep -q 'websiteLayoutScale = 1' FloatTabs/Web/WebViewFactory.swift
           grep -q 'pageZoom = userPageZoom' FloatTabs/Web/WebViewFactory.swift
