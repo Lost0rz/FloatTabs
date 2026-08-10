@@ -419,13 +419,14 @@ The independent host is mandatory. Do not reintroduce the rejected shared-variab
 
 ## 5.2 Warm
 
-Warm is the default.
+Warm is the default opportunistic resident cache.
 
-- keep the WKWebView object in `WebViewPool`;
+- keep an inactive live WKWebView in `WebViewPool` for up to 120 seconds;
 - detach it from visible presentation while inactive;
-- re-selection reuses the same WKWebView;
-- DOM / SPA / scroll / unsent text preservation remains best-effort because WebKit may throttle or suspend detached content;
-- do not proactively evict Warm WebViews merely because they are inactive.
+- keep at most 2 inactive, non-media-protected Warm runtimes resident; evict older entries LRU-first;
+- memory-pressure warning may reduce the inactive Warm cache and critical pressure may evict all inactive non-protected Warm runtimes;
+- re-selection before eviction reuses the same WKWebView; after eviction it recreates from persisted profile/current URL and the persistent website data store;
+- DOM / SPA / scroll / unsent text preservation remains best-effort only while the runtime remains resident.
 
 ## 5.3 Cold
 

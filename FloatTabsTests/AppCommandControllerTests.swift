@@ -22,6 +22,10 @@ final class AppCommandControllerTests: XCTestCase {
             .quickURL
         )
         XCTAssertEqual(
+            AppCommandController.command(characters: "r", keyCode: 15, modifiers: [.command]),
+            .reload
+        )
+        XCTAssertEqual(
             AppCommandController.command(characters: "+", keyCode: 24, modifiers: [.command, .shift]),
             .zoomIn
         )

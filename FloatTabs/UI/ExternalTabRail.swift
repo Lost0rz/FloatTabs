@@ -64,6 +64,7 @@ struct ExternalTabMetrics {
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
+    var onReload: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
@@ -243,6 +244,7 @@ final class ExternalControlZoneView: NSView {
 
         view.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
+        view.onReload = { [weak self] slotID in self?.onReload?(slotID) }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
         view.onSetWebsiteMode = { [weak self] slotID, mode in
@@ -522,6 +524,7 @@ final class ExternalWebAppTabView: NSView {
 
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
+    var onReload: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
@@ -721,6 +724,16 @@ final class ExternalWebAppTabView: NSView {
         home.keyEquivalentModifierMask = [.command, .shift]
         home.target = self
         menu.addItem(home)
+
+        let reload = NSMenuItem(
+            title: "Reload",
+            action: #selector(reloadFromMenu(_:)),
+            keyEquivalent: "r"
+        )
+        reload.keyEquivalentModifierMask = [.command]
+        reload.target = self
+        reload.isEnabled = isResident
+        menu.addItem(reload)
         menu.addItem(.separator())
 
         let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
@@ -760,6 +773,35 @@ final class ExternalWebAppTabView: NSView {
 
         let zoom = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")
         let zoomMenu = NSMenu(title: "Zoom")
+
+        let zoomIn = NSMenuItem(
+            title: "Zoom In",
+            action: #selector(zoomInFromMenu(_:)),
+            keyEquivalent: "+"
+        )
+        zoomIn.keyEquivalentModifierMask = [.command]
+        zoomIn.target = self
+        zoomMenu.addItem(zoomIn)
+
+        let zoomOut = NSMenuItem(
+            title: "Zoom Out",
+            action: #selector(zoomOutFromMenu(_:)),
+            keyEquivalent: "-"
+        )
+        zoomOut.keyEquivalentModifierMask = [.command]
+        zoomOut.target = self
+        zoomMenu.addItem(zoomOut)
+
+        let resetZoom = NSMenuItem(
+            title: "Reset Zoom",
+            action: #selector(resetZoomFromMenu(_:)),
+            keyEquivalent: "0"
+        )
+        resetZoom.keyEquivalentModifierMask = [.command]
+        resetZoom.target = self
+        zoomMenu.addItem(resetZoom)
+        zoomMenu.addItem(.separator())
+
         for value in ZoomSteps.values {
             let item = NSMenuItem(title: ZoomSteps.percentageText(for: value), action: #selector(setZoomFromMenu(_:)), keyEquivalent: "")
             item.target = self
@@ -808,6 +850,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     @objc private func returnHomeFromMenu(_ sender: NSMenuItem) { onReturnHome?(slotID) }
+    @objc private func reloadFromMenu(_ sender: NSMenuItem) { onReload?(slotID) }
 
     @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
@@ -820,6 +863,18 @@ final class ExternalWebAppTabView: NSView {
               let preset = SimpleViewportPreset(rawValue: raw),
               preset != .custom else { return }
         onSetWindowSize?(slotID, preset)
+    }
+
+    @objc private func zoomInFromMenu(_ sender: NSMenuItem) {
+        onSetZoom?(slotID, ZoomSteps.nextLarger(after: renderingProfile.zoom))
+    }
+
+    @objc private func zoomOutFromMenu(_ sender: NSMenuItem) {
+        onSetZoom?(slotID, ZoomSteps.nextSmaller(before: renderingProfile.zoom))
+    }
+
+    @objc private func resetZoomFromMenu(_ sender: NSMenuItem) {
+        onSetZoom?(slotID, 1.0)
     }
 
     @objc private func setZoomFromMenu(_ sender: NSMenuItem) {

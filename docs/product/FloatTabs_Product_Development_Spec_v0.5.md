@@ -314,10 +314,15 @@ Drag reorder 后 shortcut mapping 同步更新。
 
 ## 6.1 Slot Context Menu
 
-Slot 右键菜单管理 Slot 身份与资源策略，不模拟完整浏览器：
+Slot 右键菜单是页面 / Slot 级高频控制面，不模拟完整浏览器：
 
 ```text
-Return to Home
+Return to Home                 ⌘⇧H
+Reload                         ⌘R
+────────────
+Website Mode
+Window Size
+Zoom
 ────────────
 Residency
   Hot
@@ -331,6 +336,8 @@ Edit Web App…
 ────────────
 Remove Web App…
 ```
+
+Website Mode / Window Size / Zoom 保留在右键菜单，因为它们是高频 per-Slot 页面显示控制。Browser Identity、Device Preset、Orientation、Custom User Agent 等低频兼容性参数继续进入 `Edit Web App…` 调整。菜单快捷键提示使用原生 macOS `NSMenuItem` key equivalent 呈现，不自行绘制第二套灰字。
 
 `Edit Web App…` 已包含 Name，因此不再提供独立 `Rename` 动作。排序继续使用拖拽；`⌘1…⌘9` 始终跟随当前排序。
 
@@ -685,10 +692,12 @@ Background Media: Pause When Inactive / Allow Background Audio
 ### Warm
 
 - 默认值；
-- WKWebView 保留在 pool；
-- inactive 时从 visible presentation detach；
-- 再次选择时复用同一个 WKWebView；
-- 页面内存状态由 WebKit best-effort 保留，不做强保证。
+- inactive 时作为 opportunistic resident cache 保留 live WKWebView；
+- 默认 inactive TTL = 120 秒；
+- 最多保留 2 个 inactive、非后台播放保护的 Warm runtime，超过上限按 LRU 释放；
+- macOS memory pressure 可提前释放 inactive Warm；
+- 再次选择时若仍 resident 则复用同一个 WKWebView；若已释放则从持久化 Current URL / website data 重建；
+- 页面内存状态只在 resident 期间由 WebKit best-effort 保留，不做强保证。
 
 ### Cold
 
