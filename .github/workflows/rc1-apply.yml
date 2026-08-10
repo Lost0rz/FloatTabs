@@ -6,6 +6,7 @@ on:
       - release/v0.1.0-rc1
     paths:
       - '.github/rc1_patch.py'
+      - '.github/rc1_fix1.py'
       - '.github/rc1-trigger'
 
 permissions:
@@ -20,7 +21,9 @@ jobs:
           ref: release/v0.1.0-rc1
 
       - name: Apply RC1 implementation
-        run: python3 .github/rc1_patch.py
+        run: |
+          python3 .github/rc1_patch.py
+          python3 .github/rc1_fix1.py
 
       - name: Check diff
         run: git diff --check
