@@ -63,22 +63,18 @@ jobs:
             set -e
             mkdir -p .ci-diagnostics
             {
-              echo "Stage 5D focused failure diagnostics"
-              echo "===================================="
+              echo "Stage 5D focused XCTest failures"
+              echo "================================"
               echo "Run captured: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
               echo
-              echo "Failure contexts:"
-              grep -n -B 8 -A 12 -E "Test Case .* failed|XCTAssert|FloatTabsTests/.+error:|STAGE5D_|Assertion failed|failed -|error:" /tmp/stage5d-focused-tests.log || true
-              echo
-              echo "Final 320 log lines:"
-              tail -n 320 /tmp/stage5d-focused-tests.log
+              grep -n -E "/FloatTabsTests/[^:]+:[0-9]+: error:|Test Case '.*' failed|Test Suite '.*' failed|Executed [0-9]+ tests?, with [1-9][0-9]* failure|STAGE5D_" /tmp/stage5d-focused-tests.log || true
             } > .ci-diagnostics/stage5d-focused-failure.txt
 
             git restore FloatTabs FloatTabsTests docs || true
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .ci-diagnostics/stage5d-focused-failure.txt
-            git commit -m "ci: persist Stage 5D focused failure"
+            git commit -m "ci: persist isolated Stage 5D XCTest failure"
             git push origin HEAD:perf/stage-5-resource-benchmark
           fi
 
