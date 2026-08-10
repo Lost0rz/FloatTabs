@@ -331,38 +331,20 @@ enum UserAgentProvider {
 /// event/hit-testing pipeline intact and avoids AppKit coordinate transforms or
 /// private WebKit layout SPI.
 enum WebsiteLayoutViewport {
-    static let desktopMinimumCSSWidth: CGFloat = 1280
-    static let mobileMaximumCSSWidth: CGFloat = 390
-
     static func targetCSSWidth(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        guard visibleWidth > 0 else { return visibleWidth }
-        switch websiteMode {
-        case .desktop:
-            return max(desktopMinimumCSSWidth, visibleWidth)
-        case .mobile:
-            return min(mobileMaximumCSSWidth, visibleWidth)
-        }
+        visibleWidth
     }
 
     static func fittingScale(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        guard visibleWidth > 0 else { return 1 }
-        let targetWidth = targetCSSWidth(
-            forVisibleWidth: visibleWidth,
-            websiteMode: websiteMode
-        )
-        guard targetWidth > 0 else { return 1 }
-        return visibleWidth / targetWidth
+        1
     }
 
-    /// Compatibility hook for WebPanelContainerView. Under the public pageZoom
-    /// strategy the AppKit host must remain 1:1 with the visible surface; the
-    /// logical CSS width is produced inside WebKit instead of by resizing views.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
@@ -525,11 +507,9 @@ enum WebViewFactory {
     """
 }
 
-/// Keeps WKWebView at the real visible AppKit size. Website Mode is translated
-/// into a public WebKit pageZoom fitting factor so CSS layout can be 1280/390-
-/// class without any parent-view scaling. `userPageZoom` remains an independent
-/// product value and is composed with the internal fitting factor only at the
-/// final WebKit presentation boundary.
+/// Keeps WKWebView at the real visible AppKit/CSS size. Website Mode changes
+/// WebKit content mode / browser identity; user Zoom is the only pageZoom input.
+/// No synthetic 1280/390 viewport and no AppKit/WebKit magnification are used.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private(set) var websiteMode: WebsiteMode = .desktop
@@ -572,13 +552,9 @@ final class FloatTabsWebView: WKWebView {
     }
 
     private func refreshWebsiteLayoutScale() {
-        websiteLayoutScale = WebsiteLayoutViewport.fittingScale(
-            forVisibleWidth: frame.width,
-            websiteMode: websiteMode
-        )
-        let effectivePageZoom = websiteLayoutScale * userPageZoom
-        if abs(pageZoom - effectivePageZoom) > 0.0001 {
-            pageZoom = effectivePageZoom
+        websiteLayoutScale = 1
+        if abs(pageZoom - userPageZoom) > 0.0001 {
+            pageZoom = userPageZoom
         }
     }
 }

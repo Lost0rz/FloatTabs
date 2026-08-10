@@ -330,6 +330,29 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onRemove = { [weak self] id in
             self?.presentRemoveConfirmation(id: id)
         }
+        rail.onSetWebsiteMode = { [weak self] id, mode in
+            guard let self,
+                  let profile = self.tabStore.profiles.first(where: { $0.id == id }) else { return }
+            _ = self.tabStore.updateRenderingProfile(
+                id: id,
+                renderingProfile: profile.renderingProfile.settingWebsiteMode(mode)
+            )
+        }
+        rail.onSetWindowSize = { [weak self] id, preset in
+            guard let self,
+                  let profile = self.tabStore.profiles.first(where: { $0.id == id }),
+                  let size = preset.size else { return }
+            _ = self.tabStore.updateRenderingProfile(
+                id: id,
+                renderingProfile: profile.renderingProfile.settingSimplePreset(preset)
+            )
+            if self.tabStore.activeTabID == id {
+                self.applyPreferredViewport(size)
+            }
+        }
+        rail.onSetZoom = { [weak self] id, zoom in
+            _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
+        }
         rail.onSetResidency = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy)
         }

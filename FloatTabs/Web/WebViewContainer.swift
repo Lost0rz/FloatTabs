@@ -421,6 +421,8 @@ final class PanelResizeHandleView: NSView {
 
     private var startingMouseLocation: NSPoint?
     private var startingFrame: NSRect?
+    private var trackingAreaReference: NSTrackingArea?
+    private var resizeCursorIsPushed = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -446,6 +448,33 @@ final class PanelResizeHandleView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        pushResizeCursorIfNeeded()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        pushResizeCursorIfNeeded()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        restoreResizeCursorIfNeeded()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -506,6 +535,18 @@ final class PanelResizeHandleView: NSView {
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    private func pushResizeCursorIfNeeded() {
+        guard !resizeCursorIsPushed else { return }
+        NSCursor.resizeLeftRight.push()
+        resizeCursorIsPushed = true
+    }
+
+    private func restoreResizeCursorIfNeeded() {
+        guard resizeCursorIsPushed else { return }
+        NSCursor.pop()
+        resizeCursorIsPushed = false
     }
 
     override func draw(_ dirtyRect: NSRect) {

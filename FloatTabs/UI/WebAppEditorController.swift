@@ -23,6 +23,7 @@ enum WebAppEditorController {
             initialName: "",
             initialURL: "",
             initialRendering: .canonicalDefault,
+            showsPrimaryRenderingControls: true,
             attachedTo: window,
             completion: completion
         )
@@ -39,6 +40,7 @@ enum WebAppEditorController {
             initialName: profile.name,
             initialURL: profile.homeURL.absoluteString,
             initialRendering: profile.renderingProfile,
+            showsPrimaryRenderingControls: false,
             attachedTo: window,
             completion: completion
         )
@@ -115,6 +117,7 @@ enum WebAppEditorController {
         initialName: String,
         initialURL: String,
         initialRendering: WebRenderingProfile,
+        showsPrimaryRenderingControls: Bool,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -130,7 +133,10 @@ enum WebAppEditorController {
 
         let nameLabel = makeLabel("Name")
         let urlLabel = makeLabel("URL")
-        let renderingForm = RenderingForm(initial: initialRendering)
+        let renderingForm = RenderingForm(
+            initial: initialRendering,
+            showsPrimaryRenderingControls: showsPrimaryRenderingControls
+        )
 
         let stack = NSStackView(views: [
             nameLabel,
@@ -217,7 +223,10 @@ private final class RenderingForm: NSObject {
     private let effectiveUAField = NSTextField(labelWithString: "")
     private let advancedPopover = NSPopover()
 
-    init(initial: WebRenderingProfile) {
+    init(
+        initial: WebRenderingProfile,
+        showsPrimaryRenderingControls: Bool = true
+    ) {
         let rendering = initial.normalized()
 
         modePopup.addItems(withTitles: WebsiteMode.allCases.map(\.displayName))
@@ -277,15 +286,21 @@ private final class RenderingForm: NSObject {
         widthField.widthAnchor.constraint(equalToConstant: 66).isActive = true
         heightField.widthAnchor.constraint(equalToConstant: 66).isActive = true
 
-        view = NSStackView(views: [
-            Self.label("Website Mode"),
-            modePopup,
-            Self.label("Window Size"),
-            sizeRow,
-            Self.label("Zoom"),
-            zoomPopup,
-            advancedButton,
-        ])
+        let primaryViews: [NSView] = showsPrimaryRenderingControls
+            ? [
+                Self.label("Website Mode"),
+                modePopup,
+                Self.label("Window Size"),
+                sizeRow,
+                Self.label("Zoom"),
+                zoomPopup,
+                advancedButton,
+            ]
+            : [
+                Self.label("Browser Identity / Compatibility"),
+                advancedButton,
+            ]
+        view = NSStackView(views: primaryViews)
         view.orientation = .vertical
         view.alignment = .leading
         view.spacing = 5

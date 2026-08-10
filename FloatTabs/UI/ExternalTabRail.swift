@@ -4,10 +4,10 @@ import QuartzCore
 struct ExternalTabMetrics {
     static let tabHeight: CGFloat = 32
     static let tabRadius: CGFloat = 8
-    static let inactiveWidth: CGFloat = 44
-    static let hoverWidth: CGFloat = 66
-    static let activeWidth: CGFloat = 68
-    static let activeHoverWidth: CGFloat = 74
+    static let collapsedWidth: CGFloat = 40
+    static let hoverWidth: CGFloat = 76
+    static let activeWidth: CGFloat = 40
+    static let activeHoverWidth: CGFloat = 76
     static let topOffset: CGFloat = 23
     static let tabGap: CGFloat = 4
     static let addGap: CGFloat = 8
@@ -39,7 +39,7 @@ struct ExternalTabMetrics {
 
     static func width(isActive: Bool, dockInfluence: CGFloat) -> CGFloat {
         let influence = min(max(dockInfluence, 0), 1)
-        let resting = isActive ? activeWidth : inactiveWidth
+        let resting = isActive ? activeWidth : collapsedWidth
         let magnified = isActive ? activeHoverWidth : hoverWidth
         return resting + (magnified - resting) * influence
     }
@@ -64,6 +64,9 @@ final class ExternalControlZoneView: NSView {
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
+    var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
+    var onSetWindowSize: ((UUID, SimpleViewportPreset) -> Void)?
+    var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
@@ -214,6 +217,15 @@ final class ExternalControlZoneView: NSView {
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
+        view.onSetWebsiteMode = { [weak self] slotID, mode in
+            self?.onSetWebsiteMode?(slotID, mode)
+        }
+        view.onSetWindowSize = { [weak self] slotID, preset in
+            self?.onSetWindowSize?(slotID, preset)
+        }
+        view.onSetZoom = { [weak self] slotID, zoom in
+            self?.onSetZoom?(slotID, zoom)
+        }
         view.onSetResidency = { [weak self] slotID, policy in
             self?.onSetResidency?(slotID, policy)
         }
@@ -375,6 +387,80 @@ final class ExternalControlZoneView: NSView {
 }
 
 @MainActor
+enum ExternalTabVisualPalette {
+    /// Single seam for the future Settings → Appearance accent picker.
+    static var activeAccent: NSColor { .controlAccentColor }
+}
+
+@MainActor
+final class WebsiteFaviconProvider {
+    static let shared = WebsiteFaviconProvider()
+
+    private var cache: [String: NSImage] = [:]
+    private var failedOrigins = Set<String>()
+
+    static func originKey(for url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased() else { return nil }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
+    }
+
+    static func faviconURL(for url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else { return nil }
+        components.path = "/favicon.ico"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    func load(for url: URL, completion: @escaping (NSImage?) -> Void) {
+        guard let key = Self.originKey(for: url),
+              let faviconURL = Self.faviconURL(for: url) else {
+            completion(nil)
+            return
+        }
+        if let cached = cache[key] {
+            completion(cached)
+            return
+        }
+        if failedOrigins.contains(key) {
+            completion(nil)
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                var request = URLRequest(url: faviconURL)
+                request.cachePolicy = .returnCacheDataElseLoad
+                request.timeoutInterval = 8
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse,
+                   !(200..<300).contains(http.statusCode) {
+                    failedOrigins.insert(key)
+                    completion(nil)
+                    return
+                }
+                guard let image = NSImage(data: data) else {
+                    failedOrigins.insert(key)
+                    completion(nil)
+                    return
+                }
+                image.size = NSSize(width: 16, height: 16)
+                cache[key] = image
+                completion(image)
+            } catch {
+                failedOrigins.insert(key)
+                completion(nil)
+            }
+        }
+    }
+}
+
+@MainActor
 final class ExternalWebAppTabView: NSView {
     let slotID: UUID
 
@@ -382,43 +468,66 @@ final class ExternalWebAppTabView: NSView {
     var onReturnHome: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
+    var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
+    var onSetWindowSize: ((UUID, SimpleViewportPreset) -> Void)?
+    var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
 
+    private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let shapeLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
     private var isHovered = false
     private var dockInfluence: CGFloat = 0
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
+    private var renderingProfile: WebRenderingProfile = .canonicalDefault
     private var residencyPolicy: SlotResidencyPolicy = .warm
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
+    private var faviconOriginKey: String?
 
     var preferredWidth: CGFloat {
-        ExternalTabMetrics.width(isActive: isActive, dockInfluence: dockInfluence)
+        // Resting tabs are icon-only. Only the hovered row fully expands;
+        // nearby Dock influence is intentionally capped so labels do not leak.
+        let hoverInfluence: CGFloat = isHovered ? 1 : min(dockInfluence, 0.12)
+        return ExternalTabMetrics.width(isActive: isActive, dockInfluence: hoverInfluence)
     }
+
+    var isShowingLabel: Bool { isHovered }
+    var displayedIcon: NSImage? { iconView.image }
 
     init(slotID: UUID) {
         self.slotID = slotID
         super.init(frame: .zero)
 
         wantsLayer = true
-        layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.masksToBounds = false
+        layer?.addSublayer(shapeLayer)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.image = Self.fallbackIcon()
+        addSubview(iconView)
 
         label.translatesAutoresizingMaskIntoConstraints = false
         label.maximumNumberOfLines = 1
-        label.lineBreakMode = .byTruncatingTail
-        label.alignment = .center
+        label.lineBreakMode = .byClipping
+        label.alignment = .left
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.isHidden = true
         addSubview(label)
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -437,17 +546,24 @@ final class ExternalWebAppTabView: NSView {
         frame.contains(point) ? self : nil
     }
 
-    func update(profile: WebAppProfile, isActive: Bool) {
-        label.stringValue = profile.name
-        residencyPolicy = profile.residencyPolicy
-        backgroundMediaPolicy = profile.backgroundMediaPolicy
-        toolTip = "\(profile.name) · \(profile.residencyPolicy.displayName)"
-        self.isActive = isActive
-        updateAppearance()
+    override func layout() {
+        super.layout()
+        updateShape()
     }
 
     func setDockInfluence(_ influence: CGFloat) {
         dockInfluence = min(max(influence, 0), 1)
+    }
+
+    func update(profile: WebAppProfile, isActive: Bool) {
+        self.isActive = isActive
+        label.stringValue = profile.name
+        toolTip = profile.name
+        renderingProfile = profile.renderingProfile.normalized()
+        residencyPolicy = profile.residencyPolicy
+        backgroundMediaPolicy = profile.backgroundMediaPolicy
+        loadFaviconIfNeeded(from: profile.homeURL)
+        updateAppearance()
     }
 
     override func updateTrackingAreas() {
@@ -467,50 +583,47 @@ final class ExternalWebAppTabView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
+        label.isHidden = false
         updateAppearance()
         onPointerMoved?(event)
     }
 
     override func mouseMoved(with event: NSEvent) {
         onPointerMoved?(event)
+        if isDragging {
+            onDragChanged?(slotID, event)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        guard !isDragging else { return }
         isHovered = false
+        label.isHidden = true
         updateAppearance()
+        onPointerMoved?(event)
     }
 
     override func mouseDown(with event: NSEvent) {
-        mouseDownLocation = event.locationInWindow
+        mouseDownLocation = convert(event.locationInWindow, from: nil)
         isDragging = false
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let mouseDownLocation else { return }
-        let distance = hypot(
-            event.locationInWindow.x - mouseDownLocation.x,
-            event.locationInWindow.y - mouseDownLocation.y
-        )
-        guard isDragging || distance >= 3 else { return }
-
-        if !isDragging {
+        let current = convert(event.locationInWindow, from: nil)
+        if !isDragging,
+           hypot(current.x - mouseDownLocation.x, current.y - mouseDownLocation.y) >= 4 {
             isDragging = true
-            updateAppearance()
         }
-        onDragChanged?(slotID, event)
+        if isDragging {
+            onDragChanged?(slotID, event)
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
         defer {
             mouseDownLocation = nil
-            if isDragging {
-                isDragging = false
-                isHovered = bounds.contains(convert(event.locationInWindow, from: nil))
-                updateAppearance()
-            }
+            isDragging = false
         }
-
         if isDragging {
             onDragEnded?(slotID)
         } else {
@@ -518,12 +631,17 @@ final class ExternalWebAppTabView: NSView {
         }
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = menu(for: event) else { return }
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = NSMenu()
+        let menu = NSMenu(title: "Web App")
 
         let home = NSMenuItem(
             title: "Return to Home",
-            action: #selector(returnHomeFromMenu),
+            action: #selector(returnHomeFromMenu(_:)),
             keyEquivalent: "h"
         )
         home.keyEquivalentModifierMask = [.command, .shift]
@@ -531,14 +649,58 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(home)
         menu.addItem(.separator())
 
+        let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
+        let websiteModeMenu = NSMenu(title: "Website Mode")
+        for mode in WebsiteMode.allCases {
+            let item = NSMenuItem(title: mode.displayName, action: #selector(setWebsiteModeFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = mode == renderingProfile.websiteMode ? .on : .off
+            websiteModeMenu.addItem(item)
+        }
+        websiteMode.submenu = websiteModeMenu
+        menu.addItem(websiteMode)
+
+        let windowSize = NSMenuItem(title: "Window Size", action: nil, keyEquivalent: "")
+        let windowSizeMenu = NSMenu(title: "Window Size")
+        for preset in SimpleViewportPreset.allCases where preset != .custom {
+            let item = NSMenuItem(title: preset.menuTitle, action: #selector(setWindowSizeFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = preset.rawValue
+            item.state = preset == renderingProfile.sizePreset ? .on : .off
+            windowSizeMenu.addItem(item)
+        }
+        if renderingProfile.sizePreset == .custom {
+            windowSizeMenu.addItem(.separator())
+            let custom = NSMenuItem(
+                title: "Custom  \(Int(renderingProfile.viewportWidth)) × \(Int(renderingProfile.viewportHeight))",
+                action: nil,
+                keyEquivalent: ""
+            )
+            custom.state = .on
+            custom.isEnabled = false
+            windowSizeMenu.addItem(custom)
+        }
+        windowSize.submenu = windowSizeMenu
+        menu.addItem(windowSize)
+
+        let zoom = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")
+        let zoomMenu = NSMenu(title: "Zoom")
+        for value in ZoomSteps.values {
+            let item = NSMenuItem(title: ZoomSteps.percentageText(for: value), action: #selector(setZoomFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = NSNumber(value: Double(value))
+            item.state = abs(value - renderingProfile.zoom) < 0.001 ? .on : .off
+            zoomMenu.addItem(item)
+        }
+        zoom.submenu = zoomMenu
+        menu.addItem(zoom)
+        menu.addItem(.separator())
+
         let residency = NSMenuItem(title: "Residency", action: nil, keyEquivalent: "")
         let residencyMenu = NSMenu(title: "Residency")
         for policy in SlotResidencyPolicy.allCases {
-            let item = NSMenuItem(
-                title: policy.displayName,
-                action: #selector(setResidencyFromMenu(_:)),
-                keyEquivalent: ""
-            )
+            let item = NSMenuItem(title: policy.displayName, action: #selector(setResidencyFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = policy.rawValue
             item.state = policy == residencyPolicy ? .on : .off
@@ -550,11 +712,7 @@ final class ExternalWebAppTabView: NSView {
         let media = NSMenuItem(title: "Background Media", action: nil, keyEquivalent: "")
         let mediaMenu = NSMenu(title: "Background Media")
         for policy in BackgroundMediaPolicy.allCases {
-            let item = NSMenuItem(
-                title: policy.displayName,
-                action: #selector(setBackgroundMediaFromMenu(_:)),
-                keyEquivalent: ""
-            )
+            let item = NSMenuItem(title: policy.displayName, action: #selector(setBackgroundMediaFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = policy.rawValue
             item.state = policy == backgroundMediaPolicy ? .on : .off
@@ -564,72 +722,113 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(media)
         menu.addItem(.separator())
 
-        let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu), keyEquivalent: "")
+        let edit = NSMenuItem(title: "Edit Web App…", action: #selector(editFromMenu(_:)), keyEquivalent: "")
         edit.target = self
         menu.addItem(edit)
-
         menu.addItem(.separator())
 
-        let remove = NSMenuItem(title: "Remove Web App…", action: #selector(removeFromMenu), keyEquivalent: "")
+        let remove = NSMenuItem(title: "Remove Web App…", action: #selector(removeFromMenu(_:)), keyEquivalent: "")
         remove.target = self
         menu.addItem(remove)
         return menu
     }
+
+    @objc private func returnHomeFromMenu(_ sender: NSMenuItem) { onReturnHome?(slotID) }
+
+    @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = WebsiteMode(rawValue: raw) else { return }
+        onSetWebsiteMode?(slotID, mode)
+    }
+
+    @objc private func setWindowSizeFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let preset = SimpleViewportPreset(rawValue: raw),
+              preset != .custom else { return }
+        onSetWindowSize?(slotID, preset)
+    }
+
+    @objc private func setZoomFromMenu(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? NSNumber else { return }
+        onSetZoom?(slotID, CGFloat(number.doubleValue))
+    }
+
+    @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let policy = SlotResidencyPolicy(rawValue: raw) else { return }
+        onSetResidency?(slotID, policy)
+    }
+
+    @objc private func setBackgroundMediaFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let policy = BackgroundMediaPolicy(rawValue: raw) else { return }
+        onSetBackgroundMedia?(slotID, policy)
+    }
+
+    @objc private func editFromMenu(_ sender: NSMenuItem) { onEdit?(slotID) }
+    @objc private func removeFromMenu(_ sender: NSMenuItem) { onRemove?(slotID) }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateAppearance()
     }
 
-    @objc private func returnHomeFromMenu() {
-        onReturnHome?(slotID)
-    }
-
-    @objc private func editFromMenu() {
-        onEdit?(slotID)
-    }
-
-    @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              let policy = SlotResidencyPolicy(rawValue: rawValue) else { return }
-        onSetResidency?(slotID, policy)
-    }
-
-    @objc private func setBackgroundMediaFromMenu(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              let policy = BackgroundMediaPolicy(rawValue: rawValue) else { return }
-        onSetBackgroundMedia?(slotID, policy)
-    }
-
-    @objc private func removeFromMenu() {
-        onRemove?(slotID)
+    private func loadFaviconIfNeeded(from url: URL) {
+        let key = WebsiteFaviconProvider.originKey(for: url)
+        guard key != faviconOriginKey else { return }
+        faviconOriginKey = key
+        iconView.image = Self.fallbackIcon()
+        WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in
+            guard let self, self.faviconOriginKey == key else { return }
+            self.iconView.image = image ?? Self.fallbackIcon()
+        }
     }
 
     private func updateAppearance() {
-        let surface: NSColor
+        label.isHidden = !isHovered
+        label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
+        label.textColor = isActive ? .labelColor : .secondaryLabelColor
+        updateShape()
+    }
+
+    private func updateShape() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        shapeLayer.frame = bounds
+        let radius: CGFloat = 8
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: bounds.maxX, y: bounds.minY))
+        path.addLine(to: CGPoint(x: bounds.minX + radius, y: bounds.minY))
+        path.addQuadCurve(to: CGPoint(x: bounds.minX, y: bounds.minY + radius), control: CGPoint(x: bounds.minX, y: bounds.minY))
+        path.addLine(to: CGPoint(x: bounds.minX, y: bounds.maxY - radius))
+        path.addQuadCurve(to: CGPoint(x: bounds.minX + radius, y: bounds.maxY), control: CGPoint(x: bounds.minX, y: bounds.maxY))
+        path.addLine(to: CGPoint(x: bounds.maxX, y: bounds.maxY))
+        path.closeSubpath()
+        shapeLayer.path = path
+
         if isActive {
-            surface = NSColor.controlBackgroundColor.blended(withFraction: 0.18, of: .labelColor)
-                ?? .controlBackgroundColor
-        } else if isHovered {
-            surface = NSColor.controlBackgroundColor.blended(withFraction: 0.10, of: .labelColor)
-                ?? .controlBackgroundColor
+            let accent = ExternalTabVisualPalette.activeAccent
+            shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
+            shapeLayer.strokeColor = accent.withAlphaComponent(0.92).cgColor
+            shapeLayer.lineWidth = 2
+            layer?.shadowColor = accent.cgColor
+            layer?.shadowOpacity = 0.34
+            layer?.shadowRadius = 8
+            layer?.shadowOffset = .zero
+            layer?.shadowPath = path
         } else {
-            surface = NSColor.controlBackgroundColor.withAlphaComponent(0.92)
+            shapeLayer.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(isHovered ? 0.96 : 0.82).cgColor
+            shapeLayer.strokeColor = NSColor.separatorColor.withAlphaComponent(0.48).cgColor
+            shapeLayer.lineWidth = 1
+            layer?.shadowColor = NSColor.black.cgColor
+            layer?.shadowOpacity = isHovered ? 0.16 : 0.08
+            layer?.shadowRadius = isHovered ? 5 : 2
+            layer?.shadowOffset = NSSize(width: -1, height: -1)
+            layer?.shadowPath = path
         }
+    }
 
-        layer?.backgroundColor = surface.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-        layer?.borderWidth = 1
-        layer?.shadowOpacity = isDragging ? 0.24 : 0
-        layer?.shadowRadius = isDragging ? 8 : 0
-        layer?.shadowOffset = CGSize(width: 0, height: -2)
-
-        label.textColor = (isActive || isHovered) ? .labelColor : .secondaryLabelColor
-        label.font = NSFont.systemFont(
-            ofSize: 11,
-            weight: isActive ? .semibold : .medium
-        )
-        alphaValue = isDragging ? 0.88 : 1
+    private static func fallbackIcon() -> NSImage? {
+        NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
     }
 }
 

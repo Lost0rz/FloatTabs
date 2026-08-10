@@ -20,7 +20,7 @@ struct PanelMetrics {
     static let interactionBorderLineWidth: CGFloat = 2.5
 
     /// Bottom-right remains the only resize affordance.
-    static let resizeHandleSize: CGFloat = 18
+    static let resizeHandleSize: CGFloat = 32
     static let resizeHandleInset: CGFloat = 0
 
     static let webPanelCornerRadius: CGFloat = 14

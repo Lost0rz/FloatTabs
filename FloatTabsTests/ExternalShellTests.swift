@@ -151,7 +151,12 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Website Mode", "Window Size", "Zoom", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+        )
+        XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
+        XCTAssertEqual(
+            menu.item(withTitle: "Window Size")?.submenu?.items.filter { !$0.isSeparatorItem }.map(\.title),
+            ["Small  390 × 780", "Medium  430 × 820", "Large  600 × 800", "Wide  900 × 850"]
         )
         XCTAssertEqual(menu.item(withTitle: "Residency")?.submenu?.items.map(\.title), ["Hot", "Warm", "Cold"])
         XCTAssertEqual(
@@ -172,7 +177,9 @@ final class ExternalShellTests: XCTestCase {
         let inactiveView = try! XCTUnwrap(zone.tabView(for: inactive.id))
 
         XCTAssertEqual(activeView.frame.width, ExternalTabMetrics.activeWidth, accuracy: 0.001)
-        XCTAssertEqual(inactiveView.frame.width, ExternalTabMetrics.inactiveWidth, accuracy: 0.001)
+        XCTAssertEqual(inactiveView.frame.width, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
+        XCTAssertFalse(activeView.isShowingLabel)
+        XCTAssertFalse(inactiveView.isShowingLabel)
         XCTAssertEqual(activeView.frame.height, ExternalTabMetrics.tabHeight, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.width, ExternalTabMetrics.addNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.height, ExternalTabMetrics.addHeight, accuracy: 0.001)
@@ -189,11 +196,27 @@ final class ExternalShellTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let tab = try! XCTUnwrap(root.externalControlZoneView.tabView(for: active.id))
-        let localPoint = NSPoint(x: 10, y: 40)
+        let localPoint = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
         XCTAssertTrue(tab.frame.contains(localPoint))
         let rootPoint = root.externalControlZoneView.convert(localPoint, to: root)
 
         XCTAssertTrue(root.hitTest(rootPoint) is ExternalWebAppTabView)
+    }
+
+    func testResizeHandleUsesExpandedFirstMouseHitTarget() {
+        XCTAssertGreaterThanOrEqual(PanelMetrics.resizeHandleSize, 30)
+        let handle = PanelResizeHandleView(frame: NSRect(x: 100, y: 100, width: 32, height: 32))
+        XCTAssertTrue(handle.acceptsFirstMouse(for: nil))
+        XCTAssertTrue(handle.hitTest(NSPoint(x: 102, y: 102)) === handle)
+        XCTAssertNil(handle.hitTest(NSPoint(x: 140, y: 140)))
+    }
+
+    func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {
+        let input = URL(string: "https://example.com/a/b?q=1")!
+        XCTAssertEqual(
+            WebsiteFaviconProvider.faviconURL(for: input)?.absoluteString,
+            "https://example.com/favicon.ico"
+        )
     }
 
     func testMoveHoverTrackingRemainsActiveWhenAppIsInactive() {
