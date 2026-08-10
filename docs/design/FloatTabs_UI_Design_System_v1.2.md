@@ -554,6 +554,28 @@ Drag/Reorder：
 - neighbors smoothly make room;
 - after drop, `⌘1…⌘9` mapping immediately follows new order.
 
+## 9.1 Slot Context Menu
+
+Right click remains the fast page / Slot-level control surface:
+
+```text
+Return to Home                 ⌘⇧H
+Reload                         ⌘R
+────────────
+Website Mode                  >
+Window Size                   >
+Zoom                          >
+────────────
+Residency                     >
+Background Media              >
+────────────
+Edit Web App…
+────────────
+Remove Web App…
+```
+
+Website Mode, Window Size, and Zoom stay here because they are frequent per-Slot controls. Shortcut hints use native `NSMenuItem` key equivalents so macOS owns alignment, modifier glyphs, and secondary visual hierarchy. Browser Identity / Device Preset / Custom UA remain under Edit rather than expanding this menu.
+
 ---
 
 # 10. Bottom-left System Controls

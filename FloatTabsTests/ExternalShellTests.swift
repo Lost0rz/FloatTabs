@@ -125,6 +125,7 @@ final class ExternalShellTests: XCTestCase {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
         zone.apply(profiles: [active], activeTabID: active.id)
+        zone.setResidentSlotIDs([active.id])
         zone.layoutSubtreeIfNeeded()
 
         let tab = try! XCTUnwrap(zone.tabView(for: active.id))
@@ -151,19 +152,61 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Website Mode", "Window Size", "Zoom", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
+        let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
+        XCTAssertEqual(reload.keyEquivalent, "r")
+        XCTAssertEqual(reload.keyEquivalentModifierMask, [.command])
+        XCTAssertTrue(reload.isEnabled)
+
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
         XCTAssertEqual(
             menu.item(withTitle: "Window Size")?.submenu?.items.filter { !$0.isSeparatorItem }.map(\.title),
             ["Small  390 × 780", "Medium  430 × 820", "Large  600 × 800", "Wide  900 × 850"]
         )
+        let zoomItems = try! XCTUnwrap(menu.item(withTitle: "Zoom")?.submenu?.items)
+        XCTAssertEqual(zoomItems[0].title, "Zoom In")
+        XCTAssertEqual(zoomItems[0].keyEquivalent, "+")
+        XCTAssertEqual(zoomItems[0].keyEquivalentModifierMask, [.command])
+        XCTAssertEqual(zoomItems[1].title, "Zoom Out")
+        XCTAssertEqual(zoomItems[1].keyEquivalent, "-")
+        XCTAssertEqual(zoomItems[1].keyEquivalentModifierMask, [.command])
+        XCTAssertEqual(zoomItems[2].title, "Reset Zoom")
+        XCTAssertEqual(zoomItems[2].keyEquivalent, "0")
+        XCTAssertEqual(zoomItems[2].keyEquivalentModifierMask, [.command])
+        XCTAssertTrue(zoomItems[3].isSeparatorItem)
+
         XCTAssertEqual(menu.item(withTitle: "Residency")?.submenu?.items.map(\.title), ["Hot", "Warm", "Cold"])
         XCTAssertEqual(
             menu.item(withTitle: "Background Media")?.submenu?.items.map(\.title),
             ["Pause When Inactive", "Allow Background Audio"]
         )
         XCTAssertFalse(actionTitles.contains("Rename…"))
+    }
+
+    func testReleasedTabDisablesReloadWithoutCreatingRuntime() {
+        let (_, zone) = makeZoneHarness()
+        let released = makeProfile(order: 0, name: "Released")
+        zone.apply(profiles: [released], activeTabID: released.id)
+        zone.setResidentSlotIDs([])
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(zone.tabView(for: released.id))
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: tab.frame.midX, y: tab.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 1
+        )!
+        let menu = try! XCTUnwrap(tab.menu(for: event))
+        let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
+
+        XCTAssertFalse(reload.isEnabled)
     }
 
     func testActiveInactiveAndAddGeometryMatchDesignTokens() {

@@ -117,6 +117,13 @@ final class WebViewPool {
         load(webView, URLRequest(url: url))
     }
 
+    @discardableResult
+    func reload(slotID: UUID) -> Bool {
+        guard let webView = webViews[slotID] else { return false }
+        webView.reload()
+        return true
+    }
+
     func remove(slotID: UUID) {
         release(slotID: slotID)
     }

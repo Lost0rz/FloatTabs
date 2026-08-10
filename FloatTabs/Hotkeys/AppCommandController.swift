@@ -10,6 +10,7 @@ enum AppCommand: Equatable {
     case resetZoom
     case quickURL
     case returnHome
+    case reload
     case togglePin
 }
 
@@ -80,6 +81,8 @@ final class AppCommandController {
                 return .addWebApp
             case "l":
                 return .quickURL
+            case "r":
+                return .reload
             case "-":
                 return .zoomOut
             case "0":

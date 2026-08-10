@@ -290,6 +290,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .returnHome:
             returnActiveSlotHome()
 
+        case .reload:
+            reloadActiveSlot()
+
         case .togglePin:
             togglePinnedState()
         }
@@ -343,6 +346,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onReturnHome = { [weak self] id in
             self?.returnSlotHome(id: id)
+        }
+        rail.onReload = { [weak self] id in
+            self?.reloadSlot(id: id)
         }
         rail.onAdd = { [weak self] in
             self?.presentAddWebAppEditor()
@@ -456,6 +462,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func returnActiveSlotHome() {
         guard let id = tabStore.activeTabID else { return }
         returnSlotHome(id: id)
+    }
+
+    private func reloadActiveSlot() {
+        guard let id = tabStore.activeTabID else { return }
+        reloadSlot(id: id)
+    }
+
+    private func reloadSlot(id: UUID) {
+        guard webViewPool.reload(slotID: id) else { return }
+        if tabStore.activeTabID == id {
+            focusActiveWebViewIfAvailable()
+        }
     }
 
     private func returnSlotHome(id: UUID) {
