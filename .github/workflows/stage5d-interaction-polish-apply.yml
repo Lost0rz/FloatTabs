@@ -23,193 +23,26 @@ jobs:
         shell: bash
         run: |
           python3 <<'PY'
-          from pathlib import Path
+          import subprocess
+          import textwrap
 
-          def replace(path, old, new, count=1):
-              p = Path(path)
-              text = p.read_text()
-              actual = text.count(old)
-              if actual != count:
-                  raise SystemExit(f"{path}: expected {count} occurrence(s), found {actual}: {old[:100]!r}")
-              p.write_text(text.replace(old, new, count))
-
-          # 1) Resize acquisition: larger live target; visual grip moves inward toward the Web corner.
-          replace(
-              'FloatTabs/Panel/ScreenPositioning.swift',
-              '''    static let resizeHandleSize: CGFloat = 32\n    static let resizeHandleInset: CGFloat = 0\n''',
-              '''    static let resizeHandleSize: CGFloat = 40\n    static let resizeHandleInset: CGFloat = 0\n    static let resizeHandleVisualInset: CGFloat = 7\n'''
+          workflow_path = '.github/workflows/stage5d-interaction-polish-apply.yml'
+          raw = subprocess.check_output(
+              ['git', 'show', f'HEAD^:{workflow_path}'],
+              text=True,
           )
-
-          # 2) Root shell: rainbow border sits above tabs, active-tab geometry is part of its outline,
-          #    and transparent in-window gaps no longer click through to the desktop.
-          replace(
-              'FloatTabs/Web/WebViewContainer.swift',
-              '''        addSubview(webPanelContainerView)\n        addSubview(perimeterDragView)\n        addSubview(interactionBorderView)\n        addSubview(externalControlZoneView)\n        addSubview(resizeReadoutView)\n        addSubview(resizeHandleView)\n''',
-              '''        addSubview(webPanelContainerView)\n        addSubview(perimeterDragView)\n        addSubview(externalControlZoneView)\n        // Presentation-only and non-hit-testing, but deliberately above the tab rail so\n        // inactive tabs cannot cover the animated frame. The active tab is cut into\n        // the same outline below instead of drawing a second independent ring.\n        addSubview(interactionBorderView)\n        addSubview(resizeReadoutView)\n        addSubview(resizeHandleView)\n'''
-          )
-
-          replace(
-              'FloatTabs/Web/WebViewContainer.swift',
-              '''        resizeHandleView.onViewportSizeChange = { [weak self] viewportSize in\n''',
-              '''        externalControlZoneView.onActiveTabGeometryChange = { [weak self] in\n            self?.synchronizeInteractionBorderGeometry()\n        }\n\n        resizeHandleView.onViewportSizeChange = { [weak self] viewportSize in\n'''
-          )
-
-          replace(
-              'FloatTabs/Web/WebViewContainer.swift',
-              '''    override func layout() {\n        super.layout()\n        interactionBorderView.targetWebFrame = webPanelContainerView.frame\n    }\n\n    override func hitTest(_ point: NSPoint) -> NSView? {\n        let candidate = super.hitTest(point)\n        return candidate === self ? nil : candidate\n    }\n}\n\n/// A visual-only Siri-like flowing frame.''',
-              '''    override func layout() {\n        super.layout()\n        synchronizeInteractionBorderGeometry()\n    }\n\n    override var mouseDownCanMoveWindow: Bool { false }\n\n    override func hitTest(_ point: NSPoint) -> NSView? {\n        // A transparent pixel that is still inside the FloatTabs window belongs to\n        // FloatTabs. Returning self here is a safety net against accidental desktop\n        // click-through; functional move/resize/tab views still win through normal\n        // subview hit testing.\n        return super.hitTest(point)\n    }\n\n    private func synchronizeInteractionBorderGeometry() {\n        interactionBorderView.targetWebFrame = webPanelContainerView.frame\n        interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)\n    }\n}\n\n/// A visual-only Siri-like flowing frame.'''
-          )
-
-          p = Path('FloatTabs/Web/WebViewContainer.swift')
-          text = p.read_text()
-          start = text.index('final class PanelInteractionBorderView: NSView {')
-          end = text.index('/// Four-way movement cursor used only where FloatTabs itself will move the', start)
-          new_border = '''final class PanelInteractionBorderView: NSView {\n    private let gradientLayer = CAGradientLayer()\n    private let borderMask = CAShapeLayer()\n\n    var targetWebFrame: NSRect = .zero {\n        didSet {\n            if oldValue != targetWebFrame {\n                needsLayout = true\n            }\n        }\n    }\n\n    var activeTabFrame: NSRect? {\n        didSet {\n            if oldValue != activeTabFrame {\n                needsLayout = true\n            }\n        }\n    }\n\n    override init(frame frameRect: NSRect) {\n        super.init(frame: frameRect)\n        wantsLayer = true\n        layer?.backgroundColor = NSColor.clear.cgColor\n\n        gradientLayer.type = .conic\n        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)\n        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)\n        gradientLayer.opacity = 0.72\n\n        let palettes = Self.flowPalettes\n        gradientLayer.colors = palettes.first\n        gradientLayer.locations = [0, 0.22, 0.48, 0.74, 1]\n\n        borderMask.fillColor = NSColor.clear.cgColor\n        borderMask.strokeColor = NSColor.white.cgColor\n        borderMask.lineWidth = PanelMetrics.interactionBorderLineWidth\n        borderMask.lineJoin = .round\n        borderMask.lineCap = .round\n        gradientLayer.mask = borderMask\n        layer?.addSublayer(gradientLayer)\n\n        let flow = CAKeyframeAnimation(keyPath: "colors")\n        flow.values = palettes\n        flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]\n        flow.duration = 3.2\n        flow.repeatCount = .infinity\n        flow.calculationMode = .linear\n        gradientLayer.add(flow, forKey: "FloatTabs.interactionBorderFlow")\n    }\n\n    convenience init() {\n        self.init(frame: .zero)\n    }\n\n    @available(*, unavailable)\n    required init?(coder: NSCoder) {\n        fatalError("init(coder:) has not been implemented")\n    }\n\n    override var isOpaque: Bool { false }\n\n    override func hitTest(_ point: NSPoint) -> NSView? {\n        nil\n    }\n\n    override func layout() {\n        super.layout()\n        gradientLayer.frame = bounds\n\n        guard targetWebFrame.width > 0, targetWebFrame.height > 0 else {\n            borderMask.path = nil\n            return\n        }\n\n        borderMask.path = Self.outlinePath(\n            webFrame: targetWebFrame,\n            activeTabFrame: activeTabFrame,\n            clippingBounds: bounds\n        )\n    }\n\n    static func outlinePath(\n        webFrame: NSRect,\n        activeTabFrame: NSRect?,\n        clippingBounds: NSRect? = nil\n    ) -> CGPath {\n        let outset = PanelMetrics.interactionBorderOutset\n        let webRect = webFrame.insetBy(dx: -outset, dy: -outset)\n        let webRadius = min(\n            PanelMetrics.webPanelCornerRadius + outset,\n            min(webRect.width, webRect.height) / 2\n        )\n\n        func plainRoundedWebPath() -> CGPath {\n            CGPath(\n                roundedRect: webRect,\n                cornerWidth: webRadius,\n                cornerHeight: webRadius,\n                transform: nil\n            )\n        }\n\n        guard let activeTabFrame else {\n            return plainRoundedWebPath()\n        }\n\n        let tabRect = activeTabFrame.insetBy(dx: -outset, dy: -outset)\n        let joinBottom = max(tabRect.minY, webRect.minY + webRadius + 1)\n        let joinTop = min(tabRect.maxY, webRect.maxY - webRadius - 1)\n        guard joinTop - joinBottom >= 8 else {\n            return plainRoundedWebPath()\n        }\n\n        var tabLeft = tabRect.minX\n        if let clippingBounds {\n            tabLeft = max(\n                tabLeft,\n                clippingBounds.minX + PanelMetrics.interactionBorderLineWidth / 2\n            )\n        }\n        guard tabLeft < webRect.minX - 1 else {\n            return plainRoundedWebPath()\n        }\n\n        let tabRadius = min(\n            ExternalTabMetrics.tabRadius + outset,\n            (joinTop - joinBottom) / 2\n        )\n        let path = CGMutablePath()\n\n        // Walk clockwise around the Web surface. On the left edge, detour around\n        // the active tab and deliberately omit its right edge, producing one\n        // continuous page+tab silhouette rather than two overlapping rings.\n        path.move(to: CGPoint(x: webRect.minX + webRadius, y: webRect.maxY))\n        path.addLine(to: CGPoint(x: webRect.maxX - webRadius, y: webRect.maxY))\n        path.addQuadCurve(\n            to: CGPoint(x: webRect.maxX, y: webRect.maxY - webRadius),\n            control: CGPoint(x: webRect.maxX, y: webRect.maxY)\n        )\n        path.addLine(to: CGPoint(x: webRect.maxX, y: webRect.minY + webRadius))\n        path.addQuadCurve(\n            to: CGPoint(x: webRect.maxX - webRadius, y: webRect.minY),\n            control: CGPoint(x: webRect.maxX, y: webRect.minY)\n        )\n        path.addLine(to: CGPoint(x: webRect.minX + webRadius, y: webRect.minY))\n        path.addQuadCurve(\n            to: CGPoint(x: webRect.minX, y: webRect.minY + webRadius),\n            control: CGPoint(x: webRect.minX, y: webRect.minY)\n        )\n        path.addLine(to: CGPoint(x: webRect.minX, y: joinBottom))\n        path.addLine(to: CGPoint(x: tabLeft + tabRadius, y: joinBottom))\n        path.addQuadCurve(\n            to: CGPoint(x: tabLeft, y: joinBottom + tabRadius),\n            control: CGPoint(x: tabLeft, y: joinBottom)\n        )\n        path.addLine(to: CGPoint(x: tabLeft, y: joinTop - tabRadius))\n        path.addQuadCurve(\n            to: CGPoint(x: tabLeft + tabRadius, y: joinTop),\n            control: CGPoint(x: tabLeft, y: joinTop)\n        )\n        path.addLine(to: CGPoint(x: webRect.minX, y: joinTop))\n        path.addLine(to: CGPoint(x: webRect.minX, y: webRect.maxY - webRadius))\n        path.addQuadCurve(\n            to: CGPoint(x: webRect.minX + webRadius, y: webRect.maxY),\n            control: CGPoint(x: webRect.minX, y: webRect.maxY)\n        )\n        path.closeSubpath()\n        return path\n    }\n\n    private static var flowPalettes: [[CGColor]] {\n        let blue = NSColor.systemBlue.cgColor\n        let purple = NSColor.systemPurple.cgColor\n        let pink = NSColor.systemPink.cgColor\n        let orange = NSColor.systemOrange.cgColor\n\n        return [\n            [blue, purple, pink, orange, blue],\n            [purple, pink, orange, blue, purple],\n            [pink, orange, blue, purple, pink],\n            [orange, blue, purple, pink, orange],\n            [blue, purple, pink, orange, blue],\n        ]\n    }\n}\n\n'''
-          p.write_text(text[:start] + new_border + text[end:])
-
-          replace(
-              'FloatTabs/Web/WebViewContainer.swift',
-              '''    override func hitTest(_ point: NSPoint) -> NSView? {\n        guard bounds.contains(point) else { return nil }\n        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil\n    }\n''',
-              '''    override func hitTest(_ point: NSPoint) -> NSView? {\n        // NSView hit-test points arrive in the superview's coordinates, while\n        // dragRects are expressed in our local bounds. Convert explicitly so\n        // cursor discovery and actual mouse acquisition use identical geometry.\n        guard frame.contains(point) else { return nil }\n        let localPoint = convert(point, from: superview)\n        return Self.isDraggable(point: localPoint, in: bounds) ? self : nil\n    }\n'''
-          )
-
-          replace(
-              'FloatTabs/Web/WebViewContainer.swift',
-              '''        for offset in [5.0, 9.0, 13.0] {\n            path.move(to: NSPoint(x: bounds.maxX - CGFloat(offset), y: bounds.minY + 2))\n            path.line(to: NSPoint(x: bounds.maxX - 2, y: bounds.minY + CGFloat(offset)))\n        }\n''',
-              '''        let inset = PanelMetrics.resizeHandleVisualInset\n        for offset in [5.0, 9.0, 13.0] {\n            path.move(to: NSPoint(\n                x: bounds.maxX - inset - CGFloat(offset),\n                y: bounds.minY + inset\n            ))\n            path.line(to: NSPoint(\n                x: bounds.maxX - inset,\n                y: bounds.minY + inset + CGFloat(offset)\n            ))\n        }\n'''
-          )
-
-          # 3) Tab rail geometry + active/inactive favicon treatment.
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''import AppKit\nimport QuartzCore\n''',
-              '''import AppKit\nimport CoreImage\nimport QuartzCore\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''    var onCurrentControls: (() -> Void)?\n    var onTogglePin: (() -> Void)?\n''',
-              '''    var onCurrentControls: (() -> Void)?\n    var onTogglePin: (() -> Void)?\n    var onActiveTabGeometryChange: (() -> Void)?\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''    func tabView(for id: UUID) -> ExternalWebAppTabView? {\n        tabViews[id]\n    }\n\n    var addControlFrame: NSRect {\n''',
-              '''    func tabView(for id: UUID) -> ExternalWebAppTabView? {\n        tabViews[id]\n    }\n\n    func activeTabFrame(in ancestor: NSView) -> NSRect? {\n        guard let activeTabID,\n              let tab = tabViews[activeTabID],\n              tab.superview != nil else {\n            return nil\n        }\n        return tab.convert(tab.bounds, to: ancestor)\n    }\n\n    var addControlFrame: NSRect {\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''        guard animated else {\n            updateFrames()\n            return\n        }\n\n        NSAnimationContext.runAnimationGroup { context in\n            context.duration = duration\n            context.timingFunction = CAMediaTimingFunction(name: .easeOut)\n            context.allowsImplicitAnimation = true\n            updateFrames()\n        }\n    }\n''',
-              '''        guard animated else {\n            updateFrames()\n            onActiveTabGeometryChange?()\n            return\n        }\n\n        NSAnimationContext.runAnimationGroup { context in\n            context.duration = duration\n            context.timingFunction = CAMediaTimingFunction(name: .easeOut)\n            context.allowsImplicitAnimation = true\n            updateFrames()\n        }\n        onActiveTabGeometryChange?()\n        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in\n            self?.onActiveTabGeometryChange?()\n        }\n    }\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''    private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive\n    private var faviconOriginKey: String?\n''',
-              '''    private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive\n    private var faviconOriginKey: String?\n    private var sourceIcon: NSImage?\n    private var grayscaleIcon: NSImage?\n\n    private static let grayscaleContext = CIContext(options: nil)\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''        iconView.translatesAutoresizingMaskIntoConstraints = false\n        iconView.imageScaling = .scaleProportionallyUpOrDown\n        iconView.image = Self.fallbackIcon()\n        addSubview(iconView)\n''',
-              '''        iconView.translatesAutoresizingMaskIntoConstraints = false\n        iconView.imageScaling = .scaleProportionallyUpOrDown\n        setSourceIcon(Self.fallbackIcon())\n        addSubview(iconView)\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''    private func loadFaviconIfNeeded(from url: URL) {\n        let key = WebsiteFaviconProvider.originKey(for: url)\n        guard key != faviconOriginKey else { return }\n        faviconOriginKey = key\n        iconView.image = Self.fallbackIcon()\n        WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in\n            guard let self, self.faviconOriginKey == key else { return }\n            self.iconView.image = image ?? Self.fallbackIcon()\n        }\n    }\n\n    private func updateAppearance() {\n        label.isHidden = !isHovered\n        label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)\n        label.textColor = isActive ? .labelColor : .secondaryLabelColor\n        updateShape()\n    }\n''',
-              '''    private func loadFaviconIfNeeded(from url: URL) {\n        let key = WebsiteFaviconProvider.originKey(for: url)\n        guard key != faviconOriginKey else { return }\n        faviconOriginKey = key\n        setSourceIcon(Self.fallbackIcon())\n        WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in\n            guard let self, self.faviconOriginKey == key else { return }\n            self.setSourceIcon(image ?? Self.fallbackIcon())\n        }\n    }\n\n    private func updateAppearance() {\n        label.isHidden = !isHovered\n        label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)\n        label.textColor = isActive ? .labelColor : .secondaryLabelColor\n        applyIconAppearance()\n        updateShape()\n    }\n\n    private func setSourceIcon(_ image: NSImage?) {\n        sourceIcon = image\n        if let image, !image.isTemplate {\n            grayscaleIcon = Self.grayscaleImage(from: image)\n        } else {\n            grayscaleIcon = nil\n        }\n        applyIconAppearance()\n    }\n\n    private func applyIconAppearance() {\n        let base = sourceIcon ?? Self.fallbackIcon()\n        if isActive {\n            iconView.image = base\n            iconView.alphaValue = 1\n            iconView.contentTintColor = base?.isTemplate == true ? .labelColor : nil\n        } else {\n            if base?.isTemplate == true {\n                iconView.image = base\n                iconView.contentTintColor = .tertiaryLabelColor\n            } else {\n                // Never leave a full-color inactive favicon above the rainbow frame.\n                // If conversion ever fails, fall back to the neutral system globe.\n                iconView.image = grayscaleIcon ?? Self.fallbackIcon()\n                iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil\n            }\n            iconView.alphaValue = isHovered ? 0.74 : 0.56\n        }\n    }\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''        if isActive {\n            let accent = ExternalTabVisualPalette.activeAccent\n            shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor\n            shapeLayer.strokeColor = accent.withAlphaComponent(0.92).cgColor\n            shapeLayer.lineWidth = 2\n            layer?.shadowColor = accent.cgColor\n            layer?.shadowOpacity = 0.34\n            layer?.shadowRadius = 8\n            layer?.shadowOffset = .zero\n            layer?.shadowPath = path\n        } else {\n''',
-              '''        if isActive {\n            // The animated PanelInteractionBorderView owns the active outline.\n            // Keep only the tab surface here so page + active tab read as one shape.\n            shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor\n            shapeLayer.strokeColor = NSColor.clear.cgColor\n            shapeLayer.lineWidth = 0\n            layer?.shadowOpacity = 0\n            layer?.shadowPath = nil\n        } else {\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/ExternalTabRail.swift',
-              '''    private static func fallbackIcon() -> NSImage? {\n        NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")\n    }\n}\n''',
-              '''    private static func grayscaleImage(from image: NSImage) -> NSImage? {\n        guard let data = image.tiffRepresentation,\n              let input = CIImage(data: data),\n              let filter = CIFilter(name: "CIColorControls") else {\n            return nil\n        }\n        filter.setValue(input, forKey: kCIInputImageKey)\n        filter.setValue(0.0, forKey: kCIInputSaturationKey)\n        guard let output = filter.outputImage,\n              let cgImage = grayscaleContext.createCGImage(output, from: output.extent) else {\n            return nil\n        }\n        let result = NSImage(cgImage: cgImage, size: image.size)\n        result.isTemplate = false\n        return result\n    }\n\n    private static func fallbackIcon() -> NSImage? {\n        NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")\n    }\n}\n''',
-              count=1
-          )
-
-          # 4) Edit Web App: common controls stay on the context menu; low-frequency identity /
-          #    compatibility controls are fully exposed inline instead of another popover.
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''        stack.setFrameSize(NSSize(width: 400, height: 350))\n''',
-              '''        stack.setFrameSize(NSSize(\n            width: 400,\n            height: showsPrimaryRenderingControls ? 350 : 520\n        ))\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''    private let customUAField = NSTextField()\n    private let effectiveUAField = NSTextField(labelWithString: "")\n    private let advancedPopover = NSPopover()\n''',
-              '''    private let customUAField = NSTextField()\n    private let effectiveUAField = NSTextField(labelWithString: "")\n    private let engineValue = NSTextField(labelWithString: "WebKit")\n    private let advancedPopover = NSPopover()\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''        effectiveUAField.font = .monospacedSystemFont(ofSize: 10, weight: .regular)\n        effectiveUAField.textColor = .secondaryLabelColor\n        effectiveUAField.cell?.lineBreakMode = .byTruncatingMiddle\n''',
-              '''        effectiveUAField.font = .monospacedSystemFont(ofSize: 10, weight: .regular)\n        effectiveUAField.textColor = .secondaryLabelColor\n        effectiveUAField.cell?.lineBreakMode = .byTruncatingMiddle\n        engineValue.textColor = .secondaryLabelColor\n\n        identityPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true\n        devicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true\n        orientationPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true\n        customUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true\n        effectiveUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''            : [\n                Self.label("Browser Identity / Compatibility"),\n                advancedButton,\n            ]\n''',
-              '''            : [\n                Self.label("Browser Identity"),\n                identityPopup,\n                Self.label("Device Preset"),\n                devicePopup,\n                Self.label("Orientation"),\n                orientationPopup,\n                Self.label("Custom User Agent"),\n                customUAField,\n                Self.label("Effective Engine"),\n                engineValue,\n                Self.label("Effective User Agent"),\n                effectiveUAField,\n            ]\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''        configureAdvancedPopover()\n        updateAutomaticIdentityTitle()\n''',
-              '''        if showsPrimaryRenderingControls {\n            configureAdvancedPopover()\n        }\n        updateAutomaticIdentityTitle()\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''    private func configureAdvancedPopover() {\n        let engineValue = NSTextField(labelWithString: "WebKit")\n        engineValue.textColor = .secondaryLabelColor\n\n        let advancedStack = NSStackView(views: [\n''',
-              '''    private func configureAdvancedPopover() {\n        let advancedStack = NSStackView(views: [\n'''
-          )
-
-          replace(
-              'FloatTabs/UI/WebAppEditorController.swift',
-              '''        identityPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true\n        devicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true\n        orientationPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true\n        customUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true\n        effectiveUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true\n\n        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 350))\n''',
-              '''        let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 350))\n'''
-          )
-
-          # 5) Regression tests for the exact Real-Mac failures found in acceptance.
-          replace(
-              'FloatTabsTests/ExternalShellTests.swift',
-              '''    func testResizeHandleUsesExpandedFirstMouseHitTarget() {\n        XCTAssertGreaterThanOrEqual(PanelMetrics.resizeHandleSize, 30)\n        let handle = PanelResizeHandleView(frame: NSRect(x: 100, y: 100, width: 32, height: 32))\n        XCTAssertTrue(handle.acceptsFirstMouse(for: nil))\n        XCTAssertTrue(handle.hitTest(NSPoint(x: 102, y: 102)) === handle)\n        XCTAssertNil(handle.hitTest(NSPoint(x: 140, y: 140)))\n    }\n''',
-              '''    func testResizeHandleUsesExpandedFirstMouseHitTarget() {\n        XCTAssertGreaterThanOrEqual(PanelMetrics.resizeHandleSize, 40)\n        let handle = PanelResizeHandleView(frame: NSRect(x: 100, y: 100, width: 40, height: 40))\n        XCTAssertTrue(handle.acceptsFirstMouse(for: nil))\n        XCTAssertTrue(handle.hitTest(NSPoint(x: 102, y: 102)) === handle)\n        XCTAssertNil(handle.hitTest(NSPoint(x: 150, y: 150)))\n    }\n\n    func testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough() {\n        let root = PanelRootView()\n        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)\n        root.layoutSubtreeIfNeeded()\n\n        let rightGutterPoint = NSPoint(x: root.bounds.maxX - 4, y: root.bounds.midY)\n        XCTAssertTrue(root.hitTest(rightGutterPoint) === root)\n    }\n\n    func testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor() {\n        let host = NSView(frame: NSRect(x: 0, y: 0, width: 2400, height: 2400))\n        let drag = PanelPerimeterDragView(frame: NSRect(\n            x: 1000,\n            y: 1000,\n            width: PanelMetrics.defaultPanelSize.width,\n            height: PanelMetrics.defaultPanelSize.height\n        ))\n        host.addSubview(drag)\n\n        let localTop = NSPoint(\n            x: drag.bounds.midX,\n            y: drag.bounds.maxY - PanelMetrics.outerInteractionGutter / 2\n        )\n        XCTAssertTrue(PanelMoveHoverController.isDraggable(point: localTop, in: drag.bounds))\n        let topInHost = drag.convert(localTop, to: host)\n        XCTAssertTrue(drag.hitTest(topInHost) === drag)\n\n        let localWebCenter = NSPoint(\n            x: PanelMetrics.externalControlZoneWidth + PanelMetrics.defaultViewportSize.width / 2,\n            y: drag.bounds.midY\n        )\n        let webCenterInHost = drag.convert(localWebCenter, to: host)\n        XCTAssertNil(drag.hitTest(webCenterInHost))\n    }\n'''
-          )
-
-          replace(
-              'FloatTabsTests/ExternalShellTests.swift',
-              '''    func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {\n''',
-              '''    func testActiveTabExpandsAnimatedPanelOutlineIntoRail() {\n        let web = NSRect(x: 76, y: 12, width: 430, height: 820)\n        let activeTab = NSRect(x: 36, y: 720, width: 40, height: 32)\n        let path = PanelInteractionBorderView.outlinePath(\n            webFrame: web,\n            activeTabFrame: activeTab,\n            clippingBounds: NSRect(x: 0, y: 0, width: 518, height: 844)\n        )\n        XCTAssertLessThan(path.boundingBoxOfPath.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBoxOfPath.maxX, web.maxX)\n    }\n\n    func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {\n'''
-          )
-
-          # 6) Keep Stage 5D source-of-truth aligned with the accepted refinement target.
-          replace(
-              'docs/product/FloatTabs_Stage_5D_Interaction_Rendering_Refinement.md',
-              '''## Resize\n- Bottom-right visual grip remains small, but the acquisition view is 32 × 32 pt.\n- The resize view accepts first mouse, keeps AppKit frame-based hit testing, and uses an `activeAlways` tracking area so an inactive FloatTabs panel can be acquired on the first drag.\n''',
-              '''## Resize and movement acquisition\n- Bottom-right visual grip remains small and is shifted inward toward the Web corner, while its live acquisition view is 40 × 40 pt. The full gap between the grip and the visible Web corner is operational rather than click-through whitespace.\n- Transparent pixels inside the FloatTabs window are consumed by the panel shell instead of falling through to the desktop.\n- Resize accepts first mouse and keeps an `activeAlways` tracking area. Top/bottom/left movement uses the exact same `PanelPerimeterDragView.dragRects` geometry for cursor discovery and hit testing, including explicit superview→local coordinate conversion.\n'''
-          )
-
-          replace(
-              'docs/product/FloatTabs_Stage_5D_Interaction_Rendering_Refinement.md',
-              '''- Active presentation uses the app accent seam and an attached open-right-edge silhouette; inactive tabs use a quieter sticky-note silhouette.\n- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. No third-party favicon service or site-specific mapping is used.\n- The active accent is centralized at `ExternalTabVisualPalette.activeAccent` so a future Settings → Appearance screen can replace it without changing tab behavior.\n''',
-              '''- The animated rainbow frame is one continuous silhouette around the Web surface and the active tab; the active tab no longer draws an independent static outline.\n- The presentation-only rainbow layer is above the tab rail, so inactive tabs cannot cover the Web frame. Only the active tab makes the frame detour outward into the rail.\n- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. The active favicon remains full color; inactive favicons render grayscale/neutral. No third-party favicon service or site-specific mapping is used.\n'''
-          )
-
-          replace(
-              'docs/product/FloatTabs_Stage_5D_Interaction_Rendering_Refinement.md',
-              '''`Edit Web App…` is reduced to Name, URL, and advanced Browser Identity / compatibility. Add Web App retains the complete initial rendering form.\n''',
-              '''`Edit Web App…` is reduced to Name, URL, and low-frequency Browser Identity / compatibility controls. Those controls are fully expanded inline—there is no nested Advanced popover in Edit. Add Web App retains the complete initial rendering form.\n'''
-          )
+          start_marker = "          python3 <<'PY'\n"
+          end_marker = "          PY\n\n      - name: Resolve Swift packages"
+          if start_marker not in raw or end_marker not in raw:
+              raise SystemExit('could not recover guarded Stage 5D source-edit script')
+          script = raw.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          script = textwrap.dedent(script)
+          bad = 'return Self.isDraggable(point: localPoint, in: bounds) ? self : nil'
+          fixed = 'return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil'
+          if script.count(bad) != 1:
+              raise SystemExit(f'expected one bad drag hit-test call, found {script.count(bad)}')
+          script = script.replace(bad, fixed)
+          exec(compile(script, '<stage5d-guarded-edits>', 'exec'))
           PY
 
       - name: Resolve Swift packages
@@ -246,12 +79,11 @@ jobs:
             MACOSX_DEPLOYMENT_TARGET=14.0 \
             test
 
-      - name: Commit validated product changes and remove construction workflow
+      - name: Commit validated product changes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/stage5d-interaction-polish-apply.yml
           git add \
             FloatTabs/Panel/ScreenPositioning.swift \
             FloatTabs/Web/WebViewContainer.swift \
