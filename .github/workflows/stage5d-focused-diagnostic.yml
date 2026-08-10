@@ -1,0 +1,85 @@
+name: Stage 5D Focused Diagnostic
+
+on:
+  push:
+    branches:
+      - perf/stage-5-resource-benchmark
+    paths:
+      - '.github/workflows/stage5d-focused-diagnostic.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: perf/stage-5-resource-benchmark
+          fetch-depth: 0
+
+      - name: Apply current Stage 5D candidate edits
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/stage5d-product-apply-helper.yml').read_text()
+          match = re.search(
+              r"      - name: Apply corrected Stage 5D source edits\n        shell: bash\n        run: \|\n(?P<body>.*?)(?=\n      - name: Resolve Swift packages)",
+              workflow,
+              re.S,
+          )
+          if not match:
+              raise SystemExit('could not extract current Stage 5D candidate edit block')
+          Path('/tmp/stage5d-current-apply.sh').write_text(
+              'set -euo pipefail\n' + textwrap.dedent(match.group('body'))
+          )
+          PY
+          bash /tmp/stage5d-current-apply.sh
+          git diff --check
+
+      - name: Focused shell and hit-testing regressions
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            -only-testing:FloatTabsTests/ExternalShellTests \
+            -only-testing:FloatTabsTests/PanelPerimeterDragHitTestingTests \
+            test 2>&1 | tee /tmp/stage5d-focused-tests.log
+          status=${PIPESTATUS[0]}
+
+          if [ "$status" -ne 0 ]; then
+            set -e
+            mkdir -p .ci-diagnostics
+            {
+              echo "Stage 5D focused failure diagnostics"
+              echo "===================================="
+              echo "Run captured: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+              echo
+              echo "Failure contexts:"
+              grep -n -B 8 -A 12 -E "Test Case .* failed|XCTAssert|FloatTabsTests/.+error:|STAGE5D_|Assertion failed|failed -|error:" /tmp/stage5d-focused-tests.log || true
+              echo
+              echo "Final 320 log lines:"
+              tail -n 320 /tmp/stage5d-focused-tests.log
+            } > .ci-diagnostics/stage5d-focused-failure.txt
+
+            git restore FloatTabs FloatTabsTests docs || true
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .ci-diagnostics/stage5d-focused-failure.txt
+            git commit -m "ci: persist Stage 5D focused failure"
+            git push origin HEAD:perf/stage-5-resource-benchmark
+          fi
+
+          exit "$status"
