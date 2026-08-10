@@ -33,8 +33,8 @@ Common controls are available directly from the Web App tab and persist through 
 Global Settings is a later independent screen (Appearance / Hotkeys / Global / About). Stage 5D does not build it.
 
 ## Automated validation
-- Construction validation: package resolve PASS, Debug build PASS, full Unit Tests PASS.
-- Final clean PR validation must remain green after documentation/cleanup commits.
+- Stage 5D construction validation: package resolve PASS, Debug build PASS, full Unit Tests PASS.
+- Clean PR validation: Benchmark Tool CI PASS; macOS package-lock check, Debug build and full Unit Tests PASS.
 
 ## Real-Mac acceptance before benchmark
 1. Resize an inactive FloatTabs panel from another app/full-screen space on the first drag; verify no dead corner areas.
