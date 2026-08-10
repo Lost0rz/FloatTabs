@@ -1,13 +1,12 @@
-name: Stage 6D Apply
+name: Stage 6D Final Validate
 
 on:
   push:
     branches:
       - feat/stage-6d-global-settings
     paths:
-      - '.github/stage6d_patch.py'
-      - '.github/stage6d_fix1.py'
-      - '.github/stage6d-trigger'
+      - '.github/stage6d_fix2.py'
+      - '.github/stage6d-final-trigger'
 
 permissions:
   contents: write
@@ -20,10 +19,8 @@ jobs:
         with:
           ref: feat/stage-6d-global-settings
 
-      - name: Apply Stage 6D patch
-        run: |
-          python3 .github/stage6d_patch.py
-          python3 .github/stage6d_fix1.py
+      - name: Apply final Stage 6D audit fixes
+        run: python3 .github/stage6d_fix2.py
 
       - name: Check diff
         run: git diff --check
@@ -62,26 +59,15 @@ jobs:
             MACOSX_DEPLOYMENT_TARGET=14.0 \
             test
 
-      - name: Commit validated Stage 6D implementation
+      - name: Commit validated final Stage 6D audit fixes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
-            FloatTabs.xcodeproj/project.pbxproj \
-            FloatTabs/App/AppCoordinator.swift \
-            FloatTabs/Hotkeys/AppCommandController.swift \
-            FloatTabs/Hotkeys/GlobalHotkeyController.swift \
-            FloatTabs/MenuBar/StatusItemController.swift \
-            FloatTabs/Panel/PanelController.swift \
-            FloatTabs/Persistence/AppPreferencesStore.swift \
             FloatTabs/UI/ExternalTabRail.swift \
             FloatTabs/UI/GlobalSettingsController.swift \
-            FloatTabs/UI/WebAppEditorController.swift \
-            FloatTabsTests/AppCommandControllerTests.swift \
-            FloatTabsTests/AppPreferencesStoreTests.swift \
-            FloatTabsTests/ExternalShellTests.swift \
             docs/architecture/FloatTabs_Technical_Architecture_v1.2.md \
-            docs/design/FloatTabs_UI_Design_System_v1.2.md \
-            docs/product/FloatTabs_Product_Development_Spec_v0.5.md
-          git commit -m 'feat: implement Stage 6D global settings'
+            docs/product/FloatTabs_Product_Development_Spec_v0.5.md \
+            docs/product/FloatTabs_Stage_6D_Global_Settings.md
+          git commit -m 'fix: align Stage 6D appearance and source of truth'
           git push origin HEAD:feat/stage-6d-global-settings
