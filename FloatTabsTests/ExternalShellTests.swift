@@ -185,7 +185,45 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(zone.addControlFrame.height, ExternalTabMetrics.addHeight, accuracy: 0.001)
         XCTAssertEqual(zone.currentControlsFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.pinControlFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
+        XCTAssertEqual(activeView.frame.maxX, zone.bounds.maxX, accuracy: 0.001)
+        XCTAssertEqual(
+            inactiveView.frame.maxX,
+            zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            zone.addControlFrame.maxX,
+            zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            zone.currentControlsFrame.maxX,
+            zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            zone.pinControlFrame.maxX,
+            zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
+            accuracy: 0.001
+        )
         XCTAssertLessThan(zone.currentControlsFrame.maxY, zone.pinControlFrame.minY)
+    }
+
+    func testInactiveTabHoverCanBeClearedWithoutLeavingExpandedGeometry() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        let inactive = makeProfile(order: 1, name: "X")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let inactiveView = try! XCTUnwrap(zone.tabView(for: inactive.id))
+        inactiveView.setHovered(true)
+        XCTAssertEqual(inactiveView.preferredWidth, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
+        XCTAssertTrue(inactiveView.isShowingLabel)
+
+        inactiveView.setHovered(false)
+        XCTAssertEqual(inactiveView.preferredWidth, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
+        XCTAssertFalse(inactiveView.isShowingLabel)
     }
 
     func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {
@@ -209,6 +247,36 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(handle.acceptsFirstMouse(for: nil))
         XCTAssertTrue(handle.hitTest(NSPoint(x: 102, y: 102)) === handle)
         XCTAssertNil(handle.hitTest(NSPoint(x: 150, y: 150)))
+    }
+
+    func testResizeHandleLivesInsideWebCornerInsteadOfOuterTransparentGutter() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        let webFrame = root.webPanelContainerView.frame
+        let insideWebCorner = NSPoint(x: webFrame.maxX - 4, y: webFrame.minY + 4)
+        XCTAssertTrue(root.hitTest(insideWebCorner) is PanelResizeHandleView)
+
+        let outerTransparentCorner = NSPoint(
+            x: root.bounds.maxX - 4,
+            y: root.bounds.minY + 4
+        )
+        XCTAssertFalse(root.hitTest(outerTransparentCorner) is PanelResizeHandleView)
+    }
+
+    func testTopAndBottomMoveTargetsIncludeReliableInPageArea() {
+        XCTAssertGreaterThanOrEqual(PanelMetrics.innerMovementOverlap, 10)
+
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+        let webFrame = root.webPanelContainerView.frame
+
+        let topInside = NSPoint(x: webFrame.midX, y: webFrame.maxY - 8)
+        let bottomInside = NSPoint(x: webFrame.midX, y: webFrame.minY + 8)
+        XCTAssertTrue(root.hitTest(topInside) is PanelPerimeterDragView)
+        XCTAssertTrue(root.hitTest(bottomInside) is PanelPerimeterDragView)
     }
 
     func testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough() {

@@ -13,14 +13,16 @@ struct ExternalTabMetrics {
     static let tabGap: CGFloat = 4
     static let addGap: CGFloat = 8
 
-    static let addHeight: CGFloat = 28
-    static let addNormalWidth: CGFloat = 34
-    static let addHoverWidth: CGFloat = 54
-    static let addOpenWidth: CGFloat = 58
+    // Add / Settings / Pin are members of the same rail, not separate
+    // floating buttons. Keep their resting and hover geometry identical to tabs.
+    static let addHeight: CGFloat = tabHeight
+    static let addNormalWidth: CGFloat = collapsedWidth
+    static let addHoverWidth: CGFloat = hoverWidth
+    static let addOpenWidth: CGFloat = hoverWidth
 
-    static let systemControlHeight: CGFloat = 28
-    static let systemControlNormalWidth: CGFloat = 34
-    static let systemControlHoverWidth: CGFloat = 54
+    static let systemControlHeight: CGFloat = tabHeight
+    static let systemControlNormalWidth: CGFloat = collapsedWidth
+    static let systemControlHoverWidth: CGFloat = hoverWidth
     static let systemControlBottomOffset: CGFloat = 18
     static let systemControlGap: CGFloat = 4
 
@@ -83,6 +85,7 @@ final class ExternalControlZoneView: NSView {
     private let currentControls = CurrentWebAppControl()
     private let pinControl = PinPanelControl()
     private var trackingAreaReference: NSTrackingArea?
+    private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
 
     override var isFlipped: Bool { true }
@@ -150,7 +153,9 @@ final class ExternalControlZoneView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        pointerLocation = nil
         pointerY = nil
+        synchronizeHoverState(at: nil)
         layoutControls(animated: true, duration: ExternalTabMetrics.dockSettleDuration)
     }
 
@@ -258,8 +263,21 @@ final class ExternalControlZoneView: NSView {
 
     private func updateDockPointer(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
+        pointerLocation = location
         pointerY = location.y
+        synchronizeHoverState(at: location)
         layoutControls(animated: true, duration: ExternalTabMetrics.dockMotionDuration)
+    }
+
+    private func synchronizeHoverState(at location: NSPoint?) {
+        for tab in tabViews.values {
+            tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
+        }
+        addControl.setHovered(location.map { addControl.frame.contains($0) } ?? false)
+        currentControls.setHovered(
+            location.map { currentControls.frame.contains($0) } ?? false
+        )
+        pinControl.setHovered(location.map { pinControl.frame.contains($0) } ?? false)
     }
 
     private func layoutControls(animated: Bool, duration: TimeInterval) {
@@ -275,12 +293,11 @@ final class ExternalControlZoneView: NSView {
                 } ?? 0
                 tab.setDockInfluence(influence)
 
-                let width = min(tab.preferredWidth, self.bounds.width)
-                let targetFrame = NSRect(
-                    x: max(self.bounds.width - width, 0),
+                let targetFrame = self.attachedFrame(
+                    preferredWidth: tab.preferredWidth,
                     y: y,
-                    width: width,
-                    height: ExternalTabMetrics.tabHeight
+                    height: ExternalTabMetrics.tabHeight,
+                    isActiveTab: tab.isActiveTab
                 )
                 self.setFrame(targetFrame, for: tab, animated: animated)
                 y += ExternalTabMetrics.tabHeight + ExternalTabMetrics.tabGap
@@ -296,11 +313,9 @@ final class ExternalControlZoneView: NSView {
             } ?? 0
             self.addControl.setDockInfluence(addInfluence)
 
-            let addWidth = min(self.addControl.preferredWidth, self.bounds.width)
-            let addFrame = NSRect(
-                x: max(self.bounds.width - addWidth, 0),
+            let addFrame = self.attachedFrame(
+                preferredWidth: self.addControl.preferredWidth,
                 y: y,
-                width: addWidth,
                 height: ExternalTabMetrics.addHeight
             )
             self.setFrame(addFrame, for: self.addControl, animated: animated)
@@ -316,11 +331,9 @@ final class ExternalControlZoneView: NSView {
                 ExternalTabMetrics.dockInfluence(forDistance: $0 - pinCenterY)
             } ?? 0
             self.pinControl.setDockInfluence(pinInfluence)
-            let pinWidth = min(self.pinControl.preferredWidth, self.bounds.width)
-            let pinFrame = NSRect(
-                x: max(self.bounds.width - pinWidth, 0),
+            let pinFrame = self.attachedFrame(
+                preferredWidth: self.pinControl.preferredWidth,
                 y: pinY,
-                width: pinWidth,
                 height: ExternalTabMetrics.systemControlHeight
             )
             self.setFrame(pinFrame, for: self.pinControl, animated: animated)
@@ -336,11 +349,9 @@ final class ExternalControlZoneView: NSView {
                 ExternalTabMetrics.dockInfluence(forDistance: $0 - systemCenterY)
             } ?? 0
             self.currentControls.setDockInfluence(systemInfluence)
-            let systemWidth = min(self.currentControls.preferredWidth, self.bounds.width)
-            let systemFrame = NSRect(
-                x: max(self.bounds.width - systemWidth, 0),
+            let systemFrame = self.attachedFrame(
+                preferredWidth: self.currentControls.preferredWidth,
                 y: systemY,
-                width: systemWidth,
                 height: ExternalTabMetrics.systemControlHeight
             )
             self.setFrame(systemFrame, for: self.currentControls, animated: animated)
@@ -362,6 +373,23 @@ final class ExternalControlZoneView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.onActiveTabGeometryChange?()
         }
+    }
+
+    private func attachedFrame(
+        preferredWidth: CGFloat,
+        y: CGFloat,
+        height: CGFloat,
+        isActiveTab: Bool = false
+    ) -> NSRect {
+        let rightInset = isActiveTab ? 0 : PanelMetrics.interactionBorderOutset
+        let availableWidth = max(bounds.width - rightInset, 0)
+        let width = min(preferredWidth, availableWidth)
+        return NSRect(
+            x: max(bounds.width - rightInset - width, 0),
+            y: y,
+            width: width,
+            height: height
+        )
     }
 
     private func setFrame(_ frame: NSRect, for view: NSView, animated: Bool) {
@@ -519,6 +547,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     var isShowingLabel: Bool { isHovered }
+    var isActiveTab: Bool { isActive }
     var displayedIcon: NSImage? { iconView.image }
 
     init(slotID: UUID) {
@@ -575,6 +604,13 @@ final class ExternalWebAppTabView: NSView {
         dockInfluence = min(max(influence, 0), 1)
     }
 
+    func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        label.isHidden = !hovered
+        updateAppearance()
+    }
+
     func update(profile: WebAppProfile, isActive: Bool) {
         self.isActive = isActive
         label.stringValue = profile.name
@@ -602,9 +638,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        label.isHidden = false
-        updateAppearance()
+        setHovered(true)
         onPointerMoved?(event)
     }
 
@@ -616,9 +650,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        label.isHidden = true
-        updateAppearance()
+        setHovered(false)
         onPointerMoved?(event)
     }
 
@@ -925,6 +957,7 @@ final class AddWebAppControl: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
 
         imageView.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Web App")
         imageView.contentTintColor = .labelColor
@@ -960,6 +993,12 @@ final class AddWebAppControl: NSView {
         dockInfluence = min(max(influence, 0), 1)
     }
 
+    func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updateAppearance()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingAreaReference {
@@ -976,8 +1015,7 @@ final class AddWebAppControl: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
+        setHovered(true)
         onPointerMoved?(event)
     }
 
@@ -986,8 +1024,8 @@ final class AddWebAppControl: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
+        setHovered(false)
+        onPointerMoved?(event)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1033,6 +1071,7 @@ final class PinPanelControl: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
         NSLayoutConstraint.activate([
@@ -1063,6 +1102,12 @@ final class PinPanelControl: NSView {
         dockInfluence = min(max(influence, 0), 1)
     }
 
+    func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updateAppearance()
+    }
+
     func setPinned(_ pinned: Bool) {
         isPinned = pinned
     }
@@ -1083,8 +1128,7 @@ final class PinPanelControl: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
+        setHovered(true)
         onPointerMoved?(event)
     }
 
@@ -1093,8 +1137,8 @@ final class PinPanelControl: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
+        setHovered(false)
+        onPointerMoved?(event)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1152,6 +1196,7 @@ final class CurrentWebAppControl: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
         toolTip = "Current Web App Controls"
 
         imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Current Web App Controls")
@@ -1186,6 +1231,13 @@ final class CurrentWebAppControl: NSView {
         dockInfluence = min(max(influence, 0), 1)
     }
 
+    func setHovered(_ hovered: Bool) {
+        let resolved = hovered && isEnabled
+        guard isHovered != resolved else { return }
+        isHovered = resolved
+        updateAppearance()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingAreaReference {
@@ -1202,8 +1254,7 @@ final class CurrentWebAppControl: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
+        setHovered(true)
         onPointerMoved?(event)
     }
 
@@ -1212,8 +1263,8 @@ final class CurrentWebAppControl: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
+        setHovered(false)
+        onPointerMoved?(event)
     }
 
     override func mouseUp(with event: NSEvent) {

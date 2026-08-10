@@ -87,13 +87,14 @@ final class PanelRootView: NSView {
             interactionBorderView.topAnchor.constraint(equalTo: topAnchor),
             interactionBorderView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
+            // Keep the complete resize target inside the visible Web corner.
+            // Real-Mac acceptance showed the transparent outer gutter was an
+            // unreliable acquisition surface, while the in-page area was stable.
             resizeHandleView.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -PanelMetrics.resizeHandleInset
+                equalTo: webPanelContainerView.trailingAnchor
             ),
             resizeHandleView.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: PanelMetrics.resizeHandleInset
+                equalTo: webPanelContainerView.bottomAnchor
             ),
             resizeHandleView.widthAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
             resizeHandleView.heightAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
@@ -497,7 +498,7 @@ final class PanelPerimeterDragView: NSView {
         let middleHeight = max(bounds.height - 2 * outer, 0)
         let topWidth = max(bounds.width - PanelMetrics.webRightInteractionSafety, 0)
         let bottomExclusion = max(
-            PanelMetrics.resizeHandleSize,
+            outer + PanelMetrics.resizeHandleSize,
             PanelMetrics.webRightInteractionSafety
         )
         let bottomWidth = max(bounds.width - bottomExclusion, 0)
@@ -525,9 +526,9 @@ final class PanelPerimeterDragView: NSView {
     }
 }
 
-/// The only resize affordance. It lives mostly in the outer bottom-right gutter,
-/// with a small corner overlap so it remains easy to acquire without restoring
-/// native edge resizing.
+/// The only resize affordance. Both its visible grip and complete hit target
+/// live inside the bottom-right Web corner. This deliberately avoids relying on
+/// transparent outside-window-looking pixels for a precision interaction.
 final class PanelResizeHandleView: NSView {
     var onViewportSizeChange: ((NSSize) -> Void)?
     var onResizeEnded: (() -> Void)?
