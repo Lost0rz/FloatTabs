@@ -1,0 +1,58 @@
+name: Apply Web Padding Fix
+
+on:
+  push:
+    branches:
+      - agent/fix-web-content-padding
+    paths:
+      - '.github/fix_web_padding.py'
+      - '.github/web-padding-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-web-content-padding
+          fetch-depth: 0
+
+      - name: Apply focused Desktop layout fix
+        run: python3 .github/fix_web_padding.py
+
+      - name: Check patch
+        run: |
+          git diff --check
+          git diff -- FloatTabs/Web/WebViewFactory.swift FloatTabsTests/WebViewFactoryTests.swift
+
+      - name: Resolve packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Run WebView regression tests
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests
+          test
+
+      - name: Commit validated source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FloatTabs/Web/WebViewFactory.swift FloatTabsTests/WebViewFactoryTests.swift
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: restore desktop-class web layout in narrow panels'
+          git push origin HEAD:agent/fix-web-content-padding
