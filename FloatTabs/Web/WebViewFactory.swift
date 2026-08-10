@@ -331,20 +331,39 @@ enum UserAgentProvider {
 /// event/hit-testing pipeline intact and avoids AppKit coordinate transforms or
 /// private WebKit layout SPI.
 enum WebsiteLayoutViewport {
+    /// Desktop mode should keep a desktop-class responsive layout even when the
+    /// floating window is physically narrow. Mobile deliberately stays 1:1 so
+    /// its WebKit/AppKit hit-testing and phone layout remain native.
+    static let desktopMinimumCSSWidth: CGFloat = 1280
+
     static func targetCSSWidth(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        visibleWidth
+        guard visibleWidth > 0 else { return visibleWidth }
+        switch websiteMode {
+        case .desktop:
+            return max(desktopMinimumCSSWidth, visibleWidth)
+        case .mobile:
+            return visibleWidth
+        }
     }
 
     static func fittingScale(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        1
+        guard visibleWidth > 0 else { return 1 }
+        let targetWidth = targetCSSWidth(
+            forVisibleWidth: visibleWidth,
+            websiteMode: websiteMode
+        )
+        guard targetWidth > 0 else { return 1 }
+        return visibleWidth / targetWidth
     }
 
+    /// AppKit geometry remains exactly the visible size. CSS layout widening is
+    /// performed only by WKWebView.pageZoom, never by view transforms.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
@@ -507,9 +526,10 @@ enum WebViewFactory {
     """
 }
 
-/// Keeps WKWebView at the real visible AppKit/CSS size. Website Mode changes
-/// WebKit content mode / browser identity; user Zoom is the only pageZoom input.
-/// No synthetic 1280/390 viewport and no AppKit/WebKit magnification are used.
+/// Keeps WKWebView at the real visible AppKit size. Desktop mode uses WebKit's
+/// public pageZoom API to expose a desktop-class CSS width inside narrow FloatTabs
+/// windows while preserving native AppKit/WebKit event coordinates. Mobile stays
+/// strictly 1:1. User Zoom composes with the Desktop layout fit at this boundary.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private(set) var websiteMode: WebsiteMode = .desktop
@@ -552,9 +572,13 @@ final class FloatTabsWebView: WKWebView {
     }
 
     private func refreshWebsiteLayoutScale() {
-        websiteLayoutScale = 1
-        if abs(pageZoom - userPageZoom) > 0.0001 {
-            pageZoom = userPageZoom
+        websiteLayoutScale = WebsiteLayoutViewport.fittingScale(
+            forVisibleWidth: frame.width,
+            websiteMode: websiteMode
+        )
+        let effectivePageZoom = websiteLayoutScale * userPageZoom
+        if abs(pageZoom - effectivePageZoom) > 0.0001 {
+            pageZoom = effectivePageZoom
         }
     }
 }
