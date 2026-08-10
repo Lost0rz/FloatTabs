@@ -39,8 +39,11 @@ final class PanelRootView: NSView {
         // is presentation-only and never participates in hit testing.
         addSubview(webPanelContainerView)
         addSubview(perimeterDragView)
-        addSubview(interactionBorderView)
         addSubview(externalControlZoneView)
+        // Presentation-only and non-hit-testing, but deliberately above the tab rail so
+        // inactive tabs cannot cover the animated frame. The active tab is cut into
+        // the same outline below instead of drawing a second independent ring.
+        addSubview(interactionBorderView)
         addSubview(resizeReadoutView)
         addSubview(resizeHandleView)
 
@@ -84,13 +87,14 @@ final class PanelRootView: NSView {
             interactionBorderView.topAnchor.constraint(equalTo: topAnchor),
             interactionBorderView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
+            // Keep the complete resize target inside the visible Web corner.
+            // Real-Mac acceptance showed the transparent outer gutter was an
+            // unreliable acquisition surface, while the in-page area was stable.
             resizeHandleView.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -PanelMetrics.resizeHandleInset
+                equalTo: webPanelContainerView.trailingAnchor
             ),
             resizeHandleView.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: PanelMetrics.resizeHandleInset
+                equalTo: webPanelContainerView.bottomAnchor
             ),
             resizeHandleView.widthAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
             resizeHandleView.heightAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
@@ -104,6 +108,10 @@ final class PanelRootView: NSView {
                 constant: -8
             ),
         ])
+
+        externalControlZoneView.onActiveTabGeometryChange = { [weak self] in
+            self?.synchronizeInteractionBorderGeometry()
+        }
 
         resizeHandleView.onViewportSizeChange = { [weak self] viewportSize in
             self?.resizeReadoutView.update(viewportSize: viewportSize)
@@ -129,12 +137,22 @@ final class PanelRootView: NSView {
 
     override func layout() {
         super.layout()
-        interactionBorderView.targetWebFrame = webPanelContainerView.frame
+        synchronizeInteractionBorderGeometry()
     }
 
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let candidate = super.hitTest(point)
-        return candidate === self ? nil : candidate
+        // A transparent pixel that is still inside the FloatTabs window belongs to
+        // FloatTabs. Returning self here is a safety net against accidental desktop
+        // click-through; functional move/resize/tab views still win through normal
+        // subview hit testing.
+        return super.hitTest(point)
+    }
+
+    private func synchronizeInteractionBorderGeometry() {
+        interactionBorderView.targetWebFrame = webPanelContainerView.frame
+        interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)
     }
 }
 
@@ -153,6 +171,14 @@ final class PanelInteractionBorderView: NSView {
         }
     }
 
+    var activeTabFrame: NSRect? {
+        didSet {
+            if oldValue != activeTabFrame {
+                needsLayout = true
+            }
+        }
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -161,7 +187,7 @@ final class PanelInteractionBorderView: NSView {
         gradientLayer.type = .conic
         gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
         gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
-        gradientLayer.opacity = 0.68
+        gradientLayer.opacity = 0.72
 
         let palettes = Self.flowPalettes
         gradientLayer.colors = palettes.first
@@ -171,6 +197,7 @@ final class PanelInteractionBorderView: NSView {
         borderMask.strokeColor = NSColor.white.cgColor
         borderMask.lineWidth = PanelMetrics.interactionBorderLineWidth
         borderMask.lineJoin = .round
+        borderMask.lineCap = .round
         gradientLayer.mask = borderMask
         layer?.addSublayer(gradientLayer)
 
@@ -207,17 +234,100 @@ final class PanelInteractionBorderView: NSView {
             return
         }
 
-        let borderRect = targetWebFrame.insetBy(
-            dx: -PanelMetrics.interactionBorderOutset,
-            dy: -PanelMetrics.interactionBorderOutset
+        borderMask.path = Self.outlinePath(
+            webFrame: targetWebFrame,
+            activeTabFrame: activeTabFrame,
+            clippingBounds: bounds
         )
-        let radius = PanelMetrics.webPanelCornerRadius + PanelMetrics.interactionBorderOutset
-        borderMask.path = CGPath(
-            roundedRect: borderRect,
-            cornerWidth: radius,
-            cornerHeight: radius,
-            transform: nil
+    }
+
+    static func outlinePath(
+        webFrame: NSRect,
+        activeTabFrame: NSRect?,
+        clippingBounds: NSRect? = nil
+    ) -> CGPath {
+        let outset = PanelMetrics.interactionBorderOutset
+        let webRect = webFrame.insetBy(dx: -outset, dy: -outset)
+        let webRadius = min(
+            PanelMetrics.webPanelCornerRadius + outset,
+            min(webRect.width, webRect.height) / 2
         )
+
+        func plainRoundedWebPath() -> CGPath {
+            CGPath(
+                roundedRect: webRect,
+                cornerWidth: webRadius,
+                cornerHeight: webRadius,
+                transform: nil
+            )
+        }
+
+        guard let activeTabFrame else {
+            return plainRoundedWebPath()
+        }
+
+        let tabRect = activeTabFrame.insetBy(dx: -outset, dy: -outset)
+        let joinBottom = max(tabRect.minY, webRect.minY + webRadius + 1)
+        let joinTop = min(tabRect.maxY, webRect.maxY - webRadius - 1)
+        guard joinTop - joinBottom >= 8 else {
+            return plainRoundedWebPath()
+        }
+
+        var tabLeft = tabRect.minX
+        if let clippingBounds {
+            tabLeft = max(
+                tabLeft,
+                clippingBounds.minX + PanelMetrics.interactionBorderLineWidth / 2
+            )
+        }
+        guard tabLeft < webRect.minX - 1 else {
+            return plainRoundedWebPath()
+        }
+
+        let tabRadius = min(
+            ExternalTabMetrics.tabRadius + outset,
+            (joinTop - joinBottom) / 2
+        )
+        let path = CGMutablePath()
+
+        // Walk clockwise around the Web surface. On the left edge, detour around
+        // the active tab and deliberately omit its right edge, producing one
+        // continuous page+tab silhouette rather than two overlapping rings.
+        path.move(to: CGPoint(x: webRect.minX + webRadius, y: webRect.maxY))
+        path.addLine(to: CGPoint(x: webRect.maxX - webRadius, y: webRect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: webRect.maxX, y: webRect.maxY - webRadius),
+            control: CGPoint(x: webRect.maxX, y: webRect.maxY)
+        )
+        path.addLine(to: CGPoint(x: webRect.maxX, y: webRect.minY + webRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: webRect.maxX - webRadius, y: webRect.minY),
+            control: CGPoint(x: webRect.maxX, y: webRect.minY)
+        )
+        path.addLine(to: CGPoint(x: webRect.minX + webRadius, y: webRect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: webRect.minX, y: webRect.minY + webRadius),
+            control: CGPoint(x: webRect.minX, y: webRect.minY)
+        )
+        path.addLine(to: CGPoint(x: webRect.minX, y: joinBottom))
+        path.addLine(to: CGPoint(x: tabLeft + tabRadius, y: joinBottom))
+        path.addQuadCurve(
+            to: CGPoint(x: tabLeft, y: joinBottom + tabRadius),
+            control: CGPoint(x: tabLeft, y: joinBottom)
+        )
+        path.addLine(to: CGPoint(x: tabLeft, y: joinTop - tabRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: tabLeft + tabRadius, y: joinTop),
+            control: CGPoint(x: tabLeft, y: joinTop)
+        )
+        path.addLine(to: CGPoint(x: webRect.minX, y: joinTop))
+        path.addLine(to: CGPoint(x: webRect.minX, y: webRect.maxY - webRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: webRect.minX + webRadius, y: webRect.maxY),
+            control: CGPoint(x: webRect.minX, y: webRect.maxY)
+        )
+        path.closeSubpath()
+        return path
     }
 
     private static var flowPalettes: [[CGColor]] {
@@ -316,8 +426,12 @@ final class PanelPerimeterDragView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
-        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
+        // NSView hit-test points arrive in the superview's coordinates, while
+        // dragRects are expressed in our local bounds. Convert explicitly so
+        // cursor discovery and actual mouse acquisition use identical geometry.
+        guard frame.contains(point) else { return nil }
+        let localPoint = convert(point, from: superview)
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -384,7 +498,7 @@ final class PanelPerimeterDragView: NSView {
         let middleHeight = max(bounds.height - 2 * outer, 0)
         let topWidth = max(bounds.width - PanelMetrics.webRightInteractionSafety, 0)
         let bottomExclusion = max(
-            PanelMetrics.resizeHandleSize,
+            outer + PanelMetrics.resizeHandleSize,
             PanelMetrics.webRightInteractionSafety
         )
         let bottomWidth = max(bounds.width - bottomExclusion, 0)
@@ -412,15 +526,17 @@ final class PanelPerimeterDragView: NSView {
     }
 }
 
-/// The only resize affordance. It lives mostly in the outer bottom-right gutter,
-/// with a small corner overlap so it remains easy to acquire without restoring
-/// native edge resizing.
+/// The only resize affordance. Both its visible grip and complete hit target
+/// live inside the bottom-right Web corner. This deliberately avoids relying on
+/// transparent outside-window-looking pixels for a precision interaction.
 final class PanelResizeHandleView: NSView {
     var onViewportSizeChange: ((NSSize) -> Void)?
     var onResizeEnded: (() -> Void)?
 
     private var startingMouseLocation: NSPoint?
     private var startingFrame: NSRect?
+    private var trackingAreaReference: NSTrackingArea?
+    private var resizeCursorIsPushed = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -446,6 +562,33 @@ final class PanelResizeHandleView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        pushResizeCursorIfNeeded()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        pushResizeCursorIfNeeded()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        restoreResizeCursorIfNeeded()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -508,6 +651,18 @@ final class PanelResizeHandleView: NSView {
         addCursorRect(bounds, cursor: .resizeLeftRight)
     }
 
+    private func pushResizeCursorIfNeeded() {
+        guard !resizeCursorIsPushed else { return }
+        NSCursor.resizeLeftRight.push()
+        resizeCursorIsPushed = true
+    }
+
+    private func restoreResizeCursorIfNeeded() {
+        guard resizeCursorIsPushed else { return }
+        NSCursor.pop()
+        resizeCursorIsPushed = false
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
@@ -518,9 +673,16 @@ final class PanelResizeHandleView: NSView {
         path.lineWidth = 1.25
         path.lineCapStyle = .round
 
+        let inset = PanelMetrics.resizeHandleVisualInset
         for offset in [5.0, 9.0, 13.0] {
-            path.move(to: NSPoint(x: bounds.maxX - CGFloat(offset), y: bounds.minY + 2))
-            path.line(to: NSPoint(x: bounds.maxX - 2, y: bounds.minY + CGFloat(offset)))
+            path.move(to: NSPoint(
+                x: bounds.maxX - inset - CGFloat(offset),
+                y: bounds.minY + inset
+            ))
+            path.line(to: NSPoint(
+                x: bounds.maxX - inset,
+                y: bounds.minY + inset + CGFloat(offset)
+            ))
         }
         path.stroke()
     }
@@ -697,7 +859,12 @@ final class WebPanelContainerView: NSView {
             if let host = hotHostViews[slotID] {
                 // Freeze the outgoing Hot viewport before another Slot changes
                 // the panel size. Only an active Hot host follows live resizing.
+                //
+                // Keep the independent host and WKWebView attached so Hot keeps
+                // its DOM/SPA/runtime state, but stop presenting an inactive Hot
+                // page. Reactivation unhides this exact same host in `showHot`.
                 host.autoresizingMask = []
+                host.isHidden = true
             }
         case .warm, .cold:
             hostedWebView?.removeFromSuperview()

@@ -24,10 +24,22 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var followPreferredSize: Bool
+    private(set) var isPinned = false
+    private var externalMouseMonitor: Any?
 
     var isVisible: Bool {
         panel.isVisible
     }
+
+    var selectedSlotName: String? {
+        tabStore.activeProfile?.name
+    }
+
+    var selectedSlotHomeURL: URL? {
+        tabStore.activeProfile?.homeURL
+    }
+
+    var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
 
     init(
         tabStore: TabStore,
@@ -66,7 +78,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleManualResizeEnded()
         }
         configureSlotInteractions()
+        rootView.externalControlZoneView.setPinned(isPinned)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidActivateApplication(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleExternalMouseDown()
+            }
+        }
 
+        webViewPool.onResidentSetChange = { [weak self] in
+            self?.synchronizeResidentIndicators()
+        }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
         }
@@ -76,6 +105,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func showFloatTabs() {
         capturePreviousApplication()
         positionPanelForCurrentScreens()
+        slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
         activateFloatTabs()
 
@@ -87,6 +117,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         quickURLOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
+        slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
 
         guard let previousApplication else {
             NSApp.deactivate()
@@ -101,6 +132,133 @@ final class PanelController: NSObject, NSWindowDelegate {
     func prepareForTermination() {
         persistPanelFrame()
     }
+
+    static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
+        panelIsVisible && !isPinned
+    }
+
+    private func togglePinnedState() {
+        isPinned.toggle()
+        rootView.externalControlZoneView.setPinned(isPinned)
+    }
+
+    static func shouldAutoHideForActivatedApplication(
+        panelIsVisible: Bool,
+        isPinned: Bool,
+        activatedProcessIdentifier: pid_t,
+        ownProcessIdentifier: pid_t
+    ) -> Bool {
+        panelIsVisible
+            && !isPinned
+            && activatedProcessIdentifier != ownProcessIdentifier
+    }
+
+    static func shouldAutoHideForExternalMouseDown(
+        panelIsVisible: Bool,
+        isPinned: Bool
+    ) -> Bool {
+        shouldAutoHide(panelIsVisible: panelIsVisible, isPinned: isPinned)
+    }
+
+    private func handleExternalMouseDown() {
+        guard Self.shouldAutoHideForExternalMouseDown(
+            panelIsVisible: panel.isVisible,
+            isPinned: isPinned
+        ) else {
+            return
+        }
+        autoHideAfterApplicationDeactivation()
+    }
+
+    @objc private func workspaceDidActivateApplication(_ notification: Notification) {
+        guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication,
+              Self.shouldAutoHideForActivatedApplication(
+                panelIsVisible: panel.isVisible,
+                isPinned: isPinned,
+                activatedProcessIdentifier: activatedApplication.processIdentifier,
+                ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier
+              ) else {
+            return
+        }
+        autoHideAfterApplicationDeactivation()
+    }
+
+    private func autoHideAfterApplicationDeactivation() {
+        // The user has already selected another application. Unlike the explicit
+        // global-toggle hide path, do not reactivate `previousApplication` here:
+        // doing so would steal focus from the application the user just chose.
+        quickURLOverlayView.dismiss()
+        persistPanelFrame()
+        panel.orderOut(nil)
+        slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
+        previousApplication = nil
+    }
+
+#if DEBUG
+    func benchmarkControlSnapshot() -> [String: Any] {
+        let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
+            [
+                "id": profile.id.uuidString,
+                "order": profile.order,
+                "name": profile.name,
+                "residency": profile.residencyPolicy.rawValue,
+                "background_media": profile.backgroundMediaPolicy.rawValue,
+                "website_mode": profile.renderingProfile.websiteMode.rawValue,
+                "viewport_width": Double(profile.renderingProfile.viewportWidth),
+                "viewport_height": Double(profile.renderingProfile.viewportHeight),
+                "zoom": Double(profile.renderingProfile.zoom),
+            ]
+        }
+        var snapshot: [String: Any] = [
+            "visible": isVisible,
+            "pinned": isPinned,
+            "profiles": profiles,
+            "resident_slot_count": webViewPool.count,
+            "resident_slot_ids": webViewPool.residentSlotIDs.map(\.uuidString).sorted(),
+            "pending_cold_release_count": slotLifecycleCoordinator.pendingColdReleaseCount,
+            "pending_warm_release_count": slotLifecycleCoordinator.pendingWarmReleaseCount,
+            "media_protected_slot_ids": slotLifecycleCoordinator.mediaProtectedIDs.map(\.uuidString).sorted(),
+            "hidden_active_grace_pending": slotLifecycleCoordinator.isHiddenActiveGracePending,
+        ]
+        snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
+
+        return snapshot
+    }
+
+    func benchmarkSetResourcePolicy(
+        slotIDStrings: [String],
+        residencyRawValue: String?,
+        backgroundMediaRawValue: String?
+    ) -> Bool {
+        let ids = slotIDStrings.compactMap(UUID.init(uuidString:))
+        guard ids.count == slotIDStrings.count, !ids.isEmpty else { return false }
+        let validIDs = Set(tabStore.profiles.map(\.id))
+        guard ids.allSatisfy(validIDs.contains) else { return false }
+
+        let residency = residencyRawValue.flatMap(SlotResidencyPolicy.init(rawValue:))
+        let media = backgroundMediaRawValue.flatMap(BackgroundMediaPolicy.init(rawValue:))
+        if residencyRawValue != nil, residency == nil { return false }
+        if backgroundMediaRawValue != nil, media == nil { return false }
+        guard residency != nil || media != nil else { return false }
+
+        for id in ids {
+            guard tabStore.updateResourcePolicy(
+                id: id,
+                residencyPolicy: residency,
+                backgroundMediaPolicy: media
+            ) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func benchmarkSelect(slotIDString: String) -> Bool {
+        guard let id = UUID(uuidString: slotIDString) else { return false }
+        return tabStore.select(id: id)
+    }
+#endif
 
     func handle(_ command: AppCommand) {
         switch command {
@@ -131,6 +289,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .returnHome:
             returnActiveSlotHome()
+
+        case .togglePin:
+            togglePinnedState()
         }
     }
 
@@ -192,6 +353,29 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onRemove = { [weak self] id in
             self?.presentRemoveConfirmation(id: id)
         }
+        rail.onSetWebsiteMode = { [weak self] id, mode in
+            guard let self,
+                  let profile = self.tabStore.profiles.first(where: { $0.id == id }) else { return }
+            _ = self.tabStore.updateRenderingProfile(
+                id: id,
+                renderingProfile: profile.renderingProfile.settingWebsiteMode(mode)
+            )
+        }
+        rail.onSetWindowSize = { [weak self] id, preset in
+            guard let self,
+                  let profile = self.tabStore.profiles.first(where: { $0.id == id }),
+                  let size = preset.size else { return }
+            _ = self.tabStore.updateRenderingProfile(
+                id: id,
+                renderingProfile: profile.renderingProfile.settingSimplePreset(preset)
+            )
+            if self.tabStore.activeTabID == id {
+                self.applyPreferredViewport(size)
+            }
+        }
+        rail.onSetZoom = { [weak self] id, zoom in
+            _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
+        }
         rail.onSetResidency = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy)
         }
@@ -204,6 +388,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onCurrentControls = { [weak self] in
             self?.presentCurrentWebAppControls()
         }
+        rail.onTogglePin = { [weak self] in
+            self?.togglePinnedState()
+        }
     }
 
     private func synchronizeSlotState() {
@@ -212,6 +399,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
+        synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
         guard let activeProfile = tabStore.activeProfile else {
@@ -221,6 +409,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             lastSynchronizedActiveID = nil
             lastSynchronizedActiveProfile = nil
             rootView.webPanelContainerView.showEmptyState()
+            synchronizeResidentIndicators()
+            onSelectedSlotPresentationChange?(nil, nil)
             return
         }
 
@@ -245,10 +435,16 @@ final class PanelController: NSObject, NSWindowDelegate {
         WebViewFactory.configureHiddenScrollers(in: webView)
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
+        synchronizeResidentIndicators()
+        onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
 
         if panel.isKeyWindow {
             _ = panel.makeFirstResponder(webView)
         }
+    }
+
+    private func synchronizeResidentIndicators() {
+        rootView.externalControlZoneView.setResidentSlotIDs(webViewPool.residentSlotIDs)
     }
 
     private func focusActiveWebViewIfAvailable() {

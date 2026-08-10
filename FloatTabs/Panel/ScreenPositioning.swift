@@ -7,21 +7,26 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
-    /// Keep movement acquisition primarily outside WebKit. The effective top /
-    /// bottom target is 16 pt deep: 12 pt outside the viewport and only 4 pt
-    /// inside it. The website right edge remains protected for scrollbars.
+    /// Keep movement acquisition discoverable at the visible page edge while
+    /// making the reliable in-page portion large enough for real pointer use.
+    /// The effective top / bottom target is 22 pt deep: 12 pt in the shell and
+    /// 10 pt inside the viewport. The website right edge remains protected.
     static let outerInteractionGutter: CGFloat = 12
-    static let innerMovementOverlap: CGFloat = 4
+    static let innerMovementOverlap: CGFloat = 10
     static let webRightInteractionSafety: CGFloat = 24
 
     /// The visible frame is deliberately much thinner than its hit target.
+    /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt
+    /// stroke this deliberately overlaps the Web edge by 0.75 pt, eliminating
+    /// subpixel / antialiasing hairline gaps between the rainbow frame and page.
     /// It is presentation-only and never participates in hit testing.
-    static let interactionBorderOutset: CGFloat = 2
     static let interactionBorderLineWidth: CGFloat = 2.5
+    static let interactionBorderOutset: CGFloat = 0.5
 
     /// Bottom-right remains the only resize affordance.
-    static let resizeHandleSize: CGFloat = 18
+    static let resizeHandleSize: CGFloat = 40
     static let resizeHandleInset: CGFloat = 0
+    static let resizeHandleVisualInset: CGFloat = 7
 
     static let webPanelCornerRadius: CGFloat = 14
     static let structuralBorderWidth: CGFloat = 0

@@ -241,6 +241,21 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testResidentSetChangeTracksActualLiveWebViews() {
+        let pool = makePool()
+        let profile = makeProfile(name: "Resident")
+        var snapshots: [Set<UUID>] = []
+        pool.onResidentSetChange = { snapshots.append(pool.residentSlotIDs) }
+
+        _ = pool.webView(for: profile)
+        XCTAssertEqual(pool.residentSlotIDs, [profile.id])
+        pool.release(slotID: profile.id)
+
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots.first, [profile.id])
+        XCTAssertEqual(snapshots.last, [])
+    }
+
     func testColdLifecycleReleasesAfterGracePeriod() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "Cold")
@@ -285,6 +300,13 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
+    func testResourceLifecycleDefaultTimingsMatchAcceptedContract() {
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmResidentLimit, 2)
+    }
+
     func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "Warm")
@@ -303,6 +325,172 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(pool.contains(slotID: profile.id))
+    }
+
+    func testWarmLifecycleReleasesAfterWarmTTL() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "WarmTTL")
+        profile.residencyPolicy = .warm
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            warmReleaseDelay: 0.01,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: nil)
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testWarmLRULimitKeepsOnlyTwoRecentInactiveResidents() {
+        let pool = makePool()
+        var profiles = ["A", "B", "C"].enumerated().map { index, name in
+            var profile = makeProfile(name: name)
+            profile.order = index
+            profile.residencyPolicy = .warm
+            return profile
+        }
+        for profile in profiles {
+            _ = pool.webView(for: profile)
+        }
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            warmReleaseDelay: 60,
+            warmResidentLimit: 2,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: nil)
+
+        for profile in profiles {
+            lifecycle.activate(profile: profile)
+            lifecycle.deactivate(profile: profile)
+        }
+
+        XCTAssertEqual(pool.count, 2)
+        XCTAssertFalse(pool.contains(slotID: profiles[0].id))
+        XCTAssertTrue(pool.contains(slotID: profiles[1].id))
+        XCTAssertTrue(pool.contains(slotID: profiles[2].id))
+    }
+
+    func testBackgroundAudioPlayingProtectsColdUntilPlaybackStopsThenStartsFreshGrace() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "MediaCold")
+        profile.residencyPolicy = .cold
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = pool.webView(for: profile)
+        var isPlaying = true
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.05,
+            mediaProtectionPollDelay: 0.005,
+            mediaPlayingQuery: { _, completion in completion(isPlaying) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: nil)
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(profile.id))
+
+        isPlaying = false
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id), "stopping playback starts a fresh Cold grace period")
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testHiddenSelectedColdGetsRecentActiveGraceBeforeColdRelease() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "HiddenCold")
+        profile.residencyPolicy = .cold
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            hiddenActiveGraceDelay: 0.02,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        try await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+        try await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testShowingPanelCancelsHiddenActiveEviction() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "HiddenCancel")
+        profile.residencyPolicy = .cold
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            hiddenActiveGraceDelay: 0.03,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+        try await Task.sleep(nanoseconds: 5_000_000)
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+
+        try await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
+    }
+
+    func testCriticalMemoryPressureEvictsInactiveWarmButNeverPlayingProtectedWarm() {
+        let pool = makePool()
+        var normal = makeProfile(name: "NormalWarm")
+        normal.residencyPolicy = .warm
+        var playing = makeProfile(name: "PlayingWarm")
+        playing.residencyPolicy = .warm
+        playing.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = pool.webView(for: normal)
+        _ = pool.webView(for: playing)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            warmReleaseDelay: 60,
+            mediaPlayingQuery: { slotID, completion in completion(slotID == playing.id) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: nil)
+        lifecycle.activate(profile: normal)
+        lifecycle.deactivate(profile: normal)
+        lifecycle.activate(profile: playing)
+        lifecycle.deactivate(profile: playing)
+
+        lifecycle.handleMemoryPressure(.critical)
+
+        XCTAssertFalse(pool.contains(slotID: normal.id))
+        XCTAssertTrue(pool.contains(slotID: playing.id))
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(playing.id))
     }
 
     func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() {
