@@ -52,21 +52,29 @@ jobs:
           PY
           bash /tmp/stage5d-apply.sh
 
-          # Keep the historical PanelRootView safety net intact: transparent pixels
-          # that are still inside the FloatTabs window must remain owned by FloatTabs.
-          # Returning nil for root-only hits reintroduces desktop click-through in the
-          # narrow shell gaps around move/resize controls.
           python3 <<'PY'
           from pathlib import Path
 
           source = Path('FloatTabs/Web/WebViewContainer.swift')
-          tests = Path('FloatTabsTests/ExternalShellTests.swift')
-          text = tests.read_text()
+          shell_tests = Path('FloatTabsTests/ExternalShellTests.swift')
+          text = shell_tests.read_text()
           old = '''        XCTAssertLessThan(path.boundingBoxOfPath.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBoxOfPath.maxX, web.maxX)\n'''
           new = '''        print("STAGE5D_TEST_BOUND path=\\(path.boundingBox) web=\\(web) active=\\(activeTab)")\n        XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)\n        XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)\n'''
           if text.count(old) != 1:
               raise SystemExit(f'expected one composite-outline assertion block, found {text.count(old)}')
-          tests.write_text(text.replace(old, new))
+          shell_tests.write_text(text.replace(old, new))
+
+          # Contract cleanup: the right outer gutter is intentionally not a move
+          # target, but it is still inside the FloatTabs shell. Treating nil as the
+          # only acceptable result conflates those contracts and reintroduces
+          # accidental desktop click-through in transparent shell gaps.
+          positioning_tests = Path('FloatTabsTests/ScreenPositioningTests.swift')
+          text = positioning_tests.read_text()
+          old = '''    func testRightOuterGutterIsNotMovementTarget() {\n        let root = PanelRootView()\n        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)\n        root.layoutSubtreeIfNeeded()\n\n        let rightGutterPoint = NSPoint(\n            x: root.bounds.maxX - PanelMetrics.outerInteractionGutter / 2,\n            y: root.bounds.midY\n        )\n\n        XCTAssertNil(root.hitTest(rightGutterPoint))\n    }\n'''
+          new = '''    func testRightOuterGutterIsSafeShellButNotMovementTarget() {\n        let root = PanelRootView()\n        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)\n        root.layoutSubtreeIfNeeded()\n\n        let rightGutterPoint = NSPoint(\n            x: root.bounds.maxX - PanelMetrics.outerInteractionGutter / 2,\n            y: root.bounds.midY\n        )\n\n        let hit = root.hitTest(rightGutterPoint)\n        XCTAssertFalse(hit is PanelPerimeterDragView)\n        XCTAssertTrue(hit === root)\n    }\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one stale right-gutter contract, found {text.count(old)}')
+          positioning_tests.write_text(text.replace(old, new))
 
           text = source.read_text()
           needle = '''        let joinTop = min(tabRect.maxY, webRect.maxY - webRadius - 1)\n        guard joinTop - joinBottom >= 8 else {\n'''
@@ -119,15 +127,11 @@ jobs:
             set -e
             mkdir -p .ci-diagnostics
             {
-              echo "Stage 5D focused failure diagnostics"
-              echo "===================================="
+              echo "Stage 5D focused XCTest failures"
+              echo "================================"
               echo "Run captured: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
               echo
-              echo "Failure contexts:"
-              grep -n -B 8 -A 14 -E "Test Case .* failed|XCTAssert|FloatTabsTests/.+error:|STAGE5D_|Assertion failed|failed -|error:" /tmp/stage5d-focused-tests.log || true
-              echo
-              echo "Final 360 log lines:"
-              tail -n 360 /tmp/stage5d-focused-tests.log
+              grep -n -E "/FloatTabsTests/[^:]+:[0-9]+: error:|Test Case '.*' failed|Test Suite '.*' failed|Executed [0-9]+ tests?, with [1-9][0-9]* failure|STAGE5D_" /tmp/stage5d-focused-tests.log || true
             } > .ci-diagnostics/stage5d-focused-failure.txt
 
             git restore FloatTabs FloatTabsTests docs || true
@@ -216,6 +220,7 @@ jobs:
             FloatTabs/UI/ExternalTabRail.swift \
             FloatTabs/UI/WebAppEditorController.swift \
             FloatTabsTests/ExternalShellTests.swift \
+            FloatTabsTests/ScreenPositioningTests.swift \
             docs/product/FloatTabs_Stage_5D_Interaction_Rendering_Refinement.md
           git diff --cached --check
           git commit -m "fix: polish Stage 5D interaction shell"
