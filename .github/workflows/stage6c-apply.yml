@@ -6,6 +6,7 @@ on:
       - feat/stage-6c-page-context-menu
     paths:
       - '.github/stage6c_patch.py'
+      - '.github/stage6c-trigger'
 
 permissions:
   contents: write
