@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/rc1_patch.py'
       - '.github/rc1_fix1.py'
+      - '.github/rc1_fix2.py'
       - '.github/rc1-trigger'
 
 permissions:
@@ -24,6 +25,7 @@ jobs:
         run: |
           python3 .github/rc1_patch.py
           python3 .github/rc1_fix1.py
+          python3 .github/rc1_fix2.py
 
       - name: Check diff
         run: git diff --check
