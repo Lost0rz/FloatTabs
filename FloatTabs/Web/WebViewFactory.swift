@@ -362,13 +362,29 @@ enum WebsiteLayoutViewport {
         return visibleWidth / targetWidth
     }
 
-    /// AppKit geometry remains exactly the visible size. CSS layout widening is
-    /// performed only by WKWebView.pageZoom, never by view transforms.
+    /// The visible FloatTabs frame and the website layout viewport are separate.
+    /// Desktop receives a real desktop-class WKWebView frame; its containing
+    /// AppKit host maps that logical frame uniformly into the visible panel.
+    /// Mobile deliberately remains 1:1 with the visible panel.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
     ) -> CGSize {
-        visibleSize
+        guard visibleSize.width > 0, visibleSize.height > 0 else {
+            return visibleSize
+        }
+
+        let logicalWidth = targetCSSWidth(
+            forVisibleWidth: visibleSize.width,
+            websiteMode: websiteMode
+        )
+        guard logicalWidth > 0 else { return visibleSize }
+
+        let scale = logicalWidth / visibleSize.width
+        return CGSize(
+            width: logicalWidth,
+            height: visibleSize.height * scale
+        )
     }
 }
 
@@ -526,10 +542,10 @@ enum WebViewFactory {
     """
 }
 
-/// Keeps WKWebView at the real visible AppKit size. Desktop mode uses WebKit's
-/// public pageZoom API to expose a desktop-class CSS width inside narrow FloatTabs
-/// windows while preserving native AppKit/WebKit event coordinates. Mobile stays
-/// strictly 1:1. User Zoom composes with the Desktop layout fit at this boundary.
+/// Keeps WKWebView page zoom independent from Website Mode. The AppKit host owns
+/// Desktop viewport fitting, so WebKit lays out at a real desktop-class frame and
+/// fonts/line-height are scaled uniformly with the rest of the rendered page.
+/// `pageZoom` is reserved for the user's explicit Zoom value only.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private(set) var websiteMode: WebsiteMode = .desktop
@@ -572,13 +588,9 @@ final class FloatTabsWebView: WKWebView {
     }
 
     private func refreshWebsiteLayoutScale() {
-        websiteLayoutScale = WebsiteLayoutViewport.fittingScale(
-            forVisibleWidth: frame.width,
-            websiteMode: websiteMode
-        )
-        let effectivePageZoom = websiteLayoutScale * userPageZoom
-        if abs(pageZoom - effectivePageZoom) > 0.0001 {
-            pageZoom = effectivePageZoom
+        websiteLayoutScale = 1
+        if abs(pageZoom - userPageZoom) > 0.0001 {
+            pageZoom = userPageZoom
         }
     }
 }
