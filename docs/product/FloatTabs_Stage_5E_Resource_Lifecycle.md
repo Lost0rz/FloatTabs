@@ -1,6 +1,6 @@
 # FloatTabs Stage 5E — Resource Lifecycle Contract
 
-Status: implementation + automated validation in progress on Draft PR #10.
+Status: accepted Stage 5 resource-lifecycle contract; final closeout validated on PR #10.
 
 Stage 5D interaction/rendering geometry remains frozen. Stage 5E changes only resource lifecycle semantics and the UI signals that expose those runtime semantics.
 
@@ -25,7 +25,7 @@ Active/selected is not itself a Residency policy. Any Slot being actively used g
 ### Warm
 
 - Inactive Warm remains resident as a short-lived cache.
-- Default inactive TTL: **180 seconds**.
+- Default inactive TTL: **120 seconds**.
 - At most **2 inactive non-media-protected Warm runtimes** remain resident; older Warm runtimes are evicted LRU-first.
 - macOS memory-pressure warning reduces inactive Warm cache toward one; critical pressure evicts all inactive non-protected Warm runtimes.
 - Reactivating before eviction cancels the inactive plan and reuses the same WKWebView.
@@ -69,7 +69,7 @@ Therefore Active, Hot inactive, Warm cached, Cold grace, and background-media-pr
 
 Selected/active remains represented by the existing Stage 5D tab geometry and animated rainbow outline.
 
-The menu-bar status item displays the current selected Web App name. This remains visible when the panel is hidden, so the user can see which Slot will be presented on the next summon.
+The menu-bar status item displays the current selected Web App favicon plus name. This remains visible when the panel is hidden, so the user can see which Slot will be presented on the next summon.
 
 ## 6. Source of truth
 
@@ -83,7 +83,7 @@ Benchmark/debug state exposes:
 - media-protected Slot IDs;
 - hidden-active grace pending state.
 
-These fields are the basis for the following long-duration resource benchmark phase.
+These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The final Warm TTL is intentionally compressed from 180 seconds to 120 seconds to favor memory efficiency while retaining a two-minute quick-return cache window.
 
 ## 7. Regression boundary
 

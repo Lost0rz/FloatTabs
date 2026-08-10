@@ -9,7 +9,7 @@ enum SlotMemoryPressureLevel {
 @MainActor
 final class SlotLifecycleCoordinator {
     static let defaultColdReleaseDelay: TimeInterval = 30
-    static let defaultWarmReleaseDelay: TimeInterval = 180
+    static let defaultWarmReleaseDelay: TimeInterval = 120
     static let defaultHiddenActiveGraceDelay: TimeInterval = 120
     static let defaultMediaProtectionPollDelay: TimeInterval = 10
     static let defaultWarmResidentLimit = 2

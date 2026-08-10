@@ -1,6 +1,6 @@
 # FloatTabs — Stage 5 Resource Benchmark Protocol
 
-> Status: measurement plan / Draft PR baseline
+> Status: Stage 5 benchmark closeout baseline; final resource-lifecycle tuning validated on PR #10
 > Base: `main` after Stage 5 Residency Policy merge (`f74500246e30514a3fd1ddb89ed5c64a903da575`)
 > Scope: measurement and tuning only; no change to accepted Hot / Warm / Cold semantics without separate evidence and review.
 
@@ -15,7 +15,7 @@ This PR must answer:
 3. How much memory is actually recovered by Cold after its 30-second grace period?
 4. Does inactive media or site polling create sustained CPU / Energy / Network activity?
 5. What switch-latency benefit does Hot provide for state-heavy pages such as a long ChatGPT conversation?
-6. Is any tuning justified for Hot-count warnings or the Cold grace period?
+6. Is any tuning justified for Hot-count warnings, Warm cache timing, or the Cold grace period?
 
 ## 2. Non-goals
 
@@ -203,7 +203,7 @@ Measurements may justify a follow-up change only if the evidence is repeatable a
 
 Potential outcomes:
 
-- keep current defaults unchanged;
+- keep or tune current defaults based on repeatable Real-Mac evidence;
 - add a non-blocking warning when many Hot Slots are selected;
 - tune the Cold grace period;
 - improve inactive scheduling without changing user-visible Residency semantics;

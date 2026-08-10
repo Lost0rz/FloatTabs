@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import floattabs_benchmark as core
 
 PRODUCT_COLD_GRACE_SECONDS = 30
-PRODUCT_WARM_TTL_SECONDS = 180
+PRODUCT_WARM_TTL_SECONDS = 120
 PRODUCT_HIDDEN_ACTIVE_GRACE_SECONDS = 120
 DEFAULT_INTERVAL = 2.0
 DEFAULT_STABLE_TAIL_SECONDS = 30.0
@@ -81,22 +81,22 @@ PRESETS: Dict[str, Preset] = {
         baseline=15,
         active=20,
         hot_inactive=60,
-        warm_inactive=210,
+        warm_inactive=150,
         cold_inactive=60,
         hidden_hot=60,
         hidden_warm=0,
         hidden_cold=170,
     ),
     # Full production lifecycle: crosses 30s Cold, 120s hidden-active grace,
-    # and 180s Warm TTL (120 + 180 for the hidden-selected Warm release).
+    # and 120s Warm TTL (120 + 120 for the hidden-selected Warm release).
     "full": Preset(
         baseline=20,
         active=25,
         hot_inactive=120,
-        warm_inactive=230,
+        warm_inactive=170,
         cold_inactive=75,
         hidden_hot=160,
-        hidden_warm=340,
+        hidden_warm=280,
         hidden_cold=190,
     ),
 }

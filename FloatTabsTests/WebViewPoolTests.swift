@@ -300,6 +300,13 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
+    func testResourceLifecycleDefaultTimingsMatchAcceptedContract() {
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmResidentLimit, 2)
+    }
+
     func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "Warm")

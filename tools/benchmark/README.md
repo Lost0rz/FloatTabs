@@ -58,11 +58,11 @@ The tool prompts for the test Slots, then automatically runs:
 2. Hot Active;
 3. Hot inactive;
 4. Warm Active;
-5. Warm inactive past the 180s Warm TTL;
+5. Warm inactive past the 120s Warm TTL;
 6. Cold Active;
 7. Cold inactive past the 30s Cold grace;
 8. Hot selected + panel hidden;
-9. Warm selected + panel hidden past 120s hidden grace + 180s Warm TTL;
+9. Warm selected + panel hidden past 120s hidden grace + 120s Warm TTL;
 10. Cold selected + panel hidden past 120s hidden grace + 30s Cold grace.
 
 The full preset takes roughly 19–21 minutes depending on Slot load waits and sampling overhead. The final 30 seconds of each phase are reported separately as the stable tail, and release phases also report pre-release RSS, post-release stable RSS, and reclaimed memory.
