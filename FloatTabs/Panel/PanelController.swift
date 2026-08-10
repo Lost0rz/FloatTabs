@@ -8,7 +8,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
     private let frameStore: PanelFrameStore
-    private let quickURLOverlayView = QuickURLOverlayView()
+    private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
@@ -110,7 +110,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs() {
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
@@ -205,7 +205,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // The user has already selected another application. Unlike the explicit
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
@@ -301,8 +301,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .resetZoom:
             setActiveZoom(1.0)
 
-        case .quickURL:
-            presentQuickURL()
+        case .addressBar:
+            presentAddressBar()
 
         case .returnHome:
             returnActiveSlotHome()
@@ -319,25 +319,25 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func configureTransientUI() {
-        quickURLOverlayView.translatesAutoresizingMaskIntoConstraints = false
+        addressOverlayView.translatesAutoresizingMaskIntoConstraints = false
         zoomHUDView.translatesAutoresizingMaskIntoConstraints = false
-        rootView.addSubview(quickURLOverlayView)
+        rootView.addSubview(addressOverlayView)
         rootView.addSubview(zoomHUDView)
 
         NSLayoutConstraint.activate([
-            quickURLOverlayView.leadingAnchor.constraint(
+            addressOverlayView.leadingAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.leadingAnchor,
                 constant: 22
             ),
-            quickURLOverlayView.trailingAnchor.constraint(
+            addressOverlayView.trailingAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.trailingAnchor,
                 constant: -22
             ),
-            quickURLOverlayView.topAnchor.constraint(
+            addressOverlayView.topAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.topAnchor,
                 constant: 22
             ),
-            quickURLOverlayView.heightAnchor.constraint(equalToConstant: 52),
+            addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
 
             zoomHUDView.centerXAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.centerXAnchor
@@ -350,10 +350,16 @@ final class PanelController: NSObject, NSWindowDelegate {
             zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
         ])
 
-        quickURLOverlayView.onCommit = { [weak self] rawValue in
-            self?.commitQuickURL(rawValue) ?? false
+        addressOverlayView.onCommit = { [weak self] rawValue in
+            self?.commitAddress(rawValue) ?? false
         }
-        quickURLOverlayView.onDismiss = { [weak self] in
+        addressOverlayView.onCopy = { [weak self] rawValue in
+            self?.copyAddressToPasteboard(rawValue) ?? false
+        }
+        addressOverlayView.onCreateWebApp = { [weak self] in
+            self?.presentDerivedWebAppFromCurrentPage()
+        }
+        addressOverlayView.onDismiss = { [weak self] in
             self?.focusActiveWebViewIfAvailable()
         }
     }
@@ -474,7 +480,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable() {
-        guard !quickURLOverlayView.isPresented,
+        guard !addressOverlayView.isPresented,
               let webView = rootView.webPanelContainerView.currentWebView else { return }
         _ = panel.makeFirstResponder(webView)
     }
@@ -601,25 +607,71 @@ final class PanelController: NSObject, NSWindowDelegate {
         zoomHUDView.show(zoom: normalized)
     }
 
-    private func presentQuickURL() {
-        guard let profile = tabStore.activeProfile else { return }
-        let url = profile.currentURL ?? profile.homeURL
-        quickURLOverlayView.present(url: url, in: panel)
+    private func presentAddressBar() {
+        guard let url = currentAddressURL() else { return }
+        addressOverlayView.present(url: url, in: panel)
     }
 
-    private func commitQuickURL(_ rawValue: String) -> Bool {
+    private func currentAddressURL() -> URL? {
+        if let webURL = rootView.webPanelContainerView.currentWebView?.url,
+           WebAppURL.isSafe(webURL) {
+            return webURL
+        }
+        guard let profile = tabStore.activeProfile else { return nil }
+        if let currentURL = profile.currentURL, WebAppURL.isSafe(currentURL) {
+            return currentURL
+        }
+        return WebAppURL.isSafe(profile.homeURL) ? profile.homeURL : nil
+    }
+
+    private func commitAddress(_ rawValue: String) -> Bool {
         guard let id = tabStore.activeTabID,
               let url = WebAppURL.normalized(from: rawValue) else {
             NSSound.beep()
-            quickURLOverlayView.markInvalid()
+            addressOverlayView.markInvalid()
             return false
         }
 
         tabStore.updateCurrentURL(id: id, url: url)
         webViewPool.navigate(slotID: id, to: url)
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         focusActiveWebViewIfAvailable()
         return true
+    }
+
+    private func copyAddressToPasteboard(_ rawValue: String) -> Bool {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(value, forType: .string)
+    }
+
+    private func presentDerivedWebAppFromCurrentPage() {
+        guard panel.attachedSheet == nil,
+              let source = tabStore.activeProfile,
+              let currentURL = currentAddressURL() else {
+            return
+        }
+
+        let sourceID = source.id
+        addressOverlayView.dismiss()
+        WebAppEditorController.presentDerivedAdd(
+            sourceProfile: source,
+            currentURL: currentURL,
+            attachedTo: panel
+        ) { [weak self] name in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.focusActiveWebViewIfAvailable() }
+                guard let name else { return }
+                _ = self.tabStore.addDerived(
+                    from: sourceID,
+                    name: name,
+                    homeURL: currentURL
+                )
+            }
+        }
     }
 
     private func handleManualResizeEnded() {
@@ -719,12 +771,17 @@ final class PanelController: NSObject, NSWindowDelegate {
 }
 
 @MainActor
-final class QuickURLOverlayView: NSVisualEffectView {
+final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onCommit: ((String) -> Bool)?
+    var onCopy: ((String) -> Bool)?
+    var onCreateWebApp: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let field = QuickURLTextField()
+    let field = NSTextField()
     private let icon = NSImageView()
+    private let copyButton = NSButton()
+    private let createButton = NSButton(title: "New App", target: nil, action: nil)
+    private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
 
     override init(frame frameRect: NSRect) {
@@ -739,30 +796,55 @@ final class QuickURLOverlayView: NSVisualEffectView {
         icon.image = NSImage(systemSymbolName: "link", accessibilityDescription: "URL")
         icon.contentTintColor = .secondaryLabelColor
         icon.translatesAutoresizingMaskIntoConstraints = false
+
         field.translatesAutoresizingMaskIntoConstraints = false
         field.font = .systemFont(ofSize: 14, weight: .medium)
         field.placeholderString = "https://example.com"
         field.focusRingType = .none
+        field.delegate = self
+
+        copyButton.image = NSImage(
+            systemSymbolName: "doc.on.doc",
+            accessibilityDescription: "Copy URL"
+        )
+        copyButton.toolTip = "Copy URL"
+        copyButton.bezelStyle = .inline
+        copyButton.isBordered = false
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+        copyButton.target = self
+        copyButton.action = #selector(copyPressed(_:))
+
+        createButton.toolTip = "Create a new Web App from the current page"
+        createButton.bezelStyle = .rounded
+        createButton.controlSize = .small
+        createButton.translatesAutoresizingMaskIntoConstraints = false
+        createButton.target = self
+        createButton.action = #selector(createPressed(_:))
 
         addSubview(icon)
         addSubview(field)
+        addSubview(copyButton)
+        addSubview(createButton)
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 14),
             icon.heightAnchor.constraint(equalToConstant: 14),
+
             field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            copyButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 8),
+            copyButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 26),
+            copyButton.heightAnchor.constraint(equalToConstant: 26),
+
+            createButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            createButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 66),
         ])
 
-        field.onCommit = { [weak self] value in
-            _ = self?.onCommit?(value)
-        }
-        field.onCancel = { [weak self] in
-            self?.dismiss()
-            self?.onDismiss?()
-        }
         isHidden = true
     }
 
@@ -776,6 +858,8 @@ final class QuickURLOverlayView: NSVisualEffectView {
     }
 
     func present(url: URL, in window: NSWindow) {
+        copyFeedbackWorkItem?.cancel()
+        restoreCopyIcon()
         field.textColor = .labelColor
         field.stringValue = url.absoluteString
         isHidden = false
@@ -785,6 +869,8 @@ final class QuickURLOverlayView: NSVisualEffectView {
     }
 
     func dismiss() {
+        copyFeedbackWorkItem?.cancel()
+        restoreCopyIcon()
         isHidden = true
         isPresented = false
         field.textColor = .labelColor
@@ -794,22 +880,49 @@ final class QuickURLOverlayView: NSVisualEffectView {
         field.textColor = .systemRed
         field.selectText(nil)
     }
-}
 
-@MainActor
-private final class QuickURLTextField: NSTextField {
-    var onCommit: ((String) -> Void)?
-    var onCancel: (() -> Void)?
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 36, 76:
-            onCommit?(stringValue)
-        case 53:
-            onCancel?()
-        default:
-            super.keyDown(with: event)
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        let commandName = NSStringFromSelector(commandSelector)
+        if commandSelector == #selector(NSResponder.insertNewline(_:))
+            || commandName == "insertNewlineIgnoringFieldEditor:" {
+            _ = onCommit?(field.stringValue)
+            return true
         }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            dismiss()
+            onDismiss?()
+            return true
+        }
+        return false
+    }
+
+    @objc private func copyPressed(_ sender: NSButton) {
+        guard onCopy?(field.stringValue) == true else { return }
+        copyFeedbackWorkItem?.cancel()
+        copyButton.image = NSImage(
+            systemSymbolName: "checkmark",
+            accessibilityDescription: "Copied"
+        )
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.restoreCopyIcon()
+        }
+        copyFeedbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
+    }
+
+    @objc private func createPressed(_ sender: NSButton) {
+        onCreateWebApp?()
+    }
+
+    private func restoreCopyIcon() {
+        copyButton.image = NSImage(
+            systemSymbolName: "doc.on.doc",
+            accessibilityDescription: "Copy URL"
+        )
     }
 }
 

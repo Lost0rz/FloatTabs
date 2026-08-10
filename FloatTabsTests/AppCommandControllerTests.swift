@@ -19,7 +19,7 @@ final class AppCommandControllerTests: XCTestCase {
         )
         XCTAssertEqual(
             AppCommandController.command(characters: "l", keyCode: 37, modifiers: [.command]),
-            .quickURL
+            .addressBar
         )
         XCTAssertEqual(
             AppCommandController.command(characters: "r", keyCode: 15, modifiers: [.command]),
@@ -75,7 +75,7 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertNil(AppCommandController.command(characters: "1", keyCode: 18, modifiers: [.command, .shift]))
     }
 
-    func testQuickURLDismissesForEscapeSecondCommandLAndOutsideClickOnly() {
+    func testAddressBarDismissesForEscapeSecondCommandLAndOutsideClickOnly() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),
             styleMask: [.borderless],
@@ -85,11 +85,11 @@ final class AppCommandControllerTests: XCTestCase {
         let host = NSView(frame: window.contentView?.bounds ?? .zero)
         window.contentView = host
 
-        let overlay = QuickURLOverlayView(frame: NSRect(x: 100, y: 300, width: 300, height: 52))
+        let overlay = AddressOverlayView(frame: NSRect(x: 100, y: 300, width: 300, height: 52))
         host.addSubview(overlay)
         overlay.present(url: URL(string: "https://example.com")!, in: window)
 
-        XCTAssertTrue(AppCommandController.presentedQuickURLOverlay(in: window) === overlay)
+        XCTAssertTrue(AppCommandController.presentedAddressOverlay(in: window) === overlay)
 
         let escape = NSEvent.keyEvent(
             with: .keyDown,
@@ -103,7 +103,7 @@ final class AppCommandControllerTests: XCTestCase {
             isARepeat: false,
             keyCode: 53
         )!
-        XCTAssertTrue(AppCommandController.shouldDismissQuickURL(for: escape, overlay: overlay))
+        XCTAssertTrue(AppCommandController.shouldDismissAddressBar(for: escape, overlay: overlay))
 
         let commandL = NSEvent.keyEvent(
             with: .keyDown,
@@ -117,7 +117,7 @@ final class AppCommandControllerTests: XCTestCase {
             isARepeat: false,
             keyCode: 37
         )!
-        XCTAssertTrue(AppCommandController.shouldDismissQuickURL(for: commandL, overlay: overlay))
+        XCTAssertTrue(AppCommandController.shouldDismissAddressBar(for: commandL, overlay: overlay))
 
         let insideClick = NSEvent.mouseEvent(
             with: .leftMouseDown,
@@ -130,7 +130,7 @@ final class AppCommandControllerTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         )!
-        XCTAssertFalse(AppCommandController.shouldDismissQuickURL(for: insideClick, overlay: overlay))
+        XCTAssertFalse(AppCommandController.shouldDismissAddressBar(for: insideClick, overlay: overlay))
 
         let outsideClick = NSEvent.mouseEvent(
             with: .leftMouseDown,
@@ -143,6 +143,26 @@ final class AppCommandControllerTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         )!
-        XCTAssertTrue(AppCommandController.shouldDismissQuickURL(for: outsideClick, overlay: overlay))
+        XCTAssertTrue(AppCommandController.shouldDismissAddressBar(for: outsideClick, overlay: overlay))
+    }
+
+    func testAddressOverlayFieldEditorReturnCommitsEnteredValue() {
+        let overlay = AddressOverlayView()
+        let editor = NSTextView()
+        var committed: String?
+        overlay.onCommit = { value in
+            committed = value
+            return true
+        }
+        overlay.field.stringValue = "example.com/project"
+
+        XCTAssertTrue(
+            overlay.control(
+                overlay.field,
+                textView: editor,
+                doCommandBy: #selector(NSResponder.insertNewline(_:))
+            )
+        )
+        XCTAssertEqual(committed, "example.com/project")
     }
 }

@@ -8,7 +8,7 @@ enum AppCommand: Equatable {
     case zoomIn
     case zoomOut
     case resetZoom
-    case quickURL
+    case addressBar
     case returnHome
     case reload
     case settings
@@ -33,8 +33,8 @@ final class AppCommandController {
         ) { [weak self] event in
             guard let self else { return event }
 
-            if let overlay = Self.presentedQuickURLOverlay(in: event.window ?? NSApp.keyWindow),
-               Self.shouldDismissQuickURL(for: event, overlay: overlay) {
+            if let overlay = Self.presentedAddressOverlay(in: event.window ?? NSApp.keyWindow),
+               Self.shouldDismissAddressBar(for: event, overlay: overlay) {
                 overlay.dismiss()
                 overlay.onDismiss?()
 
@@ -88,7 +88,7 @@ final class AppCommandController {
             case "t":
                 return .addWebApp
             case "l":
-                return .quickURL
+                return .addressBar
             case "r":
                 return .reload
             case ",":
@@ -138,20 +138,20 @@ final class AppCommandController {
         return nil
     }
 
-    static func presentedQuickURLOverlay(in window: NSWindow?) -> QuickURLOverlayView? {
+    static func presentedAddressOverlay(in window: NSWindow?) -> AddressOverlayView? {
         guard let contentView = window?.contentView else { return nil }
-        return firstPresentedQuickURLOverlay(in: contentView)
+        return firstPresentedAddressOverlay(in: contentView)
     }
 
-    static func shouldDismissQuickURL(
+    static func shouldDismissAddressBar(
         for event: NSEvent,
-        overlay: QuickURLOverlayView
+        overlay: AddressOverlayView
     ) -> Bool {
         if event.type == .keyDown {
             if event.keyCode == 53 { // Escape
                 return true
             }
-            return command(for: event) == .quickURL
+            return command(for: event) == .addressBar
         }
 
         guard event.type == .leftMouseDown
@@ -165,13 +165,13 @@ final class AppCommandController {
         return !overlay.frame.contains(point)
     }
 
-    private static func firstPresentedQuickURLOverlay(in view: NSView) -> QuickURLOverlayView? {
-        if let overlay = view as? QuickURLOverlayView, overlay.isPresented {
+    private static func firstPresentedAddressOverlay(in view: NSView) -> AddressOverlayView? {
+        if let overlay = view as? AddressOverlayView, overlay.isPresented {
             return overlay
         }
 
         for subview in view.subviews {
-            if let found = firstPresentedQuickURLOverlay(in: subview) {
+            if let found = firstPresentedAddressOverlay(in: subview) {
                 return found
             }
         }

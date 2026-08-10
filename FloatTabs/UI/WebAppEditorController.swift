@@ -24,6 +24,66 @@ enum WebAppEditorController {
         )
     }
 
+    static func presentDerivedAdd(
+        sourceProfile: WebAppProfile,
+        currentURL: URL,
+        attachedTo window: NSWindow,
+        completion: @escaping (String?) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "Create Web App from Current Page"
+        alert.informativeText = "Creates a new Web App using this page as its Home URL and copies the current Web App's rendering and resource settings."
+        alert.addButton(withTitle: "Create Web App")
+        alert.addButton(withTitle: "Cancel")
+
+        let nameField = NSTextField(string: "")
+        nameField.placeholderString = "New Web App name"
+        nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
+
+        let urlField = NSTextField(labelWithString: currentURL.absoluteString)
+        urlField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        urlField.textColor = .secondaryLabelColor
+        urlField.isSelectable = true
+        urlField.cell?.lineBreakMode = .byTruncatingMiddle
+        urlField.widthAnchor.constraint(equalToConstant: 400).isActive = true
+
+        let inherited = NSTextField(
+            labelWithString: "Settings copied from \(sourceProfile.name)"
+        )
+        inherited.font = .systemFont(ofSize: 11, weight: .regular)
+        inherited.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [
+            makeLabel("Name"),
+            nameField,
+            makeLabel("Current Page URL"),
+            urlField,
+            inherited,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        stack.setFrameSize(NSSize(width: 400, height: 125))
+        alert.accessoryView = stack
+
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn else {
+                completion(nil)
+                return
+            }
+
+            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                NSSound.beep()
+                completion(nil)
+                return
+            }
+
+            completion(name)
+        }
+    }
+
     static func presentEdit(
         profile: WebAppProfile,
         attachedTo window: NSWindow,

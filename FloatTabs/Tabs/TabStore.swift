@@ -87,6 +87,40 @@ final class TabStore {
     }
 
     @discardableResult
+    func addDerived(
+        from sourceID: UUID,
+        name: String,
+        homeURL: URL,
+        now: Date = Date()
+    ) -> WebAppProfile? {
+        guard WebAppURL.isSafe(homeURL),
+              let source = profiles.first(where: { $0.id == sourceID }) else {
+            return nil
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return nil }
+
+        let profile = WebAppProfile(
+            order: orderedProfiles.count,
+            name: trimmedName,
+            homeURL: homeURL,
+            currentURL: homeURL,
+            renderingProfile: source.renderingProfile.normalized(),
+            residencyPolicy: source.residencyPolicy,
+            backgroundMediaPolicy: source.backgroundMediaPolicy,
+            createdAt: now,
+            lastUsedAt: now
+        )
+
+        profiles.append(profile)
+        normalizeInPlace()
+        activeTabID = profile.id
+        persistAndNotify()
+        return profiles.first(where: { $0.id == profile.id })
+    }
+
+    @discardableResult
     func update(
         id: UUID,
         name: String,

@@ -114,6 +114,77 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(restored.currentURL, urlB)
     }
 
+    func testDerivedWebAppCopiesSourceConfigurationAndUsesCurrentPageAsHome() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let rendering = WebRenderingProfile(
+            websiteMode: .mobile,
+            browserIdentity: .androidChrome,
+            customUserAgent: nil,
+            sizePreset: .small,
+            devicePresetID: nil,
+            orientation: .landscape,
+            viewportWidth: 780,
+            viewportHeight: 390,
+            zoom: 1.25
+        )
+        let source = store.add(
+            name: "Source",
+            homeURL: urlA,
+            renderingProfile: rendering
+        )!
+        XCTAssertTrue(
+            store.updateResourcePolicy(
+                id: source.id,
+                residencyPolicy: .hot,
+                backgroundMediaPolicy: .allowBackgroundAudio
+            )
+        )
+
+        let derived = store.addDerived(
+            from: source.id,
+            name: "Project",
+            homeURL: urlC,
+            now: Date(timeIntervalSince1970: 999)
+        )!
+
+        let updatedSource = try! XCTUnwrap(store.profiles.first(where: { $0.id == source.id }))
+        XCTAssertNotEqual(derived.id, source.id)
+        XCTAssertEqual(derived.name, "Project")
+        XCTAssertEqual(derived.homeURL, urlC)
+        XCTAssertEqual(derived.currentURL, urlC)
+        XCTAssertEqual(derived.renderingProfile, updatedSource.renderingProfile)
+        XCTAssertEqual(derived.residencyPolicy, .hot)
+        XCTAssertEqual(derived.backgroundMediaPolicy, .allowBackgroundAudio)
+        XCTAssertEqual(store.activeTabID, derived.id)
+        XCTAssertEqual(store.orderedProfiles.map(\.order), [0, 1])
+
+        let relaunched = TabStore(repository: repository)
+        let restored = try! XCTUnwrap(relaunched.profiles.first(where: { $0.id == derived.id }))
+        XCTAssertEqual(restored.homeURL, urlC)
+        XCTAssertEqual(restored.currentURL, urlC)
+        XCTAssertEqual(restored.renderingProfile, updatedSource.renderingProfile)
+        XCTAssertEqual(restored.residencyPolicy, .hot)
+        XCTAssertEqual(restored.backgroundMediaPolicy, .allowBackgroundAudio)
+    }
+
+    func testDerivedWebAppRejectsInvalidSourceNameOrURL() {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let source = store.add(name: "Source", homeURL: urlA)!
+
+        XCTAssertNil(store.addDerived(from: UUID(), name: "Missing", homeURL: urlB))
+        XCTAssertNil(store.addDerived(from: source.id, name: "   ", homeURL: urlB))
+        XCTAssertNil(
+            store.addDerived(
+                from: source.id,
+                name: "Unsafe",
+                homeURL: URL(string: "file:///tmp/not-safe")!
+            )
+        )
+        XCTAssertEqual(store.profiles.count, 1)
+        XCTAssertEqual(store.activeTabID, source.id)
+    }
+
     func testActiveSelectionUpdatesIdentity() {
         let store = TabStore(repository: MemoryProfileRepository())
         let first = store.add(name: "A", homeURL: urlA)!
