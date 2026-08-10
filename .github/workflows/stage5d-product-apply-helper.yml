@@ -108,7 +108,7 @@ jobs:
             -only-testing:FloatTabsTests/ExternalShellTests \
             test
 
-      - name: Full unit tests with exact failure diagnostics
+      - name: Full unit tests with persisted failure diagnostics
         shell: bash
         run: |
           set +e
@@ -124,52 +124,24 @@ jobs:
           status=${PIPESTATUS[0]}
 
           if [ "$status" -ne 0 ]; then
+            set -e
             mkdir -p .ci-diagnostics
-            python3 <<'PY'
-          from pathlib import Path
+            {
+              echo "Stage 5D full-suite failure diagnostics"
+              echo "======================================="
+              echo "Run captured: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+              echo
+              echo "Focused failure contexts:"
+              grep -n -B 6 -A 8 -E "Test Case .* failed|XCTAssert|FloatTabsTests/.+error:|STAGE5D_|Assertion failed|failed -" /tmp/stage5d-full-tests.log || true
+              echo
+              echo "Final 260 log lines:"
+              tail -n 260 /tmp/stage5d-full-tests.log
+            } > .ci-diagnostics/stage5d-product-apply-failure.txt
 
-          lines = Path('/tmp/stage5d-full-tests.log').read_text(errors='replace').splitlines()
-          hit_indexes = []
-          for i, line in enumerate(lines):
-              lowered = line.lower()
-              if (
-                  ('test case' in lowered and ' failed ' in lowered)
-                  or ('xctassert' in lowered)
-                  or ('floattabstests/' in lowered and 'error:' in lowered)
-                  or ('externalShellTests.swift:' in line and 'error:' in lowered)
-                  or (' error: ' in lowered and 'sandbox restriction' not in lowered)
-                  or ('stage5d_' in lowered)
-              ):
-                  hit_indexes.append(i)
-
-          selected = []
-          for i in hit_indexes:
-              selected.extend(lines[max(0, i - 5):min(len(lines), i + 6)])
-
-          # If xcodebuild reported a failure but the narrow matcher missed it,
-          # retain the last 220 lines rather than losing the evidence again.
-          if not selected:
-              selected = lines[-220:]
-
-          deduped = []
-          for line in selected:
-              if not deduped or deduped[-1] != line:
-                  deduped.append(line)
-
-          Path('.ci-diagnostics/stage5d-full-suite-failure.txt').write_text(
-              '\n'.join([
-                  'Stage 5D full-suite failure diagnostics',
-                  '=======================================',
-                  '',
-                  *deduped,
-                  '',
-              ])
-          )
-          PY
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .ci-diagnostics/stage5d-full-suite-failure.txt
-            git commit -m "ci: persist Stage 5D full-suite failure"
+            git add .ci-diagnostics/stage5d-product-apply-failure.txt
+            git commit -m "ci: persist exact Stage 5D full-suite failure"
             git push origin HEAD:perf/stage-5-resource-benchmark
           fi
 
