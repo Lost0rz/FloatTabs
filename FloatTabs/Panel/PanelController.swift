@@ -90,13 +90,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         webViewPool.onResidentSetChange = { [weak self] in
-        self?.synchronizeResidentIndicators()
-    }
-    tabStore.onChange = { [weak self] in
-        self?.synchronizeSlotState()
-    }
-    synchronizeSlotState()
-
+            self?.synchronizeResidentIndicators()
+        }
+        tabStore.onChange = { [weak self] in
+            self?.synchronizeSlotState()
+        }
+        synchronizeSlotState()
     }
 
     func showFloatTabs() {
@@ -208,17 +207,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             ]
         }
         var snapshot: [String: Any] = [
-        "visible": isVisible,
-        "pinned": isPinned,
-        "profiles": profiles,
-        "resident_slot_count": webViewPool.count,
-        "resident_slot_ids": webViewPool.residentSlotIDs.map(\.uuidString).sorted(),
-        "pending_cold_release_count": slotLifecycleCoordinator.pendingColdReleaseCount,
-        "pending_warm_release_count": slotLifecycleCoordinator.pendingWarmReleaseCount,
-        "media_protected_slot_ids": slotLifecycleCoordinator.mediaProtectedIDs.map(\.uuidString).sorted(),
-        "hidden_active_grace_pending": slotLifecycleCoordinator.isHiddenActiveGracePending,
-    ]
-    snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
+            "visible": isVisible,
+            "pinned": isPinned,
+            "profiles": profiles,
+            "resident_slot_count": webViewPool.count,
+            "resident_slot_ids": webViewPool.residentSlotIDs.map(\.uuidString).sorted(),
+            "pending_cold_release_count": slotLifecycleCoordinator.pendingColdReleaseCount,
+            "pending_warm_release_count": slotLifecycleCoordinator.pendingWarmReleaseCount,
+            "media_protected_slot_ids": slotLifecycleCoordinator.mediaProtectedIDs.map(\.uuidString).sorted(),
+            "hidden_active_grace_pending": slotLifecycleCoordinator.isHiddenActiveGracePending,
+        ]
+        snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
 
         return snapshot
     }
@@ -393,24 +392,22 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func synchronizeSlotState() {
         let orderedProfiles = tabStore.orderedProfiles
         rootView.externalControlZoneView.apply(
-        profiles: orderedProfiles,
-        activeTabID: tabStore.activeTabID
-    )
-    synchronizeResidentIndicators()
-    slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
-
+            profiles: orderedProfiles,
+            activeTabID: tabStore.activeTabID
+        )
+        synchronizeResidentIndicators()
+        slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
         guard let activeProfile = tabStore.activeProfile else {
             if let previous = lastSynchronizedActiveProfile {
                 slotLifecycleCoordinator.deactivate(profile: previous)
             }
             lastSynchronizedActiveID = nil
-        lastSynchronizedActiveProfile = nil
-        rootView.webPanelContainerView.showEmptyState()
-        synchronizeResidentIndicators()
-        onSelectedSlotNameChange?(nil)
-        return
-
+            lastSynchronizedActiveProfile = nil
+            rootView.webPanelContainerView.showEmptyState()
+            synchronizeResidentIndicators()
+            onSelectedSlotNameChange?(nil)
+            return
         }
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
