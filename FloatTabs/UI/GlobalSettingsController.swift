@@ -94,11 +94,10 @@ private final class AppearanceSettingsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = Self.titleLabel("Interface Appearance")
         let detail = Self.detailLabel(
-            "Controls FloatTabs chrome only. Website content is not restyled or injected."
+            "Changes FloatTabs' native appearance. FloatTabs injects no page CSS; websites may still respond to WebKit's effective light/dark appearance."
         )
         appearanceControl.segmentStyle = .rounded
         appearanceControl.target = self

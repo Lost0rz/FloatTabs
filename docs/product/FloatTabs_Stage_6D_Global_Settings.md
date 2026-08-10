@@ -1,6 +1,6 @@
 # FloatTabs Stage 6D — Global Settings Contract
 
-Status: implementation plan for stacked Draft PR.
+Status: implemented and automated-validated; awaiting Real-Mac acceptance.
 
 Base: `feat/stage-6c-page-context-menu @ 545e99180afb35d52bb995aa5d838b6a4006af4e`.
 
@@ -65,9 +65,9 @@ Interface Appearance
 Rules:
 
 - stored in `UserDefaults` through a dedicated preferences store;
-- applied immediately to FloatTabs-owned AppKit windows;
-- restored on next launch;
-- does not inject CSS or change website/WKWebView content appearance;
+- applied immediately as FloatTabs' application appearance and restored on next launch;
+- FloatTabs does not inject page CSS for this preference;
+- a website may still react to WebKit/macOS effective appearance such as `prefers-color-scheme`;
 - does not change frozen shell geometry.
 
 Accent customization is not required in this patch; the existing visual seam remains available for later Appearance work.
@@ -216,7 +216,7 @@ Real-Mac acceptance:
 2. Gear works with and without an active Slot;
 3. Menu Bar → Settings opens the same window;
 4. `⌘,` opens/raises the same window;
-5. Appearance System/Light/Dark changes FloatTabs chrome immediately and persists after relaunch;
+5. Appearance System/Light/Dark updates FloatTabs native chrome immediately, persists after relaunch, and does not inject page CSS; sites may follow WebKit effective appearance;
 6. Global Show/Hide recorder starts at the existing `⌘`` binding, can be changed, and the new binding works globally;
 7. old binding stops triggering after replacement;
 8. page shortcuts still work and remain unchanged;

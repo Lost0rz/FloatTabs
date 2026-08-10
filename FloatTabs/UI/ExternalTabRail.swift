@@ -1346,6 +1346,11 @@ final class GlobalSettingsControl: NSView {
         onActivate?()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
     private func updateAppearance() {
         let fraction: CGFloat = isHovered ? 0.10 : 0.02
         layer?.backgroundColor = NSColor.controlBackgroundColor

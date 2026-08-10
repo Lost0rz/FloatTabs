@@ -920,11 +920,12 @@ Rules：
 
 # 17. Global Settings
 
-Global Settings 是软件级设置，不属于 `⚙`。
+Global Settings 是软件级设置，`⚙` 是其固定入口之一。
 
 Entry：
 
 ```text
+⚙
 Menu Bar → Settings…
 ⌘,
 ```
@@ -939,7 +940,7 @@ Account & Language
 
 Stage 6D implements：
 
-- Appearance: System / Light / Dark，UserDefaults 持久化并即时应用于 FloatTabs chrome；
+- Appearance: System / Light / Dark，UserDefaults 持久化并即时应用于 FloatTabs native chrome；FloatTabs 不注入页面 CSS，但网页可按 WebKit/macOS effective appearance 响应 `prefers-color-scheme`；
 - Shortcuts: Global Show/Hide 使用 KeyboardShortcuts 原生 recorder，现有 `⌘`` 作为迁移初始值；
 - fixed page shortcuts 只读展示，不改语义；
 - Account & Language 只陈述真实 V1 local-only / no cloud account / no per-app language override 边界，不展示假的 Sign In、Sync 或 Language control。
@@ -991,16 +992,16 @@ FloatTabs/
 │
 ├── Persistence/
 │   ├── ProfileRepository.swift
-│   └── PreferencesStore.swift
+│   └── AppPreferencesStore.swift
 │
 ├── UI/
 │   ├── FloatingRootView.swift
 │   ├── ExternalTabRail.swift
-│   ├── CurrentWebAppControls.swift
+│   ├── GlobalSettingsController.swift
 │   ├── URLOverlay.swift
 │   ├── ZoomHUD.swift
 │   ├── WebAppEditorView.swift
-│   └── SettingsView.swift
+│   └── EmptyWebAppView.swift
 │
 ├── Resources/
 └── Tests/
@@ -1036,7 +1037,7 @@ Host app：
 Warm experience：
 
 - shortcut → panel visible 感知即时；
-- warm Slot switch 不 network reload；
+- resident Warm Slot switch 不 network reload；已 eviction 的 Warm 按 Current URL / persistent website data 重建；
 - no white flash where avoidable。
 
 Background：
