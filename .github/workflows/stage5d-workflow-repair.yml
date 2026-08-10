@@ -1,0 +1,41 @@
+name: Stage 5D Workflow Repair
+
+on:
+  push:
+    branches:
+      - perf/stage-5-resource-benchmark
+    paths:
+      - '.github/workflows/stage5d-workflow-repair.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: perf/stage-5-resource-benchmark
+          fetch-depth: 0
+
+      - name: Repair workflow and remove repair helper
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/stage5d-interaction-polish-apply.yml')
+          text = p.read_text()
+          old = 'return Self.isDraggable(point: localPoint, in: bounds) ? self : nil'
+          new = 'return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one bad call, found {text.count(old)}')
+          p.write_text(text.replace(old, new))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/stage5d-workflow-repair.yml
+          git add .github/workflows/stage5d-interaction-polish-apply.yml
+          git diff --cached --check
+          git commit -m "ci: fix Stage 5D polish apply"
+          git push origin HEAD:perf/stage-5-resource-benchmark
