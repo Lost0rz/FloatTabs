@@ -41,6 +41,8 @@ final class WebViewPool {
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
 
+    var onResidentSetChange: (() -> Void)?
+
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
     private let isSlotActive: IsSlotActiveHandler
@@ -128,8 +130,11 @@ final class WebViewPool {
         appliedRenderingProfiles.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
-        webViews[slotID]?.removeFromSuperview()
-        webViews.removeValue(forKey: slotID)
+        let removed = webViews.removeValue(forKey: slotID)
+        removed?.removeFromSuperview()
+        if removed != nil {
+            onResidentSetChange?()
+        }
     }
 
     /// Pauses currently playing media without putting the page into WebKit's
@@ -140,12 +145,26 @@ final class WebViewPool {
         webView.pauseAllMediaPlayback(completionHandler: nil)
     }
 
+    func isMediaPlaying(slotID: UUID, completion: @escaping (Bool) -> Void) {
+        guard let webView = webViews[slotID] else {
+            completion(false)
+            return
+        }
+        webView.requestMediaPlaybackState { state in
+            completion(state == .playing)
+        }
+    }
+
     func contains(slotID: UUID) -> Bool {
         webViews[slotID] != nil
     }
 
     var count: Int {
         webViews.count
+    }
+
+    var residentSlotIDs: Set<UUID> {
+        Set(webViews.keys)
     }
 
     static func recoveryDisposition(isActive: Bool) -> WebContentRecoveryDisposition {
@@ -232,6 +251,7 @@ final class WebViewPool {
         )
         webView.uiDelegate = popupCoordinator
 
+        let wasResident = webViews[profile.id] != nil
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
@@ -240,6 +260,9 @@ final class WebViewPool {
         appliedRenderingProfiles[profile.id] = runtimeRendering
         lastKnownURLs[profile.id] = navigationURL
         deferredReloadSlotIDs.remove(profile.id)
+        if !wasResident {
+            onResidentSetChange?()
+        }
 
         let request = URLRequest(
             url: navigationURL,

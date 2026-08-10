@@ -22,11 +22,22 @@ final class StatusItemController: NSObject {
         self.onToggle = onToggle
         self.isVisible = isVisible
         self.onQuit = onQuit
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         super.init()
         configureStatusItem()
         configureMenu()
+    }
+
+    static func displayTitle(for activeWebAppName: String?) -> String {
+        let value = activeWebAppName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "FloatTabs" : value
+    }
+
+    func setActiveWebAppName(_ name: String?) {
+        guard let button = statusItem.button else { return }
+        button.title = Self.displayTitle(for: name)
+        button.toolTip = name.map { "Current Web App · \($0)" } ?? "FloatTabs"
     }
 
     private func configureStatusItem() {
@@ -38,6 +49,8 @@ final class StatusItemController: NSObject {
         )
         image?.isTemplate = true
         button.image = image
+        button.imagePosition = .imageLeading
+        button.title = Self.displayTitle(for: nil)
         button.target = self
         button.action = #selector(statusItemClicked(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])

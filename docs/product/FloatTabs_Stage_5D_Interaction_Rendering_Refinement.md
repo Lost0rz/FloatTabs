@@ -27,7 +27,7 @@ Stage 5D interaction, rendering, resize, movement, tab-rail and editor behavior 
 - The rainbow outline centerline sits 0.5 pt outside the Web surface with a 2.5 pt stroke, deliberately overlapping the Web edge so no transparent antialiasing hairline remains.
 - Inactive tabs stop at the animated outline seam rather than protruding through it.
 - Add, Settings and Pin are treated as members of the same rail: 40 × 32 pt resting geometry, 76 pt hover width, the same non-active outline seam, and a flat page-side edge instead of an independent fully rounded pill.
-- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. The active favicon remains full color; inactive favicons render grayscale/neutral. No third-party favicon service or site-specific mapping is used.
+- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. **Stage 5E intentionally supersedes only the color semantic:** full color now means a live resident WKWebView exists; grayscale means the runtime has been released. Active/selected state remains expressed by the frozen tab/rainbow geometry. No third-party favicon service or site-specific mapping is used.
 
 ## Tab context menu / editor — FROZEN
 Common controls are available directly from the Web App tab and persist through `TabStore`:

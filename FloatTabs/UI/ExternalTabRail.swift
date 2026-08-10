@@ -79,6 +79,7 @@ final class ExternalControlZoneView: NSView {
 
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
+    private var residentSlotIDs = Set<UUID>()
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
@@ -178,7 +179,11 @@ final class ExternalControlZoneView: NSView {
 
         for profile in self.profiles {
             let view = tabViews[profile.id] ?? makeTabView(for: profile.id)
-            view.update(profile: profile, isActive: profile.id == activeTabID)
+            view.update(
+                profile: profile,
+                isActive: profile.id == activeTabID,
+                isResident: residentSlotIDs.contains(profile.id)
+            )
         }
 
         currentControls.isEnabled = activeTabID != nil
@@ -192,6 +197,13 @@ final class ExternalControlZoneView: NSView {
 
     func setPinned(_ isPinned: Bool) {
         pinControl.setPinned(isPinned)
+    }
+
+    func setResidentSlotIDs(_ slotIDs: Set<UUID>) {
+        residentSlotIDs = slotIDs
+        for (slotID, tab) in tabViews {
+            tab.setResident(slotIDs.contains(slotID))
+        }
     }
 
     override func layout() {
@@ -526,6 +538,7 @@ final class ExternalWebAppTabView: NSView {
     private let shapeLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
+    private var isResident = false
     private var isHovered = false
     private var dockInfluence: CGFloat = 0
     private var mouseDownLocation: NSPoint?
@@ -548,6 +561,7 @@ final class ExternalWebAppTabView: NSView {
 
     var isShowingLabel: Bool { isHovered }
     var isActiveTab: Bool { isActive }
+    var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
 
     init(slotID: UUID) {
@@ -611,15 +625,23 @@ final class ExternalWebAppTabView: NSView {
         updateAppearance()
     }
 
-    func update(profile: WebAppProfile, isActive: Bool) {
+    func setResident(_ resident: Bool) {
+        guard isResident != resident else { return }
+        isResident = resident
+        updateAppearance()
+        updateRuntimeToolTip()
+    }
+
+    func update(profile: WebAppProfile, isActive: Bool, isResident: Bool) {
         self.isActive = isActive
+        self.isResident = isResident
         label.stringValue = profile.name
-        toolTip = profile.name
         renderingProfile = profile.renderingProfile.normalized()
         residencyPolicy = profile.residencyPolicy
         backgroundMediaPolicy = profile.backgroundMediaPolicy
         loadFaviconIfNeeded(from: profile.homeURL)
         updateAppearance()
+        updateRuntimeToolTip()
     }
 
     override func updateTrackingAreas() {
@@ -856,7 +878,9 @@ final class ExternalWebAppTabView: NSView {
 
     private func applyIconAppearance() {
         let base = sourceIcon ?? Self.fallbackIcon()
-        if isActive {
+        if isResident {
+            // Runtime truth owns color: active, Hot, Warm cache and Cold grace
+            // all stay full color while a live WKWebView still exists.
             iconView.image = base
             iconView.alphaValue = 1
             iconView.contentTintColor = base?.isTemplate == true ? .labelColor : nil
@@ -865,13 +889,16 @@ final class ExternalWebAppTabView: NSView {
                 iconView.image = base
                 iconView.contentTintColor = .tertiaryLabelColor
             } else {
-                // Never leave a full-color inactive favicon above the rainbow frame.
-                // If conversion ever fails, fall back to the neutral system globe.
                 iconView.image = grayscaleIcon ?? Self.fallbackIcon()
                 iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
             }
             iconView.alphaValue = isHovered ? 0.74 : 0.56
         }
+    }
+
+    private func updateRuntimeToolTip() {
+        let state = isResident ? "Open" : "Released"
+        toolTip = "\(label.stringValue) · \(state)"
     }
 
     private func updateShape() {

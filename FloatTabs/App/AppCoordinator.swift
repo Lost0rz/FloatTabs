@@ -32,12 +32,16 @@ final class AppCoordinator {
 
     func start() {
         statusItemController = StatusItemController(
-            onToggle: { [weak self] in self?.toggleFloatTabs() },
-            isVisible: { [weak self] in self?.panelController.isVisible ?? false },
-            onQuit: { NSApp.terminate(nil) }
-        )
+        onToggle: { [weak self] in self?.toggleFloatTabs() },
+        isVisible: { [weak self] in self?.panelController.isVisible ?? false },
+        onQuit: { NSApp.terminate(nil) }
+    )
+    statusItemController?.setActiveWebAppName(panelController.selectedSlotName)
+    panelController.onSelectedSlotNameChange = { [weak self] name in
+        self?.statusItemController?.setActiveWebAppName(name)
+    }
 
-        globalHotkeyController = GlobalHotkeyController(
+    globalHotkeyController = GlobalHotkeyController(
             onToggle: { [weak self] in self?.toggleFloatTabs() }
         )
 

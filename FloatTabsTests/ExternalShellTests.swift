@@ -326,6 +326,27 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)
     }
 
+    func testFaviconColorStateTracksResidentRuntimeInsteadOfActiveSelection() {
+        let (_, zone) = makeZoneHarness()
+        let activeButReleased = makeProfile(order: 0, name: "Active")
+        let inactiveButResident = makeProfile(order: 1, name: "Warm")
+        zone.apply(
+            profiles: [activeButReleased, inactiveButResident],
+            activeTabID: activeButReleased.id
+        )
+        zone.setResidentSlotIDs([inactiveButResident.id])
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: activeButReleased.id)).isResidentRuntime)
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: inactiveButResident.id)).isResidentRuntime)
+    }
+
+    func testStatusItemTitleUsesSelectedWebAppName() {
+        XCTAssertEqual(StatusItemController.displayTitle(for: "ChatGPT"), "ChatGPT")
+        XCTAssertEqual(StatusItemController.displayTitle(for: "  X  "), "X")
+        XCTAssertEqual(StatusItemController.displayTitle(for: nil), "FloatTabs")
+    }
+
     func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {
         let input = URL(string: "https://example.com/a/b?q=1")!
         XCTAssertEqual(

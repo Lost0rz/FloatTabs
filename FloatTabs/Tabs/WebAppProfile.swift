@@ -18,9 +18,9 @@ enum SlotResidencyPolicy: String, Codable, CaseIterable, Equatable {
         case .hot:
             return "Keep the live WebView attached. FloatTabs does not proactively evict it."
         case .warm:
-            return "Keep the WebView in memory, but detach it from the visible presentation when inactive."
+            return "Cache recent inactive WebViews; release after 3 minutes, beyond the two-Slot Warm cache, or under memory pressure."
         case .cold:
-            return "Release the WebView after 30 seconds inactive and recreate it from the current URL when needed."
+            return "Release 30 seconds after leaving the Slot; a selected hidden Slot gets a short recent-active grace first."
         }
     }
 }
