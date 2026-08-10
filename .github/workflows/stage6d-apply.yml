@@ -1,0 +1,84 @@
+name: Stage 6D Apply
+
+on:
+  push:
+    branches:
+      - feat/stage-6d-global-settings
+    paths:
+      - '.github/stage6d_patch.py'
+      - '.github/stage6d-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/stage-6d-global-settings
+
+      - name: Apply Stage 6D patch
+        run: python3 .github/stage6d_patch.py
+
+      - name: Check diff
+        run: git diff --check
+
+      - name: Resolve Swift packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Verify package lock is unchanged
+        run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Debug build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Full unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test
+
+      - name: Commit validated Stage 6D implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            FloatTabs.xcodeproj/project.pbxproj \
+            FloatTabs/App/AppCoordinator.swift \
+            FloatTabs/Hotkeys/AppCommandController.swift \
+            FloatTabs/Hotkeys/GlobalHotkeyController.swift \
+            FloatTabs/MenuBar/StatusItemController.swift \
+            FloatTabs/Panel/PanelController.swift \
+            FloatTabs/Persistence/AppPreferencesStore.swift \
+            FloatTabs/UI/ExternalTabRail.swift \
+            FloatTabs/UI/GlobalSettingsController.swift \
+            FloatTabs/UI/WebAppEditorController.swift \
+            FloatTabsTests/AppCommandControllerTests.swift \
+            FloatTabsTests/AppPreferencesStoreTests.swift \
+            FloatTabsTests/ExternalShellTests.swift \
+            docs/architecture/FloatTabs_Technical_Architecture_v1.2.md \
+            docs/design/FloatTabs_UI_Design_System_v1.2.md \
+            docs/product/FloatTabs_Product_Development_Spec_v0.5.md
+          git commit -m 'feat: implement Stage 6D global settings'
+          git push origin HEAD:feat/stage-6d-global-settings
