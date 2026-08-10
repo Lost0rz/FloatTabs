@@ -55,7 +55,10 @@ jobs:
             build
 
       - name: Full unit tests
+        shell: bash
         run: |
+          set +e
+          set -o pipefail
           xcodebuild \
             -project FloatTabs.xcodeproj \
             -scheme FloatTabs \
@@ -63,7 +66,18 @@ jobs:
             -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
-            test
+            test 2>&1 | tee /tmp/stage5d-tests.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E 'Test Case .* failed|error:|XCTAssert|failed -|Failing tests:|Executed .* failures' /tmp/stage5d-tests.log > .github/stage5d-test-failure.txt || true
+            tail -n 120 /tmp/stage5d-tests.log >> .github/stage5d-test-failure.txt
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+Lost0rz@users.noreply.github.com'
+            git add .github/stage5d-test-failure.txt
+            git commit -m 'ci: capture Stage 5D test failure'
+            git push origin HEAD:perf/stage-5-resource-benchmark
+            exit "$status"
+          fi
 
       - name: Commit validated Stage 5D product changes
         run: |
