@@ -4,7 +4,7 @@ Status: implementation candidate pending Real-Mac acceptance and final benchmark
 
 ## Resize
 - Bottom-right visual grip remains small, but the acquisition view is 32 × 32 pt.
-- The resize view accepts first mouse, uses local `bounds` hit testing, and an `activeAlways` tracking area so an inactive FloatTabs panel can be resized on the first drag.
+- The resize view accepts first mouse, keeps AppKit frame-based hit testing, and uses an `activeAlways` tracking area so an inactive FloatTabs panel can be acquired on the first drag.
 
 ## Rendering contract
 - Website Mode selects WebKit Desktop/Mobile content mode and browser identity.
@@ -14,7 +14,7 @@ Status: implementation candidate pending Real-Mac acceptance and final benchmark
 
 ## Tab rail
 - Resting active and inactive tabs are favicon-only.
-- Hover expands the tab and reveals its name.
+- Hover expands the tab and reveals its Web App name; the native tooltip retains the full name when it exceeds the fixed external rail width.
 - Active presentation uses the app accent seam and an attached open-right-edge silhouette; inactive tabs use a quieter sticky-note silhouette.
 - Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. No third-party favicon service or site-specific mapping is used.
 - The active accent is centralized at `ExternalTabVisualPalette.activeAccent` so a future Settings → Appearance screen can replace it without changing tab behavior.
