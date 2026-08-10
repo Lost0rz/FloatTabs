@@ -1,0 +1,98 @@
+name: Stage 5D Product Apply Helper
+
+on:
+  push:
+    branches:
+      - perf/stage-5-resource-benchmark
+    paths:
+      - '.github/workflows/stage5d-product-apply-helper.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: perf/stage-5-resource-benchmark
+          fetch-depth: 0
+
+      - name: Extract and run guarded Stage 5D source edits
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow = Path('.github/workflows/stage5d-interaction-polish-apply.yml').read_text()
+          match = re.search(
+              r"      - name: Apply guarded source edits\n        shell: bash\n        run: \|\n(?P<body>.*?)(?=\n      - name: Resolve Swift packages)",
+              workflow,
+              re.S,
+          )
+          if not match:
+              raise SystemExit('could not extract guarded source-edit block')
+
+          body = textwrap.dedent(match.group('body'))
+          bad = 'return Self.isDraggable(point: localPoint, in: bounds) ? self : nil'
+          fixed = 'return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil'
+          if body.count(bad) != 1:
+              raise SystemExit(f'expected one known hit-test typo, found {body.count(bad)}')
+          body = body.replace(bad, fixed)
+          Path('/tmp/stage5d-apply.sh').write_text('set -euo pipefail\n' + body)
+          PY
+          bash /tmp/stage5d-apply.sh
+          git diff --check
+
+      - name: Resolve Swift packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Verify package lock is unchanged
+        run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Debug build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test
+
+      - name: Commit validated product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            FloatTabs/Panel/ScreenPositioning.swift \
+            FloatTabs/Web/WebViewContainer.swift \
+            FloatTabs/UI/ExternalTabRail.swift \
+            FloatTabs/UI/WebAppEditorController.swift \
+            FloatTabsTests/ExternalShellTests.swift \
+            docs/product/FloatTabs_Stage_5D_Interaction_Rendering_Refinement.md
+          git diff --cached --check
+          git commit -m "fix: polish Stage 5D interaction shell"
+          git push origin HEAD:perf/stage-5-resource-benchmark
