@@ -35,6 +35,7 @@ PRODUCT_COLD_GRACE_SECONDS = 30
 PRODUCT_WARM_TTL_SECONDS = 180
 PRODUCT_HIDDEN_ACTIVE_GRACE_SECONDS = 120
 DEFAULT_INTERVAL = 2.0
+DEFAULT_STABLE_TAIL_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -92,11 +93,11 @@ PRESETS: Dict[str, Preset] = {
         baseline=20,
         active=25,
         hot_inactive=120,
-        warm_inactive=225,
-        cold_inactive=70,
+        warm_inactive=230,
+        cold_inactive=75,
         hidden_hot=160,
-        hidden_warm=325,
-        hidden_cold=175,
+        hidden_warm=340,
+        hidden_cold=190,
     ),
 }
 
@@ -119,6 +120,7 @@ class TimelineRecorder:
         resolver: core.OwnershipResolver,
         client: core.BenchmarkControlClient,
         interval: float,
+        stable_tail_seconds: float,
         session_start: float,
         warnings: Sequence[str],
     ) -> None:
@@ -127,6 +129,7 @@ class TimelineRecorder:
         self.resolver = resolver
         self.client = client
         self.interval = interval
+        self.stable_tail_seconds = max(stable_tail_seconds, interval)
         self.session_start = session_start
         self.warnings = list(warnings)
         self.rows: List[Dict[str, object]] = []
@@ -241,7 +244,11 @@ class TimelineRecorder:
             )
             next_tick += self.interval
 
-        summary = summarize_phase(phase, phase_rows)
+        summary = summarize_phase(
+            phase,
+            phase_rows,
+            stable_tail_seconds=self.stable_tail_seconds,
+        )
         self.phase_summaries.append(summary)
         self.event("phase_end", phase.label, f"end {phase.label}")
         self.flush()
@@ -282,17 +289,101 @@ def first_time(rows: Sequence[Dict[str, object]], predicate) -> Optional[float]:
     return None
 
 
-def summarize_phase(phase: Phase, rows: Sequence[Dict[str, object]]) -> Dict[str, object]:
+def _tail_rows(
+    rows: Sequence[Dict[str, object]],
+    window_seconds: float,
+) -> List[Dict[str, object]]:
+    if not rows:
+        return []
+    end_elapsed = float(rows[-1].get("phase_elapsed_s", 0.0))
+    cutoff = max(end_elapsed - max(window_seconds, 0.0), 0.0)
+    selected = [row for row in rows if float(row.get("phase_elapsed_s", 0.0)) >= cutoff]
+    return selected or [dict(rows[-1])]
+
+
+def _median_metric(rows: Sequence[Dict[str, object]], key: str) -> float:
+    values = [float(row.get(key, 0.0)) for row in rows]
+    return float(core.statistics.median(values)) if values else 0.0
+
+
+def _mean_metric(rows: Sequence[Dict[str, object]], key: str) -> float:
+    values = [float(row.get(key, 0.0)) for row in rows]
+    return float(core.statistics.mean(values)) if values else 0.0
+
+
+def _p95_metric(rows: Sequence[Dict[str, object]], key: str) -> float:
+    return core.percentile([float(row.get(key, 0.0)) for row in rows], 0.95) if rows else 0.0
+
+
+def summarize_phase(
+    phase: Phase,
+    rows: Sequence[Dict[str, object]],
+    *,
+    stable_tail_seconds: float = DEFAULT_STABLE_TAIL_SECONDS,
+) -> Dict[str, object]:
     if not rows:
         return {"label": phase.label, "sample_count": 0}
+
     process_summary = core.summarize_samples(rows)
-    first_all_released = first_time(rows, lambda row: int(row.get("tracked_resident_count", 0)) == 0)
+    initial_resident = int(rows[0].get("tracked_resident_count", 0))
+
+    first_release_index: Optional[int] = None
+    if initial_resident > 0:
+        for index, row in enumerate(rows[1:], start=1):
+            if int(row.get("tracked_resident_count", 0)) < initial_resident:
+                first_release_index = index
+                break
+
+    all_release_index: Optional[int] = None
+    for index, row in enumerate(rows):
+        if int(row.get("tracked_resident_count", 0)) == 0:
+            all_release_index = index
+            break
+
+    first_release = (
+        float(rows[first_release_index].get("phase_elapsed_s", 0.0))
+        if first_release_index is not None
+        else None
+    )
+    first_all_released = (
+        float(rows[all_release_index].get("phase_elapsed_s", 0.0))
+        if all_release_index is not None
+        else None
+    )
     first_hidden_grace_end = first_time(rows, lambda row: not bool(row.get("hidden_active_grace_pending", False)))
     first_pending_clear = first_time(
         rows,
         lambda row: int(row.get("pending_cold_release_count", 0)) == 0
         and int(row.get("pending_warm_release_count", 0)) == 0,
     )
+
+    tail = _tail_rows(rows, stable_tail_seconds)
+    tail_start = float(tail[0].get("phase_elapsed_s", 0.0))
+    tail_end = float(tail[-1].get("phase_elapsed_s", 0.0))
+
+    rss_before_first_release: Optional[float] = None
+    if first_release_index is not None:
+        before_index = max(first_release_index - 1, 0)
+        rss_before_first_release = float(rows[before_index].get("total_rss_kb", 0.0))
+
+    post_release_tail: List[Dict[str, object]] = []
+    post_release_observed = 0.0
+    if all_release_index is not None:
+        post_release_rows = list(rows[all_release_index:])
+        post_release_tail = _tail_rows(post_release_rows, stable_tail_seconds)
+        post_release_observed = max(
+            float(rows[-1].get("phase_elapsed_s", 0.0))
+            - float(rows[all_release_index].get("phase_elapsed_s", 0.0)),
+            0.0,
+        )
+
+    post_release_rss_kb: Optional[float] = None
+    rss_reclaimed_mb: Optional[float] = None
+    if post_release_tail:
+        post_release_rss_kb = _median_metric(post_release_tail, "total_rss_kb")
+        if rss_before_first_release is not None:
+            rss_reclaimed_mb = (rss_before_first_release - post_release_rss_kb) / 1024.0
+
     start_rss = float(rows[0].get("total_rss_kb", 0.0))
     end_rss = float(rows[-1].get("total_rss_kb", 0.0))
     return {
@@ -302,8 +393,9 @@ def summarize_phase(phase: Phase, rows: Sequence[Dict[str, object]]) -> Dict[str
         "duration_s": phase.duration,
         "sample_count": len(rows),
         "tracked_slot_count": len(phase.tracked_ids),
-        "tracked_resident_start": int(rows[0].get("tracked_resident_count", 0)),
+        "tracked_resident_start": initial_resident,
         "tracked_resident_end": int(rows[-1].get("tracked_resident_count", 0)),
+        "first_tracked_release_s": None if first_release is None else round(first_release, 2),
         "first_all_tracked_released_s": None if first_all_released is None else round(first_all_released, 2),
         "first_hidden_grace_not_pending_s": None if first_hidden_grace_end is None else round(first_hidden_grace_end, 2),
         "first_release_queue_clear_s": None if first_pending_clear is None else round(first_pending_clear, 2),
@@ -315,8 +407,23 @@ def summarize_phase(phase: Phase, rows: Sequence[Dict[str, object]]) -> Dict[str
         "total_cpu_p95": round(float(process_summary.get("total_cpu_p95", 0.0)), 3),
         "webcontent_count_median": round(float(process_summary.get("webcontent_count_median", 0.0)), 2),
         "webcontent_count_end": int(rows[-1].get("webcontent_count", 0)),
+        "stable_tail_window_s": round(float(stable_tail_seconds), 2),
+        "stable_tail_observed_s": round(max(tail_end - tail_start, 0.0), 2),
+        "stable_tail_sample_count": len(tail),
+        "stable_tail_rss_median_mb": round(_median_metric(tail, "total_rss_kb") / 1024.0, 2),
+        "stable_tail_rss_min_mb": round(min(float(row.get("total_rss_kb", 0.0)) for row in tail) / 1024.0, 2),
+        "stable_tail_rss_max_mb": round(max(float(row.get("total_rss_kb", 0.0)) for row in tail) / 1024.0, 2),
+        "stable_tail_cpu_avg": round(_mean_metric(tail, "total_cpu"), 3),
+        "stable_tail_cpu_p95": round(_p95_metric(tail, "total_cpu"), 3),
+        "stable_tail_webcontent_count_median": round(_median_metric(tail, "webcontent_count"), 2),
+        "stable_tail_resident_count_median": round(_median_metric(tail, "tracked_resident_count"), 2),
+        "rss_before_first_release_mb": None if rss_before_first_release is None else round(rss_before_first_release / 1024.0, 2),
+        "post_release_stable_rss_mb": None if post_release_rss_kb is None else round(post_release_rss_kb / 1024.0, 2),
+        "post_release_stable_cpu_avg": None if not post_release_tail else round(_mean_metric(post_release_tail, "total_cpu"), 3),
+        "post_release_stable_cpu_p95": None if not post_release_tail else round(_p95_metric(post_release_tail, "total_cpu"), 3),
+        "post_release_observed_s": round(post_release_observed, 2),
+        "rss_reclaimed_mb": None if rss_reclaimed_mb is None else round(rss_reclaimed_mb, 2),
     }
-
 
 def release_expectation(summary: Dict[str, object]) -> str:
     label = str(summary.get("label", ""))
@@ -348,19 +455,64 @@ def write_markdown_report(
         "",
         "## Phase summary",
         "",
-        "| Phase | State | RSS start | RSS end | Δ RSS | Avg CPU | p95 CPU | Tracked resident | All released at | Check |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "Whole-phase CPU includes navigation/load/release spikes. `Tail` columns use only the final stable window of each phase.",
+        "",
+        "| Phase | State | RSS start | RSS end | Δ RSS | Whole CPU avg | Tail RSS | Tail CPU avg | Tail CPU p95 | Tracked resident | Check |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in summaries:
-        released = item.get("first_all_tracked_released_s")
-        released_text = f"{float(released):.1f}s" if isinstance(released, (int, float)) else "—"
         lines.append(
             f"| {item.get('label')} | {item.get('state')} | {float(item.get('total_rss_start_mb', 0)):.1f} MB | "
             f"{float(item.get('total_rss_end_mb', 0)):.1f} MB | {float(item.get('total_rss_delta_mb', 0)):+.1f} MB | "
-            f"{float(item.get('total_cpu_avg', 0)):.2f}% | {float(item.get('total_cpu_p95', 0)):.2f}% | "
-            f"{item.get('tracked_resident_start', 0)}→{item.get('tracked_resident_end', 0)} | {released_text} | {release_expectation(item)} |"
+            f"{float(item.get('total_cpu_avg', 0)):.2f}% | {float(item.get('stable_tail_rss_median_mb', 0)):.1f} MB | "
+            f"{float(item.get('stable_tail_cpu_avg', 0)):.2f}% | {float(item.get('stable_tail_cpu_p95', 0)):.2f}% | "
+            f"{item.get('tracked_resident_start', 0)}→{item.get('tracked_resident_end', 0)} | {release_expectation(item)} |"
         )
+
     lines.extend([
+        "",
+        "## Eviction / reclaim detail",
+        "",
+        "`RSS before first release` is the sample immediately before tracked resident count first drops. `Post-release stable` is the median of the final post-release window.",
+        "",
+        "| Phase | First release | All released | RSS before first release | Post-release stable RSS | RSS reclaimed | Post-release observed |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ])
+    release_rows = 0
+    for item in summaries:
+        first_release = item.get("first_tracked_release_s")
+        all_release = item.get("first_all_tracked_released_s")
+        if first_release is None and all_release is None:
+            continue
+        release_rows += 1
+        first_text = f"{float(first_release):.1f}s" if isinstance(first_release, (int, float)) else "—"
+        all_text = f"{float(all_release):.1f}s" if isinstance(all_release, (int, float)) else "—"
+        before = item.get("rss_before_first_release_mb")
+        after = item.get("post_release_stable_rss_mb")
+        reclaimed = item.get("rss_reclaimed_mb")
+        observed = item.get("post_release_observed_s")
+        before_text = f"{float(before):.1f} MB" if isinstance(before, (int, float)) else "—"
+        after_text = f"{float(after):.1f} MB" if isinstance(after, (int, float)) else "—"
+        reclaimed_text = f"{float(reclaimed):+.1f} MB" if isinstance(reclaimed, (int, float)) else "—"
+        observed_text = f"{float(observed):.1f}s" if isinstance(observed, (int, float)) else "—"
+        lines.append(
+            f"| {item.get('label')} | {first_text} | {all_text} | {before_text} | {after_text} | {reclaimed_text} | {observed_text} |"
+        )
+    if release_rows == 0:
+        lines.append("| — | — | — | — | — | — | — |")
+
+    tail_window = next(
+        (float(item.get("stable_tail_window_s", DEFAULT_STABLE_TAIL_SECONDS)) for item in summaries if item.get("sample_count", 0)),
+        DEFAULT_STABLE_TAIL_SECONDS,
+    )
+    lines.extend([
+        "",
+        "## Stable-tail interpretation",
+        "",
+        f"- Stable-tail target window: final **{tail_window:.0f}s** of each phase (or all available samples for shorter phases).",
+        "- Use Tail CPU/RSS for long-idle comparisons; use whole-phase CPU only to understand load/switch/release cost.",
+        "- For phases that fully evict tracked Slots, `Post-release stable RSS` is the better estimate of the released memory floor.",
+        "- `Post-release observed` shows how much time remained after all tracked Slots were released; short windows should be repeated before tuning policy.",
         "",
         "## Product timer reference",
         "",
@@ -383,14 +535,13 @@ def write_markdown_report(
         "",
         "- `lifecycle-timeline.csv`: continuous raw timeline.",
         "- `lifecycle-events.json`: detected lifecycle transitions.",
-        "- `lifecycle-summary.json`: machine-readable phase summaries.",
+        "- `lifecycle-summary.json`: machine-readable phase summaries including stable-tail/reclaim metrics.",
         "- `lifecycle-chart.html`: local interactive-free SVG curves for RSS, CPU and resident WebViews.",
         "",
         "Do not treat one noisy real-site run as a release threshold. Repeat an anomalous phase before changing lifecycle policy.",
         "",
     ])
     (session_dir / "lifecycle-report.md").write_text("\n".join(lines), encoding="utf-8")
-
 
 def _svg_polyline(
     rows: Sequence[Dict[str, object]],
@@ -546,6 +697,7 @@ def run_mode(args: argparse.Namespace) -> int:
             "warm_ttl": PRODUCT_WARM_TTL_SECONDS,
             "hidden_active_grace": PRODUCT_HIDDEN_ACTIVE_GRACE_SECONDS,
         },
+        "stable_tail_seconds": max(args.tail_seconds, args.interval),
     })
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -554,6 +706,7 @@ def run_mode(args: argparse.Namespace) -> int:
     print("Tracked Slots: " + ", ".join(selected_names))
     print(f"Inactive control Slot: {control_name}")
     print(f"Preset: {args.preset}; expected sampling time ≈ {estimate / 60.0:.1f} minutes")
+    print(f"Stable-tail analysis window: {max(args.tail_seconds, args.interval):.0f}s")
     print("Media policy is forced to Pause When Inactive for a clean Residency baseline.")
     print(f"Results: {session_dir}")
 
@@ -564,6 +717,7 @@ def run_mode(args: argparse.Namespace) -> int:
         resolver=resolver,
         client=client,
         interval=max(args.interval, 0.5),
+        stable_tail_seconds=max(args.tail_seconds, args.interval),
         session_start=session_start,
         warnings=warnings,
     )
@@ -639,7 +793,7 @@ def self_test_mode() -> int:
     assert PRESETS["full"].hidden_warm > PRODUCT_HIDDEN_ACTIVE_GRACE_SECONDS + PRODUCT_WARM_TTL_SECONDS
     assert PRESETS["full"].hidden_cold > PRODUCT_HIDDEN_ACTIVE_GRACE_SECONDS + PRODUCT_COLD_GRACE_SECONDS
 
-    phase = Phase("cold-inactive", "cold", "inactive", 60, ("a", "b"))
+    phase = Phase("cold-inactive", "cold", "inactive", 90, ("a", "b"))
     sample = {
         "host_rss_kb": 100.0,
         "host_cpu": 1.0,
@@ -660,12 +814,27 @@ def self_test_mode() -> int:
         "phase_elapsed_s": 0.0,
         "tracked_resident_count": 2,
     }
-    later = dict(sample)
-    later.update({"phase_elapsed_s": 35.0, "tracked_resident_count": 0, "total_rss_kb": 275.0})
-    summary = summarize_phase(phase, [sample, later])
+    partial = dict(sample)
+    partial.update({"phase_elapsed_s": 20.0, "tracked_resident_count": 1, "total_rss_kb": 325.0, "total_cpu": 2.0})
+    released = dict(sample)
+    released.update({"phase_elapsed_s": 35.0, "tracked_resident_count": 0, "total_rss_kb": 275.0, "total_cpu": 1.0})
+    steady_a = dict(sample)
+    steady_a.update({"phase_elapsed_s": 50.0, "tracked_resident_count": 0, "total_rss_kb": 260.0, "total_cpu": 0.5})
+    steady_b = dict(sample)
+    steady_b.update({"phase_elapsed_s": 70.0, "tracked_resident_count": 0, "total_rss_kb": 250.0, "total_cpu": 0.25})
+    summary = summarize_phase(
+        phase,
+        [sample, partial, released, steady_a, steady_b],
+        stable_tail_seconds=30.0,
+    )
+    assert summary["first_tracked_release_s"] == 20.0
     assert summary["first_all_tracked_released_s"] == 35.0
     assert summary["tracked_resident_start"] == 2
     assert summary["tracked_resident_end"] == 0
+    assert summary["stable_tail_rss_median_mb"] == 0.25
+    assert summary["stable_tail_cpu_avg"] == 0.375
+    assert summary["post_release_stable_rss_mb"] == 0.25
+    assert summary["rss_reclaimed_mb"] == 0.12
     assert release_expectation(summary) == "PASS"
     assert estimated_runtime(PRESETS["full"], 1.0, 2) > PRESETS["full"].duration
     print("FloatTabs lifecycle benchmark self-test: PASS")
@@ -683,6 +852,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--slots", type=int, default=2, help="Number of test Slots; keep at least one extra Slot as control.")
     run.add_argument("--interval", type=float, default=DEFAULT_INTERVAL, help="Sampling interval in seconds.")
     run.add_argument("--activation-wait", type=float, default=1.5, help="Load settle time after each automatic Slot activation.")
+    run.add_argument("--tail-seconds", type=float, default=DEFAULT_STABLE_TAIL_SECONDS, help="Final per-phase window used for steady-state RSS/CPU statistics.")
     run.add_argument("--session", default=None, help="Optional results session name.")
     run.add_argument("--results-root", default=str(core.DEFAULT_RESULTS_ROOT))
     run.add_argument("--pid", type=int, default=None)

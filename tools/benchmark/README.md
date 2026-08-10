@@ -46,6 +46,7 @@ python3 tools/benchmark/floattabs_lifecycle_benchmark.py run \
   --preset full \
   --slots 2 \
   --interval 2 \
+  --tail-seconds 30 \
   --session stage5e-full
 ```
 
@@ -64,7 +65,7 @@ The tool prompts for the test Slots, then automatically runs:
 9. Warm selected + panel hidden past 120s hidden grace + 180s Warm TTL;
 10. Cold selected + panel hidden past 120s hidden grace + 30s Cold grace.
 
-The full preset takes roughly 18–20 minutes depending on Slot load waits and sampling overhead.
+The full preset takes roughly 19–21 minutes depending on Slot load waits and sampling overhead. The final 30 seconds of each phase are reported separately as the stable tail, and release phases also report pre-release RSS, post-release stable RSS, and reclaimed memory.
 
 For a harness plumbing check only:
 
@@ -116,6 +117,10 @@ The continuous timeline records:
 - active Slot and panel visibility.
 
 Phase and runtime transitions are written as events so resource drops can be matched to the exact lifecycle transition instead of inferred from Activity Monitor.
+
+### Stable-tail metrics
+
+`lifecycle-summary.json` and `lifecycle-report.md` separate whole-phase load/switch spikes from the final steady-state window. They include stable-tail RSS/CPU, first/all release timestamps, RSS immediately before the first release, post-release stable RSS/CPU, reclaimed RSS, and how long the run observed the fully released state. Override the default window with `--tail-seconds`.
 
 ## 5. Baseline policy
 
