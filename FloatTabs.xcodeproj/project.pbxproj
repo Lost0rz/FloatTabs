@@ -40,6 +40,9 @@
 		A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001E /* AppCommandControllerTests.swift */; };
 		A0000000000000000000001E /* WebNavigationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001F /* WebNavigationCoordinator.swift */; };
 		A0000000000000000000001F /* PopupCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000020 /* PopupCoordinator.swift */; };
+		A00000000000000000000023 /* AppPreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000023 /* AppPreferencesStore.swift */; };
+		A00000000000000000000024 /* GlobalSettingsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000024 /* GlobalSettingsController.swift */; };
+		A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* AppPreferencesStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +90,9 @@
 		B0000000000000000000001E /* AppCommandControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandControllerTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000001F /* WebNavigationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebNavigationCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000020 /* PopupCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000023 /* AppPreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000024 /* GlobalSettingsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSettingsController.swift; sourceTree = "<group>"; };
+		B00000000000000000000025 /* AppPreferencesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -185,6 +191,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000014 /* ProfileRepository.swift */,
+				B00000000000000000000023 /* AppPreferencesStore.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -209,6 +216,7 @@
 				B00000000000000000000017 /* ExternalTabRail.swift */,
 				B00000000000000000000018 /* WebAppEditorController.swift */,
 				B00000000000000000000019 /* EmptyWebAppView.swift */,
+				B00000000000000000000024 /* GlobalSettingsController.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -231,6 +239,7 @@
 				B0000000000000000000001C /* WebViewPoolTests.swift */,
 				B0000000000000000000001D /* ExternalShellTests.swift */,
 				B0000000000000000000001E /* AppCommandControllerTests.swift */,
+				B00000000000000000000025 /* AppPreferencesStoreTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -350,6 +359,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
+				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
+				A00000000000000000000024 /* GlobalSettingsController.swift in Sources */,
 				A00000000000000000000022 /* BenchmarkControlServer.swift in Sources */,
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
 				A0000000000000000000000F /* AppCommandController.swift in Sources */,
@@ -381,6 +392,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0000000000000000000001D /* AppCommandControllerTests.swift in Sources */,
+				A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */,
 				A0000000000000000000001C /* ExternalShellTests.swift in Sources */,
 				A0000000000000000000001A /* ProfileRepositoryTests.swift in Sources */,
 				A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */,

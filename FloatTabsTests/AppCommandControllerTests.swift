@@ -26,6 +26,10 @@ final class AppCommandControllerTests: XCTestCase {
             .reload
         )
         XCTAssertEqual(
+            AppCommandController.command(characters: ",", keyCode: 43, modifiers: [.command]),
+            .settings
+        )
+        XCTAssertEqual(
             AppCommandController.command(characters: "+", keyCode: 24, modifiers: [.command, .shift]),
             .zoomIn
         )

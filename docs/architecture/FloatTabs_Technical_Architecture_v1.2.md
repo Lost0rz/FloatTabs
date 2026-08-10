@@ -97,7 +97,7 @@ FloatTabsApp
 │   └── persistence
 │
 ├── WebViewPool
-│   ├── one WKWebView per warm/hot slot
+│   ├── live WKWebView residency for Active / Hot / cached Warm / grace-protected Cold
 │   ├── attach / detach
 │   ├── suspend / resume
 │   └── content-process recovery
@@ -113,10 +113,9 @@ FloatTabsApp
 │
 └── UI
     ├── Frozen External Shell
-    ├── Current Web App Controls
+    ├── Global Settings
     ├── Add/Edit Web App
-    ├── Quick URL
-    └── Global Settings
+    └── Quick URL
 ```
 
 ---
