@@ -1,6 +1,6 @@
 # FloatTabs Stage 5D — Interaction & Rendering Refinement
 
-Status: implementation candidate pending Real-Mac acceptance and final benchmark.
+Status: automated implementation validation complete; Real-Mac acceptance and final benchmark pending.
 
 ## Resize
 - Bottom-right visual grip remains small, but the acquisition view is 32 × 32 pt.
@@ -31,6 +31,10 @@ Common controls are available directly from the Web App tab and persist through 
 
 ## Deferred
 Global Settings is a later independent screen (Appearance / Hotkeys / Global / About). Stage 5D does not build it.
+
+## Automated validation
+- Construction validation: package resolve PASS, Debug build PASS, full Unit Tests PASS.
+- Final clean PR validation must remain green after documentation/cleanup commits.
 
 ## Real-Mac acceptance before benchmark
 1. Resize an inactive FloatTabs panel from another app/full-screen space on the first drag; verify no dead corner areas.
