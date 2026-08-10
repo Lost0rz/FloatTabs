@@ -1,0 +1,424 @@
+Stage 5D focused failure diagnostics
+====================================
+Run captured: 2026-08-10T03:27:04Z
+
+Failure contexts:
+1162-    cd /Users/runner/work/FloatTabs/FloatTabs
+1163-    /usr/bin/touch -c /Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Build/Products/Debug/FloatTabs.app
+1164-
+1165-RegisterWithLaunchServices /Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Build/Products/Debug/FloatTabs.app (in target 'FloatTabs' from project 'FloatTabs')
+1166-    cd /Users/runner/work/FloatTabs/FloatTabs
+1167-    /System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f -R -trusted /Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Build/Products/Debug/FloatTabs.app
+1168-
+1169-note: Disabling hardened runtime with ad-hoc codesigning. (in target 'FloatTabs' from project 'FloatTabs')
+1170:2026-08-10 03:26:52.413326+0000 FloatTabs[2485:11410] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1171-2026-08-10 03:26:52.414937+0000 FloatTabs[2485:11410] [Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1172:2026-08-10 03:26:52.417407+0000 FloatTabs[2485:11409] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1173:2026-08-10 03:26:52.417489+0000 FloatTabs[2485:11409] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1174:2026-08-10 03:26:52.420111+0000 FloatTabs[2485:11414] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1175:2026-08-10 03:26:52.420158+0000 FloatTabs[2485:11414] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1176-2026-08-10 03:26:52.421482+0000 FloatTabs[2485:11409] [Connection] Will NOT re-try to establish the connection
+1177:2026-08-10 03:26:52.421692+0000 FloatTabs[2485:11410] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1178:2026-08-10 03:26:52.421783+0000 FloatTabs[2485:11410] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1179-Test Suite 'Selected tests' started at 2026-08-10 03:26:53.763.
+1180-Test Suite 'FloatTabsTests.xctest' started at 2026-08-10 03:26:53.764.
+1181-Test Suite 'ExternalShellTests' started at 2026-08-10 03:26:53.765.
+1182-Test Case '-[FloatTabsTests.ExternalShellTests testActiveInactiveAndAddGeometryMatchDesignTokens]' started.
+1183-2026-08-10 03:26:53.788469+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+1184-    "<NSLayoutConstraint:0x720ff6c60 NSImageView:0x720837480.width == 16   (active)>",
+1185-    "<NSLayoutConstraint:0x720ff68a0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+1186-    "<NSAutoresizingMaskLayoutConstraint:0x720ff7520 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+1187-    "<NSLayoutConstraint:0x720ff6b70 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0700]   (active)>",
+1188-    "<NSLayoutConstraint:0x720ff6d00 NSTextField:0x7209f0700.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+1189-).
+1190-
+--
+1261-)
+1262-
+1263-Will attempt to recover by breaking constraint 
+1264-<NSLayoutConstraint:0x720ff6260 H:[NSImageView:0x720837200]-(7)-[NSTextField:0x7209f0380]   (active)>
+1265-
+1266-Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+1267-Test Case '-[FloatTabsTests.ExternalShellTests testActiveInactiveAndAddGeometryMatchDesignTokens]' passed (0.402 seconds).
+1268-Test Case '-[FloatTabsTests.ExternalShellTests testActiveTabExpandsAnimatedPanelOutlineIntoRail]' started.
+1269:STAGE5D_OUTLINE web=(74.0, 10.0, 434.0, 824.0) tab=(34.0, 718.0, 44.0, 36.0) join=718.0...754.0 active=(36.0, 720.0, 40.0, 32.0)
+1270:STAGE5D_TEST_BOUND path=(34.0, 10.0, 474.0, 824.0) web=(76.0, 12.0, 430.0, 820.0) active=(36.0, 720.0, 40.0, 32.0)
+1271-Test Case '-[FloatTabsTests.ExternalShellTests testActiveTabExpandsAnimatedPanelOutlineIntoRail]' passed (0.002 seconds).
+1272-Test Case '-[FloatTabsTests.ExternalShellTests testActualTabHitAreaReturnsVisibleTabView]' started.
+1273-2026-08-10 03:26:54.176096+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+1274-    "<NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>",
+1275-    "<NSLayoutConstraint:0x720ff7de0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+1276-    "<NSAutoresizingMaskLayoutConstraint:0x720ff72f0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+1277-    "<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+1278-    "<NSLayoutConstraint:0x720ff6b70 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+1279-).
+1280-
+1281-Will attempt to recover by breaking <NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>.
+1282-2026-08-10 03:26:54.176332+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+--
+1409-Test Case '-[FloatTabsTests.ExternalShellTests testFaviconURLUsesWebsiteOriginWithoutThirdPartyService]' passed (0.003 seconds).
+1410-Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverTrackingRemainsActiveWhenAppIsInactive]' started.
+1411-Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverTrackingRemainsActiveWhenAppIsInactive]' passed (0.004 seconds).
+1412-Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverUsesSameHitGeometryAsWindowDrag]' started.
+1413-Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverUsesSameHitGeometryAsWindowDrag]' passed (0.002 seconds).
+1414-Test Case '-[FloatTabsTests.ExternalShellTests testPanelAutoHideDecisionRespectsPin]' started.
+1415-Test Case '-[FloatTabsTests.ExternalShellTests testPanelAutoHideDecisionRespectsPin]' passed (0.002 seconds).
+1416-Test Case '-[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough]' started.
+1417:/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ExternalShellTests.swift:220: error: -[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough] : XCTAssertTrue failed
+1418:Test Case '-[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough]' failed (0.009 seconds).
+1419-Test Case '-[FloatTabsTests.ExternalShellTests testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor]' started.
+1420-Test Case '-[FloatTabsTests.ExternalShellTests testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor]' passed (0.004 seconds).
+1421-Test Case '-[FloatTabsTests.ExternalShellTests testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState]' started.
+1422-Test Case '-[FloatTabsTests.ExternalShellTests testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState]' passed (0.015 seconds).
+1423-Test Case '-[FloatTabsTests.ExternalShellTests testResizeHandleUsesExpandedFirstMouseHitTarget]' started.
+1424-Test Case '-[FloatTabsTests.ExternalShellTests testResizeHandleUsesExpandedFirstMouseHitTarget]' passed (0.003 seconds).
+1425-Test Case '-[FloatTabsTests.ExternalShellTests testTabContextMenuStartsWithReturnToHome]' started.
+1426-2026-08-10 03:26:54.307757+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+1427-    "<NSLayoutConstraint:0x720ff54f0 NSImageView:0x720837480.width == 16   (active)>",
+1428-    "<NSLayoutConstraint:0x720ff68f0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+1429-    "<NSAutoresizingMaskLayoutConstraint:0x720ff6940 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+1430-    "<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>",
+--
+1504-    "<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>",
+1505-    "<NSLayoutConstraint:0x7208323f0 NSTextField:0x7209f0a80.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+1506-)
+1507-
+1508-Will attempt to recover by breaking constraint 
+1509-<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>
+1510-
+1511-Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+1512:STAGE5D_OUTLINE web=(74.0, 10.0, 434.0, 824.0) tab=(34.0, 775.0, 44.0, 36.0) join=775.0...811.0 active=(36.0, 777.0, 40.0, 32.0)
+1513-Test Case '-[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap]' passed (0.008 seconds).
+1514-Test Case '-[FloatTabsTests.ExternalShellTests testWorkspaceAutoHideRequiresAnotherFrontmostApplication]' started.
+1515-Test Case '-[FloatTabsTests.ExternalShellTests testWorkspaceAutoHideRequiresAnotherFrontmostApplication]' passed (0.001 seconds).
+1516-Test Suite 'ExternalShellTests' failed at 2026-08-10 03:26:54.329.
+1517-	 Executed 18 tests, with 1 failure (0 unexpected) in 0.550 (0.564) seconds
+1518-Test Suite 'PanelPerimeterDragHitTestingTests' started at 2026-08-10 03:26:54.329.
+1519-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle]' started.
+1520-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle]' passed (0.247 seconds).
+1521-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testConfiguredTopBottomInnerOverlapAlsoMovesWindow]' started.
+1522-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testConfiguredTopBottomInnerOverlapAlsoMovesWindow]' passed (0.005 seconds).
+1523-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testDirectWindowDragOriginUsesGlobalPointerDelta]' started.
+1524-Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testDirectWindowDragOriginUsesGlobalPointerDelta]' passed (0.001 seconds).
+
+Final 320 log lines:
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff5e00 NSImageView:0x720837200.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:53.797451+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff5d60 H:|-(12)-[NSImageView:0x720837200]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff7610 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6260 H:[NSImageView:0x720837200]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6300 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff6260 H:[NSImageView:0x720837200]-(7)-[NSTextField:0x7209f0380]   (active)>.
+2026-08-10 03:26:53.797661+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff5d60 H:|-(12)-[NSImageView:0x720837200]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff7610 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6260 H:[NSImageView:0x720837200]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6300 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff6260 H:[NSImageView:0x720837200]-(7)-[NSTextField:0x7209f0380]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+Test Case '-[FloatTabsTests.ExternalShellTests testActiveInactiveAndAddGeometryMatchDesignTokens]' passed (0.402 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testActiveTabExpandsAnimatedPanelOutlineIntoRail]' started.
+STAGE5D_OUTLINE web=(74.0, 10.0, 434.0, 824.0) tab=(34.0, 718.0, 44.0, 36.0) join=718.0...754.0 active=(36.0, 720.0, 40.0, 32.0)
+STAGE5D_TEST_BOUND path=(34.0, 10.0, 474.0, 824.0) web=(76.0, 12.0, 430.0, 820.0) active=(36.0, 720.0, 40.0, 32.0)
+Test Case '-[FloatTabsTests.ExternalShellTests testActiveTabExpandsAnimatedPanelOutlineIntoRail]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testActualTabHitAreaReturnsVisibleTabView]' started.
+2026-08-10 03:26:54.176096+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff72f0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6b70 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>.
+2026-08-10 03:26:54.176332+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff72f0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6b70 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff69e0 NSImageView:0x720837980.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:54.176529+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff7de0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff72f0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6b70 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>.
+2026-08-10 03:26:54.176687+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff7de0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff72f0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff6b70 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff6d00 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+Test Case '-[FloatTabsTests.ExternalShellTests testActualTabHitAreaReturnsVisibleTabView]' passed (0.032 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testAddControlUsesActualVisibleHitArea]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testAddControlUsesActualVisibleHitArea]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testBlankZoneDoesNotBecomeFullWidthInvisibleControl]' started.
+2026-08-10 03:26:54.215625+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff6ad0 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff62b0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6da0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff72a0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff6ad0 NSImageView:0x720837980.width == 16   (active)>.
+2026-08-10 03:26:54.216191+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff6ad0 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff62b0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6da0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff72a0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff6ad0 NSImageView:0x720837980.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:54.216678+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff62b0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6da0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff72a0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>.
+2026-08-10 03:26:54.216915+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff62b0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6da0 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff72a0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff7de0 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+Test Case '-[FloatTabsTests.ExternalShellTests testBlankZoneDoesNotBecomeFullWidthInvisibleControl]' passed (0.020 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testCurrentWebAppGearUsesActualVisibleHitAreaWhenSlotIsActive]' started.
+2026-08-10 03:26:54.237732+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720833250 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x7208330c0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720832670 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x7208320d0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720833250 NSImageView:0x720837980.width == 16   (active)>.
+2026-08-10 03:26:54.238288+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720833250 NSImageView:0x720837980.width == 16   (active)>",
+    "<NSLayoutConstraint:0x7208330c0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720832670 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x7208320d0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720833250 NSImageView:0x720837980.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:54.238631+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x7208330c0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720832670 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x7208320d0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>.
+2026-08-10 03:26:54.238851+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x7208330c0 H:|-(12)-[NSImageView:0x720837980]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175f400 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720832670 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175f400.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x7208320d0 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175f400.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720832f30 H:[NSImageView:0x720837980]-(7)-[NSTextField:0x7209f0380]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+Test Case '-[FloatTabsTests.ExternalShellTests testCurrentWebAppGearUsesActualVisibleHitAreaWhenSlotIsActive]' passed (0.016 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testFaviconURLUsesWebsiteOriginWithoutThirdPartyService]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testFaviconURLUsesWebsiteOriginWithoutThirdPartyService]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverTrackingRemainsActiveWhenAppIsInactive]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverTrackingRemainsActiveWhenAppIsInactive]' passed (0.004 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverUsesSameHitGeometryAsWindowDrag]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testMoveHoverUsesSameHitGeometryAsWindowDrag]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testPanelAutoHideDecisionRespectsPin]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testPanelAutoHideDecisionRespectsPin]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough]' started.
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ExternalShellTests.swift:220: error: -[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough] : XCTAssertTrue failed
+Test Case '-[FloatTabsTests.ExternalShellTests testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough]' failed (0.009 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor]' passed (0.004 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState]' passed (0.015 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testResizeHandleUsesExpandedFirstMouseHitTarget]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testResizeHandleUsesExpandedFirstMouseHitTarget]' passed (0.003 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testTabContextMenuStartsWithReturnToHome]' started.
+2026-08-10 03:26:54.307757+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff54f0 NSImageView:0x720837480.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff68f0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6940 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff5d60 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff54f0 NSImageView:0x720837480.width == 16   (active)>.
+2026-08-10 03:26:54.308299+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff54f0 NSImageView:0x720837480.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720ff68f0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6940 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff5d60 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff54f0 NSImageView:0x720837480.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:54.311183+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720ff68f0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6940 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff5d60 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>.
+2026-08-10 03:26:54.314679+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720ff68f0 H:|-(12)-[NSImageView:0x720837480]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720ff6940 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>",
+    "<NSLayoutConstraint:0x720ff5d60 NSTextField:0x7209f0380.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720ff6620 H:[NSImageView:0x720837480]-(7)-[NSTextField:0x7209f0380]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+Test Case '-[FloatTabsTests.ExternalShellTests testTabContextMenuStartsWithReturnToHome]' passed (0.023 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap]' started.
+2026-08-10 03:26:54.322742+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720832c60 NSImageView:0x720eaf700.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720833160 H:|-(12)-[NSImageView:0x720eaf700]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720833110 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>",
+    "<NSLayoutConstraint:0x7208323f0 NSTextField:0x7209f0a80.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x720832c60 NSImageView:0x720eaf700.width == 16   (active)>.
+2026-08-10 03:26:54.322943+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720832c60 NSImageView:0x720eaf700.width == 16   (active)>",
+    "<NSLayoutConstraint:0x720833160 H:|-(12)-[NSImageView:0x720eaf700]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720833110 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>",
+    "<NSLayoutConstraint:0x7208323f0 NSTextField:0x7209f0a80.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x720832c60 NSImageView:0x720eaf700.width == 16   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+2026-08-10 03:26:54.323098+0000 FloatTabs[2485:11354] [AppKit] Conflicting constraints detected: (
+    "<NSLayoutConstraint:0x720833160 H:|-(12)-[NSImageView:0x720eaf700]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720833110 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>",
+    "<NSLayoutConstraint:0x7208323f0 NSTextField:0x7209f0a80.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+).
+
+Will attempt to recover by breaking <NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>.
+2026-08-10 03:26:54.323435+0000 FloatTabs[2485:11354] [Layout] Unable to simultaneously satisfy constraints:
+(
+    "<NSLayoutConstraint:0x720833160 H:|-(12)-[NSImageView:0x720eaf700]   (active, names: '|':FloatTabs.ExternalWebAppTabView:0x72175ec00 )>",
+    "<NSAutoresizingMaskLayoutConstraint:0x720833110 h=--& v=--& FloatTabs.ExternalWebAppTabView:0x72175ec00.width == 0   (active)>",
+    "<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>",
+    "<NSLayoutConstraint:0x7208323f0 NSTextField:0x7209f0a80.trailing == FloatTabs.ExternalWebAppTabView:0x72175ec00.trailing - 8   (active)>"
+)
+
+Will attempt to recover by breaking constraint 
+<NSLayoutConstraint:0x7208328a0 H:[NSImageView:0x720eaf700]-(7)-[NSTextField:0x7209f0a80]   (active)>
+
+Set the NSUserDefault NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints to YES to have -[NSWindow visualizeConstraints:] automatically called when this happens.  And/or, set a symbolic breakpoint on LAYOUT_CONSTRAINTS_NOT_SATISFIABLE to catch this in the debugger.
+STAGE5D_OUTLINE web=(74.0, 10.0, 434.0, 824.0) tab=(34.0, 775.0, 44.0, 36.0) join=775.0...811.0 active=(36.0, 777.0, 40.0, 32.0)
+Test Case '-[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.ExternalShellTests testWorkspaceAutoHideRequiresAnotherFrontmostApplication]' started.
+Test Case '-[FloatTabsTests.ExternalShellTests testWorkspaceAutoHideRequiresAnotherFrontmostApplication]' passed (0.001 seconds).
+Test Suite 'ExternalShellTests' failed at 2026-08-10 03:26:54.329.
+	 Executed 18 tests, with 1 failure (0 unexpected) in 0.550 (0.564) seconds
+Test Suite 'PanelPerimeterDragHitTestingTests' started at 2026-08-10 03:26:54.329.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle]' passed (0.247 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testConfiguredTopBottomInnerOverlapAlsoMovesWindow]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testConfiguredTopBottomInnerOverlapAlsoMovesWindow]' passed (0.005 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testDirectWindowDragOriginUsesGlobalPointerDelta]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testDirectWindowDragOriginUsesGlobalPointerDelta]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testMovementDoesNotExtendDeeperThanConfiguredOverlap]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testMovementDoesNotExtendDeeperThanConfiguredOverlap]' passed (0.005 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testMovementOverlapWithWebIsLimitedToConfiguredTopBottomDepth]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testMovementOverlapWithWebIsLimitedToConfiguredTopBottomDepth]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeHandleWinsOverBottomMovementBand]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeHandleWinsOverBottomMovementBand]' passed (0.004 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeReadoutUsesViewportPixelsAndOneDecimalRatio]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeReadoutUsesViewportPixelsAndOneDecimalRatio]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testRightOuterGutterIsNotMovementTarget]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testRightOuterGutterIsNotMovementTarget]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testRightWebEdgeIsNeverConsumedByMovementLayer]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testRightWebEdgeIsNeverConsumedByMovementLayer]' passed (0.011 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testTopBottomAndBlankExternalZoneMoveWindow]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testTopBottomAndBlankExternalZoneMoveWindow]' passed (0.020 seconds).
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testWebsiteCenterIsNotConsumedByDragOrResizeOverlay]' started.
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testWebsiteCenterIsNotConsumedByDragOrResizeOverlay]' passed (0.012 seconds).
+Test Suite 'PanelPerimeterDragHitTestingTests' passed at 2026-08-10 03:26:54.657.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.321 (0.328) seconds
+Test Suite 'FloatTabsTests.xctest' failed at 2026-08-10 03:26:54.658.
+	 Executed 29 tests, with 1 failure (0 unexpected) in 0.871 (0.893) seconds
+Test Suite 'Selected tests' failed at 2026-08-10 03:26:54.658.
+	 Executed 29 tests, with 1 failure (0 unexpected) in 0.871 (0.895) seconds
+2026-08-10 03:26:54.674407+0000 FloatTabs[2485:11354] [ResourceLoadStatistics] Failed to request storage access quirks from WebPrivacy.
+2026-08-10 03:26:54.726740+0000 FloatTabs[2485:11354] [ResourceLoadStatistics] Failed to request known fingerprinting scripts from WebPrivacy: Error Domain=WebPrivacyErrorDomain Code=1001 "List data not found" UserInfo={NSLocalizedDescription=List data not found}
+2026-08-10 03:26:54.726765+0000 FloatTabs[2485:11354] [ResourceLoadStatistics] Failed to request storage access user agent string quirks from WebPrivacy.
+2026-08-10 03:26:59.184 xcodebuild[1126:6453] [MT] IDETestOperationsObserverDebug: 8.263 elapsed -- Testing started completed.
+2026-08-10 03:26:59.184 xcodebuild[1126:6453] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-08-10 03:26:59.184 xcodebuild[1126:6453] [MT] IDETestOperationsObserverDebug: 8.263 sec, +8.263 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Logs/Test/Test-FloatTabs-2026.08.10_03-26-06-+0000.xcresult
+
+Failing tests:
+	ExternalShellTests.testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough()
+
+** TEST FAILED **
+
+Testing started
