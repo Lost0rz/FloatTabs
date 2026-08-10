@@ -6,6 +6,7 @@ on:
       - feat/stage-6c-page-context-menu
     paths:
       - '.github/stage6c_patch.py'
+      - '.github/stage6c_testfix.py'
       - '.github/stage6c-trigger'
 
 permissions:
@@ -20,7 +21,9 @@ jobs:
           ref: feat/stage-6c-page-context-menu
 
       - name: Apply Stage 6C patch
-        run: python3 .github/stage6c_patch.py
+        run: |
+          python3 .github/stage6c_patch.py
+          python3 .github/stage6c_testfix.py
 
       - name: Check diff
         run: git diff --check
