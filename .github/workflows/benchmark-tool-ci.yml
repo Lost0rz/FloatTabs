@@ -24,8 +24,13 @@ jobs:
       - name: Python version
         run: python3 --version
 
-      - name: Compile benchmark harness
-        run: python3 -m py_compile tools/benchmark/floattabs_benchmark.py
+      - name: Compile benchmark harnesses
+        run: |
+          python3 -m py_compile tools/benchmark/floattabs_benchmark.py
+          python3 -m py_compile tools/benchmark/floattabs_lifecycle_benchmark.py
 
-      - name: Run benchmark harness self-test
+      - name: Run short benchmark harness self-test
         run: python3 tools/benchmark/floattabs_benchmark.py --self-test
+
+      - name: Run lifecycle benchmark harness self-test
+        run: python3 tools/benchmark/floattabs_lifecycle_benchmark.py --self-test
