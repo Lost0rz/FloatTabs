@@ -149,7 +149,10 @@ enum WebAppEditorController {
         stack.alignment = .leading
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
-        stack.setFrameSize(NSSize(width: 400, height: 350))
+        stack.setFrameSize(NSSize(
+            width: 400,
+            height: showsPrimaryRenderingControls ? 350 : 520
+        ))
         nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         urlField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         renderingForm.view.widthAnchor.constraint(equalToConstant: 400).isActive = true
@@ -221,6 +224,7 @@ private final class RenderingForm: NSObject {
     private let orientationPopup = NSPopUpButton()
     private let customUAField = NSTextField()
     private let effectiveUAField = NSTextField(labelWithString: "")
+    private let engineValue = NSTextField(labelWithString: "WebKit")
     private let advancedPopover = NSPopover()
 
     init(
@@ -274,6 +278,13 @@ private final class RenderingForm: NSObject {
         effectiveUAField.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         effectiveUAField.textColor = .secondaryLabelColor
         effectiveUAField.cell?.lineBreakMode = .byTruncatingMiddle
+        engineValue.textColor = .secondaryLabelColor
+
+        identityPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
+        devicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
+        orientationPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        customUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        effectiveUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true
 
         let sizeRow = NSStackView(views: [
             sizePopup,
@@ -297,8 +308,18 @@ private final class RenderingForm: NSObject {
                 advancedButton,
             ]
             : [
-                Self.label("Browser Identity / Compatibility"),
-                advancedButton,
+                Self.label("Browser Identity"),
+                identityPopup,
+                Self.label("Device Preset"),
+                devicePopup,
+                Self.label("Orientation"),
+                orientationPopup,
+                Self.label("Custom User Agent"),
+                customUAField,
+                Self.label("Effective Engine"),
+                engineValue,
+                Self.label("Effective User Agent"),
+                effectiveUAField,
             ]
         view = NSStackView(views: primaryViews)
         view.orientation = .vertical
@@ -326,7 +347,9 @@ private final class RenderingForm: NSObject {
         customUAField.target = self
         customUAField.action = #selector(customUAChanged(_:))
 
-        configureAdvancedPopover()
+        if showsPrimaryRenderingControls {
+            configureAdvancedPopover()
+        }
         updateAutomaticIdentityTitle()
         updateCustomFieldEditability()
         updateCustomUAEditability()
@@ -397,9 +420,6 @@ private final class RenderingForm: NSObject {
     }
 
     private func configureAdvancedPopover() {
-        let engineValue = NSTextField(labelWithString: "WebKit")
-        engineValue.textColor = .secondaryLabelColor
-
         let advancedStack = NSStackView(views: [
             Self.label("Browser Identity"),
             identityPopup,
@@ -418,12 +438,6 @@ private final class RenderingForm: NSObject {
         advancedStack.alignment = .leading
         advancedStack.spacing = 6
         advancedStack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
-
-        identityPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
-        devicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 270).isActive = true
-        orientationPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-        customUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true
-        effectiveUAField.widthAnchor.constraint(equalToConstant: 360).isActive = true
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 350))
         advancedStack.translatesAutoresizingMaskIntoConstraints = false

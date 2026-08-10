@@ -318,7 +318,7 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         XCTAssertFalse(root.hitTest(rightWebEdge) is PanelResizeHandleView)
     }
 
-    func testRightOuterGutterIsNotMovementTarget() {
+    func testRightOuterGutterIsSafeShellButNotMovementTarget() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
@@ -328,7 +328,9 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
             y: root.bounds.midY
         )
 
-        XCTAssertNil(root.hitTest(rightGutterPoint))
+        let hit = root.hitTest(rightGutterPoint)
+        XCTAssertFalse(hit is PanelPerimeterDragView)
+        XCTAssertTrue(hit === root)
     }
 
     func testMovementOverlapWithWebIsLimitedToConfiguredTopBottomDepth() {

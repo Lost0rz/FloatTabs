@@ -204,11 +204,58 @@ final class ExternalShellTests: XCTestCase {
     }
 
     func testResizeHandleUsesExpandedFirstMouseHitTarget() {
-        XCTAssertGreaterThanOrEqual(PanelMetrics.resizeHandleSize, 30)
-        let handle = PanelResizeHandleView(frame: NSRect(x: 100, y: 100, width: 32, height: 32))
+        XCTAssertGreaterThanOrEqual(PanelMetrics.resizeHandleSize, 40)
+        let handle = PanelResizeHandleView(frame: NSRect(x: 100, y: 100, width: 40, height: 40))
         XCTAssertTrue(handle.acceptsFirstMouse(for: nil))
         XCTAssertTrue(handle.hitTest(NSPoint(x: 102, y: 102)) === handle)
-        XCTAssertNil(handle.hitTest(NSPoint(x: 140, y: 140)))
+        XCTAssertNil(handle.hitTest(NSPoint(x: 150, y: 150)))
+    }
+
+    func testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        let rightGutterPoint = NSPoint(x: root.bounds.maxX - 4, y: root.bounds.midY)
+        XCTAssertTrue(root.hitTest(rightGutterPoint) === root)
+    }
+
+    func testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor() {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 2400, height: 2400))
+        let drag = PanelPerimeterDragView(frame: NSRect(
+            x: 1000,
+            y: 1000,
+            width: PanelMetrics.defaultPanelSize.width,
+            height: PanelMetrics.defaultPanelSize.height
+        ))
+        host.addSubview(drag)
+
+        let localTop = NSPoint(
+            x: drag.bounds.midX,
+            y: drag.bounds.maxY - PanelMetrics.outerInteractionGutter / 2
+        )
+        XCTAssertTrue(PanelMoveHoverController.isDraggable(point: localTop, in: drag.bounds))
+        let topInHost = drag.convert(localTop, to: host)
+        XCTAssertTrue(drag.hitTest(topInHost) === drag)
+
+        let localWebCenter = NSPoint(
+            x: PanelMetrics.externalControlZoneWidth + PanelMetrics.defaultViewportSize.width / 2,
+            y: drag.bounds.midY
+        )
+        let webCenterInHost = drag.convert(localWebCenter, to: host)
+        XCTAssertNil(drag.hitTest(webCenterInHost))
+    }
+
+    func testActiveTabExpandsAnimatedPanelOutlineIntoRail() {
+        let web = NSRect(x: 76, y: 12, width: 430, height: 820)
+        let activeTab = NSRect(x: 36, y: 720, width: 40, height: 32)
+        let path = PanelInteractionBorderView.outlinePath(
+            webFrame: web,
+            activeTabFrame: activeTab,
+            clippingBounds: NSRect(x: 0, y: 0, width: 518, height: 844)
+        )
+        XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)
+        XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)
     }
 
     func testFaviconURLUsesWebsiteOriginWithoutThirdPartyService() {

@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage
 import QuartzCore
 
 struct ExternalTabMetrics {
@@ -72,6 +73,7 @@ final class ExternalControlZoneView: NSView {
     var onReorder: ((UUID, Int) -> Void)?
     var onCurrentControls: (() -> Void)?
     var onTogglePin: (() -> Void)?
+    var onActiveTabGeometryChange: (() -> Void)?
 
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
@@ -194,6 +196,15 @@ final class ExternalControlZoneView: NSView {
 
     func tabView(for id: UUID) -> ExternalWebAppTabView? {
         tabViews[id]
+    }
+
+    func activeTabFrame(in ancestor: NSView) -> NSRect? {
+        guard let activeTabID,
+              let tab = tabViews[activeTabID],
+              tab.superview != nil else {
+            return nil
+        }
+        return tab.convert(tab.bounds, to: ancestor)
     }
 
     var addControlFrame: NSRect {
@@ -337,6 +348,7 @@ final class ExternalControlZoneView: NSView {
 
         guard animated else {
             updateFrames()
+            onActiveTabGeometryChange?()
             return
         }
 
@@ -345,6 +357,10 @@ final class ExternalControlZoneView: NSView {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             context.allowsImplicitAnimation = true
             updateFrames()
+        }
+        onActiveTabGeometryChange?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            self?.onActiveTabGeometryChange?()
         }
     }
 
@@ -490,6 +506,10 @@ final class ExternalWebAppTabView: NSView {
     private var residencyPolicy: SlotResidencyPolicy = .warm
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var faviconOriginKey: String?
+    private var sourceIcon: NSImage?
+    private var grayscaleIcon: NSImage?
+
+    private static let grayscaleContext = CIContext(options: nil)
 
     var preferredWidth: CGFloat {
         // Resting tabs are icon-only. Only the hovered row fully expands;
@@ -511,7 +531,7 @@ final class ExternalWebAppTabView: NSView {
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.image = Self.fallbackIcon()
+        setSourceIcon(Self.fallbackIcon())
         addSubview(iconView)
 
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -777,10 +797,10 @@ final class ExternalWebAppTabView: NSView {
         let key = WebsiteFaviconProvider.originKey(for: url)
         guard key != faviconOriginKey else { return }
         faviconOriginKey = key
-        iconView.image = Self.fallbackIcon()
+        setSourceIcon(Self.fallbackIcon())
         WebsiteFaviconProvider.shared.load(for: url) { [weak self] image in
             guard let self, self.faviconOriginKey == key else { return }
-            self.iconView.image = image ?? Self.fallbackIcon()
+            self.setSourceIcon(image ?? Self.fallbackIcon())
         }
     }
 
@@ -788,7 +808,38 @@ final class ExternalWebAppTabView: NSView {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
+        applyIconAppearance()
         updateShape()
+    }
+
+    private func setSourceIcon(_ image: NSImage?) {
+        sourceIcon = image
+        if let image, !image.isTemplate {
+            grayscaleIcon = Self.grayscaleImage(from: image)
+        } else {
+            grayscaleIcon = nil
+        }
+        applyIconAppearance()
+    }
+
+    private func applyIconAppearance() {
+        let base = sourceIcon ?? Self.fallbackIcon()
+        if isActive {
+            iconView.image = base
+            iconView.alphaValue = 1
+            iconView.contentTintColor = base?.isTemplate == true ? .labelColor : nil
+        } else {
+            if base?.isTemplate == true {
+                iconView.image = base
+                iconView.contentTintColor = .tertiaryLabelColor
+            } else {
+                // Never leave a full-color inactive favicon above the rainbow frame.
+                // If conversion ever fails, fall back to the neutral system globe.
+                iconView.image = grayscaleIcon ?? Self.fallbackIcon()
+                iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
+            }
+            iconView.alphaValue = isHovered ? 0.74 : 0.56
+        }
     }
 
     private func updateShape() {
@@ -806,15 +857,13 @@ final class ExternalWebAppTabView: NSView {
         shapeLayer.path = path
 
         if isActive {
-            let accent = ExternalTabVisualPalette.activeAccent
+            // The animated PanelInteractionBorderView owns the active outline.
+            // Keep only the tab surface here so page + active tab read as one shape.
             shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
-            shapeLayer.strokeColor = accent.withAlphaComponent(0.92).cgColor
-            shapeLayer.lineWidth = 2
-            layer?.shadowColor = accent.cgColor
-            layer?.shadowOpacity = 0.34
-            layer?.shadowRadius = 8
-            layer?.shadowOffset = .zero
-            layer?.shadowPath = path
+            shapeLayer.strokeColor = NSColor.clear.cgColor
+            shapeLayer.lineWidth = 0
+            layer?.shadowOpacity = 0
+            layer?.shadowPath = nil
         } else {
             shapeLayer.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(isHovered ? 0.96 : 0.82).cgColor
             shapeLayer.strokeColor = NSColor.separatorColor.withAlphaComponent(0.48).cgColor
@@ -825,6 +874,23 @@ final class ExternalWebAppTabView: NSView {
             layer?.shadowOffset = NSSize(width: -1, height: -1)
             layer?.shadowPath = path
         }
+    }
+
+    private static func grayscaleImage(from image: NSImage) -> NSImage? {
+        guard let data = image.tiffRepresentation,
+              let input = CIImage(data: data),
+              let filter = CIFilter(name: "CIColorControls") else {
+            return nil
+        }
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(0.0, forKey: kCIInputSaturationKey)
+        guard let output = filter.outputImage,
+              let cgImage = grayscaleContext.createCGImage(output, from: output.extent) else {
+            return nil
+        }
+        let result = NSImage(cgImage: cgImage, size: image.size)
+        result.isTemplate = false
+        return result
     }
 
     private static func fallbackIcon() -> NSImage? {

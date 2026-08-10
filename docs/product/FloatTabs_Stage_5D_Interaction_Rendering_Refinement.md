@@ -2,9 +2,10 @@
 
 Status: automated implementation validation complete; Real-Mac acceptance and final benchmark pending.
 
-## Resize
-- Bottom-right visual grip remains small, but the acquisition view is 32 × 32 pt.
-- The resize view accepts first mouse, keeps AppKit frame-based hit testing, and uses an `activeAlways` tracking area so an inactive FloatTabs panel can be acquired on the first drag.
+## Resize and movement acquisition
+- Bottom-right visual grip remains small and is shifted inward toward the Web corner, while its live acquisition view is 40 × 40 pt. The full gap between the grip and the visible Web corner is operational rather than click-through whitespace.
+- Transparent pixels inside the FloatTabs window are consumed by the panel shell instead of falling through to the desktop.
+- Resize accepts first mouse and keeps an `activeAlways` tracking area. Top/bottom/left movement uses the exact same `PanelPerimeterDragView.dragRects` geometry for cursor discovery and hit testing, including explicit superview→local coordinate conversion.
 
 ## Rendering contract
 - Website Mode selects WebKit Desktop/Mobile content mode and browser identity.
@@ -15,9 +16,9 @@ Status: automated implementation validation complete; Real-Mac acceptance and fi
 ## Tab rail
 - Resting active and inactive tabs are favicon-only.
 - Hover expands the tab and reveals its Web App name; the native tooltip retains the full name when it exceeds the fixed external rail width.
-- Active presentation uses the app accent seam and an attached open-right-edge silhouette; inactive tabs use a quieter sticky-note silhouette.
-- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. No third-party favicon service or site-specific mapping is used.
-- The active accent is centralized at `ExternalTabVisualPalette.activeAccent` so a future Settings → Appearance screen can replace it without changing tab behavior.
+- The animated rainbow frame is one continuous silhouette around the Web surface and the active tab; the active tab no longer draws an independent static outline.
+- The presentation-only rainbow layer is above the tab rail, so inactive tabs cannot cover the Web frame. Only the active tab makes the frame detour outward into the rail.
+- Favicons are fetched generically from the Web App origin `/favicon.ico`, cached in memory, and fall back to a system globe. The active favicon remains full color; inactive favicons render grayscale/neutral. No third-party favicon service or site-specific mapping is used.
 
 ## Tab context menu
 Common controls are available directly from the Web App tab and persist through `TabStore`:
@@ -27,7 +28,7 @@ Common controls are available directly from the Web App tab and persist through 
 - Residency
 - Background Media
 
-`Edit Web App…` is reduced to Name, URL, and advanced Browser Identity / compatibility. Add Web App retains the complete initial rendering form.
+`Edit Web App…` is reduced to Name, URL, and low-frequency Browser Identity / compatibility controls. Those controls are fully expanded inline—there is no nested Advanced popover in Edit. Add Web App retains the complete initial rendering form.
 
 ## Deferred
 Global Settings is a later independent screen (Appearance / Hotkeys / Global / About). Stage 5D does not build it.
