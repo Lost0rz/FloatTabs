@@ -74,7 +74,7 @@ final class ExternalControlZoneView: NSView {
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
-    var onCurrentControls: (() -> Void)?
+    var onSettings: (() -> Void)?
     var onTogglePin: (() -> Void)?
     var onActiveTabGeometryChange: (() -> Void)?
 
@@ -84,7 +84,7 @@ final class ExternalControlZoneView: NSView {
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
-    private let currentControls = CurrentWebAppControl()
+    private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerLocation: NSPoint?
@@ -100,15 +100,15 @@ final class ExternalControlZoneView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(addControl)
-        addSubview(currentControls)
+        addSubview(settingsControl)
         addSubview(pinControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
-        currentControls.onActivate = { [weak self] in self?.onCurrentControls?() }
+        settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
         addControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
-        currentControls.onPointerMoved = { [weak self] event in
+        settingsControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         pinControl.onPointerMoved = { [weak self] event in
@@ -187,7 +187,6 @@ final class ExternalControlZoneView: NSView {
             )
         }
 
-        currentControls.isEnabled = activeTabID != nil
         needsLayout = true
     }
 
@@ -229,8 +228,8 @@ final class ExternalControlZoneView: NSView {
         addControl.frame
     }
 
-    var currentControlsFrame: NSRect {
-        currentControls.frame
+    var settingsControlFrame: NSRect {
+        settingsControl.frame
     }
 
     var pinControlFrame: NSRect {
@@ -288,8 +287,8 @@ final class ExternalControlZoneView: NSView {
             tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
         }
         addControl.setHovered(location.map { addControl.frame.contains($0) } ?? false)
-        currentControls.setHovered(
-            location.map { currentControls.frame.contains($0) } ?? false
+        settingsControl.setHovered(
+            location.map { settingsControl.frame.contains($0) } ?? false
         )
         pinControl.setHovered(location.map { pinControl.frame.contains($0) } ?? false)
     }
@@ -362,13 +361,13 @@ final class ExternalControlZoneView: NSView {
             let systemInfluence = self.pointerY.map {
                 ExternalTabMetrics.dockInfluence(forDistance: $0 - systemCenterY)
             } ?? 0
-            self.currentControls.setDockInfluence(systemInfluence)
+            self.settingsControl.setDockInfluence(systemInfluence)
             let systemFrame = self.attachedFrame(
-                preferredWidth: self.currentControls.preferredWidth,
+                preferredWidth: self.settingsControl.preferredWidth,
                 y: systemY,
                 height: ExternalTabMetrics.systemControlHeight
             )
-            self.setFrame(systemFrame, for: self.currentControls, animated: animated)
+            self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
         }
 
         guard animated else {
@@ -1257,7 +1256,7 @@ final class PinPanelControl: NSView {
 }
 
 @MainActor
-final class CurrentWebAppControl: NSView {
+final class GlobalSettingsControl: NSView {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
@@ -1265,10 +1264,6 @@ final class CurrentWebAppControl: NSView {
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
     private var dockInfluence: CGFloat = 0
-
-    var isEnabled = false {
-        didSet { updateAppearance() }
-    }
 
     var preferredWidth: CGFloat {
         ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
@@ -1279,9 +1274,9 @@ final class CurrentWebAppControl: NSView {
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
-        toolTip = "Current Web App Controls"
+        toolTip = "FloatTabs Settings · ⌘,"
 
-        imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Current Web App Controls")
+        imageView.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Global Settings")
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
         NSLayoutConstraint.activate([
@@ -1305,8 +1300,7 @@ final class CurrentWebAppControl: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard isEnabled else { return nil }
-        return frame.contains(point) ? self : nil
+        frame.contains(point) ? self : nil
     }
 
     func setDockInfluence(_ influence: CGFloat) {
@@ -1314,9 +1308,8 @@ final class CurrentWebAppControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
-        let resolved = hovered && isEnabled
-        guard isHovered != resolved else { return }
-        isHovered = resolved
+        guard isHovered != hovered else { return }
+        isHovered = hovered
         updateAppearance()
     }
 
@@ -1350,7 +1343,6 @@ final class CurrentWebAppControl: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard isEnabled else { return }
         onActivate?()
     }
 
@@ -1358,10 +1350,10 @@ final class CurrentWebAppControl: NSView {
         let fraction: CGFloat = isHovered ? 0.10 : 0.02
         layer?.backgroundColor = NSColor.controlBackgroundColor
             .blended(withFraction: fraction, of: .labelColor)?
-            .withAlphaComponent(isEnabled ? 0.94 : 0.55)
+            .withAlphaComponent(0.94)
             .cgColor
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
         layer?.borderWidth = 1
-        imageView.contentTintColor = isEnabled ? .labelColor : .tertiaryLabelColor
+        imageView.contentTintColor = .labelColor
     }
 }

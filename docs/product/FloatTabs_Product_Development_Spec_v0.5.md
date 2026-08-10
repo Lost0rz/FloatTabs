@@ -272,7 +272,7 @@ Rules：
 - inactive 较小；
 - hover 向外扩展；
 - `+` 默认更小，hover / Add form open 时变大；
-- `⚙` = Current Web App / Window Controls；
+- `⚙` = Global Settings；
 - FT = expand/collapse Slot rail；
 - `⚙` 与 FT 固定在左下；
 - Web Apps 与 bottom controls 之间用 large empty gap 分组；
@@ -481,48 +481,21 @@ Zoom 绑定 Slot ID，不绑定具体 conversation URL。
 
 ---
 
-# 8. Current Web App Controls (`⚙`)
+# 8. Global Settings Gear (`⚙`)
 
-Gear Popover 不是 Global Settings。
+Gear 是 FloatTabs application-level Global Settings 的固定入口，不再承担 Current Web App Controls。
 
-Persist per Slot：
-
-```text
-Browser
-View Mode
-Window Size
-Zoom
-```
-
-Window/session action：
+Entry：
 
 ```text
-Pin Window
+⚙
+Menu Bar → Settings…
+⌘,
 ```
 
-One-shot actions：
+三者必须进入同一个 native Settings window。Gear 在没有 active Slot 时也保持可用。
 
-```text
-Reload
-Open in Default Browser
-Edit Web App…
-```
-
-Do not include：
-
-```text
-FloatTabs Settings…
-Launch at Login
-Global Shortcut
-Performance
-Appearance
-About
-Update
-```
-
-Global Settings 通过 Menu Bar / `⌘,` 打开。
-
-Pin 是当前 panel session state，不写入 WebAppProfile。
+Per-Slot 高频控制继续由 Slot context menu + `Edit Web App…` 负责；Pin 继续由独立 Pin control + `⌘⇧P` 负责。不要在 Global Settings 再复制 Website Mode / Window Size / Zoom / Residency / Background Media。
 
 ---
 
@@ -956,18 +929,22 @@ Menu Bar → Settings…
 ⌘,
 ```
 
-Possible groups：
+Stage 6D root groups：
 
-- Launch at Login；
-- Global Show/Hide shortcut；
-- hide-on-focus-loss behavior；
-- restore last Web App；
-- pause background media；
-- Memory Saver when/if implemented；
-- appearance；
-- Website Data / clear data；
-- About / Version；
-- Update。
+```text
+Appearance
+Shortcuts
+Account & Language
+```
+
+Stage 6D implements：
+
+- Appearance: System / Light / Dark，UserDefaults 持久化并即时应用于 FloatTabs chrome；
+- Shortcuts: Global Show/Hide 使用 KeyboardShortcuts 原生 recorder，现有 `⌘`` 作为迁移初始值；
+- fixed page shortcuts 只读展示，不改语义；
+- Account & Language 只陈述真实 V1 local-only / no cloud account / no per-app language override 边界，不展示假的 Sign In、Sync 或 Language control。
+
+Launch at Login、Website Data clearing、Update、账号/云同步、语言覆盖与 Accent picker 后续单独进入有真实实现的数据链路后再开放。
 
 不要求额外画完整 UIUX 图；使用 native macOS settings pattern + Design System 即可。
 

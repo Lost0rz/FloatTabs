@@ -107,18 +107,17 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: false, isPinned: false))
     }
 
-    func testCurrentWebAppGearUsesActualVisibleHitAreaWhenSlotIsActive() {
+    func testGlobalSettingsGearUsesActualVisibleHitAreaWithoutActiveSlot() {
         let (_, zone) = makeZoneHarness()
-        let active = makeProfile(order: 0, name: "GPT")
-        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.apply(profiles: [], activeTabID: nil)
         zone.layoutSubtreeIfNeeded()
 
         let pointInZone = NSPoint(
-            x: zone.currentControlsFrame.midX,
-            y: zone.currentControlsFrame.midY
+            x: zone.settingsControlFrame.midX,
+            y: zone.settingsControlFrame.midY
         )
         let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        XCTAssertTrue(zone.hitTest(pointInSuperview) is CurrentWebAppControl)
+        XCTAssertTrue(zone.hitTest(pointInSuperview) is GlobalSettingsControl)
     }
 
     func testTabContextMenuStartsWithReturnToHome() {
@@ -226,7 +225,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(activeView.frame.height, ExternalTabMetrics.tabHeight, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.width, ExternalTabMetrics.addNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.height, ExternalTabMetrics.addHeight, accuracy: 0.001)
-        XCTAssertEqual(zone.currentControlsFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
+        XCTAssertEqual(zone.settingsControlFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
         XCTAssertEqual(zone.pinControlFrame.width, ExternalTabMetrics.systemControlNormalWidth, accuracy: 0.001)
         XCTAssertEqual(activeView.frame.maxX, zone.bounds.maxX, accuracy: 0.001)
         XCTAssertEqual(
@@ -240,7 +239,7 @@ final class ExternalShellTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(
-            zone.currentControlsFrame.maxX,
+            zone.settingsControlFrame.maxX,
             zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
             accuracy: 0.001
         )
@@ -249,7 +248,7 @@ final class ExternalShellTests: XCTestCase {
             zone.bounds.maxX - PanelMetrics.interactionBorderOutset,
             accuracy: 0.001
         )
-        XCTAssertLessThan(zone.currentControlsFrame.maxY, zone.pinControlFrame.minY)
+        XCTAssertLessThan(zone.settingsControlFrame.maxY, zone.pinControlFrame.minY)
     }
 
     func testInactiveTabHoverCanBeClearedWithoutLeavingExpandedGeometry() {

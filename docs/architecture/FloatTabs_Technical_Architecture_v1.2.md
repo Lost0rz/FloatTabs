@@ -113,7 +113,7 @@ FloatTabsApp
 │
 └── UI
     ├── Frozen External Shell
-    ├── Current Web App Controls
+    ├── Global Settings
     ├── Add/Edit Web App
     ├── Quick URL
     └── Global Settings

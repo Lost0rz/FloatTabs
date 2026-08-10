@@ -6,11 +6,6 @@ struct WebAppEditorValue {
     var renderingProfile: WebRenderingProfile
 }
 
-struct CurrentWebAppControlsValue {
-    var renderingProfile: WebRenderingProfile
-    var followPreferredSize: Bool
-}
-
 @MainActor
 enum WebAppEditorController {
     static func presentAdd(
@@ -44,54 +39,6 @@ enum WebAppEditorController {
             attachedTo: window,
             completion: completion
         )
-    }
-
-    static func presentCurrentControls(
-        profile: WebAppProfile,
-        followPreferredSize: Bool,
-        attachedTo window: NSWindow,
-        completion: @escaping (CurrentWebAppControlsValue?) -> Void
-    ) {
-        let alert = NSAlert()
-        alert.messageText = "\(profile.name) Controls"
-        alert.informativeText = "Website Mode controls the site layout class. Window Size, Browser Identity, and Zoom are independent. Exact browser/device presets are available under Advanced. The engine remains WebKit."
-        alert.addButton(withTitle: "Apply")
-        alert.addButton(withTitle: "Cancel")
-
-        let renderingForm = RenderingForm(initial: profile.renderingProfile)
-        let followCheckbox = NSButton(
-            checkboxWithTitle: "Follow preferred Window Size when switching Web Apps",
-            target: nil,
-            action: nil
-        )
-        followCheckbox.state = followPreferredSize ? .on : .off
-
-        let stack = NSStackView(views: [renderingForm.view, followCheckbox])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
-        stack.setFrameSize(NSSize(width: 400, height: 260))
-        renderingForm.view.widthAnchor.constraint(equalToConstant: 400).isActive = true
-        alert.accessoryView = stack
-
-        alert.beginSheetModal(for: window) { response in
-            guard response == .alertFirstButtonReturn else {
-                completion(nil)
-                return
-            }
-            guard let rendering = renderingForm.value() else {
-                presentRenderingValidationError(attachedTo: window)
-                completion(nil)
-                return
-            }
-            completion(
-                CurrentWebAppControlsValue(
-                    renderingProfile: rendering,
-                    followPreferredSize: followCheckbox.state == .on
-                )
-            )
-        }
     }
 
     static func confirmRemove(

@@ -40,6 +40,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
+    var onOpenGlobalSettings: (() -> Void)?
 
     init(
         tabStore: TabStore,
@@ -293,6 +294,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .reload:
             reloadActiveSlot()
 
+        case .settings:
+            onOpenGlobalSettings?()
+
         case .togglePin:
             togglePinnedState()
         }
@@ -391,8 +395,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onReorder = { [weak self] id, destination in
             _ = self?.tabStore.move(id: id, toIndex: destination)
         }
-        rail.onCurrentControls = { [weak self] in
-            self?.presentCurrentWebAppControls()
+        rail.onSettings = { [weak self] in
+            self?.onOpenGlobalSettings?()
         }
         rail.onTogglePin = { [weak self] in
             self?.togglePinnedState()
@@ -545,34 +549,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                     // must not depend on the automatic switch-follow preference.
                     self.applyPreferredViewport(value.renderingProfile.viewportSize)
                 }
-            }
-        }
-    }
-
-    private func presentCurrentWebAppControls() {
-        guard panel.attachedSheet == nil,
-              let profile = tabStore.activeProfile else { return }
-
-        WebAppEditorController.presentCurrentControls(
-            profile: profile,
-            followPreferredSize: followPreferredSize,
-            attachedTo: panel
-        ) { [weak self] value in
-            Task { @MainActor [weak self] in
-                guard let self, let value else { return }
-                self.followPreferredSize = value.followPreferredSize
-                UserDefaults.standard.set(
-                    value.followPreferredSize,
-                    forKey: Self.followPreferredSizeKey
-                )
-                _ = self.tabStore.updateRenderingProfile(
-                    id: profile.id,
-                    renderingProfile: value.renderingProfile
-                )
-
-                // Applying settings to the current Slot is explicit user intent.
-                // `followPreferredSize` only controls automatic resize on Slot switch.
-                self.applyPreferredViewport(value.renderingProfile.viewportSize)
             }
         }
     }
