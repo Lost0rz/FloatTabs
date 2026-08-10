@@ -9,6 +9,7 @@ on:
       - 'FloatTabsTests/**'
       - 'FloatTabs.xcodeproj/**'
       - '.github/workflows/macos-ci.yml'
+      - 'tools/release/**'
   pull_request:
     branches:
       - main
@@ -17,6 +18,7 @@ on:
       - 'FloatTabsTests/**'
       - 'FloatTabs.xcodeproj/**'
       - '.github/workflows/macos-ci.yml'
+      - 'tools/release/**'
   workflow_dispatch:
 
 jobs:
@@ -45,6 +47,16 @@ jobs:
           -project FloatTabs.xcodeproj
           -scheme FloatTabs
           -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Release build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Release
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
           build
