@@ -12,16 +12,19 @@ final class StatusItemController: NSObject {
 
     private let onToggle: () -> Void
     private let isVisible: () -> Bool
+    private let onSettings: () -> Void
     private let onQuit: () -> Void
     private var selectedFaviconOriginKey: String?
 
     init(
         onToggle: @escaping () -> Void,
         isVisible: @escaping () -> Bool,
+        onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onToggle = onToggle
         self.isVisible = isVisible
+        self.onSettings = onSettings
         self.onQuit = onQuit
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -104,6 +107,16 @@ final class StatusItemController: NSObject {
         menu.addItem(toggleMenuItem)
         menu.addItem(.separator())
 
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        )
+        settingsItem.keyEquivalentModifierMask = [.command]
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
+
         let quitItem = NSMenuItem(
             title: "Quit FloatTabs",
             action: #selector(quit),
@@ -140,6 +153,10 @@ final class StatusItemController: NSObject {
 
     @objc private func toggleFromMenu() {
         onToggle()
+    }
+
+    @objc private func openSettings() {
+        onSettings()
     }
 
     @objc private func quit() {

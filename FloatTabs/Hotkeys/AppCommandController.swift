@@ -11,6 +11,7 @@ enum AppCommand: Equatable {
     case quickURL
     case returnHome
     case reload
+    case settings
     case togglePin
 }
 
@@ -43,11 +44,18 @@ final class AppCommandController {
             }
 
             guard event.type == .keyDown,
-                  self.isEnabled(),
                   let command = Self.command(for: event) else {
                 return event
             }
 
+            // Global Settings is application-level chrome. Allow Cmd+, while
+            // FloatTabs is active even when the floating panel itself is hidden.
+            if command == .settings {
+                self.onCommand(command)
+                return nil
+            }
+
+            guard self.isEnabled() else { return event }
             self.onCommand(command)
             return nil
         }
@@ -83,6 +91,8 @@ final class AppCommandController {
                 return .quickURL
             case "r":
                 return .reload
+            case ",":
+                return .settings
             case "-":
                 return .zoomOut
             case "0":

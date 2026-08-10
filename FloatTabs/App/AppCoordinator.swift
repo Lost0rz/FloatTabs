@@ -6,6 +6,8 @@ final class AppCoordinator {
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
+    private let preferencesStore = AppPreferencesStore()
+    private var globalSettingsController: GlobalSettingsController?
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -31,9 +33,16 @@ final class AppCoordinator {
     }
 
     func start() {
+        preferencesStore.applyStoredAppearance()
+        globalSettingsController = GlobalSettingsController(preferencesStore: preferencesStore)
+        panelController.onOpenGlobalSettings = { [weak self] in
+            self?.showGlobalSettings()
+        }
+
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
+            onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) }
         )
         statusItemController?.setActiveWebApp(
@@ -53,7 +62,12 @@ final class AppCoordinator {
                 NSApp.isActive && (self?.panelController.isVisible ?? false)
             },
             onCommand: { [weak self] command in
-                self?.panelController.handle(command)
+                guard let self else { return }
+                if command == .settings {
+                    self.showGlobalSettings()
+                } else {
+                    self.panelController.handle(command)
+                }
             }
         )
 
@@ -120,6 +134,10 @@ final class AppCoordinator {
         }
     }
 #endif
+
+    private func showGlobalSettings() {
+        globalSettingsController?.show()
+    }
 
     private func toggleFloatTabs() {
         if panelController.isVisible {

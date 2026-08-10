@@ -107,7 +107,7 @@ large empty gap
 
 左下
 ⚙
-= Current Web App / Window Controls
+= Global Settings
 
 FT / FloatTabs Logo
 = Expand / Collapse Web App Tabs
