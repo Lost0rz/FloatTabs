@@ -6,6 +6,7 @@ on:
       - agent/address-bar-current-page-actions
     paths:
       - '.github/address_bar_patch.py'
+      - '.github/address_bar_patch_fix.py'
       - '.github/address-bar-trigger'
 
 permissions:
@@ -21,7 +22,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply address bar implementation
-        run: python3 .github/address_bar_patch.py
+        run: |
+          python3 .github/address_bar_patch.py
+          python3 .github/address_bar_patch_fix.py
 
       - name: Check patch
         run: |
