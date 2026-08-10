@@ -331,25 +331,60 @@ enum UserAgentProvider {
 /// event/hit-testing pipeline intact and avoids AppKit coordinate transforms or
 /// private WebKit layout SPI.
 enum WebsiteLayoutViewport {
+    /// Desktop mode should keep a desktop-class responsive layout even when the
+    /// floating window is physically narrow. Mobile deliberately stays 1:1 so
+    /// its WebKit/AppKit hit-testing and phone layout remain native.
+    static let desktopMinimumCSSWidth: CGFloat = 1280
+
     static func targetCSSWidth(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        visibleWidth
+        guard visibleWidth > 0 else { return visibleWidth }
+        switch websiteMode {
+        case .desktop:
+            return max(desktopMinimumCSSWidth, visibleWidth)
+        case .mobile:
+            return visibleWidth
+        }
     }
 
     static func fittingScale(
         forVisibleWidth visibleWidth: CGFloat,
         websiteMode: WebsiteMode
     ) -> CGFloat {
-        1
+        guard visibleWidth > 0 else { return 1 }
+        let targetWidth = targetCSSWidth(
+            forVisibleWidth: visibleWidth,
+            websiteMode: websiteMode
+        )
+        guard targetWidth > 0 else { return 1 }
+        return visibleWidth / targetWidth
     }
 
+    /// The visible FloatTabs frame and the website layout viewport are separate.
+    /// Desktop receives a real desktop-class WKWebView frame; its containing
+    /// AppKit host maps that logical frame uniformly into the visible panel.
+    /// Mobile deliberately remains 1:1 with the visible panel.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode
     ) -> CGSize {
-        visibleSize
+        guard visibleSize.width > 0, visibleSize.height > 0 else {
+            return visibleSize
+        }
+
+        let logicalWidth = targetCSSWidth(
+            forVisibleWidth: visibleSize.width,
+            websiteMode: websiteMode
+        )
+        guard logicalWidth > 0 else { return visibleSize }
+
+        let scale = logicalWidth / visibleSize.width
+        return CGSize(
+            width: logicalWidth,
+            height: visibleSize.height * scale
+        )
     }
 }
 
@@ -507,9 +542,10 @@ enum WebViewFactory {
     """
 }
 
-/// Keeps WKWebView at the real visible AppKit/CSS size. Website Mode changes
-/// WebKit content mode / browser identity; user Zoom is the only pageZoom input.
-/// No synthetic 1280/390 viewport and no AppKit/WebKit magnification are used.
+/// Keeps WKWebView page zoom independent from Website Mode. The AppKit host owns
+/// Desktop viewport fitting, so WebKit lays out at a real desktop-class frame and
+/// fonts/line-height are scaled uniformly with the rest of the rendered page.
+/// `pageZoom` is reserved for the user's explicit Zoom value only.
 @MainActor
 final class FloatTabsWebView: WKWebView {
     private(set) var websiteMode: WebsiteMode = .desktop

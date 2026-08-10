@@ -758,6 +758,8 @@ final class ResizeReadoutView: NSView {
 /// No NSScrollView magnification is involved.
 final class WebSlotHostView: NSView {
     private(set) weak var webView: WKWebView?
+    private(set) var websiteLayoutScale: CGFloat = 1
+    private var isApplyingWebsiteLayout = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -782,18 +784,52 @@ final class WebSlotHostView: NSView {
             self.webView?.removeFromSuperview()
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
-            webView.autoresizingMask = [.width, .height]
+            webView.autoresizingMask = []
             addSubview(webView)
             self.webView = webView
         }
-        webView.frame = bounds
+        applyWebsiteLayoutIfNeeded()
     }
 
     override func layout() {
         super.layout()
-        if webView?.frame != bounds {
-            webView?.frame = bounds
+        applyWebsiteLayoutIfNeeded()
+    }
+
+    private func applyWebsiteLayoutIfNeeded() {
+        guard !isApplyingWebsiteLayout,
+              let webView,
+              frame.width > 0,
+              frame.height > 0 else {
+            return
         }
+
+        let visibleSize = frame.size
+        let mode = (webView as? FloatTabsWebView)?.websiteMode
+            ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
+                ? .mobile
+                : .desktop)
+        let logicalSize = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: visibleSize,
+            websiteMode: mode
+        )
+        guard logicalSize.width > 0, logicalSize.height > 0 else { return }
+
+        isApplyingWebsiteLayout = true
+        websiteLayoutScale = visibleSize.width / logicalSize.width
+
+        if abs(bounds.width - logicalSize.width) > 0.5
+            || abs(bounds.height - logicalSize.height) > 0.5
+            || bounds.origin != .zero {
+            bounds = NSRect(origin: .zero, size: logicalSize)
+        }
+
+        if abs(webView.frame.width - logicalSize.width) > 0.5
+            || abs(webView.frame.height - logicalSize.height) > 0.5
+            || webView.frame.origin != .zero {
+            webView.frame = NSRect(origin: .zero, size: logicalSize)
+        }
+        isApplyingWebsiteLayout = false
     }
 }
 
@@ -912,7 +948,14 @@ final class WebPanelContainerView: NSView {
 
     override func layout() {
         super.layout()
-        if activeSlotID == nil || hostedWebView != nil {
+        if let activeSlotID,
+           hostedWebView == nil,
+           let hotHost = hotHostViews[activeSlotID],
+           !hotHost.isHidden {
+            hotHost.frame = clipView.bounds
+            hotHost.layoutSubtreeIfNeeded()
+            websiteLayoutScale = hotHost.websiteLayoutScale
+        } else if activeSlotID == nil || hostedWebView != nil {
             updateWebsiteLayoutIfNeeded()
         }
         layer?.shadowPath = CGPath(
@@ -953,7 +996,7 @@ final class WebPanelContainerView: NSView {
         host.layoutSubtreeIfNeeded()
         bringToFront(host)
 
-        websiteLayoutScale = 1
+        websiteLayoutScale = host.websiteLayoutScale
         activeSlotID = slotID
         activeWebView = webView
     }
