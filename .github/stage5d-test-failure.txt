@@ -1,0 +1,162 @@
+2026-08-10 00:25:02.247885+0000 FloatTabs[27555:70575] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.249305+0000 FloatTabs[27555:70581] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.249320+0000 FloatTabs[27555:70581] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.249636+0000 FloatTabs[27555:70578] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.249658+0000 FloatTabs[27555:70578] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.250177+0000 FloatTabs[27555:70576] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+2026-08-10 00:25:02.251385+0000 FloatTabs[27555:70576] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.089 (0.090) seconds
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ExternalShellTests.swift:17: error: -[FloatTabsTests.ExternalShellTests testActualTabHitAreaReturnsVisibleTabView] : XCTAssertTrue failed
+Test Case '-[FloatTabsTests.ExternalShellTests testActualTabHitAreaReturnsVisibleTabView]' failed (0.007 seconds).
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ExternalShellTests.swift:200: error: -[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap] : XCTAssertTrue failed
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ExternalShellTests.swift:203: error: -[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap] : XCTAssertTrue failed
+Test Case '-[FloatTabsTests.ExternalShellTests testTabControlsWinOverPerimeterDragWhenTheyOverlap]' failed (0.009 seconds).
+	 Executed 15 tests, with 3 failures (0 unexpected) in 0.216 (0.220) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ScreenPositioningTests.swift:373: error: -[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle] : XCTAssertTrue failed
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testBottomRightCornerIsDedicatedResizeHandle]' failed (0.073 seconds).
+/Users/runner/work/FloatTabs/FloatTabs/FloatTabsTests/ScreenPositioningTests.swift:385: error: -[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeHandleWinsOverBottomMovementBand] : XCTAssertTrue failed
+Test Case '-[FloatTabsTests.PanelPerimeterDragHitTestingTests testResizeHandleWinsOverBottomMovementBand]' failed (0.009 seconds).
+	 Executed 11 tests, with 2 failures (0 unexpected) in 0.139 (0.144) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.017 (0.018) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.014 (0.016) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.010 (0.014) seconds
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.044 (0.048) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.035 (0.059) seconds
+2026-08-10 00:25:05.502700+0000 FloatTabs[27555:70558] [general] WebContent[27567] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:06.415501+0000 FloatTabs[27555:70558] [general] WebContent[27578] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:06.930134+0000 FloatTabs[27555:70558] [general] WebContent[27581] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:07.080906+0000 FloatTabs[27555:70558] [general] WebContent[27586] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:07.200523+0000 FloatTabs[27555:70558] [general] WebContent[27587] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:07.482105+0000 FloatTabs[27555:70558] [general] WebContent[27590] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:07.573227+0000 FloatTabs[27555:70558] [general] WebContent[27591] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+2026-08-10 00:25:07.685915+0000 FloatTabs[27555:70558] [general] WebContent[27592] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	 Executed 26 tests, with 0 failures (0 unexpected) in 3.284 (3.294) seconds
+2026-08-10 00:25:08.504802+0000 FloatTabs[27555:70558] [general] WebContent[27600] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	 Executed 37 tests, with 0 failures (0 unexpected) in 0.533 (0.559) seconds
+	 Executed 136 tests, with 5 failures (0 unexpected) in 4.394 (4.499) seconds
+	 Executed 136 tests, with 5 failures (0 unexpected) in 4.394 (4.500) seconds
+Failing tests:
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdLifecycleReleasesAfterGracePeriod]' passed (0.066 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testColdReleaseDropsOnlyRequestedLiveWebView]' passed (0.017 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDifferentSlotIDsReceiveDifferentWebViews]' passed (0.016 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testDownloadSuggestedFilenameDropsPathComponents]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitDownloadActionUsesDownloadPolicy]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' started.
+2026-08-10 00:25:08.253237+0000 FloatTabs[27555:70699] [ProcessSuspension] WebContent[27587] 0x10c070100 - [sessionID=1] WebProcess::markAllLayersVolatile: Failed to mark layers as volatile for webPageID=111
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitLinkContextMenuOffersUserControlledDestinations]' passed (0.009 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity]' passed (0.141 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testInactiveWebContentTerminationDefersReloadUntilSlotActivation]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorAllowsNormalInFrameNavigation]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testNavigationCoordinatorLetsScriptedBlankReachUIDelegate]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsInstallPopupCoordinator]' passed (0.007 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPooledWebViewsUsePersistentWebsiteDataStore]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingHandsNonWebSchemeToSystem]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingKeepsSameSiteContextInCurrentSlot]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingTreatsAboutBlankAsTemporaryChild]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testRemovingOneSlotDoesNotAffectOtherWebViewIdentity]' passed (0.011 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSameSlotIDReusesSameWebViewInstance]' passed (0.008 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testSlotNavigationObserverSurfacesContentProcessTermination]' passed (0.006 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUnshowableMimeResponseUsesDownloadPolicy]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForDirectory]' passed (0.002 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForMultipleFiles]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testUploadPanelPolicyForSingleFile]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' started.
+2026-08-10 00:25:08.504802+0000 FloatTabs[27555:70558] [general] WebContent[27600] Connection to 'pboard' server had an error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f3201730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 00:25:08.505039+0000 FloatTabs[27555:70558] [general] WebContent[27600] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f3201730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 00:25:08.531531+0000 FloatTabs[27555:70558] [general] WebContent[27600] Failed to set up CFPasteboardRef 'Apple CFPasteboard general'. Error: <dictionary: 0x1f32015f0> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1f3201730> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}
+Invalidation reason: Connection init failed at lookup with error 159 - Sandbox restriction
+2026-08-10 00:25:08.532000+0000 FloatTabs[27555:70558] [access] WebContent[27600] send_message_with_reply_sync(): XPC_ERROR_CONNECTION_INVALID for message 0xa79168480
+2026-08-10 00:25:08.532730+0000 FloatTabs[27555:70558] [access] WebContent[27600] TCCAccessRequest_block_invoke: Connection invalid
+2026-08-10 00:25:08.532746+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.532752+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.532757+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.532763+0000 FloatTabs[27555:70558] [cas] WebContent[27600] CONNECT: Attempt to connect to launchservicesd prohibited because kLSServerConnectionStatusProcessIsDaemonMask is set.
+2026-08-10 00:25:08.532770+0000 FloatTabs[27555:70558] [cas] WebContent[27600] CRASHSTRING: rdar://problem/28724618 Couldn't connect to launchservicesd.
+2026-08-10 00:25:08.532777+0000 FloatTabs[27555:70558] WebContent[27600] invalid product id '(null)'
+2026-08-10 00:25:08.532793+0000 FloatTabs[27555:70558] [sharedcache] WebContent[27600] checkinWithServer Failed bootstrap_lookup2 for name of coreservicesd, kern_return_t=#1100/0x44c Permission denied name=com.apple.CoreServices.coreservicesd
+2026-08-10 00:25:08.535129+0000 FloatTabs[27555:70558] [connection] WebContent[27600] The sandbox in this process does not allow access to RunningBoard.
+2026-08-10 00:25:08.535195+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.535250+0000 FloatTabs[27555:70558] [connection] WebContent[27600] Handshake aborted as the connection has been invalidated
+2026-08-10 00:25:08.535781+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+Test Case '-[FloatTabsTests.WebViewPoolTests testWarmLifecycleDoesNotScheduleColdRelease]' passed (0.065 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots]' passed (0.001 seconds).
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' started.
+Test Case '-[FloatTabsTests.WebViewPoolTests testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView]' passed (0.009 seconds).
+Test Suite 'WebViewPoolTests' passed at 2026-08-10 00:25:08.559.
+	 Executed 37 tests, with 0 failures (0 unexpected) in 0.533 (0.559) seconds
+Test Suite 'FloatTabsTests.xctest' failed at 2026-08-10 00:25:08.559.
+	 Executed 136 tests, with 5 failures (0 unexpected) in 4.394 (4.499) seconds
+Test Suite 'All tests' failed at 2026-08-10 00:25:08.560.
+	 Executed 136 tests, with 5 failures (0 unexpected) in 4.394 (4.500) seconds
+2026-08-10 00:25:08.560218+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.560239+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.560244+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.560250+0000 FloatTabs[27555:70558] [default] WebContent[27600] Conn 0x0 is not a valid connection ID.
+2026-08-10 00:25:08.560662+0000 FloatTabs[27555:70558] [Connection] WebContent[27600] Missing com.apple.linkd.application-service / com.apple.linkd.autoShortcut mach-lookup entitlement, will NOT register the process
+2026-08-10 00:25:08.566960+0000 FloatTabs[27555:70558] [Application] WebContent[27600] Error registering app with intents framework: Error Domain=LNProcessInstanceRegistryClientErrorDomain Code=1
+2026-08-10 00:25:08.567555+0000 FloatTabs[27555:70558] WebContent[27600] networkd_settings_read_from_file_locked Sandbox is preventing this process from reading networkd settings file at "/Library/Preferences/com.apple.networkd.plist", please add an exception.
+2026-08-10 00:25:08.567571+0000 FloatTabs[27555:70558] WebContent[27600] networkd_settings_read_from_file_locked Sandbox is preventing this process from reading networkd settings file at "/Library/Preferences/com.apple.networkd.plist", please add an exception.
+2026-08-10 00:25:08.567595+0000 FloatTabs[27555:70558] [audiocomp] WebContent[27600] AudioComponentPluginMgr.mm:590   reg server remote proxy error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.audio.AudioComponentRegistrar was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+2026-08-10 00:25:12.346 xcodebuild[26844:68742] [MT] IDETestOperationsObserverDebug: 11.095 elapsed -- Testing started completed.
+2026-08-10 00:25:12.346 xcodebuild[26844:68742] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-08-10 00:25:12.346 xcodebuild[26844:68742] [MT] IDETestOperationsObserverDebug: 11.095 sec, +11.095 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/Library/Developer/Xcode/DerivedData/FloatTabs-cnpyonmwkjezzqdagttfbbrajxpf/Logs/Test/Test-FloatTabs-2026.08.10_00-24-49-+0000.xcresult
+
+Failing tests:
+	ExternalShellTests.testActualTabHitAreaReturnsVisibleTabView()
+	ExternalShellTests.testTabControlsWinOverPerimeterDragWhenTheyOverlap()
+	ExternalShellTests.testTabControlsWinOverPerimeterDragWhenTheyOverlap()
+	PanelPerimeterDragHitTestingTests.testBottomRightCornerIsDedicatedResizeHandle()
+	PanelPerimeterDragHitTestingTests.testResizeHandleWinsOverBottomMovementBand()
+
+** TEST FAILED **
+
+Testing started
