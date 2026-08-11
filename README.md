@@ -131,16 +131,17 @@ Website sessions use a shared persistent `WKWebsiteDataStore` profile. FloatTabs
 
 ## Distribution Target
 
-Public builds are planned as signed and notarized direct-download DMGs:
+Public builds are signed and notarized direct-download **Universal 2** DMGs:
 
 ```text
 FloatTabs-x.y.z.dmg
 └── FloatTabs.app
+    └── arm64 + x86_64
 ```
 
-Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, and ticket stapling/validation. `tools/release/build_dmg.sh` also supports an unsigned QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
+The release target covers both current Apple Silicon Macs (`arm64`) and Intel Macs (`x86_64`) with one application bundle. CI runs the full build/test lane natively on both `macos-26` Apple Silicon and `macos-26-intel`, then separately builds a Universal 2 Release app and verifies both Mach-O slices with `lipo`.
 
-The current automated build and DMG lane targets **Apple Silicon (`arm64`)**. Intel (`x86_64`) is not currently built or validated and must not be advertised as supported unless a separate Universal/Intel release scope is implemented and tested.
+Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling/validation, and Gatekeeper assessment. `tools/release/build_dmg.sh` also supports an unsigned Universal 2 QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
 
 FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 includes explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
 
