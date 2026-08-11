@@ -135,6 +135,27 @@ enum FloatTabsDiagnostics {
 #endif
     }
 
+    static func markFullscreenReachedStableState(_ window: NSWindow) {
+#if DEBUG
+        guard let candidateID = pendingDoubleClickCandidateID else { return }
+        candidateWatchdog?.cancel()
+        candidateWatchdog = nil
+        let elapsed = pendingDoubleClickStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        record(
+            "fullscreen_candidate_success",
+            fields: [
+                "candidate": candidateID,
+                "elapsed_ms": String(Int(elapsed * 1000)),
+                "reason": "webkit_fullscreen_state_reached_inFullscreen",
+                "fullscreen_window": windowSummary(window),
+                "windows": allWindowSummary(),
+            ].merging(globalFields()) { _, new in new }
+        )
+        pendingDoubleClickCandidateID = nil
+        pendingDoubleClickStartedAt = nil
+#endif
+    }
+
     static func stop() {
 #if DEBUG
         record("session_end", fields: globalFields())
@@ -186,27 +207,15 @@ enum FloatTabsDiagnostics {
             Task { @MainActor in
                 guard pendingDoubleClickCandidateID == candidateID else { return }
                 let elapsed = pendingDoubleClickStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-                if let fullscreen = visibleFullscreenPrimaryWindow() {
-                    record(
-                        "fullscreen_candidate_success",
-                        fields: [
-                            "candidate": candidateID,
-                            "elapsed_ms": String(Int(elapsed * 1000)),
-                            "fullscreen_window": windowSummary(fullscreen),
-                            "windows": allWindowSummary(),
-                        ]
-                    )
-                } else {
-                    record(
-                        "fullscreen_candidate_failed",
-                        fields: [
-                            "candidate": candidateID,
-                            "elapsed_ms": String(Int(elapsed * 1000)),
-                            "reason": "no_visible_fullscreen_primary_window_within_2500ms",
-                            "windows": allWindowSummary(),
-                        ].merging(globalFields()) { _, new in new }
-                    )
-                }
+                record(
+                    "fullscreen_candidate_failed",
+                    fields: [
+                        "candidate": candidateID,
+                        "elapsed_ms": String(Int(elapsed * 1000)),
+                        "reason": "webkit_fullscreen_state_never_reached_inFullscreen_within_2500ms",
+                        "windows": allWindowSummary(),
+                    ].merging(globalFields()) { _, new in new }
+                )
                 pendingDoubleClickCandidateID = nil
                 pendingDoubleClickStartedAt = nil
                 candidateWatchdog = nil
@@ -225,24 +234,6 @@ enum FloatTabsDiagnostics {
             "window_snapshot",
             fields: ["windows": fingerprint].merging(globalFields()) { _, new in new }
         )
-
-        if let candidateID = pendingDoubleClickCandidateID,
-           let fullscreen = visibleFullscreenPrimaryWindow() {
-            candidateWatchdog?.cancel()
-            candidateWatchdog = nil
-            let elapsed = pendingDoubleClickStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-            record(
-                "fullscreen_candidate_success",
-                fields: [
-                    "candidate": candidateID,
-                    "elapsed_ms": String(Int(elapsed * 1000)),
-                    "fullscreen_window": windowSummary(fullscreen),
-                    "windows": fingerprint,
-                ]
-            )
-            pendingDoubleClickCandidateID = nil
-            pendingDoubleClickStartedAt = nil
-        }
     }
 
     private static func globalFields() -> [String: String] {
@@ -257,14 +248,6 @@ enum FloatTabsDiagnostics {
             "key_window": NSApp.keyWindow.map { String($0.windowNumber) } ?? "nil",
             "main_window": NSApp.mainWindow.map { String($0.windowNumber) } ?? "nil",
         ]
-    }
-
-    private static func visibleFullscreenPrimaryWindow() -> NSWindow? {
-        NSApp.windows.first {
-            $0.isVisible
-                && !($0 is FloatingPanel)
-                && $0.collectionBehavior.contains(.fullScreenPrimary)
-        }
     }
 
     private static func allWindowSummary() -> String {
