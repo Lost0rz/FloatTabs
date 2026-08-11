@@ -185,6 +185,39 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.activeTabID, source.id)
     }
 
+    func testGlobalFixedWindowPreferenceDoesNotMutateSavedPerWebAppSizes() {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let first = store.add(
+            name: "First",
+            homeURL: urlA,
+            renderingProfile: .canonicalDefault.settingViewport(CGSize(width: 390, height: 780))
+        )!
+        let second = store.add(
+            name: "Second",
+            homeURL: urlB,
+            renderingProfile: .canonicalDefault.settingViewport(CGSize(width: 900, height: 850))
+        )!
+        let before = Dictionary(uniqueKeysWithValues: store.profiles.map {
+            ($0.id, $0.renderingProfile.viewportSize)
+        })
+
+        let suite = "FloatTabsTests.FixedWindow.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.windowSizeMode = .fixed
+        _ = store.select(id: first.id)
+        _ = store.select(id: second.id)
+        preferences.windowSizeMode = .perWebApp
+
+        let after = Dictionary(uniqueKeysWithValues: store.profiles.map {
+            ($0.id, $0.renderingProfile.viewportSize)
+        })
+        XCTAssertEqual(after[first.id], before[first.id])
+        XCTAssertEqual(after[second.id], before[second.id])
+    }
+
     func testActiveSelectionUpdatesIdentity() {
         let store = TabStore(repository: MemoryProfileRepository())
         let first = store.add(name: "A", homeURL: urlA)!

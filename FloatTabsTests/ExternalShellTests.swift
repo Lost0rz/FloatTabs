@@ -183,6 +183,42 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(actionTitles.contains("Rename…"))
     }
 
+    func testFixedWindowModeDisablesPerTabWindowSizeMenu() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.setWindowSizeEditingEnabled(false)
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(zone.tabView(for: active.id))
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: tab.frame.midX, y: tab.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 91,
+            clickCount: 1,
+            pressure: 1
+        )!
+        let menu = try! XCTUnwrap(tab.menu(for: event))
+        XCTAssertFalse(try! XCTUnwrap(menu.item(withTitle: "Window Size")).isEnabled)
+    }
+
+    func testFixedWindowModeNeverWritesManualResizeIntoActiveWebApp() {
+        XCTAssertTrue(
+            PanelController.shouldPersistManualViewportToActiveTab(
+                windowSizeMode: .perWebApp
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldPersistManualViewportToActiveTab(
+                windowSizeMode: .fixed
+            )
+        )
+    }
+
     func testReleasedTabDisablesReloadWithoutCreatingRuntime() {
         let (_, zone) = makeZoneHarness()
         let released = makeProfile(order: 0, name: "Released")

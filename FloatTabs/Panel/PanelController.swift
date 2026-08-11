@@ -74,6 +74,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleManualResizeEnded()
         }
         configureSlotInteractions()
+        configurePreferenceObservers()
+        synchronizePreferencePresentation()
         rootView.externalControlZoneView.setPinned(isPinned)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -152,6 +154,12 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
         panelIsVisible && !isPinned
+    }
+
+    static func shouldPersistManualViewportToActiveTab(
+        windowSizeMode: PanelWindowSizeMode
+    ) -> Bool {
+        windowSizeMode == .perWebApp
     }
 
     private func togglePinnedState() {
@@ -364,6 +372,51 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func configurePreferenceObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(borderPreferenceDidChange(_:)),
+            name: .floatTabsBorderPreferenceDidChange,
+            object: preferencesStore
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowSizeModeDidChange(_:)),
+            name: .floatTabsWindowSizeModeDidChange,
+            object: preferencesStore
+        )
+    }
+
+    @objc private func borderPreferenceDidChange(_ notification: Notification) {
+        synchronizeBorderTheme()
+    }
+
+    @objc private func windowSizeModeDidChange(_ notification: Notification) {
+        synchronizeWindowSizeMode()
+        if preferencesStore.windowSizeMode == .perWebApp,
+           let active = tabStore.activeProfile {
+            applyPreferredViewport(active.renderingProfile.viewportSize)
+        }
+    }
+
+    private func synchronizePreferencePresentation() {
+        synchronizeBorderTheme()
+        synchronizeWindowSizeMode()
+    }
+
+    private func synchronizeBorderTheme() {
+        rootView.interactionBorderView.apply(
+            theme: preferencesStore.borderTheme,
+            customColor: preferencesStore.customBorderColor
+        )
+    }
+
+    private func synchronizeWindowSizeMode() {
+        rootView.externalControlZoneView.setWindowSizeEditingEnabled(
+            preferencesStore.windowSizeMode == .perWebApp
+        )
+    }
+
     private func configureSlotInteractions() {
         let rail = rootView.externalControlZoneView
 
@@ -395,6 +448,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onSetWindowSize = { [weak self] id, preset in
             guard let self,
+                  self.preferencesStore.windowSizeMode == .perWebApp,
                   let profile = self.tabStore.profiles.first(where: { $0.id == id }),
                   let size = preset.size else { return }
             _ = self.tabStore.updateRenderingProfile(
@@ -525,7 +579,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard panel.attachedSheet == nil else { return }
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
-        WebAppEditorController.presentAdd(attachedTo: panel) { [weak self] value in
+        WebAppEditorController.presentAdd(
+            allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
+            attachedTo: panel
+        ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
@@ -538,9 +595,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                     return
                 }
 
-                // The user explicitly chose this new Slot's size. Apply it now;
-                // the follow preference only governs later automatic Slot switches.
-                self.applyPreferredViewport(added.renderingProfile.viewportSize)
+                if self.preferencesStore.windowSizeMode == .perWebApp {
+                    self.applyPreferredViewport(added.renderingProfile.viewportSize)
+                }
             }
         }
     }
@@ -551,7 +608,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        WebAppEditorController.presentEdit(profile: profile, attachedTo: panel) { [weak self] value in
+        WebAppEditorController.presentEdit(
+            profile: profile,
+            allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
+            attachedTo: panel
+        ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self, let value else { return }
                 let oldHomeURL = self.tabStore.profiles.first(where: { $0.id == id })?.homeURL
@@ -566,9 +627,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if oldHomeURL != value.url {
                     self.webViewPool.navigate(slotID: id, to: value.url)
                 }
-                if self.tabStore.activeTabID == id {
-                    // Editing the current Slot is an explicit size request and
-                    // must not depend on the automatic switch-follow preference.
+                if self.tabStore.activeTabID == id,
+                   self.preferencesStore.windowSizeMode == .perWebApp {
                     self.applyPreferredViewport(value.renderingProfile.viewportSize)
                 }
             }
@@ -676,18 +736,25 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func handleManualResizeEnded() {
         clampPanelToConnectedScreens()
-        let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-        if let id = tabStore.activeTabID {
-            _ = tabStore.updatePreferredViewport(
-                id: id,
-                size: CGSize(width: viewport.width, height: viewport.height)
-            )
+        if Self.shouldPersistManualViewportToActiveTab(
+            windowSizeMode: preferencesStore.windowSizeMode
+        ) {
+            let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+            if let id = tabStore.activeTabID {
+                _ = tabStore.updatePreferredViewport(
+                    id: id,
+                    size: CGSize(width: viewport.width, height: viewport.height)
+                )
+            }
         }
+        // Fixed mode intentionally persists only the shared panel frame. The
+        // hidden per-Web-App viewport values remain untouched for later restore.
         persistPanelFrame()
     }
 
     private func applyPreferredViewport(_ viewportSize: CGSize) {
-        guard hasPositionedPanel else { return }
+        guard preferencesStore.windowSizeMode == .perWebApp,
+              hasPositionedPanel else { return }
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
         guard let visibleFrame else { return }

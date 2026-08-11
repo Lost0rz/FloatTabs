@@ -185,7 +185,9 @@ final class AppCoordinator {
             webAppState: panelController.storedWebAppStateSnapshot(),
             globalPreferences: FloatTabsBackupPreferences(
                 appearanceMode: preferencesStore.appearanceMode,
-                followPreferredSize: preferencesStore.followPreferredSize
+                followPreferredSize: preferencesStore.followPreferredSize,
+                borderTheme: preferencesStore.borderTheme,
+                customBorderColorHex: preferencesStore.customBorderColorHex
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -205,6 +207,9 @@ final class AppCoordinator {
 
         preferencesStore.followPreferredSize = imported.globalPreferences.followPreferredSize
         preferencesStore.appearanceMode = imported.globalPreferences.appearanceMode
+        preferencesStore.customBorderColorHex = imported.globalPreferences.customBorderColorHex
+            ?? AppPreferencesStore.defaultCustomBorderColorHex
+        preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
 
         let shortcut = imported.globalShowHideShortcut.map {
             KeyboardShortcuts.Shortcut(

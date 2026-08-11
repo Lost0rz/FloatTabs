@@ -45,11 +45,35 @@ final class AppPreferencesStoreTests: XCTestCase {
     func testFollowPreferredSizeDefaultsTrueAndPersists() {
         let first = AppPreferencesStore(defaults: defaults)
         XCTAssertTrue(first.followPreferredSize)
+        XCTAssertEqual(first.windowSizeMode, .perWebApp)
 
-        first.followPreferredSize = false
+        first.windowSizeMode = .fixed
         XCTAssertFalse(AppPreferencesStore(defaults: defaults).followPreferredSize)
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).windowSizeMode, .fixed)
 
-        first.followPreferredSize = true
+        first.windowSizeMode = .perWebApp
         XCTAssertTrue(AppPreferencesStore(defaults: defaults).followPreferredSize)
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).windowSizeMode, .perWebApp)
+    }
+
+    func testBorderThemeDefaultsRainbowAndPersists() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.borderTheme, .rainbow)
+
+        first.borderTheme = .orange
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).borderTheme, .orange)
+
+        first.borderTheme = .custom
+        first.customBorderColorHex = "#12AB34"
+        let restored = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(restored.borderTheme, .custom)
+        XCTAssertEqual(restored.customBorderColorHex, "#12AB34FF")
+    }
+
+    func testCustomBorderColorRoundTripsThroughSRGBHex() {
+        let store = AppPreferencesStore(defaults: defaults)
+        store.customBorderColor = NSColor(srgbRed: 1, green: 0.25, blue: 0, alpha: 1)
+        XCTAssertEqual(store.customBorderColorHex, "#FF4000FF")
+        XCTAssertEqual(store.customBorderColor.usingColorSpace(.sRGB)?.redComponent ?? 0, 1, accuracy: 0.01)
     }
 }

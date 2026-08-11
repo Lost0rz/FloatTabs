@@ -9,6 +9,7 @@ struct WebAppEditorValue {
 @MainActor
 enum WebAppEditorController {
     static func presentAdd(
+        allowsWindowSizeEditing: Bool = true,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -19,6 +20,7 @@ enum WebAppEditorController {
             initialURL: "",
             initialRendering: .canonicalDefault,
             showsPrimaryRenderingControls: true,
+            allowsWindowSizeEditing: allowsWindowSizeEditing,
             attachedTo: window,
             completion: completion
         )
@@ -86,6 +88,7 @@ enum WebAppEditorController {
 
     static func presentEdit(
         profile: WebAppProfile,
+        allowsWindowSizeEditing: Bool = true,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -96,6 +99,7 @@ enum WebAppEditorController {
             initialURL: profile.homeURL.absoluteString,
             initialRendering: profile.renderingProfile,
             showsPrimaryRenderingControls: false,
+            allowsWindowSizeEditing: allowsWindowSizeEditing,
             attachedTo: window,
             completion: completion
         )
@@ -125,6 +129,7 @@ enum WebAppEditorController {
         initialURL: String,
         initialRendering: WebRenderingProfile,
         showsPrimaryRenderingControls: Bool,
+        allowsWindowSizeEditing: Bool,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -142,7 +147,8 @@ enum WebAppEditorController {
         let urlLabel = makeLabel("URL")
         let renderingForm = RenderingForm(
             initial: initialRendering,
-            showsPrimaryRenderingControls: showsPrimaryRenderingControls
+            showsPrimaryRenderingControls: showsPrimaryRenderingControls,
+            allowsWindowSizeEditing: allowsWindowSizeEditing
         )
 
         let stack = NSStackView(views: [
@@ -224,6 +230,8 @@ private final class RenderingForm: NSObject {
 
     private let modePopup = NSPopUpButton()
     private let sizePopup = NSPopUpButton()
+    private let initialRendering: WebRenderingProfile
+    private let allowsWindowSizeEditing: Bool
     private let widthField = NSTextField()
     private let heightField = NSTextField()
     private let zoomPopup = NSPopUpButton()
@@ -239,9 +247,12 @@ private final class RenderingForm: NSObject {
 
     init(
         initial: WebRenderingProfile,
-        showsPrimaryRenderingControls: Bool = true
+        showsPrimaryRenderingControls: Bool = true,
+        allowsWindowSizeEditing: Bool = true
     ) {
         let rendering = initial.normalized()
+        self.initialRendering = rendering
+        self.allowsWindowSizeEditing = allowsWindowSizeEditing
 
         modePopup.addItems(withTitles: WebsiteMode.allCases.map(\.displayName))
         if let index = WebsiteMode.allCases.firstIndex(of: rendering.websiteMode) {
@@ -308,15 +319,17 @@ private final class RenderingForm: NSObject {
         heightField.widthAnchor.constraint(equalToConstant: 66).isActive = true
 
         let primaryViews: [NSView] = showsPrimaryRenderingControls
-            ? [
+            ? ([
                 Self.label("Website Mode"),
                 modePopup,
-                Self.label("Window Size"),
-                sizeRow,
+            ] + (allowsWindowSizeEditing
+                ? [Self.label("Window Size"), sizeRow]
+                : [Self.secondaryLabel("Window Size is fixed globally. Existing per-App sizes are preserved.")]
+            ) + [
                 Self.label("Zoom"),
                 zoomPopup,
                 advancedButton,
-            ]
+            ])
             : [
                 Self.label("Browser Identity"),
                 identityPopup,
@@ -357,6 +370,16 @@ private final class RenderingForm: NSObject {
         customUAField.target = self
         customUAField.action = #selector(customUAChanged(_:))
 
+        sizePopup.isEnabled = allowsWindowSizeEditing
+        widthField.isEnabled = allowsWindowSizeEditing
+        heightField.isEnabled = allowsWindowSizeEditing
+        devicePopup.isEnabled = allowsWindowSizeEditing
+        orientationPopup.isEnabled = allowsWindowSizeEditing
+        devicePopup.toolTip = allowsWindowSizeEditing
+            ? nil
+            : "Device preset is preserved while global Fixed window sizing is active."
+        orientationPopup.toolTip = devicePopup.toolTip
+
         if showsPrimaryRenderingControls {
             configureAdvancedPopover()
         }
@@ -382,16 +405,26 @@ private final class RenderingForm: NSObject {
         }
 
         let mode = WebsiteMode.allCases[modeIndex]
-        let preset = SimpleViewportPreset.allCases[sizeIndex]
+        let selectedPreset = SimpleViewportPreset.allCases[sizeIndex]
         let identity = BrowserIdentity.allCases[identityIndex]
-        let orientation = DeviceOrientation.allCases[orientationIndex]
+        let selectedOrientation = DeviceOrientation.allCases[orientationIndex]
 
+        let preset: SimpleViewportPreset
+        let orientation: DeviceOrientation
         let size: CGSize
-        if let presetSize = preset.size {
-            size = presetSize
+        if allowsWindowSizeEditing {
+            preset = selectedPreset
+            orientation = selectedOrientation
+            if let presetSize = preset.size {
+                size = presetSize
+            } else {
+                guard let parsed = parsedCustomSize() else { return nil }
+                size = parsed
+            }
         } else {
-            guard let parsed = parsedCustomSize() else { return nil }
-            size = parsed
+            preset = initialRendering.sizePreset
+            orientation = initialRendering.orientation
+            size = initialRendering.viewportSize
         }
 
         let customUA: String?
@@ -404,7 +437,9 @@ private final class RenderingForm: NSObject {
         }
 
         let deviceID: String?
-        if let selectedDevice = selectedDevicePreset() {
+        if !allowsWindowSizeEditing {
+            deviceID = initialRendering.devicePresetID
+        } else if let selectedDevice = selectedDevicePreset() {
             let expected = selectedDevice.size(for: orientation)
             if abs(expected.width - size.width) <= 0.5,
                abs(expected.height - size.height) <= 0.5 {
@@ -627,6 +662,15 @@ private final class RenderingForm: NSObject {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 11, weight: .medium)
         label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    private static func secondaryLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 0
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 360).isActive = true
         return label
     }
 }

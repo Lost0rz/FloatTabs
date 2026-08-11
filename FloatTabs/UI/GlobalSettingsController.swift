@@ -95,6 +95,14 @@ private final class AppearanceSettingsViewController: NSViewController {
         target: nil,
         action: nil
     )
+    private let borderThemePopup = NSPopUpButton()
+    private let customColorWell = NSColorWell()
+    private let windowSizeControl = NSSegmentedControl(
+        labels: PanelWindowSizeMode.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
 
     init(preferencesStore: AppPreferencesStore) {
         self.preferencesStore = preferencesStore
@@ -110,34 +118,68 @@ private final class AppearanceSettingsViewController: NSViewController {
     override func loadView() {
         let root = NSView()
 
-        let titleLabel = Self.titleLabel("Interface Appearance")
-        let detail = Self.detailLabel(
-            "Changes FloatTabs' native appearance. FloatTabs injects no page CSS; websites may still respond to WebKit's effective light/dark appearance."
-        )
         appearanceControl.segmentStyle = .rounded
         appearanceControl.target = self
         appearanceControl.action = #selector(appearanceChanged(_:))
-        synchronizeControl()
+        appearanceControl.widthAnchor.constraint(equalToConstant: 250).isActive = true
 
-        let stack = NSStackView(views: [titleLabel, detail, appearanceControl])
+        borderThemePopup.addItems(withTitles: PanelBorderTheme.allCases.map(\.displayName))
+        borderThemePopup.target = self
+        borderThemePopup.action = #selector(borderThemeChanged(_:))
+        borderThemePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 170).isActive = true
+
+        customColorWell.target = self
+        customColorWell.action = #selector(customBorderColorChanged(_:))
+        customColorWell.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        customColorWell.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        let borderRow = NSStackView(views: [borderThemePopup, customColorWell])
+        borderRow.orientation = .horizontal
+        borderRow.alignment = .centerY
+        borderRow.spacing = 10
+
+        windowSizeControl.segmentStyle = .rounded
+        windowSizeControl.target = self
+        windowSizeControl.action = #selector(windowSizeModeChanged(_:))
+        windowSizeControl.widthAnchor.constraint(equalToConstant: 280).isActive = true
+
+        let stack = NSStackView(views: [
+            Self.titleLabel("Interface Appearance"),
+            Self.detailLabel(
+                "Changes FloatTabs' native appearance. Websites keep their own CSS and may still respond to WebKit's effective light/dark appearance."
+            ),
+            appearanceControl,
+            Self.spacer(8),
+            Self.titleLabel("Border Theme"),
+            Self.detailLabel(
+                "Rainbow is the default animated outline. Choose a macOS accent color or use Custom for a personal border color."
+            ),
+            borderRow,
+            Self.spacer(8),
+            Self.titleLabel("Window Size Behavior"),
+            Self.detailLabel(
+                "Per Web App follows each Tab's saved size. Fixed keeps one shared window size across all Tabs without overwriting their saved individual sizes."
+            ),
+            windowSizeControl,
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 28),
-            appearanceControl.widthAnchor.constraint(equalToConstant: 250),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
         ])
+        synchronizeControls()
         view = root
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        synchronizeControl()
+        synchronizeControls()
     }
 
     @objc private func appearanceChanged(_ sender: NSSegmentedControl) {
@@ -145,10 +187,43 @@ private final class AppearanceSettingsViewController: NSViewController {
         preferencesStore.appearanceMode = AppAppearanceMode.allCases[sender.selectedSegment]
     }
 
-    private func synchronizeControl() {
+    @objc private func borderThemeChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard PanelBorderTheme.allCases.indices.contains(index) else { return }
+        preferencesStore.borderTheme = PanelBorderTheme.allCases[index]
+        synchronizeCustomColorState()
+    }
+
+    @objc private func customBorderColorChanged(_ sender: NSColorWell) {
+        preferencesStore.customBorderColor = sender.color
+        if preferencesStore.borderTheme != .custom {
+            preferencesStore.borderTheme = .custom
+        }
+        synchronizeControls()
+    }
+
+    @objc private func windowSizeModeChanged(_ sender: NSSegmentedControl) {
+        guard PanelWindowSizeMode.allCases.indices.contains(sender.selectedSegment) else { return }
+        preferencesStore.windowSizeMode = PanelWindowSizeMode.allCases[sender.selectedSegment]
+    }
+
+    private func synchronizeControls() {
         appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
             of: preferencesStore.appearanceMode
         ) ?? 0
+        borderThemePopup.selectItem(
+            at: PanelBorderTheme.allCases.firstIndex(of: preferencesStore.borderTheme) ?? 0
+        )
+        customColorWell.color = preferencesStore.customBorderColor
+        windowSizeControl.selectedSegment = PanelWindowSizeMode.allCases.firstIndex(
+            of: preferencesStore.windowSizeMode
+        ) ?? 0
+        synchronizeCustomColorState()
+    }
+
+    private func synchronizeCustomColorState() {
+        customColorWell.isEnabled = preferencesStore.borderTheme == .custom
+        customColorWell.alphaValue = customColorWell.isEnabled ? 1 : 0.45
     }
 
     private static func titleLabel(_ text: String) -> NSTextField {
@@ -164,6 +239,12 @@ private final class AppearanceSettingsViewController: NSViewController {
         label.maximumNumberOfLines = 0
         label.widthAnchor.constraint(lessThanOrEqualToConstant: 500).isActive = true
         return label
+    }
+
+    private static func spacer(_ height: CGFloat) -> NSView {
+        let view = NSView()
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
     }
 }
 

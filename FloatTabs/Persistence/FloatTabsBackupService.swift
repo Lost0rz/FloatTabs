@@ -8,6 +8,20 @@ struct FloatTabsBackupShortcut: Codable, Equatable {
 struct FloatTabsBackupPreferences: Codable, Equatable {
     let appearanceMode: AppAppearanceMode
     let followPreferredSize: Bool
+    let borderTheme: PanelBorderTheme?
+    let customBorderColorHex: String?
+
+    init(
+        appearanceMode: AppAppearanceMode,
+        followPreferredSize: Bool,
+        borderTheme: PanelBorderTheme? = nil,
+        customBorderColorHex: String? = nil
+    ) {
+        self.appearanceMode = appearanceMode
+        self.followPreferredSize = followPreferredSize
+        self.borderTheme = borderTheme
+        self.customBorderColorHex = customBorderColorHex
+    }
 }
 
 struct FloatTabsBackupDocument: Codable, Equatable {
