@@ -35,6 +35,8 @@ final class SlotLifecycleCoordinator {
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
+    private var fullscreenProtectedSlotIDs = Set<UUID>()
+    private var fullscreenProtectionTokens: [UUID: UUID] = [:]
     private var inactiveWarmRecency: [UUID: UInt64] = [:]
     private var warmRecencyCounter: UInt64 = 0
     private var hiddenActiveToken: UUID?
@@ -91,8 +93,25 @@ final class SlotLifecycleCoordinator {
             !validIDs.contains(slotID) || !webViewPool.contains(slotID: slotID) {
             cancelInactivePlan(slotID: slotID)
         }
+        for slotID in Array(fullscreenProtectionTokens.keys) where
+            !validIDs.contains(slotID) || !webViewPool.contains(slotID: slotID) {
+            cancelFullscreenProtection(slotID: slotID)
+        }
 
         for profile in profiles {
+            if elementFullscreenQuery(profile.id) {
+                cancelInactivePlan(slotID: profile.id)
+                fullscreenProtectedSlotIDs.insert(profile.id)
+                if profile.id != activeSlotID {
+                    ensureFullscreenInactiveProtection(for: profile)
+                }
+                continue
+            }
+
+            if fullscreenProtectedSlotIDs.contains(profile.id) {
+                cancelFullscreenProtection(slotID: profile.id)
+            }
+
             if profile.id == activeSlotID {
                 cancelInactivePlan(slotID: profile.id)
                 continue
@@ -125,6 +144,9 @@ final class SlotLifecycleCoordinator {
         if visible {
             activeSlotID = activeProfile.id
             cancelInactivePlan(slotID: activeProfile.id)
+            if !elementFullscreenQuery(activeProfile.id) {
+                cancelFullscreenProtection(slotID: activeProfile.id)
+            }
         } else if activeSlotID == activeProfile.id {
             scheduleHiddenActiveTransition(profile: activeProfile)
         }
@@ -134,6 +156,12 @@ final class SlotLifecycleCoordinator {
         activeSlotID = profile.id
         cancelInactivePlan(slotID: profile.id)
         hiddenActiveToken = nil
+
+        if elementFullscreenQuery(profile.id) {
+            fullscreenProtectedSlotIDs.insert(profile.id)
+        } else {
+            cancelFullscreenProtection(slotID: profile.id)
+        }
 
         if !panelIsVisible {
             scheduleHiddenActiveTransition(profile: profile)
@@ -145,6 +173,19 @@ final class SlotLifecycleCoordinator {
             activeSlotID = nil
         }
         hiddenActiveToken = nil
+
+        // Shell selection and fullscreen ownership are independent. A fullscreen
+        // Slot is not inactive merely because the user selected ChatGPT in the
+        // FloatTabs shell. Do not pause media, detach its view, or start an
+        // eviction plan until WebKit actually exits fullscreen.
+        if elementFullscreenQuery(profile.id) {
+            cancelInactivePlan(slotID: profile.id)
+            fullscreenProtectedSlotIDs.insert(profile.id)
+            ensureFullscreenInactiveProtection(for: profile)
+            return
+        }
+
+        cancelFullscreenProtection(slotID: profile.id)
         container.deactivate(slotID: profile.id, residencyPolicy: profile.residencyPolicy)
         prepareInactive(profile: profile, resetWarmRecency: true)
     }
@@ -154,6 +195,7 @@ final class SlotLifecycleCoordinator {
             activeSlotID = nil
         }
         cancelInactivePlan(slotID: slotID)
+        cancelFullscreenProtection(slotID: slotID)
         container.removeSlot(slotID)
     }
 
@@ -162,6 +204,8 @@ final class SlotLifecycleCoordinator {
         activeSlotID = nil
         inactivePlans.removeAll()
         mediaProtectedSlotIDs.removeAll()
+        fullscreenProtectedSlotIDs.removeAll()
+        fullscreenProtectionTokens.removeAll()
         inactiveWarmRecency.removeAll()
         warmRecencyCounter = 0
         for slotID in slotIDs {
@@ -187,7 +231,7 @@ final class SlotLifecycleCoordinator {
     }
 
     var mediaProtectedIDs: Set<UUID> {
-        mediaProtectedSlotIDs
+        mediaProtectedSlotIDs.union(fullscreenProtectedSlotIDs)
     }
 
     var isHiddenActiveGracePending: Bool {
@@ -215,8 +259,18 @@ final class SlotLifecycleCoordinator {
     private func prepareInactive(profile: WebAppProfile, resetWarmRecency: Bool) {
         guard webViewPool.contains(slotID: profile.id) else {
             cancelInactivePlan(slotID: profile.id)
+            cancelFullscreenProtection(slotID: profile.id)
             return
         }
+
+        if elementFullscreenQuery(profile.id) {
+            cancelInactivePlan(slotID: profile.id)
+            fullscreenProtectedSlotIDs.insert(profile.id)
+            ensureFullscreenInactiveProtection(for: profile)
+            return
+        }
+
+        cancelFullscreenProtection(slotID: profile.id)
 
         if profile.backgroundMediaPolicy == .pauseWhenInactive {
             webViewPool.pauseMediaPlayback(slotID: profile.id)
@@ -234,6 +288,12 @@ final class SlotLifecycleCoordinator {
         for profile: WebAppProfile,
         resetWarmRecency: Bool
     ) {
+        if elementFullscreenQuery(profile.id) {
+            fullscreenProtectedSlotIDs.insert(profile.id)
+            ensureFullscreenInactiveProtection(for: profile)
+            return
+        }
+
         if let existing = inactivePlans[profile.id],
            existing.residencyPolicy == profile.residencyPolicy,
            existing.backgroundMediaPolicy == profile.backgroundMediaPolicy {
@@ -272,6 +332,13 @@ final class SlotLifecycleCoordinator {
                   self.planMatches(plan, slotID: profile.id),
                   self.activeSlotID != profile.id,
                   self.webViewPool.contains(slotID: profile.id) else {
+                return
+            }
+
+            if self.elementFullscreenQuery(profile.id) {
+                self.cancelInactivePlan(slotID: profile.id)
+                self.fullscreenProtectedSlotIDs.insert(profile.id)
+                self.ensureFullscreenInactiveProtection(for: profile)
                 return
             }
 
@@ -332,6 +399,13 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
+            if self.elementFullscreenQuery(profile.id) {
+                self.cancelInactivePlan(slotID: profile.id)
+                self.fullscreenProtectedSlotIDs.insert(profile.id)
+                self.ensureFullscreenInactiveProtection(for: profile)
+                return
+            }
+
             if profile.backgroundMediaPolicy == .allowBackgroundAudio {
                 self.mediaPlayingQuery(profile.id) { [weak self] isPlaying in
                     guard let self,
@@ -339,7 +413,11 @@ final class SlotLifecycleCoordinator {
                           self.activeSlotID != profile.id else {
                         return
                     }
-                    if isPlaying {
+                    if self.elementFullscreenQuery(profile.id) {
+                        self.cancelInactivePlan(slotID: profile.id)
+                        self.fullscreenProtectedSlotIDs.insert(profile.id)
+                        self.ensureFullscreenInactiveProtection(for: profile)
+                    } else if isPlaying {
                         self.mediaProtectedSlotIDs.insert(profile.id)
                         self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
                     } else {
@@ -380,6 +458,7 @@ final class SlotLifecycleCoordinator {
     private func scheduleHiddenFullscreenProtectionRecheck(profile: WebAppProfile) {
         let token = UUID()
         hiddenActiveToken = token
+        fullscreenProtectedSlotIDs.insert(profile.id)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + mediaProtectionPollDelay) { [weak self] in
             guard let self,
@@ -392,6 +471,7 @@ final class SlotLifecycleCoordinator {
             if self.elementFullscreenQuery(profile.id) {
                 self.scheduleHiddenFullscreenProtectionRecheck(profile: profile)
             } else {
+                self.fullscreenProtectedSlotIDs.remove(profile.id)
                 self.scheduleHiddenActiveTransition(profile: profile)
             }
         }
@@ -407,6 +487,45 @@ final class SlotLifecycleCoordinator {
         prepareInactive(profile: profile, resetWarmRecency: true)
     }
 
+    /// A fullscreen Slot can remain protected after the shell selects another
+    /// Slot. Poll until WebKit returns the live view, then only at that point run
+    /// ordinary inactive handling. This is the explicit separation between
+    /// fullscreen owner and shell-active Slot.
+    private func ensureFullscreenInactiveProtection(for profile: WebAppProfile) {
+        guard activeSlotID != profile.id,
+              webViewPool.contains(slotID: profile.id) else {
+            return
+        }
+        guard fullscreenProtectionTokens[profile.id] == nil else { return }
+
+        let token = UUID()
+        fullscreenProtectionTokens[profile.id] = token
+        fullscreenProtectedSlotIDs.insert(profile.id)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + mediaProtectionPollDelay) { [weak self] in
+            guard let self,
+                  self.fullscreenProtectionTokens[profile.id] == token,
+                  self.activeSlotID != profile.id,
+                  self.webViewPool.contains(slotID: profile.id) else {
+                return
+            }
+
+            if self.elementFullscreenQuery(profile.id) {
+                self.fullscreenProtectionTokens.removeValue(forKey: profile.id)
+                self.ensureFullscreenInactiveProtection(for: profile)
+                return
+            }
+
+            self.fullscreenProtectionTokens.removeValue(forKey: profile.id)
+            self.fullscreenProtectedSlotIDs.remove(profile.id)
+            self.container.deactivate(
+                slotID: profile.id,
+                residencyPolicy: profile.residencyPolicy
+            )
+            self.prepareInactive(profile: profile, resetWarmRecency: true)
+        }
+    }
+
     private func enforceWarmResidentLimit() {
         evictInactiveWarmUntilResidentLimit(warmResidentLimit)
     }
@@ -417,6 +536,8 @@ final class SlotLifecycleCoordinator {
             .filter { slotID, _ in
                 activeSlotID != slotID
                     && !mediaProtectedSlotIDs.contains(slotID)
+                    && !fullscreenProtectedSlotIDs.contains(slotID)
+                    && !elementFullscreenQuery(slotID)
                     && webViewPool.contains(slotID: slotID)
                     && inactivePlans[slotID]?.residencyPolicy == .warm
             }
@@ -436,15 +557,26 @@ final class SlotLifecycleCoordinator {
 
     private func releaseInactiveSlot(slotID: UUID) {
         guard activeSlotID != slotID else { return }
+        if elementFullscreenQuery(slotID) {
+            fullscreenProtectedSlotIDs.insert(slotID)
+            cancelInactivePlan(slotID: slotID)
+            return
+        }
         container.removeSlot(slotID)
         webViewPool.release(slotID: slotID)
         cancelInactivePlan(slotID: slotID)
+        cancelFullscreenProtection(slotID: slotID)
     }
 
     private func cancelInactivePlan(slotID: UUID) {
         inactivePlans.removeValue(forKey: slotID)
         mediaProtectedSlotIDs.remove(slotID)
         inactiveWarmRecency.removeValue(forKey: slotID)
+    }
+
+    private func cancelFullscreenProtection(slotID: UUID) {
+        fullscreenProtectionTokens.removeValue(forKey: slotID)
+        fullscreenProtectedSlotIDs.remove(slotID)
     }
 
     private func planMatches(_ plan: InactivePlan, slotID: UUID) -> Bool {
