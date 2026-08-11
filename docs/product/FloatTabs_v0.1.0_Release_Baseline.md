@@ -2,7 +2,7 @@
 
 > **Status:** v0.1.0 release source of truth  
 > **Date:** 2026-08-11  
-> **Scope:** current release behavior after the accepted Stage 0–6 work and PR #16–#18 rendering/settings refinements
+> **Scope:** current release behavior after the accepted Stage 0–6 work, PR #16–#18 rendering/settings refinements, and the final release audit
 
 This document resolves release-time drift between older stage documents and the implementation that has since passed automated and Real-Mac acceptance. For **v0.1.0**, this document has precedence wherever an older Product, Architecture, Stage addendum, README section, or validation note describes superseded behavior.
 
@@ -113,7 +113,7 @@ non-web scheme                       → system handler
 
 Same-site versus cross-site comparison does not decide ordinary user navigation.
 
-Explicit Floating Windows must size themselves from the **visible source viewport**, not the internal Desktop logical `WKWebView.frame`.
+Explicit Floating Windows must size themselves from the **visible source viewport**, not the internal Desktop logical `WKWebView.frame`. The release-audit regression coverage verifies a Medium 600×820 visible viewport does not produce a floating window sized from the larger 1024px Desktop logical child frame.
 
 ## 7. Session, upload, download, and recovery baseline
 
@@ -166,28 +166,50 @@ Bundle Identifier          = com.lost0rz.FloatTabs
 
 Configuration persistence uses atomic writes. Manual restore creates a local rollback backup before replacing current configuration. One automatic configuration snapshot per app version/build is also retained locally.
 
-## 11. Release validation boundary
+## 11. Platform and distribution baseline
+
+v0.1.0 is a **Universal 2 macOS release**:
+
+```text
+FloatTabs.app
+├─ arm64   → Apple Silicon
+└─ x86_64  → Intel Mac
+```
+
+The public DMG contains one Universal 2 `FloatTabs.app`; separate architecture-specific downloads are not required.
+
+Architecture validation is intentionally three-layered:
+
+1. `macos-26` Apple Silicon runner builds Debug/Release and runs the full XCTest suite natively as `arm64`;
+2. `macos-26-intel` Intel runner builds Debug/Release and runs the full XCTest suite natively as `x86_64`;
+3. a separate Universal Release build uses `ARCHS='arm64 x86_64'`, `ONLY_ACTIVE_ARCH=NO`, and verifies the resulting Mach-O slices with `lipo`.
+
+`tools/release/build_dmg.sh` uses the same Universal build contract and refuses to package an app if any Mach-O binary in the app bundle is missing either required architecture.
+
+## 12. Release validation boundary
 
 A code-ready v0.1.0 candidate requires:
 
 - package resolution from the committed lock file;
-- Debug build;
-- Release build;
-- full XCTest suite;
-- QA DMG construction;
+- package lock remains unchanged;
+- native Apple Silicon Debug + Release builds;
+- native Intel Debug + Release builds;
+- full XCTest suite on both architecture-specific GitHub-hosted macOS runners;
+- successful Universal 2 Release build containing both `arm64` and `x86_64` slices;
+- successful Universal 2 QA DMG construction and verification;
 - no unreviewed release-scope changes relative to the accepted interaction/rendering baselines.
 
-A public download additionally requires the operator's Developer ID signing and Apple notarization credentials, plus ticket stapling/validation through the release script.
+A public download additionally requires the operator's Developer ID signing and Apple notarization credentials. The release script then performs codesign verification, notarization, ticket stapling/validation, and Gatekeeper assessment before declaring the public DMG ready.
 
-The current automated build and DMG lane targets **Apple Silicon (`arm64`)**. Intel (`x86_64`) is not currently built or validated and must not be advertised as supported unless a separate Universal/Intel release scope is implemented and tested.
-
-## 12. Real-site compatibility claims
+## 13. Real-site compatibility claims
 
 Accepted Real-Mac evidence includes the provider/site behavior recorded in the repository validation documents, including ChatGPT session persistence, shared Google/YouTube authenticated state, Bilibili Desktop/Mobile interaction, and YouTube element fullscreen.
 
 Rows still marked `not yet tested` in the provider matrix remain unknown. They are compatibility coverage to expand from released-product usage; this release baseline does not convert unknown provider results into claimed PASS results and does not authorize provider-specific auth bypasses.
 
-## 13. Historical document rule
+Architecture-specific CI validates FloatTabs code and WebKit/AppKit integration on both Apple Silicon and Intel GitHub-hosted macOS runners. Historical provider-specific Real-Mac acceptance should not be misrepresented as a complete manual site matrix on both CPU families.
+
+## 14. Historical document rule
 
 Older stage documents remain useful engineering history. When they conflict with this v0.1.0 baseline, use this order:
 
