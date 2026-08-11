@@ -1,0 +1,63 @@
+name: Apply PR17 Appearance Polish
+
+on:
+  push:
+    branches:
+      - agent/address-bar-current-page-actions
+    paths:
+      - '.github/pr17_appearance_polish.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/address-bar-current-page-actions
+          fetch-depth: 0
+
+      - name: Apply appearance polish
+        run: python3 .github/pr17_appearance_polish.py
+
+      - name: Check patch
+        run: git diff --check
+
+      - name: Resolve packages
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -resolvePackageDependencies \
+            -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Focused tests
+        run: |
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            MACOSX_DEPLOYMENT_TARGET=14.0 \
+            test \
+            -only-testing:FloatTabsTests/AppPreferencesStoreTests \
+            -only-testing:FloatTabsTests/ExternalShellTests \
+            -only-testing:FloatTabsTests/FloatTabsBackupServiceTests
+
+      - name: Commit validated source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            FloatTabs/App/AppCoordinator.swift \
+            FloatTabs/Panel/PanelController.swift \
+            FloatTabs/Persistence/AppPreferencesStore.swift \
+            FloatTabs/Persistence/FloatTabsBackupService.swift \
+            FloatTabs/UI/GlobalSettingsController.swift \
+            FloatTabsTests/AppPreferencesStoreTests.swift
+          git diff --cached --quiet && exit 1
+          git commit -m 'ui: refine appearance and fixed window controls'
+          git push origin HEAD:agent/address-bar-current-page-actions
