@@ -6,6 +6,7 @@ on:
       - agent/address-bar-current-page-actions
     paths:
       - '.github/pr17_preferences_followup.py'
+      - '.github/run_pr17_preferences_followup.py'
       - '.github/pr17-preferences-trigger'
 
 permissions:
@@ -21,7 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply preference follow-up
-        run: python3 .github/pr17_preferences_followup.py
+        run: python3 .github/run_pr17_preferences_followup.py
 
       - name: Check patch
         run: |
