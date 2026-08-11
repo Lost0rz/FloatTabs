@@ -18,6 +18,7 @@ final class AppPreferencesStoreTests: XCTestCase {
     override func tearDown() {
         defaults.removePersistentDomain(forName: suiteName)
         NSApp.appearance = nil
+        FloatTabsFullscreenGate.blocksSummon = false
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -183,6 +184,89 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(pinnedFullscreen.contains(.canJoinAllApplications))
         XCTAssertTrue(pinnedFullscreen.contains(.fullScreenAuxiliary))
         XCTAssertFalse(pinnedFullscreen.contains(.fullScreenNone))
+    }
+
+    func testUnpinnedFullscreenBlocksSummonThroughoutTransition() {
+        XCTAssertFalse(
+            FloatingPanel.shouldBlockSummon(
+                isPinned: false,
+                fullscreenState: .notInFullscreen
+            )
+        )
+        XCTAssertTrue(
+            FloatingPanel.shouldBlockSummon(
+                isPinned: false,
+                fullscreenState: .enteringFullscreen
+            )
+        )
+        XCTAssertTrue(
+            FloatingPanel.shouldBlockSummon(
+                isPinned: false,
+                fullscreenState: .inFullscreen
+            )
+        )
+        XCTAssertTrue(
+            FloatingPanel.shouldBlockSummon(
+                isPinned: false,
+                fullscreenState: .exitingFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldBlockSummon(
+                isPinned: true,
+                fullscreenState: .inFullscreen
+            )
+        )
+    }
+
+    func testShellWaitsUntilFullscreenIsEstablishedBeforeOrderingOut() {
+        XCTAssertFalse(
+            FloatingPanel.shouldSuppressShell(
+                isPinned: false,
+                fullscreenState: .enteringFullscreen
+            )
+        )
+        XCTAssertTrue(
+            FloatingPanel.shouldSuppressShell(
+                isPinned: false,
+                fullscreenState: .inFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldSuppressShell(
+                isPinned: false,
+                fullscreenState: .exitingFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldSuppressShell(
+                isPinned: true,
+                fullscreenState: .inFullscreen
+            )
+        )
+    }
+
+    func testFullscreenTransitionsFreezeFloatTabsWebViewHierarchyWrites() {
+        XCTAssertTrue(
+            WebPanelContainerView.canMutateWebViewHierarchy(
+                fullscreenState: .notInFullscreen
+            )
+        )
+        XCTAssertFalse(
+            WebPanelContainerView.canMutateWebViewHierarchy(
+                fullscreenState: .enteringFullscreen
+            )
+        )
+        XCTAssertFalse(
+            WebPanelContainerView.canMutateWebViewHierarchy(
+                fullscreenState: .inFullscreen
+            )
+        )
+        XCTAssertFalse(
+            WebPanelContainerView.canMutateWebViewHierarchy(
+                fullscreenState: .exitingFullscreen
+            )
+        )
     }
 
     func testMouseDownAnchorsKeyboardFocusOnlyBeforeFullscreenTransition() {
