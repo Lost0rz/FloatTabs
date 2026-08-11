@@ -162,14 +162,15 @@ final class WebViewPool {
         }
     }
 
-    /// Element fullscreen is stronger than ordinary background-media playback.
-    /// WebKit temporarily reparents the WKWebView into its own fullscreen window,
-    /// so the Slot must stay resident even when the FloatTabs shell itself is
-    /// hidden. Releasing or detaching the view during that presentation can tear
-    /// down the fullscreen session.
+    /// App-owned fullscreen is stronger than ordinary background-media playback.
+    /// The same live WKWebView is temporarily hosted by a fresh FloatTabs-owned
+    /// AppKit fullscreen window, so the Slot must remain resident until it returns
+    /// to its Shell host. Native WebKit element fullscreen remains as a fallback
+    /// signal for older/test-created webviews that have not yet used the bridge.
     func isPresentingElementFullscreen(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
-        return Self.isActiveFullscreenState(webView.fullscreenState)
+        return AppOwnedFullscreenPresentation.isPresenting(webView)
+            || Self.isActiveFullscreenState(webView.fullscreenState)
     }
 
     static func isActiveFullscreenState(_ state: WKWebView.FullscreenState) -> Bool {
@@ -259,6 +260,14 @@ final class WebViewPool {
             navigationURL: navigationURL
         )
         let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
+
+        // Install the standards-shaped app-owned fullscreen bridge before the
+        // first navigation. Disable WebKit element fullscreen for this live view
+        // so a missed/unsupported page request cannot create a reusable
+        // WebCoreFullScreenWindow behind FloatTabs' fresh-window architecture.
+        webView.configuration.preferences.isElementFullscreenEnabled = false
+        AppOwnedFullscreenCoordinator.shared.configure(webView.configuration)
+
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
