@@ -278,6 +278,13 @@ enum FloatTabsDiagnostics {
 
     private static func windowSummary(_ window: NSWindow) -> String {
         let frame = window.frame
+        let frameDescription = String(
+            format: "%.0f,%.0f,%.0f,%.0f",
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height
+        )
         return [
             "class=\(String(describing: type(of: window)))",
             "num=\(window.windowNumber)",
@@ -286,7 +293,7 @@ enum FloatTabsDiagnostics {
             "main=\(window.isMainWindow)",
             "activeSpace=\(window.isOnActiveSpace)",
             "screen=\(screenID(window.screen))",
-            "frame=\(String(format: \"%.0f,%.0f,%.0f,%.0f\", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height))",
+            "frame=\(frameDescription)",
             "level=\(window.level.rawValue)",
             "behavior=\(window.collectionBehavior.rawValue)",
         ].joined(separator: ",")
@@ -302,7 +309,14 @@ enum FloatTabsDiagnostics {
         let number = (screen.deviceDescription[key] as? NSNumber)?.uint32Value
         let frame = screen.frame
         let id = number.map(String.init) ?? "unknown"
-        return "\(id)@\(String(format: \"%.0f,%.0f,%.0f,%.0f\", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height))"
+        let frameDescription = String(
+            format: "%.0f,%.0f,%.0f,%.0f",
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height
+        )
+        return "\(id)@\(frameDescription)"
     }
 
     private static func prepareLogFile(at url: URL) {
