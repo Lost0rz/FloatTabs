@@ -1,6 +1,9 @@
 # FloatTabs — Stage 3 Rendering Profile V3 Product Addendum
 
-> Status: **ACCEPTED STAGE 3 OVERRIDE**  
+> **HISTORICAL STAGE DOCUMENT — NOT THE CURRENT v0.1.0 RENDERING SOURCE OF TRUTH**  
+> The Stage 3 `pageZoom` fitting model and Stage 3 viewport sizes recorded below were superseded by PR #16 and PR #18. For current Desktop logical-host rendering, viewport presets, and navigation behavior, use `docs/product/FloatTabs_v0.1.0_Release_Baseline.md`. This document remains as accepted Stage 3 history and must not be used to reintroduce the superseded implementation.
+
+> Status: **ACCEPTED STAGE 3 OVERRIDE (HISTORICAL)**  
 > Supersedes: `FloatTabs_Stage_3_Rendering_Profile_V2_Addendum.md` where rendering semantics conflict  
 > Base: accepted Stage 2 runtime  
 > Detailed design: `docs/design/Stage_3_Rendering_Profile_V3.md`  
