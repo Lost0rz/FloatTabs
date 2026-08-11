@@ -18,20 +18,78 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
-    func testAppOwnedFullscreenIsConfiguredBeforeWebViewCreation() {
-        let webView = WebViewFactory.makeWebView(
-            fullscreenPresentationMode: .appOwned
+    func testWebViewsUseNativeElementFullscreenWithExitOnlyResetBridge() throws {
+        let webView = WebViewFactory.makeWebView()
+        let bridge = try XCTUnwrap(
+            webView.configuration.userContentController.userScripts.first(where: {
+                $0.source.contains("__floatTabsNativeFullscreenExitBridgeInstalled")
+            })
         )
-        XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
 
-        let bridge = webView.configuration.userContentController.userScripts.first {
-            $0.source.contains("__floatTabsAppFullscreenBridgeInstalled")
-        }
-        XCTAssertNotNil(bridge)
-        XCTAssertEqual(bridge?.injectionTime, WKUserScriptInjectionTime.atDocumentStart)
-        XCTAssertFalse(bridge?.isForMainFrameOnly ?? true)
-        XCTAssertTrue(bridge?.source.contains("requestFullscreen") == true)
-        XCTAssertTrue(bridge?.source.contains("exitFullscreen") == true)
+        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
+        XCTAssertEqual(bridge.injectionTime, .atDocumentStart)
+        XCTAssertFalse(bridge.isForMainFrameOnly)
+        XCTAssertTrue(bridge.source.contains("Document.prototype, 'exitFullscreen'"))
+        XCTAssertTrue(bridge.source.contains("closeAllMediaPresentations") == false)
+        XCTAssertFalse(bridge.source.contains("requestFullscreen"))
+        XCTAssertFalse(bridge.source.contains("Element.prototype"))
+        XCTAssertFalse(bridge.source.contains("style.position"))
+    }
+
+    func testFullscreenSessionResetPoliciesRequireAnActiveNativePresentation() {
+        XCTAssertTrue(
+            NativeFullscreenSessionResetCoordinator.shouldResetForEscape(
+                keyCode: NativeFullscreenSessionResetCoordinator.escapeKeyCode,
+                fullscreenState: .inFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertFalse(
+            NativeFullscreenSessionResetCoordinator.shouldResetForEscape(
+                keyCode: 36,
+                fullscreenState: .inFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertFalse(
+            NativeFullscreenSessionResetCoordinator.shouldResetForEscape(
+                keyCode: NativeFullscreenSessionResetCoordinator.escapeKeyCode,
+                fullscreenState: .enteringFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertFalse(
+            NativeFullscreenSessionResetCoordinator.shouldResetForEscape(
+                keyCode: NativeFullscreenSessionResetCoordinator.escapeKeyCode,
+                fullscreenState: .inFullscreen,
+                resetInFlight: true
+            )
+        )
+
+        XCTAssertTrue(
+            NativeFullscreenSessionResetCoordinator.canResetForPageExit(
+                fullscreenState: .enteringFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertTrue(
+            NativeFullscreenSessionResetCoordinator.canResetForPageExit(
+                fullscreenState: .inFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertFalse(
+            NativeFullscreenSessionResetCoordinator.canResetForPageExit(
+                fullscreenState: .exitingFullscreen,
+                resetInFlight: false
+            )
+        )
+        XCTAssertFalse(
+            NativeFullscreenSessionResetCoordinator.canResetForPageExit(
+                fullscreenState: .notInFullscreen,
+                resetInFlight: false
+            )
+        )
     }
 
     func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {

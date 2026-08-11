@@ -79,13 +79,6 @@ final class WebViewPool {
             )
 
             if desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
-                // Rendering-mode rebuilds are destructive to the live view.
-                // Keep the old runtime until fullscreen returns it to the Shell;
-                // the next synchronization will observe the same profile delta
-                // and perform the rebuild safely.
-                guard !Self.isFullscreenProtected(existing) else {
-                    return existing
-                }
                 let navigationURL = Self.rebuildNavigationURL(
                     initialURL: existing.backForwardList.currentItem?.initialURL,
                     visibleURL: existing.url,
@@ -139,14 +132,6 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
-        if let webView = webViews[slotID], Self.isFullscreenProtected(webView) {
-            FloatTabsDiagnostics.record(
-                "fullscreen_slot_release_blocked",
-                fields: ["slot_id": slotID.uuidString]
-            )
-            return
-        }
-
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -177,19 +162,14 @@ final class WebViewPool {
         }
     }
 
-    /// App-owned fullscreen is stronger than ordinary background-media playback.
-    /// The same live WKWebView is temporarily hosted by a fresh FloatTabs-owned
-    /// AppKit fullscreen window, so the Slot must remain resident until it returns
-    /// to its Shell host. Native WebKit element fullscreen remains as a fallback
-    /// signal for older/test-created webviews that have not yet used the bridge.
+    /// Element fullscreen is stronger than ordinary background-media playback.
+    /// WebKit temporarily reparents the WKWebView into its own fullscreen window,
+    /// so the Slot must stay resident even when the FloatTabs shell itself is
+    /// hidden. Releasing or detaching the view during that presentation can tear
+    /// down the fullscreen session.
     func isPresentingElementFullscreen(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
-        return Self.isFullscreenProtected(webView)
-    }
-
-    static func isFullscreenProtected(_ webView: WKWebView) -> Bool {
-        AppOwnedFullscreenPresentation.isPresenting(webView)
-            || isActiveFullscreenState(webView.fullscreenState)
+        return Self.isActiveFullscreenState(webView.fullscreenState)
     }
 
     static func isActiveFullscreenState(_ state: WKWebView.FullscreenState) -> Bool {
@@ -278,11 +258,7 @@ final class WebViewPool {
             for: rendering,
             navigationURL: navigationURL
         )
-        let webView = WebViewFactory.makeWebView(
-            renderingProfile: runtimeRendering,
-            fullscreenPresentationMode: .appOwned
-        )
-
+        let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,

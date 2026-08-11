@@ -18,7 +18,7 @@ final class AppPreferencesStoreTests: XCTestCase {
     override func tearDown() {
         defaults.removePersistentDomain(forName: suiteName)
         NSApp.appearance = nil
-        FloatTabsFullscreenPresentation.updateWebKitState(isActive: false)
+        FloatTabsFullscreenPresentation.isActive = false
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -195,23 +195,6 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(pinnedFullscreen.contains(.canJoinAllApplications))
         XCTAssertTrue(pinnedFullscreen.contains(.fullScreenAuxiliary))
         XCTAssertFalse(pinnedFullscreen.contains(.fullScreenNone))
-
-        let appOwnedPassive = FloatingPanel.presentationCollectionBehavior(
-            isPinned: false,
-            fullscreenState: .notInFullscreen,
-            appOwnedPhase: .active
-        )
-        XCTAssertTrue(appOwnedPassive.contains(.fullScreenNone))
-        XCTAssertFalse(appOwnedPassive.contains(.canJoinAllSpaces))
-
-        let appOwnedExplicit = FloatingPanel.presentationCollectionBehavior(
-            isPinned: false,
-            fullscreenState: .notInFullscreen,
-            appOwnedPhase: .active,
-            explicitFullscreenOverlay: true
-        )
-        XCTAssertTrue(appOwnedExplicit.contains(.fullScreenAuxiliary))
-        XCTAssertFalse(appOwnedExplicit.contains(.fullScreenNone))
     }
 
     func testFullscreenSessionFreezesProgrammaticShellFrameRouting() {
@@ -226,24 +209,6 @@ final class AppPreferencesStoreTests: XCTestCase {
         )
         XCTAssertTrue(
             FloatingPanel.shouldFreezeShellFrame(fullscreenState: .exitingFullscreen)
-        )
-        XCTAssertTrue(
-            FloatingPanel.shouldFreezeShellFrame(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .entering
-            )
-        )
-        XCTAssertTrue(
-            FloatingPanel.shouldFreezeShellFrame(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .active
-            )
-        )
-        XCTAssertTrue(
-            FloatingPanel.shouldFreezeShellFrame(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .exiting
-            )
         )
     }
 
@@ -293,12 +258,6 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(
             WebPanelContainerView.canMutateWebViewHierarchy(
                 fullscreenState: .exitingFullscreen
-            )
-        )
-        XCTAssertFalse(
-            WebPanelContainerView.canMutateWebViewHierarchy(
-                fullscreenState: .notInFullscreen,
-                appOwnedFullscreenActive: true
             )
         )
     }
@@ -372,51 +331,6 @@ final class AppPreferencesStoreTests: XCTestCase {
                 eventType: .leftMouseDown,
                 isKeyWindow: false,
                 fullscreenState: .exitingFullscreen
-            )
-        )
-        XCTAssertFalse(
-            FloatingPanel.shouldAnchorKeyboardFocus(
-                eventType: .leftMouseDown,
-                isKeyWindow: false,
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .active
-            )
-        )
-    }
-
-    func testAppOwnedFullscreenShellSummonOnlyWorksInStablePhase() {
-        XCTAssertTrue(
-            FloatingPanel.shouldDeferKeyAndOrderFront(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .entering
-            )
-        )
-        XCTAssertFalse(
-            FloatingPanel.shouldDeferKeyAndOrderFront(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .active
-            )
-        )
-        XCTAssertTrue(
-            FloatingPanel.shouldDeferKeyAndOrderFront(
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .exiting
-            )
-        )
-        XCTAssertTrue(
-            FloatingPanel.shouldTreatShowAsExplicitFullscreenSummon(
-                isPinned: false,
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .active,
-                panelIsVisible: false
-            )
-        )
-        XCTAssertFalse(
-            FloatingPanel.shouldTreatShowAsExplicitFullscreenSummon(
-                isPinned: false,
-                fullscreenState: .notInFullscreen,
-                appOwnedPhase: .entering,
-                panelIsVisible: false
             )
         )
     }

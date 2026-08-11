@@ -404,11 +404,6 @@ enum WebsiteLayoutViewport {
 
 @MainActor
 enum WebViewFactory {
-    enum FullscreenPresentationMode {
-        case webKit
-        case appOwned
-    }
-
     private static let hiddenScrollbarScriptSource = """
     (() => {
       const styleID = 'floattabs-hidden-scrollbar-style';
@@ -449,29 +444,20 @@ enum WebViewFactory {
     }
 
     static func makeWebView(
-        renderingProfile: WebRenderingProfile = .canonicalDefault,
-        fullscreenPresentationMode: FullscreenPresentationMode = .webKit
+        renderingProfile: WebRenderingProfile = .canonicalDefault
     ) -> WKWebView {
         let rendering = renderingProfile.normalized()
         let versions = BrowserVersionCatalog.current
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
-        switch fullscreenPresentationMode {
-        case .webKit:
-            configuration.preferences.isElementFullscreenEnabled = true
-        case .appOwned:
-            // WKWebView copies its configuration at initialization. Install the
-            // app-owned bridge and disable native element fullscreen on this
-            // original configuration before constructing the live view.
-            configuration.preferences.isElementFullscreenEnabled = false
-            AppOwnedFullscreenCoordinator.shared.configure(configuration)
-        }
+        configuration.preferences.isElementFullscreenEnabled = true
         configuration.applicationNameForUserAgent = UserAgentProvider.safariApplicationName(
             versions: versions
         )
         configuration.defaultWebpagePreferences.preferredContentMode =
             rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
         configuration.userContentController.addUserScript(hiddenScrollbarUserScript())
+        NativeFullscreenSessionResetCoordinator.shared.install(in: configuration)
 
         let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
