@@ -38,11 +38,15 @@ final class FloatingPanel: NSPanel {
             fullscreenState: .notInFullscreen
         )
 
-        // A non-activating panel can receive the first pointer interaction while
-        // another application is frontmost. The explicit show path still calls
-        // NSApp.activate() before focusing the active WKWebView, so keyboard input
-        // keeps the accepted Stage 0 behavior.
-        becomesKeyOnlyIfNeeded = true
+        // A non-activating panel is allowed to become key without activating the
+        // owning app. Let every real click establish this panel as the key window
+        // instead of relying on `needsPanelToBecomeKey` from the hit subview. This
+        // matters for WebKit element fullscreen because WebKit chooses its target
+        // display from `NSScreen.main`, i.e. the screen containing the key window.
+        // Re-establishing key ownership on every panel interaction prevents a
+        // previous fullscreen session on display A from leaving display A as the
+        // stale fullscreen target after the user returns to FloatTabs on display B.
+        becomesKeyOnlyIfNeeded = false
         acceptsMouseMovedEvents = true
 
         // The native resizable style is intentionally disabled. Stage 2 owns a
@@ -84,21 +88,13 @@ final class FloatingPanel: NSPanel {
             isKeyWindow: isKeyWindow,
             fullscreenState: ownElementFullscreenState
         ) {
-            // Ordinary show already activates FloatTabs and makes this panel key.
-            // Only a pinned panel can legitimately remain visible while another
-            // app is active; activate in that narrow case. Avoid repeatedly
-            // activating an already-active app from inside sendEvent because that
-            // can perturb WebKit's fullscreen transition state machine.
-            if isPresentationPinned && !NSApp.isActive {
-                if #available(macOS 14.0, *) {
-                    NSApp.activate()
-                } else {
-                    _ = NSRunningApplication.current.activate(options: [])
-                }
-            }
-            if NSApp.isActive {
-                makeKey()
-            }
+            // `.nonactivatingPanel` keeps this from activating the entire app.
+            // Making the panel key is nevertheless important: WebKit samples
+            // `NSScreen.main` asynchronously when starting element fullscreen,
+            // and `NSScreen.main` follows the key window rather than pointer
+            // location. Do not gate this on `NSApp.isActive`; doing so leaves the
+            // previous app/display as the fullscreen target after a screen switch.
+            makeKey()
         }
 
         super.sendEvent(event)
