@@ -232,6 +232,12 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs() {
+        // WebKit owns the live WKWebView throughout element-fullscreen. Re-showing
+        // the FloatTabs panel during that transition can force AppKit layout and
+        // reparent/frame work against WebKit's fullscreen window. Treat the global
+        // shortcut as temporarily unavailable until fullscreen fully exits.
+        guard !FloatTabsFullscreenGate.blocksSummon else { return }
+
         if panelController.isVisible {
             panelController.hideFloatTabs()
         } else {
