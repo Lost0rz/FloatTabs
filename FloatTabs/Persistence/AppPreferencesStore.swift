@@ -86,6 +86,9 @@ extension Notification.Name {
     static let floatTabsWindowSizeModeDidChange = Notification.Name(
         "FloatTabs.windowSizeModeDidChange"
     )
+    static let floatTabsFixedWindowSizeDidChange = Notification.Name(
+        "FloatTabs.fixedWindowSizeDidChange"
+    )
 }
 
 @MainActor
@@ -94,7 +97,11 @@ final class AppPreferencesStore {
     static let followPreferredSizeKey = "FloatTabs.followTabPreferredSize"
     static let borderThemeKey = "FloatTabs.borderTheme"
     static let customBorderColorKey = "FloatTabs.customBorderColor"
+    static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
+    static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
+    static let defaultFixedViewportSize = CGSize(width: 430, height: 820)
+    static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
 
     private let defaults: UserDefaults
 
@@ -138,6 +145,41 @@ final class AppPreferencesStore {
     var windowSizeMode: PanelWindowSizeMode {
         get { followPreferredSize ? .perWebApp : .fixed }
         set { followPreferredSize = newValue == .perWebApp }
+    }
+
+    /// The shared viewport used only while Fixed mode is active. It never
+    /// replaces or normalizes any Web App's own renderingProfile viewport.
+    var fixedViewportSize: CGSize {
+        get {
+            guard hasStoredFixedViewportSize else {
+                return Self.defaultFixedViewportSize
+            }
+            let value = CGSize(
+                width: defaults.double(forKey: Self.fixedViewportWidthKey),
+                height: defaults.double(forKey: Self.fixedViewportHeightKey)
+            )
+            return Self.normalizedFixedViewportSize(value)
+        }
+        set {
+            let normalized = Self.normalizedFixedViewportSize(newValue)
+            let current = fixedViewportSize
+            guard !hasStoredFixedViewportSize
+                    || abs(current.width - normalized.width) > 0.001
+                    || abs(current.height - normalized.height) > 0.001 else {
+                return
+            }
+            defaults.set(Double(normalized.width), forKey: Self.fixedViewportWidthKey)
+            defaults.set(Double(normalized.height), forKey: Self.fixedViewportHeightKey)
+            NotificationCenter.default.post(
+                name: .floatTabsFixedWindowSizeDidChange,
+                object: self
+            )
+        }
+    }
+
+    var hasStoredFixedViewportSize: Bool {
+        defaults.object(forKey: Self.fixedViewportWidthKey) != nil
+            && defaults.object(forKey: Self.fixedViewportHeightKey) != nil
     }
 
     var borderTheme: PanelBorderTheme {
@@ -189,6 +231,19 @@ final class AppPreferencesStore {
         NotificationCenter.default.post(
             name: .floatTabsBorderPreferenceDidChange,
             object: self
+        )
+    }
+
+    static func normalizedFixedViewportSize(_ proposed: CGSize) -> CGSize {
+        guard proposed.width.isFinite,
+              proposed.height.isFinite,
+              proposed.width > 0,
+              proposed.height > 0 else {
+            return defaultFixedViewportSize
+        }
+        return CGSize(
+            width: max(proposed.width, minimumFixedViewportSize.width),
+            height: max(proposed.height, minimumFixedViewportSize.height)
         )
     }
 

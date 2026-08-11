@@ -65,8 +65,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: tabs)
         window.title = "FloatTabs Settings"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 580, height: 440))
-        window.minSize = NSSize(width: 540, height: 400)
+        window.setContentSize(NSSize(width: 620, height: 520))
+        window.minSize = NSSize(width: 580, height: 460)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -95,14 +95,23 @@ private final class AppearanceSettingsViewController: NSViewController {
         target: nil,
         action: nil
     )
-    private let borderThemePopup = NSPopUpButton()
-    private let customColorWell = NSColorWell()
     private let windowSizeControl = NSSegmentedControl(
         labels: PanelWindowSizeMode.allCases.map(\.displayName),
         trackingMode: .selectOne,
         target: nil,
         action: nil
     )
+    private let fixedSizeControl = NSSegmentedControl(
+        labels: SimpleViewportPreset.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let customFixedWidthField = NSTextField()
+    private let customFixedHeightField = NSTextField()
+    private let fixedSizeSection = NSStackView()
+    private let customFixedSizeRow = NSStackView()
+    private var borderThemeButtons: [BorderThemeSwatchButton] = []
 
     init(preferencesStore: AppPreferencesStore) {
         self.preferencesStore = preferencesStore
@@ -123,25 +132,41 @@ private final class AppearanceSettingsViewController: NSViewController {
         appearanceControl.action = #selector(appearanceChanged(_:))
         appearanceControl.widthAnchor.constraint(equalToConstant: 250).isActive = true
 
-        borderThemePopup.addItems(withTitles: PanelBorderTheme.allCases.map(\.displayName))
-        borderThemePopup.target = self
-        borderThemePopup.action = #selector(borderThemeChanged(_:))
-        borderThemePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 170).isActive = true
-
-        customColorWell.target = self
-        customColorWell.action = #selector(customBorderColorChanged(_:))
-        customColorWell.widthAnchor.constraint(equalToConstant: 56).isActive = true
-        customColorWell.heightAnchor.constraint(equalToConstant: 28).isActive = true
-
-        let borderRow = NSStackView(views: [borderThemePopup, customColorWell])
-        borderRow.orientation = .horizontal
-        borderRow.alignment = .centerY
-        borderRow.spacing = 10
+        let borderPalette = makeBorderPalette()
 
         windowSizeControl.segmentStyle = .rounded
         windowSizeControl.target = self
         windowSizeControl.action = #selector(windowSizeModeChanged(_:))
         windowSizeControl.widthAnchor.constraint(equalToConstant: 280).isActive = true
+
+        fixedSizeControl.segmentStyle = .rounded
+        fixedSizeControl.target = self
+        fixedSizeControl.action = #selector(fixedSizePresetChanged(_:))
+        fixedSizeControl.widthAnchor.constraint(equalToConstant: 455).isActive = true
+
+        configureCustomFixedField(customFixedWidthField)
+        configureCustomFixedField(customFixedHeightField)
+        let multiplication = NSTextField(labelWithString: "×")
+        multiplication.textColor = .secondaryLabelColor
+        customFixedSizeRow.setViews(
+            [Self.detailInlineLabel("Custom viewport"), customFixedWidthField, multiplication, customFixedHeightField],
+            in: .leading
+        )
+        customFixedSizeRow.orientation = .horizontal
+        customFixedSizeRow.alignment = .centerY
+        customFixedSizeRow.spacing = 8
+
+        fixedSizeSection.setViews([
+            Self.titleLabel("Fixed Window Size"),
+            Self.detailLabel(
+                "This is the shared viewport used by every Tab in Fixed mode. Resizing the FloatTabs window outside Settings updates this same saved value."
+            ),
+            fixedSizeControl,
+            customFixedSizeRow,
+        ], in: .leading)
+        fixedSizeSection.orientation = .vertical
+        fixedSizeSection.alignment = .leading
+        fixedSizeSection.spacing = 7
 
         let stack = NSStackView(views: [
             Self.titleLabel("Interface Appearance"),
@@ -149,29 +174,30 @@ private final class AppearanceSettingsViewController: NSViewController {
                 "Changes FloatTabs' native appearance. Websites keep their own CSS and may still respond to WebKit's effective light/dark appearance."
             ),
             appearanceControl,
-            Self.spacer(8),
+            Self.spacer(6),
             Self.titleLabel("Border Theme"),
             Self.detailLabel(
-                "Rainbow is the default animated outline. Choose a macOS accent color or use Custom for a personal border color."
+                "Choose the outline directly. Rainbow keeps the animated outline; the final swatch is your custom color."
             ),
-            borderRow,
-            Self.spacer(8),
+            borderPalette,
+            Self.spacer(6),
             Self.titleLabel("Window Size Behavior"),
             Self.detailLabel(
-                "Per Web App follows each Tab's saved size. Fixed keeps one shared window size across all Tabs without overwriting their saved individual sizes."
+                "Per Web App follows each Tab's saved size. Fixed uses one shared size without overwriting any saved individual Web App size."
             ),
             windowSizeControl,
+            fixedSizeSection,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
+        stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 22),
         ])
         synchronizeControls()
         view = root
@@ -187,43 +213,126 @@ private final class AppearanceSettingsViewController: NSViewController {
         preferencesStore.appearanceMode = AppAppearanceMode.allCases[sender.selectedSegment]
     }
 
-    @objc private func borderThemeChanged(_ sender: NSPopUpButton) {
-        let index = sender.indexOfSelectedItem
-        guard PanelBorderTheme.allCases.indices.contains(index) else { return }
-        preferencesStore.borderTheme = PanelBorderTheme.allCases[index]
-        synchronizeCustomColorState()
+    @objc private func borderThemeSwatchPressed(_ sender: BorderThemeSwatchButton) {
+        guard PanelBorderTheme.allCases.indices.contains(sender.tag) else { return }
+        let theme = PanelBorderTheme.allCases[sender.tag]
+        preferencesStore.borderTheme = theme
+        synchronizeBorderPalette()
+        if theme == .custom {
+            presentCustomColorPanel()
+        }
     }
 
-    @objc private func customBorderColorChanged(_ sender: NSColorWell) {
+    @objc private func customBorderColorChanged(_ sender: NSColorPanel) {
         preferencesStore.customBorderColor = sender.color
         if preferencesStore.borderTheme != .custom {
             preferencesStore.borderTheme = .custom
         }
-        synchronizeControls()
+        synchronizeBorderPalette()
     }
 
     @objc private func windowSizeModeChanged(_ sender: NSSegmentedControl) {
         guard PanelWindowSizeMode.allCases.indices.contains(sender.selectedSegment) else { return }
         preferencesStore.windowSizeMode = PanelWindowSizeMode.allCases[sender.selectedSegment]
+        synchronizeFixedSizeControls()
+    }
+
+    @objc private func fixedSizePresetChanged(_ sender: NSSegmentedControl) {
+        guard SimpleViewportPreset.allCases.indices.contains(sender.selectedSegment) else { return }
+        let preset = SimpleViewportPreset.allCases[sender.selectedSegment]
+        guard let size = preset.size else {
+            customFixedSizeRow.isHidden = false
+            customFixedWidthField.stringValue = Self.sizeText(preferencesStore.fixedViewportSize.width)
+            customFixedHeightField.stringValue = Self.sizeText(preferencesStore.fixedViewportSize.height)
+            view.window?.makeFirstResponder(customFixedWidthField)
+            return
+        }
+        preferencesStore.fixedViewportSize = size
+        synchronizeFixedSizeControls()
+    }
+
+    @objc private func customFixedSizeChanged(_ sender: NSTextField) {
+        guard let width = Double(customFixedWidthField.stringValue),
+              let height = Double(customFixedHeightField.stringValue),
+              width.isFinite,
+              height.isFinite,
+              width >= Double(AppPreferencesStore.minimumFixedViewportSize.width),
+              height >= Double(AppPreferencesStore.minimumFixedViewportSize.height) else {
+            NSSound.beep()
+            synchronizeFixedSizeControls()
+            return
+        }
+        preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
+        synchronizeFixedSizeControls()
+    }
+
+    private func configureCustomFixedField(_ field: NSTextField) {
+        field.alignment = .right
+        field.placeholderString = "px"
+        field.target = self
+        field.action = #selector(customFixedSizeChanged(_:))
+        field.widthAnchor.constraint(equalToConstant: 72).isActive = true
+    }
+
+    private func makeBorderPalette() -> NSStackView {
+        borderThemeButtons = PanelBorderTheme.allCases.enumerated().map { index, theme in
+            let button = BorderThemeSwatchButton(
+                theme: theme,
+                customColor: preferencesStore.customBorderColor
+            )
+            button.tag = index
+            button.target = self
+            button.action = #selector(borderThemeSwatchPressed(_:))
+            return button
+        }
+        let palette = NSStackView(views: borderThemeButtons)
+        palette.orientation = .horizontal
+        palette.alignment = .centerY
+        palette.spacing = 7
+        return palette
+    }
+
+    private func presentCustomColorPanel() {
+        let panel = NSColorPanel.shared
+        panel.color = preferencesStore.customBorderColor
+        panel.setTarget(self)
+        panel.setAction(#selector(customBorderColorChanged(_:)))
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func synchronizeControls() {
         appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
             of: preferencesStore.appearanceMode
         ) ?? 0
-        borderThemePopup.selectItem(
-            at: PanelBorderTheme.allCases.firstIndex(of: preferencesStore.borderTheme) ?? 0
-        )
-        customColorWell.color = preferencesStore.customBorderColor
         windowSizeControl.selectedSegment = PanelWindowSizeMode.allCases.firstIndex(
             of: preferencesStore.windowSizeMode
         ) ?? 0
-        synchronizeCustomColorState()
+        synchronizeBorderPalette()
+        synchronizeFixedSizeControls()
     }
 
-    private func synchronizeCustomColorState() {
-        customColorWell.isEnabled = preferencesStore.borderTheme == .custom
-        customColorWell.alphaValue = customColorWell.isEnabled ? 1 : 0.45
+    private func synchronizeBorderPalette() {
+        for button in borderThemeButtons {
+            button.isThemeSelected = button.theme == preferencesStore.borderTheme
+            button.customColor = preferencesStore.customBorderColor
+        }
+    }
+
+    private func synchronizeFixedSizeControls() {
+        let isFixed = preferencesStore.windowSizeMode == .fixed
+        fixedSizeSection.isHidden = !isFixed
+        guard isFixed else { return }
+
+        let size = preferencesStore.fixedViewportSize
+        let preset = SimpleViewportPreset.matching(size) ?? .custom
+        fixedSizeControl.selectedSegment = SimpleViewportPreset.allCases.firstIndex(of: preset) ?? 0
+        customFixedSizeRow.isHidden = preset != .custom
+        customFixedWidthField.stringValue = Self.sizeText(size.width)
+        customFixedHeightField.stringValue = Self.sizeText(size.height)
+    }
+
+    private static func sizeText(_ value: CGFloat) -> String {
+        String(Int(value.rounded()))
     }
 
     private static func titleLabel(_ text: String) -> NSTextField {
@@ -237,7 +346,14 @@ private final class AppearanceSettingsViewController: NSViewController {
         label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabelColor
         label.maximumNumberOfLines = 0
-        label.widthAnchor.constraint(lessThanOrEqualToConstant: 500).isActive = true
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+        return label
+    }
+
+    private static func detailInlineLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11.5)
+        label.textColor = .secondaryLabelColor
         return label
     }
 
@@ -245,6 +361,70 @@ private final class AppearanceSettingsViewController: NSViewController {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
+    }
+}
+
+@MainActor
+private final class BorderThemeSwatchButton: NSButton {
+    let theme: PanelBorderTheme
+    var customColor: NSColor {
+        didSet { needsDisplay = true }
+    }
+    var isThemeSelected = false {
+        didSet { needsDisplay = true }
+    }
+
+    init(theme: PanelBorderTheme, customColor: NSColor) {
+        self.theme = theme
+        self.customColor = customColor
+        super.init(frame: .zero)
+        title = ""
+        isBordered = false
+        focusRingType = .none
+        toolTip = theme.displayName
+        setButtonType(.momentaryChange)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 38).isActive = true
+        heightAnchor.constraint(equalToConstant: 38).isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let ringRect = bounds.insetBy(dx: 2.5, dy: 2.5)
+        if isThemeSelected {
+            let ring = NSBezierPath(ovalIn: ringRect)
+            ring.lineWidth = 3
+            NSColor.controlAccentColor.setStroke()
+            ring.stroke()
+        }
+
+        let swatchRect = bounds.insetBy(dx: 7, dy: 7)
+        let swatch = NSBezierPath(ovalIn: swatchRect)
+        if theme == .rainbow {
+            NSGraphicsContext.saveGraphicsState()
+            swatch.addClip()
+            NSGradient(colors: [
+                .systemPurple,
+                .systemBlue,
+                .systemGreen,
+                .systemYellow,
+                .systemOrange,
+                .systemRed,
+                .systemPink,
+            ])?.draw(in: swatchRect, angle: 0)
+            NSGraphicsContext.restoreGraphicsState()
+        } else {
+            (theme.solidColor ?? customColor).setFill()
+            swatch.fill()
+        }
+
+        NSColor.separatorColor.withAlphaComponent(0.45).setStroke()
+        swatch.lineWidth = 1
+        swatch.stroke()
     }
 }
 
@@ -442,7 +622,7 @@ private final class AccountLanguageSettingsViewController: NSViewController {
             spacer(8),
             sectionTitle("Backup & Restore"),
             detailLabel(
-                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, window-size switching preference, and the global Show/Hide shortcut."
+                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
             ),
             detailLabel(
                 "Website passwords, cookies, OAuth/login sessions, WebKit caches, and page runtime state are not exported. A new Mac may require website sign-in again."

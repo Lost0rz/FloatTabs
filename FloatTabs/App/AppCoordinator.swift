@@ -187,7 +187,9 @@ final class AppCoordinator {
                 appearanceMode: preferencesStore.appearanceMode,
                 followPreferredSize: preferencesStore.followPreferredSize,
                 borderTheme: preferencesStore.borderTheme,
-                customBorderColorHex: preferencesStore.customBorderColorHex
+                customBorderColorHex: preferencesStore.customBorderColorHex,
+                fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
+                fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height)
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -210,6 +212,10 @@ final class AppCoordinator {
         preferencesStore.customBorderColorHex = imported.globalPreferences.customBorderColorHex
             ?? AppPreferencesStore.defaultCustomBorderColorHex
         preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
+        if let width = imported.globalPreferences.fixedViewportWidth,
+           let height = imported.globalPreferences.fixedViewportHeight {
+            preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
+        }
 
         let shortcut = imported.globalShowHideShortcut.map {
             KeyboardShortcuts.Shortcut(

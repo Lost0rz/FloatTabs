@@ -76,4 +76,31 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertEqual(store.customBorderColorHex, "#FF4000FF")
         XCTAssertEqual(store.customBorderColor.usingColorSpace(.sRGB)?.redComponent ?? 0, 1, accuracy: 0.01)
     }
+
+    func testFixedViewportDefaultsToMediumAndPersistsSeparately() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertFalse(first.hasStoredFixedViewportSize)
+        XCTAssertEqual(first.fixedViewportSize.width, 430, accuracy: 0.001)
+        XCTAssertEqual(first.fixedViewportSize.height, 820, accuracy: 0.001)
+
+        first.fixedViewportSize = CGSize(width: 777, height: 666)
+        XCTAssertTrue(first.hasStoredFixedViewportSize)
+
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(second.fixedViewportSize.width, 777, accuracy: 0.001)
+        XCTAssertEqual(second.fixedViewportSize.height, 666, accuracy: 0.001)
+        XCTAssertNil(SimpleViewportPreset.matching(second.fixedViewportSize))
+    }
+
+    func testFixedViewportUsesStandardPresetAndClampsUnsafeSmallValues() {
+        let store = AppPreferencesStore(defaults: defaults)
+        let wide = try! XCTUnwrap(SimpleViewportPreset.wide.size)
+        store.fixedViewportSize = wide
+        XCTAssertEqual(SimpleViewportPreset.matching(store.fixedViewportSize), .wide)
+
+        store.fixedViewportSize = CGSize(width: 100, height: 200)
+        XCTAssertEqual(store.fixedViewportSize.width, 320, accuracy: 0.001)
+        XCTAssertEqual(store.fixedViewportSize.height, 400, accuracy: 0.001)
+    }
+
 }

@@ -103,6 +103,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func showFloatTabs() {
         capturePreviousApplication()
         positionPanelForCurrentScreens()
+        synchronizeFixedViewportAfterPositioning()
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
         activateFloatTabs()
@@ -385,6 +386,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: .floatTabsWindowSizeModeDidChange,
             object: preferencesStore
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(fixedWindowSizeDidChange(_:)),
+            name: .floatTabsFixedWindowSizeDidChange,
+            object: preferencesStore
+        )
     }
 
     @objc private func borderPreferenceDidChange(_ notification: Notification) {
@@ -393,10 +400,25 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @objc private func windowSizeModeDidChange(_ notification: Notification) {
         synchronizeWindowSizeMode()
-        if preferencesStore.windowSizeMode == .perWebApp,
-           let active = tabStore.activeProfile {
-            applyPreferredViewport(active.renderingProfile.viewportSize)
+        switch preferencesStore.windowSizeMode {
+        case .perWebApp:
+            if let active = tabStore.activeProfile {
+                applyPreferredViewport(active.renderingProfile.viewportSize)
+            }
+        case .fixed:
+            guard hasPositionedPanel else { return }
+            if preferencesStore.hasStoredFixedViewportSize {
+                applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+            } else {
+                let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+                preferencesStore.fixedViewportSize = viewport
+            }
         }
+    }
+
+    @objc private func fixedWindowSizeDidChange(_ notification: Notification) {
+        guard preferencesStore.windowSizeMode == .fixed else { return }
+        applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
     }
 
     private func synchronizePreferencePresentation() {
@@ -736,25 +758,37 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func handleManualResizeEnded() {
         clampPanelToConnectedScreens()
-        if Self.shouldPersistManualViewportToActiveTab(
-            windowSizeMode: preferencesStore.windowSizeMode
-        ) {
-            let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+        let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+
+        switch preferencesStore.windowSizeMode {
+        case .perWebApp:
             if let id = tabStore.activeTabID {
                 _ = tabStore.updatePreferredViewport(
                     id: id,
                     size: CGSize(width: viewport.width, height: viewport.height)
                 )
             }
+        case .fixed:
+            // Manual resizing updates only the shared Fixed viewport. Every Web
+            // App keeps its own hidden preferred size for Per Web App mode.
+            preferencesStore.fixedViewportSize = viewport
         }
-        // Fixed mode intentionally persists only the shared panel frame. The
-        // hidden per-Web-App viewport values remain untouched for later restore.
         persistPanelFrame()
     }
 
     private func applyPreferredViewport(_ viewportSize: CGSize) {
         guard preferencesStore.windowSizeMode == .perWebApp,
               hasPositionedPanel else { return }
+        applyViewportSize(viewportSize, animated: true)
+    }
+
+    private func applySharedFixedViewport(_ viewportSize: CGSize, animated: Bool) {
+        guard preferencesStore.windowSizeMode == .fixed,
+              hasPositionedPanel else { return }
+        applyViewportSize(viewportSize, animated: animated)
+    }
+
+    private func applyViewportSize(_ viewportSize: CGSize, animated: Bool) {
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
         guard let visibleFrame else { return }
@@ -769,8 +803,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             visibleFrame: visibleFrame
         )
         guard target != panel.frame else { return }
-        panel.setFrame(target, display: true, animate: true)
+        panel.setFrame(target, display: true, animate: animated)
         persistPanelFrame()
+    }
+
+    private func synchronizeFixedViewportAfterPositioning() {
+        guard preferencesStore.windowSizeMode == .fixed,
+              hasPositionedPanel else { return }
+        if preferencesStore.hasStoredFixedViewportSize {
+            applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: false)
+        } else {
+            let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+            preferencesStore.fixedViewportSize = viewport
+        }
     }
 
     private func activateFloatTabs() {
