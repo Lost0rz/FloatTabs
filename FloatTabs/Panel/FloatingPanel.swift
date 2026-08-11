@@ -74,6 +74,10 @@ final class FloatingPanel: NSPanel {
     func setPresentationPinned(_ pinned: Bool) {
         guard isPresentationPinned != pinned else { return }
         isPresentationPinned = pinned
+        FloatTabsDiagnostics.record(
+            "shell_pin_changed",
+            fields: ["pinned": String(pinned)]
+        )
         applyPresentationPolicy()
         synchronizeShellVisibilityForFullscreen()
     }
@@ -88,6 +92,10 @@ final class FloatingPanel: NSPanel {
             shellAutoSuppressedForOwnFullscreen = false
             explicitFullscreenOverlay = true
             FloatTabsFullscreenPresentation.shellExplicitlySummoned = true
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_explicit_summon",
+                fields: ["panel_window_number": String(windowNumber)]
+            )
             applyPresentationPolicy()
         }
         super.makeKeyAndOrderFront(sender)
@@ -97,6 +105,10 @@ final class FloatingPanel: NSPanel {
         if explicitFullscreenOverlay {
             explicitFullscreenOverlay = false
             FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_explicit_hide",
+                fields: ["panel_window_number": String(windowNumber)]
+            )
             applyPresentationPolicy()
         }
         super.orderOut(sender)
@@ -144,6 +156,15 @@ final class FloatingPanel: NSPanel {
             // `.nonactivatingPanel` keeps this from broadly activating the app,
             // while refreshing NSScreen.main for WebKit's next fullscreen request.
             makeKey()
+            FloatTabsDiagnostics.record(
+                "fullscreen_focus_anchor",
+                fields: [
+                    "panel_window_number": String(windowNumber),
+                    "panel_frame": NSStringFromRect(frame),
+                    "panel_screen_frame": screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                    "main_screen_frame": NSScreen.main.map { NSStringFromRect($0.frame) } ?? "nil",
+                ]
+            )
         }
 
         super.sendEvent(event)
@@ -272,10 +293,34 @@ final class FloatingPanel: NSPanel {
         }
         let targetScreen = screens[index]
 
+        FloatTabsDiagnostics.record(
+            "reusable_fullscreen_window_preposition_before",
+            fields: [
+                "window_number": String(reusableFullscreenWindow.windowNumber),
+                "window_visible": String(reusableFullscreenWindow.isVisible),
+                "window_active_space": String(reusableFullscreenWindow.isOnActiveSpace),
+                "window_frame": NSStringFromRect(reusableFullscreenWindow.frame),
+                "window_screen_frame": reusableFullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "target_screen_frame": NSStringFromRect(targetScreen.frame),
+            ]
+        )
+
         // Use only public NSWindow/NSScreen API. The window remains hidden; this
         // updates its AppKit screen association before WebKit calls
         // `enterFullScreenMode` again on the same reused window.
         reusableFullscreenWindow.setFrame(targetScreen.frame, display: false)
+
+        FloatTabsDiagnostics.record(
+            "reusable_fullscreen_window_preposition_after",
+            fields: [
+                "window_number": String(reusableFullscreenWindow.windowNumber),
+                "window_visible": String(reusableFullscreenWindow.isVisible),
+                "window_active_space": String(reusableFullscreenWindow.isOnActiveSpace),
+                "window_frame": NSStringFromRect(reusableFullscreenWindow.frame),
+                "window_screen_frame": reusableFullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "target_screen_frame": NSStringFromRect(targetScreen.frame),
+            ]
+        )
     }
 
     private func observeFullscreenStateIfNeeded(for webView: WKWebView) {
@@ -292,6 +337,14 @@ final class FloatingPanel: NSPanel {
         fullscreenObservedWebView = webView
         reusableFullscreenWindow = nil
         ownElementFullscreenState = webView.fullscreenState
+        FloatTabsDiagnostics.record(
+            "webkit_fullscreen_observation_started",
+            fields: [
+                "state": String(describing: ownElementFullscreenState),
+                "webview_window_number": webView.window.map { String($0.windowNumber) } ?? "nil",
+                "webview_window_frame": webView.window.map { NSStringFromRect($0.frame) } ?? "nil",
+            ]
+        )
         synchronizeFullscreenPresentationState(for: webView)
 
         fullscreenStateObservation = webView.observe(
@@ -308,6 +361,22 @@ final class FloatingPanel: NSPanel {
 
                 let wasActive = self.isOwnElementFullscreenActive
                 self.ownElementFullscreenState = state
+                let currentWindow = webView.window
+                FloatTabsDiagnostics.record(
+                    "webkit_fullscreen_state",
+                    fields: [
+                        "state": String(describing: state),
+                        "was_active": String(wasActive),
+                        "webview_window_number": currentWindow.map { String($0.windowNumber) } ?? "nil",
+                        "webview_window_visible": currentWindow.map { String($0.isVisible) } ?? "nil",
+                        "webview_window_active_space": currentWindow.map { String($0.isOnActiveSpace) } ?? "nil",
+                        "webview_window_frame": currentWindow.map { NSStringFromRect($0.frame) } ?? "nil",
+                        "webview_window_screen_frame": currentWindow?.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                        "panel_window_number": String(self.windowNumber),
+                        "panel_visible": String(self.isVisible),
+                        "panel_active_space": String(self.isOnActiveSpace),
+                    ]
+                )
 
                 if !wasActive && WebViewPool.isActiveFullscreenState(state) {
                     // Every new fullscreen session starts passive. Pin is the only
@@ -323,6 +392,17 @@ final class FloatingPanel: NSPanel {
                    let fullscreenWindow = webView.window,
                    fullscreenWindow !== self {
                     self.reusableFullscreenWindow = fullscreenWindow
+                    FloatTabsDiagnostics.record(
+                        "reusable_fullscreen_window_captured",
+                        fields: [
+                            "window_number": String(fullscreenWindow.windowNumber),
+                            "window_visible": String(fullscreenWindow.isVisible),
+                            "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                            "window_frame": NSStringFromRect(fullscreenWindow.frame),
+                            "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                            "window_behavior": String(fullscreenWindow.collectionBehavior.rawValue),
+                        ]
+                    )
                 }
 
                 if !WebViewPool.isActiveFullscreenState(state) {
@@ -368,6 +448,13 @@ final class FloatingPanel: NSPanel {
 
         shellAutoSuppressedForOwnFullscreen = true
         FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+        FloatTabsDiagnostics.record(
+            "fullscreen_shell_auto_suppressed",
+            fields: [
+                "panel_window_number": String(windowNumber),
+                "panel_visible_before": String(isVisible),
+            ]
+        )
         if isVisible {
             super.orderOut(nil)
         }
@@ -379,6 +466,10 @@ final class FloatingPanel: NSPanel {
         guard shellAutoSuppressedForOwnFullscreen else { return }
 
         shellAutoSuppressedForOwnFullscreen = false
+        FloatTabsDiagnostics.record(
+            "fullscreen_shell_restore_immediate",
+            fields: ["panel_window_number": String(windowNumber)]
+        )
         super.orderFront(nil)
     }
 
@@ -394,6 +485,10 @@ final class FloatingPanel: NSPanel {
             }
             self.shellAutoSuppressedForOwnFullscreen = false
             self.restoreShellWorkItem = nil
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_restored_after_exit",
+                fields: ["panel_window_number": String(self.windowNumber)]
+            )
             self.orderFront(nil)
         }
         restoreShellWorkItem = workItem
