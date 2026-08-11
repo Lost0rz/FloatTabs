@@ -89,17 +89,6 @@ final class FloatingPanel: NSPanel {
     /// from the fullscreen window. Once `.inFullscreen` is stable, a hidden
     /// unpinned shell may be explicitly summoned by the global shortcut.
     override func makeKeyAndOrderFront(_ sender: Any?) {
-        // Real-Mac diagnostics isolated a reusable-WebKit-window failure that is
-        // narrower than ordinary screen routing. After a successful fullscreen on
-        // one display, WebKit can leave its now-hidden fullscreen-primary window
-        // attached to that display's active Space. When the next target
-        // `NSScreen.main` is a different display, WebKit moves the frame correctly
-        // but AppKit can still abort `enterFullScreenMode`. Re-arm only that exact
-        // stale hidden-window signature before the Shell itself becomes key.
-        if ownElementFullscreenState == .notInFullscreen {
-            rearmReusableFullscreenWindowForCurrentMainScreenIfNeeded()
-        }
-
         if Self.shouldDeferKeyAndOrderFront(fullscreenState: ownElementFullscreenState) {
             FloatTabsDiagnostics.record(
                 "fullscreen_shell_show_deferred_during_transition",
@@ -166,12 +155,13 @@ final class FloatingPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if Self.isMouseDown(event.type),
            let webView = webViewHit(by: event) {
-            // Do not use the mouse display as fullscreen routing authority. Real
-            // multi-display logs proved WebKit can correctly fullscreen on
-            // `NSScreen.main` even while the mouse remains on another display.
-            // This hook is diagnostics-only; the stale-Space re-arm happens when
-            // the Shell is shown, before this mouse event reaches WebKit.
-            recordReusableFullscreenWindowBeforePotentialRequest(
+            // Do not move WebKit's reusable fullscreen NSWindow ourselves.
+            // Physical multi-display diagnostics proved WebKit re-selects the
+            // fullscreen display from NSScreen.main on every entry and can move
+            // this same hidden window itself. Mutating its frame between sessions
+            // risks carrying stale fullscreen-Space affiliation into the next
+            // enter. Observe it for diagnostics, but leave ownership to WebKit.
+            prepareReusableFullscreenWindowForPotentialRequest(
                 webView: webView,
                 mouseLocation: NSEvent.mouseLocation
             )
@@ -272,26 +262,6 @@ final class FloatingPanel: NSPanel {
             && windowIsVisible
     }
 
-    static func shouldRearmReusableFullscreenWindow(
-        fullscreenState: WKWebView.FullscreenState,
-        isSameWebView: Bool,
-        windowIsVisible: Bool,
-        windowIsOnActiveSpace: Bool,
-        windowScreenFrame: NSRect?,
-        targetScreenFrame: NSRect?
-    ) -> Bool {
-        guard fullscreenState == .notInFullscreen,
-              isSameWebView,
-              !windowIsVisible,
-              windowIsOnActiveSpace,
-              let windowScreenFrame,
-              let targetScreenFrame else {
-            return false
-        }
-
-        return !framesApproximatelyEqual(windowScreenFrame, targetScreenFrame)
-    }
-
     static func shouldFreezeShellFrame(
         fullscreenState: WKWebView.FullscreenState
     ) -> Bool {
@@ -332,17 +302,6 @@ final class FloatingPanel: NSPanel {
         return isMouseDown(eventType)
     }
 
-    private static func framesApproximatelyEqual(
-        _ lhs: NSRect,
-        _ rhs: NSRect,
-        tolerance: CGFloat = 0.5
-    ) -> Bool {
-        abs(lhs.origin.x - rhs.origin.x) <= tolerance
-            && abs(lhs.origin.y - rhs.origin.y) <= tolerance
-            && abs(lhs.size.width - rhs.size.width) <= tolerance
-            && abs(lhs.size.height - rhs.size.height) <= tolerance
-    }
-
     private static func isMouseDown(_ eventType: NSEvent.EventType) -> Bool {
         switch eventType {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
@@ -366,74 +325,7 @@ final class FloatingPanel: NSPanel {
         return nil
     }
 
-    private func rearmReusableFullscreenWindowForCurrentMainScreenIfNeeded() {
-        guard let webView = fullscreenObservedWebView,
-              let fullscreenWindow = reusableFullscreenWindow,
-              let targetScreen = NSScreen.main,
-              Self.shouldRearmReusableFullscreenWindow(
-                fullscreenState: ownElementFullscreenState,
-                isSameWebView: fullscreenObservedWebView === webView,
-                windowIsVisible: fullscreenWindow.isVisible,
-                windowIsOnActiveSpace: fullscreenWindow.isOnActiveSpace,
-                windowScreenFrame: fullscreenWindow.screen?.frame,
-                targetScreenFrame: targetScreen.frame
-              ) else {
-            return
-        }
-
-        let originalBehavior = fullscreenWindow.collectionBehavior
-        let originalAlpha = fullscreenWindow.alphaValue
-        let originalIgnoresMouseEvents = fullscreenWindow.ignoresMouseEvents
-        var temporaryBehavior = originalBehavior
-        temporaryBehavior.remove(.stationary)
-        temporaryBehavior.insert(.moveToActiveSpace)
-
-        FloatTabsDiagnostics.record(
-            "reusable_fullscreen_window_space_rearm_before",
-            fields: [
-                "window_number": String(fullscreenWindow.windowNumber),
-                "window_visible": String(fullscreenWindow.isVisible),
-                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
-                "window_frame": NSStringFromRect(fullscreenWindow.frame),
-                "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-                "target_screen_frame": NSStringFromRect(targetScreen.frame),
-                "main_screen_frame": NSScreen.main.map { NSStringFromRect($0.frame) } ?? "nil",
-                "original_behavior": String(originalBehavior.rawValue),
-                "temporary_behavior": String(temporaryBehavior.rawValue),
-            ]
-        )
-
-        // This WebKit-owned window is empty and hidden after element-fullscreen
-        // exit; the live WKWebView has already returned to the FloatTabs Shell.
-        // Temporarily make the window transparent/noninteractive, remove
-        // `.stationary`, opt into `.moveToActiveSpace`, and order it once on the
-        // target screen. Then hide it and restore WebKit's exact behavior before
-        // WebKit receives the next page fullscreen request.
-        fullscreenWindow.alphaValue = 0
-        fullscreenWindow.ignoresMouseEvents = true
-        fullscreenWindow.collectionBehavior = temporaryBehavior
-        fullscreenWindow.setFrame(targetScreen.frame, display: false)
-        fullscreenWindow.makeKeyAndOrderFront(nil)
-        fullscreenWindow.orderOut(nil)
-        fullscreenWindow.collectionBehavior = originalBehavior
-        fullscreenWindow.alphaValue = originalAlpha
-        fullscreenWindow.ignoresMouseEvents = originalIgnoresMouseEvents
-
-        FloatTabsDiagnostics.record(
-            "reusable_fullscreen_window_space_rearm_after",
-            fields: [
-                "window_number": String(fullscreenWindow.windowNumber),
-                "window_visible": String(fullscreenWindow.isVisible),
-                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
-                "window_frame": NSStringFromRect(fullscreenWindow.frame),
-                "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-                "target_screen_frame": NSStringFromRect(targetScreen.frame),
-                "restored_behavior": String(fullscreenWindow.collectionBehavior.rawValue),
-            ]
-        )
-    }
-
-    private func recordReusableFullscreenWindowBeforePotentialRequest(
+    private func prepareReusableFullscreenWindowForPotentialRequest(
         webView: WKWebView,
         mouseLocation: NSPoint
     ) {
@@ -555,7 +447,6 @@ final class FloatingPanel: NSPanel {
                     self.didReachInFullscreenThisSession = true
                     self.reusableFullscreenWindow = fullscreenWindow
                     self.transitionFullscreenWindow = fullscreenWindow
-                    FloatTabsDiagnostics.markFullscreenReachedStableState(fullscreenWindow)
                     FloatTabsDiagnostics.record(
                         "fullscreen_transition_completed",
                         fields: [
