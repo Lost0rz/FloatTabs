@@ -281,6 +281,27 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
             : .temporaryPopup
     }
 
+    /// Returns the user-visible FloatTabs viewport for a source WebView.
+    ///
+    /// Desktop Website Mode deliberately gives the child WKWebView a larger
+    /// logical CSS frame and maps it into the visible panel through an AppKit
+    /// host. Using `webView.frame.size` directly therefore over-sizes explicit
+    /// floating windows after the PR #16 logical-host rendering change. Walk up
+    /// to the owning WebPanelContainerView when present; standalone/popup WebViews
+    /// keep their ordinary frame as the fallback.
+    static func visibleSourceSize(for webView: WKWebView) -> NSSize {
+        var ancestor = webView.superview
+        while let view = ancestor {
+            if let container = view as? WebPanelContainerView,
+               container.bounds.width > 0,
+               container.bounds.height > 0 {
+                return container.bounds.size
+            }
+            ancestor = view.superview
+        }
+        return webView.frame.size
+    }
+
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -426,7 +447,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         floatingWebView.navigationDelegate = self
         installExplicitLinkContextMenu(on: floatingWebView)
 
-        let sourceSize = sourceWebView.frame.size
+        let sourceSize = Self.visibleSourceSize(for: sourceWebView)
         let panel = NSPanel(
             contentRect: NSRect(
                 x: 0,
