@@ -48,8 +48,10 @@ final class FloatingPanel: NSPanel {
     /// FloatTabs window should yield to WebKit's own full-screen presentation,
     /// while a pinned panel deliberately stays above other application content.
     func setPresentationPinned(_ pinned: Bool) {
+        let targetLevel: NSWindow.Level = pinned ? .floating : .normal
+        guard isPresentationPinned != pinned || level != targetLevel else { return }
         isPresentationPinned = pinned
-        level = pinned ? .floating : .normal
+        level = targetLevel
     }
 
     /// WebKit's macOS element-fullscreen controller currently chooses
