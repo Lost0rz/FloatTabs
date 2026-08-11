@@ -28,6 +28,17 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testPoolCreatesAppOwnedFullscreenWebViews() {
+        let webView = makePool().webView(for: makeProfile(name: "Fullscreen"))
+
+        XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
+        XCTAssertTrue(
+            webView.configuration.userContentController.userScripts.contains {
+                $0.source.contains("__floatTabsAppFullscreenBridgeInstalled")
+            }
+        )
+    }
+
     func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() {
         let pool = makePool()
         var profile = makeProfile(name: "A")

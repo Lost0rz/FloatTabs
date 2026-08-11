@@ -3,10 +3,22 @@ import WebKit
 
 @MainActor
 enum AppOwnedFullscreenPresentation {
+    enum Phase: String {
+        case idle
+        case entering
+        case active
+        case exiting
+    }
+
     private(set) static var activeWebView: WKWebView?
+    private(set) static var phase: Phase = .idle
 
     static var isActive: Bool {
-        activeWebView != nil
+        activeWebView != nil && phase != .idle
+    }
+
+    static var isTransitioning: Bool {
+        phase == .entering || phase == .exiting
     }
 
     static func isPresenting(_ webView: WKWebView) -> Bool {
@@ -15,8 +27,18 @@ enum AppOwnedFullscreenPresentation {
 
     fileprivate static func begin(webView: WKWebView) {
         activeWebView = webView
-        FloatTabsFullscreenPresentation.isActive = true
+        phase = .entering
         FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+    }
+
+    fileprivate static func markEntered(webView: WKWebView) {
+        guard activeWebView === webView else { return }
+        phase = .active
+    }
+
+    fileprivate static func markExiting(webView: WKWebView?) {
+        guard webView == nil || activeWebView === webView else { return }
+        phase = .exiting
     }
 
     fileprivate static func end(webView: WKWebView?) {
@@ -24,7 +46,7 @@ enum AppOwnedFullscreenPresentation {
             return
         }
         activeWebView = nil
-        FloatTabsFullscreenPresentation.isActive = false
+        phase = .idle
         FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
     }
 }
@@ -41,13 +63,6 @@ enum AppOwnedFullscreenPresentation {
 @MainActor
 final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSWindowDelegate {
     static let shared = AppOwnedFullscreenCoordinator()
-
-    private enum Phase: String {
-        case idle
-        case entering
-        case active
-        case exiting
-    }
 
     private static let messageHandlerName = "floatTabsAppFullscreen"
 
@@ -199,7 +214,6 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
     })();
     """#
 
-    private var phase: Phase = .idle
     private var fullscreenWindow: NSWindow?
     private var fullscreenHostView: NSView?
     private var activeWebView: WKWebView?
@@ -210,7 +224,12 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
     private var sourceTranslatesAutoresizingMaskIntoConstraints = true
     private var sourcePanelWasVisible = false
     private var shellAutoSuppressed = false
+    private var shellRestoreCancelledByUser = false
     private var pendingExit = false
+
+    private var phase: AppOwnedFullscreenPresentation.Phase {
+        AppOwnedFullscreenPresentation.phase
+    }
 
     private override init() {
         super.init()
@@ -231,13 +250,20 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         activeWebView === webView && phase != .idle
     }
 
-    func restoreFullscreenWindowKeyIfAvailable() {
+    @discardableResult
+    func restoreFullscreenWindowKeyIfAvailable() -> Bool {
         guard phase != .idle,
               let fullscreenWindow,
               fullscreenWindow.isVisible else {
-            return
+            return false
         }
         fullscreenWindow.makeKey()
+        return true
+    }
+
+    func shellWasExplicitlyHidden() {
+        guard phase != .idle else { return }
+        shellRestoreCancelledByUser = true
     }
 
     func userContentController(
@@ -282,7 +308,6 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
             return
         }
 
-        phase = .entering
         pendingExit = false
         activeWebView = webView
         self.sourceSuperview = sourceSuperview
@@ -292,7 +317,9 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         sourceTranslatesAutoresizingMaskIntoConstraints = webView.translatesAutoresizingMaskIntoConstraints
         sourcePanelWasVisible = sourcePanel?.isVisible ?? false
         shellAutoSuppressed = false
+        shellRestoreCancelledByUser = false
         AppOwnedFullscreenPresentation.begin(webView: webView)
+        sourcePanel?.appOwnedFullscreenPhaseDidChange()
 
         FloatTabsDiagnostics.record(
             "app_owned_fullscreen_request",
@@ -383,7 +410,8 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
               let fullscreenWindow else {
             return
         }
-        phase = .exiting
+        AppOwnedFullscreenPresentation.markExiting(webView: activeWebView)
+        sourcePanel?.appOwnedFullscreenPhaseDidChange()
         FloatTabsDiagnostics.record(
             "app_owned_fullscreen_exit_requested",
             fields: [
@@ -401,7 +429,12 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
             return
         }
 
-        phase = .active
+        guard let activeWebView else {
+            finishExit(reason: "missing_active_webview_after_enter")
+            return
+        }
+        AppOwnedFullscreenPresentation.markEntered(webView: activeWebView)
+        sourcePanel?.appOwnedFullscreenPhaseDidChange()
         FloatTabsDiagnostics.record(
             "app_owned_fullscreen_did_enter",
             fields: [
@@ -439,7 +472,8 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         }
 
         if phase != .exiting {
-            phase = .exiting
+            AppOwnedFullscreenPresentation.markExiting(webView: activeWebView)
+            sourcePanel?.appOwnedFullscreenPhaseDidChange()
             FloatTabsDiagnostics.record(
                 "app_owned_fullscreen_exit_requested",
                 fields: [
@@ -464,7 +498,28 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
                 "window_screen_frame": window.screen.map { NSStringFromRect($0.frame) } ?? "nil",
             ]
         )
-        finishExit()
+        finishExit(reason: "did_exit_fullscreen")
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        guard window === fullscreenWindow else { return }
+        FloatTabsDiagnostics.record(
+            "app_owned_fullscreen_enter_failed",
+            fields: ["window_number": String(window.windowNumber)]
+        )
+        finishExit(reason: "failed_to_enter_fullscreen")
+    }
+
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        guard window === fullscreenWindow else { return }
+        FloatTabsDiagnostics.record(
+            "app_owned_fullscreen_exit_failed",
+            fields: ["window_number": String(window.windowNumber)]
+        )
+        // A failed AppKit exit must not strand the live WKWebView in an orphaned
+        // full-screen window. Detach it, restore its original host, and close this
+        // one-shot presentation window. The next request always gets a new window.
+        finishExit(reason: "failed_to_exit_fullscreen")
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -473,21 +528,23 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         return false
     }
 
-    private func finishExit() {
+    private func finishExit(reason: String) {
         guard phase != .idle else { return }
 
         let webView = activeWebView
         let sourceSuperview = self.sourceSuperview
         let sourcePanel = self.sourcePanel
-        let shouldRestoreShell = sourcePanelWasVisible && shellAutoSuppressed
+        let shouldRestoreShell = sourcePanelWasVisible
+            && shellAutoSuppressed
+            && !shellRestoreCancelledByUser
         let window = fullscreenWindow
 
         // Clear ownership before restoring the WKWebView so normal FloatTabs host
         // layout is allowed to resume immediately. No WebKit-owned fullscreen
         // window exists in this architecture.
         AppOwnedFullscreenPresentation.end(webView: webView)
-        phase = .idle
         pendingExit = false
+        sourcePanel?.appOwnedFullscreenPhaseDidChange()
 
         if let webView {
             webView.removeFromSuperview()
@@ -516,6 +573,7 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         sourceTranslatesAutoresizingMaskIntoConstraints = true
         sourcePanelWasVisible = false
         shellAutoSuppressed = false
+        shellRestoreCancelledByUser = false
 
         if shouldRestoreShell,
            let sourcePanel,
@@ -526,6 +584,7 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         FloatTabsDiagnostics.record(
             "app_owned_fullscreen_restored",
             fields: [
+                "reason": reason,
                 "shell_restored": String(shouldRestoreShell),
                 "panel_window_number": sourcePanel.map { String($0.windowNumber) } ?? "nil",
                 "webview_window_number": webView?.window.map { String($0.windowNumber) } ?? "nil",

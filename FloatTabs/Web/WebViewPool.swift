@@ -79,6 +79,13 @@ final class WebViewPool {
             )
 
             if desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
+                // Rendering-mode rebuilds are destructive to the live view.
+                // Keep the old runtime until fullscreen returns it to the Shell;
+                // the next synchronization will observe the same profile delta
+                // and perform the rebuild safely.
+                guard !Self.isFullscreenProtected(existing) else {
+                    return existing
+                }
                 let navigationURL = Self.rebuildNavigationURL(
                     initialURL: existing.backForwardList.currentItem?.initialURL,
                     visibleURL: existing.url,
@@ -132,6 +139,14 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
+        if let webView = webViews[slotID], Self.isFullscreenProtected(webView) {
+            FloatTabsDiagnostics.record(
+                "fullscreen_slot_release_blocked",
+                fields: ["slot_id": slotID.uuidString]
+            )
+            return
+        }
+
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -169,8 +184,12 @@ final class WebViewPool {
     /// signal for older/test-created webviews that have not yet used the bridge.
     func isPresentingElementFullscreen(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
-        return AppOwnedFullscreenPresentation.isPresenting(webView)
-            || Self.isActiveFullscreenState(webView.fullscreenState)
+        return Self.isFullscreenProtected(webView)
+    }
+
+    static func isFullscreenProtected(_ webView: WKWebView) -> Bool {
+        AppOwnedFullscreenPresentation.isPresenting(webView)
+            || isActiveFullscreenState(webView.fullscreenState)
     }
 
     static func isActiveFullscreenState(_ state: WKWebView.FullscreenState) -> Bool {
@@ -259,14 +278,10 @@ final class WebViewPool {
             for: rendering,
             navigationURL: navigationURL
         )
-        let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
-
-        // Install the standards-shaped app-owned fullscreen bridge before the
-        // first navigation. Disable WebKit element fullscreen for this live view
-        // so a missed/unsupported page request cannot create a reusable
-        // WebCoreFullScreenWindow behind FloatTabs' fresh-window architecture.
-        webView.configuration.preferences.isElementFullscreenEnabled = false
-        AppOwnedFullscreenCoordinator.shared.configure(webView.configuration)
+        let webView = WebViewFactory.makeWebView(
+            renderingProfile: runtimeRendering,
+            fullscreenPresentationMode: .appOwned
+        )
 
         let observer = SlotNavigationObserver(
             slotID: profile.id,

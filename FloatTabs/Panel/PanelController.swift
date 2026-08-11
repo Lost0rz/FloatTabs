@@ -101,7 +101,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func showFloatTabs() {
-        let preservesOwnFullscreen = panel.isOwnElementFullscreenActive
+        let preservesOwnFullscreen = FloatTabsFullscreenPresentation.isActive
 
         if preservesOwnFullscreen {
             // The fullscreen owner and Shell are two windows of the same app.
@@ -134,7 +134,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs() {
-        let preservesOwnFullscreen = panel.isOwnElementFullscreenActive
+        let preservesOwnFullscreen = FloatTabsFullscreenPresentation.isActive
 
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -177,6 +177,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func restoreStoredWebAppState(_ state: StoredWebAppState) -> Bool {
+        // A restore can rebuild every live Slot. Defer it rather than orphaning
+        // the WKWebView currently owned by a fullscreen presentation window.
+        guard !FloatTabsFullscreenPresentation.isActive else { return false }
+
         let existingIDs = Set(tabStore.profiles.map(\.id))
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
         for slotID in existingIDs {
@@ -705,6 +709,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         WebAppEditorController.confirmRemove(profile: profile, attachedTo: panel) { [weak self] confirmed in
             Task { @MainActor [weak self] in
                 guard let self, confirmed else { return }
+                guard !self.webViewPool.isPresentingElementFullscreen(slotID: id) else {
+                    NSSound.beep()
+                    return
+                }
                 _ = self.tabStore.remove(id: id)
                 self.slotLifecycleCoordinator.remove(slotID: id)
                 self.webViewPool.remove(slotID: id)
@@ -872,6 +880,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func restoreOwnFullscreenWindowKeyIfAvailable() {
+        guard FloatTabsFullscreenPresentation.isActive else { return }
+
+        if AppOwnedFullscreenPresentation.isActive {
+            _ = AppOwnedFullscreenCoordinator.shared.restoreFullscreenWindowKeyIfAvailable()
+            return
+        }
+
         guard panel.isOwnElementFullscreenActive else { return }
 
         guard let fullscreenWindow = NSApp.windows.first(where: { window in

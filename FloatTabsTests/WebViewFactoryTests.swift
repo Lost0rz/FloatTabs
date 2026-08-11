@@ -18,6 +18,22 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
+    func testAppOwnedFullscreenIsConfiguredBeforeWebViewCreation() {
+        let webView = WebViewFactory.makeWebView(
+            fullscreenPresentationMode: .appOwned
+        )
+        XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
+
+        let bridge = webView.configuration.userContentController.userScripts.first {
+            $0.source.contains("__floatTabsAppFullscreenBridgeInstalled")
+        }
+        XCTAssertNotNil(bridge)
+        XCTAssertEqual(bridge?.injectionTime, WKUserScriptInjectionTime.atDocumentStart)
+        XCTAssertFalse(bridge?.isForMainFrameOnly ?? true)
+        XCTAssertTrue(bridge?.source.contains("requestFullscreen") == true)
+        XCTAssertTrue(bridge?.source.contains("exitFullscreen") == true)
+    }
+
     func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)

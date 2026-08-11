@@ -908,24 +908,33 @@ final class WebPanelContainerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// WebKit temporarily owns the live WKWebView hierarchy during element
-    /// fullscreen. FloatTabs must treat all transition states as an exclusive
-    /// ownership period and avoid removeFromSuperview/addSubview/frame writes.
+    /// A fullscreen coordinator temporarily owns the live WKWebView hierarchy.
+    /// FloatTabs must treat app-owned and native WebKit transition states as an
+    /// exclusive ownership period and avoid remove/addSubview and frame writes.
     static func canMutateWebViewHierarchy(
-        fullscreenState: WKWebView.FullscreenState
+        fullscreenState: WKWebView.FullscreenState,
+        appOwnedFullscreenActive: Bool = false
     ) -> Bool {
-        !WebViewPool.isActiveFullscreenState(fullscreenState)
+        !appOwnedFullscreenActive
+            && !WebViewPool.isActiveFullscreenState(fullscreenState)
     }
 
     static func canMutateWebViewHierarchy(for webView: WKWebView) -> Bool {
-        canMutateWebViewHierarchy(fullscreenState: webView.fullscreenState)
+        canMutateWebViewHierarchy(
+            fullscreenState: webView.fullscreenState,
+            appOwnedFullscreenActive: AppOwnedFullscreenPresentation.isPresenting(webView)
+        )
     }
 
     static func shouldUseIndependentShellHost(
         hasFullscreenOwner: Bool,
-        targetFullscreenState: WKWebView.FullscreenState
+        targetFullscreenState: WKWebView.FullscreenState,
+        targetAppOwnedFullscreenActive: Bool = false
     ) -> Bool {
-        hasFullscreenOwner && canMutateWebViewHierarchy(fullscreenState: targetFullscreenState)
+        hasFullscreenOwner && canMutateWebViewHierarchy(
+            fullscreenState: targetFullscreenState,
+            appOwnedFullscreenActive: targetAppOwnedFullscreenActive
+        )
     }
 
     /// Compatibility seam used by existing Stage 4 tests and the Stage 0 helper.

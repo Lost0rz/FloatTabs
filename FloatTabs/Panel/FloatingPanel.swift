@@ -4,14 +4,23 @@ import WebKit
 
 @MainActor
 enum FloatTabsFullscreenPresentation {
-    /// True while the FloatTabs page currently observed by the panel is in any
-    /// WebKit element-fullscreen transition.
-    static var isActive = false
+    private(set) static var isWebKitActive = false
+
+    /// Unified presentation state used by the global shortcut and Shell. Native
+    /// WebKit fullscreen remains a diagnostic fallback; production WebViews use
+    /// the app-owned one-shot window coordinator.
+    static var isActive: Bool {
+        isWebKitActive || AppOwnedFullscreenPresentation.isActive
+    }
 
     /// Tracks only an explicit user summon of the shell during own fullscreen.
     /// `NSWindow.isVisible` is not reliable enough across Spaces to implement the
     /// fullscreen shortcut as a toggle by itself.
     static var shellExplicitlySummoned = false
+
+    static func updateWebKitState(isActive: Bool) {
+        isWebKitActive = isActive
+    }
 }
 
 final class FloatingPanel: NSPanel {
@@ -89,7 +98,10 @@ final class FloatingPanel: NSPanel {
     /// from the fullscreen window. Once `.inFullscreen` is stable, a hidden
     /// unpinned shell may be explicitly summoned by the global shortcut.
     override func makeKeyAndOrderFront(_ sender: Any?) {
-        if Self.shouldDeferKeyAndOrderFront(fullscreenState: ownElementFullscreenState) {
+        if Self.shouldDeferKeyAndOrderFront(
+            fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase
+        ) {
             FloatTabsDiagnostics.record(
                 "fullscreen_shell_show_deferred_during_transition",
                 fields: [
@@ -104,6 +116,7 @@ final class FloatingPanel: NSPanel {
         if Self.shouldTreatShowAsExplicitFullscreenSummon(
             isPinned: isPresentationPinned,
             fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase,
             panelIsVisible: isVisible
         ) {
             restoreShellWorkItem?.cancel()
@@ -122,6 +135,7 @@ final class FloatingPanel: NSPanel {
 
     override func orderOut(_ sender: Any?) {
         if explicitFullscreenOverlay {
+            AppOwnedFullscreenCoordinator.shared.shellWasExplicitlyHidden()
             explicitFullscreenOverlay = false
             FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
             FloatTabsDiagnostics.record(
@@ -139,14 +153,20 @@ final class FloatingPanel: NSPanel {
     /// that must stay independent. Freeze programmatic frame changes until the
     /// fullscreen owner exits; user-initiated movement uses `setFrameOrigin`.
     override func setFrame(_ frameRect: NSRect, display flag: Bool) {
-        guard !Self.shouldFreezeShellFrame(fullscreenState: ownElementFullscreenState) else {
+        guard !Self.shouldFreezeShellFrame(
+            fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase
+        ) else {
             return
         }
         super.setFrame(frameRect, display: flag)
     }
 
     override func setFrame(_ frameRect: NSRect, display flag: Bool, animate animateFlag: Bool) {
-        guard !Self.shouldFreezeShellFrame(fullscreenState: ownElementFullscreenState) else {
+        guard !Self.shouldFreezeShellFrame(
+            fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase
+        ) else {
             return
         }
         super.setFrame(frameRect, display: flag, animate: animateFlag)
@@ -171,7 +191,8 @@ final class FloatingPanel: NSPanel {
         if Self.shouldAnchorKeyboardFocus(
             eventType: event.type,
             isKeyWindow: isKeyWindow,
-            fullscreenState: ownElementFullscreenState
+            fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase
         ) {
             // `.nonactivatingPanel` keeps this from broadly activating the app,
             // while refreshing NSScreen.main for WebKit's next fullscreen request.
@@ -197,9 +218,11 @@ final class FloatingPanel: NSPanel {
     static func presentationCollectionBehavior(
         isPinned: Bool,
         fullscreenState: WKWebView.FullscreenState,
+        appOwnedPhase: AppOwnedFullscreenPresentation.Phase = .idle,
         explicitFullscreenOverlay: Bool = false
     ) -> NSWindow.CollectionBehavior {
         let ownFullscreen = WebViewPool.isActiveFullscreenState(fullscreenState)
+            || appOwnedPhase != .idle
 
         if ownFullscreen && !isPinned && !explicitFullscreenOverlay {
             return [.fullScreenNone, .ignoresCycle]
@@ -230,8 +253,12 @@ final class FloatingPanel: NSPanel {
     }
 
     static func shouldDeferKeyAndOrderFront(
-        fullscreenState: WKWebView.FullscreenState
+        fullscreenState: WKWebView.FullscreenState,
+        appOwnedPhase: AppOwnedFullscreenPresentation.Phase = .idle
     ) -> Bool {
+        if appOwnedPhase == .entering || appOwnedPhase == .exiting {
+            return true
+        }
         switch fullscreenState {
         case .enteringFullscreen, .exitingFullscreen:
             return true
@@ -245,9 +272,11 @@ final class FloatingPanel: NSPanel {
     static func shouldTreatShowAsExplicitFullscreenSummon(
         isPinned: Bool,
         fullscreenState: WKWebView.FullscreenState,
+        appOwnedPhase: AppOwnedFullscreenPresentation.Phase = .idle,
         panelIsVisible: Bool
     ) -> Bool {
-        !isPinned && fullscreenState == .inFullscreen && !panelIsVisible
+        let stableFullscreen = fullscreenState == .inFullscreen || appOwnedPhase == .active
+        return !isPinned && stableFullscreen && !panelIsVisible
     }
 
     static func shouldRecoverStaleFullscreenWindow(
@@ -263,9 +292,10 @@ final class FloatingPanel: NSPanel {
     }
 
     static func shouldFreezeShellFrame(
-        fullscreenState: WKWebView.FullscreenState
+        fullscreenState: WKWebView.FullscreenState,
+        appOwnedPhase: AppOwnedFullscreenPresentation.Phase = .idle
     ) -> Bool {
-        WebViewPool.isActiveFullscreenState(fullscreenState)
+        WebViewPool.isActiveFullscreenState(fullscreenState) || appOwnedPhase != .idle
     }
 
     static func shouldKeepObservedFullscreenOwner(
@@ -293,10 +323,12 @@ final class FloatingPanel: NSPanel {
     static func shouldAnchorKeyboardFocus(
         eventType: NSEvent.EventType,
         isKeyWindow: Bool,
-        fullscreenState: WKWebView.FullscreenState
+        fullscreenState: WKWebView.FullscreenState,
+        appOwnedPhase: AppOwnedFullscreenPresentation.Phase = .idle
     ) -> Bool {
         guard !isKeyWindow,
-              !WebViewPool.isActiveFullscreenState(fullscreenState) else {
+              !WebViewPool.isActiveFullscreenState(fullscreenState),
+              appOwnedPhase == .idle else {
             return false
         }
         return isMouseDown(eventType)
@@ -561,9 +593,19 @@ final class FloatingPanel: NSPanel {
     }
 
     private func synchronizeFullscreenPresentationState(for webView: WKWebView) {
-        FloatTabsFullscreenPresentation.isActive = isOwnElementFullscreenActive
+        FloatTabsFullscreenPresentation.updateWebKitState(
+            isActive: isOwnElementFullscreenActive
+        )
         applyPresentationPolicy()
         synchronizeShellVisibilityForFullscreen()
+    }
+
+    func appOwnedFullscreenPhaseDidChange() {
+        if !AppOwnedFullscreenPresentation.isActive && !isOwnElementFullscreenActive {
+            explicitFullscreenOverlay = false
+            FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+        }
+        applyPresentationPolicy()
     }
 
     private func synchronizeShellVisibilityForFullscreen() {
@@ -644,6 +686,7 @@ final class FloatingPanel: NSPanel {
         let targetBehavior = Self.presentationCollectionBehavior(
             isPinned: isPresentationPinned,
             fullscreenState: ownElementFullscreenState,
+            appOwnedPhase: AppOwnedFullscreenPresentation.phase,
             explicitFullscreenOverlay: explicitFullscreenOverlay
         )
 
