@@ -68,8 +68,6 @@ enum FloatTabsDiagnostics {
             NSWindow.didResignKeyNotification,
             NSWindow.didMoveNotification,
             NSWindow.didChangeScreenNotification,
-            NSWindow.didOrderOnScreenNotification,
-            NSWindow.didOrderOffScreenNotification,
             NSWindow.willEnterFullScreenNotification,
             NSWindow.didEnterFullScreenNotification,
             NSWindow.willExitFullScreenNotification,
