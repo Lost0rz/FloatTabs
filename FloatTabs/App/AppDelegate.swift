@@ -1,138 +1,137 @@
 import AppKit
 
 @MainActor
-final class FullscreenExitShellCoordinator {
-    private var observerTokens: [NSObjectProtocol] = []
-    private weak var shellToRestore: FloatingPanel?
-    private var observedFullscreenWindowNumber: Int?
-    private var restoreWorkItem: DispatchWorkItem?
+final class FullscreenSpaceRebindCoordinator {
+    private var localEventMonitor: Any?
+    private var cleanupWorkItem: DispatchWorkItem?
 
     func start() {
-        guard observerTokens.isEmpty else { return }
+        guard localEventMonitor == nil else { return }
 
-        let center = NotificationCenter.default
-        observerTokens.append(
-            center.addObserver(
-                forName: NSWindow.willExitFullScreenNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                Task { @MainActor [weak self] in
-                    self?.handleWillExitFullScreen(notification)
-                }
+        // WebKit historically had a macOS fullscreen bug where its reusable
+        // fullscreen window remembered the Space from the first presentation.
+        // The upstream fix was to orderBack the fullscreen window immediately
+        // before starting the next fullscreen transition so AppKit associates it
+        // with the current Space. FloatTabs can reproduce the same shape across
+        // displays: Shell/source stays on A, WebKit fullscreen succeeds on B,
+        // exit returns the WKWebView to A, while the hidden reusable fullscreen
+        // window remains associated with B and a later A enter aborts.
+        //
+        // Observe only the second click of a local double-click. Never swallow or
+        // rewrite the event. The event is returned unchanged to the WKWebView.
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) {
+            [weak self] event in
+            guard let self else { return event }
+            return MainActor.assumeIsolated {
+                self.prepareReusableFullscreenWindowIfNeeded(for: event)
+                return event
             }
-        )
-        observerTokens.append(
-            center.addObserver(
-                forName: NSWindow.didExitFullScreenNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                Task { @MainActor [weak self] in
-                    self?.handleDidExitFullScreen(notification)
-                }
-            }
-        )
+        }
     }
 
     func stop() {
-        restoreWorkItem?.cancel()
-        restoreWorkItem = nil
-        shellToRestore = nil
-        observedFullscreenWindowNumber = nil
-
-        for token in observerTokens {
-            NotificationCenter.default.removeObserver(token)
+        cleanupWorkItem?.cancel()
+        cleanupWorkItem = nil
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
+            self.localEventMonitor = nil
         }
-        observerTokens.removeAll()
     }
 
-    private func handleWillExitFullScreen(_ notification: Notification) {
-        guard let fullscreenWindow = notification.object as? NSWindow,
-              fullscreenWindow.collectionBehavior.contains(.fullScreenPrimary),
-              let shell = NSApp.windows
-                .compactMap({ $0 as? FloatingPanel })
-                .first(where: { $0.isOwnElementFullscreenActive }),
-              shell.isVisible else {
+    private func prepareReusableFullscreenWindowIfNeeded(for event: NSEvent) {
+        guard event.clickCount >= 2,
+              let panel = (event.window ?? NSApp.keyWindow) as? FloatingPanel,
+              !panel.isOwnElementFullscreenActive,
+              let targetScreen = NSScreen.main,
+              let fullscreenWindow = NSApp.windows.first(where: { window in
+                  window !== panel
+                      && !window.isVisible
+                      && window.collectionBehavior.contains(.fullScreenPrimary)
+              }) else {
             return
         }
 
-        restoreWorkItem?.cancel()
-        restoreWorkItem = nil
-        shellToRestore = shell
-        observedFullscreenWindowNumber = fullscreenWindow.windowNumber
+        cleanupWorkItem?.cancel()
+        cleanupWorkItem = nil
 
         FloatTabsDiagnostics.record(
-            "fullscreen_shell_withdraw_before_webkit_exit",
+            "fullscreen_space_rebind_before",
             fields: [
-                "fullscreen_window_number": String(fullscreenWindow.windowNumber),
-                "fullscreen_window_active_space": String(fullscreenWindow.isOnActiveSpace),
-                "fullscreen_window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-                "shell_window_number": String(shell.windowNumber),
-                "shell_key": String(shell.isKeyWindow),
-                "shell_active_space": String(shell.isOnActiveSpace),
-                "shell_screen_frame": shell.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "panel_window_number": String(panel.windowNumber),
+                "panel_screen_frame": panel.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "window_number": String(fullscreenWindow.windowNumber),
+                "window_visible": String(fullscreenWindow.isVisible),
+                "window_key": String(fullscreenWindow.isKeyWindow),
+                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                "window_frame": NSStringFromRect(fullscreenWindow.frame),
+                "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "target_screen_frame": NSStringFromRect(targetScreen.frame),
+                "main_screen_frame": NSScreen.main.map { NSStringFromRect($0.frame) } ?? "nil",
             ]
         )
 
-        // A physical dual-display trace showed that a successful fullscreen exit
-        // left WebKit's reusable fullscreen window off the active Space, while an
-        // otherwise identical exit with the explicitly summoned FloatTabs Shell
-        // still visible caused that same WebKit window to become active-Space
-        // affiliated again just before NSWindowDidExitFullScreen. Temporarily
-        // withdraw only the Shell window while AppKit completes the fullscreen
-        // exit. Keep the PanelController lifecycle logically visible so no WebView
-        // ownership, media, or Slot residency changes occur during this transient.
-        shell.orderOut(nil)
-
-        FloatTabsDiagnostics.record(
-            "fullscreen_shell_withdrawn_for_webkit_exit",
-            fields: [
-                "fullscreen_window_number": String(fullscreenWindow.windowNumber),
-                "shell_window_number": String(shell.windowNumber),
-                "shell_visible": String(shell.isVisible),
-            ]
-        )
-    }
-
-    private func handleDidExitFullScreen(_ notification: Notification) {
-        guard let fullscreenWindow = notification.object as? NSWindow,
-              fullscreenWindow.windowNumber == observedFullscreenWindowNumber,
-              let shell = shellToRestore else {
-            return
+        // Keep WebKit's own collectionBehavior intact. The old FloatTabs re-arm
+        // changed behavior, made the window key, and ordered it out again; Real-Mac
+        // testing proved that path does not repair the stale Space membership.
+        // Here we do the narrower operation used by WebKit's historical Space fix:
+        // place the hidden reusable window on the target display, then orderBack it
+        // immediately before the user's double-click reaches WebKit. WebKit remains
+        // responsible for makeKeyAndOrderFront and enterFullScreenMode.
+        if fullscreenWindow.screen?.frame != targetScreen.frame {
+            fullscreenWindow.setFrame(targetScreen.frame, display: false)
         }
+        fullscreenWindow.orderBack(nil)
 
-        observedFullscreenWindowNumber = nil
-        restoreWorkItem?.cancel()
+        FloatTabsDiagnostics.record(
+            "fullscreen_space_rebind_after",
+            fields: [
+                "window_number": String(fullscreenWindow.windowNumber),
+                "window_visible": String(fullscreenWindow.isVisible),
+                "window_key": String(fullscreenWindow.isKeyWindow),
+                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                "window_frame": NSStringFromRect(fullscreenWindow.frame),
+                "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
+                "target_screen_frame": NSStringFromRect(targetScreen.frame),
+            ]
+        )
 
-        let workItem = DispatchWorkItem { [weak self, weak shell, weak fullscreenWindow] in
+        // A random page double-click may not request fullscreen. If WebKit has not
+        // entered a fullscreen state shortly afterward, hide the preparation window
+        // again. A genuine fullscreen request flips the panel's observed state to
+        // enteringFullscreen almost immediately, so this cleanup stays out of the
+        // normal WebKit transition.
+        let workItem = DispatchWorkItem { [weak self, weak panel, weak fullscreenWindow] in
             guard let self,
-                  let shell,
-                  !shell.isOwnElementFullscreenActive else {
+                  let panel,
+                  let fullscreenWindow else {
+                return
+            }
+            self.cleanupWorkItem = nil
+            guard !panel.isOwnElementFullscreenActive,
+                  fullscreenWindow.isVisible,
+                  !fullscreenWindow.isKeyWindow else {
                 return
             }
 
-            self.shellToRestore = nil
-            self.restoreWorkItem = nil
             FloatTabsDiagnostics.record(
-                "fullscreen_shell_restored_after_webkit_exit",
+                "fullscreen_space_rebind_cleanup",
                 fields: [
-                    "fullscreen_window_number": fullscreenWindow.map { String($0.windowNumber) } ?? "nil",
-                    "fullscreen_window_active_space": fullscreenWindow.map { String($0.isOnActiveSpace) } ?? "nil",
-                    "shell_window_number": String(shell.windowNumber),
+                    "window_number": String(fullscreenWindow.windowNumber),
+                    "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                    "window_screen_frame": fullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
                 ]
             )
-            shell.orderFront(nil)
+            fullscreenWindow.orderOut(nil)
         }
-        restoreWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+        cleanupWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40, execute: workItem)
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: AppCoordinator?
-    private var fullscreenExitShellCoordinator: FullscreenExitShellCoordinator?
+    private var fullscreenSpaceRebindCoordinator: FullscreenSpaceRebindCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -141,13 +140,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.coordinator = coordinator
         coordinator.start()
 
-        let fullscreenExitShellCoordinator = FullscreenExitShellCoordinator()
-        self.fullscreenExitShellCoordinator = fullscreenExitShellCoordinator
-        fullscreenExitShellCoordinator.start()
+        let fullscreenSpaceRebindCoordinator = FullscreenSpaceRebindCoordinator()
+        self.fullscreenSpaceRebindCoordinator = fullscreenSpaceRebindCoordinator
+        fullscreenSpaceRebindCoordinator.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        fullscreenExitShellCoordinator?.stop()
+        fullscreenSpaceRebindCoordinator?.stop()
         coordinator?.prepareForTermination()
     }
 
