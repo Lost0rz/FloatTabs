@@ -156,13 +156,16 @@ enum WebAppEditorController {
         stack.alignment = .leading
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
-        stack.setFrameSize(NSSize(
-            width: 400,
-            height: showsPrimaryRenderingControls ? 350 : 520
-        ))
+        stack.setContentHuggingPriority(.required, for: .vertical)
         nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         urlField.widthAnchor.constraint(equalToConstant: 400).isActive = true
         renderingForm.view.widthAnchor.constraint(equalToConstant: 400).isActive = true
+
+        // NSAlert sizes its accessory from the view frame. Using the actual
+        // fitting height keeps Add/Edit compact when their visible fields differ.
+        stack.setFrameSize(NSSize(width: 400, height: 1))
+        stack.layoutSubtreeIfNeeded()
+        stack.setFrameSize(NSSize(width: 400, height: ceil(stack.fittingSize.height)))
         alert.accessoryView = stack
 
         alert.beginSheetModal(for: window) { response in

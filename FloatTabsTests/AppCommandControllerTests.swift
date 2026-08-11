@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import XCTest
 @testable import FloatTabs
 
@@ -73,6 +74,38 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertNil(AppCommandController.command(characters: "a", keyCode: 0, modifiers: [.command]))
         XCTAssertNil(AppCommandController.command(characters: "c", keyCode: 8, modifiers: [.command]))
         XCTAssertNil(AppCommandController.command(characters: "1", keyCode: 18, modifiers: [.command, .shift]))
+    }
+
+    func testEveryPreviouslyFixedShortcutHasAnIndividualBinding() {
+        XCTAssertEqual(AppShortcutCatalog.slotBindings.count, 9)
+        XCTAssertEqual(AppShortcutCatalog.navigationBindings.count, 6)
+        XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
+        XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 20)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 20)
+    }
+
+    func testConfiguredAddressShortcutReplacesDefaultCommandL() {
+        let original = KeyboardShortcuts.getShortcut(for: .addressBar)
+        let custom = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])
+        KeyboardShortcuts.setShortcut(custom, for: .addressBar)
+        defer { KeyboardShortcuts.setShortcut(original, for: .addressBar) }
+
+        XCTAssertNil(
+            AppCommandController.command(
+                characters: "l",
+                keyCode: UInt16(KeyboardShortcuts.Key.l.rawValue),
+                modifiers: [.command]
+            )
+        )
+        XCTAssertEqual(
+            AppCommandController.command(
+                characters: "k",
+                keyCode: UInt16(KeyboardShortcuts.Key.k.rawValue),
+                modifiers: [.command, .option]
+            ),
+            .addressBar
+        )
     }
 
     func testAddressBarDismissesForEscapeSecondCommandLAndOutsideClickOnly() {

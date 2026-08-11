@@ -168,63 +168,125 @@ private final class AppearanceSettingsViewController: NSViewController {
 }
 
 @MainActor
+private final class SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+@MainActor
 private final class ShortcutsSettingsViewController: NSViewController {
     override func loadView() {
         let root = NSView()
-        let heading = sectionTitle("Global Show / Hide")
-        let detail = detailLabel(
-            "This shortcut works from other apps. Changing it replaces the previous global binding immediately."
-        )
-        let recorder = KeyboardShortcuts.RecorderCocoa(for: .toggleFloatTabs)
-        recorder.translatesAutoresizingMaskIntoConstraints = false
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
 
-        let recorderRow = NSStackView(views: [label("Show / Hide FloatTabs"), recorder])
-        recorderRow.orientation = .horizontal
-        recorderRow.alignment = .centerY
-        recorderRow.spacing = 12
-        recorderRow.distribution = .fill
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
 
-        let fixedHeading = sectionTitle("FloatTabs Shortcuts")
-        let fixedDetail = detailLabel("Page shortcuts are fixed in V1; only global Show / Hide is configurable here.")
-        let rows = [
-            shortcutRow("Select Slot", "⌘1…⌘9"),
-            shortcutRow("Next / Previous Slot", "⌃Tab / ⌃⇧Tab"),
-            shortcutRow("Add Web App", "⌘T"),
-            shortcutRow("Quick URL", "⌘L"),
-            shortcutRow("Return Home", "⌘⇧H"),
-            shortcutRow("Reload", "⌘R"),
-            shortcutRow("Zoom", "⌘+ / ⌘- / ⌘0"),
-            shortcutRow("Pin / Auto-hide", "⌘⇧P"),
-            shortcutRow("Global Settings", "⌘,"),
+        var views: [NSView] = [
+            sectionTitle("Global"),
+            detailLabel(
+                "Show / Hide works from other apps. All remaining shortcuts below are app-local and only act while FloatTabs is active."
+            ),
+            shortcutRecorderRow("Show / Hide FloatTabs", name: .toggleFloatTabs),
+            spacer(10),
+            sectionTitle("Slots"),
         ]
+        views.append(contentsOf: AppShortcutCatalog.slotBindings.map(shortcutRecorderRow(for:)))
+        views.append(contentsOf: [spacer(10), sectionTitle("Navigation")])
+        views.append(contentsOf: AppShortcutCatalog.navigationBindings.map(shortcutRecorderRow(for:)))
+        views.append(contentsOf: [spacer(10), sectionTitle("View")])
+        views.append(contentsOf: AppShortcutCatalog.viewBindings.map(shortcutRecorderRow(for:)))
+        views.append(contentsOf: [spacer(10), sectionTitle("Application")])
+        views.append(contentsOf: AppShortcutCatalog.applicationBindings.map(shortcutRecorderRow(for:)))
 
-        let stack = NSStackView(views: [heading, detail, recorderRow, spacer(8), fixedHeading, fixedDetail] + rows)
+        let resetButton = NSButton(
+            title: "Reset All to Defaults",
+            target: self,
+            action: #selector(resetAllShortcuts)
+        )
+        resetButton.bezelStyle = .rounded
+        views.append(contentsOf: [spacer(10), resetButton, spacer(8)])
+
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
+        document.addSubview(stack)
+        root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
-            recorder.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
+
         view = root
     }
 
-    private func shortcutRow(_ action: String, _ shortcut: String) -> NSView {
-        let actionLabel = label(action)
-        actionLabel.widthAnchor.constraint(equalToConstant: 190).isActive = true
-        let shortcutLabel = NSTextField(labelWithString: shortcut)
-        shortcutLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        shortcutLabel.textColor = .secondaryLabelColor
-        let row = NSStackView(views: [actionLabel, shortcutLabel])
+    private func shortcutRecorderRow(for binding: AppShortcutBinding) -> NSView {
+        shortcutRecorderRow(binding.title, name: binding.name)
+    }
+
+    private func shortcutRecorderRow(
+        _ title: String,
+        name: KeyboardShortcuts.Name
+    ) -> NSView {
+        let actionLabel = label(title)
+        actionLabel.widthAnchor.constraint(equalToConstant: 220).isActive = true
+
+        let recorder = KeyboardShortcuts.RecorderCocoa(for: name)
+        recorder.translatesAutoresizingMaskIntoConstraints = false
+        recorder.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        recorder.validateShortcut = { [weak self] shortcut in
+            guard let self else { return .allow }
+            if let conflict = self.conflictingAction(for: shortcut, excluding: name) {
+                return .disallow(reason: "This shortcut is already used by “\(conflict)”.")
+            }
+            return .allow
+        }
+
+        let row = NSStackView(views: [actionLabel, recorder])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 12
+        row.spacing = 16
         return row
+    }
+
+    private func conflictingAction(
+        for shortcut: KeyboardShortcuts.Shortcut,
+        excluding excludedName: KeyboardShortcuts.Name
+    ) -> String? {
+        let entries: [(String, KeyboardShortcuts.Name)] = [
+            ("Show / Hide FloatTabs", .toggleFloatTabs),
+        ] + AppShortcutCatalog.allBindings.map { ($0.title, $0.name) }
+
+        for (title, name) in entries where name != excludedName {
+            if KeyboardShortcuts.getShortcut(for: name) == shortcut {
+                return title
+            }
+        }
+        return nil
+    }
+
+    @objc private func resetAllShortcuts() {
+        KeyboardShortcuts.reset([.toggleFloatTabs] + AppShortcutCatalog.allNames)
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {

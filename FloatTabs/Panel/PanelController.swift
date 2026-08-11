@@ -778,7 +778,6 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onDismiss: (() -> Void)?
 
     let field = NSTextField()
-    private let icon = NSImageView()
     private let copyButton = NSButton()
     private let createButton = NSButton(title: "New App", target: nil, action: nil)
     private var copyFeedbackWorkItem: DispatchWorkItem?
@@ -792,10 +791,6 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         wantsLayer = true
         layer?.cornerRadius = 12
         layer?.masksToBounds = true
-
-        icon.image = NSImage(systemSymbolName: "link", accessibilityDescription: "URL")
-        icon.contentTintColor = .secondaryLabelColor
-        icon.translatesAutoresizingMaskIntoConstraints = false
 
         field.translatesAutoresizingMaskIntoConstraints = false
         field.font = .systemFont(ofSize: 14, weight: .medium)
@@ -821,17 +816,11 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         createButton.target = self
         createButton.action = #selector(createPressed(_:))
 
-        addSubview(icon)
         addSubview(field)
         addSubview(copyButton)
         addSubview(createButton)
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 14),
-            icon.heightAnchor.constraint(equalToConstant: 14),
-
-            field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             copyButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 8),
