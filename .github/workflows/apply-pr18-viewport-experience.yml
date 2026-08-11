@@ -1,0 +1,83 @@
+name: Apply PR18 Viewport Experience
+
+on:
+  push:
+    branches:
+      - agent/viewport-experience-presets
+    paths:
+      - '.github/pr18_viewport_experience.py'
+      - '.github/pr18-viewport-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/viewport-experience-presets
+          fetch-depth: 0
+
+      - name: Apply viewport experience implementation
+        run: python3 .github/pr18_viewport_experience.py
+
+      - name: Check focused diff
+        run: |
+          git diff --check
+          git diff -- \
+            FloatTabs/Tabs/WebRenderingProfile.swift \
+            FloatTabs/Panel/ScreenPositioning.swift \
+            FloatTabs/Persistence/AppPreferencesStore.swift \
+            FloatTabs/Web/WebViewFactory.swift \
+            FloatTabsTests/AppPreferencesStoreTests.swift \
+            FloatTabsTests/ScreenPositioningTests.swift \
+            FloatTabsTests/ExternalShellTests.swift \
+            FloatTabsTests/ProfileRepositoryTests.swift \
+            FloatTabsTests/WebViewFactoryTests.swift
+
+      - name: Resolve packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Run viewport and WebKit regression tests
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          MACOSX_DEPLOYMENT_TARGET=14.0
+          -only-testing:FloatTabsTests/WebViewFactoryTests
+          -only-testing:FloatTabsTests/ScreenPositioningTests
+          -only-testing:FloatTabsTests/PanelMetricsTests
+          -only-testing:FloatTabsTests/AppPreferencesStoreTests
+          -only-testing:FloatTabsTests/ExternalShellTests
+          -only-testing:FloatTabsTests/ProfileRepositoryTests
+          -only-testing:FloatTabsTests/TabStoreTests
+          -only-testing:FloatTabsTests/WebViewPoolTests
+          test
+
+      - name: Commit validated source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            FloatTabs/Tabs/WebRenderingProfile.swift \
+            FloatTabs/Panel/ScreenPositioning.swift \
+            FloatTabs/Persistence/AppPreferencesStore.swift \
+            FloatTabs/Web/WebViewFactory.swift \
+            FloatTabsTests/AppPreferencesStoreTests.swift \
+            FloatTabsTests/ScreenPositioningTests.swift \
+            FloatTabsTests/ExternalShellTests.swift \
+            FloatTabsTests/ProfileRepositoryTests.swift \
+            FloatTabsTests/WebViewFactoryTests.swift
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: define viewport experience presets'
+          git push origin HEAD:agent/viewport-experience-presets
