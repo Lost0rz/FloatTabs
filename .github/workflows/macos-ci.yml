@@ -23,9 +23,25 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: macos-26
+    name: Build & Test (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Apple Silicon arm64
+            runner: macos-26
+            arch: arm64
+          - label: Intel x86_64
+            runner: macos-26-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Runner architecture
+        run: |
+          uname -m
+          sysctl -n machdep.cpu.brand_string || true
 
       - name: Xcode version
         run: xcodebuild -version
@@ -47,7 +63,8 @@ jobs:
           -project FloatTabs.xcodeproj
           -scheme FloatTabs
           -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
+          -destination 'platform=macOS,arch=${{ matrix.arch }}'
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
           CODE_SIGNING_ALLOWED=NO
           build
 
@@ -57,9 +74,26 @@ jobs:
           -project FloatTabs.xcodeproj
           -scheme FloatTabs
           -configuration Release
-          -destination 'platform=macOS,arch=arm64'
+          -destination 'platform=macOS,arch=${{ matrix.arch }}'
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
           CODE_SIGNING_ALLOWED=NO
           build
+
+      - name: Verify native Release architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/FloatTabsDerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
+          if [[ ! -f "$binary" ]]; then
+            echo "Release binary not found: $binary" >&2
+            exit 1
+          fi
+          architectures="$(lipo -archs "$binary")"
+          echo "Release binary architectures: $architectures"
+          if [[ " $architectures " != *" ${{ matrix.arch }} "* ]]; then
+            echo "Expected architecture ${{ matrix.arch }} is missing." >&2
+            exit 1
+          fi
 
       - name: Unit tests
         shell: bash
@@ -69,7 +103,8 @@ jobs:
             -project FloatTabs.xcodeproj \
             -scheme FloatTabs \
             -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" \
             -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
@@ -96,8 +131,53 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FloatTabs-XCTest-diagnostics
+          name: FloatTabs-XCTest-diagnostics-${{ matrix.arch }}
           if-no-files-found: ignore
           path: |
             ${{ runner.temp }}/xcodebuild-test.log
             ${{ runner.temp }}/FloatTabsTests.xcresult
+
+  universal-release:
+    name: Universal 2 Release Build
+    needs: build-and-test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve Swift packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Verify package lock is unchanged
+        run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Universal 2 Release build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Release
+          -destination 'generic/platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsUniversalDerivedData"
+          ARCHS='arm64 x86_64'
+          ONLY_ACTIVE_ARCH=NO
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Verify Universal 2 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$RUNNER_TEMP/FloatTabsUniversalDerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
+          architectures="$(lipo -archs "$binary")"
+          echo "Universal Release architectures: $architectures"
+          for required in arm64 x86_64; do
+            if [[ " $architectures " != *" $required "* ]]; then
+              echo "Universal Release binary is missing $required." >&2
+              exit 1
+            fi
+          done

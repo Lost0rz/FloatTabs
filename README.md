@@ -2,7 +2,7 @@
 
 FloatTabs is a lightweight native macOS **Persistent Floating Web App Switcher** built with Swift, AppKit, SwiftUI, and WebKit.
 
-The product is intentionally not a full browser. It keeps a small number of frequently used, long-lived web apps instantly available in a floating macOS panel while leaving complex research and multi-tab browsing to a normal browser.
+The product is intentionally not a full browser. It keeps a small number of frequently used, long-lived web apps instantly available in a floating macOS panel while leaving complex research and conventional multi-tab browsing to a normal browser.
 
 ## Project Status
 
@@ -14,50 +14,47 @@ Stage 3 Rendering Profiles: PASSED
 Stage 4 Web Compatibility, Navigation, Sessions & OAuth: PASSED
 Stage 5 Resource Lifecycle & Interaction Refinement: PASSED
 Stage 6 Menus, Commands & Global Settings: PASSED
-v0.1.0 Release Candidate: IN PROGRESS
+v0.1.0 Release Candidate: UNIVERSAL 2 VALIDATED
 ```
 
-Stage 3 real-Mac acceptance includes:
+Current release behavior is frozen by the v0.1.0 release baseline. In particular:
 
-- Desktop website layout in a narrow FloatTabs window;
-- Mobile website layout in a wide FloatTabs window;
-- Bilibili Desktop playback and interaction without the previous browser-version warning;
-- Bilibili Desktop links/new-window actions working through the accepted compatibility path;
-- YouTube ordinary controls and enter/exit element fullscreen;
-- persistent per-Slot rendering values and the maintained macOS CI lane.
-
-Stage 4A centralized navigation-policy ownership without changing accepted Stage 3 behavior. Stage 4B now adds structured new-context routing: same-site HTTP(S) stays in the current Slot, ordinary cross-site user links hand off to the default browser, and scripted cross-site/about:blank popups receive a temporary child WKWebView for login/OAuth-compatible flows.
-
-Later Stage 4 slices will record real-site session/OAuth compatibility and add file upload/download handling.
-
-Redirect-sensitive Website Mode switching such as the observed Sina case remains a compatibility follow-up and is not represented as solved.
+- Desktop Website Mode uses a desktop-class logical `WKWebView` inside an AppKit host; it does **not** use `pageZoom` as the layout-fitting mechanism;
+- Mobile Website Mode remains native 1:1 geometry;
+- visible Window Size presets are Small 420×760, Medium 600×820, Large 820×850, Wide 1080×850, plus Custom;
+- ordinary user HTTP(S) navigation remains in the current Slot regardless of host;
+- external-browser routing is explicit user intent through the link context menu;
+- Window Size Behavior supports Per Web App and Fixed modes without Fixed overwriting saved per-App sizes;
+- the accepted floating panel uses the current explicit activation/focus path validated on Real Mac.
 
 Recorded evidence and interaction decisions:
 
+- [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md)
 - [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md)
 - [`docs/validation/Stage_1_Acceptance.md`](docs/validation/Stage_1_Acceptance.md)
 - [`docs/validation/Stage_2_Acceptance.md`](docs/validation/Stage_2_Acceptance.md)
 - [`docs/validation/Stage_3_V3_Acceptance.md`](docs/validation/Stage_3_V3_Acceptance.md)
 - [`docs/validation/Stage_4_Acceptance.md`](docs/validation/Stage_4_Acceptance.md)
-- [`docs/architecture/Stage_1_Interaction_Baseline.md`](docs/architecture/Stage_1_Interaction_Baseline.md)
+- [`docs/validation/Stage_4_Session_OAuth_Matrix.md`](docs/validation/Stage_4_Session_OAuth_Matrix.md)
 
 ## Canonical Documentation
 
 Read these before changing product behavior, architecture, or UI:
 
-1. **Product**  
+1. **v0.1.0 Release Baseline — highest precedence for this release**  
+   [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md)
+
+2. **Product**  
    [`docs/product/FloatTabs_Product_Development_Spec_v0.5.md`](docs/product/FloatTabs_Product_Development_Spec_v0.5.md)
 
-2. **Technical Architecture**  
+3. **Technical Architecture**  
    [`docs/architecture/FloatTabs_Technical_Architecture_v1.2.md`](docs/architecture/FloatTabs_Technical_Architecture_v1.2.md)
 
-3. **UI Design System**  
+4. **UI Design System**  
    [`docs/design/FloatTabs_UI_Design_System_v1.2.md`](docs/design/FloatTabs_UI_Design_System_v1.2.md)
 
-4. **Stage 3 Rendering Override**  
-   [`docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`](docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md)
-
-5. **Stage 4 Compatibility Addendum**  
+5. **Historical Stage rendering/compatibility addenda**  
+   [`docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`](docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md)  
    [`docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`](docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md)
 
 6. **Generated UI/UX References**  
@@ -65,15 +62,18 @@ Read these before changing product behavior, architecture, or UI:
 
 ### Source-of-Truth Precedence
 
-If materials conflict:
+If materials conflict for v0.1.0:
 
 ```text
-Design/System rule for UI
-+ Product scope
-+ Technical Architecture
-+ accepted Stage addenda / validation
+v0.1.0 Release Baseline
         ↓
-override generated Stitch screenshots / code.html
+accepted later PR behavior / current implementation
+        ↓
+Product + Technical Architecture + Stage addenda
+        ↓
+older stage history / validation notes
+        ↓
+generated Stitch screenshots / code.html
 ```
 
 Generated Stitch files are visual references only and are not production source code.
@@ -125,31 +125,30 @@ Zoom
 
 Website Mode controls the requested website layout class. Window Size controls only the visible FloatTabs Web surface. Browser Identity is compatibility identity, not an engine switch. User Zoom remains a persisted per-Slot value.
 
-Stage 3 uses public `WKWebView.pageZoom` as the final presentation boundary: internal website-layout fitting is composed with the independent user Zoom while the AppKit/WKWebView geometry remains at the real visible size.
+For Desktop mode, an AppKit logical host maps the visible FloatTabs viewport to the desktop-class CSS layout width while preserving native AppKit/WebKit pointer conversion. `WKWebView.pageZoom` is reserved for explicit user Zoom. Mobile mode remains 1:1.
 
 Website sessions use a shared persistent `WKWebsiteDataStore` profile. FloatTabs does not store passwords or manually copy browser cookies.
 
 ## Distribution Target
 
-Public builds are planned as signed and notarized direct-download DMGs:
+Public builds are signed and notarized direct-download **Universal 2** DMGs:
 
 ```text
 FloatTabs-x.y.z.dmg
 └── FloatTabs.app
+    └── arm64 + x86_64
 ```
 
-Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling, and Gatekeeper validation. `tools/release/build_dmg.sh` also supports an unsigned QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
+The release target covers both current Apple Silicon Macs (`arm64`) and Intel Macs (`x86_64`) with one application bundle. CI runs the full build/test lane natively on both `macos-26` Apple Silicon and `macos-26-intel`, then separately builds a Universal 2 Release app and verifies both Mach-O slices with `lipo`.
 
-FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 RC1 adds explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
+The v0.1.0 release-audit gate passed native Debug/Release builds plus full XCTest on both architectures, followed by a successful Universal 2 Release binary check and Universal QA-DMG build/verification.
+
+Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling/validation, and Gatekeeper assessment. `tools/release/build_dmg.sh` also supports an unsigned Universal 2 QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
+
+FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 includes explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
 
 ## Development Workflow
 
-Keep `main` in a reviewed/known-good state. Develop features on focused branches, for example:
+Keep `main` in a reviewed/known-good state. Develop features and release fixes on focused branches.
 
-```text
-feat/stage-2-persistent-web-app-slots
-feat/stage-3-rendering-profiles
-feat/stage-4-web-compatibility-sessions
-```
-
-Before merging code that changes product behavior or UI structure, confirm it does not conflict with the canonical documentation above.
+Before merging code that changes product behavior or UI structure, confirm it does not conflict with the current release baseline. Historical stage documents remain useful context, but they must not be used to reintroduce behavior explicitly superseded by later accepted PRs.

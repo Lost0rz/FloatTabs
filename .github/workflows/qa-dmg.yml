@@ -17,16 +17,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build and verify QA DMG
+      - name: Build and verify Universal 2 QA DMG
         env:
           FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
         run: |
           chmod +x tools/release/build_dmg.sh
           tools/release/build_dmg.sh
 
-      - name: Upload QA DMG
+      - name: Upload Universal 2 QA DMG
         uses: actions/upload-artifact@v4
         with:
-          name: FloatTabs-0.1.0-QA-DMG
+          name: FloatTabs-0.1.0-Universal-QA-DMG
           if-no-files-found: error
           path: ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg
