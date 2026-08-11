@@ -765,9 +765,7 @@ final class ResizeReadoutView: NSView {
         let ratio = size.height > 0 ? size.width / size.height : 0
         return String(
             format: "%.1f × %.1f px  ·  W/H %.1f",
-            Double(size.width),
-            Double(size.height),
-            Double(ratio)
+            Double(size.width), Double(size.height), Double(ratio)
         )
     }
 
@@ -807,6 +805,10 @@ final class WebSlotHostView: NSView {
     }
 
     func attach(_ webView: WKWebView) {
+        guard WebPanelContainerView.canMutateWebViewHierarchy(for: webView) else {
+            return
+        }
+
         if self.webView !== webView {
             self.webView?.removeFromSuperview()
             webView.removeFromSuperview()
@@ -826,6 +828,7 @@ final class WebSlotHostView: NSView {
     private func applyWebsiteLayoutIfNeeded() {
         guard !isApplyingWebsiteLayout,
               let webView,
+              WebPanelContainerView.canMutateWebViewHierarchy(for: webView),
               frame.width > 0,
               frame.height > 0 else {
             return
@@ -860,7 +863,7 @@ final class WebSlotHostView: NSView {
     }
 }
 
-/// Owns the visible FloatTabs web surface. Warm/Cold use the accepted Stage 4
+/// Owns the visible FloatTabs Web surface. Warm/Cold use the accepted Stage 4
 /// transient host. Hot Slots instead receive one independent host each, so an
 /// inactive Hot WebView can stay attached to the FloatTabs window without being
 /// resized when another Slot has a different Window Size preset.
@@ -895,9 +898,26 @@ final class WebPanelContainerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// WebKit temporarily owns the live WKWebView hierarchy during element
+    /// fullscreen. FloatTabs must treat all transition states as an exclusive
+    /// ownership period and avoid removeFromSuperview/addSubview/frame writes.
+    static func canMutateWebViewHierarchy(
+        fullscreenState: WKWebView.FullscreenState
+    ) -> Bool {
+        !WebViewPool.isActiveFullscreenState(fullscreenState)
+    }
+
+    static func canMutateWebViewHierarchy(for webView: WKWebView) -> Bool {
+        canMutateWebViewHierarchy(fullscreenState: webView.fullscreenState)
+    }
+
     /// Compatibility seam used by existing Stage 4 tests and the Stage 0 helper.
     /// Product Slot switching should call the policy-aware overload below.
     func show(webView: WKWebView) {
+        guard Self.canMutateWebViewHierarchy(for: webView) else {
+            activeWebView = webView
+            return
+        }
         showTransient(webView: webView, slotID: nil)
     }
 
@@ -906,6 +926,12 @@ final class WebPanelContainerView: NSView {
         slotID: UUID,
         residencyPolicy: SlotResidencyPolicy
     ) {
+        guard Self.canMutateWebViewHierarchy(for: webView) else {
+            activeSlotID = slotID
+            activeWebView = webView
+            return
+        }
+
         switch residencyPolicy {
         case .hot:
             showHot(webView: webView, slotID: slotID)
@@ -916,6 +942,10 @@ final class WebPanelContainerView: NSView {
 
     func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
         guard activeSlotID == slotID else { return }
+        if let activeWebView,
+           !Self.canMutateWebViewHierarchy(for: activeWebView) {
+            return
+        }
 
         switch residencyPolicy {
         case .hot:
@@ -941,18 +971,34 @@ final class WebPanelContainerView: NSView {
     func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
         let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
         for slotID in staleHotSlotIDs {
-            guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
+            guard let host = hotHostViews[slotID] else { continue }
+            if let webView = host.webView,
+               !Self.canMutateWebViewHierarchy(for: webView) {
+                continue
+            }
+            hotHostViews.removeValue(forKey: slotID)
             host.webView?.removeFromSuperview()
             host.removeFromSuperview()
         }
     }
 
     func removeSlot(_ slotID: UUID) {
+        if activeSlotID == slotID,
+           let activeWebView,
+           !Self.canMutateWebViewHierarchy(for: activeWebView) {
+            return
+        }
+
         if activeSlotID == slotID {
             hostedWebView?.removeFromSuperview()
             hostedWebView = nil
             activeWebView = nil
             activeSlotID = nil
+        }
+        if let host = hotHostViews[slotID],
+           let webView = host.webView,
+           !Self.canMutateWebViewHierarchy(for: webView) {
+            return
         }
         if let host = hotHostViews.removeValue(forKey: slotID) {
             host.webView?.removeFromSuperview()
@@ -961,6 +1007,10 @@ final class WebPanelContainerView: NSView {
     }
 
     func showEmptyState() {
+        if let activeWebView,
+           !Self.canMutateWebViewHierarchy(for: activeWebView) {
+            return
+        }
         guard currentContentView !== emptyView else { return }
         hostedWebView?.removeFromSuperview()
         hostedWebView = nil
@@ -975,16 +1025,23 @@ final class WebPanelContainerView: NSView {
 
     override func layout() {
         super.layout()
-        if let activeSlotID,
-           hostedWebView == nil,
-           let hotHost = hotHostViews[activeSlotID],
-           !hotHost.isHidden {
-            hotHost.frame = clipView.bounds
-            hotHost.layoutSubtreeIfNeeded()
-            websiteLayoutScale = hotHost.websiteLayoutScale
-        } else if activeSlotID == nil || hostedWebView != nil {
+
+        if let activeWebView,
+           Self.canMutateWebViewHierarchy(for: activeWebView) {
+            if let activeSlotID,
+               hostedWebView == nil,
+               let hotHost = hotHostViews[activeSlotID],
+               !hotHost.isHidden {
+                hotHost.frame = clipView.bounds
+                hotHost.layoutSubtreeIfNeeded()
+                websiteLayoutScale = hotHost.websiteLayoutScale
+            } else if activeSlotID == nil || hostedWebView != nil {
+                updateWebsiteLayoutIfNeeded()
+            }
+        } else if activeWebView == nil {
             updateWebsiteLayoutIfNeeded()
         }
+
         layer?.shadowPath = CGPath(
             roundedRect: bounds,
             cornerWidth: PanelMetrics.webPanelCornerRadius,
@@ -1002,6 +1059,7 @@ final class WebPanelContainerView: NSView {
     }
 
     private func showHot(webView: WKWebView, slotID: UUID) {
+        guard Self.canMutateWebViewHierarchy(for: webView) else { return }
         hostedWebView?.removeFromSuperview()
         hostedWebView = nil
         currentContentView?.isHidden = true
@@ -1029,6 +1087,7 @@ final class WebPanelContainerView: NSView {
     }
 
     private func showTransient(webView: WKWebView, slotID: UUID?) {
+        guard Self.canMutateWebViewHierarchy(for: webView) else { return }
         if hostedWebView !== webView {
             hostedWebView?.removeFromSuperview()
             webView.removeFromSuperview()
@@ -1105,7 +1164,8 @@ final class WebPanelContainerView: NSView {
     }
 
     private func updateWebsiteLayoutIfNeeded() {
-        guard let webView = hostedWebView else { return }
+        guard let webView = hostedWebView,
+              Self.canMutateWebViewHierarchy(for: webView) else { return }
 
         let visibleSize = clipView.bounds.size
         guard visibleSize.width > 0, visibleSize.height > 0 else { return }
