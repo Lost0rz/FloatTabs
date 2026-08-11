@@ -140,12 +140,12 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertEqual(visibleSize.height, 720, accuracy: 0.001)
     }
 
-    func testPinControlsActualPanelWindowLevel() {
+    func testPanelStaysFloatingAboveOrdinaryApplicationsRegardlessOfPin() {
         let panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 760)
         )
 
-        XCTAssertEqual(panel.level, .normal)
+        XCTAssertEqual(panel.level, .floating)
         XCTAssertFalse(panel.isPresentationPinned)
 
         panel.setPresentationPinned(true)
@@ -153,33 +153,86 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(panel.isPresentationPinned)
 
         panel.setPresentationPinned(false)
-        XCTAssertEqual(panel.level, .normal)
+        XCTAssertEqual(panel.level, .floating)
         XCTAssertFalse(panel.isPresentationPinned)
     }
 
-    func testMouseDownAnchorsKeyboardFocusBeforeWebFullscreenDecision() {
+    func testUnpinnedOwnFullscreenLeavesFullscreenSpaceButPinnedCanRemain() {
+        let ordinary = FloatingPanel.presentationCollectionBehavior(
+            isPinned: false,
+            fullscreenState: .notInFullscreen
+        )
+        XCTAssertTrue(ordinary.contains(.canJoinAllSpaces))
+        XCTAssertTrue(ordinary.contains(.canJoinAllApplications))
+        XCTAssertTrue(ordinary.contains(.fullScreenAuxiliary))
+
+        let unpinnedFullscreen = FloatingPanel.presentationCollectionBehavior(
+            isPinned: false,
+            fullscreenState: .inFullscreen
+        )
+        XCTAssertTrue(unpinnedFullscreen.contains(.fullScreenNone))
+        XCTAssertFalse(unpinnedFullscreen.contains(.canJoinAllSpaces))
+        XCTAssertFalse(unpinnedFullscreen.contains(.canJoinAllApplications))
+        XCTAssertFalse(unpinnedFullscreen.contains(.fullScreenAuxiliary))
+
+        let pinnedFullscreen = FloatingPanel.presentationCollectionBehavior(
+            isPinned: true,
+            fullscreenState: .inFullscreen
+        )
+        XCTAssertTrue(pinnedFullscreen.contains(.canJoinAllSpaces))
+        XCTAssertTrue(pinnedFullscreen.contains(.canJoinAllApplications))
+        XCTAssertTrue(pinnedFullscreen.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(pinnedFullscreen.contains(.fullScreenNone))
+    }
+
+    func testMouseDownAnchorsKeyboardFocusOnlyBeforeFullscreenTransition() {
         XCTAssertTrue(
             FloatingPanel.shouldAnchorKeyboardFocus(
                 eventType: .leftMouseDown,
-                isKeyWindow: false
+                isKeyWindow: false,
+                fullscreenState: .notInFullscreen
             )
         )
         XCTAssertTrue(
             FloatingPanel.shouldAnchorKeyboardFocus(
                 eventType: .rightMouseDown,
-                isKeyWindow: false
+                isKeyWindow: false,
+                fullscreenState: .notInFullscreen
             )
         )
         XCTAssertFalse(
             FloatingPanel.shouldAnchorKeyboardFocus(
                 eventType: .leftMouseDown,
-                isKeyWindow: true
+                isKeyWindow: true,
+                fullscreenState: .notInFullscreen
             )
         )
         XCTAssertFalse(
             FloatingPanel.shouldAnchorKeyboardFocus(
                 eventType: .mouseMoved,
-                isKeyWindow: false
+                isKeyWindow: false,
+                fullscreenState: .notInFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .leftMouseDown,
+                isKeyWindow: false,
+                fullscreenState: .enteringFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .leftMouseDown,
+                isKeyWindow: false,
+                fullscreenState: .inFullscreen
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .leftMouseDown,
+                isKeyWindow: false,
+                fullscreenState: .exitingFullscreen
             )
         )
     }
