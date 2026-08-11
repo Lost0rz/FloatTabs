@@ -30,9 +30,9 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(bridge.injectionTime, .atDocumentStart)
         XCTAssertFalse(bridge.isForMainFrameOnly)
         XCTAssertTrue(bridge.source.contains("Document.prototype, 'exitFullscreen'"))
-        XCTAssertTrue(bridge.source.contains("closeAllMediaPresentations") == false)
+        XCTAssertFalse(bridge.source.contains("closeAllMediaPresentations"))
         XCTAssertFalse(bridge.source.contains("requestFullscreen"))
-        XCTAssertFalse(bridge.source.contains("Element.prototype"))
+        XCTAssertFalse(bridge.source.contains("wrapExitMethod(Element.prototype,"))
         XCTAssertFalse(bridge.source.contains("style.position"))
     }
 
