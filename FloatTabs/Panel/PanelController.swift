@@ -101,22 +101,61 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func showFloatTabs() {
-        capturePreviousApplication()
-        positionPanelForCurrentScreens()
-        synchronizeFixedViewportAfterPositioning()
+        let preservesOwnFullscreen = panel.isOwnElementFullscreenActive
+
+        if preservesOwnFullscreen {
+            // The fullscreen owner and Shell are two windows of the same app.
+            // Activating FloatTabs again here can make AppKit change the active
+            // Space/frontmost application while WebKit owns a fullscreen Space.
+            // The panel is non-activating, so it can become key without a broad
+            // NSApp activation. Keep the fullscreen session as the app context.
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_show_preserving_app_activation",
+                fields: [
+                    "panel_window_number": String(panel.windowNumber),
+                    "app_active": String(NSApp.isActive),
+                ]
+            )
+        } else {
+            capturePreviousApplication()
+            positionPanelForCurrentScreens()
+            synchronizeFixedViewportAfterPositioning()
+        }
+
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
-        activateFloatTabs()
+
+        if !preservesOwnFullscreen {
+            activateFloatTabs()
+        }
 
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
     }
 
     func hideFloatTabs() {
+        let preservesOwnFullscreen = panel.isOwnElementFullscreenActive
+
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
+
+        if preservesOwnFullscreen {
+            // Do not deactivate FloatTabs or reactivate `previousApplication`
+            // while its WebKit fullscreen window is alive. The old behavior
+            // switched Finder/Obsidian/etc. to the foreground and forced AppKit
+            // Space churn underneath the still-active fullscreen session.
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_hide_preserving_app_activation",
+                fields: [
+                    "panel_window_number": String(panel.windowNumber),
+                    "app_active": String(NSApp.isActive),
+                ]
+            )
+            restoreOwnFullscreenWindowKeyIfAvailable()
+            return
+        }
 
         guard let previousApplication else {
             NSApp.deactivate()
@@ -830,6 +869,48 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard let frontmost = NSWorkspace.shared.frontmostApplication else { return }
         guard frontmost.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
         previousApplication = frontmost
+    }
+
+    private func restoreOwnFullscreenWindowKeyIfAvailable() {
+        guard panel.isOwnElementFullscreenActive else { return }
+
+        guard let fullscreenWindow = NSApp.windows.first(where: { window in
+            window !== panel
+                && window.isVisible
+                && window.collectionBehavior.contains(.fullScreenPrimary)
+        }) else {
+            FloatTabsDiagnostics.record(
+                "fullscreen_owner_key_restore_skipped",
+                fields: ["reason": "no_visible_fullscreen_primary_window"]
+            )
+            return
+        }
+
+        FloatTabsDiagnostics.record(
+            "fullscreen_owner_key_restore_before",
+            fields: [
+                "window_number": String(fullscreenWindow.windowNumber),
+                "window_key": String(fullscreenWindow.isKeyWindow),
+                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                "app_active": String(NSApp.isActive),
+            ]
+        )
+
+        // `makeKey()` is intentionally narrower than `makeKeyAndOrderFront`.
+        // The WebKit fullscreen window is already visible and owns its Space; we
+        // only return keyboard focus without ordering windows or activating an
+        // unrelated desktop application.
+        fullscreenWindow.makeKey()
+
+        FloatTabsDiagnostics.record(
+            "fullscreen_owner_key_restore_after",
+            fields: [
+                "window_number": String(fullscreenWindow.windowNumber),
+                "window_key": String(fullscreenWindow.isKeyWindow),
+                "window_active_space": String(fullscreenWindow.isOnActiveSpace),
+                "app_active": String(NSApp.isActive),
+            ]
+        )
     }
 
     private func positionPanelForCurrentScreens() {
