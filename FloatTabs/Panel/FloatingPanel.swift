@@ -5,10 +5,13 @@ import WebKit
 @MainActor
 enum FloatTabsFullscreenPresentation {
     /// True while the FloatTabs page currently observed by the panel is in any
-    /// WebKit element-fullscreen transition. This does not block the shell; it
-    /// lets the global shortcut treat fullscreen as an explicit summon instead
-    /// of relying on NSWindow.isVisible across Spaces.
+    /// WebKit element-fullscreen transition.
     static var isActive = false
+
+    /// Tracks only an explicit user summon of the shell during own fullscreen.
+    /// `NSWindow.isVisible` is not reliable enough across Spaces to implement the
+    /// fullscreen shortcut as a toggle by itself.
+    static var shellExplicitlySummoned = false
 }
 
 final class FloatingPanel: NSPanel {
@@ -19,7 +22,17 @@ final class FloatingPanel: NSPanel {
     private weak var fullscreenObservedWebView: WKWebView?
     private var fullscreenStateObservation: NSKeyValueObservation?
     private var ownElementFullscreenState: WKWebView.FullscreenState = .notInFullscreen
+
+    // Shell presentation is independent from WebKit's fullscreen presentation.
     private var explicitFullscreenOverlay = false
+    private var shellAutoSuppressedForOwnFullscreen = false
+    private var restoreShellWorkItem: DispatchWorkItem?
+
+    // WebKit creates one fullscreen NSWindow for a WKWebView and reuses it across
+    // later fullscreen sessions. Capture that public NSWindow while the WebView is
+    // fullscreen so, after exit, it can be pre-positioned onto the next target
+    // display before WebKit re-enters fullscreen.
+    private weak var reusableFullscreenWindow: NSWindow?
 
     init(contentRect: NSRect) {
         super.init(
@@ -41,15 +54,10 @@ final class FloatingPanel: NSPanel {
 
         // A non-activating panel is allowed to become key without activating the
         // owning app. Let every real click establish this panel as the key window
-        // instead of relying on `needsPanelToBecomeKey` from the hit subview. This
-        // matters for WebKit element fullscreen because WebKit chooses its target
-        // display from `NSScreen.main`, i.e. the screen containing the key window.
+        // instead of relying on `needsPanelToBecomeKey` from the hit subview.
         becomesKeyOnlyIfNeeded = false
         acceptsMouseMovedEvents = true
 
-        // The native resizable style is intentionally disabled. Stage 2 owns a
-        // single bottom-right resize handle so edge movement and resizing cannot
-        // compete for the same pointer hit.
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
@@ -63,22 +71,23 @@ final class FloatingPanel: NSPanel {
         WebViewPool.isActiveFullscreenState(ownElementFullscreenState)
     }
 
-    /// FloatTabs is always a real floating utility window during ordinary use.
-    /// Pin controls persistence. It is not required merely to summon the shell
-    /// while one FloatTabs page is fullscreen.
     func setPresentationPinned(_ pinned: Bool) {
         guard isPresentationPinned != pinned else { return }
         isPresentationPinned = pinned
         applyPresentationPolicy()
+        synchronizeShellVisibilityForFullscreen()
     }
 
     /// An explicit global summon during own fullscreen is different from the
-    /// automatic fullscreen transition. The shell is allowed to join the current
-    /// fullscreen Space only after the user asks for it. This keeps an existing
-    /// shell on display A from automatically following fullscreen content to B.
+    /// automatic fullscreen transition. The shell may temporarily join the
+    /// fullscreen Space only after the user asks for it.
     override func makeKeyAndOrderFront(_ sender: Any?) {
         if isOwnElementFullscreenActive && !isPresentationPinned {
+            restoreShellWorkItem?.cancel()
+            restoreShellWorkItem = nil
+            shellAutoSuppressedForOwnFullscreen = false
             explicitFullscreenOverlay = true
+            FloatTabsFullscreenPresentation.shellExplicitlySummoned = true
             applyPresentationPolicy()
         }
         super.makeKeyAndOrderFront(sender)
@@ -87,6 +96,7 @@ final class FloatingPanel: NSPanel {
     override func orderOut(_ sender: Any?) {
         if explicitFullscreenOverlay {
             explicitFullscreenOverlay = false
+            FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
             applyPresentationPolicy()
         }
         super.orderOut(sender)
@@ -96,8 +106,7 @@ final class FloatingPanel: NSPanel {
     /// screen each time it is summoned. During a WebKit fullscreen session that
     /// would make the shell follow the fullscreen display, coupling two things
     /// that must stay independent. Freeze programmatic frame changes until the
-    /// fullscreen owner exits; user-initiated window movement still uses
-    /// `setFrameOrigin` and remains intentional.
+    /// fullscreen owner exits; user-initiated movement uses `setFrameOrigin`.
     override func setFrame(_ frameRect: NSRect, display flag: Bool) {
         guard !Self.shouldFreezeShellFrame(fullscreenState: ownElementFullscreenState) else {
             return
@@ -112,14 +121,18 @@ final class FloatingPanel: NSPanel {
         super.setFrame(frameRect, display: flag, animate: animateFlag)
     }
 
-    /// WebKit documents `fullscreenState` as KVO-compliant and temporarily owns
-    /// the live WKWebView hierarchy during element fullscreen. Keep observing the
-    /// fullscreen owner even when the user summons the shell and clicks another
-    /// Slot; otherwise clicking ChatGPT would replace the observation and make
-    /// FloatTabs forget that YouTube is still fullscreen.
     override func sendEvent(_ event: NSEvent) {
         if Self.isMouseDown(event.type),
            let webView = webViewHit(by: event) {
+            // A reused WebKit fullscreen window can remain associated with the
+            // display/Space from the previous session even after it is ordered
+            // out. Before a new request is generated, move that hidden standard
+            // NSWindow onto the display containing this interaction. WebKit will
+            // still own the actual enter/exit transition.
+            prepareReusableFullscreenWindowForPotentialRequest(
+                webView: webView,
+                mouseLocation: NSEvent.mouseLocation
+            )
             observeFullscreenStateIfNeeded(for: webView)
         }
 
@@ -128,15 +141,13 @@ final class FloatingPanel: NSPanel {
             isKeyWindow: isKeyWindow,
             fullscreenState: ownElementFullscreenState
         ) {
-            // `.nonactivatingPanel` keeps this from activating the entire app.
-            // Making the panel key refreshes NSScreen.main for each new fullscreen
-            // request so display routing does not remain stuck on an old screen.
+            // `.nonactivatingPanel` keeps this from broadly activating the app,
+            // while refreshing NSScreen.main for WebKit's next fullscreen request.
             makeKey()
         }
 
         super.sendEvent(event)
 
-        // PanelController remains the single owner of Pin state.
         if let panelController = delegate as? PanelController {
             setPresentationPinned(panelController.isPinned)
         }
@@ -150,21 +161,31 @@ final class FloatingPanel: NSPanel {
         let ownFullscreen = WebViewPool.isActiveFullscreenState(fullscreenState)
 
         if ownFullscreen && !isPinned && !explicitFullscreenOverlay {
-            // The fullscreen page and the shell are independent presentations.
-            // Do not automatically drag the shell into the fullscreen Space. On
-            // multi-display Macs this leaves the shell on its original display;
-            // on one display the fullscreen Space naturally covers it until the
-            // user explicitly summons FloatTabs.
             return [.fullScreenNone, .ignoresCycle]
         }
 
-        // Ordinary global summon, Pin, or an explicit summon over own fullscreen.
         return [
             .canJoinAllSpaces,
             .canJoinAllApplications,
             .fullScreenAuxiliary,
             .ignoresCycle,
         ]
+    }
+
+    static func shouldAutoSuppressShell(
+        isPinned: Bool,
+        fullscreenState: WKWebView.FullscreenState,
+        explicitFullscreenOverlay: Bool
+    ) -> Bool {
+        guard !isPinned, !explicitFullscreenOverlay else { return false }
+        switch fullscreenState {
+        case .inFullscreen:
+            return true
+        case .notInFullscreen, .enteringFullscreen, .exitingFullscreen:
+            return false
+        @unknown default:
+            return true
+        }
     }
 
     static func shouldFreezeShellFrame(
@@ -178,6 +199,21 @@ final class FloatingPanel: NSPanel {
         isSameWebView: Bool
     ) -> Bool {
         !isSameWebView && WebViewPool.isActiveFullscreenState(currentState)
+    }
+
+    static func shouldPrepositionReusableFullscreenWindow(
+        fullscreenState: WKWebView.FullscreenState,
+        isSameWebView: Bool,
+        windowIsVisible: Bool
+    ) -> Bool {
+        fullscreenState == .notInFullscreen && isSameWebView && !windowIsVisible
+    }
+
+    static func targetScreenIndex(
+        mouseLocation: NSPoint,
+        screenFrames: [NSRect]
+    ) -> Int? {
+        screenFrames.firstIndex { NSMouseInRect(mouseLocation, $0, false) }
     }
 
     static func shouldAnchorKeyboardFocus(
@@ -215,6 +251,33 @@ final class FloatingPanel: NSPanel {
         return nil
     }
 
+    private func prepareReusableFullscreenWindowForPotentialRequest(
+        webView: WKWebView,
+        mouseLocation: NSPoint
+    ) {
+        guard Self.shouldPrepositionReusableFullscreenWindow(
+            fullscreenState: ownElementFullscreenState,
+            isSameWebView: fullscreenObservedWebView === webView,
+            windowIsVisible: reusableFullscreenWindow?.isVisible ?? true
+        ), let reusableFullscreenWindow else {
+            return
+        }
+
+        let screens = NSScreen.screens
+        guard let index = Self.targetScreenIndex(
+            mouseLocation: mouseLocation,
+            screenFrames: screens.map(\.frame)
+        ) else {
+            return
+        }
+        let targetScreen = screens[index]
+
+        // Use only public NSWindow/NSScreen API. The window remains hidden; this
+        // updates its AppKit screen association before WebKit calls
+        // `enterFullScreenMode` again on the same reused window.
+        reusableFullscreenWindow.setFrame(targetScreen.frame, display: false)
+    }
+
     private func observeFullscreenStateIfNeeded(for webView: WKWebView) {
         let isSameWebView = fullscreenObservedWebView === webView
         if Self.shouldKeepObservedFullscreenOwner(
@@ -227,8 +290,9 @@ final class FloatingPanel: NSPanel {
 
         fullscreenStateObservation?.invalidate()
         fullscreenObservedWebView = webView
+        reusableFullscreenWindow = nil
         ownElementFullscreenState = webView.fullscreenState
-        synchronizeFullscreenPresentationState()
+        synchronizeFullscreenPresentationState(for: webView)
 
         fullscreenStateObservation = webView.observe(
             \.fullscreenState,
@@ -241,18 +305,99 @@ final class FloatingPanel: NSPanel {
                       self.fullscreenObservedWebView === webView else {
                     return
                 }
+
+                let wasActive = self.isOwnElementFullscreenActive
                 self.ownElementFullscreenState = state
+
+                if !wasActive && WebViewPool.isActiveFullscreenState(state) {
+                    // Every new fullscreen session starts passive. Pin is the only
+                    // persistent overlay policy; an old explicit summon must not
+                    // leak into the next session.
+                    self.explicitFullscreenOverlay = false
+                    FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+                    self.restoreShellWorkItem?.cancel()
+                    self.restoreShellWorkItem = nil
+                }
+
+                if state == .inFullscreen,
+                   let fullscreenWindow = webView.window,
+                   fullscreenWindow !== self {
+                    self.reusableFullscreenWindow = fullscreenWindow
+                }
+
                 if !WebViewPool.isActiveFullscreenState(state) {
                     self.explicitFullscreenOverlay = false
+                    FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
                 }
-                self.synchronizeFullscreenPresentationState()
+
+                self.synchronizeFullscreenPresentationState(for: webView)
             }
         }
     }
 
-    private func synchronizeFullscreenPresentationState() {
+    private func synchronizeFullscreenPresentationState(for webView: WKWebView) {
         FloatTabsFullscreenPresentation.isActive = isOwnElementFullscreenActive
         applyPresentationPolicy()
+        synchronizeShellVisibilityForFullscreen()
+    }
+
+    private func synchronizeShellVisibilityForFullscreen() {
+        if Self.shouldAutoSuppressShell(
+            isPinned: isPresentationPinned,
+            fullscreenState: ownElementFullscreenState,
+            explicitFullscreenOverlay: explicitFullscreenOverlay
+        ) {
+            autoSuppressShellForOwnFullscreenIfNeeded()
+            return
+        }
+
+        if isPresentationPinned && shellAutoSuppressedForOwnFullscreen {
+            restoreAutoSuppressedShellImmediately()
+            return
+        }
+
+        if !isOwnElementFullscreenActive {
+            restoreAutoSuppressedShellAfterFullscreenIfNeeded()
+        }
+    }
+
+    private func autoSuppressShellForOwnFullscreenIfNeeded() {
+        restoreShellWorkItem?.cancel()
+        restoreShellWorkItem = nil
+        guard !shellAutoSuppressedForOwnFullscreen else { return }
+
+        shellAutoSuppressedForOwnFullscreen = true
+        FloatTabsFullscreenPresentation.shellExplicitlySummoned = false
+        if isVisible {
+            super.orderOut(nil)
+        }
+    }
+
+    private func restoreAutoSuppressedShellImmediately() {
+        restoreShellWorkItem?.cancel()
+        restoreShellWorkItem = nil
+        guard shellAutoSuppressedForOwnFullscreen else { return }
+
+        shellAutoSuppressedForOwnFullscreen = false
+        super.orderFront(nil)
+    }
+
+    private func restoreAutoSuppressedShellAfterFullscreenIfNeeded() {
+        guard shellAutoSuppressedForOwnFullscreen else { return }
+        restoreShellWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.shellAutoSuppressedForOwnFullscreen,
+                  !self.isOwnElementFullscreenActive else {
+                return
+            }
+            self.shellAutoSuppressedForOwnFullscreen = false
+            self.restoreShellWorkItem = nil
+            self.orderFront(nil)
+        }
+        restoreShellWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
     }
 
     private func applyPresentationPolicy() {
@@ -262,9 +407,6 @@ final class FloatingPanel: NSPanel {
             explicitFullscreenOverlay: explicitFullscreenOverlay
         )
 
-        // FloatTabs must remain above ordinary application windows even when Pin
-        // is off. Fullscreen yielding is controlled by Space participation only;
-        // the fullscreen WKWebView never owns or relocates the shell itself.
         if level != .floating {
             level = .floating
         }
