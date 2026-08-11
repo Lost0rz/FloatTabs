@@ -456,7 +456,7 @@ final class WebRenderingProfileTests: XCTestCase {
         XCTAssertEqual(profile.effectiveBrowserIdentity, .macosSafari)
         XCTAssertEqual(profile.sizePreset, .medium)
         XCTAssertNil(profile.devicePresetID)
-        XCTAssertEqual(profile.viewportSize, CGSize(width: 430, height: 820))
+        XCTAssertEqual(profile.viewportSize, CGSize(width: 600, height: 820))
         XCTAssertEqual(profile.zoom, 1.0)
 
         let data = try JSONEncoder().encode(profile)
@@ -465,10 +465,10 @@ final class WebRenderingProfileTests: XCTestCase {
     }
 
     func testSimpleViewportPresetsAndMinimumClamp() {
-        XCTAssertEqual(SimpleViewportPreset.small.size, CGSize(width: 390, height: 780))
-        XCTAssertEqual(SimpleViewportPreset.medium.size, CGSize(width: 430, height: 820))
-        XCTAssertEqual(SimpleViewportPreset.large.size, CGSize(width: 600, height: 800))
-        XCTAssertEqual(SimpleViewportPreset.wide.size, CGSize(width: 900, height: 850))
+        XCTAssertEqual(SimpleViewportPreset.small.size, CGSize(width: 420, height: 760))
+        XCTAssertEqual(SimpleViewportPreset.medium.size, CGSize(width: 600, height: 820))
+        XCTAssertEqual(SimpleViewportPreset.large.size, CGSize(width: 820, height: 850))
+        XCTAssertEqual(SimpleViewportPreset.wide.size, CGSize(width: 1080, height: 850))
         XCTAssertNil(SimpleViewportPreset.custom.size)
 
         let clamped = WebRenderingProfile.canonicalDefault.settingViewport(
@@ -490,7 +490,7 @@ final class WebRenderingProfileTests: XCTestCase {
         XCTAssertEqual(wide.websiteMode, .mobile)
         XCTAssertEqual(wide.browserIdentity, .automatic)
         XCTAssertEqual(wide.effectiveBrowserIdentity, .iphoneSafari)
-        XCTAssertEqual(wide.viewportSize, CGSize(width: 900, height: 850))
+        XCTAssertEqual(wide.viewportSize, CGSize(width: 1080, height: 850))
     }
 
     func testExplicitBrowserIdentityAndWebsiteModeRemainIndependent() {
@@ -563,7 +563,7 @@ final class WebRenderingProfileTests: XCTestCase {
         let migrated = try JSONDecoder().decode(WebRenderingProfile.self, from: data)
         XCTAssertEqual(migrated.websiteMode, .mobile)
         XCTAssertEqual(migrated.browserIdentity, .iphoneChrome)
-        XCTAssertEqual(migrated.sizePreset, .small)
+        XCTAssertEqual(migrated.sizePreset, .custom)
         XCTAssertEqual(migrated.viewportSize, CGSize(width: 390, height: 780))
         XCTAssertEqual(migrated.zoom, 1.25, accuracy: 0.001)
     }

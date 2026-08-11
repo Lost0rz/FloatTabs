@@ -6,10 +6,10 @@ import XCTest
 final class PanelMetricsTests: XCTestCase {
     func testDefaultViewportProducesExpectedTotalPanelSize() {
         XCTAssertEqual(
-            PanelMetrics.panelSize(forViewport: NSSize(width: 430, height: 820)),
-            NSSize(width: 518, height: 844)
+            PanelMetrics.panelSize(forViewport: NSSize(width: 600, height: 820)),
+            NSSize(width: 688, height: 844)
         )
-        XCTAssertEqual(PanelMetrics.defaultPanelSize, NSSize(width: 518, height: 844))
+        XCTAssertEqual(PanelMetrics.defaultPanelSize, NSSize(width: 688, height: 844))
     }
 
     func testMinimumViewportProducesExpectedMinimumPanelSize() {
@@ -22,8 +22,8 @@ final class PanelMetricsTests: XCTestCase {
 
     func testPanelSizeProducesViewportSizeWithoutShellChrome() {
         XCTAssertEqual(
-            PanelMetrics.viewportSize(forPanelSize: NSSize(width: 518, height: 844)),
-            NSSize(width: 430, height: 820)
+            PanelMetrics.viewportSize(forPanelSize: NSSize(width: 688, height: 844)),
+            NSSize(width: 600, height: 820)
         )
     }
 
@@ -68,7 +68,7 @@ final class ScreenPositioningTests: XCTestCase {
             in: visible
         )
 
-        XCTAssertEqual(frame.size, NSSize(width: 518, height: 844))
+        XCTAssertEqual(frame.size, NSSize(width: 688, height: 844))
         XCTAssertEqual(frame.midX, visible.midX, accuracy: 0.001)
         XCTAssertEqual(frame.midY, visible.midY, accuracy: 0.001)
     }

@@ -325,16 +325,34 @@ enum UserAgentProvider {
     }
 }
 
-/// Website Mode owns the CSS layout class while Window Size remains the real
-/// AppKit/WKWebView size. The public WKWebView.pageZoom API provides the mapping
-/// between the physical width and the target CSS width. This keeps WebKit's own
-/// event/hit-testing pipeline intact and avoids AppKit coordinate transforms or
-/// private WebKit layout SPI.
+/// Website Mode owns the responsive layout class while Window Size remains the
+/// real visible FloatTabs viewport. Desktop maps visible widths into deliberate
+/// experience classes so Small/Medium/Large/Wide do not merely show the same
+/// 1280px page at four scales. Mobile remains native 1:1. The AppKit logical
+/// host performs the uniform coordinate mapping; pageZoom remains user Zoom.
 enum WebsiteLayoutViewport {
-    /// Desktop mode should keep a desktop-class responsive layout even when the
-    /// floating window is physically narrow. Mobile deliberately stays 1:1 so
-    /// its WebKit/AppKit hit-testing and phone layout remain native.
-    static let desktopMinimumCSSWidth: CGFloat = 1280
+    static let compactVisibleMaximum: CGFloat = 520
+    static let balancedVisibleMaximum: CGFloat = 720
+    static let standardVisibleMaximum: CGFloat = 960
+
+    static let compactCSSWidth: CGFloat = 720
+    static let balancedCSSWidth: CGFloat = 1024
+    static let standardCSSWidth: CGFloat = 1280
+    static let expandedCSSWidth: CGFloat = 1440
+
+    static func desktopCSSWidth(forVisibleWidth visibleWidth: CGFloat) -> CGFloat {
+        guard visibleWidth > 0 else { return visibleWidth }
+        switch visibleWidth {
+        case ...compactVisibleMaximum:
+            return compactCSSWidth
+        case ...balancedVisibleMaximum:
+            return balancedCSSWidth
+        case ...standardVisibleMaximum:
+            return standardCSSWidth
+        default:
+            return max(expandedCSSWidth, visibleWidth)
+        }
+    }
 
     static func targetCSSWidth(
         forVisibleWidth visibleWidth: CGFloat,
@@ -343,7 +361,7 @@ enum WebsiteLayoutViewport {
         guard visibleWidth > 0 else { return visibleWidth }
         switch websiteMode {
         case .desktop:
-            return max(desktopMinimumCSSWidth, visibleWidth)
+            return desktopCSSWidth(forVisibleWidth: visibleWidth)
         case .mobile:
             return visibleWidth
         }
@@ -362,10 +380,6 @@ enum WebsiteLayoutViewport {
         return visibleWidth / targetWidth
     }
 
-    /// The visible FloatTabs frame and the website layout viewport are separate.
-    /// Desktop receives a real desktop-class WKWebView frame; its containing
-    /// AppKit host maps that logical frame uniformly into the visible panel.
-    /// Mobile deliberately remains 1:1 with the visible panel.
     static func logicalSize(
         forVisibleSize visibleSize: CGSize,
         websiteMode: WebsiteMode

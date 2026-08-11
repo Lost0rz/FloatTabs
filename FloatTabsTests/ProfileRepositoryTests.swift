@@ -70,7 +70,9 @@ final class ProfileRepositoryTests: XCTestCase {
             XCTAssertEqual(profile.currentURL, URL(string: "https://example.com/current"))
             XCTAssertEqual(profile.renderingProfile.websiteMode, .mobile)
             XCTAssertEqual(profile.renderingProfile.browserIdentity, .iphoneChrome)
-            XCTAssertEqual(profile.renderingProfile.sizePreset, .small)
+            // Legacy records without a named preset keep their exact old
+            // geometry instead of being silently reinterpreted as the new Small.
+            XCTAssertEqual(profile.renderingProfile.sizePreset, .custom)
             XCTAssertEqual(profile.renderingProfile.viewportSize, CGSize(width: 390, height: 780))
             XCTAssertEqual(profile.renderingProfile.zoom, 1.25, accuracy: 0.001)
             XCTAssertEqual(profile.residencyPolicy, .warm)

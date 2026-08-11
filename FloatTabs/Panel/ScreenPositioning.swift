@@ -3,7 +3,7 @@ import Foundation
 
 struct PanelMetrics {
     /// User-facing Window Size always means the WKWebView viewport.
-    static let defaultViewportSize = NSSize(width: 430, height: 820)
+    static let defaultViewportSize = NSSize(width: 600, height: 820)
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 

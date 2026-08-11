@@ -80,7 +80,7 @@ final class AppPreferencesStoreTests: XCTestCase {
     func testFixedViewportDefaultsToMediumAndPersistsSeparately() {
         let first = AppPreferencesStore(defaults: defaults)
         XCTAssertFalse(first.hasStoredFixedViewportSize)
-        XCTAssertEqual(first.fixedViewportSize.width, 430, accuracy: 0.001)
+        XCTAssertEqual(first.fixedViewportSize.width, 600, accuracy: 0.001)
         XCTAssertEqual(first.fixedViewportSize.height, 820, accuracy: 0.001)
 
         first.fixedViewportSize = CGSize(width: 777, height: 666)

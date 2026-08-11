@@ -46,89 +46,111 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertEqual(webView.pageZoom, 1.25, accuracy: 0.001)
     }
 
-    func testWebsiteLayoutViewportKeepsDesktopLayoutClassButMobileOneToOne() {
+    func testWebsiteLayoutViewportMapsVisibleWidthsToDistinctDesktopExperiences() {
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 430, websiteMode: .desktop),
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 420, websiteMode: .desktop),
+            720,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 600, websiteMode: .desktop),
+            1024,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 820, websiteMode: .desktop),
             1280,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.fittingScale(forVisibleWidth: 430, websiteMode: .desktop),
-            430.0 / 1280.0,
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 1080, websiteMode: .desktop),
+            1440,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 1400, websiteMode: .desktop),
-            1400,
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 1600, websiteMode: .desktop),
+            1600,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 900, websiteMode: .mobile),
-            900,
+            WebsiteLayoutViewport.targetCSSWidth(forVisibleWidth: 1080, websiteMode: .mobile),
+            1080,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WebsiteLayoutViewport.fittingScale(forVisibleWidth: 600, websiteMode: .desktop),
+            600.0 / 1024.0,
             accuracy: 0.001
         )
 
-        let desktop = WebsiteLayoutViewport.logicalSize(
-            forVisibleSize: CGSize(width: 430, height: 820),
+        let medium = WebsiteLayoutViewport.logicalSize(
+            forVisibleSize: CGSize(width: 600, height: 820),
             websiteMode: .desktop
         )
-        XCTAssertEqual(desktop.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(desktop.height, 820.0 * 1280.0 / 430.0, accuracy: 0.001)
+        XCTAssertEqual(medium.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(medium.height, 820.0 * 1024.0 / 600.0, accuracy: 0.001)
 
         let mobile = WebsiteLayoutViewport.logicalSize(
-            forVisibleSize: CGSize(width: 900, height: 850),
+            forVisibleSize: CGSize(width: 1080, height: 850),
             websiteMode: .mobile
         )
-        XCTAssertEqual(mobile, CGSize(width: 900, height: 850))
+        XCTAssertEqual(mobile, CGSize(width: 1080, height: 850))
     }
 
-    func testDesktopHostUsesRealLogicalWebViewFrameWithoutPageZoomFit() {
+    func testMediumDesktopHostUsesBalancedLogicalLayoutWithoutPageZoomFit() {
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        let container = host(webView, visibleSize: NSSize(width: 430, height: 820))
+        let container = host(webView, visibleSize: NSSize(width: 600, height: 820))
         let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
 
-        XCTAssertEqual(container.bounds.size, NSSize(width: 430, height: 820))
-        XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.height, 820.0 * 1280.0 / 430.0, accuracy: 0.001)
+        XCTAssertEqual(container.bounds.size, NSSize(width: 600, height: 820))
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, 820.0 * 1024.0 / 600.0, accuracy: 0.001)
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
-        XCTAssertEqual(container.websiteLayoutScale, 430.0 / 1280.0, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
         XCTAssertEqual(floatTabsWebView.websiteLayoutScale, 1, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
         XCTAssertEqual(webView.magnification, 1, accuracy: 0.001)
     }
 
-    func testVisibleResizeRecomputesLogicalHostWithoutPageZoomFit() {
+    func testVisibleResizeMovesBetweenDesktopExperienceClassesWithoutPageZoomFit() {
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        let container = host(webView, visibleSize: NSSize(width: 430, height: 820))
+        let container = host(webView, visibleSize: NSSize(width: 600, height: 820))
 
-        container.setFrameSize(NSSize(width: 900, height: 850))
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
+        container.setFrameSize(NSSize(width: 820, height: 850))
         container.layoutSubtreeIfNeeded()
         webView.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(container.bounds.size, NSSize(width: 900, height: 850))
+        XCTAssertEqual(container.bounds.size, NSSize(width: 820, height: 850))
         XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.height, 850.0 * 1280.0 / 900.0, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, 850.0 * 1280.0 / 820.0, accuracy: 0.001)
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
-        XCTAssertEqual(container.websiteLayoutScale, 900.0 / 1280.0, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 820.0 / 1280.0, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
     }
 
-    func testDesktopModeExposesDesktopClassCSSWidthInsideNarrowWindow() {
-        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        let container = host(webView, visibleSize: NSSize(width: 430, height: 820))
+    func testSmallDesktopModeUsesCompactResponsiveCSSClass() {
+        let rendering = WebRenderingProfile.canonicalDefault.settingSimplePreset(.small)
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        let container = host(webView, visibleSize: NSSize(width: 420, height: 760))
         loadTestHTML(in: webView)
 
         let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
-        let desktopMediaQuery = evaluateNumber(
-            "matchMedia('(min-width: 1000px)').matches ? 1 : 0",
+        let reaches700 = evaluateNumber(
+            "matchMedia('(min-width: 700px)').matches ? 1 : 0",
+            in: webView
+        )
+        let reaches768 = evaluateNumber(
+            "matchMedia('(min-width: 768px)').matches ? 1 : 0",
             in: webView
         )
 
-        XCTAssertEqual(container.bounds.width, 430, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(container.bounds.width, 420, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 720, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
-        XCTAssertEqual(cssWidth, 1280, accuracy: 3)
-        XCTAssertEqual(desktopMediaQuery, 1, accuracy: 0.001)
+        XCTAssertEqual(cssWidth, 720, accuracy: 3)
+        XCTAssertEqual(reaches700, 1, accuracy: 0.001)
+        XCTAssertEqual(reaches768, 0, accuracy: 0.001)
     }
 
     func testMobileModeRemainsNativeOneToOneAtWideWindowSize() {
@@ -136,23 +158,23 @@ final class WebViewFactoryTests: XCTestCase {
             .settingWebsiteMode(.mobile)
             .settingSimplePreset(.wide)
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
-        let container = host(webView, visibleSize: NSSize(width: 900, height: 850))
+        let container = host(webView, visibleSize: NSSize(width: 1080, height: 850))
         let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
         loadTestHTML(in: webView)
 
         let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
-        XCTAssertEqual(container.bounds.width, 900, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.width, 900, accuracy: 0.001)
+        XCTAssertEqual(container.bounds.width, 1080, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 1080, accuracy: 0.001)
         XCTAssertEqual(floatTabsWebView.websiteLayoutScale, 1, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
-        XCTAssertEqual(cssWidth, 900, accuracy: 3)
+        XCTAssertEqual(cssWidth, 1080, accuracy: 3)
     }
 
     func testDesktopHostMapsVisibleCenterIntoLogicalWebCoordinates() {
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
-        let container = host(webView, visibleSize: NSSize(width: 430, height: 820))
+        let container = host(webView, visibleSize: NSSize(width: 600, height: 820))
 
-        let webPoint = webView.convert(NSPoint(x: 215, y: 410), from: container)
+        let webPoint = webView.convert(NSPoint(x: 300, y: 410), from: container)
         XCTAssertEqual(webPoint.x, webView.bounds.midX, accuracy: 0.5)
         XCTAssertEqual(webPoint.y, webView.bounds.midY, accuracy: 0.5)
     }
@@ -160,7 +182,7 @@ final class WebViewFactoryTests: XCTestCase {
     func testHotHostsPreserveInactiveViewportAcrossDifferentSlotSizes() {
         _ = NSApplication.shared
         let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
         )
         let window = NSWindow(
             contentRect: container.frame,
@@ -179,13 +201,13 @@ final class WebViewFactoryTests: XCTestCase {
         container.show(webView: first, slotID: firstID, residencyPolicy: .hot)
         container.layoutSubtreeIfNeeded()
         let firstSize = first.frame.size
-        XCTAssertEqual(first.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 430.0 / 1280.0, accuracy: 0.001)
+        XCTAssertEqual(first.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
         XCTAssertTrue(first.window === window)
 
         container.deactivate(slotID: firstID, residencyPolicy: .hot)
         XCTAssertTrue(first.superview?.isHidden == true)
-        container.setFrameSize(NSSize(width: 900, height: 850))
+        container.setFrameSize(NSSize(width: 1080, height: 850))
         container.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(first.frame.size, firstSize)
@@ -193,8 +215,8 @@ final class WebViewFactoryTests: XCTestCase {
 
         container.show(webView: second, slotID: secondID, residencyPolicy: .hot)
         container.layoutSubtreeIfNeeded()
-        XCTAssertEqual(second.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 900.0 / 1280.0, accuracy: 0.001)
+        XCTAssertEqual(second.frame.width, 1440, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
         XCTAssertEqual(first.frame.size, firstSize)
         XCTAssertTrue(first.window === window)
         XCTAssertTrue(second.window === window)
@@ -204,8 +226,8 @@ final class WebViewFactoryTests: XCTestCase {
         container.layoutSubtreeIfNeeded()
         XCTAssertFalse(first.superview?.isHidden ?? true)
         XCTAssertTrue(container.currentWebView === first)
-        XCTAssertEqual(first.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 900.0 / 1280.0, accuracy: 0.001)
+        XCTAssertEqual(first.frame.width, 1440, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
         XCTAssertTrue(first.window === window)
     }
 
@@ -213,12 +235,12 @@ final class WebViewFactoryTests: XCTestCase {
         _ = NSApplication.shared
         let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
         let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
         )
         container.show(webView: webView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 820),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 820),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -229,9 +251,9 @@ final class WebViewFactoryTests: XCTestCase {
         webView.layoutSubtreeIfNeeded()
 
         loadInteractiveTestHTML(in: webView)
-        XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
-        clickWindow(at: NSPoint(x: 215, y: 410), in: window)
+        clickWindow(at: NSPoint(x: 300, y: 410), in: window)
         waitForJavaScriptNumber("window.clicks", in: webView, equals: 1)
         window.orderOut(nil)
     }
@@ -305,13 +327,13 @@ final class WebViewFactoryTests: XCTestCase {
     func testUserZoomStaysIndependentFromDesktopHostLayoutFit() {
         let desktopRendering = WebRenderingProfile.canonicalDefault.settingZoom(1.25)
         let desktopWebView = WebViewFactory.makeWebView(renderingProfile: desktopRendering)
-        let desktopContainer = host(desktopWebView, visibleSize: NSSize(width: 430, height: 820))
+        let desktopContainer = host(desktopWebView, visibleSize: NSSize(width: 600, height: 820))
         let desktopFloatWebView = tryUnwrapFloatTabsWebView(desktopWebView)
 
         XCTAssertEqual(desktopFloatWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(desktopFloatWebView.websiteLayoutScale, 1, accuracy: 0.001)
-        XCTAssertEqual(desktopContainer.websiteLayoutScale, 430.0 / 1280.0, accuracy: 0.001)
-        XCTAssertEqual(desktopWebView.frame.width, 1280, accuracy: 0.001)
+        XCTAssertEqual(desktopContainer.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertEqual(desktopWebView.frame.width, 1024, accuracy: 0.001)
         XCTAssertEqual(desktopWebView.pageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(desktopWebView.magnification, 1, accuracy: 0.001)
 
@@ -319,13 +341,13 @@ final class WebViewFactoryTests: XCTestCase {
             .settingWebsiteMode(.mobile)
             .settingSimplePreset(.wide)
         let mobileWebView = WebViewFactory.makeWebView(renderingProfile: mobileRendering)
-        let mobileContainer = host(mobileWebView, visibleSize: NSSize(width: 900, height: 850))
+        let mobileContainer = host(mobileWebView, visibleSize: NSSize(width: 1080, height: 850))
         let mobileFloatWebView = tryUnwrapFloatTabsWebView(mobileWebView)
 
         XCTAssertEqual(mobileFloatWebView.userPageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(mobileFloatWebView.websiteLayoutScale, 1, accuracy: 0.001)
         XCTAssertEqual(mobileContainer.websiteLayoutScale, 1, accuracy: 0.001)
-        XCTAssertEqual(mobileWebView.frame.width, 900, accuracy: 0.001)
+        XCTAssertEqual(mobileWebView.frame.width, 1080, accuracy: 0.001)
         XCTAssertEqual(mobileWebView.pageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(mobileWebView.magnification, 1, accuracy: 0.001)
     }
