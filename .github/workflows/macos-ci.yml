@@ -35,8 +35,6 @@ jobs:
             runner: macos-26-intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
-    env:
-      DERIVED_DATA: ${{ runner.temp }}/FloatTabsDerivedData
     steps:
       - uses: actions/checkout@v5
 
@@ -66,7 +64,7 @@ jobs:
           -scheme FloatTabs
           -configuration Debug
           -destination 'platform=macOS,arch=${{ matrix.arch }}'
-          -derivedDataPath "$DERIVED_DATA"
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
           CODE_SIGNING_ALLOWED=NO
           build
 
@@ -77,7 +75,7 @@ jobs:
           -scheme FloatTabs
           -configuration Release
           -destination 'platform=macOS,arch=${{ matrix.arch }}'
-          -derivedDataPath "$DERIVED_DATA"
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
           CODE_SIGNING_ALLOWED=NO
           build
 
@@ -85,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary="$DERIVED_DATA/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
+          binary="$RUNNER_TEMP/FloatTabsDerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
           if [[ ! -f "$binary" ]]; then
             echo "Release binary not found: $binary" >&2
             exit 1
@@ -106,7 +104,7 @@ jobs:
             -scheme FloatTabs \
             -configuration Debug \
             -destination 'platform=macOS,arch=${{ matrix.arch }}' \
-            -derivedDataPath "$DERIVED_DATA" \
+            -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" \
             -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             MACOSX_DEPLOYMENT_TARGET=14.0 \
@@ -143,8 +141,6 @@ jobs:
     name: Universal 2 Release Build
     needs: build-and-test
     runs-on: macos-26
-    env:
-      DERIVED_DATA: ${{ runner.temp }}/FloatTabsUniversalDerivedData
     steps:
       - uses: actions/checkout@v5
 
@@ -166,7 +162,7 @@ jobs:
           -scheme FloatTabs
           -configuration Release
           -destination 'generic/platform=macOS'
-          -derivedDataPath "$DERIVED_DATA"
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsUniversalDerivedData"
           ARCHS='arm64 x86_64'
           ONLY_ACTIVE_ARCH=NO
           CODE_SIGNING_ALLOWED=NO
@@ -176,7 +172,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary="$DERIVED_DATA/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
+          binary="$RUNNER_TEMP/FloatTabsUniversalDerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
           architectures="$(lipo -archs "$binary")"
           echo "Universal Release architectures: $architectures"
           for required in arm64 x86_64; do
