@@ -41,7 +41,29 @@ rm -f "$DMG_PATH"
 
 hdiutil create   -volname "FloatTabs $VERSION"   -srcfolder "$STAGE_DIR"   -ov   -format UDZO   "$DMG_PATH"
 
-hdiutil verify "$DMG_PATH"
+# On fresh macOS runners diskimages-helper can hold the newly-created image for
+# a short moment after `hdiutil create` returns. Retry verification only for
+# that transient handoff; a persistently invalid DMG still fails the build.
+verify_dmg() {
+  local attempt
+  local max_attempts=5
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if hdiutil verify "$DMG_PATH"; then
+      return 0
+    fi
+
+    if ((attempt == max_attempts)); then
+      echo "error: DMG verification failed after $max_attempts attempts: $DMG_PATH" >&2
+      return 1
+    fi
+
+    echo "DMG verify attempt $attempt failed; retrying in 2 seconds..." >&2
+    sleep 2
+  done
+}
+
+verify_dmg
 
 if [[ -n "$NOTARY_PROFILE" ]]; then
   if [[ -z "$SIGN_IDENTITY" ]]; then
