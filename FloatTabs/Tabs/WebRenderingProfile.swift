@@ -57,12 +57,15 @@ enum SimpleViewportPreset: String, Codable, CaseIterable {
         }
     }
 
+    /// Visible FloatTabs viewport sizes are product experience tiers, not
+    /// device emulation sizes. Their spacing is intentionally large enough to
+    /// produce materially different reading/browsing surfaces.
     var size: CGSize? {
         switch self {
-        case .small: CGSize(width: 390, height: 780)
-        case .medium: CGSize(width: 430, height: 820)
-        case .large: CGSize(width: 600, height: 800)
-        case .wide: CGSize(width: 900, height: 850)
+        case .small: CGSize(width: 420, height: 760)
+        case .medium: CGSize(width: 600, height: 820)
+        case .large: CGSize(width: 820, height: 850)
+        case .wide: CGSize(width: 1080, height: 850)
         case .custom: nil
         }
     }
@@ -264,7 +267,7 @@ struct WebRenderingProfile: Codable, Equatable {
         sizePreset: .medium,
         devicePresetID: nil,
         orientation: .portrait,
-        viewportWidth: 430,
+        viewportWidth: 600,
         viewportHeight: 820,
         zoom: 1.0
     )
@@ -462,7 +465,7 @@ struct WebRenderingProfile: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let width = try container.decodeIfPresent(CGFloat.self, forKey: .viewportWidth) ?? 430
+        let width = try container.decodeIfPresent(CGFloat.self, forKey: .viewportWidth) ?? 600
         let height = try container.decodeIfPresent(CGFloat.self, forKey: .viewportHeight) ?? 820
         let decodedZoom = try container.decodeIfPresent(CGFloat.self, forKey: .zoom) ?? 1.0
 

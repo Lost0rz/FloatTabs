@@ -161,7 +161,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
         XCTAssertEqual(
             menu.item(withTitle: "Window Size")?.submenu?.items.filter { !$0.isSeparatorItem }.map(\.title),
-            ["Small  390 × 780", "Medium  430 × 820", "Large  600 × 800", "Wide  900 × 850"]
+            ["Small  420 × 760", "Medium  600 × 820", "Large  820 × 850", "Wide  1080 × 850"]
         )
         let zoomItems = try! XCTUnwrap(menu.item(withTitle: "Zoom")?.submenu?.items)
         XCTAssertEqual(zoomItems[0].title, "Zoom In")

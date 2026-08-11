@@ -100,7 +100,7 @@ final class AppPreferencesStore {
     static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
     static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
-    static let defaultFixedViewportSize = CGSize(width: 430, height: 820)
+    static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
 
     private let defaults: UserDefaults
