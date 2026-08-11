@@ -84,12 +84,23 @@ final class FloatingPanel: NSPanel {
     }
 
     /// `makeKeyAndOrderFront` is used by several ordinary show/focus paths, so it
-    /// cannot by itself prove that the user explicitly summoned FloatTabs. Treat
-    /// it as a fullscreen overlay request only after WebKit has fully reached
-    /// `.inFullscreen` and the unpinned shell has already been auto-suppressed.
-    /// This prevents an AppKit/internal show during `.enteringFullscreen` from
-    /// stealing key status back from WebKit and aborting the transition.
+    /// cannot by itself prove that the user explicitly summoned FloatTabs. During
+    /// WebKit's enter/exit transitions, never let the shell take key status back
+    /// from the fullscreen window. Once `.inFullscreen` is stable, a hidden
+    /// unpinned shell may be explicitly summoned by the global shortcut.
     override func makeKeyAndOrderFront(_ sender: Any?) {
+        if Self.shouldDeferKeyAndOrderFront(fullscreenState: ownElementFullscreenState) {
+            FloatTabsDiagnostics.record(
+                "fullscreen_shell_show_deferred_during_transition",
+                fields: [
+                    "panel_window_number": String(windowNumber),
+                    "state": String(describing: ownElementFullscreenState),
+                    "panel_visible": String(isVisible),
+                ]
+            )
+            return
+        }
+
         if Self.shouldTreatShowAsExplicitFullscreenSummon(
             isPinned: isPresentationPinned,
             fullscreenState: ownElementFullscreenState,
@@ -211,6 +222,19 @@ final class FloatingPanel: NSPanel {
         case .inFullscreen:
             return true
         case .notInFullscreen, .enteringFullscreen, .exitingFullscreen:
+            return false
+        @unknown default:
+            return true
+        }
+    }
+
+    static func shouldDeferKeyAndOrderFront(
+        fullscreenState: WKWebView.FullscreenState
+    ) -> Bool {
+        switch fullscreenState {
+        case .enteringFullscreen, .exitingFullscreen:
+            return true
+        case .notInFullscreen, .inFullscreen:
             return false
         @unknown default:
             return true
