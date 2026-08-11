@@ -162,6 +162,27 @@ final class WebViewPool {
         }
     }
 
+    /// Element fullscreen is stronger than ordinary background-media playback.
+    /// WebKit temporarily reparents the WKWebView into its own fullscreen window,
+    /// so the Slot must stay resident even when the FloatTabs shell itself is
+    /// hidden. Releasing or detaching the view during that presentation can tear
+    /// down the fullscreen session.
+    func isPresentingElementFullscreen(slotID: UUID) -> Bool {
+        guard let webView = webViews[slotID] else { return false }
+        return Self.isActiveFullscreenState(webView.fullscreenState)
+    }
+
+    static func isActiveFullscreenState(_ state: WKWebView.FullscreenState) -> Bool {
+        switch state {
+        case .notInFullscreen:
+            return false
+        case .enteringFullscreen, .inFullscreen, .exitingFullscreen:
+            return true
+        @unknown default:
+            return true
+        }
+    }
+
     func contains(slotID: UUID) -> Bool {
         webViews[slotID] != nil
     }
