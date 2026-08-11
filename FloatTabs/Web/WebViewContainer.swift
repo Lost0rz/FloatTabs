@@ -810,7 +810,10 @@ final class WebSlotHostView: NSView {
         }
 
         if self.webView !== webView {
-            self.webView?.removeFromSuperview()
+            if let oldWebView = self.webView,
+               WebPanelContainerView.canMutateWebViewHierarchy(for: oldWebView) {
+                oldWebView.removeFromSuperview()
+            }
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
             webView.autoresizingMask = []
@@ -863,24 +866,31 @@ final class WebSlotHostView: NSView {
     }
 }
 
-/// Owns the visible FloatTabs Web surface. Warm/Cold use the accepted Stage 4
-/// transient host. Hot Slots instead receive one independent host each, so an
-/// inactive Hot WebView can stay attached to the FloatTabs window without being
-/// resized when another Slot has a different Window Size preset.
+/// Owns the visible FloatTabs Web surface. A WebKit fullscreen owner keeps its
+/// original host/placeholder untouched. If the user summons the FloatTabs shell
+/// and selects another Slot, that Slot is rendered in an independent temporary
+/// host layered above the fullscreen owner's original host.
 final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
+    private var hostedSlotID: UUID?
     private weak var activeWebView: WKWebView?
     private var activeSlotID: UUID?
     private var hotHostViews: [UUID: WebSlotHostView] = [:]
+    private var fullscreenShellHostView: WebSlotHostView?
+    private var fullscreenShellSlotID: UUID?
 
     private(set) var websiteLayoutScale: CGFloat = 1
 
     var currentWebView: WKWebView? {
-        activeWebView
+        guard let activeWebView,
+              Self.canMutateWebViewHierarchy(for: activeWebView) else {
+            return nil
+        }
+        return activeWebView
     }
 
     override init(frame frameRect: NSRect) {
@@ -911,11 +921,21 @@ final class WebPanelContainerView: NSView {
         canMutateWebViewHierarchy(fullscreenState: webView.fullscreenState)
     }
 
+    static func shouldUseIndependentShellHost(
+        hasFullscreenOwner: Bool,
+        targetFullscreenState: WKWebView.FullscreenState
+    ) -> Bool {
+        hasFullscreenOwner && canMutateWebViewHierarchy(fullscreenState: targetFullscreenState)
+    }
+
     /// Compatibility seam used by existing Stage 4 tests and the Stage 0 helper.
-    /// Product Slot switching should call the policy-aware overload below.
     func show(webView: WKWebView) {
-        guard Self.canMutateWebViewHierarchy(for: webView) else {
+        if !Self.canMutateWebViewHierarchy(for: webView) {
             activeWebView = webView
+            return
+        }
+        if hasProtectedFullscreenOwner(excluding: webView) {
+            showInFullscreenShellHost(webView: webView, slotID: nil)
             return
         }
         showTransient(webView: webView, slotID: nil)
@@ -926,9 +946,14 @@ final class WebPanelContainerView: NSView {
         slotID: UUID,
         residencyPolicy: SlotResidencyPolicy
     ) {
-        guard Self.canMutateWebViewHierarchy(for: webView) else {
+        if !Self.canMutateWebViewHierarchy(for: webView) {
             activeSlotID = slotID
             activeWebView = webView
+            return
+        }
+
+        if hasProtectedFullscreenOwner(excluding: webView) {
+            showInFullscreenShellHost(webView: webView, slotID: slotID)
             return
         }
 
@@ -941,31 +966,40 @@ final class WebPanelContainerView: NSView {
     }
 
     func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
-        guard activeSlotID == slotID else { return }
-        if let activeWebView,
-           !Self.canMutateWebViewHierarchy(for: activeWebView) {
+        if fullscreenShellSlotID == slotID {
+            tearDownFullscreenShellHost(detachWebView: true)
+            if activeSlotID == slotID {
+                activeSlotID = nil
+                activeWebView = nil
+            }
             return
         }
 
         switch residencyPolicy {
         case .hot:
-            if let host = hotHostViews[slotID] {
-                // Freeze the outgoing Hot viewport before another Slot changes
-                // the panel size. Only an active Hot host follows live resizing.
-                //
-                // Keep the independent host and WKWebView attached so Hot keeps
-                // its DOM/SPA/runtime state, but stop presenting an inactive Hot
-                // page. Reactivation unhides this exact same host in `showHot`.
-                host.autoresizingMask = []
-                host.isHidden = true
+            guard let host = hotHostViews[slotID] else { return }
+            if let webView = host.webView,
+               !Self.canMutateWebViewHierarchy(for: webView) {
+                return
             }
+            host.autoresizingMask = []
+            host.isHidden = true
+
         case .warm, .cold:
+            guard hostedSlotID == slotID else { return }
+            if let hostedWebView,
+               !Self.canMutateWebViewHierarchy(for: hostedWebView) {
+                return
+            }
             hostedWebView?.removeFromSuperview()
             hostedWebView = nil
+            hostedSlotID = nil
         }
 
-        activeSlotID = nil
-        activeWebView = nil
+        if activeSlotID == slotID {
+            activeSlotID = nil
+            activeWebView = nil
+        }
     }
 
     func retainHotSlots(_ validHotSlotIDs: Set<UUID>) {
@@ -983,37 +1017,44 @@ final class WebPanelContainerView: NSView {
     }
 
     func removeSlot(_ slotID: UUID) {
-        if activeSlotID == slotID,
-           let activeWebView,
-           !Self.canMutateWebViewHierarchy(for: activeWebView) {
-            return
+        if fullscreenShellSlotID == slotID {
+            tearDownFullscreenShellHost(detachWebView: true)
+        }
+
+        if hostedSlotID == slotID {
+            if let hostedWebView,
+               !Self.canMutateWebViewHierarchy(for: hostedWebView) {
+                return
+            }
+            hostedWebView?.removeFromSuperview()
+            hostedWebView = nil
+            hostedSlotID = nil
+        }
+
+        if let host = hotHostViews[slotID] {
+            if let webView = host.webView,
+               !Self.canMutateWebViewHierarchy(for: webView) {
+                return
+            }
+            hotHostViews.removeValue(forKey: slotID)
+            host.webView?.removeFromSuperview()
+            host.removeFromSuperview()
         }
 
         if activeSlotID == slotID {
-            hostedWebView?.removeFromSuperview()
-            hostedWebView = nil
             activeWebView = nil
             activeSlotID = nil
-        }
-        if let host = hotHostViews[slotID],
-           let webView = host.webView,
-           !Self.canMutateWebViewHierarchy(for: webView) {
-            return
-        }
-        if let host = hotHostViews.removeValue(forKey: slotID) {
-            host.webView?.removeFromSuperview()
-            host.removeFromSuperview()
         }
     }
 
     func showEmptyState() {
-        if let activeWebView,
-           !Self.canMutateWebViewHierarchy(for: activeWebView) {
-            return
-        }
+        // Do not dismantle the original host while WebKit owns one of its views.
+        guard !hasProtectedFullscreenOwner(excluding: nil) else { return }
+        tearDownFullscreenShellHost(detachWebView: true)
         guard currentContentView !== emptyView else { return }
         hostedWebView?.removeFromSuperview()
         hostedWebView = nil
+        hostedSlotID = nil
         activeWebView = nil
         activeSlotID = nil
         websiteLayoutScale = 1
@@ -1026,8 +1067,13 @@ final class WebPanelContainerView: NSView {
     override func layout() {
         super.layout()
 
-        if let activeWebView,
-           Self.canMutateWebViewHierarchy(for: activeWebView) {
+        if let fullscreenShellHostView,
+           !fullscreenShellHostView.isHidden {
+            fullscreenShellHostView.frame = clipView.bounds
+            fullscreenShellHostView.layoutSubtreeIfNeeded()
+            websiteLayoutScale = fullscreenShellHostView.websiteLayoutScale
+        } else if let activeWebView,
+                  Self.canMutateWebViewHierarchy(for: activeWebView) {
             if let activeSlotID,
                hostedWebView == nil,
                let hotHost = hotHostViews[activeSlotID],
@@ -1056,12 +1102,26 @@ final class WebPanelContainerView: NSView {
         for host in hotHostViews.values {
             host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         }
+        fullscreenShellHostView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 
     private func showHot(webView: WKWebView, slotID: UUID) {
         guard Self.canMutateWebViewHierarchy(for: webView) else { return }
+        if hasProtectedFullscreenOwner(excluding: webView) {
+            showInFullscreenShellHost(webView: webView, slotID: slotID)
+            return
+        }
+
+        tearDownFullscreenShellHostPreparingToReuse(webView)
+
+        if let hostedWebView,
+           !Self.canMutateWebViewHierarchy(for: hostedWebView) {
+            showInFullscreenShellHost(webView: webView, slotID: slotID)
+            return
+        }
         hostedWebView?.removeFromSuperview()
         hostedWebView = nil
+        hostedSlotID = nil
         currentContentView?.isHidden = true
 
         let host: WebSlotHostView
@@ -1088,7 +1148,19 @@ final class WebPanelContainerView: NSView {
 
     private func showTransient(webView: WKWebView, slotID: UUID?) {
         guard Self.canMutateWebViewHierarchy(for: webView) else { return }
+        if hasProtectedFullscreenOwner(excluding: webView) {
+            showInFullscreenShellHost(webView: webView, slotID: slotID)
+            return
+        }
+
+        tearDownFullscreenShellHostPreparingToReuse(webView)
+
         if hostedWebView !== webView {
+            if let hostedWebView,
+               !Self.canMutateWebViewHierarchy(for: hostedWebView) {
+                showInFullscreenShellHost(webView: webView, slotID: slotID)
+                return
+            }
             hostedWebView?.removeFromSuperview()
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
@@ -1096,6 +1168,7 @@ final class WebPanelContainerView: NSView {
             logicalHostView.addSubview(webView)
             hostedWebView = webView
         }
+        hostedSlotID = slotID
 
         if currentContentView !== logicalHostView {
             setContentView(logicalHostView)
@@ -1108,6 +1181,72 @@ final class WebPanelContainerView: NSView {
         needsLayout = true
         layoutSubtreeIfNeeded()
         updateWebsiteLayoutIfNeeded()
+    }
+
+    private func showInFullscreenShellHost(webView: WKWebView, slotID: UUID?) {
+        guard Self.canMutateWebViewHierarchy(for: webView) else { return }
+
+        let host: WebSlotHostView
+        if let existing = fullscreenShellHostView {
+            host = existing
+            host.attach(webView)
+        } else {
+            host = WebSlotHostView(webView: webView)
+            fullscreenShellHostView = host
+            host.frame = clipView.bounds
+            host.autoresizingMask = [.width, .height]
+            clipView.addSubview(host)
+        }
+
+        host.frame = clipView.bounds
+        host.autoresizingMask = [.width, .height]
+        host.isHidden = false
+        host.layoutSubtreeIfNeeded()
+        bringToFront(host)
+
+        fullscreenShellSlotID = slotID
+        activeSlotID = slotID
+        activeWebView = webView
+        websiteLayoutScale = host.websiteLayoutScale
+    }
+
+    private func tearDownFullscreenShellHostPreparingToReuse(_ webView: WKWebView) {
+        guard let host = fullscreenShellHostView else { return }
+        if host.webView === webView {
+            webView.removeFromSuperview()
+            tearDownFullscreenShellHost(detachWebView: false)
+        } else {
+            tearDownFullscreenShellHost(detachWebView: true)
+        }
+    }
+
+    private func tearDownFullscreenShellHost(detachWebView: Bool) {
+        guard let host = fullscreenShellHostView else { return }
+        if detachWebView,
+           let webView = host.webView,
+           Self.canMutateWebViewHierarchy(for: webView) {
+            webView.removeFromSuperview()
+        }
+        host.removeFromSuperview()
+        fullscreenShellHostView = nil
+        fullscreenShellSlotID = nil
+    }
+
+    private func hasProtectedFullscreenOwner(excluding excludedWebView: WKWebView?) -> Bool {
+        if let hostedWebView,
+           hostedWebView !== excludedWebView,
+           !Self.canMutateWebViewHierarchy(for: hostedWebView) {
+            return true
+        }
+
+        for host in hotHostViews.values {
+            if let webView = host.webView,
+               webView !== excludedWebView,
+               !Self.canMutateWebViewHierarchy(for: webView) {
+                return true
+            }
+        }
+        return false
     }
 
     private func configureShell() {
