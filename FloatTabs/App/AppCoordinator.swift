@@ -234,8 +234,9 @@ final class AppCoordinator {
     private func toggleFloatTabs() {
         // WebKit owns the live WKWebView throughout element-fullscreen. Re-showing
         // the FloatTabs panel during that transition can force AppKit layout and
-        // reparent/frame work against WebKit's fullscreen window. Treat the global
-        // shortcut as temporarily unavailable until fullscreen fully exits.
+        // reparent/frame work against WebKit's fullscreen window. For now, the
+        // shell shortcut is deliberately suspended for this one Slot's own
+        // unpinned fullscreen session; unrelated fullscreen apps are unaffected.
         guard !FloatTabsFullscreenGate.blocksSummon else { return }
 
         if panelController.isVisible {
