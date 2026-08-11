@@ -14,7 +14,7 @@ Stage 3 Rendering Profiles: PASSED
 Stage 4 Web Compatibility, Navigation, Sessions & OAuth: PASSED
 Stage 5 Resource Lifecycle & Interaction Refinement: PASSED
 Stage 6 Menus, Commands & Global Settings: PASSED
-v0.1.0 Release Candidate: FINAL RELEASE AUDIT
+v0.1.0 Release Candidate: UNIVERSAL 2 VALIDATED
 ```
 
 Current release behavior is frozen by the v0.1.0 release baseline. In particular:
@@ -140,6 +140,8 @@ FloatTabs-x.y.z.dmg
 ```
 
 The release target covers both current Apple Silicon Macs (`arm64`) and Intel Macs (`x86_64`) with one application bundle. CI runs the full build/test lane natively on both `macos-26` Apple Silicon and `macos-26-intel`, then separately builds a Universal 2 Release app and verifies both Mach-O slices with `lipo`.
+
+The v0.1.0 release-audit gate passed native Debug/Release builds plus full XCTest on both architectures, followed by a successful Universal 2 Release binary check and Universal QA-DMG build/verification.
 
 Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling/validation, and Gatekeeper assessment. `tools/release/build_dmg.sh` also supports an unsigned Universal 2 QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
 
