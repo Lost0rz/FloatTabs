@@ -103,4 +103,38 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertEqual(store.fixedViewportSize.height, 400, accuracy: 0.001)
     }
 
+    func testFloatingWindowSizingUsesVisibleViewportInsteadOfDesktopLogicalFrame() {
+        _ = NSApplication.shared
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
+        let window = NSWindow(
+            contentRect: container.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+
+        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        container.show(webView: webView)
+        container.layoutSubtreeIfNeeded()
+        webView.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
+        XCTAssertGreaterThan(webView.frame.height, 820)
+
+        let visibleSize = PopupCoordinator.visibleSourceSize(for: webView)
+        XCTAssertEqual(visibleSize.width, 600, accuracy: 0.001)
+        XCTAssertEqual(visibleSize.height, 820, accuracy: 0.001)
+    }
+
+    func testFloatingWindowSizingFallsBackToStandaloneWebViewFrame() {
+        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        webView.frame = NSRect(x: 0, y: 0, width: 640, height: 720)
+
+        let visibleSize = PopupCoordinator.visibleSourceSize(for: webView)
+        XCTAssertEqual(visibleSize.width, 640, accuracy: 0.001)
+        XCTAssertEqual(visibleSize.height, 720, accuracy: 0.001)
+    }
 }
