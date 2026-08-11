@@ -4,6 +4,8 @@ final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    private(set) var isPresentationPinned = false
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -15,7 +17,7 @@ final class FloatingPanel: NSPanel {
         isFloatingPanel = true
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        level = .floating
+        level = .normal
         collectionBehavior = [
             .canJoinAllSpaces,
             .canJoinAllApplications,
@@ -40,5 +42,46 @@ final class FloatingPanel: NSPanel {
 
         contentMinSize = PanelMetrics.minimumPanelSize
         minSize = PanelMetrics.minimumPanelSize
+    }
+
+    /// Pin is a presentation policy, not just an auto-hide flag. An unpinned
+    /// FloatTabs window should yield to WebKit's own full-screen presentation,
+    /// while a pinned panel deliberately stays above other application content.
+    func setPresentationPinned(_ pinned: Bool) {
+        isPresentationPinned = pinned
+        level = pinned ? .floating : .normal
+    }
+
+    /// WebKit's macOS element-fullscreen controller currently chooses
+    /// `NSScreen.main`, which is the screen containing the window with keyboard
+    /// focus. FloatTabs is a non-activating panel, so the previously focused
+    /// display can otherwise leak into the full-screen decision. Anchor keyboard
+    /// focus to this panel before dispatching a mouse-down into web content.
+    override func sendEvent(_ event: NSEvent) {
+        if Self.shouldAnchorKeyboardFocus(
+            eventType: event.type,
+            isKeyWindow: isKeyWindow
+        ) {
+            if #available(macOS 14.0, *) {
+                NSApp.activate()
+            } else {
+                _ = NSRunningApplication.current.activate(options: [])
+            }
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
+
+    static func shouldAnchorKeyboardFocus(
+        eventType: NSEvent.EventType,
+        isKeyWindow: Bool
+    ) -> Bool {
+        guard !isKeyWindow else { return false }
+        switch eventType {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            return true
+        default:
+            return false
+        }
     }
 }
