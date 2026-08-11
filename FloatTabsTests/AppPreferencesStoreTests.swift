@@ -18,7 +18,7 @@ final class AppPreferencesStoreTests: XCTestCase {
     override func tearDown() {
         defaults.removePersistentDomain(forName: suiteName)
         NSApp.appearance = nil
-        FloatTabsFullscreenGate.blocksSummon = false
+        FloatTabsFullscreenPresentation.isActive = false
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -158,7 +158,7 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(panel.isPresentationPinned)
     }
 
-    func testUnpinnedOwnFullscreenLeavesFullscreenSpaceButPinnedCanRemain() {
+    func testUnpinnedOwnFullscreenStaysOffFullscreenSpaceUntilExplicitSummon() {
         let ordinary = FloatingPanel.presentationCollectionBehavior(
             isPinned: false,
             fullscreenState: .notInFullscreen
@@ -167,14 +167,25 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertTrue(ordinary.contains(.canJoinAllApplications))
         XCTAssertTrue(ordinary.contains(.fullScreenAuxiliary))
 
-        let unpinnedFullscreen = FloatingPanel.presentationCollectionBehavior(
+        let passiveFullscreen = FloatingPanel.presentationCollectionBehavior(
             isPinned: false,
-            fullscreenState: .inFullscreen
+            fullscreenState: .inFullscreen,
+            explicitFullscreenOverlay: false
         )
-        XCTAssertTrue(unpinnedFullscreen.contains(.fullScreenNone))
-        XCTAssertFalse(unpinnedFullscreen.contains(.canJoinAllSpaces))
-        XCTAssertFalse(unpinnedFullscreen.contains(.canJoinAllApplications))
-        XCTAssertFalse(unpinnedFullscreen.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(passiveFullscreen.contains(.fullScreenNone))
+        XCTAssertFalse(passiveFullscreen.contains(.canJoinAllSpaces))
+        XCTAssertFalse(passiveFullscreen.contains(.canJoinAllApplications))
+        XCTAssertFalse(passiveFullscreen.contains(.fullScreenAuxiliary))
+
+        let explicitSummon = FloatingPanel.presentationCollectionBehavior(
+            isPinned: false,
+            fullscreenState: .inFullscreen,
+            explicitFullscreenOverlay: true
+        )
+        XCTAssertTrue(explicitSummon.contains(.canJoinAllSpaces))
+        XCTAssertTrue(explicitSummon.contains(.canJoinAllApplications))
+        XCTAssertTrue(explicitSummon.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(explicitSummon.contains(.fullScreenNone))
 
         let pinnedFullscreen = FloatingPanel.presentationCollectionBehavior(
             isPinned: true,
@@ -186,62 +197,44 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(pinnedFullscreen.contains(.fullScreenNone))
     }
 
-    func testUnpinnedFullscreenBlocksSummonThroughoutTransition() {
+    func testFullscreenSessionFreezesProgrammaticShellFrameRouting() {
         XCTAssertFalse(
-            FloatingPanel.shouldBlockSummon(
-                isPinned: false,
-                fullscreenState: .notInFullscreen
-            )
+            FloatingPanel.shouldFreezeShellFrame(fullscreenState: .notInFullscreen)
         )
         XCTAssertTrue(
-            FloatingPanel.shouldBlockSummon(
-                isPinned: false,
-                fullscreenState: .enteringFullscreen
-            )
+            FloatingPanel.shouldFreezeShellFrame(fullscreenState: .enteringFullscreen)
         )
         XCTAssertTrue(
-            FloatingPanel.shouldBlockSummon(
-                isPinned: false,
-                fullscreenState: .inFullscreen
-            )
+            FloatingPanel.shouldFreezeShellFrame(fullscreenState: .inFullscreen)
         )
         XCTAssertTrue(
-            FloatingPanel.shouldBlockSummon(
-                isPinned: false,
-                fullscreenState: .exitingFullscreen
-            )
-        )
-        XCTAssertFalse(
-            FloatingPanel.shouldBlockSummon(
-                isPinned: true,
-                fullscreenState: .inFullscreen
-            )
+            FloatingPanel.shouldFreezeShellFrame(fullscreenState: .exitingFullscreen)
         )
     }
 
-    func testShellWaitsUntilFullscreenIsEstablishedBeforeOrderingOut() {
-        XCTAssertFalse(
-            FloatingPanel.shouldSuppressShell(
-                isPinned: false,
-                fullscreenState: .enteringFullscreen
+    func testFullscreenOwnerObservationSurvivesClicksInSummonedShell() {
+        XCTAssertTrue(
+            FloatingPanel.shouldKeepObservedFullscreenOwner(
+                currentState: .inFullscreen,
+                isSameWebView: false
             )
         )
         XCTAssertTrue(
-            FloatingPanel.shouldSuppressShell(
-                isPinned: false,
-                fullscreenState: .inFullscreen
+            FloatingPanel.shouldKeepObservedFullscreenOwner(
+                currentState: .exitingFullscreen,
+                isSameWebView: false
             )
         )
         XCTAssertFalse(
-            FloatingPanel.shouldSuppressShell(
-                isPinned: false,
-                fullscreenState: .exitingFullscreen
+            FloatingPanel.shouldKeepObservedFullscreenOwner(
+                currentState: .notInFullscreen,
+                isSameWebView: false
             )
         )
         XCTAssertFalse(
-            FloatingPanel.shouldSuppressShell(
-                isPinned: true,
-                fullscreenState: .inFullscreen
+            FloatingPanel.shouldKeepObservedFullscreenOwner(
+                currentState: .inFullscreen,
+                isSameWebView: true
             )
         )
     }
@@ -265,6 +258,27 @@ final class AppPreferencesStoreTests: XCTestCase {
         XCTAssertFalse(
             WebPanelContainerView.canMutateWebViewHierarchy(
                 fullscreenState: .exitingFullscreen
+            )
+        )
+    }
+
+    func testFullscreenOwnerUsesIndependentShellHostForAnotherTab() {
+        XCTAssertTrue(
+            WebPanelContainerView.shouldUseIndependentShellHost(
+                hasFullscreenOwner: true,
+                targetFullscreenState: .notInFullscreen
+            )
+        )
+        XCTAssertFalse(
+            WebPanelContainerView.shouldUseIndependentShellHost(
+                hasFullscreenOwner: false,
+                targetFullscreenState: .notInFullscreen
+            )
+        )
+        XCTAssertFalse(
+            WebPanelContainerView.shouldUseIndependentShellHost(
+                hasFullscreenOwner: true,
+                targetFullscreenState: .inFullscreen
             )
         )
     }
@@ -374,5 +388,67 @@ final class AppPreferencesStoreTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 80_000_000)
         XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testFullscreenOwnerSurvivesShellSwitchUntilFullscreenEnds() async throws {
+        let fullscreenProfile = WebAppProfile(
+            order: 0,
+            name: "Video",
+            homeURL: URL(string: "https://example.com/video")!,
+            residencyPolicy: .cold,
+            backgroundMediaPolicy: .pauseWhenInactive
+        )
+        let shellProfile = WebAppProfile(
+            order: 1,
+            name: "Chat",
+            homeURL: URL(string: "https://example.com/chat")!,
+            residencyPolicy: .cold,
+            backgroundMediaPolicy: .pauseWhenInactive
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        _ = pool.webView(for: fullscreenProfile)
+        _ = pool.webView(for: shellProfile)
+
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
+        var fullscreen = true
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            hiddenActiveGraceDelay: 0.01,
+            mediaProtectionPollDelay: 0.005,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            elementFullscreenQuery: { slotID in
+                slotID == fullscreenProfile.id && fullscreen
+            },
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: fullscreenProfile)
+        lifecycle.activate(profile: fullscreenProfile)
+        lifecycle.deactivate(profile: fullscreenProfile)
+        lifecycle.activate(profile: shellProfile)
+
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(fullscreenProfile.id))
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertTrue(
+            pool.contains(slotID: fullscreenProfile.id),
+            "selecting another shell tab must not evict the fullscreen owner"
+        )
+
+        fullscreen = false
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertFalse(
+            pool.contains(slotID: fullscreenProfile.id),
+            "after fullscreen ends, ordinary inactive cold release should resume"
+        )
+        XCTAssertTrue(pool.contains(slotID: shellProfile.id))
     }
 }
