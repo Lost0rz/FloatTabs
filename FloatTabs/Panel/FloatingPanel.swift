@@ -155,11 +155,12 @@ final class FloatingPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if Self.isMouseDown(event.type),
            let webView = webViewHit(by: event) {
-            // A reused WebKit fullscreen window can remain associated with the
-            // display/Space from the previous session even after it is ordered
-            // out. Before a new request is generated, move that hidden standard
-            // NSWindow onto the display containing this interaction. WebKit will
-            // still own the actual enter/exit transition.
+            // Do not move WebKit's reusable fullscreen NSWindow ourselves.
+            // Physical multi-display diagnostics proved WebKit re-selects the
+            // fullscreen display from NSScreen.main on every entry and can move
+            // this same hidden window itself. Mutating its frame between sessions
+            // risks carrying stale fullscreen-Space affiliation into the next
+            // enter. Observe it for diagnostics, but leave ownership to WebKit.
             prepareReusableFullscreenWindowForPotentialRequest(
                 webView: webView,
                 mouseLocation: NSEvent.mouseLocation
@@ -337,40 +338,21 @@ final class FloatingPanel: NSPanel {
         }
 
         let screens = NSScreen.screens
-        guard let index = Self.targetScreenIndex(
+        let mouseScreen = Self.targetScreenIndex(
             mouseLocation: mouseLocation,
             screenFrames: screens.map(\.frame)
-        ) else {
-            return
-        }
-        let targetScreen = screens[index]
+        ).map { screens[$0] }
 
         FloatTabsDiagnostics.record(
-            "reusable_fullscreen_window_preposition_before",
+            "reusable_fullscreen_window_left_to_webkit",
             fields: [
                 "window_number": String(reusableFullscreenWindow.windowNumber),
                 "window_visible": String(reusableFullscreenWindow.isVisible),
                 "window_active_space": String(reusableFullscreenWindow.isOnActiveSpace),
                 "window_frame": NSStringFromRect(reusableFullscreenWindow.frame),
                 "window_screen_frame": reusableFullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-                "target_screen_frame": NSStringFromRect(targetScreen.frame),
-            ]
-        )
-
-        // Use only public NSWindow/NSScreen API. The window remains hidden; this
-        // updates its AppKit screen association before WebKit calls
-        // `enterFullScreenMode` again on the same reused window.
-        reusableFullscreenWindow.setFrame(targetScreen.frame, display: false)
-
-        FloatTabsDiagnostics.record(
-            "reusable_fullscreen_window_preposition_after",
-            fields: [
-                "window_number": String(reusableFullscreenWindow.windowNumber),
-                "window_visible": String(reusableFullscreenWindow.isVisible),
-                "window_active_space": String(reusableFullscreenWindow.isOnActiveSpace),
-                "window_frame": NSStringFromRect(reusableFullscreenWindow.frame),
-                "window_screen_frame": reusableFullscreenWindow.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-                "target_screen_frame": NSStringFromRect(targetScreen.frame),
+                "main_screen_frame": NSScreen.main.map { NSStringFromRect($0.frame) } ?? "nil",
+                "mouse_screen_frame": mouseScreen.map { NSStringFromRect($0.frame) } ?? "nil",
             ]
         )
     }
