@@ -15,6 +15,7 @@ final class SlotLifecycleCoordinator {
     static let defaultWarmResidentLimit = 2
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
+    typealias ElementFullscreenQuery = (UUID) -> Bool
 
     private struct InactivePlan {
         let token: UUID
@@ -30,6 +31,7 @@ final class SlotLifecycleCoordinator {
     private let mediaProtectionPollDelay: TimeInterval
     private let warmResidentLimit: Int
     private let mediaPlayingQuery: MediaPlayingQuery
+    private let elementFullscreenQuery: ElementFullscreenQuery
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
@@ -49,6 +51,7 @@ final class SlotLifecycleCoordinator {
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
         warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
+        elementFullscreenQuery: ElementFullscreenQuery? = nil,
         installsMemoryPressureSource: Bool = true
     ) {
         self.webViewPool = webViewPool
@@ -64,6 +67,9 @@ final class SlotLifecycleCoordinator {
                 return
             }
             webViewPool.isMediaPlaying(slotID: slotID, completion: completion)
+        }
+        self.elementFullscreenQuery = elementFullscreenQuery ?? { [weak webViewPool] slotID in
+            webViewPool?.isPresentingElementFullscreen(slotID: slotID) ?? false
         }
 
         if installsMemoryPressureSource {
@@ -358,14 +364,47 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
-            self.hiddenActiveToken = nil
-            self.activeSlotID = nil
-            self.container.deactivate(
-                slotID: profile.id,
-                residencyPolicy: profile.residencyPolicy
-            )
-            self.prepareInactive(profile: profile, resetWarmRecency: true)
+            if self.elementFullscreenQuery(profile.id) {
+                self.scheduleHiddenFullscreenProtectionRecheck(profile: profile)
+                return
+            }
+
+            self.finishHiddenActiveTransition(profile: profile)
         }
+    }
+
+    /// While WebKit owns an element-fullscreen presentation it has temporarily
+    /// reparented the live WKWebView out of the FloatTabs container. Keep the Slot
+    /// active and resident, then start a fresh hidden-active grace period only
+    /// after fullscreen actually ends.
+    private func scheduleHiddenFullscreenProtectionRecheck(profile: WebAppProfile) {
+        let token = UUID()
+        hiddenActiveToken = token
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + mediaProtectionPollDelay) { [weak self] in
+            guard let self,
+                  self.hiddenActiveToken == token,
+                  !self.panelIsVisible,
+                  self.activeSlotID == profile.id else {
+                return
+            }
+
+            if self.elementFullscreenQuery(profile.id) {
+                self.scheduleHiddenFullscreenProtectionRecheck(profile: profile)
+            } else {
+                self.scheduleHiddenActiveTransition(profile: profile)
+            }
+        }
+    }
+
+    private func finishHiddenActiveTransition(profile: WebAppProfile) {
+        hiddenActiveToken = nil
+        activeSlotID = nil
+        container.deactivate(
+            slotID: profile.id,
+            residencyPolicy: profile.residencyPolicy
+        )
+        prepareInactive(profile: profile, resetWarmRecency: true)
     }
 
     private func enforceWarmResidentLimit() {
