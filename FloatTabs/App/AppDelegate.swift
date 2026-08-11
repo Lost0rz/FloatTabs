@@ -380,6 +380,7 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
 
         window.setFrame(targetScreen.visibleFrame, display: false)
         window.makeKeyAndOrderFront(nil)
+        _ = window.makeFirstResponder(webView)
 
         // Give AppKit one run-loop turn to associate this fresh app-owned window
         // with the target display before starting the standard fullscreen Space.
@@ -435,6 +436,7 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         }
         AppOwnedFullscreenPresentation.markEntered(webView: activeWebView)
         sourcePanel?.appOwnedFullscreenPhaseDidChange()
+        _ = window.makeFirstResponder(activeWebView)
         FloatTabsDiagnostics.record(
             "app_owned_fullscreen_did_enter",
             fields: [
@@ -444,7 +446,10 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
                 "window_active_space": String(window.isOnActiveSpace),
             ]
         )
-        FloatTabsDiagnostics.markFullscreenReachedStableState(window)
+        FloatTabsDiagnostics.markFullscreenReachedStableState(
+            window,
+            reason: "app_owned_window_did_enter_fullscreen"
+        )
 
         if let sourcePanel,
            sourcePanelWasVisible,
@@ -537,6 +542,8 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
         let shouldRestoreShell = sourcePanelWasVisible
             && shellAutoSuppressed
             && !shellRestoreCancelledByUser
+        let shouldFocusRestoredWebView = shouldRestoreShell
+            && sourcePanel?.isVisible == false
         let window = fullscreenWindow
 
         // Clear ownership before restoring the WKWebView so normal FloatTabs host
@@ -579,6 +586,9 @@ final class AppOwnedFullscreenCoordinator: NSObject, WKScriptMessageHandler, NSW
            let sourcePanel,
            !sourcePanel.isVisible {
             sourcePanel.makeKeyAndOrderFront(nil)
+            if shouldFocusRestoredWebView, let webView {
+                _ = sourcePanel.makeFirstResponder(webView)
+            }
         }
 
         FloatTabsDiagnostics.record(

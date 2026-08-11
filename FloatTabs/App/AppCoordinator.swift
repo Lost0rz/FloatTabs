@@ -135,7 +135,10 @@ enum FloatTabsDiagnostics {
 #endif
     }
 
-    static func markFullscreenReachedStableState(_ window: NSWindow) {
+    static func markFullscreenReachedStableState(
+        _ window: NSWindow,
+        reason: String
+    ) {
 #if DEBUG
         guard let candidateID = pendingDoubleClickCandidateID else { return }
         candidateWatchdog?.cancel()
@@ -146,7 +149,7 @@ enum FloatTabsDiagnostics {
             fields: [
                 "candidate": candidateID,
                 "elapsed_ms": String(Int(elapsed * 1000)),
-                "reason": "webkit_fullscreen_state_reached_inFullscreen",
+                "reason": reason,
                 "fullscreen_window": windowSummary(window),
                 "windows": allWindowSummary(),
             ].merging(globalFields()) { _, new in new }
@@ -212,7 +215,7 @@ enum FloatTabsDiagnostics {
                     fields: [
                         "candidate": candidateID,
                         "elapsed_ms": String(Int(elapsed * 1000)),
-                        "reason": "webkit_fullscreen_state_never_reached_inFullscreen_within_2500ms",
+                        "reason": "fullscreen_stable_state_not_reached_within_2500ms",
                         "windows": allWindowSummary(),
                     ].merging(globalFields()) { _, new in new }
                 )
