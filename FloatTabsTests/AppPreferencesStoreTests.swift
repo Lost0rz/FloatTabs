@@ -1,3 +1,5 @@
+import AppKit
+import WebKit
 import XCTest
 @testable import FloatTabs
 
@@ -136,5 +138,104 @@ final class AppPreferencesStoreTests: XCTestCase {
         let visibleSize = PopupCoordinator.visibleSourceSize(for: webView)
         XCTAssertEqual(visibleSize.width, 640, accuracy: 0.001)
         XCTAssertEqual(visibleSize.height, 720, accuracy: 0.001)
+    }
+
+    func testPinControlsActualPanelWindowLevel() {
+        let panel = FloatingPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 760)
+        )
+
+        XCTAssertEqual(panel.level, .normal)
+        XCTAssertFalse(panel.isPresentationPinned)
+
+        panel.setPresentationPinned(true)
+        XCTAssertEqual(panel.level, .floating)
+        XCTAssertTrue(panel.isPresentationPinned)
+
+        panel.setPresentationPinned(false)
+        XCTAssertEqual(panel.level, .normal)
+        XCTAssertFalse(panel.isPresentationPinned)
+    }
+
+    func testMouseDownAnchorsKeyboardFocusBeforeWebFullscreenDecision() {
+        XCTAssertTrue(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .leftMouseDown,
+                isKeyWindow: false
+            )
+        )
+        XCTAssertTrue(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .rightMouseDown,
+                isKeyWindow: false
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .leftMouseDown,
+                isKeyWindow: true
+            )
+        )
+        XCTAssertFalse(
+            FloatingPanel.shouldAnchorKeyboardFocus(
+                eventType: .mouseMoved,
+                isKeyWindow: false
+            )
+        )
+    }
+
+    func testWebFullscreenStateProtectionCoversTransitions() {
+        XCTAssertFalse(WebViewPool.isActiveFullscreenState(.notInFullscreen))
+        XCTAssertTrue(WebViewPool.isActiveFullscreenState(.enteringFullscreen))
+        XCTAssertTrue(WebViewPool.isActiveFullscreenState(.inFullscreen))
+        XCTAssertTrue(WebViewPool.isActiveFullscreenState(.exitingFullscreen))
+    }
+
+    func testHiddenFullscreenSlotSurvivesGraceAndGetsFreshGraceAfterExit() async throws {
+        let profile = WebAppProfile(
+            order: 0,
+            name: "Fullscreen",
+            homeURL: URL(string: "https://example.com")!,
+            residencyPolicy: .cold,
+            backgroundMediaPolicy: .pauseWhenInactive
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        _ = pool.webView(for: profile)
+
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
+        var isFullscreen = true
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            hiddenActiveGraceDelay: 0.01,
+            mediaProtectionPollDelay: 0.005,
+            mediaPlayingQuery: { _, completion in completion(false) },
+            elementFullscreenQuery: { _ in isFullscreen },
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+
+        isFullscreen = false
+        try await Task.sleep(nanoseconds: 8_000_000)
+        XCTAssertTrue(
+            pool.contains(slotID: profile.id),
+            "leaving fullscreen should start a fresh hidden-active grace, not release immediately"
+        )
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 }
