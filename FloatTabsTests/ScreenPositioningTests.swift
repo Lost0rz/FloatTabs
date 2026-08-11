@@ -185,7 +185,6 @@ final class PanelFrameStoreTests: XCTestCase {
 
     func testInvalidSerializedFrameIsRejected() {
         defaults.set("not-a-frame", forKey: "frame")
-        let store = PanelFrameStore(defaults: defaults, key: "frame")
         XCTAssertNil(store.loadFrame())
     }
 }
@@ -195,6 +194,79 @@ final class FloatingPanelResizePolicyTests: XCTestCase {
     func testNativeResizeStyleIsDisabled() {
         let panel = FloatingPanel(contentRect: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize))
         XCTAssertFalse(panel.styleMask.contains(.resizable))
+    }
+
+    func testCrossDisplayRearmOnlyTargetsHiddenStaleActiveSpaceWindow() {
+        let screenA = NSRect(x: 0, y: 0, width: 1920, height: 1080)
+        let screenB = NSRect(x: 1920, y: 183, width: 1024, height: 666)
+
+        XCTAssertTrue(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .notInFullscreen,
+                isSameWebView: true,
+                windowIsVisible: false,
+                windowIsOnActiveSpace: true,
+                windowScreenFrame: screenB,
+                targetScreenFrame: screenA
+            )
+        )
+
+        XCTAssertFalse(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .notInFullscreen,
+                isSameWebView: true,
+                windowIsVisible: false,
+                windowIsOnActiveSpace: false,
+                windowScreenFrame: screenB,
+                targetScreenFrame: screenA
+            ),
+            "The real-Mac success baseline had activeSpace=false and must remain untouched"
+        )
+
+        XCTAssertFalse(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .notInFullscreen,
+                isSameWebView: true,
+                windowIsVisible: false,
+                windowIsOnActiveSpace: true,
+                windowScreenFrame: screenA,
+                targetScreenFrame: screenA
+            ),
+            "Same-display re-entry must not disturb WebKit's reusable fullscreen window"
+        )
+
+        XCTAssertFalse(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .notInFullscreen,
+                isSameWebView: true,
+                windowIsVisible: true,
+                windowIsOnActiveSpace: true,
+                windowScreenFrame: screenB,
+                targetScreenFrame: screenA
+            )
+        )
+
+        XCTAssertFalse(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .enteringFullscreen,
+                isSameWebView: true,
+                windowIsVisible: false,
+                windowIsOnActiveSpace: true,
+                windowScreenFrame: screenB,
+                targetScreenFrame: screenA
+            )
+        )
+
+        XCTAssertFalse(
+            FloatingPanel.shouldRearmReusableFullscreenWindow(
+                fullscreenState: .notInFullscreen,
+                isSameWebView: false,
+                windowIsVisible: false,
+                windowIsOnActiveSpace: true,
+                windowScreenFrame: screenB,
+                targetScreenFrame: screenA
+            )
+        )
     }
 }
 
