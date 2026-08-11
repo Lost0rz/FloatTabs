@@ -185,6 +185,7 @@ final class PanelFrameStoreTests: XCTestCase {
 
     func testInvalidSerializedFrameIsRejected() {
         defaults.set("not-a-frame", forKey: "frame")
+        let store = PanelFrameStore(defaults: defaults, key: "frame")
         XCTAssertNil(store.loadFrame())
     }
 }
