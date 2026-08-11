@@ -69,7 +69,15 @@ final class FloatingPanel: NSPanel {
             }
             makeKey()
         }
+
         super.sendEvent(event)
+
+        // PanelController is the single owner of Pin state. Synchronize after the
+        // event so both the rail button and the keyboard command update window
+        // level without introducing a second Pin state machine.
+        if let panelController = delegate as? PanelController {
+            setPresentationPinned(panelController.isPinned)
+        }
     }
 
     static func shouldAnchorKeyboardFocus(
