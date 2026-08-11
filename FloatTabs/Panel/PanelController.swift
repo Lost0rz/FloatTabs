@@ -8,7 +8,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
     private let frameStore: PanelFrameStore
-    private let quickURLOverlayView = QuickURLOverlayView()
+    private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
@@ -74,6 +74,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.handleManualResizeEnded()
         }
         configureSlotInteractions()
+        configurePreferenceObservers()
+        synchronizePreferencePresentation()
         rootView.externalControlZoneView.setPinned(isPinned)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -101,6 +103,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func showFloatTabs() {
         capturePreviousApplication()
         positionPanelForCurrentScreens()
+        synchronizeFixedViewportAfterPositioning()
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
         activateFloatTabs()
@@ -110,7 +113,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs() {
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
@@ -152,6 +155,12 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     static func shouldAutoHide(panelIsVisible: Bool, isPinned: Bool) -> Bool {
         panelIsVisible && !isPinned
+    }
+
+    static func shouldPersistManualViewportToActiveTab(
+        windowSizeMode: PanelWindowSizeMode
+    ) -> Bool {
+        windowSizeMode == .perWebApp
     }
 
     private func togglePinnedState() {
@@ -205,7 +214,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // The user has already selected another application. Unlike the explicit
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
@@ -301,8 +310,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .resetZoom:
             setActiveZoom(1.0)
 
-        case .quickURL:
-            presentQuickURL()
+        case .addressBar:
+            presentAddressBar()
 
         case .returnHome:
             returnActiveSlotHome()
@@ -319,25 +328,25 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func configureTransientUI() {
-        quickURLOverlayView.translatesAutoresizingMaskIntoConstraints = false
+        addressOverlayView.translatesAutoresizingMaskIntoConstraints = false
         zoomHUDView.translatesAutoresizingMaskIntoConstraints = false
-        rootView.addSubview(quickURLOverlayView)
+        rootView.addSubview(addressOverlayView)
         rootView.addSubview(zoomHUDView)
 
         NSLayoutConstraint.activate([
-            quickURLOverlayView.leadingAnchor.constraint(
+            addressOverlayView.leadingAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.leadingAnchor,
                 constant: 22
             ),
-            quickURLOverlayView.trailingAnchor.constraint(
+            addressOverlayView.trailingAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.trailingAnchor,
                 constant: -22
             ),
-            quickURLOverlayView.topAnchor.constraint(
+            addressOverlayView.topAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.topAnchor,
                 constant: 22
             ),
-            quickURLOverlayView.heightAnchor.constraint(equalToConstant: 52),
+            addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
 
             zoomHUDView.centerXAnchor.constraint(
                 equalTo: rootView.webPanelContainerView.centerXAnchor
@@ -350,12 +359,84 @@ final class PanelController: NSObject, NSWindowDelegate {
             zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
         ])
 
-        quickURLOverlayView.onCommit = { [weak self] rawValue in
-            self?.commitQuickURL(rawValue) ?? false
+        addressOverlayView.onCommit = { [weak self] rawValue in
+            self?.commitAddress(rawValue) ?? false
         }
-        quickURLOverlayView.onDismiss = { [weak self] in
+        addressOverlayView.onCopy = { [weak self] rawValue in
+            self?.copyAddressToPasteboard(rawValue) ?? false
+        }
+        addressOverlayView.onCreateWebApp = { [weak self] in
+            self?.presentDerivedWebAppFromCurrentPage()
+        }
+        addressOverlayView.onDismiss = { [weak self] in
             self?.focusActiveWebViewIfAvailable()
         }
+    }
+
+    private func configurePreferenceObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(borderPreferenceDidChange(_:)),
+            name: .floatTabsBorderPreferenceDidChange,
+            object: preferencesStore
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowSizeModeDidChange(_:)),
+            name: .floatTabsWindowSizeModeDidChange,
+            object: preferencesStore
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(fixedWindowSizeDidChange(_:)),
+            name: .floatTabsFixedWindowSizeDidChange,
+            object: preferencesStore
+        )
+    }
+
+    @objc private func borderPreferenceDidChange(_ notification: Notification) {
+        synchronizeBorderTheme()
+    }
+
+    @objc private func windowSizeModeDidChange(_ notification: Notification) {
+        synchronizeWindowSizeMode()
+        switch preferencesStore.windowSizeMode {
+        case .perWebApp:
+            if let active = tabStore.activeProfile {
+                applyPreferredViewport(active.renderingProfile.viewportSize)
+            }
+        case .fixed:
+            guard hasPositionedPanel else { return }
+            if preferencesStore.hasStoredFixedViewportSize {
+                applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+            } else {
+                let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+                preferencesStore.fixedViewportSize = viewport
+            }
+        }
+    }
+
+    @objc private func fixedWindowSizeDidChange(_ notification: Notification) {
+        guard preferencesStore.windowSizeMode == .fixed else { return }
+        applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+    }
+
+    private func synchronizePreferencePresentation() {
+        synchronizeBorderTheme()
+        synchronizeWindowSizeMode()
+    }
+
+    private func synchronizeBorderTheme() {
+        rootView.interactionBorderView.apply(
+            theme: preferencesStore.borderTheme,
+            customColor: preferencesStore.customBorderColor
+        )
+    }
+
+    private func synchronizeWindowSizeMode() {
+        rootView.externalControlZoneView.setWindowSizeEditingEnabled(
+            preferencesStore.windowSizeMode == .perWebApp
+        )
     }
 
     private func configureSlotInteractions() {
@@ -389,6 +470,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onSetWindowSize = { [weak self] id, preset in
             guard let self,
+                  self.preferencesStore.windowSizeMode == .perWebApp,
                   let profile = self.tabStore.profiles.first(where: { $0.id == id }),
                   let size = preset.size else { return }
             _ = self.tabStore.updateRenderingProfile(
@@ -474,7 +556,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable() {
-        guard !quickURLOverlayView.isPresented,
+        guard !addressOverlayView.isPresented,
               let webView = rootView.webPanelContainerView.currentWebView else { return }
         _ = panel.makeFirstResponder(webView)
     }
@@ -519,7 +601,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard panel.attachedSheet == nil else { return }
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
-        WebAppEditorController.presentAdd(attachedTo: panel) { [weak self] value in
+        WebAppEditorController.presentAdd(
+            allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
+            attachedTo: panel
+        ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
@@ -532,9 +617,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                     return
                 }
 
-                // The user explicitly chose this new Slot's size. Apply it now;
-                // the follow preference only governs later automatic Slot switches.
-                self.applyPreferredViewport(added.renderingProfile.viewportSize)
+                if self.preferencesStore.windowSizeMode == .perWebApp {
+                    self.applyPreferredViewport(added.renderingProfile.viewportSize)
+                }
             }
         }
     }
@@ -545,7 +630,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        WebAppEditorController.presentEdit(profile: profile, attachedTo: panel) { [weak self] value in
+        WebAppEditorController.presentEdit(
+            profile: profile,
+            allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
+            attachedTo: panel
+        ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self, let value else { return }
                 let oldHomeURL = self.tabStore.profiles.first(where: { $0.id == id })?.homeURL
@@ -560,9 +649,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if oldHomeURL != value.url {
                     self.webViewPool.navigate(slotID: id, to: value.url)
                 }
-                if self.tabStore.activeTabID == id {
-                    // Editing the current Slot is an explicit size request and
-                    // must not depend on the automatic switch-follow preference.
+                if self.tabStore.activeTabID == id,
+                   self.preferencesStore.windowSizeMode == .perWebApp {
                     self.applyPreferredViewport(value.renderingProfile.viewportSize)
                 }
             }
@@ -601,41 +689,106 @@ final class PanelController: NSObject, NSWindowDelegate {
         zoomHUDView.show(zoom: normalized)
     }
 
-    private func presentQuickURL() {
-        guard let profile = tabStore.activeProfile else { return }
-        let url = profile.currentURL ?? profile.homeURL
-        quickURLOverlayView.present(url: url, in: panel)
+    private func presentAddressBar() {
+        guard let url = currentAddressURL() else { return }
+        addressOverlayView.present(url: url, in: panel)
     }
 
-    private func commitQuickURL(_ rawValue: String) -> Bool {
+    private func currentAddressURL() -> URL? {
+        if let webURL = rootView.webPanelContainerView.currentWebView?.url,
+           WebAppURL.isSafe(webURL) {
+            return webURL
+        }
+        guard let profile = tabStore.activeProfile else { return nil }
+        if let currentURL = profile.currentURL, WebAppURL.isSafe(currentURL) {
+            return currentURL
+        }
+        return WebAppURL.isSafe(profile.homeURL) ? profile.homeURL : nil
+    }
+
+    private func commitAddress(_ rawValue: String) -> Bool {
         guard let id = tabStore.activeTabID,
               let url = WebAppURL.normalized(from: rawValue) else {
             NSSound.beep()
-            quickURLOverlayView.markInvalid()
+            addressOverlayView.markInvalid()
             return false
         }
 
         tabStore.updateCurrentURL(id: id, url: url)
         webViewPool.navigate(slotID: id, to: url)
-        quickURLOverlayView.dismiss()
+        addressOverlayView.dismiss()
         focusActiveWebViewIfAvailable()
         return true
+    }
+
+    private func copyAddressToPasteboard(_ rawValue: String) -> Bool {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(value, forType: .string)
+    }
+
+    private func presentDerivedWebAppFromCurrentPage() {
+        guard panel.attachedSheet == nil,
+              let source = tabStore.activeProfile,
+              let currentURL = currentAddressURL() else {
+            return
+        }
+
+        let sourceID = source.id
+        addressOverlayView.dismiss()
+        WebAppEditorController.presentDerivedAdd(
+            sourceProfile: source,
+            currentURL: currentURL,
+            attachedTo: panel
+        ) { [weak self] name in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.focusActiveWebViewIfAvailable() }
+                guard let name else { return }
+                _ = self.tabStore.addDerived(
+                    from: sourceID,
+                    name: name,
+                    homeURL: currentURL
+                )
+            }
+        }
     }
 
     private func handleManualResizeEnded() {
         clampPanelToConnectedScreens()
         let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
-        if let id = tabStore.activeTabID {
-            _ = tabStore.updatePreferredViewport(
-                id: id,
-                size: CGSize(width: viewport.width, height: viewport.height)
-            )
+
+        switch preferencesStore.windowSizeMode {
+        case .perWebApp:
+            if let id = tabStore.activeTabID {
+                _ = tabStore.updatePreferredViewport(
+                    id: id,
+                    size: CGSize(width: viewport.width, height: viewport.height)
+                )
+            }
+        case .fixed:
+            // Manual resizing updates only the shared Fixed viewport. Every Web
+            // App keeps its own hidden preferred size for Per Web App mode.
+            preferencesStore.fixedViewportSize = viewport
         }
         persistPanelFrame()
     }
 
     private func applyPreferredViewport(_ viewportSize: CGSize) {
-        guard hasPositionedPanel else { return }
+        guard preferencesStore.windowSizeMode == .perWebApp,
+              hasPositionedPanel else { return }
+        applyViewportSize(viewportSize, animated: true)
+    }
+
+    private func applySharedFixedViewport(_ viewportSize: CGSize, animated: Bool) {
+        guard preferencesStore.windowSizeMode == .fixed,
+              hasPositionedPanel else { return }
+        applyViewportSize(viewportSize, animated: animated)
+    }
+
+    private func applyViewportSize(_ viewportSize: CGSize, animated: Bool) {
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
         guard let visibleFrame else { return }
@@ -650,8 +803,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             visibleFrame: visibleFrame
         )
         guard target != panel.frame else { return }
-        panel.setFrame(target, display: true, animate: true)
+        panel.setFrame(target, display: true, animate: animated)
         persistPanelFrame()
+    }
+
+    private func synchronizeFixedViewportAfterPositioning() {
+        guard preferencesStore.windowSizeMode == .fixed,
+              hasPositionedPanel else { return }
+        if preferencesStore.hasStoredFixedViewportSize {
+            applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: false)
+        } else {
+            let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
+            preferencesStore.fixedViewportSize = viewport
+        }
     }
 
     private func activateFloatTabs() {
@@ -719,12 +883,16 @@ final class PanelController: NSObject, NSWindowDelegate {
 }
 
 @MainActor
-final class QuickURLOverlayView: NSVisualEffectView {
+final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onCommit: ((String) -> Bool)?
+    var onCopy: ((String) -> Bool)?
+    var onCreateWebApp: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let field = QuickURLTextField()
-    private let icon = NSImageView()
+    let field = NSTextField()
+    private let copyButton = NSButton()
+    private let createButton = NSButton(title: "New App", target: nil, action: nil)
+    private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
 
     override init(frame frameRect: NSRect) {
@@ -736,33 +904,48 @@ final class QuickURLOverlayView: NSVisualEffectView {
         layer?.cornerRadius = 12
         layer?.masksToBounds = true
 
-        icon.image = NSImage(systemSymbolName: "link", accessibilityDescription: "URL")
-        icon.contentTintColor = .secondaryLabelColor
-        icon.translatesAutoresizingMaskIntoConstraints = false
         field.translatesAutoresizingMaskIntoConstraints = false
         field.font = .systemFont(ofSize: 14, weight: .medium)
         field.placeholderString = "https://example.com"
         field.focusRingType = .none
+        field.delegate = self
 
-        addSubview(icon)
+        copyButton.image = NSImage(
+            systemSymbolName: "doc.on.doc",
+            accessibilityDescription: "Copy URL"
+        )
+        copyButton.toolTip = "Copy URL"
+        copyButton.bezelStyle = .inline
+        copyButton.isBordered = false
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+        copyButton.target = self
+        copyButton.action = #selector(copyPressed(_:))
+
+        createButton.toolTip = "Create a new Web App from the current page"
+        createButton.bezelStyle = .rounded
+        createButton.controlSize = .small
+        createButton.translatesAutoresizingMaskIntoConstraints = false
+        createButton.target = self
+        createButton.action = #selector(createPressed(_:))
+
         addSubview(field)
+        addSubview(copyButton)
+        addSubview(createButton)
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 14),
-            icon.heightAnchor.constraint(equalToConstant: 14),
-            field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             field.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            copyButton.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 8),
+            copyButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 26),
+            copyButton.heightAnchor.constraint(equalToConstant: 26),
+
+            createButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            createButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 66),
         ])
 
-        field.onCommit = { [weak self] value in
-            _ = self?.onCommit?(value)
-        }
-        field.onCancel = { [weak self] in
-            self?.dismiss()
-            self?.onDismiss?()
-        }
         isHidden = true
     }
 
@@ -776,6 +959,8 @@ final class QuickURLOverlayView: NSVisualEffectView {
     }
 
     func present(url: URL, in window: NSWindow) {
+        copyFeedbackWorkItem?.cancel()
+        restoreCopyIcon()
         field.textColor = .labelColor
         field.stringValue = url.absoluteString
         isHidden = false
@@ -785,6 +970,8 @@ final class QuickURLOverlayView: NSVisualEffectView {
     }
 
     func dismiss() {
+        copyFeedbackWorkItem?.cancel()
+        restoreCopyIcon()
         isHidden = true
         isPresented = false
         field.textColor = .labelColor
@@ -794,22 +981,49 @@ final class QuickURLOverlayView: NSVisualEffectView {
         field.textColor = .systemRed
         field.selectText(nil)
     }
-}
 
-@MainActor
-private final class QuickURLTextField: NSTextField {
-    var onCommit: ((String) -> Void)?
-    var onCancel: (() -> Void)?
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 36, 76:
-            onCommit?(stringValue)
-        case 53:
-            onCancel?()
-        default:
-            super.keyDown(with: event)
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        let commandName = NSStringFromSelector(commandSelector)
+        if commandSelector == #selector(NSResponder.insertNewline(_:))
+            || commandName == "insertNewlineIgnoringFieldEditor:" {
+            _ = onCommit?(field.stringValue)
+            return true
         }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            dismiss()
+            onDismiss?()
+            return true
+        }
+        return false
+    }
+
+    @objc private func copyPressed(_ sender: NSButton) {
+        guard onCopy?(field.stringValue) == true else { return }
+        copyFeedbackWorkItem?.cancel()
+        copyButton.image = NSImage(
+            systemSymbolName: "checkmark",
+            accessibilityDescription: "Copied"
+        )
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.restoreCopyIcon()
+        }
+        copyFeedbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
+    }
+
+    @objc private func createPressed(_ sender: NSButton) {
+        onCreateWebApp?()
+    }
+
+    private func restoreCopyIcon() {
+        copyButton.image = NSImage(
+            systemSymbolName: "doc.on.doc",
+            accessibilityDescription: "Copy URL"
+        )
     }
 }
 

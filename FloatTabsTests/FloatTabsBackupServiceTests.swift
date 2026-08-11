@@ -31,7 +31,9 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             ),
             globalPreferences: FloatTabsBackupPreferences(
                 appearanceMode: .dark,
-                followPreferredSize: false
+                followPreferredSize: false,
+                borderTheme: .green,
+                customBorderColorHex: "#123456FF"
             ),
             globalShowHideShortcut: FloatTabsBackupShortcut(
                 carbonKeyCode: 50,
@@ -48,6 +50,8 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.webAppState.profiles.first?.backgroundMediaPolicy, .allowBackgroundAudio)
         XCTAssertEqual(decoded.globalPreferences.appearanceMode, .dark)
         XCTAssertFalse(decoded.globalPreferences.followPreferredSize)
+        XCTAssertEqual(decoded.globalPreferences.borderTheme, .green)
+        XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
     }
 

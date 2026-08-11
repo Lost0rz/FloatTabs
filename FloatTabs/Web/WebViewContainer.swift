@@ -162,6 +162,8 @@ final class PanelRootView: NSView {
 final class PanelInteractionBorderView: NSView {
     private let gradientLayer = CAGradientLayer()
     private let borderMask = CAShapeLayer()
+    private var borderTheme: PanelBorderTheme = .rainbow
+    private var customBorderColor: NSColor = .systemBlue
 
     var targetWebFrame: NSRect = .zero {
         didSet {
@@ -184,14 +186,7 @@ final class PanelInteractionBorderView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        gradientLayer.type = .conic
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
         gradientLayer.opacity = 0.72
-
-        let palettes = Self.flowPalettes
-        gradientLayer.colors = palettes.first
-        gradientLayer.locations = [0, 0.22, 0.48, 0.74, 1]
 
         borderMask.fillColor = NSColor.clear.cgColor
         borderMask.strokeColor = NSColor.white.cgColor
@@ -200,14 +195,7 @@ final class PanelInteractionBorderView: NSView {
         borderMask.lineCap = .round
         gradientLayer.mask = borderMask
         layer?.addSublayer(gradientLayer)
-
-        let flow = CAKeyframeAnimation(keyPath: "colors")
-        flow.values = palettes
-        flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]
-        flow.duration = 3.2
-        flow.repeatCount = .infinity
-        flow.calculationMode = .linear
-        gradientLayer.add(flow, forKey: "FloatTabs.interactionBorderFlow")
+        applyBorderAppearance()
     }
 
     convenience init() {
@@ -220,6 +208,45 @@ final class PanelInteractionBorderView: NSView {
     }
 
     override var isOpaque: Bool { false }
+
+    func apply(theme: PanelBorderTheme, customColor: NSColor) {
+        borderTheme = theme
+        customBorderColor = customColor
+        applyBorderAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBorderAppearance()
+    }
+
+    private func applyBorderAppearance() {
+        gradientLayer.removeAnimation(forKey: "FloatTabs.interactionBorderFlow")
+
+        if borderTheme == .rainbow {
+            gradientLayer.type = .conic
+            gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+            gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+            let palettes = Self.flowPalettes
+            gradientLayer.colors = palettes.first
+            gradientLayer.locations = [0, 0.22, 0.48, 0.74, 1]
+
+            let flow = CAKeyframeAnimation(keyPath: "colors")
+            flow.values = palettes
+            flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+            flow.duration = 3.2
+            flow.repeatCount = .infinity
+            flow.calculationMode = .linear
+            gradientLayer.add(flow, forKey: "FloatTabs.interactionBorderFlow")
+        } else {
+            let color = borderTheme.solidColor ?? customBorderColor
+            gradientLayer.type = .axial
+            gradientLayer.startPoint = CGPoint(x: 0, y: 0.5)
+            gradientLayer.endPoint = CGPoint(x: 1, y: 0.5)
+            gradientLayer.colors = [color.cgColor, color.cgColor]
+            gradientLayer.locations = [0, 1]
+        }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil

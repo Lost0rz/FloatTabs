@@ -89,6 +89,7 @@ final class ExternalControlZoneView: NSView {
     private var trackingAreaReference: NSTrackingArea?
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
+    private var windowSizeEditingEnabled = true
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -199,6 +200,13 @@ final class ExternalControlZoneView: NSView {
         pinControl.setPinned(isPinned)
     }
 
+    func setWindowSizeEditingEnabled(_ enabled: Bool) {
+        windowSizeEditingEnabled = enabled
+        for tab in tabViews.values {
+            tab.setWindowSizeEditingEnabled(enabled)
+        }
+    }
+
     func setResidentSlotIDs(_ slotIDs: Set<UUID>) {
         residentSlotIDs = slotIDs
         for (slotID, tab) in tabViews {
@@ -238,6 +246,7 @@ final class ExternalControlZoneView: NSView {
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
+        view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
         tabViews[id] = view
         addSubview(view, positioned: .above, relativeTo: addControl)
 
@@ -547,6 +556,7 @@ final class ExternalWebAppTabView: NSView {
     private var isDragging = false
     private var renderingProfile: WebRenderingProfile = .canonicalDefault
     private var residencyPolicy: SlotResidencyPolicy = .warm
+    private var windowSizeEditingEnabled = true
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var faviconOriginKey: String?
     private var sourceIcon: NSImage?
@@ -632,6 +642,10 @@ final class ExternalWebAppTabView: NSView {
         isResident = resident
         updateAppearance()
         updateRuntimeToolTip()
+    }
+
+    func setWindowSizeEditingEnabled(_ enabled: Bool) {
+        windowSizeEditingEnabled = enabled
     }
 
     func update(profile: WebAppProfile, isActive: Bool, isResident: Bool) {
@@ -768,6 +782,10 @@ final class ExternalWebAppTabView: NSView {
             windowSizeMenu.addItem(custom)
         }
         windowSize.submenu = windowSizeMenu
+        windowSize.isEnabled = windowSizeEditingEnabled
+        windowSize.toolTip = windowSizeEditingEnabled
+            ? nil
+            : "Window size is fixed globally in Settings → Appearance."
         menu.addItem(windowSize)
 
         let zoom = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")
