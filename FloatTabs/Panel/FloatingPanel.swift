@@ -16,6 +16,7 @@ final class FloatingPanel: NSPanel {
 
     private weak var fullscreenObservedWebView: WKWebView?
     private var fullscreenObservation: NSKeyValueObservation?
+    private var shellRestoreGeneration = 0
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -63,6 +64,7 @@ final class FloatingPanel: NSPanel {
 
     deinit {
         fullscreenObservation?.invalidate()
+        shellRestoreGeneration &+= 1
     }
 
     override func makeKeyAndOrderFront(_ sender: Any?) {
@@ -78,6 +80,7 @@ final class FloatingPanel: NSPanel {
             fullscreenObservation?.invalidate()
             fullscreenObservation = nil
             fullscreenObservedWebView = nil
+            cancelDeferredShellRestore()
             restoreOrdinaryShellPresentation()
             return
         }
@@ -102,6 +105,7 @@ final class FloatingPanel: NSPanel {
     private func applyShellPresentation(for state: WKWebView.FullscreenState) {
         switch state {
         case .inFullscreen:
+            cancelDeferredShellRestore()
             // Do not orderOut the source panel here. Removing the source window
             // during WebKit fullscreen can strand fullscreen teardown/Spaces.
             // Instead, stop the shell/Tab rail from joining or floating above the
@@ -110,14 +114,21 @@ final class FloatingPanel: NSPanel {
             level = .normal
 
         case .exitingFullscreen:
+            cancelDeferredShellRestore()
             // Keep the shell out of the fullscreen Space until WebKit has fully
             // returned the WKWebView to its source window.
             break
 
         case .notInFullscreen:
-            restoreOrdinaryShellPresentation()
+            // fullscreenState can reach notInFullscreen while WebKit's native
+            // fullscreen window/Space is still visible for a short period. If we
+            // restore .fullScreenAuxiliary + .floating immediately, the shell can
+            // rejoin that dying fullscreen Space and leave Dock/Space presentation
+            // stranded. Restore only after the WebCore fullscreen window is gone.
+            restoreOrdinaryShellPresentationWhenFullscreenWindowIsGone()
 
         case .enteringFullscreen:
+            cancelDeferredShellRestore()
             // Preserve the source-window characteristics while WebKit constructs
             // its native fullscreen presentation. The shell is demoted only once
             // WebKit reports stable inFullscreen.
@@ -125,6 +136,47 @@ final class FloatingPanel: NSPanel {
 
         @unknown default:
             break
+        }
+    }
+
+    private func cancelDeferredShellRestore() {
+        shellRestoreGeneration &+= 1
+    }
+
+    private func restoreOrdinaryShellPresentationWhenFullscreenWindowIsGone() {
+        shellRestoreGeneration &+= 1
+        let generation = shellRestoreGeneration
+        pollForFullscreenWindowExit(generation: generation, attemptsRemaining: 200)
+    }
+
+    private func pollForFullscreenWindowExit(generation: Int, attemptsRemaining: Int) {
+        guard generation == shellRestoreGeneration else { return }
+        guard let observed = fullscreenObservedWebView,
+              observed.fullscreenState == .notInFullscreen else { return }
+
+        if !hasVisibleWebCoreFullscreenWindow() {
+            restoreOrdinaryShellPresentation()
+            return
+        }
+
+        // Ten seconds is intentionally generous. If WebKit still owns a visible
+        // fullscreen window after that, keep the shell demoted rather than forcing
+        // it back into the stale fullscreen Space. A later show/state refresh will
+        // re-evaluate this safely.
+        guard attemptsRemaining > 0 else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.pollForFullscreenWindowExit(
+                generation: generation,
+                attemptsRemaining: attemptsRemaining - 1
+            )
+        }
+    }
+
+    private func hasVisibleWebCoreFullscreenWindow() -> Bool {
+        NSApp.windows.contains { window in
+            guard window.isVisible else { return false }
+            return String(describing: type(of: window)).contains("WebCoreFullScreenWindow")
         }
     }
 
