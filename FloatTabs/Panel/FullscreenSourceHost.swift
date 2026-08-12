@@ -28,6 +28,7 @@ final class FullscreenSourceWindow: NSWindow {
 private final class FullscreenSourceRootView: NSView {
     init(
         container: WebPanelContainerView,
+        railFoldControl: RailFoldControl,
         resizeHandle: PanelResizeHandleView,
         resizeReadout: ResizeReadoutView,
         shellWindow: NSWindow
@@ -37,7 +38,7 @@ private final class FullscreenSourceRootView: NSView {
         let edgeDragView = WebSourceEdgeDragView(targetWindow: shellWindow)
         resizeHandle.resizeTargetWindow = shellWindow
 
-        for view in [container, edgeDragView, resizeHandle, resizeReadout] {
+        for view in [container, edgeDragView, railFoldControl, resizeHandle, resizeReadout] {
             view.removeFromSuperview()
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -53,6 +54,17 @@ private final class FullscreenSourceRootView: NSView {
             edgeDragView.trailingAnchor.constraint(equalTo: trailingAnchor),
             edgeDragView.topAnchor.constraint(equalTo: topAnchor),
             edgeDragView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // Mirror the bottom-right resize affordance: the rail fold is
+            // acquired entirely inside the page's bottom-left corner.
+            railFoldControl.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railFoldControl.bottomAnchor.constraint(equalTo: bottomAnchor),
+            railFoldControl.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
+            ),
+            railFoldControl.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
+            ),
 
             resizeHandle.trailingAnchor.constraint(equalTo: trailingAnchor),
             resizeHandle.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -73,10 +85,11 @@ private final class FullscreenSourceRootView: NSView {
     }
 }
 
-/// Restores the accepted 10 pt in-page move target after splitting the web
-/// surface from the shell window. It always moves the shell; the host follows
-/// through PanelController's window delegate while no fullscreen session runs.
-private final class WebSourceEdgeDragView: NSView {
+/// Owns the inner half of the uniform four-edge move target after splitting the
+/// Web surface from the shell window. It always moves the shell; the host
+/// follows through PanelController's window delegate while no fullscreen
+/// session runs.
+final class WebSourceEdgeDragView: NSView {
     private weak var targetWindow: NSWindow?
     private var startingMouseLocation: NSPoint?
     private var startingWindowOrigin: NSPoint?
@@ -94,7 +107,9 @@ private final class WebSourceEdgeDragView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
+        guard frame.contains(point) else { return nil }
+        let localPoint = convert(point, from: superview)
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -130,18 +145,13 @@ private final class WebSourceEdgeDragView: NSView {
     }
 
     static func dragRects(in bounds: NSRect) -> [NSRect] {
-        let depth = min(max(PanelMetrics.innerMovementOverlap, 0), bounds.height / 2)
-        guard depth > 0 else { return [] }
-        let topWidth = max(bounds.width - PanelMetrics.webRightInteractionSafety, 0)
-        let bottomExclusion = max(
-            PanelMetrics.resizeHandleSize,
-            PanelMetrics.webRightInteractionSafety
+        PanelMovementGeometry.edgeBands(
+            around: bounds,
+            outerDepth: 0,
+            innerDepth: PanelMetrics.innerMovementOverlap,
+            clippingBounds: bounds,
+            bottomRightExclusion: PanelMetrics.resizeHandleSize
         )
-        let bottomWidth = max(bounds.width - bottomExclusion, 0)
-        return [
-            NSRect(x: 0, y: bounds.maxY - depth, width: topWidth, height: depth),
-            NSRect(x: 0, y: 0, width: bottomWidth, height: depth),
-        ]
     }
 }
 
@@ -221,6 +231,7 @@ final class FullscreenSourceHostController {
 
     let window: FullscreenSourceWindow
     let companionContainer = WebPanelContainerView()
+    let railFoldControl = RailFoldControl()
 
     var transientUIContainerView: NSView {
         window.contentView!
@@ -256,6 +267,7 @@ final class FullscreenSourceHostController {
         )
         window.contentView = FullscreenSourceRootView(
             container: container,
+            railFoldControl: railFoldControl,
             resizeHandle: resizeHandle,
             resizeReadout: resizeReadout,
             shellWindow: shellWindow
@@ -286,6 +298,14 @@ final class FullscreenSourceHostController {
             window.makeKeyAndOrderFront(nil)
             _ = window.makeFirstResponder(webView)
         }
+    }
+
+    /// Keep the separately hosted Web surface at the same application-level
+    /// z-order as the shell. Changing WebKit's source window while it owns an
+    /// element-fullscreen session is intentionally deferred until restoration.
+    func setPinnedPresentation(_ isPinned: Bool) {
+        guard !isSessionLocked else { return }
+        window.level = FloatTabsWindowLevel.presentation(isPinned: isPinned)
     }
 
     func orderOutIfSafe() {

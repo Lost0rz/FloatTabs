@@ -1,155 +1,170 @@
 # FloatTabs
 
-FloatTabs is a lightweight native macOS **Persistent Floating Web App Switcher** built with Swift, AppKit, SwiftUI, and WebKit.
+<p align="center">
+  <img src="FloatTabs/Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="128" height="128" alt="FloatTabs app icon">
+</p>
 
-The product is intentionally not a full browser. It keeps a small number of frequently used, long-lived web apps instantly available in a floating macOS panel while leaving complex research and conventional multi-tab browsing to a normal browser.
+<p align="center">
+  A native floating Web App switcher for macOS.<br>
+  原生 macOS 悬浮 Web App 切换器。
+</p>
 
-## Project Status
+<p align="center">
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.0"><strong>Download FloatTabs v0.1.0</strong></a>
+  · macOS 13 or later · Apple Silicon and Intel
+</p>
 
-```text
-Stage 0 Window Feasibility Spike: PASSED
-Stage 1 Core Native Shell: PASSED
-Stage 2 Persistent Web App Slots: PASSED
-Stage 3 Rendering Profiles: PASSED
-Stage 4 Web Compatibility, Navigation, Sessions & OAuth: PASSED
-Stage 5 Resource Lifecycle & Interaction Refinement: PASSED
-Stage 6 Menus, Commands & Global Settings: PASSED
-v0.1.0 Release Candidate: UNIVERSAL 2 VALIDATED
+FloatTabs keeps the web apps you use every day one shortcut away. Each app lives in its own persistent Slot with independent window size, website mode, browser identity, zoom, resource policy, and background-play behavior.
+
+It is intentionally not a full browser. FloatTabs is a compact native shell for a small set of long-lived web apps, while conventional multi-tab browsing stays in your regular browser.
+
+## Highlights
+
+- Native Swift, AppKit, SwiftUI, and WebKit application.
+- Floating Tab rail with color/residency indicators and Dock-style magnification.
+- Per-Web-App window sizes, or one shared Fixed window size.
+- Desktop and Mobile website modes with configurable compatibility identity.
+- Persistent website sessions through WebKit's standard data store.
+- Multi-display element fullscreen with a separate, still-usable Tab shell.
+- Pin mode that keeps FloatTabs above other applications in normal and fullscreen presentations.
+- Hot, Warm, and Cold resource policies, plus optional background playback.
+- Light, Dark, and System appearance modes with rainbow, preset, or custom border colors.
+- Collapsible Tab rail controlled by the colored grip inside the bottom-left page corner.
+- Configurable keyboard shortcuts with live menu shortcut labels.
+- Configuration backup and restore.
+
+## Install v0.1.0
+
+1. Download [`FloatTabs-0.1.0.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg).
+2. Open the DMG.
+3. Drag **FloatTabs** onto the **Applications** shortcut in the DMG window. Replacing an older copy does not remove your saved configuration or WebKit website data.
+4. Open FloatTabs from Applications.
+
+FloatTabs v0.1.0 is an unsigned, unnotarized personal-distribution build. If macOS blocks the first launch, Control-click or right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
+
+Verify the downloaded image with the accompanying checksum:
+
+```bash
+shasum -a 256 -c FloatTabs-0.1.0.dmg.sha256
 ```
 
-Current release behavior is frozen by the v0.1.0 release baseline. In particular:
+Only install an unsigned build when you trust this repository and the checksum matches.
 
-- Desktop Website Mode uses a desktop-class logical `WKWebView` inside an AppKit host; it does **not** use `pageZoom` as the layout-fitting mechanism;
-- Mobile Website Mode remains native 1:1 geometry;
-- visible Window Size presets are Small 420×760, Medium 600×820, Large 820×850, Wide 1080×850, plus Custom;
-- ordinary user HTTP(S) navigation remains in the current Slot regardless of host;
-- external-browser routing is explicit user intent through the link context menu;
-- Window Size Behavior supports Per Web App and Fixed modes without Fixed overwriting saved per-App sizes;
-- the visible shell and ordinary `NSWindow` Web source are separate, so WebKit fullscreen can reparent and restore the page without hiding or corrupting the cross-display Tab shell;
-- the show path explicitly activates FloatTabs before focusing the active `WKWebView`.
+## Quick Start
 
-Recorded evidence and interaction decisions:
+1. Launch FloatTabs. It runs as a menu-bar application without a Dock icon.
+2. Press Command–backtick (⌘ + backtick) or click the menu-bar icon to show FloatTabs.
+3. Select **+** to add a Web App and enter its home URL.
+4. Use the left Tab rail to switch apps.
+5. Drag the page edge to move the panel and use the bottom-right grip to resize it.
+6. Click the colored bottom-left grip to hide or reveal the Tab rail.
+7. Use the Pin control when FloatTabs must remain above other applications.
 
-- [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md)
-- [`docs/validation/Stage_0_Acceptance.md`](docs/validation/Stage_0_Acceptance.md)
-- [`docs/validation/Stage_1_Acceptance.md`](docs/validation/Stage_1_Acceptance.md)
-- [`docs/validation/Stage_2_Acceptance.md`](docs/validation/Stage_2_Acceptance.md)
-- [`docs/validation/Stage_3_V3_Acceptance.md`](docs/validation/Stage_3_V3_Acceptance.md)
-- [`docs/validation/Stage_4_Acceptance.md`](docs/validation/Stage_4_Acceptance.md)
-- [`docs/validation/Stage_4_Session_OAuth_Matrix.md`](docs/validation/Stage_4_Session_OAuth_Matrix.md)
+Clicking outside FloatTabs hides it when Pin is off. A hidden or inactive page pauses playback unless that Web App explicitly allows background playback. A page currently presented in element fullscreen remains protected from hidden-shell resource release.
 
-## Canonical Documentation
+## Default Shortcuts
 
-Read these before changing product behavior, architecture, or UI:
+All shortcuts can be changed in **FloatTabs Settings → Shortcuts**. Menus display the currently configured bindings rather than hard-coded labels.
 
-1. **v0.1.0 Release Baseline — highest precedence for this release**  
-   [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md)
+| Action | Default shortcut |
+| --- | --- |
+| Show / hide FloatTabs | Command–backtick |
+| Select Slots 1–9 | `⌘1` … `⌘9` |
+| Next / previous Slot | `⌃Tab` / `⌃⇧Tab` |
+| Add Web App | `⌘T` |
+| Address bar | `⌘L` |
+| Return home | `⌘⇧H` |
+| Reload | `⌘R` |
+| Zoom in / out / reset | `⌘+` / `⌘-` / `⌘0` |
+| Pin / auto-hide | `⌘⇧P` |
+| Settings | `⌘,` |
 
-2. **Product**  
-   [`docs/product/FloatTabs_Product_Development_Spec_v0.5.md`](docs/product/FloatTabs_Product_Development_Spec_v0.5.md)
+## Per-Web-App Controls
 
-3. **Technical Architecture**  
-   [`docs/architecture/FloatTabs_Technical_Architecture_v1.2.md`](docs/architecture/FloatTabs_Technical_Architecture_v1.2.md)
+Each Slot can independently store:
 
-4. **UI Design System**  
-   [`docs/design/FloatTabs_UI_Design_System_v1.2.md`](docs/design/FloatTabs_UI_Design_System_v1.2.md)
+| Setting | Purpose |
+| --- | --- |
+| Website Mode | Request a Desktop or Mobile page layout. |
+| Window Size | Small, Medium, Large, Wide, or Custom visible viewport. |
+| Browser Identity | Automatic or explicit compatibility identity and user agent. |
+| Zoom | User-controlled WebKit page zoom. |
+| Residency | Hot, Warm, or Cold runtime retention. |
+| Background Play | Pause when inactive, or explicitly allow background media. |
 
-5. **Historical Stage rendering/compatibility addenda**  
-   [`docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md`](docs/product/FloatTabs_Stage_3_Rendering_Profile_V3_Addendum.md)  
-   [`docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md`](docs/product/FloatTabs_Stage_4_Web_Compatibility_Addendum.md)
+In **Per Web App** size mode, switching Tabs restores each app's saved viewport. In **Fixed** mode, all apps share one viewport without overwriting their individual saved sizes.
 
-6. **Generated UI/UX References**  
-   [`docs/uiux/README.md`](docs/uiux/README.md)
+## Fullscreen and Multiple Displays
 
-### Source-of-Truth Precedence
+FloatTabs separates the floating shell from WebKit's ordinary source window. This lets WebKit enter and restore element fullscreen without turning the Tab shell into the fullscreen source or locking every other Slot.
 
-If materials conflict for v0.1.0:
+While one Slot is fullscreen, you can show the shell on the current or another display, select another Slot, or use the fullscreen Slot's exit placeholder. The fullscreen page and companion shell keep independent but synchronized lifecycles until WebKit has fully restored the source page.
 
-```text
-v0.1.0 Release Baseline
-        ↓
-accepted later PR behavior / current implementation
-        ↓
-Product + Technical Architecture + Stage addenda
-        ↓
-older stage history / validation notes
-        ↓
-generated Stitch screenshots / code.html
+## Privacy and Data
+
+- Website content is rendered by the system WebKit framework.
+- Website sessions use WebKit's persistent website data store.
+- FloatTabs does not implement its own password store.
+- `.floattabsbackup` exports configuration, not cookies, passwords, OAuth tokens, caches, or live page state.
+- Opening a normal HTTP(S) link stays in the current Slot. Sending a link to the default browser or a separate floating browser is an explicit context-menu action.
+
+## Build from Source
+
+Requirements:
+
+- macOS 13 or later
+- Xcode with the macOS SDK
+- Git
+
+Build and test:
+
+```bash
+git clone https://github.com/Lost0rz/FloatTabs.git
+cd FloatTabs
+xcodebuild \
+  -project FloatTabs.xcodeproj \
+  -scheme FloatTabs \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  test
 ```
 
-Generated Stitch files are visual references only and are not production source code.
+Build the same unsigned Universal 2 DMG used by the v0.1.0 release:
 
-## Frozen Product Shell
-
-```text
- GPT ───┐
- X   ───┤
- CL  ───┤
- IG  ───┤
- TT  ───┤          WEBSITE / WKWEBVIEW
- +   ───┤
-        │
-        │
-        │
- ⚙   ───┤
- FT  ───┤
-        └────────────────────────────
+```bash
+tools/release/build_dmg.sh
 ```
 
-Core UI rule:
-
-> **Inside the main rectangle = Website / WKWebView**  
-> **Outside on the left edge = FloatTabs UI**
-
-Do not reintroduce a permanent address bar, top tabs, browser toolbar, conventional sidebar, or top-right FloatTabs ellipsis.
-
-## V1 Technical Baseline
+Artifacts are written to `.release/`:
 
 ```text
-Swift
-AppKit
-SwiftUI
-WKWebView / WebKit
-KeyboardShortcuts
+FloatTabs-0.1.0.dmg
+FloatTabs-0.1.0.dmg.sha256
+FloatTabs-0.1.0.dSYM.zip
+FloatTabs-0.1.0.dSYM.zip.sha256
 ```
 
-V1 uses one real embedded engine: **WebKit**.
+The release script verifies every bundled Mach-O binary contains both `arm64` and `x86_64`, verifies the DMG, and generates SHA-256 sidecars. Developer ID signing and Apple notarization can be enabled later through the script's environment variables; neither is used for the current v0.1.0 package.
 
-Per Web App Slot, users can independently configure:
+## Architecture and Project Documentation
+
+The main implementation areas are:
 
 ```text
-Website Mode
-Window Size
-Browser Identity / Compatibility
-Zoom
+FloatTabs/App          Application coordination
+FloatTabs/Panel        Shell, source-window, fullscreen, and screen geometry
+FloatTabs/Tabs         Slot models and persistence-facing state
+FloatTabs/UI           Tab rail, settings, editors, and interaction controls
+FloatTabs/Web          WKWebView creation, navigation, popups, and lifecycle
+FloatTabsTests         XCTest regression suite
 ```
 
-Website Mode controls the requested website layout class. Window Size controls only the visible FloatTabs Web surface. Browser Identity is compatibility identity, not an engine switch. User Zoom remains a persisted per-Slot value.
+Detailed product, architecture, design, release, performance, and validation records live under [`docs/`](docs/). The v0.1.0 behavioral source of truth is [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md), supplemented by the accepted current implementation and tests.
 
-For Desktop mode, an AppKit logical host maps the visible FloatTabs viewport to the desktop-class CSS layout width while preserving native AppKit/WebKit pointer conversion. `WKWebView.pageZoom` is reserved for explicit user Zoom. Mobile mode remains 1:1.
+## Release
 
-Website sessions use a shared persistent `WKWebsiteDataStore` profile. FloatTabs does not store passwords or manually copy browser cookies.
+FloatTabs v0.1.0 is the first published release. It is distributed as one Universal 2 DMG for Apple Silicon and Intel Macs:
 
-## Distribution Target
-
-The current v0.1.0 baseline is a self-use, unsigned **Universal 2** DMG:
-
-```text
-FloatTabs-x.y.z.dmg
-└── FloatTabs.app
-    └── arm64 + x86_64
-```
-
-The release target covers both current Apple Silicon Macs (`arm64`) and Intel Macs (`x86_64`) with one application bundle. CI runs the full build/test lane natively on both `macos-26` Apple Silicon and `macos-26-intel`, then separately builds a Universal 2 Release app and verifies both Mach-O slices with `lipo`.
-
-CI is configured to build/test natively on both architectures and to build a separate Universal 2 DMG. The local release gate also verifies the app icon, both Mach-O slices, the DMG, its checksum, and a matching dSYM archive.
-
-`tools/release/build_dmg.sh` defaults to the unsigned self-use package requested for this release. Developer ID signing, notarization, stapling, and Gatekeeper assessment remain supported when credentials are supplied later, but they are not part of the current personal-distribution gate.
-
-FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 includes explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
-
-## Development Workflow
-
-Keep `main` in a reviewed/known-good state. Develop features and release fixes on focused branches.
-
-Before merging code that changes product behavior or UI structure, confirm it does not conflict with the current release baseline. Historical stage documents remain useful context, but they must not be used to reintroduce behavior explicitly superseded by later accepted PRs.
+- [Release page](https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.0)
+- [DMG](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg)
+- [SHA-256 checksum](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg.sha256)

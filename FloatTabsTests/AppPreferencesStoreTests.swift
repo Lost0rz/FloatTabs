@@ -30,6 +30,16 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(store.appearanceMode, .system)
     }
 
+    func testTabRailCollapseDefaultsExpandedAndPersists() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertFalse(first.isTabRailCollapsed)
+
+        first.isTabRailCollapsed = true
+
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertTrue(second.isTabRailCollapsed)
+    }
+
     func testAppearancePersistsAcrossStoreInstances() {
         let first = AppPreferencesStore(defaults: defaults)
         first.appearanceMode = .dark

@@ -37,18 +37,14 @@ final class PanelMetricsTests: XCTestCase {
 
     func testMovementFrameUsesLargeInvisibleTargetAndThinVisibleOutline() {
         XCTAssertEqual(PanelMetrics.outerInteractionGutter, 12)
-        XCTAssertEqual(PanelMetrics.innerMovementOverlap, 10)
+        XCTAssertEqual(PanelMetrics.innerMovementOverlap, 12)
         XCTAssertEqual(
             PanelMetrics.outerInteractionGutter + PanelMetrics.innerMovementOverlap,
-            22
+            24
         )
-        XCTAssertGreaterThan(
+        XCTAssertEqual(
             PanelMetrics.outerInteractionGutter,
             PanelMetrics.innerMovementOverlap
-        )
-        XCTAssertGreaterThanOrEqual(
-            PanelMetrics.webRightInteractionSafety,
-            PanelMetrics.outerInteractionGutter
         )
         XCTAssertLessThan(
             PanelMetrics.interactionBorderLineWidth,
@@ -277,56 +273,52 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         }
     }
 
-    func testConfiguredTopBottomInnerOverlapAlsoMovesWindow() {
-        let root = PanelRootView()
-        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        root.layoutSubtreeIfNeeded()
-
+    func testConfiguredInnerOverlapMovesSourceFromEveryEdge() {
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
         let halfOverlap = PanelMetrics.innerMovementOverlap / 2
-        let x = root.webViewportLayoutView.frame.midX
         let points = [
-            NSPoint(x: x, y: root.webViewportLayoutView.frame.maxY - halfOverlap),
-            NSPoint(x: x, y: root.webViewportLayoutView.frame.minY + halfOverlap),
+            NSPoint(x: bounds.midX, y: bounds.maxY - halfOverlap),
+            NSPoint(x: bounds.midX, y: bounds.minY + halfOverlap),
+            NSPoint(x: bounds.minX + halfOverlap, y: bounds.midY),
+            NSPoint(x: bounds.maxX - halfOverlap, y: bounds.midY),
         ]
+        let dragRects = WebSourceEdgeDragView.dragRects(in: bounds)
 
         for point in points {
-            XCTAssertTrue(root.hitTest(point) is PanelPerimeterDragView)
+            XCTAssertTrue(dragRects.contains(where: { $0.contains(point) }))
         }
     }
 
     func testMovementDoesNotExtendDeeperThanConfiguredOverlap() {
-        let root = PanelRootView()
-        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        root.layoutSubtreeIfNeeded()
-
-        let x = root.webViewportLayoutView.frame.midX
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
         let inset = PanelMetrics.innerMovementOverlap + 2
         let points = [
-            NSPoint(x: x, y: root.webViewportLayoutView.frame.maxY - inset),
-            NSPoint(x: x, y: root.webViewportLayoutView.frame.minY + inset),
+            NSPoint(x: bounds.midX, y: bounds.maxY - inset),
+            NSPoint(x: bounds.midX, y: bounds.minY + inset),
+            NSPoint(x: bounds.minX + inset, y: bounds.midY),
+            NSPoint(x: bounds.maxX - inset, y: bounds.midY),
         ]
+        let dragRects = WebSourceEdgeDragView.dragRects(in: bounds)
 
         for point in points {
-            XCTAssertFalse(root.hitTest(point) is PanelPerimeterDragView)
+            XCTAssertFalse(dragRects.contains(where: { $0.contains(point) }))
         }
     }
 
-    func testRightWebEdgeIsNeverConsumedByMovementLayer() {
-        let webView = WKWebView(frame: .zero)
-        let root = PanelRootView(webView: webView)
-        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        root.layoutSubtreeIfNeeded()
-
+    func testRightWebEdgeIsOwnedBySourceMovementLayer() {
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultViewportSize)
         let rightWebEdge = NSPoint(
-            x: root.webViewportLayoutView.frame.maxX - 1,
-            y: root.webViewportLayoutView.frame.midY
+            x: bounds.maxX - 1,
+            y: bounds.midY
         )
 
-        XCTAssertFalse(root.hitTest(rightWebEdge) is PanelPerimeterDragView)
-        XCTAssertFalse(root.hitTest(rightWebEdge) is PanelResizeHandleView)
+        XCTAssertTrue(
+            WebSourceEdgeDragView.dragRects(in: bounds)
+                .contains(where: { $0.contains(rightWebEdge) })
+        )
     }
 
-    func testRightOuterGutterIsSafeShellButNotMovementTarget() {
+    func testRightOuterGutterIsMovementTarget() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
@@ -337,26 +329,18 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         )
 
         let hit = root.hitTest(rightGutterPoint)
-        XCTAssertFalse(hit is PanelPerimeterDragView)
-        XCTAssertTrue(hit === root)
+        XCTAssertTrue(hit is PanelPerimeterDragView)
     }
 
-    func testMovementOverlapWithWebIsLimitedToConfiguredTopBottomDepth() {
+    func testShellMovementBandsStayOutsideWebBecauseSourceOwnsInnerDepth() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
-        var overlappingRectCount = 0
         for rect in PanelPerimeterDragView.dragRects(in: root.bounds) {
             let overlap = rect.intersection(root.webViewportLayoutView.frame)
-            guard !overlap.isNull, overlap.width > 0, overlap.height > 0 else { continue }
-            overlappingRectCount += 1
-            XCTAssertLessThanOrEqual(
-                overlap.height,
-                PanelMetrics.innerMovementOverlap + 0.001
-            )
+            XCTAssertTrue(overlap.isNull || overlap.isEmpty)
         }
-        XCTAssertEqual(overlappingRectCount, 2)
     }
 
     func testDirectWindowDragOriginUsesGlobalPointerDelta() {

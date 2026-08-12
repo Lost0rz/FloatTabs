@@ -398,6 +398,28 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: false, isPinned: false))
     }
 
+    func testPinnedPresentationUsesFloatingWindowLevel() {
+        let shell = FloatingPanel(
+            contentRect: NSRect(x: 20, y: 20, width: 688, height: 844)
+        )
+        let host = FullscreenSourceHostController(
+            container: WebPanelContainerView(),
+            resizeHandle: PanelResizeHandleView(),
+            resizeReadout: ResizeReadoutView(),
+            shellWindow: shell
+        )
+
+        shell.setPinnedPresentation(true)
+        host.setPinnedPresentation(true)
+        XCTAssertEqual(shell.level, .floating)
+        XCTAssertEqual(host.window.level, .floating)
+
+        shell.setPinnedPresentation(false)
+        host.setPinnedPresentation(false)
+        XCTAssertEqual(shell.level, .normal)
+        XCTAssertEqual(host.window.level, .normal)
+    }
+
     func testGlobalSettingsGearUsesActualVisibleHitAreaWithoutActiveSlot() {
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [], activeTabID: nil)
@@ -708,27 +730,50 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(root.hitTest(outerTransparentCorner) is PanelResizeHandleView)
     }
 
-    func testTopAndBottomMoveTargetsIncludeReliableInPageArea() {
-        XCTAssertGreaterThanOrEqual(PanelMetrics.innerMovementOverlap, 10)
+    func testMovementTargetsUseMatchingInnerAndOuterDepthOnEveryEdge() {
+        XCTAssertEqual(
+            PanelMetrics.innerMovementOverlap,
+            PanelMetrics.outerInteractionGutter
+        )
 
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
         let webFrame = root.webViewportLayoutView.frame
 
-        let topInside = NSPoint(x: webFrame.midX, y: webFrame.maxY - 8)
-        let bottomInside = NSPoint(x: webFrame.midX, y: webFrame.minY + 8)
-        XCTAssertTrue(root.hitTest(topInside) is PanelPerimeterDragView)
-        XCTAssertTrue(root.hitTest(bottomInside) is PanelPerimeterDragView)
+        let shellOuterPoints = [
+            NSPoint(x: webFrame.midX, y: webFrame.maxY + 8),
+            NSPoint(x: webFrame.midX, y: webFrame.minY - 8),
+            NSPoint(x: webFrame.minX - 8, y: webFrame.midY),
+            NSPoint(x: webFrame.maxX + 8, y: webFrame.midY),
+        ]
+        for point in shellOuterPoints {
+            XCTAssertTrue(root.hitTest(point) is PanelPerimeterDragView)
+        }
+
+        let sourceBounds = NSRect(origin: .zero, size: webFrame.size)
+        let sourceInnerPoints = [
+            NSPoint(x: sourceBounds.midX, y: sourceBounds.maxY - 8),
+            NSPoint(x: sourceBounds.midX, y: sourceBounds.minY + 8),
+            NSPoint(x: sourceBounds.minX + 8, y: sourceBounds.midY),
+            NSPoint(x: sourceBounds.maxX - 8, y: sourceBounds.midY),
+        ]
+        let sourceRects = WebSourceEdgeDragView.dragRects(in: sourceBounds)
+        for point in sourceInnerPoints {
+            XCTAssertTrue(sourceRects.contains(where: { $0.contains(point) }))
+        }
     }
 
-    func testPanelRootConsumesTransparentInWindowGapsInsteadOfClickingThrough() {
+    func testRightOuterGutterIsARealMovementTargetInsteadOfClickingThrough() {
+        XCTAssertGreaterThan(PanelPerimeterDragView.acquisitionSurfaceAlpha, 0)
+        XCTAssertLessThan(PanelPerimeterDragView.acquisitionSurfaceAlpha, 0.01)
+
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
         let rightGutterPoint = NSPoint(x: root.bounds.maxX - 4, y: root.bounds.midY)
-        XCTAssertTrue(root.hitTest(rightGutterPoint) === root)
+        XCTAssertTrue(root.hitTest(rightGutterPoint) is PanelPerimeterDragView)
     }
 
     func testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor() {
@@ -745,7 +790,9 @@ final class ExternalShellTests: XCTestCase {
             x: drag.bounds.midX,
             y: drag.bounds.maxY - PanelMetrics.outerInteractionGutter / 2
         )
-        XCTAssertTrue(PanelMoveHoverController.isDraggable(point: localTop, in: drag.bounds))
+        XCTAssertTrue(PanelPerimeterDragView.dragRects(in: drag.bounds).contains {
+            $0.contains(localTop)
+        })
         let topInHost = drag.convert(localTop, to: host)
         XCTAssertTrue(drag.hitTest(topInHost) === drag)
 
@@ -767,6 +814,73 @@ final class ExternalShellTests: XCTestCase {
         )
         XCTAssertLessThan(path.boundingBox.minX, web.minX - 10)
         XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)
+    }
+
+    func testFoldControlCollapsesRailWithoutChangingViewportGeometry() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        let active = makeProfile(order: 0, name: "GPT")
+        root.externalControlZoneView.apply(profiles: [active], activeTabID: active.id)
+        root.layoutSubtreeIfNeeded()
+
+        let webFrameBefore = root.webViewportLayoutView.frame
+        root.externalControlZoneView.setCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(root.externalControlZoneView.isRailCollapsed)
+        XCTAssertNil(root.externalControlZoneView.activeTabFrame(in: root))
+        XCTAssertEqual(root.webViewportLayoutView.frame, webFrameBefore)
+        XCTAssertTrue(try! XCTUnwrap(
+            root.externalControlZoneView.tabView(for: active.id)
+        ).isHidden)
+    }
+
+    func testFoldControlsLiveInsideBottomLeftPageCorner() {
+        let shell = FloatingPanel(
+            contentRect: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        )
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        shell.contentView = root
+        let host = FullscreenSourceHostController(
+            container: root.webPanelContainerView,
+            resizeHandle: root.resizeHandleView,
+            resizeReadout: root.resizeReadoutView,
+            shellWindow: shell
+        )
+        host.window.contentView?.frame = NSRect(
+            origin: .zero,
+            size: PanelMetrics.defaultViewportSize
+        )
+        host.window.contentView?.layoutSubtreeIfNeeded()
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(host.railFoldControl.frame.minX, 0, accuracy: 0.001)
+        XCTAssertEqual(host.railFoldControl.frame.minY, 0, accuracy: 0.001)
+        XCTAssertEqual(
+            host.railFoldControl.frame.size,
+            NSSize(
+                width: PanelMetrics.resizeHandleSize,
+                height: PanelMetrics.resizeHandleSize
+            )
+        )
+
+        let webFrame = root.webViewportLayoutView.frame
+        let companionFrame = root.companionRailFoldControlView.frame
+        XCTAssertEqual(companionFrame.minX, webFrame.minX, accuracy: 0.001)
+        XCTAssertEqual(companionFrame.minY, webFrame.minY, accuracy: 0.001)
+        XCTAssertTrue(webFrame.contains(companionFrame))
+    }
+
+    func testNewTabsRemainHiddenWhileRailIsCollapsed() {
+        let (_, zone) = makeZoneHarness()
+        zone.setCollapsed(true, animated: false)
+        let profile = makeProfile(order: 0, name: "Added While Hidden")
+
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isHidden)
     }
 
     func testFaviconColorStateTracksResidentRuntimeInsteadOfActiveSelection() {
@@ -842,13 +956,7 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
-    func testMoveHoverTrackingRemainsActiveWhenAppIsInactive() {
-        XCTAssertTrue(PanelMoveHoverController.trackingOptions.contains(.activeAlways))
-        XCTAssertTrue(PanelMoveHoverController.trackingOptions.contains(.mouseMoved))
-        XCTAssertTrue(PanelMoveHoverController.trackingOptions.contains(.mouseEnteredAndExited))
-    }
-
-    func testMoveHoverUsesSameHitGeometryAsWindowDrag() {
+    func testMoveCursorRectsUseSameGeometryAsWindowDrag() {
         let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         let topPoint = NSPoint(
             x: bounds.midX,
@@ -859,8 +967,9 @@ final class ExternalShellTests: XCTestCase {
             y: bounds.midY
         )
 
-        XCTAssertTrue(PanelMoveHoverController.isDraggable(point: topPoint, in: bounds))
-        XCTAssertFalse(PanelMoveHoverController.isDraggable(point: websiteCenter, in: bounds))
+        let dragRects = PanelPerimeterDragView.dragRects(in: bounds)
+        XCTAssertTrue(dragRects.contains(where: { $0.contains(topPoint) }))
+        XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
     }
 
     private func makeZoneHarness() -> (host: NSView, zone: ExternalControlZoneView) {
