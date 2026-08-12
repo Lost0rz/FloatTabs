@@ -94,7 +94,6 @@ final class FullscreenLabController: NSObject {
     private var retiredWebContents: [RetiredWebContent] = []
 
     private var fullscreenObservation: NSKeyValueObservation?
-    private var stagedProgressObservation: NSKeyValueObservation?
     private var stagedWebView: WKWebView?
     private var stagedRootView: NSView?
     private var stagedReadyCommitScheduled = false
@@ -132,8 +131,8 @@ final class FullscreenLabController: NSObject {
     func start() {
         let now = ISO8601DateFormatter().string(from: Date())
         let header = """
-        FloatTabs Fullscreen Refined Recovery Lab
-        =========================================
+        FloatTabs Fullscreen Stabilized Recovery Lab
+        ============================================
         Baseline commit: \(baselineCommit)
         Started: \(now)
         OS: \(ProcessInfo.processInfo.operatingSystemVersionString)
@@ -144,11 +143,13 @@ final class FullscreenLabController: NSObject {
         ------------------
         1. Native WKWebView element fullscreen remains WebKit-owned.
         2. Shell show/hide/move requests are serialized with fullscreen/recovery instead of dropped.
-        3. A replacement WKWebView is laid out at the real panel viewport size before navigation starts.
-        4. Replacement swap waits for a nearly-complete load plus a short layout-stability interval.
-        5. Retiring media is suspended before replacement loading, preventing duplicate audio.
-        6. Retired fullscreen-owning WKWebViews are quarantined for this process instead of force-released.
-        7. The FloatingPanel separately removes its shell/Tab rail from stable native fullscreen presentation.
+        3. Initial and replacement WKWebViews receive their final logical viewport before navigation starts.
+        4. Recovery waits until WKWebView is back in the source panel AND no visible WebCore fullscreen window remains.
+        5. Replacement swap requires progress >= 0.99, isLoading == false, and a stable URL for 1 second.
+        6. There is no partial-load fallback swap; an unstable replacement aborts instead of being shown.
+        7. Retiring media is suspended before replacement loading, preventing duplicate audio.
+        8. Retired fullscreen-owning WKWebViews are quarantined for this process instead of force-released.
+        9. The FloatingPanel separately removes its shell/Tab rail from stable native fullscreen presentation.
 
         Guardrails
         ----------
@@ -167,7 +168,6 @@ final class FullscreenLabController: NSObject {
         recoveryOldWebViewIdentity = nil
         recoveryNewWebViewIdentity = nil
         verifiedRecoveryWebViews.removeAll()
-        stagedProgressObservation = nil
         stagedWebView?.stopLoading()
         stagedWebView = nil
         stagedRootView = nil
@@ -182,7 +182,6 @@ final class FullscreenLabController: NSObject {
     func stop() {
         captureCurrentURL()
         fullscreenObservation = nil
-        stagedProgressObservation = nil
         stagedWebView?.stopLoading()
         stagedWebView = nil
         stagedRootView = nil
@@ -268,7 +267,7 @@ final class FullscreenLabController: NSObject {
         guard let button = statusItem.button else { return }
         button.image = NSImage(
             systemSymbolName: "rectangle.3.group",
-            accessibilityDescription: "Fullscreen Refined Recovery Lab"
+            accessibilityDescription: "Fullscreen Stabilized Recovery Lab"
         )
         button.image?.isTemplate = true
         button.imagePosition = .imageLeading
@@ -277,13 +276,13 @@ final class FullscreenLabController: NSObject {
     }
 
     private func configureMenu() {
-        let titleItem = NSMenuItem(title: "Fullscreen Refined Recovery Lab", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "Fullscreen Stabilized Recovery Lab", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         menu.addItem(.separator())
 
         let enableItem = NSMenuItem(
-            title: "Enable Refined Recovery Experiment",
+            title: "Enable Stabilized Recovery Experiment",
             action: #selector(enableLab),
             keyEquivalent: ""
         )
@@ -455,16 +454,27 @@ final class FullscreenLabController: NSObject {
     private func installInitialWebView(in window: NSWindow) {
         let newWebView = WebViewFactory.makeWebView()
         let root = PanelRootView(webView: newWebView)
+
+        // Match the replacement path: establish the real panel geometry before
+        // navigation starts so responsive/player initialization never sees 0x0.
+        let initialBounds = NSRect(origin: .zero, size: window.contentLayoutRect.size)
+        root.frame = initialBounds
+        root.autoresizingMask = [.width, .height]
         window.contentView = root
+        root.frame = window.contentView?.bounds ?? initialBounds
+        root.layoutSubtreeIfNeeded()
+
         webView = newWebView
         rootView = root
         observedFullscreenState = fullscreenStateName(newWebView.fullscreenState)
         attachFullscreenObservation(to: newWebView)
-        newWebView.load(URLRequest(url: sourceURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60))
+
         reportWriter.append(
-            "WEBVIEW_INSTALLED reason=initial_environment webview=\(webViewIdentity(newWebView)) "
-                + "frame=\(NSStringFromRect(newWebView.frame)) url=\(sourceURL.absoluteString)"
+            "WEBVIEW_INSTALLED reason=initial_environment_prelaid_out webview=\(webViewIdentity(newWebView)) "
+                + "root_frame=\(NSStringFromRect(root.frame)) frame=\(NSStringFromRect(newWebView.frame)) "
+                + "url=\(sourceURL.absoluteString)"
         )
+        newWebView.load(URLRequest(url: sourceURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60))
     }
 
     private func scheduleCrossScreenRecovery(retiring oldWebView: WKWebView) {
@@ -480,11 +490,11 @@ final class FullscreenLabController: NSObject {
         reportWriter.append(
             "CROSS_SCREEN_RECOVERY_SCHEDULED next_recovery=\(recoveryCount + 1) "
                 + "old_webview=\(webViewIdentity(oldWebView)) url=\(sourceURL.absoluteString) "
-                + "strategy=stable_source_then_sized_preload_swap_quarantine"
+                + "strategy=webcore_gone_then_sustained_ready_swap_quarantine"
         )
         reportWriter.flush()
 
-        waitForStableSourceReturn(retiring: oldWebView, consecutiveStableChecks: 0, attemptsRemaining: 40)
+        waitForStableSourceReturn(retiring: oldWebView, consecutiveStableChecks: 0, attemptsRemaining: 80)
     }
 
     private func waitForStableSourceReturn(
@@ -500,27 +510,31 @@ final class FullscreenLabController: NSObject {
             return
         }
 
+        let visibleWebCore = visibleWebCoreFullscreenWindowsSummary()
+        let webCoreGone = visibleWebCore == "none"
         let stable = fullscreenStateName(oldWebView.fullscreenState) == "notInFullscreen"
             && oldWebView.window === window
             && window.contentView === oldRoot
+            && webCoreGone
         let nextStableChecks = stable ? consecutiveStableChecks + 1 : 0
 
         reportWriter.append(
-            "RECOVERY_SOURCE_STABILITY stable=\(stable) consecutive=\(nextStableChecks) remaining=\(attemptsRemaining) "
+            "RECOVERY_SOURCE_STABILITY stable=\(stable) webcore_gone=\(webCoreGone) "
+                + "consecutive=\(nextStableChecks) remaining=\(attemptsRemaining) "
                 + "webview_window={\(windowSummary(oldWebView.window))} source_window={\(windowSummary(window))} "
-                + "visible_webcore=\(visibleWebCoreFullscreenWindowsSummary())"
+                + "visible_webcore=\(visibleWebCore)"
         )
 
-        // Require a longer stable return interval than the prior experiment. This
-        // leaves WebKit/AppKit time to finish the native fullscreen transition before
-        // we touch the source hierarchy.
+        // WebKit can report notInFullscreen before its fullscreen window/Space is
+        // actually gone. Require the source hierarchy and absence of a visible
+        // WebCore fullscreen window to remain stable for 500ms before recovery.
         if nextStableChecks >= 5 {
             beginRecoveryPreload(retiring: oldWebView)
             return
         }
 
         guard attemptsRemaining > 0 else {
-            abortRecovery(retiring: oldWebView, reason: "source_never_stabilized")
+            abortRecovery(retiring: oldWebView, reason: "source_or_webcore_never_stabilized")
             return
         }
 
@@ -551,9 +565,6 @@ final class FullscreenLabController: NSObject {
         let candidate = WebViewFactory.makeWebView()
         let candidateRoot = PanelRootView(webView: candidate)
 
-        // Give the staged page the exact viewport it will receive after the swap.
-        // Loading a detached zero-sized WKWebView can send responsive sites down a
-        // different layout/player initialization path.
         let stagingBounds = oldRoot.bounds.width > 1 && oldRoot.bounds.height > 1
             ? oldRoot.bounds
             : NSRect(origin: .zero, size: window.contentView?.bounds.size ?? window.contentLayoutRect.size)
@@ -566,34 +577,6 @@ final class FullscreenLabController: NSObject {
         stagedRootView = candidateRoot
         stagedReadyCommitScheduled = false
 
-        stagedProgressObservation = candidate.observe(\.estimatedProgress, options: [.new]) { [weak self, weak candidate, weak oldWebView] _, _ in
-            DispatchQueue.main.async {
-                guard let self,
-                      let candidate,
-                      let oldWebView,
-                      self.stagedWebView === candidate,
-                      self.recoveryRetiringWebView === oldWebView else { return }
-
-                let progress = candidate.estimatedProgress
-                guard progress >= 0.99,
-                      candidate.url != nil,
-                      !self.stagedReadyCommitScheduled else { return }
-
-                self.stagedReadyCommitScheduled = true
-                self.reportWriter.append(
-                    "REPLACEMENT_PRELOAD_READY staged_webview=\(self.webViewIdentity(candidate)) "
-                        + "progress=\(String(format: "%.2f", progress)) frame=\(NSStringFromRect(candidate.frame)) "
-                        + "stabilize_ms=350"
-                )
-                self.reportWriter.flush()
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak oldWebView, weak candidate] in
-                    guard let self, let oldWebView, let candidate, self.stagedWebView === candidate else { return }
-                    self.commitStagedRecovery(retiring: oldWebView, staged: candidate, reason: "loaded_and_layout_stable")
-                }
-            }
-        }
-
         reportWriter.append(
             "REPLACEMENT_PRELOAD_STARTED staged_webview=\(webViewIdentity(candidate)) "
                 + "root_frame=\(NSStringFromRect(candidateRoot.frame)) webview_frame=\(NSStringFromRect(candidate.frame)) "
@@ -601,18 +584,85 @@ final class FullscreenLabController: NSObject {
         )
         candidate.load(URLRequest(url: sourceURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60))
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self, weak oldWebView, weak candidate] in
-            guard let self,
-                  let oldWebView,
-                  let candidate,
-                  self.stagedWebView === candidate,
-                  !self.stagedReadyCommitScheduled else { return }
-            if candidate.url != nil, candidate.estimatedProgress >= 0.75 {
-                self.stagedReadyCommitScheduled = true
-                self.commitStagedRecovery(retiring: oldWebView, staged: candidate, reason: "preload_timeout_fallback")
-            } else {
-                self.abortRecovery(retiring: oldWebView, reason: "replacement_preload_timeout")
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) { [weak self, weak oldWebView, weak candidate] in
+            guard let self, let oldWebView, let candidate else { return }
+            self.waitForReplacementReadiness(
+                retiring: oldWebView,
+                staged: candidate,
+                consecutiveStableChecks: 0,
+                lastStableURL: nil,
+                attemptsRemaining: 300
+            )
+        }
+    }
+
+    private func waitForReplacementReadiness(
+        retiring oldWebView: WKWebView,
+        staged candidate: WKWebView,
+        consecutiveStableChecks: Int,
+        lastStableURL: String?,
+        attemptsRemaining: Int
+    ) {
+        guard recoveryScheduled,
+              self.webView === oldWebView,
+              recoveryRetiringWebView === oldWebView,
+              stagedWebView === candidate else { return }
+
+        let currentURL = candidate.url?.absoluteString
+        let progress = candidate.estimatedProgress
+        let readyNow = currentURL != nil
+            && !candidate.isLoading
+            && progress >= 0.99
+            && candidate.frame.width > 1
+            && candidate.frame.height > 1
+        let sameStableURL = readyNow && lastStableURL == currentURL
+        let nextStableChecks: Int
+        if readyNow {
+            nextStableChecks = sameStableURL ? consecutiveStableChecks + 1 : 1
+        } else {
+            nextStableChecks = 0
+        }
+        let nextStableURL = readyNow ? currentURL : nil
+
+        if nextStableChecks == 0
+            || nextStableChecks == 1
+            || nextStableChecks == 5
+            || nextStableChecks >= 10 {
+            reportWriter.append(
+                "REPLACEMENT_READINESS ready=\(readyNow) loading=\(candidate.isLoading) "
+                    + "progress=\(String(format: "%.2f", progress)) stable=\(nextStableChecks)/10 "
+                    + "url=\(currentURL ?? "nil") frame=\(NSStringFromRect(candidate.frame)) "
+                    + "remaining=\(attemptsRemaining)"
+            )
+            reportWriter.flush()
+        }
+
+        if nextStableChecks >= 10 {
+            stagedReadyCommitScheduled = true
+            reportWriter.append(
+                "REPLACEMENT_PRELOAD_READY staged_webview=\(webViewIdentity(candidate)) "
+                    + "progress=\(String(format: "%.2f", progress)) loading=\(candidate.isLoading) "
+                    + "stable_ms=1000 url=\(currentURL ?? "nil") frame=\(NSStringFromRect(candidate.frame))"
+            )
+            reportWriter.flush()
+            commitStagedRecovery(retiring: oldWebView, staged: candidate, reason: "sustained_navigation_stable")
+            return
+        }
+
+        guard attemptsRemaining > 0 else {
+            abortRecovery(retiring: oldWebView, reason: "replacement_never_reached_sustained_ready_state")
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) { [weak self, weak oldWebView, weak candidate] in
+            guard let self, let oldWebView, let candidate else { return }
+            self.waitForReplacementReadiness(
+                retiring: oldWebView,
+                staged: candidate,
+                consecutiveStableChecks: nextStableChecks,
+                lastStableURL: nextStableURL,
+                attemptsRemaining: attemptsRemaining - 1
+            )
         }
     }
 
@@ -625,20 +675,43 @@ final class FullscreenLabController: NSObject {
               let window,
               let oldRoot = rootView else { return }
 
+        let visibleWebCore = visibleWebCoreFullscreenWindowsSummary()
         guard fullscreenStateName(oldWebView.fullscreenState) == "notInFullscreen",
               oldWebView.window === window,
-              window.contentView === oldRoot else {
+              window.contentView === oldRoot,
+              visibleWebCore == "none" else {
             stagedReadyCommitScheduled = false
-            reportWriter.append("RECOVERY_SWAP_DEFERRED reason=source_no_longer_stable")
+            reportWriter.append(
+                "RECOVERY_SWAP_DEFERRED reason=source_or_webcore_no_longer_stable visible_webcore=\(visibleWebCore)"
+            )
             reportWriter.flush()
-            waitForStableSourceReturn(retiring: oldWebView, consecutiveStableChecks: 0, attemptsRemaining: 30)
+            waitForStableSourceReturn(retiring: oldWebView, consecutiveStableChecks: 0, attemptsRemaining: 80)
+            return
+        }
+
+        guard candidate.url != nil,
+              !candidate.isLoading,
+              candidate.estimatedProgress >= 0.99 else {
+            stagedReadyCommitScheduled = false
+            reportWriter.append(
+                "RECOVERY_SWAP_DEFERRED reason=replacement_navigation_became_unstable "
+                    + "loading=\(candidate.isLoading) progress=\(String(format: "%.2f", candidate.estimatedProgress)) "
+                    + "url=\(candidate.url?.absoluteString ?? "nil")"
+            )
+            reportWriter.flush()
+            waitForReplacementReadiness(
+                retiring: oldWebView,
+                staged: candidate,
+                consecutiveStableChecks: 0,
+                lastStableURL: nil,
+                attemptsRemaining: 150
+            )
             return
         }
 
         let oldIdentity = webViewIdentity(oldWebView)
         let newIdentity = webViewIdentity(candidate)
 
-        stagedProgressObservation = nil
         fullscreenObservation = nil
 
         retiredWebContents.append(
@@ -674,15 +747,16 @@ final class FullscreenLabController: NSObject {
             "CROSS_SCREEN_RECOVERY_APPLIED recovery=\(recoveryCount) reason=\(reason) "
                 + "same_panel_window=\(window.windowNumber) old_webview=\(oldIdentity) new_webview=\(newIdentity) "
                 + "preload_progress=\(String(format: "%.2f", candidate.estimatedProgress)) "
-                + "candidate_frame=\(NSStringFromRect(candidate.frame)) quarantined_count=\(retiredWebContents.count) "
-                + "url=\(sourceURL.absoluteString)"
+                + "preload_loading=\(candidate.isLoading) candidate_frame=\(NSStringFromRect(candidate.frame)) "
+                + "visible_webcore=\(visibleWebCoreFullscreenWindowsSummary()) "
+                + "quarantined_count=\(retiredWebContents.count) url=\(candidate.url?.absoluteString ?? sourceURL.absoluteString)"
         )
         reportWriter.append(
             "RETIRED_WEBVIEW_QUARANTINED old_webview=\(oldIdentity) media_suspended=true "
                 + "force_release=false quarantined_count=\(retiredWebContents.count)"
         )
         reportWriter.append(
-            "RECOVERY_READY #\(recoveryCount) · sized replacement loaded before swap; queued toggle may now drain"
+            "RECOVERY_READY #\(recoveryCount) · sustained stable replacement swapped; queued toggle may now drain"
         )
         updateStatusItemTitle()
         reportWriter.flush()
@@ -690,7 +764,6 @@ final class FullscreenLabController: NSObject {
     }
 
     private func abortRecovery(retiring oldWebView: WKWebView, reason: String) {
-        stagedProgressObservation = nil
         stagedWebView?.stopLoading()
         stagedWebView = nil
         stagedRootView = nil
@@ -771,7 +844,7 @@ final class FullscreenLabController: NSObject {
             reportWriter.append("  shell={\(attempt.shellScreenSummary)}")
             reportWriter.append("  pointer={\(attempt.pointerScreenSummary)}")
             reportWriter.append("  source_window={\(attempt.sourceWindowSummary)}")
-            reportWriter.append("  webview=\(attempt.webViewIdentity)")
+            reportWriter.append("  webview=\(attempt.webViewIdentity) frame=\(NSStringFromRect(webView.frame)) url=\(webView.url?.absoluteString ?? "nil")")
             if kind == .crossScreen {
                 reportWriter.append("  CROSS-SCREEN CONDITION CONFIRMED · current shell and context/main differ")
             }
@@ -805,7 +878,11 @@ final class FullscreenLabController: NSObject {
 
             reportWriter.append(
                 "  REACHED inFullscreen · actual={\(screenSummary(actualScreen))} "
-                    + "fullscreen_window={\(windowSummary(webView.window))}"
+                    + "fullscreen_window={\(windowSummary(webView.window))} "
+                    + "webview_frame=\(NSStringFromRect(webView.frame)) url=\(webView.url?.absoluteString ?? "nil")"
+            )
+            reportWriter.append(
+                "  FULLSCREEN_CONTENT_VISUAL_CHECK_REQUIRED · no-JS guardrail preserved; confirm video/player-only vs whole-page visually"
             )
             reportWriter.flush()
             return
@@ -834,7 +911,7 @@ final class FullscreenLabController: NSObject {
 
             if attempt.kind == .crossScreen, success {
                 reportWriter.append(
-                    "CROSS-SCREEN SUCCESS · scheduling serialized recovery after stable source return"
+                    "CROSS-SCREEN SUCCESS · scheduling serialized recovery after WebCore window disappears and source remains stable"
                 )
                 scheduleCrossScreenRecovery(retiring: webView)
             }
@@ -850,17 +927,17 @@ final class FullscreenLabController: NSObject {
                     verifiedRecoveryWebViews.insert(attempt.webViewIdentity)
                 }
 
-                reportWriter.append("\n================ REFINED RECOVERY VERDICT ================")
+                reportWriter.append("\n================ STABILIZED RECOVERY VERDICT ================")
                 reportWriter.append("Latest recovery number: \(recoveryCount)")
                 reportWriter.append("Post-recovery fullscreen result: \(success ? "PASS" : "FAIL")")
                 reportWriter.append("Verified recovered WKWebViews: \(verifiedRecoveryWebViews.count) / \(recoveryCount)")
                 reportWriter.append("Quarantined retired WKWebViews: \(retiredWebContents.count)")
                 if recoveryCount >= 2 && verifiedRecoveryWebViews.count >= 2 {
-                    reportWriter.append("REPEATABLE REFINED RECOVERY = PASS")
+                    reportWriter.append("REPEATABLE STABILIZED RECOVERY = PASS")
                 } else {
-                    reportWriter.append("REPEATABLE REFINED RECOVERY = PENDING")
+                    reportWriter.append("REPEATABLE STABILIZED RECOVERY = PENDING")
                 }
-                reportWriter.append("==========================================================\n")
+                reportWriter.append("=============================================================\n")
             }
             reportWriter.flush()
             schedulePendingToggleDrain()
@@ -947,11 +1024,11 @@ final class FullscreenLabController: NSObject {
                 button.title = "FS Repair"
             }
             button.toolTip = pendingToggle == nil
-                ? "Fullscreen refined recovery experiment"
-                : "Fullscreen refined recovery experiment · one toggle queued"
+                ? "Fullscreen stabilized recovery experiment"
+                : "Fullscreen stabilized recovery experiment · one toggle queued"
         } else {
             button.title = "FS Lab Off"
-            button.toolTip = "FloatTabs Fullscreen Refined Recovery Lab"
+            button.toolTip = "FloatTabs Fullscreen Stabilized Recovery Lab"
         }
     }
 }
