@@ -3,39 +3,6 @@ import Foundation
 import KeyboardShortcuts
 import WebKit
 
-enum FullscreenLabMode: Int, CaseIterable {
-    case baseline = 0
-    case freshWebViewPerDisplay = 1
-    case plainNSWindowHost = 2
-    case stableAutoresizingHost = 3
-
-    var menuTitle: String {
-        switch self {
-        case .baseline:
-            return "Mode 0 — Baseline"
-        case .freshWebViewPerDisplay:
-            return "Mode 1 — Fresh WKWebView per Display"
-        case .plainNSWindowHost:
-            return "Mode 2 — Plain NSWindow Host"
-        case .stableAutoresizingHost:
-            return "Mode 3 — Stable Autoresizing Host"
-        }
-    }
-
-    var reportTitle: String {
-        switch self {
-        case .baseline:
-            return "Baseline · FloatingPanel + existing logical host + persistent WKWebView"
-        case .freshWebViewPerDisplay:
-            return "Fresh WKWebView per Display · baseline host, new WKWebView whenever target display changes"
-        case .plainNSWindowHost:
-            return "Plain NSWindow Host · existing logical host + persistent WKWebView"
-        case .stableAutoresizingHost:
-            return "Stable Autoresizing Host · FloatingPanel + direct frame/autoresizing WKWebView host"
-        }
-    }
-}
-
 private final class FullscreenLabReportWriter {
     let url: URL
     private let queue = DispatchQueue(label: "com.lost0rz.FloatTabs.fullscreenLabReport")
@@ -73,29 +40,28 @@ private final class FullscreenLabReportWriter {
 
 @MainActor
 final class FullscreenLabController: NSObject {
+    private enum AttemptKind: String {
+        case sameScreenControl = "SAME-SCREEN CONTROL"
+        case crossScreen = "CROSS-SCREEN"
+        case postCross = "POST-CROSS"
+        case unknown = "UNKNOWN"
+    }
+
     private struct AttemptResult {
         let number: Int
-        let sourceDisplayLabel: String
-        let sourceDisplayNumber: UInt32?
-        let sourceDisplaySummary: String
+        let kind: AttemptKind
+        let contextScreenNumber: UInt32?
+        let contextScreenSummary: String
+        let shellScreenNumber: UInt32?
+        let shellScreenSummary: String
+        let pointerScreenSummary: String
         let webViewIdentity: String
         let sourceWindowSummary: String
         var reachedFullscreen: Bool
         var failedBeforeFullscreen: Bool
-        var fullscreenDisplayLabel: String?
-        var fullscreenDisplaySummary: String?
-        var fullscreenMatchedSource: Bool?
-    }
-
-    private struct RetiredEnvironment {
-        let window: NSWindow
-        let webView: WKWebView?
-        let rootView: NSView?
-    }
-
-    private struct RetiredContent {
-        let webView: WKWebView
-        let rootView: NSView
+        var fullscreenScreenNumber: UInt32?
+        var fullscreenScreenSummary: String?
+        var fullscreenMatchedContext: Bool?
     }
 
     var onWillEnable: (() -> Void)?
@@ -105,25 +71,18 @@ final class FullscreenLabController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
 
-    private var modeItems: [FullscreenLabMode: NSMenuItem] = [:]
-    private var currentMode: FullscreenLabMode?
+    private var enabled = false
     private var window: NSWindow?
     private var webView: WKWebView?
     private var rootView: NSView?
-    private var retiredEnvironments: [RetiredEnvironment] = []
-    private var retiredContent: [RetiredContent] = []
     private var fullscreenObservation: NSKeyValueObservation?
     private var observedFullscreenState = "notInFullscreen"
     private var sourceURL = URL(string: "https://www.youtube.com/")!
-    private var lastHostScreenNumber: UInt32?
-    private var displayLabels: [UInt32: String] = [:]
-    private var nextDisplayLabelIndex = 0
     private var activeAttempt: AttemptResult?
     private var completedAttempts: [AttemptResult] = []
-    private var runSequenceEvaluated = false
-    private var runNumber = 0
+    private var completedCrossScreenAttempt = false
 
-    var isEnabled: Bool { currentMode != nil }
+    var isEnabled: Bool { enabled }
     var isVisible: Bool { window?.isVisible ?? false }
     var reportURL: URL { reportWriter.url }
 
@@ -136,34 +95,44 @@ final class FullscreenLabController: NSObject {
     func start() {
         let now = ISO8601DateFormatter().string(from: Date())
         let header = """
-        FloatTabs Fullscreen Lab Report
-        ===============================
+        FloatTabs Fullscreen Screen-Context Lab
+        =======================================
         Baseline commit: \(baselineCommit)
         Started: \(now)
         OS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         PID: \(ProcessInfo.processInfo.processIdentifier)
         Report: \(reportWriter.url.path)
 
-        Test contract
-        -------------
-        For each mode: A fullscreen -> exit -> B fullscreen -> exit -> A fullscreen.
-        PASS requires all first three attempts to reach WKWebView.FullscreenState.inFullscreen,
-        the source-display sequence to be A -> B -> A, AND the actual WebKit fullscreen
-        window to appear on the same display as its source attempt.
+        Root-cause contract
+        -------------------
+        We now distinguish three displays for every fullscreen attempt:
+          1. context/main screen: the screen WebKit/macOS currently treats as the active target
+          2. shell screen: the screen that physically hosts the FloatTabs WKWebView
+          3. actual fullscreen screen: the screen used by WebCoreFullScreenWindow
+
+        A CROSS-SCREEN attempt (context != shell) is NOT automatically a failure.
+        It is correct when actual fullscreen follows context/main.
+        The primary regression under test is whether a successful CROSS-SCREEN attempt
+        poisons the SAME WKWebView so that the next same-screen fullscreen aborts or mis-targets.
+
+        Recommended sequence
+        --------------------
+        Attempt 1: SAME-SCREEN CONTROL (activate A, shell A, fullscreen A, exit)
+        Attempt 2: CROSS-SCREEN (activate B, move pointer to A, summon shell A, fullscreen should go B, exit)
+        Attempt 3: POST-CROSS (activate A, shell A, fullscreen A)
 
         Safety constraints
         ------------------
-        No mouse event monitor, no NSWindow.sendEvent override, no injected JavaScript,
-        no requestFullscreen/exitFullscreen wrapping, no closeAllMediaPresentations,
-        and no mutation of WebKit-owned fullscreen windows.
-
-        Lab lifetime rule
-        -----------------
-        Retired WKWebViews/windows are hidden but intentionally retained until process exit.
-        Mode switching never tears down an old WebKit fullscreen controller synchronously.
+        One FloatingPanel and one persistent WKWebView for the entire process.
+        No mode switching, no extra experiment windows, no mouse event monitor,
+        no NSWindow.sendEvent override, no injected JavaScript, no fullscreen API wrapping,
+        no closeAllMediaPresentations, and no WebKit-owned fullscreen-window mutation.
 
         """
         reportWriter.reset(header: header)
+        completedAttempts.removeAll()
+        activeAttempt = nil
+        completedCrossScreenAttempt = false
         reportWriter.append("Available displays: \(NSScreen.screens.map(screenSummary).joined(separator: " || "))\n")
     }
 
@@ -171,17 +140,13 @@ final class FullscreenLabController: NSObject {
         captureCurrentURL()
         fullscreenObservation = nil
         window?.orderOut(nil)
-        for environment in retiredEnvironments {
-            environment.window.orderOut(nil)
-        }
-        currentMode = nil
-        refreshMenuState()
+        enabled = false
         updateStatusItemTitle()
         reportWriter.flush()
     }
 
     func toggleOnCurrentDisplay() {
-        guard let mode = currentMode else { return }
+        guard enabled else { return }
         let targetScreen = screenAtMouse() ?? NSScreen.main ?? NSScreen.screens.first
         guard let targetScreen else { return }
 
@@ -190,12 +155,15 @@ final class FullscreenLabController: NSObject {
             let targetNumber = screenNumber(targetScreen)
             if currentNumber == targetNumber {
                 window.orderOut(nil)
-                reportWriter.append("lab_window_hidden mode=\(mode.rawValue) screen=\(screenSummary(targetScreen))")
+                reportWriter.append(
+                    "lab_window_hidden shell={\(screenSummary(window.screen))} "
+                        + "main={\(screenSummary(NSScreen.main))} pointer={\(screenSummary(screenAtMouse()))}"
+                )
                 return
             }
         }
 
-        show(mode: mode, on: targetScreen)
+        show(on: targetScreen)
     }
 
     func revealReport() {
@@ -207,51 +175,55 @@ final class FullscreenLabController: NSObject {
         guard let button = statusItem.button else { return }
         button.image = NSImage(
             systemSymbolName: "rectangle.3.group",
-            accessibilityDescription: "Fullscreen Lab"
+            accessibilityDescription: "Fullscreen Screen Context Lab"
         )
         button.image?.isTemplate = true
         button.imagePosition = .imageLeading
-        button.title = "FS Lab Off"
-        button.toolTip = "FloatTabs Fullscreen Lab"
+        updateStatusItemTitle()
         statusItem.menu = menu
     }
 
     private func configureMenu() {
-        let titleItem = NSMenuItem(title: "Fullscreen Lab", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "Fullscreen Screen-Context Lab", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         menu.addItem(.separator())
 
-        let offItem = NSMenuItem(
-            title: "Off — Normal FloatTabs",
+        let enableItem = NSMenuItem(
+            title: "Enable Single Baseline Lab",
+            action: #selector(enableLab),
+            keyEquivalent: ""
+        )
+        enableItem.target = self
+        menu.addItem(enableItem)
+
+        let disableItem = NSMenuItem(
+            title: "Disable / Hide Lab",
             action: #selector(disableLab),
             keyEquivalent: ""
         )
-        offItem.target = self
-        offItem.tag = -1
-        menu.addItem(offItem)
-
-        for mode in FullscreenLabMode.allCases {
-            let item = NSMenuItem(
-                title: mode.menuTitle,
-                action: #selector(selectMode(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.tag = mode.rawValue
-            modeItems[mode] = item
-            menu.addItem(item)
-        }
+        disableItem.target = self
+        menu.addItem(disableItem)
 
         menu.addItem(.separator())
 
         let showItem = NSMenuItem(
-            title: "Show / Move Lab Here",
+            title: "Show / Move Single Lab Here",
             action: #selector(showLabHere),
             keyEquivalent: ""
         )
         showItem.target = self
         menu.addItem(showItem)
+
+        let snapshotItem = NSMenuItem(
+            title: "Log Current Screen Context",
+            action: #selector(logCurrentContext),
+            keyEquivalent: ""
+        )
+        snapshotItem.target = self
+        menu.addItem(snapshotItem)
+
+        menu.addItem(.separator())
 
         let reportItem = NSMenuItem(
             title: "Reveal Desktop Report",
@@ -262,39 +234,49 @@ final class FullscreenLabController: NSObject {
         menu.addItem(reportItem)
 
         let resetItem = NSMenuItem(
-            title: "Reset Desktop Report",
+            title: "Reset Report / Attempts (same WKWebView)",
             action: #selector(resetDesktopReport),
             keyEquivalent: ""
         )
         resetItem.target = self
         menu.addItem(resetItem)
+    }
 
-        refreshMenuState()
+    @objc private func enableLab() {
+        onWillEnable?()
+        enabled = true
+        updateStatusItemTitle()
+        let targetScreen = screenAtMouse() ?? NSScreen.main ?? NSScreen.screens.first
+        if let targetScreen {
+            show(on: targetScreen)
+        }
     }
 
     @objc private func disableLab() {
         captureCurrentURL()
-        fullscreenObservation = nil
-        retireCurrentEnvironment(reason: "disable_lab")
-        if let currentMode {
-            reportWriter.append("\nLAB DISABLED from mode \(currentMode.rawValue)\n")
-        }
-        currentMode = nil
+        enabled = false
+        window?.orderOut(nil)
         activeAttempt = nil
-        refreshMenuState()
         updateStatusItemTitle()
+        reportWriter.append("\nLAB HIDDEN/DISABLED — WKWebView retained; no new window created.\n")
         reportWriter.flush()
     }
 
-    @objc private func selectMode(_ sender: NSMenuItem) {
-        guard let mode = FullscreenLabMode(rawValue: sender.tag) else { return }
-        onWillEnable?()
-        switchToMode(mode)
+    @objc private func showLabHere() {
+        guard enabled else { return }
+        let targetScreen = screenAtMouse() ?? NSScreen.main ?? NSScreen.screens.first
+        if let targetScreen {
+            show(on: targetScreen)
+        }
     }
 
-    @objc private func showLabHere() {
-        guard currentMode != nil else { return }
-        toggleOnCurrentDisplay()
+    @objc private func logCurrentContext() {
+        reportWriter.append(
+            "CONTEXT_SNAPSHOT main={\(screenSummary(NSScreen.main))} "
+                + "shell={\(screenSummary(window?.screen))} pointer={\(screenSummary(screenAtMouse()))} "
+                + "key_window={\(windowSummary(NSApp.keyWindow))} lab_window={\(windowSummary(window))}"
+        )
+        reportWriter.flush()
     }
 
     @objc private func revealDesktopReport() {
@@ -303,176 +285,60 @@ final class FullscreenLabController: NSObject {
 
     @objc private func resetDesktopReport() {
         start()
-        if let currentMode {
-            reportWriter.append("Report reset while mode \(currentMode.rawValue) remained selected.\n")
-        }
-    }
-
-    private func retireCurrentEnvironment(reason: String) {
-        guard let currentWindow = window else {
-            webView = nil
-            rootView = nil
-            return
-        }
-
-        currentWindow.orderOut(nil)
-        retiredEnvironments.append(
-            RetiredEnvironment(window: currentWindow, webView: webView, rootView: rootView)
-        )
-        reportWriter.append(
-            "environment_retired reason=\(reason) window={\(windowSummary(currentWindow))} "
-                + "webview=\(webViewIdentity(webView)) retained_count=\(retiredEnvironments.count)"
-        )
-        window = nil
-        webView = nil
-        rootView = nil
-    }
-
-    private func switchToMode(_ mode: FullscreenLabMode) {
-        captureCurrentURL()
-        fullscreenObservation = nil
-        reportWriter.append("\nMODE_SWITCH_BEGIN from=\(currentMode.map { String($0.rawValue) } ?? "off") to=\(mode.rawValue)")
+        reportWriter.append("Reset performed with SAME WKWebView retained: \(webViewIdentity(webView))")
         reportWriter.flush()
-        retireCurrentEnvironment(reason: "switch_to_mode_\(mode.rawValue)")
-
-        currentMode = mode
-        lastHostScreenNumber = nil
-        displayLabels.removeAll()
-        nextDisplayLabelIndex = 0
-        activeAttempt = nil
-        completedAttempts.removeAll()
-        runSequenceEvaluated = false
-        runNumber += 1
-
-        let targetScreen = screenAtMouse() ?? NSScreen.main ?? NSScreen.screens.first
-        reportWriter.append("\n============================================================")
-        reportWriter.append("RUN \(runNumber) · MODE \(mode.rawValue) · \(mode.reportTitle)")
-        reportWriter.append("Selected at: \(ISO8601DateFormatter().string(from: Date()))")
-        if let targetScreen {
-            reportWriter.append("Initial target display: \(screenSummary(targetScreen))")
-        }
-        reportWriter.append("============================================================")
-        reportWriter.flush()
-
-        refreshMenuState()
-        updateStatusItemTitle()
-
-        if let targetScreen {
-            show(mode: mode, on: targetScreen)
-        }
     }
 
-    private func show(mode: FullscreenLabMode, on targetScreen: NSScreen) {
-        let targetNumber = screenNumber(targetScreen)
+    private func show(on targetScreen: NSScreen) {
+        let mainBeforeShow = NSScreen.main
+        let pointerBeforeShow = screenAtMouse()
 
         if window == nil {
-            createEnvironment(mode: mode, targetScreen: targetScreen)
-        } else if mode == .freshWebViewPerDisplay,
-                  let lastHostScreenNumber,
-                  let targetNumber,
-                  lastHostScreenNumber != targetNumber {
-            let newFrame = frame(for: targetScreen)
-            window?.setFrame(newFrame, display: false)
-            rebuildWebViewForFreshDisplay(targetScreen: targetScreen)
+            createEnvironment(on: targetScreen)
         } else {
             window?.setFrame(frame(for: targetScreen), display: false)
         }
 
-        lastHostScreenNumber = targetNumber
-        let label = displayLabel(for: targetScreen)
         reportWriter.append(
-            "lab_window_shown mode=\(mode.rawValue) display=\(label) target={\(screenSummary(targetScreen))} "
-                + "source_window={\(windowSummary(window))} webview=\(webViewIdentity(webView))"
+            "LAB_SHOW shell_target={\(screenSummary(targetScreen))} "
+                + "main_before_show={\(screenSummary(mainBeforeShow))} "
+                + "pointer_before_show={\(screenSummary(pointerBeforeShow))} "
+                + "webview=\(webViewIdentity(webView))"
         )
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         if let webView {
-            DispatchQueue.main.async { [weak self, weak webView] in
-                guard let self, let webView else { return }
-                self.window?.makeFirstResponder(webView)
-            }
-        }
-    }
-
-    private func createEnvironment(mode: FullscreenLabMode, targetScreen: NSScreen) {
-        let targetFrame = frame(for: targetScreen)
-        let newWindow: NSWindow
-
-        switch mode {
-        case .plainNSWindowHost:
-            let ordinaryWindow = NSWindow(
-                contentRect: targetFrame,
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            ordinaryWindow.title = "FloatTabs Fullscreen Lab — Mode 2"
-            ordinaryWindow.isReleasedWhenClosed = false
-            ordinaryWindow.level = .normal
-            ordinaryWindow.collectionBehavior = []
-            newWindow = ordinaryWindow
-
-        case .baseline, .freshWebViewPerDisplay, .stableAutoresizingHost:
-            newWindow = FloatingPanel(contentRect: targetFrame)
+            window?.makeFirstResponder(webView)
         }
 
-        window = newWindow
-        installNewWebView(mode: mode, in: newWindow)
-    }
-
-    private func rebuildWebViewForFreshDisplay(targetScreen: NSScreen) {
-        guard currentMode == .freshWebViewPerDisplay,
-              let window else { return }
-
-        captureCurrentURL()
-        let oldIdentity = webViewIdentity(webView)
-        fullscreenObservation = nil
-
-        if let oldWebView = webView, let oldRoot = rootView {
-            retiredContent.append(RetiredContent(webView: oldWebView, rootView: oldRoot))
-            reportWriter.append(
-                "fresh_webview_retained old=\(oldIdentity) retained_content_count=\(retiredContent.count)"
-            )
-        }
-
-        webView = nil
-        rootView = nil
-        installNewWebView(mode: .freshWebViewPerDisplay, in: window)
         reportWriter.append(
-            "fresh_webview_created_for_display old=\(oldIdentity) new=\(webViewIdentity(webView)) "
-                + "target={\(screenSummary(targetScreen))}"
+            "LAB_SHOWN shell={\(screenSummary(window?.screen))} "
+                + "main_after_show={\(screenSummary(NSScreen.main))} "
+                + "pointer_after_show={\(screenSummary(screenAtMouse()))} "
+                + "window={\(windowSummary(window))}"
         )
         reportWriter.flush()
     }
 
-    private func installNewWebView(mode: FullscreenLabMode, in window: NSWindow) {
+    private func createEnvironment(on targetScreen: NSScreen) {
+        let newWindow = FloatingPanel(contentRect: frame(for: targetScreen))
         let newWebView = WebViewFactory.makeWebView()
         newWebView.navigationDelegate = nil
+        let root = PanelRootView(webView: newWebView)
+        newWindow.contentView = root
 
-        switch mode {
-        case .baseline, .freshWebViewPerDisplay, .plainNSWindowHost:
-            let root = PanelRootView(webView: newWebView)
-            window.contentView = root
-            rootView = root
-
-        case .stableAutoresizingHost:
-            let host = NSView(frame: NSRect(origin: .zero, size: window.contentView?.bounds.size ?? window.frame.size))
-            host.wantsLayer = true
-            host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-            host.autoresizingMask = [.width, .height]
-            newWebView.translatesAutoresizingMaskIntoConstraints = true
-            newWebView.autoresizingMask = [.width, .height]
-            newWebView.frame = host.bounds
-            host.addSubview(newWebView)
-            window.contentView = host
-            rootView = host
-        }
-
+        window = newWindow
         webView = newWebView
+        rootView = root
         observedFullscreenState = fullscreenStateName(newWebView.fullscreenState)
         attachFullscreenObservation(to: newWebView)
         newWebView.load(URLRequest(url: sourceURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60))
+
+        reportWriter.append(
+            "SINGLE_ENVIRONMENT_CREATED window={\(windowSummary(newWindow))} "
+                + "webview=\(webViewIdentity(newWebView))"
+        )
     }
 
     private func attachFullscreenObservation(to webView: WKWebView) {
@@ -485,42 +351,61 @@ final class FullscreenLabController: NSObject {
     }
 
     private func handleFullscreenStateChange(for webView: WKWebView) {
-        guard let mode = currentMode else { return }
         let oldState = observedFullscreenState
         let newState = fullscreenStateName(webView.fullscreenState)
         observedFullscreenState = newState
 
         if newState == "enteringFullscreen" {
-            if runSequenceEvaluated {
-                reportWriter.append("\nEXTRA_FULLSCREEN_ATTEMPT_IGNORED mode=\(mode.rawValue) after_first_three=true")
+            let contextScreen = NSScreen.main
+            let shellScreen = window?.screen
+            let pointerScreen = screenAtMouse()
+            let contextNumber = screenNumber(contextScreen)
+            let shellNumber = screenNumber(shellScreen)
+
+            let kind: AttemptKind
+            if completedCrossScreenAttempt {
+                kind = .postCross
+            } else if let contextNumber, let shellNumber, contextNumber == shellNumber {
+                kind = .sameScreenControl
+            } else if contextNumber != nil, shellNumber != nil {
+                kind = .crossScreen
             } else {
-                let screen = hostScreen() ?? screenAtMouse() ?? NSScreen.main
-                let label = screen.map { displayLabel(for: $0) } ?? "?"
-                let attempt = AttemptResult(
-                    number: completedAttempts.count + 1,
-                    sourceDisplayLabel: label,
-                    sourceDisplayNumber: screenNumber(screen),
-                    sourceDisplaySummary: screenSummary(screen),
-                    webViewIdentity: webViewIdentity(webView),
-                    sourceWindowSummary: windowSummary(window),
-                    reachedFullscreen: false,
-                    failedBeforeFullscreen: false,
-                    fullscreenDisplayLabel: nil,
-                    fullscreenDisplaySummary: nil,
-                    fullscreenMatchedSource: nil
-                )
-                activeAttempt = attempt
-                reportWriter.append("\nATTEMPT \(attempt.number) START · mode=\(mode.rawValue) source_display=\(label)")
-                reportWriter.append("  source_display={\(attempt.sourceDisplaySummary)}")
-                reportWriter.append("  source_window={\(attempt.sourceWindowSummary)}")
-                reportWriter.append("  webview=\(attempt.webViewIdentity)")
+                kind = .unknown
+            }
+
+            let attempt = AttemptResult(
+                number: completedAttempts.count + 1,
+                kind: kind,
+                contextScreenNumber: contextNumber,
+                contextScreenSummary: screenSummary(contextScreen),
+                shellScreenNumber: shellNumber,
+                shellScreenSummary: screenSummary(shellScreen),
+                pointerScreenSummary: screenSummary(pointerScreen),
+                webViewIdentity: webViewIdentity(webView),
+                sourceWindowSummary: windowSummary(window),
+                reachedFullscreen: false,
+                failedBeforeFullscreen: false,
+                fullscreenScreenNumber: nil,
+                fullscreenScreenSummary: nil,
+                fullscreenMatchedContext: nil
+            )
+            activeAttempt = attempt
+
+            reportWriter.append("\nATTEMPT \(attempt.number) START · \(kind.rawValue)")
+            reportWriter.append("  context/main={\(attempt.contextScreenSummary)}")
+            reportWriter.append("  shell={\(attempt.shellScreenSummary)}")
+            reportWriter.append("  pointer={\(attempt.pointerScreenSummary)}")
+            reportWriter.append("  source_window={\(attempt.sourceWindowSummary)}")
+            reportWriter.append("  webview=\(attempt.webViewIdentity)")
+            if kind == .crossScreen {
+                reportWriter.append("  CROSS-SCREEN CONDITION CONFIRMED · shell and context/main differ")
             }
         }
 
         reportWriter.append(
             "  fullscreen_state \(oldState) -> \(newState) "
                 + "webview_window={\(windowSummary(webView.window))} "
-                + "main_screen={\(screenSummary(NSScreen.main))}"
+                + "main_now={\(screenSummary(NSScreen.main))}"
         )
 
         guard var attempt = activeAttempt else { return }
@@ -529,22 +414,24 @@ final class FullscreenLabController: NSObject {
             attempt.reachedFullscreen = true
             let actualScreen = webView.window?.screen
             let actualNumber = screenNumber(actualScreen)
-            let actualLabel = actualScreen.map { displayLabel(for: $0) }
-            let matches = actualNumber != nil
-                && attempt.sourceDisplayNumber != nil
-                && actualNumber == attempt.sourceDisplayNumber
-            attempt.fullscreenDisplayLabel = actualLabel
-            attempt.fullscreenDisplaySummary = screenSummary(actualScreen)
-            attempt.fullscreenMatchedSource = matches
+            let matchesContext = actualNumber != nil
+                && attempt.contextScreenNumber != nil
+                && actualNumber == attempt.contextScreenNumber
+            attempt.fullscreenScreenNumber = actualNumber
+            attempt.fullscreenScreenSummary = screenSummary(actualScreen)
+            attempt.fullscreenMatchedContext = matchesContext
             activeAttempt = attempt
+
             reportWriter.append(
-                "  REACHED inFullscreen · actual_display=\(actualLabel ?? "?") "
+                "  REACHED inFullscreen · actual={\(screenSummary(actualScreen))} "
                     + "fullscreen_window={\(windowSummary(webView.window))}"
             )
-            if !matches {
+            if matchesContext {
+                reportWriter.append("  TARGET MATCH · actual fullscreen follows context/main screen")
+            } else {
                 reportWriter.append(
-                    "  WRONG DISPLAY SIGNAL · source=\(attempt.sourceDisplayLabel) "
-                        + "actual=\(actualLabel ?? "?") actual_screen={\(screenSummary(actualScreen))}"
+                    "  TARGET MISMATCH · context/main={\(attempt.contextScreenSummary)} "
+                        + "actual={\(screenSummary(actualScreen))}"
                 )
             }
             return
@@ -562,63 +449,38 @@ final class FullscreenLabController: NSObject {
             completedAttempts.append(attempt)
             let success = attempt.reachedFullscreen
                 && !attempt.failedBeforeFullscreen
-                && attempt.fullscreenMatchedSource == true
+                && attempt.fullscreenMatchedContext == true
+
             reportWriter.append(
                 "ATTEMPT \(attempt.number) RESULT = \(success ? "PASS" : "FAIL") "
-                    + "source=\(attempt.sourceDisplayLabel) "
-                    + "actual=\(attempt.fullscreenDisplayLabel ?? "none") "
-                    + "webview=\(attempt.webViewIdentity)"
+                    + "kind=\(attempt.kind.rawValue)"
             )
-            evaluateRunIfReady(mode: mode)
-        }
-    }
 
-    private func evaluateRunIfReady(mode: FullscreenLabMode) {
-        guard !runSequenceEvaluated, completedAttempts.count >= 3 else { return }
-        runSequenceEvaluated = true
-        let firstThree = Array(completedAttempts.prefix(3))
-        let sourceSequence = firstThree.map(\.sourceDisplayLabel)
-        let fullscreenSequence = firstThree.map { $0.fullscreenDisplayLabel ?? "none" }
-        let allSucceeded = firstThree.allSatisfy {
-            $0.reachedFullscreen
-                && !$0.failedBeforeFullscreen
-                && $0.fullscreenMatchedSource == true
-        }
-        let sequenceIsABA = sourceSequence.count == 3
-            && sourceSequence[0] == "A"
-            && sourceSequence[1] == "B"
-            && sourceSequence[2] == "A"
-        let passed = allSucceeded && sequenceIsABA
-        let attemptResults = firstThree.map { attempt in
-            let ok = attempt.reachedFullscreen
-                && !attempt.failedBeforeFullscreen
-                && attempt.fullscreenMatchedSource == true
-            return ok ? "PASS" : "FAIL"
-        }.joined(separator: ", ")
+            if attempt.kind == .crossScreen, success {
+                completedCrossScreenAttempt = true
+                reportWriter.append(
+                    "CROSS-SCREEN PRIMER COMPLETE · next fullscreen attempt will be classified POST-CROSS"
+                )
+            }
 
-        reportWriter.append("\n---------------- MODE \(mode.rawValue) SUMMARY ----------------")
-        reportWriter.append("Source sequence: \(sourceSequence.joined(separator: " -> "))")
-        reportWriter.append("Actual fullscreen sequence: \(fullscreenSequence.joined(separator: " -> "))")
-        reportWriter.append("Attempt results: \(attemptResults)")
-        reportWriter.append("A -> B -> A RESULT = \(passed ? "PASS" : "FAIL")")
-        if !sequenceIsABA {
-            reportWriter.append("Reason: first three source displays were not A -> B -> A; repeat this mode after Reset Report if needed.")
+            if attempt.kind == .postCross {
+                let postCrossSameScreen = attempt.contextScreenNumber != nil
+                    && attempt.shellScreenNumber != nil
+                    && attempt.contextScreenNumber == attempt.shellScreenNumber
+                reportWriter.append("\n================ POST-CROSS VERDICT ================")
+                reportWriter.append("Post-cross context and shell are same screen: \(postCrossSameScreen ? "YES" : "NO")")
+                reportWriter.append("Post-cross fullscreen result: \(success ? "PASS" : "FAIL")")
+                if postCrossSameScreen && !success {
+                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = YES")
+                } else if postCrossSameScreen && success {
+                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = NO")
+                } else {
+                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = INCONCLUSIVE (post-cross attempt was not same-screen)")
+                }
+                reportWriter.append("====================================================\n")
+            }
+            reportWriter.flush()
         }
-        let wrongDisplay = firstThree.filter { $0.reachedFullscreen && $0.fullscreenMatchedSource != true }
-        if !wrongDisplay.isEmpty {
-            reportWriter.append(
-                "Wrong-target attempt(s): "
-                    + wrongDisplay.map {
-                        "\($0.number)[source=\($0.sourceDisplayLabel),actual=\($0.fullscreenDisplayLabel ?? "none")]"
-                    }.joined(separator: ", ")
-            )
-        }
-        let aborted = firstThree.filter { !$0.reachedFullscreen || $0.failedBeforeFullscreen }
-        if !aborted.isEmpty {
-            reportWriter.append("Aborted/failed attempt(s): \(aborted.map { String($0.number) }.joined(separator: ", "))")
-        }
-        reportWriter.append("------------------------------------------------------\n")
-        reportWriter.flush()
     }
 
     private func captureCurrentURL() {
@@ -639,31 +501,6 @@ final class FullscreenLabController: NSObject {
     private func screenAtMouse() -> NSScreen? {
         let point = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.contains(point) }
-    }
-
-    private func hostScreen() -> NSScreen? {
-        if let windowScreen = window?.screen {
-            return windowScreen
-        }
-        if let lastHostScreenNumber {
-            return NSScreen.screens.first { screenNumber($0) == lastHostScreenNumber }
-        }
-        return nil
-    }
-
-    private func displayLabel(for screen: NSScreen) -> String {
-        guard let number = screenNumber(screen) else { return "?" }
-        if let existing = displayLabels[number] { return existing }
-
-        let label: String
-        switch nextDisplayLabelIndex {
-        case 0: label = "A"
-        case 1: label = "B"
-        default: label = "D\(nextDisplayLabelIndex + 1)"
-        }
-        nextDisplayLabelIndex += 1
-        displayLabels[number] = label
-        return label
     }
 
     private func screenNumber(_ screen: NSScreen?) -> UInt32? {
@@ -700,20 +537,14 @@ final class FullscreenLabController: NSObject {
         }
     }
 
-    private func refreshMenuState() {
-        for (mode, item) in modeItems {
-            item.state = currentMode == mode ? .on : .off
-        }
-    }
-
     private func updateStatusItemTitle() {
         guard let button = statusItem.button else { return }
-        if let currentMode {
-            button.title = "FS\(currentMode.rawValue)"
-            button.toolTip = "Fullscreen Lab · \(currentMode.menuTitle)"
+        if enabled {
+            button.title = "FS Context"
+            button.toolTip = "Fullscreen Screen-Context Lab · single persistent WKWebView"
         } else {
             button.title = "FS Lab Off"
-            button.toolTip = "FloatTabs Fullscreen Lab"
+            button.toolTip = "FloatTabs Fullscreen Screen-Context Lab"
         }
     }
 }
