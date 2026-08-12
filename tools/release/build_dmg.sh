@@ -83,8 +83,10 @@ verify_universal_app "$APP_PATH"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
-DMG_PATH="$OUTPUT_DIR/FloatTabs-$VERSION.dmg"
-DSYM_ARCHIVE_PATH="$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip"
+DMG_NAME="FloatTabs-$VERSION.dmg"
+DSYM_ARCHIVE_NAME="FloatTabs-$VERSION.dSYM.zip"
+DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
+DSYM_ARCHIVE_PATH="$OUTPUT_DIR/$DSYM_ARCHIVE_NAME"
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
   echo "Signing FloatTabs.app with Developer ID identity: $SIGN_IDENTITY"
@@ -164,7 +166,10 @@ else
   echo "NOTE: This is not a public notarized release unless Developer ID + notary credentials were supplied."
 fi
 
-/usr/bin/shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
-/usr/bin/shasum -a 256 "$DSYM_ARCHIVE_PATH" > "$DSYM_ARCHIVE_PATH.sha256"
+(
+  cd "$OUTPUT_DIR"
+  /usr/bin/shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
+  /usr/bin/shasum -a 256 "$DSYM_ARCHIVE_NAME" > "$DSYM_ARCHIVE_NAME.sha256"
+)
 echo "Debug symbols: $DSYM_ARCHIVE_PATH"
 echo "Checksums: $DMG_PATH.sha256 and $DSYM_ARCHIVE_PATH.sha256"
