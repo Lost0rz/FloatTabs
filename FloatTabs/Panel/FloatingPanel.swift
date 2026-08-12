@@ -41,4 +41,9 @@ final class FloatingPanel: NSPanel {
         contentMinSize = PanelMetrics.minimumPanelSize
         minSize = PanelMetrics.minimumPanelSize
     }
+
+    override func sendEvent(_ event: NSEvent) {
+        FullscreenDiagnostics.shared.recordPanelInput(event: event, panel: self)
+        super.sendEvent(event)
+    }
 }
