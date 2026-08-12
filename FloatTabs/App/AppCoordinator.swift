@@ -96,7 +96,6 @@ final class FullscreenLabController: NSObject {
     private var fullscreenObservation: NSKeyValueObservation?
     private var stagedWebView: WKWebView?
     private var stagedRootView: NSView?
-    private var stagedReadyCommitScheduled = false
     private var recoveryRetiringWebView: WKWebView?
     private var pendingToggle: PendingToggle?
 
@@ -171,7 +170,6 @@ final class FullscreenLabController: NSObject {
         stagedWebView?.stopLoading()
         stagedWebView = nil
         stagedRootView = nil
-        stagedReadyCommitScheduled = false
         recoveryRetiringWebView = nil
         pendingToggle = nil
         updateStatusItemTitle()
@@ -575,7 +573,6 @@ final class FullscreenLabController: NSObject {
         candidate.setAllMediaPlaybackSuspended(true, completionHandler: nil)
         stagedWebView = candidate
         stagedRootView = candidateRoot
-        stagedReadyCommitScheduled = false
 
         reportWriter.append(
             "REPLACEMENT_PRELOAD_STARTED staged_webview=\(webViewIdentity(candidate)) "
@@ -638,7 +635,6 @@ final class FullscreenLabController: NSObject {
         }
 
         if nextStableChecks >= 10 {
-            stagedReadyCommitScheduled = true
             reportWriter.append(
                 "REPLACEMENT_PRELOAD_READY staged_webview=\(webViewIdentity(candidate)) "
                     + "progress=\(String(format: "%.2f", progress)) loading=\(candidate.isLoading) "
@@ -680,7 +676,6 @@ final class FullscreenLabController: NSObject {
               oldWebView.window === window,
               window.contentView === oldRoot,
               visibleWebCore == "none" else {
-            stagedReadyCommitScheduled = false
             reportWriter.append(
                 "RECOVERY_SWAP_DEFERRED reason=source_or_webcore_no_longer_stable visible_webcore=\(visibleWebCore)"
             )
@@ -692,7 +687,6 @@ final class FullscreenLabController: NSObject {
         guard candidate.url != nil,
               !candidate.isLoading,
               candidate.estimatedProgress >= 0.99 else {
-            stagedReadyCommitScheduled = false
             reportWriter.append(
                 "RECOVERY_SWAP_DEFERRED reason=replacement_navigation_became_unstable "
                     + "loading=\(candidate.isLoading) progress=\(String(format: "%.2f", candidate.estimatedProgress)) "
@@ -725,7 +719,6 @@ final class FullscreenLabController: NSObject {
         rootView = candidateRoot
         stagedWebView = nil
         stagedRootView = nil
-        stagedReadyCommitScheduled = false
         recoveryRetiringWebView = nil
         observedFullscreenState = fullscreenStateName(candidate.fullscreenState)
         attachFullscreenObservation(to: candidate)
@@ -767,7 +760,6 @@ final class FullscreenLabController: NSObject {
         stagedWebView?.stopLoading()
         stagedWebView = nil
         stagedRootView = nil
-        stagedReadyCommitScheduled = false
         if self.webView === oldWebView {
             oldWebView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
