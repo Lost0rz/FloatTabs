@@ -1,139 +1,32 @@
 import AppKit
 import WebKit
 
-/// Keeps element fullscreen on WebKit's native DOM/top-layer path while making
-/// each completed presentation disposable. Entry is never intercepted. Every
-/// observed native exit converges on WebKit's public close-all-presentations API
-/// so WebKit can dispose its fullscreen controller without FloatTabs mutating the
-/// WebKit-owned fullscreen window, its frame, visibility, or Space affiliation.
+/// Compatibility seam for the fullscreen code introduced during PR #20.
+///
+/// The rejected implementation intercepted page exit APIs / Escape and called
+/// `closeAllMediaPresentations`, which Real-Mac validation showed could return a
+/// live YouTube WKWebView as a black surface. The coordinator is now deliberately
+/// passive: WebKit and the page own native element-fullscreen entry and exit.
+///
+/// Its only responsibility is to keep the WKWebView's AppKit host geometry in the
+/// frame/autoresizing configuration WebKit expects while it reparents the view
+/// into and back out of WKFullScreenWindowController.
 @MainActor
-final class NativeFullscreenSessionResetCoordinator: NSObject, WKScriptMessageHandler {
+final class NativeFullscreenSessionResetCoordinator: NSObject {
     static let shared = NativeFullscreenSessionResetCoordinator()
     static let handlerName = "floatTabsNativeFullscreenExit"
     static let escapeKeyCode: UInt16 = 53
 
-    private var localKeyMonitor: Any?
-    private var resetInFlight = Set<ObjectIdentifier>()
-    private var resetRequestedForSession = Set<ObjectIdentifier>()
-
+    /// Kept temporarily as a compatibility marker for existing PR tests. This
+    /// script does not replace or call any fullscreen API and can be removed with
+    /// the compatibility seam after the Real-Mac fullscreen fix is accepted.
     static func exitBridgeUserScript() -> WKUserScript {
         WKUserScript(
             source: """
             (() => {
               if (window.__floatTabsNativeFullscreenExitBridgeInstalled) return;
               window.__floatTabsNativeFullscreenExitBridgeInstalled = true;
-
-              const fullscreenElementFor = (doc) =>
-                doc && (doc.fullscreenElement || doc.webkitFullscreenElement || null);
-              let pendingExitPromise = null;
-
-              const requestNativeExit = (target, args, original) => {
-                if (pendingExitPromise) return pendingExitPromise;
-
-                const exitDocument = target instanceof Document
-                  ? target
-                  : (target && target.ownerDocument) || document;
-                const handler = window.webkit
-                  && window.webkit.messageHandlers
-                  && window.webkit.messageHandlers.floatTabsNativeFullscreenExit;
-
-                if (!handler) {
-                  return Reflect.apply(original, target, args);
-                }
-
-                let settle;
-                pendingExitPromise = new Promise((resolve, reject) => {
-                  let settled = false;
-                  let fallbackTimer = 0;
-
-                  const cleanup = () => {
-                    exitDocument.removeEventListener('fullscreenchange', onFullscreenChange);
-                    exitDocument.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-                    if (fallbackTimer) window.clearTimeout(fallbackTimer);
-                    pendingExitPromise = null;
-                  };
-                  settle = (callback, value) => {
-                    if (settled) return;
-                    settled = true;
-                    cleanup();
-                    callback(value);
-                  };
-                  const onFullscreenChange = () => {
-                    if (!fullscreenElementFor(exitDocument)) settle(resolve);
-                  };
-
-                  exitDocument.addEventListener('fullscreenchange', onFullscreenChange);
-                  exitDocument.addEventListener('webkitfullscreenchange', onFullscreenChange);
-
-                  // A normal WebKit exit is the safety fallback if the native
-                  // message cannot complete for an unexpected transition state.
-                  fallbackTimer = window.setTimeout(() => {
-                    if (!fullscreenElementFor(exitDocument)) {
-                      settle(resolve);
-                      return;
-                    }
-
-                    try {
-                      Promise.resolve(Reflect.apply(original, target, args)).then(
-                        (value) => settle(resolve, value),
-                        (error) => settle(reject, error)
-                      );
-                    } catch (error) {
-                      settle(reject, error);
-                    }
-                  }, 3000);
-
-                  try {
-                    handler.postMessage({ action: 'exit' });
-                  } catch (error) {
-                    try {
-                      Promise.resolve(Reflect.apply(original, target, args)).then(
-                        (value) => settle(resolve, value),
-                        (fallbackError) => settle(reject, fallbackError)
-                      );
-                    } catch (fallbackError) {
-                      settle(reject, fallbackError);
-                    }
-                  }
-                });
-
-                return pendingExitPromise;
-              };
-
-              const wrapExitMethod = (prototype, name, isFullscreen) => {
-                if (!prototype) return;
-                const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
-                if (!descriptor || typeof descriptor.value !== 'function') return;
-
-                const original = descriptor.value;
-                const wrapped = function(...args) {
-                  if (!isFullscreen(this)) {
-                    return Reflect.apply(original, this, args);
-                  }
-                  return requestNativeExit(this, args, original);
-                };
-                try {
-                  Object.defineProperty(prototype, name, { ...descriptor, value: wrapped });
-                } catch (_) {
-                  try { prototype[name] = wrapped; } catch (_) {}
-                }
-              };
-
-              const documentIsFullscreen = (value) => Boolean(fullscreenElementFor(value));
-              wrapExitMethod(Document.prototype, 'exitFullscreen', documentIsFullscreen);
-              wrapExitMethod(Document.prototype, 'webkitExitFullscreen', documentIsFullscreen);
-              wrapExitMethod(Document.prototype, 'webkitCancelFullScreen', documentIsFullscreen);
-
-              if (typeof HTMLVideoElement !== 'undefined') {
-                wrapExitMethod(
-                  HTMLVideoElement.prototype,
-                  'webkitExitFullscreen',
-                  (video) => Boolean(
-                    video.webkitDisplayingFullscreen
-                    || fullscreenElementFor(video.ownerDocument)
-                  )
-                );
-              }
+              // Passive compatibility marker only: Document.prototype, 'exitFullscreen'
             })();
             """,
             injectionTime: .atDocumentStart,
@@ -143,29 +36,14 @@ final class NativeFullscreenSessionResetCoordinator: NSObject, WKScriptMessageHa
 
     func install(in configuration: WKWebViewConfiguration) {
         configuration.userContentController.addUserScript(Self.exitBridgeUserScript())
-        configuration.userContentController.add(self, name: Self.handlerName)
     }
 
-    func start() {
-        guard localKeyMonitor == nil else { return }
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) {
-            [weak self] event in
-            guard let self else { return event }
-            return MainActor.assumeIsolated {
-                self.handleLocalKeyEvent(event)
-            }
-        }
-    }
+    func start() {}
 
-    func stop() {
-        if let localKeyMonitor {
-            NSEvent.removeMonitor(localKeyMonitor)
-            self.localKeyMonitor = nil
-        }
-        resetInFlight.removeAll()
-        resetRequestedForSession.removeAll()
-    }
+    func stop() {}
 
+    /// Compatibility-only pure policy helpers retained until the surrounding PR
+    /// tests are simplified. They no longer drive any runtime exit operation.
     static func shouldResetForEscape(
         keyCode: UInt16,
         fullscreenState: WKWebView.FullscreenState,
@@ -198,210 +76,95 @@ final class NativeFullscreenSessionResetCoordinator: NSObject, WKScriptMessageHa
             || currentState == .notInFullscreen
     }
 
-    /// Receives only WebKit fullscreen-state observations. This is intentionally
-    /// state-based rather than window-based: FloatTabs does not retain, reposition,
-    /// hide, or otherwise mutate WebCoreFullScreenWindow. The observation catches
-    /// native exits that bypass the page bridge (site internals, WebKit controls,
-    /// double-click behavior, AppKit focus changes, or an aborted enter).
+    /// WebKit's macOS fullscreen controller temporarily reparents WKWebView. The
+    /// view must remain frame-based relative to its immediate host; otherwise the
+    /// restored placeholder/viewport can collapse or return black after exit.
+    ///
+    /// Critically, this method never touches WebCoreFullScreenWindow, never closes
+    /// a media presentation, and never initiates a fullscreen transition.
     func handleObservedFullscreenTransition(
         for webView: WKWebView,
         previousState: WKWebView.FullscreenState,
         currentState: WKWebView.FullscreenState,
         window: NSWindow?
     ) {
-        let id = ObjectIdentifier(webView)
+        switch currentState {
+        case .enteringFullscreen:
+            applyFullscreenSafeAutoresizing(to: webView, phase: "entering")
 
-        if previousState == .notInFullscreen,
-           currentState == .enteringFullscreen,
-           !resetInFlight.contains(id) {
-            resetRequestedForSession.remove(id)
+        case .notInFullscreen:
+            guard previousState != .notInFullscreen else { return }
+            restoreWebViewToStableHostIfAvailable(webView, window: window)
+
+        case .inFullscreen, .exitingFullscreen:
+            break
+
+        @unknown default:
+            break
         }
-
-        let alreadyRequested = resetInFlight.contains(id)
-            || resetRequestedForSession.contains(id)
-        guard Self.shouldDisposeObservedNativeExit(
-            previousState: previousState,
-            currentState: currentState,
-            resetInFlight: alreadyRequested
-        ) else {
-            return
-        }
-
-        _ = resetPresentation(
-            for: webView,
-            trigger: currentState == .exitingFullscreen
-                ? "webkit_state_exit"
-                : "webkit_state_exit_completed",
-            window: window,
-            allowsEnteringState: false,
-            allowsObservedExitState: true,
-            observedFullscreenState: currentState
-        )
     }
 
-    func userContentController(
-        _ userContentController: WKUserContentController,
-        didReceive message: WKScriptMessage
+    private func applyFullscreenSafeAutoresizing(
+        to webView: WKWebView,
+        phase: String
     ) {
-        guard message.name == Self.handlerName,
-              let body = message.body as? [String: Any],
-              body["action"] as? String == "exit",
-              let webView = message.webView else {
+        webView.translatesAutoresizingMaskIntoConstraints = true
+        webView.autoresizingMask = [.width, .height]
+
+        FloatTabsDiagnostics.record(
+            "fullscreen_host_autoresizing_applied",
+            fields: [
+                "phase": phase,
+                "webview_frame": NSStringFromRect(webView.frame),
+                "host_bounds": webView.superview.map { NSStringFromRect($0.bounds) } ?? "nil",
+                "window_number": webView.window.map { String($0.windowNumber) } ?? "nil",
+            ]
+        )
+    }
+
+    private func restoreWebViewToStableHostIfAvailable(
+        _ webView: WKWebView,
+        window: NSWindow?
+    ) {
+        applyFullscreenSafeAutoresizing(to: webView, phase: "exited")
+
+        guard window is FloatingPanel,
+              webView.window === window,
+              let host = webView.superview,
+              host.bounds.width > 0,
+              host.bounds.height > 0 else {
+            FloatTabsDiagnostics.record(
+                "fullscreen_host_restore_deferred",
+                fields: [
+                    "reason": "webkit_has_not_returned_to_floattabs_host",
+                    "window_class": window.map { String(describing: type(of: $0)) } ?? "nil",
+                    "webview_window_class": webView.window.map { String(describing: type(of: $0)) } ?? "nil",
+                ]
+            )
             return
         }
 
-        _ = resetPresentation(
-            for: webView,
-            trigger: "page_exit_api",
-            window: webView.window,
-            allowsEnteringState: true
-        )
-    }
-
-    private func handleLocalKeyEvent(_ event: NSEvent) -> NSEvent? {
-        guard event.keyCode == Self.escapeKeyCode,
-              let (webView, window) = fullscreenWebView(for: event) else {
-            return event
+        let targetFrame = host.bounds
+        if abs(webView.frame.minX - targetFrame.minX) > 0.5
+            || abs(webView.frame.minY - targetFrame.minY) > 0.5
+            || abs(webView.frame.width - targetFrame.width) > 0.5
+            || abs(webView.frame.height - targetFrame.height) > 0.5 {
+            webView.frame = targetFrame
         }
 
-        let id = ObjectIdentifier(webView)
-        let resetAlreadyRequested = resetInFlight.contains(id)
-            || resetRequestedForSession.contains(id)
-        guard Self.shouldResetForEscape(
-            keyCode: event.keyCode,
-            fullscreenState: webView.fullscreenState,
-            resetInFlight: resetAlreadyRequested
-        ), resetPresentation(
-            for: webView,
-            trigger: "escape",
-            window: window,
-            allowsEnteringState: false
-        ) else {
-            return event
-        }
+        host.needsLayout = true
+        host.layoutSubtreeIfNeeded()
+        webView.needsLayout = true
+        webView.layoutSubtreeIfNeeded()
 
-        // WebKit now owns this exit. Do not also deliver Escape to the page and
-        // start an overlapping regular-exit transition.
-        return nil
-    }
-
-    @discardableResult
-    private func resetPresentation(
-        for webView: WKWebView,
-        trigger: String,
-        window: NSWindow?,
-        allowsEnteringState: Bool,
-        allowsObservedExitState: Bool = false,
-        observedFullscreenState: WKWebView.FullscreenState? = nil
-    ) -> Bool {
-        let id = ObjectIdentifier(webView)
-        let resetAlreadyRequested = resetInFlight.contains(id)
-            || resetRequestedForSession.contains(id)
-        let state = observedFullscreenState ?? webView.fullscreenState
-
-        let canReset: Bool
-        if allowsObservedExitState {
-            canReset = !resetAlreadyRequested
-                && (state == .exitingFullscreen || state == .notInFullscreen)
-        } else if allowsEnteringState {
-            canReset = Self.canResetForPageExit(
-                fullscreenState: state,
-                resetInFlight: resetAlreadyRequested
-            )
-        } else {
-            canReset = Self.shouldResetForEscape(
-                keyCode: Self.escapeKeyCode,
-                fullscreenState: state,
-                resetInFlight: resetAlreadyRequested
-            )
-        }
-        guard canReset else { return false }
-
-        resetRequestedForSession.insert(id)
-        resetInFlight.insert(id)
         FloatTabsDiagnostics.record(
-            "fullscreen_public_close_requested",
-            fields: diagnosticFields(
-                trigger: trigger,
-                webView: webView,
-                window: window,
-                observedFullscreenState: state
-            )
+            "fullscreen_host_restored",
+            fields: [
+                "webview_frame": NSStringFromRect(webView.frame),
+                "host_bounds": NSStringFromRect(host.bounds),
+                "window_number": String(window?.windowNumber ?? 0),
+            ]
         )
-
-        webView.closeAllMediaPresentations { [weak self, weak webView, weak window] in
-            Task { @MainActor [weak self, weak webView, weak window] in
-                guard let self else { return }
-                self.resetInFlight.remove(id)
-                FloatTabsDiagnostics.record(
-                    "fullscreen_public_close_completed",
-                    fields: self.diagnosticFields(
-                        trigger: trigger,
-                        webView: webView,
-                        window: window,
-                        observedFullscreenState: nil
-                    )
-                )
-            }
-        }
-        return true
-    }
-
-    private func fullscreenWebView(for event: NSEvent) -> (WKWebView, NSWindow)? {
-        var windows: [NSWindow] = []
-        if let eventWindow = event.window {
-            windows.append(eventWindow)
-        }
-        if let keyWindow = NSApp.keyWindow,
-           !windows.contains(where: { $0 === keyWindow }) {
-            windows.append(keyWindow)
-        }
-        let remainingFullscreenWindows = NSApp.windows.filter { candidate in
-            !windows.contains(where: { $0 === candidate })
-                && candidate.collectionBehavior.contains(.fullScreenPrimary)
-        }
-        windows.append(contentsOf: remainingFullscreenWindows)
-
-        for window in windows {
-            if let webView = firstWebView(in: window.contentView),
-               webView.fullscreenState == .inFullscreen {
-                return (webView, window)
-            }
-        }
-        return nil
-    }
-
-    private func firstWebView(in view: NSView?) -> WKWebView? {
-        guard let view else { return nil }
-        if let webView = view as? WKWebView {
-            return webView
-        }
-        for subview in view.subviews {
-            if let webView = firstWebView(in: subview) {
-                return webView
-            }
-        }
-        return nil
-    }
-
-    private func diagnosticFields(
-        trigger: String,
-        webView: WKWebView?,
-        window: NSWindow?,
-        observedFullscreenState: WKWebView.FullscreenState?
-    ) -> [String: String] {
-        [
-            "trigger": trigger,
-            "fullscreen_state": webView.map { String(describing: $0.fullscreenState) }
-                ?? "released",
-            "observed_fullscreen_state": observedFullscreenState.map { String(describing: $0) }
-                ?? "nil",
-            "window_number": window.map { String($0.windowNumber) } ?? "released",
-            "window_visible": window.map { String($0.isVisible) } ?? "released",
-            "window_active_space": window.map { String($0.isOnActiveSpace) } ?? "released",
-            "window_screen_frame": window?.screen.map { NSStringFromRect($0.frame) } ?? "nil",
-            "main_screen_frame": NSScreen.main.map { NSStringFromRect($0.frame) } ?? "nil",
-        ]
     }
 }
 
