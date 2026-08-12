@@ -64,6 +64,11 @@ final class FullscreenLabController: NSObject {
         var fullscreenMatchedContext: Bool?
     }
 
+    private struct RetiredWebContent {
+        let webView: WKWebView
+        let rootView: NSView
+    }
+
     var onWillEnable: (() -> Void)?
 
     private let baselineCommit = "dad0ee79e6b70d07e659814aefde6d4f4701e221"
@@ -75,12 +80,17 @@ final class FullscreenLabController: NSObject {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var rootView: NSView?
+    private var retiredWebContents: [RetiredWebContent] = []
     private var fullscreenObservation: NSKeyValueObservation?
     private var observedFullscreenState = "notInFullscreen"
     private var sourceURL = URL(string: "https://www.youtube.com/")!
     private var activeAttempt: AttemptResult?
     private var completedAttempts: [AttemptResult] = []
     private var completedCrossScreenAttempt = false
+    private var recoveryScheduled = false
+    private var recoveryApplied = false
+    private var recoveryOldWebViewIdentity: String?
+    private var recoveryNewWebViewIdentity: String?
 
     var isEnabled: Bool { enabled }
     var isVisible: Bool { window?.isVisible ?? false }
@@ -95,44 +105,47 @@ final class FullscreenLabController: NSObject {
     func start() {
         let now = ISO8601DateFormatter().string(from: Date())
         let header = """
-        FloatTabs Fullscreen Screen-Context Lab
-        =======================================
+        FloatTabs Fullscreen Cross-Screen Recovery Lab
+        ===============================================
         Baseline commit: \(baselineCommit)
         Started: \(now)
         OS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         PID: \(ProcessInfo.processInfo.processIdentifier)
         Report: \(reportWriter.url.path)
 
-        Root-cause contract
-        -------------------
-        We now distinguish three displays for every fullscreen attempt:
-          1. context/main screen: the screen WebKit/macOS currently treats as the active target
-          2. shell screen: the screen that physically hosts the FloatTabs WKWebView
-          3. actual fullscreen screen: the screen used by WebCoreFullScreenWindow
-
-        A CROSS-SCREEN attempt (context != shell) is NOT automatically a failure.
-        It is correct when actual fullscreen follows context/main.
-        The primary regression under test is whether a successful CROSS-SCREEN attempt
-        poisons the SAME WKWebView so that the next same-screen fullscreen aborts or mis-targets.
+        Repair hypothesis
+        -----------------
+        A successful native fullscreen where shell screen != context/main screen can leave the
+        current WKWebView fullscreen controller in a poisoned state. This experiment keeps the
+        same FloatingPanel, but after a successful CROSS-SCREEN fullscreen exits it retires that
+        WKWebView and installs a fresh WKWebView in the SAME panel, restoring the current URL.
 
         Recommended sequence
         --------------------
         Attempt 1: SAME-SCREEN CONTROL (activate A, shell A, fullscreen A, exit)
-        Attempt 2: CROSS-SCREEN (activate B, move pointer to A, summon shell A, fullscreen should go B, exit)
+        Attempt 2: CROSS-SCREEN (activate B, move pointer to A without clicking A, summon shell A,
+                   fullscreen should go B, exit)
+        Recovery : wait for CROSS_SCREEN_RECOVERY_APPLIED and the page to reload
         Attempt 3: POST-CROSS (activate A, shell A, fullscreen A)
 
-        Safety constraints
+        Repair constraints
         ------------------
-        One FloatingPanel and one persistent WKWebView for the entire process.
-        No mode switching, no extra experiment windows, no mouse event monitor,
-        no NSWindow.sendEvent override, no injected JavaScript, no fullscreen API wrapping,
-        no closeAllMediaPresentations, and no WebKit-owned fullscreen-window mutation.
+        One FloatingPanel for the entire process.
+        Native WKWebView fullscreen is untouched.
+        No mouse event monitor, no NSWindow.sendEvent override, no injected JavaScript,
+        no requestFullscreen/exitFullscreen wrapping, no closeAllMediaPresentations,
+        no app-owned fullscreen, and no WebKit-owned fullscreen-window mutation.
+        The old WKWebView is retained after retirement to avoid synchronous WebKit teardown.
 
         """
         reportWriter.reset(header: header)
         completedAttempts.removeAll()
         activeAttempt = nil
         completedCrossScreenAttempt = false
+        recoveryScheduled = false
+        recoveryApplied = false
+        recoveryOldWebViewIdentity = nil
+        recoveryNewWebViewIdentity = nil
         reportWriter.append("Available displays: \(NSScreen.screens.map(screenSummary).joined(separator: " || "))\n")
     }
 
@@ -157,7 +170,8 @@ final class FullscreenLabController: NSObject {
                 window.orderOut(nil)
                 reportWriter.append(
                     "lab_window_hidden shell={\(screenSummary(window.screen))} "
-                        + "main={\(screenSummary(NSScreen.main))} pointer={\(screenSummary(screenAtMouse()))}"
+                        + "main={\(screenSummary(NSScreen.main))} pointer={\(screenSummary(screenAtMouse()))} "
+                        + "webview=\(webViewIdentity(webView))"
                 )
                 return
             }
@@ -175,7 +189,7 @@ final class FullscreenLabController: NSObject {
         guard let button = statusItem.button else { return }
         button.image = NSImage(
             systemSymbolName: "rectangle.3.group",
-            accessibilityDescription: "Fullscreen Screen Context Lab"
+            accessibilityDescription: "Fullscreen Cross-Screen Recovery Lab"
         )
         button.image?.isTemplate = true
         button.imagePosition = .imageLeading
@@ -184,13 +198,13 @@ final class FullscreenLabController: NSObject {
     }
 
     private func configureMenu() {
-        let titleItem = NSMenuItem(title: "Fullscreen Screen-Context Lab", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "Fullscreen Cross-Screen Recovery Lab", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         menu.addItem(.separator())
 
         let enableItem = NSMenuItem(
-            title: "Enable Single Baseline Lab",
+            title: "Enable Recovery Experiment",
             action: #selector(enableLab),
             keyEquivalent: ""
         )
@@ -216,7 +230,7 @@ final class FullscreenLabController: NSObject {
         menu.addItem(showItem)
 
         let snapshotItem = NSMenuItem(
-            title: "Log Current Screen Context",
+            title: "Log Current Repair Context",
             action: #selector(logCurrentContext),
             keyEquivalent: ""
         )
@@ -234,7 +248,7 @@ final class FullscreenLabController: NSObject {
         menu.addItem(reportItem)
 
         let resetItem = NSMenuItem(
-            title: "Reset Report / Attempts (same WKWebView)",
+            title: "Reset Report / Attempts",
             action: #selector(resetDesktopReport),
             keyEquivalent: ""
         )
@@ -258,7 +272,7 @@ final class FullscreenLabController: NSObject {
         window?.orderOut(nil)
         activeAttempt = nil
         updateStatusItemTitle()
-        reportWriter.append("\nLAB HIDDEN/DISABLED — WKWebView retained; no new window created.\n")
+        reportWriter.append("\nLAB HIDDEN/DISABLED — panel and current WKWebView retained.\n")
         reportWriter.flush()
     }
 
@@ -272,9 +286,10 @@ final class FullscreenLabController: NSObject {
 
     @objc private func logCurrentContext() {
         reportWriter.append(
-            "CONTEXT_SNAPSHOT main={\(screenSummary(NSScreen.main))} "
+            "REPAIR_CONTEXT main={\(screenSummary(NSScreen.main))} "
                 + "shell={\(screenSummary(window?.screen))} pointer={\(screenSummary(screenAtMouse()))} "
-                + "key_window={\(windowSummary(NSApp.keyWindow))} lab_window={\(windowSummary(window))}"
+                + "webview=\(webViewIdentity(webView)) recovery_scheduled=\(recoveryScheduled) "
+                + "recovery_applied=\(recoveryApplied) key_window={\(windowSummary(NSApp.keyWindow))}"
         )
         reportWriter.flush()
     }
@@ -285,7 +300,7 @@ final class FullscreenLabController: NSObject {
 
     @objc private func resetDesktopReport() {
         start()
-        reportWriter.append("Reset performed with SAME WKWebView retained: \(webViewIdentity(webView))")
+        reportWriter.append("Reset performed with current WKWebView retained: \(webViewIdentity(webView))")
         reportWriter.flush()
     }
 
@@ -303,7 +318,7 @@ final class FullscreenLabController: NSObject {
             "LAB_SHOW shell_target={\(screenSummary(targetScreen))} "
                 + "main_before_show={\(screenSummary(mainBeforeShow))} "
                 + "pointer_before_show={\(screenSummary(pointerBeforeShow))} "
-                + "webview=\(webViewIdentity(webView))"
+                + "webview=\(webViewIdentity(webView)) recovery_applied=\(recoveryApplied)"
         )
 
         NSApp.activate(ignoringOtherApps: true)
@@ -316,19 +331,27 @@ final class FullscreenLabController: NSObject {
             "LAB_SHOWN shell={\(screenSummary(window?.screen))} "
                 + "main_after_show={\(screenSummary(NSScreen.main))} "
                 + "pointer_after_show={\(screenSummary(screenAtMouse()))} "
-                + "window={\(windowSummary(window))}"
+                + "window={\(windowSummary(window))} webview=\(webViewIdentity(webView))"
         )
         reportWriter.flush()
     }
 
     private func createEnvironment(on targetScreen: NSScreen) {
         let newWindow = FloatingPanel(contentRect: frame(for: targetScreen))
+        window = newWindow
+        installFreshWebView(in: newWindow, reason: "initial_environment")
+        reportWriter.append(
+            "SINGLE_PANEL_CREATED window={\(windowSummary(newWindow))} "
+                + "webview=\(webViewIdentity(webView))"
+        )
+    }
+
+    private func installFreshWebView(in window: NSWindow, reason: String) {
         let newWebView = WebViewFactory.makeWebView()
         newWebView.navigationDelegate = nil
         let root = PanelRootView(webView: newWebView)
-        newWindow.contentView = root
+        window.contentView = root
 
-        window = newWindow
         webView = newWebView
         rootView = root
         observedFullscreenState = fullscreenStateName(newWebView.fullscreenState)
@@ -336,9 +359,64 @@ final class FullscreenLabController: NSObject {
         newWebView.load(URLRequest(url: sourceURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60))
 
         reportWriter.append(
-            "SINGLE_ENVIRONMENT_CREATED window={\(windowSummary(newWindow))} "
-                + "webview=\(webViewIdentity(newWebView))"
+            "WEBVIEW_INSTALLED reason=\(reason) webview=\(webViewIdentity(newWebView)) "
+                + "url=\(sourceURL.absoluteString)"
         )
+    }
+
+    private func scheduleCrossScreenRecovery(retiring webView: WKWebView) {
+        guard !recoveryScheduled, !recoveryApplied else { return }
+        recoveryScheduled = true
+        captureCurrentURL()
+        let oldIdentity = webViewIdentity(webView)
+        recoveryOldWebViewIdentity = oldIdentity
+
+        reportWriter.append(
+            "CROSS_SCREEN_RECOVERY_SCHEDULED old_webview=\(oldIdentity) "
+                + "url=\(sourceURL.absoluteString) delay_ms=350"
+        )
+        reportWriter.flush()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak webView] in
+            guard let self, let webView, self.webView === webView else { return }
+            self.applyCrossScreenRecovery(retiring: webView)
+        }
+    }
+
+    private func applyCrossScreenRecovery(retiring oldWebView: WKWebView) {
+        guard let window, let oldRoot = rootView else {
+            recoveryScheduled = false
+            reportWriter.append("CROSS_SCREEN_RECOVERY_FAILED reason=missing_window_or_root")
+            reportWriter.flush()
+            return
+        }
+
+        captureCurrentURL()
+        fullscreenObservation = nil
+        let oldIdentity = webViewIdentity(oldWebView)
+        retiredWebContents.append(RetiredWebContent(webView: oldWebView, rootView: oldRoot))
+
+        webView = nil
+        rootView = nil
+        installFreshWebView(in: window, reason: "post_cross_screen_recovery")
+
+        recoveryScheduled = false
+        recoveryApplied = true
+        recoveryOldWebViewIdentity = oldIdentity
+        recoveryNewWebViewIdentity = webViewIdentity(webView)
+
+        if window.isVisible, let webView {
+            window.makeFirstResponder(webView)
+        }
+
+        reportWriter.append(
+            "CROSS_SCREEN_RECOVERY_APPLIED same_panel_window=\(window.windowNumber) "
+                + "old_webview=\(oldIdentity) new_webview=\(webViewIdentity(webView)) "
+                + "retired_count=\(retiredWebContents.count) url=\(sourceURL.absoluteString)"
+        )
+        reportWriter.append("RECOVERY_READY · wait for page load, then perform POST-CROSS attempt")
+        updateStatusItemTitle()
+        reportWriter.flush()
     }
 
     private func attachFullscreenObservation(to webView: WKWebView) {
@@ -397,6 +475,10 @@ final class FullscreenLabController: NSObject {
             reportWriter.append("  pointer={\(attempt.pointerScreenSummary)}")
             reportWriter.append("  source_window={\(attempt.sourceWindowSummary)}")
             reportWriter.append("  webview=\(attempt.webViewIdentity)")
+            reportWriter.append(
+                "  recovery_state scheduled=\(recoveryScheduled) applied=\(recoveryApplied) "
+                    + "old=\(recoveryOldWebViewIdentity ?? "none") new=\(recoveryNewWebViewIdentity ?? "none")"
+            )
             if kind == .crossScreen {
                 reportWriter.append("  CROSS-SCREEN CONDITION CONFIRMED · shell and context/main differ")
             }
@@ -453,31 +535,35 @@ final class FullscreenLabController: NSObject {
 
             reportWriter.append(
                 "ATTEMPT \(attempt.number) RESULT = \(success ? "PASS" : "FAIL") "
-                    + "kind=\(attempt.kind.rawValue)"
+                    + "kind=\(attempt.kind.rawValue) webview=\(attempt.webViewIdentity)"
             )
 
             if attempt.kind == .crossScreen, success {
                 completedCrossScreenAttempt = true
-                reportWriter.append(
-                    "CROSS-SCREEN PRIMER COMPLETE · next fullscreen attempt will be classified POST-CROSS"
-                )
+                reportWriter.append("CROSS-SCREEN PRIMER COMPLETE · retiring poisoned-candidate WKWebView")
+                scheduleCrossScreenRecovery(retiring: webView)
             }
 
             if attempt.kind == .postCross {
                 let postCrossSameScreen = attempt.contextScreenNumber != nil
                     && attempt.shellScreenNumber != nil
                     && attempt.contextScreenNumber == attempt.shellScreenNumber
-                reportWriter.append("\n================ POST-CROSS VERDICT ================")
+                let recoveryWasApplied = recoveryApplied
+                    && recoveryOldWebViewIdentity != nil
+                    && recoveryNewWebViewIdentity == attempt.webViewIdentity
+
+                reportWriter.append("\n================ RECOVERY FIX VERDICT ================")
+                reportWriter.append("Recovery applied before post-cross: \(recoveryWasApplied ? "YES" : "NO")")
                 reportWriter.append("Post-cross context and shell are same screen: \(postCrossSameScreen ? "YES" : "NO")")
                 reportWriter.append("Post-cross fullscreen result: \(success ? "PASS" : "FAIL")")
-                if postCrossSameScreen && !success {
-                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = YES")
-                } else if postCrossSameScreen && success {
-                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = NO")
+                if recoveryWasApplied && postCrossSameScreen && success {
+                    reportWriter.append("CROSS-SCREEN WKWEBVIEW RECOVERY FIX = PASS")
+                } else if recoveryWasApplied && postCrossSameScreen && !success {
+                    reportWriter.append("CROSS-SCREEN WKWEBVIEW RECOVERY FIX = FAIL")
                 } else {
-                    reportWriter.append("POST-CROSS REGRESSION REPRODUCED = INCONCLUSIVE (post-cross attempt was not same-screen)")
+                    reportWriter.append("CROSS-SCREEN WKWEBVIEW RECOVERY FIX = INCONCLUSIVE")
                 }
-                reportWriter.append("====================================================\n")
+                reportWriter.append("======================================================\n")
             }
             reportWriter.flush()
         }
@@ -540,11 +626,11 @@ final class FullscreenLabController: NSObject {
     private func updateStatusItemTitle() {
         guard let button = statusItem.button else { return }
         if enabled {
-            button.title = "FS Context"
-            button.toolTip = "Fullscreen Screen-Context Lab · single persistent WKWebView"
+            button.title = recoveryApplied ? "FS Repair ✓" : "FS Repair"
+            button.toolTip = "Fullscreen cross-screen recovery experiment"
         } else {
             button.title = "FS Lab Off"
-            button.toolTip = "FloatTabs Fullscreen Screen-Context Lab"
+            button.toolTip = "FloatTabs Fullscreen Cross-Screen Recovery Lab"
         }
     }
 }
@@ -768,8 +854,7 @@ final class AppCoordinator {
         let rollbackURL = try backupService.writeRollback(makeBackupDocument())
 
         guard panelController.restoreStoredWebAppState(imported.webAppState) else {
-            throw FloatTabsBackupError.restoreFailed
-        }
+            throw FloatTabsBackupError.restoreFailed }
 
         preferencesStore.followPreferredSize = imported.globalPreferences.followPreferredSize
         preferencesStore.appearanceMode = imported.globalPreferences.appearanceMode
