@@ -1,5 +1,11 @@
 import AppKit
 
+enum FloatTabsWindowLevel {
+    static func presentation(isPinned: Bool) -> NSWindow.Level {
+        isPinned ? .floating : .normal
+    }
+}
+
 final class FloatingPanel: NSPanel {
     private static let ordinaryCollectionBehavior: NSWindow.CollectionBehavior = [
         .canJoinAllSpaces,
@@ -56,5 +62,9 @@ final class FloatingPanel: NSPanel {
         collectionBehavior = enabled
             ? Self.fullscreenCompanionCollectionBehavior
             : Self.ordinaryCollectionBehavior
+    }
+
+    func setPinnedPresentation(_ isPinned: Bool) {
+        level = FloatTabsWindowLevel.presentation(isPinned: isPinned)
     }
 }

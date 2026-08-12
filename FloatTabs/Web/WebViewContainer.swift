@@ -12,6 +12,7 @@ final class PanelRootView: NSView {
     let interactionBorderView: PanelInteractionBorderView
     let resizeHandleView: PanelResizeHandleView
     let resizeReadoutView: ResizeReadoutView
+    let companionRailFoldControlView: RailFoldControl
     let fullscreenExitPlaceholderView: FullscreenExitPlaceholderView
     private weak var fullscreenCompanionContainer: WebPanelContainerView?
     private var fullscreenCompanionConstraints: [NSLayoutConstraint] = []
@@ -27,6 +28,7 @@ final class PanelRootView: NSView {
         interactionBorderView = PanelInteractionBorderView()
         resizeHandleView = PanelResizeHandleView()
         resizeReadoutView = ResizeReadoutView()
+        companionRailFoldControlView = RailFoldControl()
         fullscreenExitPlaceholderView = FullscreenExitPlaceholderView()
 
         super.init(frame: .zero)
@@ -40,6 +42,7 @@ final class PanelRootView: NSView {
         interactionBorderView.translatesAutoresizingMaskIntoConstraints = false
         resizeHandleView.translatesAutoresizingMaskIntoConstraints = false
         resizeReadoutView.translatesAutoresizingMaskIntoConstraints = false
+        companionRailFoldControlView.translatesAutoresizingMaskIntoConstraints = false
 
         // WebKit remains visually clean. The movement layer sits above it only
         // for the deliberately tiny top/bottom overlap, while the animated frame
@@ -56,6 +59,8 @@ final class PanelRootView: NSView {
         addSubview(interactionBorderView)
         addSubview(resizeReadoutView)
         addSubview(resizeHandleView)
+        addSubview(companionRailFoldControlView)
+        companionRailFoldControlView.isHidden = true
 
         NSLayoutConstraint.activate([
             externalControlZoneView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -116,6 +121,21 @@ final class PanelRootView: NSView {
             resizeReadoutView.bottomAnchor.constraint(
                 equalTo: webViewportLayoutView.bottomAnchor,
                 constant: -8
+            ),
+
+            // Fullscreen's companion shell does not use the ordinary source
+            // window, so it owns a second synchronized page-fold control.
+            companionRailFoldControlView.leadingAnchor.constraint(
+                equalTo: webViewportLayoutView.leadingAnchor
+            ),
+            companionRailFoldControlView.bottomAnchor.constraint(
+                equalTo: webViewportLayoutView.bottomAnchor
+            ),
+            companionRailFoldControlView.widthAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
+            ),
+            companionRailFoldControlView.heightAnchor.constraint(
+                equalToConstant: PanelMetrics.resizeHandleSize
             ),
         ])
 
@@ -545,14 +565,20 @@ enum PanelMoveCursor {
     }
 }
 
-/// Window movement is acquired mainly outside the Web viewport: the external
-/// left zone and thin top/bottom gutters. Top/bottom borrow only a few WebKit
-/// pixels for easier acquisition. The website right edge remains protected.
+/// This shell view owns the outer half of the uniform movement target around
+/// all four Web edges. `WebSourceEdgeDragView` owns the matching inner half in
+/// the separate source window.
 ///
 /// Movement is implemented directly from global pointer deltas instead of
 /// NSWindow.performDrag(with:), which is unreliable for this borderless floating
 /// NSPanel configuration on real hardware.
 final class PanelPerimeterDragView: NSView {
+    /// A fully transparent borderless window can visually track the pointer yet
+    /// still let WindowServer route the following mouse-down to the desktop.
+    /// This alpha is far below the visible threshold, but gives every advertised
+    /// movement band a real composited surface and therefore a reliable hit.
+    static let acquisitionSurfaceAlpha: CGFloat = 0.003
+
     private var startingMouseLocation: NSPoint?
     private var startingWindowOrigin: NSPoint?
 
@@ -575,9 +601,6 @@ final class PanelPerimeterDragView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // NSView hit-test points arrive in the superview's coordinates, while
-        // dragRects are expressed in our local bounds. Convert explicitly so
-        // cursor discovery and actual mouse acquisition use identical geometry.
         guard frame.contains(point) else { return nil }
         let localPoint = convert(point, from: superview)
         return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
@@ -619,6 +642,19 @@ final class PanelPerimeterDragView: NSView {
     override func layout() {
         super.layout()
         window?.invalidateCursorRects(for: self)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        // Do not tint the entire shell: only the exact rectangles that return
+        // `self` from hitTest receive the acquisition surface. Cursor feedback,
+        // pixel ownership and drag handling consequently share one geometry.
+        NSColor.black.withAlphaComponent(Self.acquisitionSurfaceAlpha).setFill()
+        for rect in Self.dragRects(in: bounds) where rect.intersects(dirtyRect) {
+            rect.fill(using: .sourceOver)
+        }
     }
 
     static func destinationOrigin(
@@ -633,45 +669,20 @@ final class PanelPerimeterDragView: NSView {
     }
 
     static func dragRects(in bounds: NSRect) -> [NSRect] {
-        guard bounds.width > 0, bounds.height > 0 else { return [] }
-
-        let outer = min(
-            max(PanelMetrics.outerInteractionGutter, 0),
-            min(bounds.width / 2, bounds.height / 2)
+        let edgeBands = PanelMovementGeometry.edgeBands(
+            around: PanelMovementGeometry.webFrame(in: bounds),
+            outerDepth: PanelMetrics.outerInteractionGutter,
+            innerDepth: 0,
+            clippingBounds: bounds
         )
-        let overlap = max(PanelMetrics.innerMovementOverlap, 0)
-        let bandDepth = min(outer + overlap, bounds.height / 2)
-        guard bandDepth > 0 else { return [] }
-
-        let leftWidth = min(PanelMetrics.externalControlZoneWidth, bounds.width)
-        let middleHeight = max(bounds.height - 2 * outer, 0)
-        let topWidth = max(bounds.width - PanelMetrics.webRightInteractionSafety, 0)
-        let bottomExclusion = max(
-            outer + PanelMetrics.resizeHandleSize,
-            PanelMetrics.webRightInteractionSafety
+        let outer = max(PanelMetrics.outerInteractionGutter, 0)
+        let blankRail = NSRect(
+            x: bounds.minX,
+            y: bounds.minY + outer,
+            width: min(PanelMetrics.externalControlZoneWidth, bounds.width),
+            height: max(bounds.height - 2 * outer, 0)
         )
-        let bottomWidth = max(bounds.width - bottomExclusion, 0)
-
-        return [
-            NSRect(
-                x: bounds.minX,
-                y: bounds.minY + outer,
-                width: leftWidth,
-                height: middleHeight
-            ),
-            NSRect(
-                x: bounds.minX,
-                y: bounds.maxY - bandDepth,
-                width: topWidth,
-                height: bandDepth
-            ),
-            NSRect(
-                x: bounds.minX,
-                y: bounds.minY,
-                width: bottomWidth,
-                height: bandDepth
-            ),
-        ]
+        return edgeBands + (blankRail.isEmpty ? [] : [blankRail])
     }
 }
 

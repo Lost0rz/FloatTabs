@@ -7,13 +7,12 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
-    /// Keep movement acquisition discoverable at the visible page edge while
-    /// making the reliable in-page portion large enough for real pointer use.
-    /// The effective top / bottom target is 22 pt deep: 12 pt in the shell and
-    /// 10 pt inside the viewport. The website right edge remains protected.
+    /// Movement uses the same depth on both sides of every visible Web edge.
+    /// The shell owns the outer 12 pt and the ordinary Web source window owns
+    /// the inner 12 pt, so the complete 24 pt target remains draggable even
+    /// though the visible surface is split across two AppKit windows.
     static let outerInteractionGutter: CGFloat = 12
-    static let innerMovementOverlap: CGFloat = 10
-    static let webRightInteractionSafety: CGFloat = 24
+    static let innerMovementOverlap = outerInteractionGutter
 
     /// The visible frame is deliberately much thinner than its hit target.
     /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt
@@ -63,6 +62,78 @@ struct PanelMetrics {
         NSSize(
             width: max(proposedSize.width, minimumPanelSize.width),
             height: max(proposedSize.height, minimumPanelSize.height)
+        )
+    }
+}
+
+enum PanelMovementGeometry {
+    /// Returns four edge bands around `edgeFrame`, clipped to `clippingBounds`.
+    /// Passing only an outer or inner depth lets the shell and Web source own
+    /// complementary halves of the same visible movement target.
+    static func edgeBands(
+        around edgeFrame: NSRect,
+        outerDepth: CGFloat,
+        innerDepth: CGFloat,
+        clippingBounds: NSRect,
+        bottomRightExclusion: CGFloat = 0
+    ) -> [NSRect] {
+        guard edgeFrame.width > 0, edgeFrame.height > 0 else { return [] }
+
+        let outer = max(outerDepth, 0)
+        let inner = max(innerDepth, 0)
+        let thickness = outer + inner
+        guard thickness > 0 else { return [] }
+
+        let requestedExclusion = max(bottomRightExclusion, 0)
+        let horizontalExclusion = min(requestedExclusion, edgeFrame.width)
+        let verticalExclusion = min(requestedExclusion, edgeFrame.height)
+        let horizontalWidth = max(
+            edgeFrame.width + 2 * outer - horizontalExclusion,
+            0
+        )
+        let verticalHeight = max(edgeFrame.height - verticalExclusion, 0)
+        let candidates = [
+            NSRect(
+                x: edgeFrame.minX - outer,
+                y: edgeFrame.maxY - inner,
+                width: edgeFrame.width + 2 * outer,
+                height: thickness
+            ),
+            NSRect(
+                x: edgeFrame.minX - outer,
+                y: edgeFrame.minY - outer,
+                width: horizontalWidth,
+                height: thickness
+            ),
+            NSRect(
+                x: edgeFrame.minX - outer,
+                y: edgeFrame.minY,
+                width: thickness,
+                height: edgeFrame.height
+            ),
+            NSRect(
+                x: edgeFrame.maxX - inner,
+                y: edgeFrame.minY + verticalExclusion,
+                width: thickness,
+                height: verticalHeight
+            ),
+        ]
+
+        return candidates
+            .map { $0.intersection(clippingBounds) }
+            .filter { !$0.isNull && !$0.isEmpty }
+    }
+
+    static func webFrame(in panelBounds: NSRect) -> NSRect {
+        let outer = max(PanelMetrics.outerInteractionGutter, 0)
+        return NSRect(
+            x: panelBounds.minX + PanelMetrics.externalControlZoneWidth,
+            y: panelBounds.minY + outer,
+            width: max(
+                panelBounds.width - PanelMetrics.externalControlZoneWidth - outer,
+                0
+            ),
+            height: max(panelBounds.height - 2 * outer, 0)
         )
     }
 }

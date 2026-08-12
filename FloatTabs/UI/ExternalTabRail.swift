@@ -91,6 +91,8 @@ final class ExternalControlZoneView: NSView {
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
     private var windowSizeEditingEnabled = true
+    private var railVisibilityGeneration = 0
+    private(set) var isRailCollapsed = false
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -227,6 +229,53 @@ final class ExternalControlZoneView: NSView {
         pinControl.refreshAppearance()
     }
 
+    func setCollapsed(_ collapsed: Bool, animated: Bool) {
+        guard isRailCollapsed != collapsed || !animated else { return }
+        isRailCollapsed = collapsed
+        railVisibilityGeneration += 1
+        let generation = railVisibilityGeneration
+        pointerLocation = nil
+        pointerY = nil
+        synchronizeHoverState(at: nil)
+
+        let controls = railContentViews
+        controls.forEach { $0.isHidden = false }
+
+        guard animated else {
+            finishRailVisibility(generation: generation, collapsed: collapsed)
+            needsLayout = true
+            return
+        }
+
+        let translation: CGFloat = -12
+        for view in controls {
+            guard let layer = view.layer else { continue }
+            let slide = CABasicAnimation(keyPath: "transform.translation.x")
+            slide.fromValue = collapsed ? 0 : translation
+            slide.toValue = collapsed ? translation : 0
+            slide.duration = 0.26
+            slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.78, 0.22, 1)
+            layer.add(slide, forKey: "FloatTabs.railFoldSlide")
+        }
+
+        if !collapsed {
+            controls.forEach { $0.alphaValue = 0 }
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            controls.forEach { $0.animator().alphaValue = collapsed ? 0 : 1 }
+        } completionHandler: {
+            Task { @MainActor [weak self] in
+                self?.finishRailVisibility(
+                    generation: generation,
+                    collapsed: collapsed
+                )
+            }
+        }
+        onActiveTabGeometryChange?()
+    }
+
     func setResidentSlotIDs(_ slotIDs: Set<UUID>) {
         residentSlotIDs = slotIDs
         for (slotID, tab) in tabViews {
@@ -244,7 +293,8 @@ final class ExternalControlZoneView: NSView {
     }
 
     func activeTabFrame(in ancestor: NSView) -> NSRect? {
-        guard let activeTabID,
+        guard !isRailCollapsed,
+              let activeTabID,
               let tab = tabViews[activeTabID],
               tab.superview != nil else {
             return nil
@@ -264,9 +314,24 @@ final class ExternalControlZoneView: NSView {
         pinControl.frame
     }
 
+    private var railContentViews: [NSView] {
+        Array(tabViews.values) + [addControl, settingsControl, pinControl]
+    }
+
+    private func finishRailVisibility(generation: Int, collapsed: Bool) {
+        guard generation == railVisibilityGeneration else { return }
+        railContentViews.forEach {
+            $0.alphaValue = collapsed ? 0 : 1
+            $0.isHidden = collapsed
+        }
+        onActiveTabGeometryChange?()
+    }
+
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
+        view.alphaValue = isRailCollapsed ? 0 : 1
+        view.isHidden = isRailCollapsed
         tabViews[id] = view
         addSubview(view, positioned: .above, relativeTo: addControl)
 
@@ -312,6 +377,7 @@ final class ExternalControlZoneView: NSView {
     }
 
     private func synchronizeHoverState(at location: NSPoint?) {
+        guard !isRailCollapsed else { return }
         for tab in tabViews.values {
             tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
         }
@@ -397,6 +463,7 @@ final class ExternalControlZoneView: NSView {
                 height: ExternalTabMetrics.systemControlHeight
             )
             self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
+
         }
 
         guard animated else {
@@ -469,6 +536,197 @@ final class ExternalControlZoneView: NSView {
         previewOrderIDs = nil
         onReorder?(slotID, destination)
         needsLayout = true
+    }
+}
+
+/// Bottom-left mirror of the native-looking resize grip. Three themed strokes
+/// sit entirely inside the Web surface and fan open / tuck inward with the rail.
+@MainActor
+final class RailFoldControl: NSView {
+    var onActivate: (() -> Void)?
+
+    private let strokeLayers = [CAShapeLayer(), CAShapeLayer(), CAShapeLayer()]
+    private var trackingAreaReference: NSTrackingArea?
+    private var borderTheme: PanelBorderTheme = .rainbow
+    private var customBorderColor: NSColor = .systemBlue
+    private(set) var isExpanded = true
+    private var isHovered = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        for stroke in strokeLayers {
+            stroke.fillColor = NSColor.clear.cgColor
+            stroke.lineWidth = 1.35
+            stroke.lineCap = .round
+            layer?.addSublayer(stroke)
+        }
+
+        toolTip = "Hide Tab Rail"
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(toolTip)
+        applyColorAppearance()
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isOpaque: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        NSCursor.arrow.set()
+        refreshAppearance()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        refreshAppearance()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        NSCursor.arrow.set()
+        let press = CASpringAnimation(keyPath: "transform.scale")
+        press.fromValue = 0.82
+        press.toValue = 1
+        press.mass = 0.55
+        press.stiffness = 260
+        press.damping = 19
+        press.duration = press.settlingDuration
+        layer?.add(press, forKey: "FloatTabs.railGripPress")
+        onActivate?()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    override func layout() {
+        super.layout()
+        for (index, stroke) in strokeLayers.enumerated() {
+            stroke.frame = bounds
+            stroke.path = gripPath(index: index, expanded: isExpanded)
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // This control overlaps the source window's inner movement band. Its
+        // own cursor rect must win so a rail toggle never advertises dragging.
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    func apply(theme: PanelBorderTheme, customColor: NSColor) {
+        borderTheme = theme
+        customBorderColor = customColor
+        applyColorAppearance()
+    }
+
+    func refreshAppearance() {
+        let opacity: Float = isHovered ? 1 : 0.82
+        let width: CGFloat = isHovered ? 1.7 : 1.35
+        strokeLayers.forEach {
+            $0.opacity = opacity
+            $0.lineWidth = width
+        }
+    }
+
+    func setExpanded(_ expanded: Bool, animated: Bool) {
+        guard isExpanded != expanded else { return }
+        let oldPaths = strokeLayers.indices.map { gripPath(index: $0, expanded: isExpanded) }
+        isExpanded = expanded
+        toolTip = expanded ? "Hide Tab Rail" : "Show Tab Rail"
+        setAccessibilityLabel(toolTip)
+
+        for (index, stroke) in strokeLayers.enumerated() {
+            let newPath = gripPath(index: index, expanded: expanded)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            stroke.path = newPath
+            CATransaction.commit()
+
+            guard animated else { continue }
+            let fold = CABasicAnimation(keyPath: "path")
+            fold.fromValue = oldPaths[index]
+            fold.toValue = newPath
+            fold.duration = 0.25
+            fold.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.82, 0.2, 1)
+            stroke.add(fold, forKey: "FloatTabs.railGripFold")
+        }
+    }
+
+    /// The open state extends slightly beyond the right grip's 5/9/13 rhythm;
+    /// the hidden state tucks back to that familiar size. The 40pt acquisition
+    /// target never changes, keeping the control easy to recover.
+    private func gripPath(index: Int, expanded: Bool) -> CGPath {
+        let inset = PanelMetrics.resizeHandleVisualInset
+        let expandedOffsets: [CGFloat] = [7, 12, 17]
+        let tuckedOffsets: [CGFloat] = [5, 9, 13]
+        let offset = (expanded ? expandedOffsets : tuckedOffsets)[index]
+        let path = CGMutablePath()
+        path.move(to: CGPoint(
+            x: bounds.minX + inset + offset,
+            y: bounds.minY + inset
+        ))
+        path.addLine(to: CGPoint(
+            x: bounds.minX + inset,
+            y: bounds.minY + inset + offset
+        ))
+        return path
+    }
+
+    private func applyColorAppearance() {
+        strokeLayers.forEach { $0.removeAnimation(forKey: "FloatTabs.railGripRainbow") }
+        if borderTheme == .rainbow {
+            let colors = [NSColor.systemBlue, .systemPurple, .systemPink, .systemOrange]
+            for (index, stroke) in strokeLayers.enumerated() {
+                stroke.strokeColor = colors[index].cgColor
+                let flow = CAKeyframeAnimation(keyPath: "strokeColor")
+                flow.values = (0...3).map { colors[(index + $0) % colors.count].cgColor }
+                    + [colors[index].cgColor]
+                flow.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+                flow.duration = 3.2
+                flow.repeatCount = .infinity
+                flow.calculationMode = .linear
+                stroke.add(flow, forKey: "FloatTabs.railGripRainbow")
+            }
+        } else {
+            let color = borderTheme.solidColor ?? customBorderColor
+            strokeLayers.forEach { $0.strokeColor = color.cgColor }
+        }
+        refreshAppearance()
     }
 }
 

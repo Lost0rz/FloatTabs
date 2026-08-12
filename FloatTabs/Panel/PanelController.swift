@@ -39,7 +39,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         container: rootView.webPanelContainerView
     )
 
-    private var moveHoverController: PanelMoveHoverController?
     private var previousApplication: NSRunningApplication?
     private var restoredFrame: NSRect?
     private var hasPositionedPanel = false
@@ -134,7 +133,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.layer?.shadowRadius = 0
         rootView.webPanelContainerView.layer?.shadowOffset = .zero
 
-        moveHoverController = PanelMoveHoverController(view: rootView.perimeterDragView)
         configureTransientUI()
 
         rootView.onResizeEnded = { [weak self] in
@@ -147,6 +145,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         configurePreferenceObservers()
         synchronizePreferencePresentation()
         rootView.externalControlZoneView.setPinned(isPinned)
+        synchronizePinnedPresentation()
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(workspaceDidActivateApplication(_:)),
@@ -300,11 +299,17 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func togglePinnedState() {
         isPinned.toggle()
         rootView.externalControlZoneView.setPinned(isPinned)
+        synchronizePinnedPresentation()
         if isPinned, sourceHostController.sessionState == .fullscreen {
             requestedVisibility = true
             fullscreenVisibilityIntent.requestPresentation()
             showFullscreenCompanionIfReady()
         }
+    }
+
+    private func synchronizePinnedPresentation() {
+        panel.setPinnedPresentation(isPinned)
+        sourceHostController.setPinnedPresentation(isPinned)
     }
 
     static func shouldAutoHideForActivatedApplication(
@@ -675,6 +680,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             theme: preferencesStore.borderTheme,
             customColor: preferencesStore.customBorderColor
         )
+        sourceHostController.railFoldControl.apply(
+            theme: preferencesStore.borderTheme,
+            customColor: preferencesStore.customBorderColor
+        )
+        rootView.companionRailFoldControlView.apply(
+            theme: preferencesStore.borderTheme,
+            customColor: preferencesStore.customBorderColor
+        )
     }
 
     private func synchronizeWindowSizeMode() {
@@ -743,6 +756,26 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onTogglePin = { [weak self] in
             self?.togglePinnedState()
         }
+        let toggleRail: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.setTabRailCollapsed(
+                !self.rootView.externalControlZoneView.isRailCollapsed,
+                animated: true
+            )
+        }
+        sourceHostController.railFoldControl.onActivate = toggleRail
+        rootView.companionRailFoldControlView.onActivate = toggleRail
+        setTabRailCollapsed(preferencesStore.isTabRailCollapsed, animated: false)
+    }
+
+    private func setTabRailCollapsed(_ collapsed: Bool, animated: Bool) {
+        preferencesStore.isTabRailCollapsed = collapsed
+        rootView.externalControlZoneView.setCollapsed(collapsed, animated: animated)
+        sourceHostController.railFoldControl.setExpanded(!collapsed, animated: animated)
+        rootView.companionRailFoldControlView.setExpanded(
+            !collapsed,
+            animated: animated
+        )
     }
 
     private func synchronizeSlotState() {
@@ -1223,6 +1256,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         synchronizeTransientUIHost()
+        synchronizePinnedPresentation()
 
         requestedVisibility = fullscreenVisibilityIntent.consumeRestore(
             currentVisibility: requestedVisibility
@@ -1328,6 +1362,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         positionPanelForCurrentScreens()
         panel.setFullscreenCompanionPresentation(true)
+        rootView.companionRailFoldControlView.isHidden = false
         synchronizeFullscreenCompanionSlotState()
         activateFloatTabs()
         panel.makeKeyAndOrderFront(nil)
@@ -1408,6 +1443,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         pauseInactiveMedia: Bool,
         hidePanel: Bool
     ) {
+        rootView.companionRailFoldControlView.isHidden = true
         if hidePanel {
             hideFullscreenCompanion(pauseInactiveMedia: pauseInactiveMedia)
         }
@@ -1627,87 +1663,5 @@ final class ZoomHUDView: NSView {
         }
         hideWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
-    }
-}
-
-@MainActor
-final class PanelMoveHoverController: NSResponder {
-    static let trackingOptions: NSTrackingArea.Options = [
-        .mouseEnteredAndExited,
-        .mouseMoved,
-        .activeAlways,
-        .inVisibleRect,
-    ]
-
-    private weak var view: PanelPerimeterDragView?
-    private var trackingArea: NSTrackingArea?
-    private var moveCursorIsPushed = false
-
-    init(view: PanelPerimeterDragView) {
-        self.view = view
-        super.init()
-
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: Self.trackingOptions,
-            owner: self,
-            userInfo: nil
-        )
-        view.addTrackingArea(area)
-        trackingArea = area
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        MainActor.assumeIsolated {
-            if moveCursorIsPushed {
-                NSCursor.pop()
-            }
-            if let view, let trackingArea {
-                view.removeTrackingArea(trackingArea)
-            }
-        }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        updateCursor(for: event)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        updateCursor(for: event)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        restorePreviousCursorIfNeeded()
-    }
-
-    static func isDraggable(point: NSPoint, in bounds: NSRect) -> Bool {
-        PanelPerimeterDragView.dragRects(in: bounds).contains(where: { $0.contains(point) })
-    }
-
-    private func updateCursor(for event: NSEvent) {
-        guard let view else {
-            restorePreviousCursorIfNeeded()
-            return
-        }
-
-        let point = view.convert(event.locationInWindow, from: nil)
-        let draggable = Self.isDraggable(point: point, in: view.bounds)
-
-        if draggable, !moveCursorIsPushed {
-            PanelMoveCursor.cursor.push()
-            moveCursorIsPushed = true
-        } else if !draggable {
-            restorePreviousCursorIfNeeded()
-        }
-    }
-
-    private func restorePreviousCursorIfNeeded() {
-        guard moveCursorIsPushed else { return }
-        NSCursor.pop()
-        moveCursorIsPushed = false
     }
 }

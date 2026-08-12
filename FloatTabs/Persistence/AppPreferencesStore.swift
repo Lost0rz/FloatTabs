@@ -100,6 +100,7 @@ final class AppPreferencesStore {
     static let followPreferredSizeKey = "FloatTabs.followTabPreferredSize"
     static let borderThemeKey = "FloatTabs.borderTheme"
     static let customBorderColorKey = "FloatTabs.customBorderColor"
+    static let railCollapsedKey = "FloatTabs.railCollapsed"
     static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
     static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
@@ -198,6 +199,11 @@ final class AppPreferencesStore {
             defaults.set(newValue.rawValue, forKey: Self.borderThemeKey)
             notifyBorderChange()
         }
+    }
+
+    var isTabRailCollapsed: Bool {
+        get { defaults.bool(forKey: Self.railCollapsedKey) }
+        set { defaults.set(newValue, forKey: Self.railCollapsedKey) }
     }
 
     var customBorderColorHex: String {
