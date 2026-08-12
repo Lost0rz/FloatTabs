@@ -1,9 +1,16 @@
 import AppKit
 import WebKit
 
-final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
+/// Passive fullscreen diagnostics for the baseline reproduction branch.
+///
+/// Important constraints:
+/// - does not intercept NSWindow.sendEvent
+/// - does not install local/global mouse monitors
+/// - does not inject JavaScript into pages or iframes
+/// - does not call any fullscreen/media API
+/// - does not mutate WKWebView/window hierarchy or geometry
+final class FullscreenDiagnostics: NSObject {
     static let shared = FullscreenDiagnostics()
-    static let messageHandlerName = "floatTabsFullscreenDiagnostics"
 
     private struct AttemptState {
         let id: Int
@@ -11,15 +18,14 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
         var lastState = "notInFullscreen"
     }
 
-    private let lock = NSLock()
     private let logURL: URL
+    private let logQueue = DispatchQueue(label: "FloatTabs.FullscreenDiagnostics.Log")
     private var observerTokens: [NSObjectProtocol] = []
     private var fullscreenObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
     private var frameObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
     private var slotIDs: [ObjectIdentifier: UUID] = [:]
     private var attempts: [ObjectIdentifier: AttemptState] = [:]
     private var nextAttemptID = 1
-    private var sequence: UInt64 = 0
 
     private override init() {
         let logsDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -79,13 +85,14 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
                 object: NSApp,
                 queue: .main
             ) { [weak self] notification in
-                self?.log(
+                guard let self else { return }
+                self.log(
                     "application_activity",
                     fields: [
                         "name": notification.name.rawValue,
                         "active": String(NSApp.isActive),
-                        "key_window": self?.windowSummary(NSApp.keyWindow) ?? "nil",
-                        "main_window": self?.windowSummary(NSApp.mainWindow) ?? "nil",
+                        "key_window": self.windowSummary(NSApp.keyWindow),
+                        "main_window": self.windowSummary(NSApp.mainWindow),
                     ]
                 )
             })
@@ -104,6 +111,7 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
         log(
             "diagnostics_started",
             fields: [
+                "mode": "passive_only",
                 "os": ProcessInfo.processInfo.operatingSystemVersionString,
                 "pid": String(ProcessInfo.processInfo.processIdentifier),
                 "screens": screenInventory(),
@@ -117,14 +125,6 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
         let objectID = ObjectIdentifier(webView)
         guard fullscreenObservations[objectID] == nil else { return }
         slotIDs[objectID] = slotID
-
-        let controller = webView.configuration.userContentController
-        controller.add(self, name: Self.messageHandlerName)
-        controller.addUserScript(WKUserScript(
-            source: Self.domDiagnosticScript(slotID: slotID),
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        ))
 
         fullscreenObservations[objectID] = webView.observe(
             \.fullscreenState,
@@ -146,8 +146,8 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
                       let newFrame = change.newValue,
                       oldFrame != newFrame else { return }
 
-                let windowClass = webView.window.map { String(describing: type(of: $0)) } ?? "nil"
                 let state = self.fullscreenStateName(webView.fullscreenState)
+                let windowClass = webView.window.map { String(describing: type(of: $0)) } ?? "nil"
                 let suspicious = state != "notInFullscreen"
                     || windowClass.localizedCaseInsensitiveContains("fullscreen")
                     || windowClass.localizedCaseInsensitiveContains("webcore")
@@ -162,47 +162,12 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
                         "new": NSStringFromRect(newFrame),
                         "window": self.windowSummary(webView.window),
                         "superview": self.viewSummary(webView.superview),
-                        "call_stack": suspicious ? Thread.callStackSymbols.joined(separator: " <- ") : "",
                     ]
                 )
             }
         }
 
-        log(
-            "webview_attached_to_diagnostics",
-            fields: webViewFields(webView)
-        )
-    }
-
-    @MainActor
-    func recordPanelInput(event: NSEvent, panel: NSPanel) {
-        guard event.type == .leftMouseDown
-                || event.type == .rightMouseDown
-                || event.type == .otherMouseDown
-                || event.type == .keyDown else { return }
-
-        var fields = globalScreenFields()
-        fields["event"] = String(describing: event.type)
-        fields["key_code"] = String(event.keyCode)
-        fields["characters"] = event.charactersIgnoringModifiers ?? ""
-        fields["panel"] = windowSummary(panel)
-        log("panel_input", fields: fields)
-    }
-
-    func userContentController(
-        _ userContentController: WKUserContentController,
-        didReceive message: WKScriptMessage
-    ) {
-        guard message.name == Self.messageHandlerName,
-              let body = message.body as? [String: Any] else { return }
-
-        var fields: [String: String] = [:]
-        for (key, value) in body {
-            fields[key] = String(describing: value)
-        }
-        fields["is_main_frame"] = String(message.frameInfo.isMainFrame)
-        fields["frame_url"] = message.frameInfo.request.url?.absoluteString ?? "nil"
-        log("dom_fullscreen_event", fields: fields)
+        log("webview_observation_started", fields: webViewFields(webView))
     }
 
     @MainActor
@@ -212,22 +177,24 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
     ) {
         let objectID = ObjectIdentifier(webView)
         let oldState = change.oldValue.map(fullscreenStateName) ?? "unknown"
-        let newState = change.newValue.map(fullscreenStateName) ?? fullscreenStateName(webView.fullscreenState)
+        let newState = change.newValue.map(fullscreenStateName)
+            ?? fullscreenStateName(webView.fullscreenState)
 
         if newState == "enteringFullscreen" {
             let attemptID = nextAttemptID
             nextAttemptID += 1
-            attempts[objectID] = AttemptState(id: attemptID, reachedInFullscreen: false, lastState: newState)
-            log(
-                "attempt_started",
-                fields: [
-                    "attempt": String(attemptID),
-                    "slot": slotID(for: webView),
-                    "webview": objectAddress(webView),
-                    "from": oldState,
-                    "to": newState,
-                ]
+            attempts[objectID] = AttemptState(
+                id: attemptID,
+                reachedInFullscreen: false,
+                lastState: newState
             )
+            var fields = webViewFields(webView)
+            fields["attempt"] = String(attemptID)
+            fields["from"] = oldState
+            fields["to"] = newState
+            fields["current_event"] = currentEventSummary()
+            fields.merge(globalScreenFields()) { current, _ in current }
+            log("attempt_started", fields: fields)
         } else if var attempt = attempts[objectID] {
             if newState == "inFullscreen" {
                 attempt.reachedInFullscreen = true
@@ -271,6 +238,7 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
         var fields = webViewFields(webView)
         fields["old_state"] = oldState
         fields["new_state"] = newState
+        fields["current_event"] = currentEventSummary()
         fields.merge(globalScreenFields()) { current, _ in current }
         log("webkit_fullscreen_state", fields: fields)
         logAllWindows(reason: "webkit_fullscreen_state_\(newState)")
@@ -322,6 +290,17 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
     }
 
     @MainActor
+    private func currentEventSummary() -> String {
+        guard let event = NSApp.currentEvent else { return "nil" }
+        return [
+            "type=\(String(describing: event.type))",
+            "clickCount=\(event.clickCount)",
+            "location=\(NSStringFromPoint(event.locationInWindow))",
+            "windowNumber=\(event.windowNumber)",
+        ].joined(separator: ",")
+    }
+
+    @MainActor
     private func windowSummary(_ window: NSWindow?) -> String {
         guard let window else { return "nil" }
         return [
@@ -370,75 +349,29 @@ final class FullscreenDiagnostics: NSObject, WKScriptMessageHandler {
     }
 
     private func log(_ event: String, fields: [String: String] = [:]) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        sequence &+= 1
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let details = fields
             .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\(sanitize($0.value))" }
+            .map { "\($0.key)=\(Self.sanitize($0.value))" }
             .joined(separator: " ")
-        let line = "\(timestamp) seq=\(sequence) event=\(event) \(details)\n"
+        let line = "\(timestamp) event=\(event) \(details)\n"
         guard let data = line.data(using: .utf8) else { return }
+        let url = logURL
 
-        if let handle = try? FileHandle(forWritingTo: logURL) {
-            defer { try? handle.close() }
-            try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
+        logQueue.async {
+            if let handle = try? FileHandle(forWritingTo: url) {
+                defer { try? handle.close() }
+                try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+            }
         }
     }
 
-    private func sanitize(_ value: String) -> String {
+    private static func sanitize(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\t", with: "\\t")
-    }
-
-    private static func domDiagnosticScript(slotID: UUID) -> String {
-        """
-        (() => {
-          if (window.__floatTabsFullscreenDiagnosticsInstalled) return;
-          window.__floatTabsFullscreenDiagnosticsInstalled = true;
-          const slot = '\(slotID.uuidString)';
-          const elementDescription = (element) => {
-            if (!element) return 'nil';
-            const id = element.id ? `#${element.id}` : '';
-            const cls = typeof element.className === 'string' && element.className
-              ? `.${element.className.trim().replace(/\\s+/g, '.')}`
-              : '';
-            return `${element.tagName || 'unknown'}${id}${cls}`;
-          };
-          const send = (event, extra = {}) => {
-            try {
-              const fs = document.fullscreenElement || document.webkitFullscreenElement || null;
-              window.webkit.messageHandlers.\(messageHandlerName).postMessage({
-                slot,
-                event,
-                href: location.href,
-                readyState: document.readyState,
-                visibilityState: document.visibilityState,
-                fullscreenElement: elementDescription(fs),
-                userActivationActive: navigator.userActivation ? navigator.userActivation.isActive : 'unsupported',
-                userActivationEver: navigator.userActivation ? navigator.userActivation.hasBeenActive : 'unsupported',
-                ...extra,
-              });
-            } catch (_) {}
-          };
-          document.addEventListener('fullscreenchange', () => send('fullscreenchange'), true);
-          document.addEventListener('webkitfullscreenchange', () => send('webkitfullscreenchange'), true);
-          document.addEventListener('fullscreenerror', (e) => send('fullscreenerror', { errorType: e.type }), true);
-          document.addEventListener('webkitfullscreenerror', (e) => send('webkitfullscreenerror', { errorType: e.type }), true);
-          document.addEventListener('dblclick', (e) => send('dblclick', { target: elementDescription(e.target) }), true);
-          document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') send('escape_keydown');
-          }, true);
-          window.addEventListener('pagehide', () => send('pagehide'), true);
-          window.addEventListener('pageshow', () => send('pageshow'), true);
-          send('diagnostics_script_ready');
-        })();
-        """
     }
 }
 
