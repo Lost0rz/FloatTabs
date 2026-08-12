@@ -1,0 +1,182 @@
+name: Apply Native Fullscreen Host Repair
+
+on:
+  push:
+    branches:
+      - agent/fix-web-fullscreen-state
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-web-fullscreen-state
+          fetch-depth: 0
+
+      - name: Apply guarded repair
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def must_replace(text, old, new, label, count=None):
+              found = text.count(old)
+              if found == 0:
+                  raise SystemExit(f"missing replacement anchor: {label}")
+              if count is not None and found != count:
+                  raise SystemExit(f"unexpected anchor count for {label}: {found} != {count}")
+              return text.replace(old, new)
+
+          # 1) Remove the rejected media-presentation reset architecture entirely.
+          path = Path('FloatTabs/App/AppDelegate.swift')
+          text = path.read_text()
+          pattern = re.compile(
+              r'import AppKit\nimport WebKit\n\n/// Keeps element fullscreen.*?\n@MainActor\nfinal class AppDelegate',
+              re.S,
+          )
+          text, n = pattern.subn('import AppKit\n\n@MainActor\nfinal class AppDelegate', text, count=1)
+          if n != 1:
+              raise SystemExit(f'failed to remove NativeFullscreenSessionResetCoordinator: {n}')
+          text = must_replace(
+              text,
+              '        NativeFullscreenSessionResetCoordinator.shared.start()\n',
+              '',
+              'fullscreen coordinator start',
+              1,
+          )
+          text = must_replace(
+              text,
+              '        NativeFullscreenSessionResetCoordinator.shared.stop()\n',
+              '',
+              'fullscreen coordinator stop',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path('FloatTabs/Web/WebViewFactory.swift')
+          text = path.read_text()
+          text = must_replace(
+              text,
+              '        NativeFullscreenSessionResetCoordinator.shared.install(in: configuration)\n',
+              '',
+              'fullscreen bridge install',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path('FloatTabs/Panel/FloatingPanel.swift')
+          text = path.read_text()
+          old = '''                NativeFullscreenSessionResetCoordinator.shared.handleObservedFullscreenTransition(\n                    for: webView,\n                    previousState: previousState,\n                    currentState: state,\n                    window: currentWindow\n                )\n\n'''
+          text = must_replace(text, old, '', 'observed fullscreen reset', 1)
+          path.write_text(text)
+
+          # 2) Make every transient WKWebView use the same stable frame-based host
+          #    as Hot/fullscreen-shell paths. WebKit may reparent the WKWebView for
+          #    native element fullscreen; its immediate host must remain stable.
+          path = Path('FloatTabs/Web/WebViewContainer.swift')
+          text = path.read_text()
+          text = must_replace(
+              text,
+              '    private let logicalHostView = NSView()\n',
+              '    private let logicalHostView = WebSlotHostView(frame: .zero)\n',
+              'logical host type',
+              1,
+          )
+          # WebKit fullscreen placeholders restore from frame + autoresizing mask.
+          mask_count = text.count('            webView.autoresizingMask = []\n')
+          if mask_count < 1:
+              raise SystemExit('missing WKWebView autoresizing anchor')
+          text = text.replace(
+              '            webView.autoresizingMask = []\n',
+              '            webView.autoresizingMask = [.width, .height]\n',
+          )
+          old = '''            hostedWebView?.removeFromSuperview()\n            webView.removeFromSuperview()\n            webView.translatesAutoresizingMaskIntoConstraints = true\n            webView.autoresizingMask = [.width, .height]\n            logicalHostView.addSubview(webView)\n            hostedWebView = webView\n'''
+          new = '''            hostedWebView?.removeFromSuperview()\n            logicalHostView.attach(webView)\n            hostedWebView = webView\n'''
+          text = must_replace(text, old, new, 'transient host attachment', 1)
+          path.write_text(text)
+
+          # 3) Replace tests for the rejected bridge with tests locking the new contract.
+          path = Path('FloatTabsTests/WebViewFactoryTests.swift')
+          text = path.read_text()
+          pattern = re.compile(
+              r'\n    func testWebViewsUseNativeElementFullscreenWithExitOnlyResetBridge\(\) throws \{.*?\n    \}\n\n    func testFullscreenSessionResetPoliciesRequireAnActiveNativePresentation\(\) \{.*?\n    \}\n',
+              re.S,
+          )
+          replacement = r'''
+    func testWebViewsLeaveNativeElementFullscreenEntryAndExitUntouched() {
+        let webView = WebViewFactory.makeWebView()
+        let scripts = webView.configuration.userContentController.userScripts
+
+        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
+        XCTAssertFalse(scripts.contains(where: { script in
+            script.source.contains("__floatTabsNativeFullscreenExitBridgeInstalled")
+                || script.source.contains("requestFullscreen")
+                || script.source.contains("exitFullscreen")
+                || script.source.contains("closeAllMediaPresentations")
+        }))
+    }
+
+    func testTransientWebViewUsesStableFrameBasedFullscreenHost() throws {
+        let webView = WebViewFactory.makeWebView()
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
+
+        container.show(webView: webView)
+        container.layoutSubtreeIfNeeded()
+        let host = try XCTUnwrap(webView.superview as? WebSlotHostView)
+
+        XCTAssertTrue(webView.translatesAutoresizingMaskIntoConstraints)
+        XCTAssertTrue(webView.autoresizingMask.contains(.width))
+        XCTAssertTrue(webView.autoresizingMask.contains(.height))
+        XCTAssertTrue(webView.superview === host)
+        XCTAssertFalse(host.constraints.contains(where: { constraint in
+            constraint.firstItem as AnyObject? === webView
+                || constraint.secondItem as AnyObject? === webView
+        }))
+    }
+'''
+          text, n = pattern.subn(replacement, text, count=1)
+          if n != 1:
+              raise SystemExit(f'failed to replace rejected fullscreen tests: {n}')
+          path.write_text(text)
+
+          # Guardrails: none of the rejected implementation is allowed to remain.
+          app_delegate = Path('FloatTabs/App/AppDelegate.swift').read_text()
+          factory = Path('FloatTabs/Web/WebViewFactory.swift').read_text()
+          panel = Path('FloatTabs/Panel/FloatingPanel.swift').read_text()
+          combined = app_delegate + factory + panel
+          forbidden = [
+              'NativeFullscreenSessionResetCoordinator',
+              'closeAllMediaPresentations',
+              'floatTabsNativeFullscreenExit',
+              'fullscreen_public_close_requested',
+              'fullscreen_public_close_completed',
+          ]
+          for token in forbidden:
+              if token in combined:
+                  raise SystemExit(f'forbidden rejected-fullscreen token remains: {token}')
+          PY
+
+          git diff --check
+          git diff -- FloatTabs/App/AppDelegate.swift FloatTabs/Panel/FloatingPanel.swift FloatTabs/Web/WebViewFactory.swift FloatTabs/Web/WebViewContainer.swift FloatTabsTests/WebViewFactoryTests.swift
+
+      - name: Commit repair and remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/tmp-native-fullscreen-host-repair.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FloatTabs/App/AppDelegate.swift \
+                  FloatTabs/Panel/FloatingPanel.swift \
+                  FloatTabs/Web/WebViewFactory.swift \
+                  FloatTabs/Web/WebViewContainer.swift \
+                  FloatTabsTests/WebViewFactoryTests.swift
+          git commit -m 'fix: use fullscreen-safe WebKit host hierarchy'
+          git push origin HEAD:agent/fix-web-fullscreen-state
