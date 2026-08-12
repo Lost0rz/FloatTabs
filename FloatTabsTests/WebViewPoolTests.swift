@@ -330,6 +330,46 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: companion.id))
     }
 
+    func testHiddenShellNeverPausesOrReleasesVisibleFullscreenSource() async throws {
+        let pool = makePool()
+        var source = makeProfile(name: "FullscreenSource")
+        source.residencyPolicy = .cold
+        source.backgroundMediaPolicy = .pauseWhenInactive
+        _ = pool.webView(for: source)
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        var pausedIDs: [UUID] = []
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            hiddenActiveGraceDelay: 0.02,
+            mediaPauseAction: { pausedIDs.append($0) },
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: source)
+        lifecycle.activate(profile: source)
+        lifecycle.beginFullscreenSourceVisibility(profile: source)
+        lifecycle.setPanelVisible(false, activeProfile: source)
+
+        XCTAssertTrue(pausedIDs.isEmpty)
+        XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertTrue(pool.contains(slotID: source.id))
+
+        // Once WebKit exits fullscreen, the same hidden source returns to the
+        // ordinary pause + grace + Cold release contract.
+        lifecycle.endFullscreenSourceVisibility(profile: source)
+        lifecycle.setPanelVisible(false, activeProfile: source)
+        XCTAssertEqual(pausedIDs, [source.id])
+        XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertFalse(pool.contains(slotID: source.id))
+    }
+
     func testHiddenFullscreenCompanionReturnsToInactiveLifecycle() async throws {
         let pool = makePool()
         var source = makeProfile(name: "FullscreenSource")
@@ -411,7 +451,7 @@ final class WebViewPoolTests: XCTestCase {
 
     func testWarmLRULimitKeepsOnlyTwoRecentInactiveResidents() {
         let pool = makePool()
-        var profiles = ["A", "B", "C"].enumerated().map { index, name in
+        let profiles = ["A", "B", "C"].enumerated().map { index, name in
             var profile = makeProfile(name: name)
             profile.order = index
             profile.residencyPolicy = .warm
@@ -734,24 +774,44 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingUsesTemporaryChildForScriptedCrossSitePopup() {
+    func testPopupRoutingKeepsScriptedCrossSitePopupInCurrentSlot() {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
             targetURL: URL(string: "https://accounts.example-idp.com/oauth")
         )
 
-        XCTAssertEqual(result, .temporaryPopup)
+        XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingTreatsAboutBlankAsTemporaryChild() {
+    func testPopupRoutingKeepsAboutBlankInCurrentSlot() {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
             targetURL: URL(string: "about:blank")
         )
 
-        XCTAssertEqual(result, .temporaryPopup)
+        XCTAssertEqual(result, .currentSlot)
+    }
+
+    func testPopupRoutingKeepsMissingInitialURLInCurrentSlot() {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://v.qq.com"),
+            targetURL: nil
+        )
+
+        XCTAssertEqual(result, .currentSlot)
+    }
+
+    func testWindowOpenScriptForcesWebDestinationsIntoCurrentSlot() {
+        let script = PopupCoordinator.currentSlotWindowOpenScript()
+
+        XCTAssertEqual(script.injectionTime, .atDocumentStart)
+        XCTAssertFalse(script.isForMainFrameOnly)
+        XCTAssertTrue(script.source.contains("window.location.assign"))
+        XCTAssertTrue(script.source.contains("about:blank"))
+        XCTAssertTrue(script.source.contains("return window"))
     }
 
     func testPopupRoutingHandsNonWebSchemeToSystem() {

@@ -8,6 +8,7 @@ enum WebNavigationDisposition: Equatable {
 
 /// Owns navigation-policy decisions independently from per-Slot WebView
 /// lifecycle observation.
+@MainActor
 final class WebNavigationCoordinator {
     func disposition(for navigationAction: WKNavigationAction) -> WebNavigationDisposition {
         Self.disposition(

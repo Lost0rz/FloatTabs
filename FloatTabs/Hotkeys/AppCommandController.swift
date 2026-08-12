@@ -187,8 +187,10 @@ final class AppCommandController {
     }
 
     deinit {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
+        MainActor.assumeIsolated {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
         }
     }
 

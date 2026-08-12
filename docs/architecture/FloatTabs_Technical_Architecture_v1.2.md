@@ -122,7 +122,12 @@ FloatTabsApp
 
 # 3. Native Window Architecture
 
-The main browser surface is a focusable `NSPanel` or custom `NSWindow`, not an `NSPopover`.
+The release implementation uses two coordinated native windows, not an `NSPopover`:
+
+```text
+visible controls / Tab shell → focusable NSPanel
+ordinary WKWebView source    → borderless NSWindow
+```
 
 Requirements:
 
@@ -132,7 +137,7 @@ Requirements:
 - reliable show/hide;
 - previous-app focus restoration;
 - multi-Space support;
-- full-screen auxiliary behavior;
+- stable WebKit element-fullscreen source/restoration;
 - multi-display positioning.
 
 Target app behavior:
@@ -141,12 +146,12 @@ Target app behavior:
 LSUIElement = true
 Dock icon = hidden
 Menu Bar status item = persistent
-main panel level = floating
+shell and source level = normal
 ```
 
-Collection behavior must be validated rather than assumed. Use the appropriate supported combination for the chosen minimum macOS version, including `canJoinAllSpaces` / full-screen auxiliary behavior and `canJoinAllApplications` when available and eligible.
+The shell normally uses `canJoinAllSpaces + canJoinAllApplications`; the ordinary source window uses `managed + fullScreenNone`. During an active WebKit fullscreen session, an independently ordered shell companion may use `moveToActiveSpace + fullScreenAuxiliary` so the Tab rail remains available without making the panel WebKit's source/restore owner.
 
-Do not use `.nonactivatingPanel` as the primary window model because the embedded webpage must receive keyboard focus.
+The shell may use `.nonactivatingPanel` for first-click acquisition because the show path explicitly activates FloatTabs and keyboard focus is handed to the ordinary source window's `WKWebView`.
 
 ## 3.1 Stage 0 Blocker
 

@@ -497,7 +497,8 @@ final class PanelInteractionBorderView: NSView {
 /// Four-way movement cursor used only where FloatTabs itself will move the
 /// window. This gives immediate feedback before the user starts dragging.
 enum PanelMoveCursor {
-    static let cursor: NSCursor = {
+    @MainActor
+    static var cursor: NSCursor {
         let size = NSSize(width: 24, height: 24)
         let image = NSImage(size: size, flipped: false) { rect in
             let center = NSPoint(x: rect.midX, y: rect.midY)
@@ -541,7 +542,7 @@ enum PanelMoveCursor {
         }
 
         return NSCursor(image: image, hotSpot: NSPoint(x: 12, y: 12))
-    }()
+    }
 }
 
 /// Window movement is acquired mainly outside the Web viewport: the external

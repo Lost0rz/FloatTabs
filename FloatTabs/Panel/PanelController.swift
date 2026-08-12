@@ -54,6 +54,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var fullscreenProfile: WebAppProfile?
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
+    private var shouldClampAfterFullscreen = false
 
     var isVisible: Bool {
         requestedVisibility
@@ -103,6 +104,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.onSessionStateChange = { [weak self] state in
             self?.handleSourceSessionStateChange(state)
         }
+        sourceHostController.onSourceRebuildRequired = { [weak self] in
+            self?.rebuildFullscreenSourceAfterRestoreTimeout()
+        }
 
         // The animated color outline is the only persistent shell outline.
         rootView.webPanelContainerView.layer?.borderWidth = 0
@@ -127,6 +131,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             self,
             selector: #selector(workspaceDidActivateApplication(_:)),
             name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
         externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -535,6 +545,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func configurePreferenceObservers() {
         NotificationCenter.default.addObserver(
             self,
+            selector: #selector(appearancePreferenceDidChange(_:)),
+            name: .floatTabsAppearanceDidChange,
+            object: preferencesStore
+        )
+        NotificationCenter.default.addObserver(
+            self,
             selector: #selector(borderPreferenceDidChange(_:)),
             name: .floatTabsBorderPreferenceDidChange,
             object: preferencesStore
@@ -551,6 +567,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: .floatTabsFixedWindowSizeDidChange,
             object: preferencesStore
         )
+    }
+
+    @objc private func appearancePreferenceDidChange(_ notification: Notification) {
+        let appearance = preferencesStore.appearanceMode.appKitAppearance
+        panel.appearance = appearance
+        sourceHostController.window.appearance = appearance
+        rootView.externalControlZoneView.refreshAppearance()
+        synchronizeBorderTheme()
+        rootView.needsDisplay = true
     }
 
     @objc private func borderPreferenceDidChange(_ notification: Notification) {
@@ -1079,6 +1104,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        guard !sourceHostController.isSessionLocked else {
+            shouldClampAfterFullscreen = true
+            return
+        }
+        clampPanelToConnectedScreens()
+    }
+
     private func persistPanelFrame() {
         guard hasPositionedPanel else { return }
         frameStore.saveFrame(panel.frame)
@@ -1100,6 +1133,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         if isLocked {
             fullscreenVisibilityIntent.begin(wasVisible: requestedVisibility)
             fullscreenProfile = lastSynchronizedActiveProfile ?? tabStore.activeProfile
+            if let fullscreenProfile {
+                slotLifecycleCoordinator.beginFullscreenSourceVisibility(
+                    profile: fullscreenProfile
+                )
+            }
             companionActiveProfile = nil
             pendingSlotSynchronization = false
             addressOverlayView.dismiss()
@@ -1110,6 +1148,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             rootView.removeFullscreenExitPlaceholder()
             requestedVisibility = isPinned
             return
+        }
+
+        if let fullscreenProfile {
+            slotLifecycleCoordinator.endFullscreenSourceVisibility(
+                profile: fullscreenProfile
+            )
         }
 
         requestedVisibility = fullscreenVisibilityIntent.consumeRestore(
@@ -1133,6 +1177,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         fullscreenProfile = nil
         panel.setFullscreenCompanionPresentation(false)
         pendingSlotSynchronization = true
+
+        if shouldClampAfterFullscreen {
+            shouldClampAfterFullscreen = false
+            clampPanelToConnectedScreens()
+        }
 
         if pendingSlotSynchronization {
             synchronizeSlotState()
@@ -1161,6 +1210,20 @@ final class PanelController: NSObject, NSWindowDelegate {
                 + "shellVisible=\(panel.isVisible) "
                 + "sourceVisible=\(sourceHostController.window.isVisible)"
         )
+    }
+
+    /// A last-resort recovery used only after WebKit has publicly left
+    /// fullscreen but failed to restore its source view for ten seconds. The
+    /// persisted Slot remains intact; only its transient WKWebView is rebuilt.
+    private func rebuildFullscreenSourceAfterRestoreTimeout() {
+        guard let sourceID = fullscreenProfile?.id else { return }
+        slotLifecycleCoordinator.remove(slotID: sourceID)
+        webViewPool.release(slotID: sourceID)
+        if lastSynchronizedActiveID == sourceID {
+            lastSynchronizedActiveID = nil
+            lastSynchronizedActiveProfile = nil
+        }
+        pendingSlotSynchronization = true
     }
 
     private func handleSourceSessionStateChange(_ state: FullscreenSourceSessionState) {
@@ -1531,11 +1594,13 @@ final class PanelMoveHoverController: NSResponder {
     }
 
     deinit {
-        if moveCursorIsPushed {
-            NSCursor.pop()
-        }
-        if let view, let trackingArea {
-            view.removeTrackingArea(trackingArea)
+        MainActor.assumeIsolated {
+            if moveCursorIsPushed {
+                NSCursor.pop()
+            }
+            if let view, let trackingArea {
+                view.removeTrackingArea(trackingArea)
+            }
         }
     }
 

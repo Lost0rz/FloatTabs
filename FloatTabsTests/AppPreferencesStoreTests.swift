@@ -2,23 +2,27 @@ import XCTest
 @testable import FloatTabs
 
 @MainActor
-final class AppPreferencesStoreTests: XCTestCase {
+final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
     private var defaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
-        suiteName = "FloatTabsTests.AppPreferencesStore.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
+    nonisolated override func setUp() {
+        MainActor.assumeIsolated {
+            super.setUp()
+            suiteName = "FloatTabsTests.AppPreferencesStore.\(UUID().uuidString)"
+            defaults = UserDefaults(suiteName: suiteName)!
+            defaults.removePersistentDomain(forName: suiteName)
+        }
     }
 
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
-        NSApp.appearance = nil
-        defaults = nil
-        suiteName = nil
-        super.tearDown()
+    nonisolated override func tearDown() {
+        MainActor.assumeIsolated {
+            defaults.removePersistentDomain(forName: suiteName)
+            NSApp.appearance = nil
+            defaults = nil
+            suiteName = nil
+            super.tearDown()
+        }
     }
 
     func testAppearanceDefaultsToSystem() {

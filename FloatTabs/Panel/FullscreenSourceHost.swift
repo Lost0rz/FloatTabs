@@ -173,6 +173,40 @@ enum FullscreenSourceSessionState: String, Equatable {
     }
 }
 
+enum FullscreenRestoreWatchdogDecision: Equatable {
+    case poll(stableChecks: Int, delay: TimeInterval)
+    case restored
+    case rebuildSource
+}
+
+/// Keeps the normal WebKit restore path unchanged while bounding the one failure
+/// mode that previously polled at 20 Hz forever: WebKit reports that fullscreen
+/// ended but never puts the source view back into FloatTabs' public hierarchy.
+struct FullscreenRestoreWatchdog {
+    static let pollInterval: TimeInterval = 0.05
+    static let sourceRebuildTimeout: TimeInterval = 10
+    static let requiredStableChecks = 3
+
+    static func decision(
+        elapsed: TimeInterval,
+        isBackInSourceHierarchy: Bool,
+        stableChecks: Int
+    ) -> FullscreenRestoreWatchdogDecision {
+        if isBackInSourceHierarchy {
+            let nextStableChecks = stableChecks + 1
+            return nextStableChecks >= requiredStableChecks
+                ? .restored
+                : .poll(stableChecks: nextStableChecks, delay: pollInterval)
+        }
+
+        if elapsed >= sourceRebuildTimeout {
+            return .rebuildSource
+        }
+
+        return .poll(stableChecks: 0, delay: pollInterval)
+    }
+}
+
 /// Owns the stable, ordinary source window used by every normal WKWebView.
 ///
 /// The host frame, ordering and active WebView are frozen from the first
@@ -189,14 +223,17 @@ final class FullscreenSourceHostController {
     let companionContainer = WebPanelContainerView()
 
     private let container: WebPanelContainerView
+    private weak var shellWindow: NSWindow?
     private weak var observedWebView: WKWebView?
     private var fullscreenObservation: NSKeyValueObservation?
     private var restoreGeneration = 0
+    private var restoreStartedAtUptime: TimeInterval?
     private var presentationGeneration = 0
     private(set) var sessionState: FullscreenSourceSessionState = .idle
 
     var onSessionLockChange: ((Bool) -> Void)?
     var onSessionStateChange: ((FullscreenSourceSessionState) -> Void)?
+    var onSourceRebuildRequired: (() -> Void)?
 
     var isSessionLocked: Bool {
         sessionState.locksSourceHost
@@ -209,6 +246,7 @@ final class FullscreenSourceHostController {
         shellWindow: NSWindow
     ) {
         self.container = container
+        self.shellWindow = shellWindow
         window = Self.makeSourceWindow(
             frame: NSRect(x: 0, y: 0, width: 1, height: 1)
         )
@@ -218,6 +256,7 @@ final class FullscreenSourceHostController {
             resizeReadout: resizeReadout,
             shellWindow: shellWindow
         )
+        attachSourceWindowToShell()
     }
 
     deinit {
@@ -233,6 +272,7 @@ final class FullscreenSourceHostController {
 
     func orderFrontAndFocus(_ webView: WKWebView?) {
         guard !isSessionLocked else { return }
+        attachSourceWindowToShell()
         presentationGeneration &+= 1
         window.alphaValue = 1
         window.ignoresMouseEvents = false
@@ -286,9 +326,9 @@ final class FullscreenSourceHostController {
         fullscreenObservation?.invalidate()
         observedWebView = webView
         fullscreenObservation = webView.observe(\.fullscreenState, options: [.new]) {
-            [weak self, weak webView] _, _ in
-            DispatchQueue.main.async {
-                guard let self, let webView, self.observedWebView === webView else { return }
+            [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, let webView = self.observedWebView else { return }
                 self.handleFullscreenStateChange(of: webView)
             }
         }
@@ -326,6 +366,7 @@ final class FullscreenSourceHostController {
     }
 
     private func handleFullscreenStateChange(of webView: WKWebView) {
+        let previous = sessionState
         let next = FullscreenSourceSessionState.next(
             from: sessionState,
             webKitState: webView.fullscreenState
@@ -336,6 +377,11 @@ final class FullscreenSourceHostController {
 
         if !wasLocked, next.locksSourceHost {
             presentationGeneration &+= 1
+            // In ordinary presentation the source is a child of the shell so
+            // Mission Control treats the rail, outline and Web surface as one
+            // window group. Detach before hiding the shell: WebKit must keep
+            // its source window independently ordered throughout fullscreen.
+            detachSourceWindowFromShell()
             window.collectionBehavior = Self.sourceWindowCollectionBehavior
             // Preserve the ordered source and hierarchy WebKit needs for
             // restoration without exposing its tab-less placeholder window.
@@ -350,6 +396,9 @@ final class FullscreenSourceHostController {
         }
 
         guard next == .restoring else { return }
+        if previous != .restoring {
+            restoreStartedAtUptime = ProcessInfo.processInfo.systemUptime
+        }
         waitForPublicSourceRestoration(
             of: webView,
             generation: restoreGeneration,
@@ -373,9 +422,17 @@ final class FullscreenSourceHostController {
             && container.window === window
             && webView.isDescendant(of: container)
 
-        let nextStableChecks = isBackInSourceHierarchy ? stableChecks + 1 : 0
-        guard nextStableChecks >= 3 else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak webView] in
+        let elapsed = ProcessInfo.processInfo.systemUptime
+            - (restoreStartedAtUptime ?? ProcessInfo.processInfo.systemUptime)
+        let decision = FullscreenRestoreWatchdog.decision(
+            elapsed: elapsed,
+            isBackInSourceHierarchy: isBackInSourceHierarchy,
+            stableChecks: stableChecks
+        )
+
+        switch decision {
+        case let .poll(nextStableChecks, delay):
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
                 guard let self, let webView else { return }
                 self.waitForPublicSourceRestoration(
                     of: webView,
@@ -384,16 +441,49 @@ final class FullscreenSourceHostController {
                 )
             }
             return
-        }
 
+        case .rebuildSource:
+            fullscreenExperimentLog(
+                "FULLSCREEN_RESTORE_TIMEOUT source=\(window.windowNumber) "
+                    + "screen=\(fullscreenExperimentScreenID(window.screen))"
+            )
+            finishRestoration(rebuildSource: true)
+
+        case .restored:
+            finishRestoration(rebuildSource: false)
+        }
+    }
+
+    private func finishRestoration(rebuildSource: Bool) {
         sessionState = .idle
+        restoreStartedAtUptime = nil
         window.alphaValue = 1
         window.ignoresMouseEvents = false
+        if rebuildSource {
+            onSourceRebuildRequired?()
+        }
         fullscreenExperimentLog(
             "FULLSCREEN_RESTORED source=\(window.windowNumber) "
                 + "screen=\(fullscreenExperimentScreenID(window.screen))"
         )
         onSessionLockChange?(false)
+        // The callback has rebuilt/repositioned the normal hierarchy. Restore
+        // the parent-child relationship only after that atomic presentation.
+        attachSourceWindowToShell()
+    }
+
+    private func attachSourceWindowToShell() {
+        guard !isSessionLocked,
+              let shellWindow,
+              window.parent !== shellWindow else {
+            return
+        }
+        window.parent?.removeChildWindow(window)
+        shellWindow.addChildWindow(window, ordered: .above)
+    }
+
+    private func detachSourceWindowFromShell() {
+        window.parent?.removeChildWindow(window)
     }
 
     private static func approximatelyEqual(_ lhs: NSRect, _ rhs: NSRect) -> Bool {

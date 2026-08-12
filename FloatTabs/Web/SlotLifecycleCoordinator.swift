@@ -8,11 +8,11 @@ enum SlotMemoryPressureLevel {
 
 @MainActor
 final class SlotLifecycleCoordinator {
-    static let defaultColdReleaseDelay: TimeInterval = 30
-    static let defaultWarmReleaseDelay: TimeInterval = 120
-    static let defaultHiddenActiveGraceDelay: TimeInterval = 120
-    static let defaultMediaProtectionPollDelay: TimeInterval = 10
-    static let defaultWarmResidentLimit = 2
+    nonisolated static let defaultColdReleaseDelay: TimeInterval = 30
+    nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
+    nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
+    nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
+    nonisolated static let defaultWarmResidentLimit = 2
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
@@ -39,6 +39,7 @@ final class SlotLifecycleCoordinator {
     private var warmRecencyCounter: UInt64 = 0
     private var hiddenActiveToken: UUID?
     private var activeSlotID: UUID?
+    private var fullscreenSourceProfile: WebAppProfile?
     private var supplementalVisibleProfile: WebAppProfile?
     private var panelIsVisible = false
     private var memoryPressureSource: DispatchSourceMemoryPressure?
@@ -127,6 +128,10 @@ final class SlotLifecycleCoordinator {
             activeSlotID = activeProfile.id
             cancelInactivePlan(slotID: activeProfile.id)
         } else if activeSlotID == activeProfile.id {
+            // Element fullscreen remains foreground content even when the
+            // FloatTabs shell is hidden. Never pause it or start the hidden
+            // active eviction chain while WebKit owns the fullscreen source.
+            guard fullscreenSourceProfile?.id != activeProfile.id else { return }
             if activeProfile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(activeProfile.id)
             }
@@ -145,12 +150,29 @@ final class SlotLifecycleCoordinator {
     }
 
     func deactivate(profile: WebAppProfile) {
+        guard fullscreenSourceProfile?.id != profile.id else { return }
         if activeSlotID == profile.id {
             activeSlotID = nil
         }
         hiddenActiveToken = nil
         container.deactivate(slotID: profile.id, residencyPolicy: profile.residencyPolicy)
         prepareInactive(profile: profile, resetWarmRecency: true)
+    }
+
+    /// Explicitly protects the WebView WebKit is presenting in element
+    /// fullscreen. This is independent from shell visibility and active Tab
+    /// selection so a hidden shell can never pause or evict visible content.
+    func beginFullscreenSourceVisibility(profile: WebAppProfile) {
+        fullscreenSourceProfile = profile
+        cancelInactivePlan(slotID: profile.id)
+        if hiddenActiveToken != nil, activeSlotID == profile.id {
+            hiddenActiveToken = nil
+        }
+    }
+
+    func endFullscreenSourceVisibility(profile: WebAppProfile) {
+        guard fullscreenSourceProfile?.id == profile.id else { return }
+        fullscreenSourceProfile = nil
     }
 
     /// Protects a second foreground WebView while WebKit exclusively owns the
@@ -180,6 +202,9 @@ final class SlotLifecycleCoordinator {
         if activeSlotID == slotID {
             activeSlotID = nil
         }
+        if fullscreenSourceProfile?.id == slotID {
+            fullscreenSourceProfile = nil
+        }
         if supplementalVisibleProfile?.id == slotID {
             supplementalVisibleProfile = nil
         }
@@ -190,6 +215,7 @@ final class SlotLifecycleCoordinator {
     func reset(slotIDs: Set<UUID>) {
         hiddenActiveToken = nil
         activeSlotID = nil
+        fullscreenSourceProfile = nil
         supplementalVisibleProfile = nil
         inactivePlans.removeAll()
         mediaProtectedSlotIDs.removeAll()
@@ -450,6 +476,8 @@ final class SlotLifecycleCoordinator {
     }
 
     private func isVisibleSlot(_ slotID: UUID) -> Bool {
-        activeSlotID == slotID || supplementalVisibleProfile?.id == slotID
+        activeSlotID == slotID
+            || fullscreenSourceProfile?.id == slotID
+            || supplementalVisibleProfile?.id == slotID
     }
 }

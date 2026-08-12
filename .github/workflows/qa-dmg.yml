@@ -24,9 +24,17 @@ jobs:
           chmod +x tools/release/build_dmg.sh
           tools/release/build_dmg.sh
 
-      - name: Upload Universal 2 QA DMG
+      # The repository is public, while QA builds are intentionally unsigned and
+      # private. Pull requests still build and verify the image, but only an
+      # explicit maintainer dispatch retains the binary artifacts.
+      - name: Upload manually requested Universal 2 QA DMG and debug symbols
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: FloatTabs-0.1.0-Universal-QA-DMG
           if-no-files-found: error
-          path: ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg
+          path: |
+            ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg
+            ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg.sha256
+            ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dSYM.zip
+            ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dSYM.zip.sha256

@@ -25,7 +25,8 @@ Current release behavior is frozen by the v0.1.0 release baseline. In particular
 - ordinary user HTTP(S) navigation remains in the current Slot regardless of host;
 - external-browser routing is explicit user intent through the link context menu;
 - Window Size Behavior supports Per Web App and Fixed modes without Fixed overwriting saved per-App sizes;
-- the accepted floating panel uses the current explicit activation/focus path validated on Real Mac.
+- the visible shell and ordinary `NSWindow` Web source are separate, so WebKit fullscreen can reparent and restore the page without hiding or corrupting the cross-display Tab shell;
+- the show path explicitly activates FloatTabs before focusing the active `WKWebView`.
 
 Recorded evidence and interaction decisions:
 
@@ -131,7 +132,7 @@ Website sessions use a shared persistent `WKWebsiteDataStore` profile. FloatTabs
 
 ## Distribution Target
 
-Public builds are signed and notarized direct-download **Universal 2** DMGs:
+The current v0.1.0 baseline is a self-use, unsigned **Universal 2** DMG:
 
 ```text
 FloatTabs-x.y.z.dmg
@@ -141,9 +142,9 @@ FloatTabs-x.y.z.dmg
 
 The release target covers both current Apple Silicon Macs (`arm64`) and Intel Macs (`x86_64`) with one application bundle. CI runs the full build/test lane natively on both `macos-26` Apple Silicon and `macos-26-intel`, then separately builds a Universal 2 Release app and verifies both Mach-O slices with `lipo`.
 
-The v0.1.0 release-audit gate passed native Debug/Release builds plus full XCTest on both architectures, followed by a successful Universal 2 Release binary check and Universal QA-DMG build/verification.
+CI is configured to build/test natively on both architectures and to build a separate Universal 2 DMG. The local release gate also verifies the app icon, both Mach-O slices, the DMG, its checksum, and a matching dSYM archive.
 
-Release architecture includes Developer ID signing, Hardened Runtime, Apple notarization, ticket stapling/validation, and Gatekeeper assessment. `tools/release/build_dmg.sh` also supports an unsigned Universal 2 QA-DMG mode for developer-machine acceptance before public signing credentials are configured.
+`tools/release/build_dmg.sh` defaults to the unsigned self-use package requested for this release. Developer ID signing, notarization, stapling, and Gatekeeper assessment remain supported when credentials are supplied later, but they are not part of the current personal-distribution gate.
 
 FloatTabs configuration is stored outside the app bundle and survives normal app replacement. v0.1.0 includes explicit `.floattabsbackup` export/restore plus local per-version configuration snapshots. Website passwords/cookies/login sessions are intentionally not exported.
 

@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import KeyboardShortcuts
 import QuartzCore
 
 struct ExternalTabMetrics {
@@ -129,6 +130,16 @@ final class ExternalControlZoneView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
+        guard window != nil else { return }
+
+        // CALayer stores concrete CGColors rather than dynamic NSColors. A rail
+        // can be created while its panel is ordered out, then attached under a
+        // different effective appearance. Resolve every cached layer color
+        // again once the view inherits its actual window appearance.
+        refreshAppearance()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshAppearance()
+        }
     }
 
     override func updateTrackingAreas() {
@@ -205,6 +216,15 @@ final class ExternalControlZoneView: NSView {
         for tab in tabViews.values {
             tab.setWindowSizeEditingEnabled(enabled)
         }
+    }
+
+    func refreshAppearance() {
+        for tab in tabViews.values {
+            tab.refreshAppearance()
+        }
+        addControl.refreshAppearance()
+        settingsControl.refreshAppearance()
+        pinControl.refreshAppearance()
     }
 
     func setResidentSlotIDs(_ slotIDs: Set<UUID>) {
@@ -597,13 +617,23 @@ final class ExternalWebAppTabView: NSView {
         label.isHidden = true
         addSubview(label)
 
+        let labelTrailingConstraint = label.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -8
+        )
+        // A collapsed 40pt Tab intentionally has room for only the 16pt icon.
+        // Keep the label's trailing edge optional until Dock magnification
+        // expands the row; a required edge made AppKit break icon constraints
+        // every time a hidden/new Tab was laid out at zero or collapsed width.
+        labelTrailingConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 16),
             iconView.heightAnchor.constraint(equalToConstant: 16),
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            labelTrailingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
@@ -732,18 +762,18 @@ final class ExternalWebAppTabView: NSView {
         let home = NSMenuItem(
             title: "Return to Home",
             action: #selector(returnHomeFromMenu(_:)),
-            keyEquivalent: "h"
+            keyEquivalent: ""
         )
-        home.keyEquivalentModifierMask = [.command, .shift]
+        home.setShortcut(KeyboardShortcuts.getShortcut(for: .returnHome))
         home.target = self
         menu.addItem(home)
 
         let reload = NSMenuItem(
             title: "Reload",
             action: #selector(reloadFromMenu(_:)),
-            keyEquivalent: "r"
+            keyEquivalent: ""
         )
-        reload.keyEquivalentModifierMask = [.command]
+        reload.setShortcut(KeyboardShortcuts.getShortcut(for: .reload))
         reload.target = self
         reload.isEnabled = isResident
         menu.addItem(reload)
@@ -794,27 +824,27 @@ final class ExternalWebAppTabView: NSView {
         let zoomIn = NSMenuItem(
             title: "Zoom In",
             action: #selector(zoomInFromMenu(_:)),
-            keyEquivalent: "+"
+            keyEquivalent: ""
         )
-        zoomIn.keyEquivalentModifierMask = [.command]
+        zoomIn.setShortcut(KeyboardShortcuts.getShortcut(for: .zoomIn))
         zoomIn.target = self
         zoomMenu.addItem(zoomIn)
 
         let zoomOut = NSMenuItem(
             title: "Zoom Out",
             action: #selector(zoomOutFromMenu(_:)),
-            keyEquivalent: "-"
+            keyEquivalent: ""
         )
-        zoomOut.keyEquivalentModifierMask = [.command]
+        zoomOut.setShortcut(KeyboardShortcuts.getShortcut(for: .zoomOut))
         zoomOut.target = self
         zoomMenu.addItem(zoomOut)
 
         let resetZoom = NSMenuItem(
             title: "Reset Zoom",
             action: #selector(resetZoomFromMenu(_:)),
-            keyEquivalent: "0"
+            keyEquivalent: ""
         )
-        resetZoom.keyEquivalentModifierMask = [.command]
+        resetZoom.setShortcut(KeyboardShortcuts.getShortcut(for: .resetZoom))
         resetZoom.target = self
         zoomMenu.addItem(resetZoom)
         zoomMenu.addItem(.separator())
@@ -916,6 +946,10 @@ final class ExternalWebAppTabView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
         updateAppearance()
     }
 
@@ -931,6 +965,12 @@ final class ExternalWebAppTabView: NSView {
     }
 
     private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyResolvedAppearance()
+        }
+    }
+
+    private func applyResolvedAppearance() {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
@@ -997,8 +1037,11 @@ final class ExternalWebAppTabView: NSView {
             layer?.shadowPath = nil
         } else {
             shapeLayer.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(isHovered ? 0.96 : 0.82).cgColor
-            shapeLayer.strokeColor = NSColor.separatorColor.withAlphaComponent(0.48).cgColor
-            shapeLayer.lineWidth = 1
+            // Selection is represented by the shared page+tab rainbow outline.
+            // Inactive tabs have no individual hairline, especially in Light
+            // appearance where a dark separator looked like a second border.
+            shapeLayer.strokeColor = NSColor.clear.cgColor
+            shapeLayer.lineWidth = 0
             layer?.shadowColor = NSColor.black.cgColor
             layer?.shadowOpacity = isHovered ? 0.16 : 0.08
             layer?.shadowRadius = isHovered ? 5 : 2
@@ -1133,10 +1176,20 @@ final class AddWebAppControl: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
         updateAppearance()
     }
 
     private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyResolvedAppearance()
+        }
+    }
+
+    private func applyResolvedAppearance() {
         let fraction: CGFloat = (isHovered || isEditorOpen) ? 0.10 : 0.02
         layer?.backgroundColor = NSColor.controlBackgroundColor
             .blended(withFraction: fraction, of: .labelColor)?
@@ -1246,10 +1299,20 @@ final class PinPanelControl: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
         updateAppearance()
     }
 
     private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyResolvedAppearance()
+        }
+    }
+
+    private func applyResolvedAppearance() {
         let symbol = isPinned ? "pin.fill" : "pin"
         let description = isPinned ? "Pinned: keep FloatTabs visible" : "Pin FloatTabs"
         imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
@@ -1366,10 +1429,20 @@ final class GlobalSettingsControl: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
         updateAppearance()
     }
 
     private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            applyResolvedAppearance()
+        }
+    }
+
+    private func applyResolvedAppearance() {
         let fraction: CGFloat = isHovered ? 0.10 : 0.02
         layer?.backgroundColor = NSColor.controlBackgroundColor
             .blended(withFraction: fraction, of: .labelColor)?

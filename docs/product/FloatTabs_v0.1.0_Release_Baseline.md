@@ -1,8 +1,10 @@
 # FloatTabs v0.1.0 Release Baseline
 
-> **Status:** v0.1.0 release source of truth  
-> **Date:** 2026-08-11  
-> **Scope:** current release behavior after the accepted Stage 0–6 work, PR #16–#18 rendering/settings refinements, and the final release audit
+> **Status:** v0.1.0 release source of truth
+>
+> **Date:** 2026-08-12
+>
+> **Scope:** current release behavior after the accepted Stage 0–6 work, rendering/settings refinements, fullscreen source-host stabilization, and the final self-use release audit
 
 This document resolves release-time drift between older stage documents and the implementation that has since passed automated and Real-Mac acceptance. For **v0.1.0**, this document has precedence wherever an older Product, Architecture, Stage addendum, README section, or validation note describes superseded behavior.
 
@@ -20,18 +22,22 @@ The website rectangle does not gain a permanent address bar, toolbar, top tab st
 
 ## 2. Window and activation baseline
 
-The accepted v0.1.0 implementation uses a focusable floating `NSPanel` with:
+The accepted v0.1.0 implementation separates the visible shell from WebKit's ordinary source window.
+
+The shell is a focusable `NSPanel` with:
 
 ```text
 .borderless
 .nonactivatingPanel
-level = .floating
+level = .normal
 canJoinAllSpaces
 canJoinAllApplications
-fullScreenAuxiliary
+ignoresCycle
 ```
 
-FloatTabs explicitly activates the application on the show path before focusing the active `WKWebView`. This is the accepted implementation that passed the Stage 0/full-screen typing and later shell regression checks.
+The active normal `WKWebView` lives in a separate ordinary `NSWindow` with `managed + fullScreenNone`. That stable window is WebKit's source/restore owner during element fullscreen. While fullscreen is active, the shell may temporarily use `moveToActiveSpace + fullScreenAuxiliary` as an independent companion so Tabs remain usable on either display; it does not become WebKit's fullscreen source window.
+
+FloatTabs explicitly activates the application on the show path before focusing the active `WKWebView`. Exit remains locked until WebKit reports `notInFullscreen` and returns the source to its public hierarchy for three stable checks. A ten-second watchdog rebuilds only the transient source `WKWebView` if WebKit reports exit but never restores the hierarchy. Display-configuration changes are clamped immediately outside fullscreen or deferred until restoration while fullscreen owns the source.
 
 Older documents that categorically prohibit `.nonactivatingPanel` are historical and do **not** override the accepted v0.1.0 implementation.
 
@@ -104,10 +110,10 @@ Current v0.1.0 routing is intent-based, not host-based:
 ```text
 ordinary HTTP(S) user navigation     → current Slot
 user target=_blank HTTP(S) link      → current Slot
+scripted window.open HTTP(S)         → current Slot
+about:blank then HTTP(S) assignment  → current Slot
 right click: Open in Floating Window → explicit FloatTabs floating window
 right click: Open in Default Browser → system default browser
-scripted/window.open                 → temporary child WKWebView
-about:blank                          → temporary child WKWebView
 non-web scheme                       → system handler
 ```
 
@@ -154,6 +160,8 @@ Manual resize in Fixed mode updates only the shared Fixed viewport. It does not 
 
 The Edit Web App surface exposes advanced Browser Identity / Device Preset / Orientation / Custom UA controls directly. Frequent Website Mode / Window Size / Zoom controls remain available in the primary/context-menu surfaces.
 
+Menu shortcut hints are derived from the current Settings bindings. The status menu's Show/Hide and Settings items update live; per-Web-App context menus read the latest Return Home, Reload, and Zoom bindings whenever they open. Status-item presentation is deferred until status/menu tracking finishes so the explicit activation and order-front operation is not overwritten by AppKit's final tracking update.
+
 ## 10. Backup / restore and version baseline
 
 v0.1.0 uses:
@@ -186,6 +194,8 @@ Architecture validation is intentionally three-layered:
 
 `tools/release/build_dmg.sh` uses the same Universal build contract and refuses to package an app if any Mach-O binary in the app bundle is missing either required architecture.
 
+The current self-use artifact is unsigned. The release script additionally emits a matching zipped dSYM plus SHA-256 files for both the DMG and dSYM archive.
+
 ## 12. Release validation boundary
 
 A code-ready v0.1.0 candidate requires:
@@ -196,10 +206,12 @@ A code-ready v0.1.0 candidate requires:
 - native Intel Debug + Release builds;
 - full XCTest suite on both architecture-specific GitHub-hosted macOS runners;
 - successful Universal 2 Release build containing both `arm64` and `x86_64` slices;
-- successful Universal 2 QA DMG construction and verification;
+- successful unsigned Universal 2 self-use DMG construction and verification;
+- generated app icon, zipped dSYM, and SHA-256 sidecar verification;
+- strict Swift concurrency checking in normal Debug and Release builds;
 - no unreviewed release-scope changes relative to the accepted interaction/rendering baselines.
 
-A public download additionally requires the operator's Developer ID signing and Apple notarization credentials. The release script then performs codesign verification, notarization, ticket stapling/validation, and Gatekeeper assessment before declaring the public DMG ready.
+A future public download additionally requires the operator's Developer ID signing and Apple notarization credentials. The release script can then perform codesign verification, notarization, ticket stapling/validation, and Gatekeeper assessment. Those credentials and checks are deliberately outside the current personal-use v0.1.0 gate.
 
 ## 13. Real-site compatibility claims
 
