@@ -33,6 +33,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let frameStore: PanelFrameStore
     private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
+    private var transientUIConstraints: [NSLayoutConstraint] = []
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
         container: rootView.webPanelContainerView
@@ -523,34 +524,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func configureTransientUI() {
         addressOverlayView.translatesAutoresizingMaskIntoConstraints = false
         zoomHUDView.translatesAutoresizingMaskIntoConstraints = false
-        rootView.addSubview(addressOverlayView)
-        rootView.addSubview(zoomHUDView)
-
-        NSLayoutConstraint.activate([
-            addressOverlayView.leadingAnchor.constraint(
-                equalTo: rootView.webViewportLayoutView.leadingAnchor,
-                constant: 22
-            ),
-            addressOverlayView.trailingAnchor.constraint(
-                equalTo: rootView.webViewportLayoutView.trailingAnchor,
-                constant: -22
-            ),
-            addressOverlayView.topAnchor.constraint(
-                equalTo: rootView.webViewportLayoutView.topAnchor,
-                constant: 22
-            ),
-            addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
-
-            zoomHUDView.centerXAnchor.constraint(
-                equalTo: rootView.webViewportLayoutView.centerXAnchor
-            ),
-            zoomHUDView.bottomAnchor.constraint(
-                equalTo: rootView.webViewportLayoutView.bottomAnchor,
-                constant: -28
-            ),
-            zoomHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
-            zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
-        ])
+        installTransientUI(
+            in: sourceHostController.transientUIContainerView,
+            viewport: sourceHostController.transientUIContainerView
+        )
 
         addressOverlayView.onCommit = { [weak self] rawValue in
             self?.commitAddress(rawValue) ?? false
@@ -563,6 +540,60 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         addressOverlayView.onDismiss = { [weak self] in
             self?.focusActiveWebViewIfAvailable()
+        }
+    }
+
+    private func installTransientUI(in host: NSView, viewport: NSView) {
+        guard addressOverlayView.superview !== host || zoomHUDView.superview !== host else {
+            return
+        }
+
+        NSLayoutConstraint.deactivate(transientUIConstraints)
+        transientUIConstraints.removeAll()
+        addressOverlayView.removeFromSuperview()
+        zoomHUDView.removeFromSuperview()
+        host.addSubview(addressOverlayView)
+        host.addSubview(zoomHUDView)
+
+        transientUIConstraints = [
+            addressOverlayView.leadingAnchor.constraint(
+                equalTo: viewport.leadingAnchor,
+                constant: 22
+            ),
+            addressOverlayView.trailingAnchor.constraint(
+                equalTo: viewport.trailingAnchor,
+                constant: -22
+            ),
+            addressOverlayView.topAnchor.constraint(
+                equalTo: viewport.topAnchor,
+                constant: 22
+            ),
+            addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
+
+            zoomHUDView.centerXAnchor.constraint(
+                equalTo: viewport.centerXAnchor
+            ),
+            zoomHUDView.bottomAnchor.constraint(
+                equalTo: viewport.bottomAnchor,
+                constant: -28
+            ),
+            zoomHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
+        ]
+        NSLayoutConstraint.activate(transientUIConstraints)
+    }
+
+    private func synchronizeTransientUIHost() {
+        if sourceHostController.isSessionLocked {
+            installTransientUI(
+                in: rootView,
+                viewport: rootView.webViewportLayoutView
+            )
+        } else {
+            installTransientUI(
+                in: sourceHostController.transientUIContainerView,
+                viewport: sourceHostController.transientUIContainerView
+            )
         }
     }
 
@@ -923,13 +954,18 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard let id = tabStore.activeTabID else { return }
         let normalized = ZoomSteps.nearest(to: zoom)
         guard tabStore.updateZoom(id: id, zoom: normalized) else { return }
+        synchronizeTransientUIHost()
         zoomHUDView.show(zoom: normalized)
     }
 
     private func presentAddressBar() {
         guard let url = currentAddressURL() else { return }
-        addressOverlayView.present(url: url, in: panel)
-        panel.makeKeyAndOrderFront(nil)
+        synchronizeTransientUIHost()
+        let hostWindow = sourceHostController.isSessionLocked
+            ? panel
+            : sourceHostController.window
+        hostWindow.makeKeyAndOrderFront(nil)
+        addressOverlayView.present(url: url, in: hostWindow)
     }
 
     private func currentAddressURL() -> URL? {
@@ -1170,6 +1206,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             companionActiveProfile = nil
             pendingSlotSynchronization = false
             addressOverlayView.dismiss()
+            synchronizeTransientUIHost()
             panel.orderOut(nil)
             rootView.removeFullscreenCompanionContainer(
                 sourceHostController.companionContainer
@@ -1184,6 +1221,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 profile: fullscreenProfile
             )
         }
+
+        synchronizeTransientUIHost()
 
         requestedVisibility = fullscreenVisibilityIntent.consumeRestore(
             currentVisibility: requestedVisibility

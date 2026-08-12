@@ -222,6 +222,10 @@ final class FullscreenSourceHostController {
     let window: FullscreenSourceWindow
     let companionContainer = WebPanelContainerView()
 
+    var transientUIContainerView: NSView {
+        window.contentView!
+    }
+
     private let container: WebPanelContainerView
     private weak var shellWindow: NSWindow?
     private weak var observedWebView: WKWebView?
