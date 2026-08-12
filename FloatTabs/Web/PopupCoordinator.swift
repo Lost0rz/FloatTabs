@@ -4,7 +4,6 @@ import WebKit
 
 enum NewBrowsingContextDisposition: Equatable {
     case currentSlot
-    case temporaryPopup
     case externalBrowser
 }
 
@@ -30,7 +29,7 @@ final class UploadCoordinator {
     func presentOpenPanel(
         parameters: WKOpenPanelParameters,
         for webView: WKWebView,
-        completionHandler: @escaping ([URL]?) -> Void
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
         let policy = UploadPanelPolicy.make(
             allowsMultipleSelection: parameters.allowsMultipleSelection,
@@ -218,23 +217,20 @@ final class LinkContextMenuCoordinator: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Owns new browsing contexts created through `target=_blank`, `window.open`,
+/// Routes new browsing contexts created through `target=_blank`, `window.open`,
 /// and explicit FloatTabs link actions.
 ///
 /// Navigation Intent rules:
 ///
-/// - any user-activated HTTP(S) link stays in the current Slot;
-/// - scripted HTTP(S) / `window.open` contexts use a temporary child WKWebView;
-/// - `about:blank` uses a temporary child because many auth flows create it first;
+/// - every automatic HTTP(S) or about:blank context stays in the current Slot;
 /// - non-web schemes are handed to the system;
 /// - the default browser is used for web links only through the explicit context-menu action;
-/// - user-created floating windows are independent from temporary auth popups.
+/// - only the explicit context-menu action may create a floating Web window.
 @MainActor
 final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
     typealias ExternalOpenHandler = (URL) -> Void
 
     private weak var parentWebView: WKWebView?
-    private var childPanels: [ObjectIdentifier: NSPanel] = [:]
     private var userFloatingPanels: [ObjectIdentifier: NSPanel] = [:]
     private var linkContextCoordinators: [ObjectIdentifier: LinkContextMenuCoordinator] = [:]
     private let openExternal: ExternalOpenHandler
@@ -254,6 +250,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         super.init()
+        installCurrentSlotWindowOpenPolicy(on: parentWebView)
         installExplicitLinkContextMenu(on: parentWebView)
     }
 
@@ -262,23 +259,64 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         sourceURL: URL?,
         targetURL: URL?
     ) -> NewBrowsingContextDisposition {
-        guard let targetURL else {
-            return .temporaryPopup
-        }
+        guard let targetURL else { return .currentSlot }
 
         let scheme = targetURL.scheme?.lowercased()
         if scheme == "about" {
-            return .temporaryPopup
+            return .currentSlot
         }
 
         guard WebNavigationCoordinator.isWebURL(targetURL) else {
             return .externalBrowser
         }
 
+        _ = navigationType
         _ = sourceURL
-        return navigationType == .linkActivated
-            ? .currentSlot
-            : .temporaryPopup
+        return .currentSlot
+    }
+
+    /// Makes the JavaScript form of `window.open` obey the same current-Slot
+    /// contract as WKUIDelegate. Returning the current Window also covers the
+    /// common `const child = open('about:blank'); child.location = url` pattern.
+    static func currentSlotWindowOpenScript() -> WKUserScript {
+        WKUserScript(
+            source: """
+            (() => {
+              if (window.__floatTabsCurrentSlotOpenInstalled) return;
+              window.__floatTabsCurrentSlotOpenInstalled = true;
+
+              const nativeOpen = window.open.bind(window);
+              const openInCurrentSlot = function(url, target, features) {
+                const raw = url == null ? '' : String(url);
+                if (!raw || raw.toLowerCase() === 'about:blank') {
+                  return window;
+                }
+
+                try {
+                  const destination = new URL(raw, document.baseURI);
+                  if (destination.protocol === 'http:' || destination.protocol === 'https:') {
+                    window.location.assign(destination.href);
+                    return window;
+                  }
+                } catch (_) {}
+
+                return nativeOpen(url, target, features);
+              };
+
+              try {
+                Object.defineProperty(window, 'open', {
+                  configurable: true,
+                  writable: true,
+                  value: openInCurrentSlot
+                });
+              } catch (_) {
+                window.open = openInCurrentSlot;
+              }
+            })();
+            """,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
     }
 
     /// Returns the user-visible FloatTabs viewport for a source WebView.
@@ -317,7 +355,9 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
             targetURL: targetURL
         ) {
         case .currentSlot:
-            webView.load(navigationAction.request)
+            if targetURL?.scheme?.lowercased() != "about" {
+                webView.load(navigationAction.request)
+            }
             return nil
 
         case .externalBrowser:
@@ -326,12 +366,6 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
             }
             return nil
 
-        case .temporaryPopup:
-            return makeTemporaryPopup(
-                sourceWebView: webView,
-                configuration: configuration,
-                targetURL: targetURL
-            )
         }
     }
 
@@ -339,7 +373,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         _ webView: WKWebView,
         runOpenPanelWith parameters: WKOpenPanelParameters,
         initiatedByFrame frame: WKFrameInfo,
-        completionHandler: @escaping ([URL]?) -> Void
+        completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
         uploadCoordinator.presentOpenPanel(
             parameters: parameters,
@@ -352,7 +386,10 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         preferences: WKWebpagePreferences,
-        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (
+            WKNavigationActionPolicy,
+            WKWebpagePreferences
+        ) -> Void
     ) {
         decisionHandler(
             DownloadCoordinator.actionPolicy(
@@ -365,7 +402,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         decisionHandler(
             DownloadCoordinator.responsePolicy(
@@ -401,14 +438,13 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         }
 
         let id = ObjectIdentifier(webView)
-        childPanels.removeValue(forKey: id)
         userFloatingPanels.removeValue(forKey: id)
         linkContextCoordinators.removeValue(forKey: id)?.invalidate()
         restoreParentFocus()
     }
 
     func closeAll() {
-        let panels = Array(childPanels.values) + Array(userFloatingPanels.values)
+        let panels = Array(userFloatingPanels.values)
         let webViews = panels.compactMap { $0.contentView as? WKWebView }
         for webView in webViews {
             close(webView: webView, restoreFocus: false)
@@ -445,6 +481,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         floatingWebView.allowsBackForwardNavigationGestures = true
         floatingWebView.uiDelegate = self
         floatingWebView.navigationDelegate = self
+        installCurrentSlotWindowOpenPolicy(on: floatingWebView)
         installExplicitLinkContextMenu(on: floatingWebView)
 
         let sourceSize = Self.visibleSourceSize(for: sourceWebView)
@@ -496,57 +533,24 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         linkContextCoordinators[id] = coordinator
     }
 
-    private func makeTemporaryPopup(
-        sourceWebView: WKWebView,
-        configuration: WKWebViewConfiguration,
-        targetURL: URL?
-    ) -> WKWebView {
-        let popupWebView = WKWebView(frame: .zero, configuration: configuration)
-        popupWebView.allowsBackForwardNavigationGestures = true
-        popupWebView.customUserAgent = sourceWebView.customUserAgent
-        popupWebView.uiDelegate = self
-        popupWebView.navigationDelegate = self
-
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 720),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
+    private func installCurrentSlotWindowOpenPolicy(on webView: WKWebView) {
+        webView.configuration.userContentController.addUserScript(
+            Self.currentSlotWindowOpenScript()
         )
-        panel.title = targetURL?.host ?? "Web Login"
-        panel.contentView = popupWebView
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-
-        if let parentWindow = sourceWebView.window {
-            panel.level = parentWindow.level
-            panel.collectionBehavior = parentWindow.collectionBehavior
-            parentWindow.addChildWindow(panel, ordered: .above)
-        }
-
-        panel.center()
-        panel.makeKeyAndOrderFront(nil)
-        childPanels[ObjectIdentifier(popupWebView)] = panel
-        return popupWebView
     }
 
     private func close(webView: WKWebView, restoreFocus: Bool) {
         let id = ObjectIdentifier(webView)
-        let temporaryPanel = childPanels.removeValue(forKey: id)
         let userPanel = userFloatingPanels.removeValue(forKey: id)
         linkContextCoordinators.removeValue(forKey: id)?.invalidate()
 
-        guard let panel = temporaryPanel ?? userPanel else {
+        guard let panel = userPanel else {
             if restoreFocus {
                 restoreParentFocus()
             }
             return
         }
 
-        if temporaryPanel != nil,
-           let parentWindow = parentWebView?.window {
-            parentWindow.removeChildWindow(panel)
-        }
         panel.orderOut(nil)
         panel.close()
 

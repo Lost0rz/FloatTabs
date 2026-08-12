@@ -1,9 +1,223 @@
 import AppKit
+import KeyboardShortcuts
+import WebKit
 import XCTest
 @testable import FloatTabs
 
 @MainActor
 final class ExternalShellTests: XCTestCase {
+    func testFullscreenRestoreWatchdogUsesStablePublicHierarchyBeforeUnlocking() {
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 0.1,
+                isBackInSourceHierarchy: true,
+                stableChecks: 0
+            ),
+            .poll(stableChecks: 1, delay: 0.05)
+        )
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 0.2,
+                isBackInSourceHierarchy: true,
+                stableChecks: 2
+            ),
+            .restored
+        )
+    }
+
+    func testFullscreenRestoreWatchdogBoundsMissingHierarchyRecovery() {
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 9.9,
+                isBackInSourceHierarchy: false,
+                stableChecks: 2
+            ),
+            .poll(stableChecks: 0, delay: 0.05)
+        )
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 10,
+                isBackInSourceHierarchy: false,
+                stableChecks: 0
+            ),
+            .rebuildSource
+        )
+    }
+
+    func testFullscreenVisibilityRestoresPresentationThatWasVisibleBeforeEntry() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: true)
+
+        XCTAssertTrue(intent.consumeRestore(currentVisibility: false))
+        XCTAssertFalse(intent.shouldRestoreNormalPresentation)
+    }
+
+    func testExplicitFullscreenDismissalCancelsNormalPresentationRestore() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: true)
+        intent.dismissPresentation()
+
+        XCTAssertFalse(intent.consumeRestore(currentVisibility: false))
+    }
+
+    func testExplicitFullscreenShowKeepsNormalPresentationAfterRestore() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: false)
+        intent.requestPresentation()
+
+        XCTAssertTrue(intent.consumeRestore(currentVisibility: true))
+    }
+
+    func testFullscreenSourceSlotCannotBeRemovedWhileWebKitOwnsIt() {
+        let sourceID = UUID()
+
+        XCTAssertFalse(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: sourceID,
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: UUID(),
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: sourceID,
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: false
+            )
+        )
+    }
+
+    func testFullscreenSourceHostUsesOrdinaryWindowSemantics() {
+        let behavior = FullscreenSourceHostController.sourceWindowCollectionBehavior
+
+        XCTAssertTrue(behavior.contains(.managed))
+        XCTAssertTrue(behavior.contains(.fullScreenNone))
+        XCTAssertFalse(behavior.contains(.canJoinAllSpaces))
+        XCTAssertFalse(behavior.contains(.canJoinAllApplications))
+        XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(behavior.contains(.fullScreenPrimary))
+    }
+
+    func testFullscreenSourceIsGroupedWithShellOutsideFullscreen() {
+        let shell = FloatingPanel(contentRect: NSRect(x: 20, y: 20, width: 688, height: 844))
+        let host = FullscreenSourceHostController(
+            container: WebPanelContainerView(),
+            resizeHandle: PanelResizeHandleView(),
+            resizeReadout: ResizeReadoutView(),
+            shellWindow: shell
+        )
+
+        XCTAssertTrue(host.window.parent === shell)
+        XCTAssertTrue(shell.childWindows?.contains(where: { $0 === host.window }) == true)
+    }
+
+    func testFullscreenSourceSessionStaysLockedUntilRestorePhaseCompletes() {
+        var state = FullscreenSourceSessionState.idle
+
+        state = .next(from: state, webKitState: .enteringFullscreen)
+        XCTAssertEqual(state, .entering)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .inFullscreen)
+        XCTAssertEqual(state, .fullscreen)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .exitingFullscreen)
+        XCTAssertEqual(state, .exiting)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .notInFullscreen)
+        XCTAssertEqual(state, .restoring)
+        XCTAssertTrue(state.locksSourceHost)
+    }
+
+    func testSourceHostFrameMatchesOnlyTheWebViewport() {
+        let shell = NSRect(x: 100, y: 200, width: 688, height: 844)
+        let source = FullscreenSourceHostController.sourceFrame(forShellFrame: shell)
+
+        XCTAssertEqual(source.origin.x, 176, accuracy: 0.001)
+        XCTAssertEqual(source.origin.y, 212, accuracy: 0.001)
+        XCTAssertEqual(source.size.width, 600, accuracy: 0.001)
+        XCTAssertEqual(source.size.height, 820, accuracy: 0.001)
+    }
+
+    func testPanelRootKeepsWebContainerOutOfFloatingShellHierarchy() {
+        let root = PanelRootView()
+
+        XCTAssertNil(root.webPanelContainerView.superview)
+        XCTAssertTrue(root.webViewportLayoutView.superview === root)
+    }
+
+    func testFullscreenExitPlaceholderOccupiesShellViewportAndReceivesClicks() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+
+        root.installFullscreenExitPlaceholder()
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(root.fullscreenExitPlaceholderView.superview === root)
+        XCTAssertEqual(
+            root.fullscreenExitPlaceholderView.frame,
+            root.webViewportLayoutView.frame
+        )
+
+        let viewportPoint = NSPoint(
+            x: root.fullscreenExitPlaceholderView.frame.midX,
+            y: root.fullscreenExitPlaceholderView.frame.midY
+        )
+        XCTAssertNotNil(root.hitTest(viewportPoint))
+    }
+
+    func testFullscreenCompanionContainerOccupiesShellViewportAndReceivesClicks() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+
+        root.installFullscreenCompanionContainer(companion)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(companion.superview === root)
+        XCTAssertEqual(companion.frame, root.webViewportLayoutView.frame)
+
+        let viewportPoint = NSPoint(x: companion.frame.midX, y: companion.frame.midY)
+        XCTAssertNotNil(root.hitTest(viewportPoint))
+
+        root.removeFullscreenCompanionContainer(companion)
+        XCTAssertNil(companion.superview)
+    }
+
+    func testInstallingCompanionReplacesFullscreenExitPlaceholder() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+
+        root.installFullscreenExitPlaceholder()
+        root.installFullscreenCompanionContainer(companion)
+
+        XCTAssertNil(root.fullscreenExitPlaceholderView.superview)
+        XCTAssertTrue(companion.superview === root)
+    }
+
+    func testInstallingFullscreenExitPlaceholderReplacesCompanion() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+
+        root.installFullscreenCompanionContainer(companion)
+        root.installFullscreenExitPlaceholder()
+
+        XCTAssertNil(companion.superview)
+        XCTAssertTrue(root.fullscreenExitPlaceholderView.superview === root)
+    }
+
     func testActualTabHitAreaReturnsVisibleTabView() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
@@ -101,6 +315,42 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testGlobalFirstMouseInsideVisibleSourceDoesNotAutoHidePresentation() {
+        XCTAssertTrue(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 150, y: 150),
+                shellFrame: NSRect(x: 0, y: 0, width: 50, height: 50),
+                shellIsVisible: true,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: true
+            )
+        )
+    }
+
+    func testGlobalMouseOutsidePresentationStillAllowsAutoHide() {
+        XCTAssertFalse(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 500, y: 500),
+                shellFrame: NSRect(x: 0, y: 0, width: 50, height: 50),
+                shellIsVisible: true,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: true
+            )
+        )
+    }
+
+    func testHiddenOrFullscreenSourceDoesNotMaskRealExternalClick() {
+        XCTAssertFalse(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 150, y: 150),
+                shellFrame: .zero,
+                shellIsVisible: false,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: false
+            )
+        )
+    }
+
     func testPanelAutoHideDecisionRespectsPin() {
         XCTAssertTrue(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: false))
         XCTAssertFalse(PanelController.shouldAutoHide(panelIsVisible: true, isPinned: true))
@@ -143,8 +393,7 @@ final class ExternalShellTests: XCTestCase {
         let first = try! XCTUnwrap(menu.items.first)
 
         XCTAssertEqual(first.title, "Return to Home")
-        XCTAssertEqual(first.keyEquivalent, "h")
-        XCTAssertEqual(first.keyEquivalentModifierMask, [.command, .shift])
+        assertShortcut(first, matches: .returnHome)
 
         let actionTitles = menu.items
             .filter { !$0.isSeparatorItem }
@@ -154,8 +403,7 @@ final class ExternalShellTests: XCTestCase {
             ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
         let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
-        XCTAssertEqual(reload.keyEquivalent, "r")
-        XCTAssertEqual(reload.keyEquivalentModifierMask, [.command])
+        assertShortcut(reload, matches: .reload)
         XCTAssertTrue(reload.isEnabled)
 
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
@@ -165,14 +413,11 @@ final class ExternalShellTests: XCTestCase {
         )
         let zoomItems = try! XCTUnwrap(menu.item(withTitle: "Zoom")?.submenu?.items)
         XCTAssertEqual(zoomItems[0].title, "Zoom In")
-        XCTAssertEqual(zoomItems[0].keyEquivalent, "+")
-        XCTAssertEqual(zoomItems[0].keyEquivalentModifierMask, [.command])
+        assertShortcut(zoomItems[0], matches: .zoomIn)
         XCTAssertEqual(zoomItems[1].title, "Zoom Out")
-        XCTAssertEqual(zoomItems[1].keyEquivalent, "-")
-        XCTAssertEqual(zoomItems[1].keyEquivalentModifierMask, [.command])
+        assertShortcut(zoomItems[1], matches: .zoomOut)
         XCTAssertEqual(zoomItems[2].title, "Reset Zoom")
-        XCTAssertEqual(zoomItems[2].keyEquivalent, "0")
-        XCTAssertEqual(zoomItems[2].keyEquivalentModifierMask, [.command])
+        assertShortcut(zoomItems[2], matches: .resetZoom)
         XCTAssertTrue(zoomItems[3].isSeparatorItem)
 
         XCTAssertEqual(menu.item(withTitle: "Residency")?.submenu?.items.map(\.title), ["Hot", "Warm", "Cold"])
@@ -304,6 +549,85 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(inactiveView.isShowingLabel)
     }
 
+    func testDarkRailReapplyAndNewInactiveTabResolveLayerColorsFromEffectiveAppearance() {
+        let (_, zone) = makeZoneHarness()
+        zone.appearance = NSAppearance(named: .darkAqua)
+
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: try! XCTUnwrap(zone.appearance)
+        )
+
+        // Hidden → shown synchronization reapplies every profile. A newly
+        // inserted, never-hovered Tab follows the same path.
+        let newlyAdded = makeProfile(order: 2, name: "New")
+        zone.apply(
+            profiles: [active, inactive, newlyAdded],
+            activeTabID: active.id
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: try! XCTUnwrap(zone.appearance)
+        )
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: newlyAdded.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: try! XCTUnwrap(zone.appearance)
+        )
+    }
+
+    func testLightRailReapplyResolvesLayerColorsFromExplicitLightAppearance() {
+        let (_, zone) = makeZoneHarness()
+        zone.appearance = NSAppearance(named: .aqua)
+
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+    }
+
+    func testSystemRailInheritsCurrentHostAppearanceAcrossLightDarkChanges() {
+        let (host, zone) = makeZoneHarness()
+        zone.appearance = nil
+        host.appearance = NSAppearance(named: .darkAqua)
+
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+        zone.refreshAppearance()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+
+        host.appearance = NSAppearance(named: .aqua)
+        zone.refreshAppearance()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+    }
+
     func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
@@ -332,7 +656,7 @@ final class ExternalShellTests: XCTestCase {
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
-        let webFrame = root.webPanelContainerView.frame
+        let webFrame = root.webViewportLayoutView.frame
         let insideWebCorner = NSPoint(x: webFrame.maxX - 4, y: webFrame.minY + 4)
         XCTAssertTrue(root.hitTest(insideWebCorner) is PanelResizeHandleView)
 
@@ -349,7 +673,7 @@ final class ExternalShellTests: XCTestCase {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
-        let webFrame = root.webPanelContainerView.frame
+        let webFrame = root.webViewportLayoutView.frame
 
         let topInside = NSPoint(x: webFrame.midX, y: webFrame.maxY - 8)
         let bottomInside = NSPoint(x: webFrame.midX, y: webFrame.minY + 8)
@@ -425,6 +749,38 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(StatusItemController.displayTitle(for: nil), "FloatTabs")
     }
 
+    func testStatusMenuBindsConfiguredToggleAndSettingsShortcuts() {
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {}
+        )
+
+        XCTAssertEqual(
+            controller.menuShortcutPresentations["Show FloatTabs"],
+            shortcutPresentation(for: .toggleFloatTabs)
+        )
+        XCTAssertEqual(
+            controller.menuShortcutPresentations["Settings…"],
+            shortcutPresentation(for: .floatTabsSettings)
+        )
+    }
+
+    func testStatusItemToggleRunsAfterTrackingTurnCompletes() {
+        let callback = expectation(description: "deferred status toggle")
+        var didRun = false
+
+        StatusItemController.scheduleAfterStatusItemTracking {
+            didRun = true
+            callback.fulfill()
+        }
+
+        XCTAssertFalse(didRun)
+        wait(for: [callback], timeout: 1)
+        XCTAssertTrue(didRun)
+    }
+
     func testStatusItemFaviconIdentityUsesSelectedWebsiteOrigin() {
         XCTAssertEqual(
             StatusItemController.faviconOriginKey(for: URL(string: "https://x.com/home")),
@@ -472,6 +828,79 @@ final class ExternalShellTests: XCTestCase {
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)
+    }
+
+    private func assertShortcut(
+        _ menuItem: NSMenuItem,
+        matches name: KeyboardShortcuts.Name,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let shortcut = try! XCTUnwrap(
+            KeyboardShortcuts.getShortcut(for: name),
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            menuItem.keyEquivalent,
+            shortcut.nsMenuItemKeyEquivalent ?? "",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            menuItem.keyEquivalentModifierMask,
+            shortcut.modifiers,
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertTabFill(
+        _ tab: ExternalWebAppTabView,
+        matches expectedColor: @autoclosure () -> NSColor,
+        appearance: NSAppearance,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actualCGColor = try! XCTUnwrap(
+            tab.layer?.sublayers?.compactMap { ($0 as? CAShapeLayer)?.fillColor }.first,
+            file: file,
+            line: line
+        )
+        let actual = try! XCTUnwrap(
+            NSColor(cgColor: actualCGColor)?.usingColorSpace(.deviceRGB),
+            file: file,
+            line: line
+        )
+        var expected: NSColor?
+        appearance.performAsCurrentDrawingAppearance {
+            // Resolve a dynamic system color only after selecting the intended
+            // Light/Dark appearance. This keeps the assertion independent from
+            // the CI runner's own System setting.
+            expected = expectedColor().usingColorSpace(.deviceRGB)
+        }
+        let resolvedExpected = try! XCTUnwrap(expected, file: file, line: line)
+
+        XCTAssertEqual(actual.redComponent, resolvedExpected.redComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, resolvedExpected.greenComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, resolvedExpected.blueComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.alphaComponent, resolvedExpected.alphaComponent, accuracy: 0.01, file: file, line: line)
+    }
+
+    private func shortcutPresentation(
+        for name: KeyboardShortcuts.Name,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> MenuShortcutPresentation {
+        let shortcut = try! XCTUnwrap(
+            KeyboardShortcuts.getShortcut(for: name),
+            file: file,
+            line: line
+        )
+        return MenuShortcutPresentation(
+            keyEquivalent: shortcut.nsMenuItemKeyEquivalent ?? "",
+            modifiers: shortcut.modifiers
+        )
     }
 
     private func makeProfile(order: Int, name: String) -> WebAppProfile {

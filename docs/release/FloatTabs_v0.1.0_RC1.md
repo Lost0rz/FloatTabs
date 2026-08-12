@@ -1,8 +1,8 @@
 # FloatTabs v0.1.0 RC1 — Backup, Restore & DMG Release Contract
 
-Status: implementation plan.
+Status: implemented self-use release contract.
 
-Base: `main @ e69e8441d07f26242fc6ef3486b3a474cf48fe37` after accepted Stage 6C + 6D merge.
+Base: current `main` after the accepted fullscreen source-host stabilization and release-risk cleanup.
 
 ## 1. Goal
 
@@ -213,6 +213,10 @@ Expected artifact:
 FloatTabs-0.1.0.dmg
 ├─ FloatTabs.app
 └─ Applications -> /Applications
+
+FloatTabs-0.1.0.dSYM.zip
+FloatTabs-0.1.0.dmg.sha256
+FloatTabs-0.1.0.dSYM.zip.sha256
 ```
 
 The script must:
@@ -222,6 +226,7 @@ The script must:
 - stage the app and Applications symlink;
 - create compressed UDZO DMG;
 - verify the DMG;
+- archive matching debug symbols and emit SHA-256 sidecars;
 - clearly report whether the app is unsigned QA or Developer ID signed.
 
 ## 9. Signing / notarization boundary
@@ -247,7 +252,7 @@ workflow_dispatch
 → Release build
 → build DMG
 → verify DMG
-→ upload FloatTabs-0.1.0.dmg artifact
+→ upload DMG + SHA-256 + dSYM archive artifacts
 ```
 
 No release/tag publication is automatic in RC1.
@@ -279,7 +284,7 @@ Not in RC1:
 - website credential/session migration;
 - auto-updater;
 - launch-at-login;
-- app icon redesign;
+- further app icon redesign beyond the integrated v0.1.0 icon;
 - accent/theme redesign;
 - new Web App features;
 - new lifecycle tuning;

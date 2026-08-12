@@ -8,6 +8,7 @@ OUTPUT_DIR="${FLOATTABS_OUTPUT_DIR:-$ROOT_DIR/.release}"
 DERIVED_DATA="$OUTPUT_DIR/DerivedData"
 STAGE_DIR="$OUTPUT_DIR/dmg-root"
 APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
+DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 SIGN_IDENTITY="${FLOATTABS_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${FLOATTABS_NOTARY_PROFILE:-}"
 REQUIRED_ARCHITECTURES=(arm64 x86_64)
@@ -83,6 +84,7 @@ verify_universal_app "$APP_PATH"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
 DMG_PATH="$OUTPUT_DIR/FloatTabs-$VERSION.dmg"
+DSYM_ARCHIVE_PATH="$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip"
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
   echo "Signing FloatTabs.app with Developer ID identity: $SIGN_IDENTITY"
@@ -97,6 +99,13 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
 else
   echo "Building unsigned QA app (no FLOATTABS_SIGN_IDENTITY supplied)."
 fi
+
+if [[ ! -d "$DSYM_PATH" ]]; then
+  echo "error: Release dSYM not found at $DSYM_PATH" >&2
+  exit 1
+fi
+rm -f "$DSYM_ARCHIVE_PATH"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$DSYM_PATH" "$DSYM_ARCHIVE_PATH"
 
 /usr/bin/ditto "$APP_PATH" "$STAGE_DIR/FloatTabs.app"
 verify_universal_app "$STAGE_DIR/FloatTabs.app"
@@ -154,3 +163,8 @@ else
   echo "Version: $VERSION ($BUILD)"
   echo "NOTE: This is not a public notarized release unless Developer ID + notary credentials were supplied."
 fi
+
+/usr/bin/shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+/usr/bin/shasum -a 256 "$DSYM_ARCHIVE_PATH" > "$DSYM_ARCHIVE_PATH.sha256"
+echo "Debug symbols: $DSYM_ARCHIVE_PATH"
+echo "Checksums: $DMG_PATH.sha256 and $DSYM_ARCHIVE_PATH.sha256"

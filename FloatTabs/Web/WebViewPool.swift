@@ -31,7 +31,7 @@ enum WebContentRecoveryDisposition: Equatable {
 
 @MainActor
 final class WebViewPool {
-    typealias LoadHandler = (WKWebView, URLRequest) -> Void
+    typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
 
     private var webViews: [UUID: WKWebView] = [:]

@@ -1,12 +1,23 @@
 import AppKit
+import KeyboardShortcuts
+
+struct MenuShortcutPresentation: Equatable {
+    let keyEquivalent: String
+    let modifiers: NSEvent.ModifierFlags
+}
 
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let toggleMenuItem = NSMenuItem(
         title: "Show FloatTabs",
         action: #selector(toggleFromMenu),
+        keyEquivalent: ""
+    )
+    private let settingsMenuItem = NSMenuItem(
+        title: "Settings…",
+        action: #selector(openSettings),
         keyEquivalent: ""
     )
 
@@ -15,6 +26,19 @@ final class StatusItemController: NSObject {
     private let onSettings: () -> Void
     private let onQuit: () -> Void
     private var selectedFaviconOriginKey: String?
+
+    var menuShortcutPresentations: [String: MenuShortcutPresentation] {
+        [
+            toggleMenuItem.title: MenuShortcutPresentation(
+                keyEquivalent: toggleMenuItem.keyEquivalent,
+                modifiers: toggleMenuItem.keyEquivalentModifierMask
+            ),
+            settingsMenuItem.title: MenuShortcutPresentation(
+                keyEquivalent: settingsMenuItem.keyEquivalent,
+                modifiers: settingsMenuItem.keyEquivalentModifierMask
+            ),
+        ]
+    }
 
     init(
         onToggle: @escaping () -> Void,
@@ -103,18 +127,15 @@ final class StatusItemController: NSObject {
     }
 
     private func configureMenu() {
+        menu.delegate = self
         toggleMenuItem.target = self
+        toggleMenuItem.setShortcut(for: .toggleFloatTabs)
         menu.addItem(toggleMenuItem)
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(
-            title: "Settings…",
-            action: #selector(openSettings),
-            keyEquivalent: ","
-        )
-        settingsItem.keyEquivalentModifierMask = [.command]
-        settingsItem.target = self
-        menu.addItem(settingsItem)
+        settingsMenuItem.setShortcut(for: .floatTabsSettings)
+        settingsMenuItem.target = self
+        menu.addItem(settingsMenuItem)
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -128,7 +149,7 @@ final class StatusItemController: NSObject {
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else {
-            onToggle()
+            requestToggleAfterStatusItemTracking()
             return
         }
 
@@ -138,7 +159,7 @@ final class StatusItemController: NSObject {
         if shouldOpenMenu {
             presentMenu(from: sender)
         } else {
-            onToggle()
+            requestToggleAfterStatusItemTracking()
         }
     }
 
@@ -152,7 +173,32 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func toggleFromMenu() {
-        onToggle()
+        requestToggleAfterStatusItemTracking()
+    }
+
+    /// Status-bar and menu tracking can perform one final window-order update
+    /// after an action returns. Defer presentation by one main run-loop turn so
+    /// FloatTabs' explicit activation/order-front work is the final operation.
+    private func requestToggleAfterStatusItemTracking() {
+        Self.scheduleAfterStatusItemTracking { [weak self] in
+            self?.onToggle()
+        }
+    }
+
+    static func scheduleAfterStatusItemTracking(
+        _ action: @escaping @MainActor @Sendable () -> Void
+    ) {
+        DispatchQueue.main.async(execute: action)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // The menu item owns this key equivalent while tracking. Disable the
+        // global listener temporarily so the same key-up cannot toggle twice.
+        KeyboardShortcuts.disable(.toggleFloatTabs)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        KeyboardShortcuts.enable(.toggleFloatTabs)
     }
 
     @objc private func openSettings() {

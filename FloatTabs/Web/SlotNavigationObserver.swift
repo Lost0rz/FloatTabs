@@ -41,7 +41,7 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
         _ download: WKDownload,
         decideDestinationUsing response: URLResponse,
         suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
+        completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
     ) {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
@@ -133,13 +133,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onContentProcessTermination = onContentProcessTermination
         super.init()
 
-        observation = webView.observe(\.url, options: [.new]) { observedWebView, _ in
-            guard let url = observedWebView.url, WebAppURL.isSafe(url) else {
-                return
-            }
-
-            Task { @MainActor in
-                onURLChange(slotID, url)
+        observation = webView.observe(\.url, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let url = self.webView?.url,
+                      WebAppURL.isSafe(url) else {
+                    return
+                }
+                self.onURLChange(self.slotID, url)
             }
         }
 
@@ -154,7 +155,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         preferences: WKWebpagePreferences,
-        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (
+            WKNavigationActionPolicy,
+            WKWebpagePreferences
+        ) -> Void
     ) {
         restoreWebsiteMode(in: webView)
 
@@ -176,7 +180,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         decisionHandler(
             DownloadCoordinator.responsePolicy(

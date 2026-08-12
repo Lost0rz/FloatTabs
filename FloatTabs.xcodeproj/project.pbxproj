@@ -18,7 +18,7 @@
 		A00000000000000000000008 /* GlobalHotkeyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000008 /* GlobalHotkeyController.swift */; };
 		A00000000000000000000009 /* WebViewFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000009 /* WebViewFactory.swift */; };
 		A0000000000000000000000A /* WebViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000A /* WebViewContainer.swift */; };
-		A0000000000000000000000B /* StageZeroTestPage.html in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000B /* StageZeroTestPage.html */; };
+		A00000000000000000000029 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000029 /* Assets.xcassets */; };
 		A0000000000000000000000C /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000001 /* KeyboardShortcuts */; };
 		A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* ScreenPositioningTests.swift */; };
 		A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* WebViewFactoryTests.swift */; };
@@ -45,6 +45,7 @@
 		A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* AppPreferencesStoreTests.swift */; };
 		A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000026 /* FloatTabsBackupService.swift */; };
 		A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */; };
+		A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000028 /* FullscreenSourceHost.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,7 +70,7 @@
 		B00000000000000000000008 /* GlobalHotkeyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyController.swift; sourceTree = "<group>"; };
 		B00000000000000000000009 /* WebViewFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewFactory.swift; sourceTree = "<group>"; };
 		B0000000000000000000000A /* WebViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewContainer.swift; sourceTree = "<group>"; };
-		B0000000000000000000000B /* StageZeroTestPage.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = StageZeroTestPage.html; sourceTree = "<group>"; };
+		B00000000000000000000029 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0000000000000000000000C /* ScreenPositioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPositioningTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000000D /* WebViewFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewFactoryTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000000E /* FloatTabs.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FloatTabs.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -97,6 +98,7 @@
 		B00000000000000000000025 /* AppPreferencesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStoreTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000026 /* FloatTabsBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupService.swift; sourceTree = "<group>"; };
 		B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupServiceTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000028 /* FullscreenSourceHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenSourceHost.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000004 /* FloatingPanel.swift */,
+				B00000000000000000000028 /* FullscreenSourceHost.swift */,
 				B00000000000000000000005 /* PanelController.swift */,
 				B00000000000000000000006 /* ScreenPositioning.swift */,
 			);
@@ -229,7 +232,7 @@
 		H00000000000000000000008 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				B0000000000000000000000B /* StageZeroTestPage.html */,
+				B00000000000000000000029 /* Assets.xcassets */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -346,7 +349,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A0000000000000000000000B /* StageZeroTestPage.html in Resources */,
+				A00000000000000000000029 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,6 +378,7 @@
 				A00000000000000000000016 /* ExternalTabRail.swift in Sources */,
 				A00000000000000000000001 /* FloatTabsApp.swift in Sources */,
 				A00000000000000000000004 /* FloatingPanel.swift in Sources */,
+				A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */,
 				A00000000000000000000008 /* GlobalHotkeyController.swift in Sources */,
 				A00000000000000000000005 /* PanelController.swift in Sources */,
 				A00000000000000000000013 /* ProfileRepository.swift in Sources */,
@@ -436,6 +440,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -451,12 +456,14 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_STRICT_CONCURRENCY = complete;
 			};
 			name = Release;
 		};
 		N00000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -478,6 +485,7 @@
 		N00000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -507,6 +515,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabsTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -525,6 +534,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lost0rz.FloatTabsTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

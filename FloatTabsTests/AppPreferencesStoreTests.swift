@@ -2,23 +2,27 @@ import XCTest
 @testable import FloatTabs
 
 @MainActor
-final class AppPreferencesStoreTests: XCTestCase {
+final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
     private var defaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
-        suiteName = "FloatTabsTests.AppPreferencesStore.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
+    nonisolated override func setUp() {
+        MainActor.assumeIsolated {
+            super.setUp()
+            suiteName = "FloatTabsTests.AppPreferencesStore.\(UUID().uuidString)"
+            defaults = UserDefaults(suiteName: suiteName)!
+            defaults.removePersistentDomain(forName: suiteName)
+        }
     }
 
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
-        NSApp.appearance = nil
-        defaults = nil
-        suiteName = nil
-        super.tearDown()
+    nonisolated override func tearDown() {
+        MainActor.assumeIsolated {
+            defaults.removePersistentDomain(forName: suiteName)
+            NSApp.appearance = nil
+            defaults = nil
+            suiteName = nil
+            super.tearDown()
+        }
     }
 
     func testAppearanceDefaultsToSystem() {
@@ -40,6 +44,28 @@ final class AppPreferencesStoreTests: XCTestCase {
     func testUnknownAppearanceFallsBackToSystem() {
         defaults.set("future-value", forKey: AppPreferencesStore.appearanceKey)
         XCTAssertEqual(AppPreferencesStore(defaults: defaults).appearanceMode, .system)
+    }
+
+    func testAppearanceModesUseSystemInheritanceOrExplicitOverrides() {
+        XCTAssertNil(AppAppearanceMode.system.appKitAppearance)
+        XCTAssertEqual(
+            AppAppearanceMode.light.appKitAppearance?.bestMatch(from: [.aqua, .darkAqua]),
+            .aqua
+        )
+        XCTAssertEqual(
+            AppAppearanceMode.dark.appKitAppearance?.bestMatch(from: [.aqua, .darkAqua]),
+            .darkAqua
+        )
+    }
+
+    func testSelectingSystemClearsAnExplicitApplicationAppearance() {
+        let store = AppPreferencesStore(defaults: defaults)
+        store.appearanceMode = .dark
+        XCTAssertEqual(NSApp.appearance?.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+
+        store.appearanceMode = .system
+
+        XCTAssertNil(NSApp.appearance)
     }
 
     func testFollowPreferredSizeDefaultsTrueAndPersists() {

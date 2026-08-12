@@ -926,7 +926,10 @@ private final class NewWindowPolicyDelegate: NSObject, WKNavigationDelegate {
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         preferences: WKWebpagePreferences,
-        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (
+            WKNavigationActionPolicy,
+            WKWebpagePreferences
+        ) -> Void
     ) {
         if navigationAction.targetFrame == nil,
            let url = navigationAction.request.url,

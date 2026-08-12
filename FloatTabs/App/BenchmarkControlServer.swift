@@ -7,21 +7,22 @@ import Foundation
 /// The listener binds to 127.0.0.1 on an ephemeral port and requires a random
 /// per-process token written to the user's FloatTabs Application Support folder.
 /// Release builds contain no benchmark listener or control-info publication.
-final class BenchmarkControlServer {
+final class BenchmarkControlServer: @unchecked Sendable {
     static let protocolVersion = 1
 
     private let token = UUID().uuidString
-    private let commandHandler: @MainActor ([String: Any]) -> [String: Any]
+    private let commandHandler: @MainActor @Sendable ([String: Any]) -> [String: Any]
     private let acceptQueue = DispatchQueue(label: "com.lost0rz.FloatTabs.benchmark-control")
+    private let stateLock = NSLock()
     private var listenerFD: Int32 = -1
     private var controlInfoURL: URL?
 
-    init(commandHandler: @escaping @MainActor ([String: Any]) -> [String: Any]) {
+    init(commandHandler: @escaping @MainActor @Sendable ([String: Any]) -> [String: Any]) {
         self.commandHandler = commandHandler
     }
 
     func start() throws {
-        guard listenerFD < 0 else { return }
+        guard stateLock.withLock({ listenerFD < 0 }) else { return }
 
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -56,9 +57,16 @@ final class BenchmarkControlServer {
             throw POSIXError(.EIO)
         }
 
-        listenerFD = fd
         let port = UInt16(bigEndian: boundAddress.sin_port)
-        try publishControlInfo(port: port)
+        do {
+            try publishControlInfo(port: port)
+        } catch {
+            Darwin.close(fd)
+            throw error
+        }
+        stateLock.withLock {
+            listenerFD = fd
+        }
 
         acceptQueue.async { [weak self] in
             self?.acceptLoop(listenerFD: fd)
@@ -66,16 +74,19 @@ final class BenchmarkControlServer {
     }
 
     func stop() {
-        let fd = listenerFD
-        listenerFD = -1
+        let (fd, infoURL) = stateLock.withLock {
+            let values = (listenerFD, controlInfoURL)
+            listenerFD = -1
+            controlInfoURL = nil
+            return values
+        }
         if fd >= 0 {
             Darwin.shutdown(fd, SHUT_RDWR)
             Darwin.close(fd)
         }
-        if let controlInfoURL {
-            try? FileManager.default.removeItem(at: controlInfoURL)
+        if let infoURL {
+            try? FileManager.default.removeItem(at: infoURL)
         }
-        controlInfoURL = nil
     }
 
     deinit {
@@ -103,18 +114,24 @@ final class BenchmarkControlServer {
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: url, options: [.atomic])
         try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        controlInfoURL = url
+        stateLock.withLock {
+            controlInfoURL = url
+        }
     }
 
     private func acceptLoop(listenerFD: Int32) {
-        while self.listenerFD == listenerFD {
+        while isCurrentListener(listenerFD) {
             let connectionFD = Darwin.accept(listenerFD, nil, nil)
             if connectionFD < 0 {
-                if self.listenerFD != listenerFD { return }
+                if !isCurrentListener(listenerFD) { return }
                 continue
             }
             handleConnection(connectionFD)
         }
+    }
+
+    private func isCurrentListener(_ fd: Int32) -> Bool {
+        stateLock.withLock { listenerFD == fd }
     }
 
     private func handleConnection(_ fd: Int32) {

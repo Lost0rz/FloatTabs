@@ -20,6 +20,11 @@ final class AppCoordinator {
         backupService: FloatTabsBackupService = FloatTabsBackupService()
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
+        // Layer-backed rail controls resolve dynamic NSColors to CGColor while
+        // they are created. Apply the stored appearance before PanelController
+        // builds any windows/views so a saved Dark choice cannot be cached as
+        // Aqua white until the next appearance transition.
+        resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
         self.backupService = backupService
 
@@ -44,7 +49,6 @@ final class AppCoordinator {
     }
 
     func start() {
-        preferencesStore.applyStoredAppearance()
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
             onExportBackup: { [weak self] url in
@@ -95,14 +99,14 @@ final class AppCoordinator {
         // Keep one local snapshot per app version/build. It is overwritten by
         // the same version on clean starts/exits, while older-version snapshots
         // remain available when a newer app build is installed.
-        try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
 
 #if DEBUG
         let benchmarkControlServer = BenchmarkControlServer { [weak self] request in
             self?.handleBenchmarkControl(request) ?? ["ok": false, "error": "coordinator_unavailable"]
         }
         self.benchmarkControlServer = benchmarkControlServer
-        try? benchmarkControlServer.start()
+        _ = try? benchmarkControlServer.start()
 #endif
     }
 
@@ -111,7 +115,7 @@ final class AppCoordinator {
         benchmarkControlServer?.stop()
 #endif
         panelController.prepareForTermination()
-        try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
     }
 
 #if DEBUG

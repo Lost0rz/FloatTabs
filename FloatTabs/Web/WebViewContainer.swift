@@ -6,21 +6,28 @@ import WebKit
 /// AppKit owns the shell so hit testing and WebKit focus remain explicit.
 final class PanelRootView: NSView {
     let externalControlZoneView: ExternalControlZoneView
+    let webViewportLayoutView: NSView
     let webPanelContainerView: WebPanelContainerView
     let perimeterDragView: PanelPerimeterDragView
     let interactionBorderView: PanelInteractionBorderView
     let resizeHandleView: PanelResizeHandleView
     let resizeReadoutView: ResizeReadoutView
+    let fullscreenExitPlaceholderView: FullscreenExitPlaceholderView
+    private weak var fullscreenCompanionContainer: WebPanelContainerView?
+    private var fullscreenCompanionConstraints: [NSLayoutConstraint] = []
+    private var fullscreenPlaceholderConstraints: [NSLayoutConstraint] = []
 
     var onResizeEnded: (() -> Void)?
 
     init() {
         externalControlZoneView = ExternalControlZoneView()
+        webViewportLayoutView = NSView()
         webPanelContainerView = WebPanelContainerView()
         perimeterDragView = PanelPerimeterDragView()
         interactionBorderView = PanelInteractionBorderView()
         resizeHandleView = PanelResizeHandleView()
         resizeReadoutView = ResizeReadoutView()
+        fullscreenExitPlaceholderView = FullscreenExitPlaceholderView()
 
         super.init(frame: .zero)
 
@@ -28,7 +35,7 @@ final class PanelRootView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         externalControlZoneView.translatesAutoresizingMaskIntoConstraints = false
-        webPanelContainerView.translatesAutoresizingMaskIntoConstraints = false
+        webViewportLayoutView.translatesAutoresizingMaskIntoConstraints = false
         perimeterDragView.translatesAutoresizingMaskIntoConstraints = false
         interactionBorderView.translatesAutoresizingMaskIntoConstraints = false
         resizeHandleView.translatesAutoresizingMaskIntoConstraints = false
@@ -37,7 +44,10 @@ final class PanelRootView: NSView {
         // WebKit remains visually clean. The movement layer sits above it only
         // for the deliberately tiny top/bottom overlap, while the animated frame
         // is presentation-only and never participates in hit testing.
-        addSubview(webPanelContainerView)
+        // The actual WebPanelContainerView lives in an ordinary NSWindow. This
+        // transparent layout-only view preserves the shell geometry without
+        // making the floating shell WebKit's fullscreen source window.
+        addSubview(webViewportLayoutView)
         addSubview(perimeterDragView)
         addSubview(externalControlZoneView)
         // Presentation-only and non-hit-testing, but deliberately above the tab rail so
@@ -61,18 +71,18 @@ final class PanelRootView: NSView {
                 equalToConstant: PanelMetrics.externalControlZoneWidth
             ),
 
-            webPanelContainerView.leadingAnchor.constraint(
+            webViewportLayoutView.leadingAnchor.constraint(
                 equalTo: externalControlZoneView.trailingAnchor
             ),
-            webPanelContainerView.trailingAnchor.constraint(
+            webViewportLayoutView.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -PanelMetrics.outerInteractionGutter
             ),
-            webPanelContainerView.topAnchor.constraint(
+            webViewportLayoutView.topAnchor.constraint(
                 equalTo: topAnchor,
                 constant: PanelMetrics.outerInteractionGutter
             ),
-            webPanelContainerView.bottomAnchor.constraint(
+            webViewportLayoutView.bottomAnchor.constraint(
                 equalTo: bottomAnchor,
                 constant: -PanelMetrics.outerInteractionGutter
             ),
@@ -91,10 +101,10 @@ final class PanelRootView: NSView {
             // Real-Mac acceptance showed the transparent outer gutter was an
             // unreliable acquisition surface, while the in-page area was stable.
             resizeHandleView.trailingAnchor.constraint(
-                equalTo: webPanelContainerView.trailingAnchor
+                equalTo: webViewportLayoutView.trailingAnchor
             ),
             resizeHandleView.bottomAnchor.constraint(
-                equalTo: webPanelContainerView.bottomAnchor
+                equalTo: webViewportLayoutView.bottomAnchor
             ),
             resizeHandleView.widthAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
             resizeHandleView.heightAnchor.constraint(equalToConstant: PanelMetrics.resizeHandleSize),
@@ -104,7 +114,7 @@ final class PanelRootView: NSView {
                 constant: -8
             ),
             resizeReadoutView.bottomAnchor.constraint(
-                equalTo: webPanelContainerView.bottomAnchor,
+                equalTo: webViewportLayoutView.bottomAnchor,
                 constant: -8
             ),
         ])
@@ -143,16 +153,127 @@ final class PanelRootView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // A transparent pixel that is still inside the FloatTabs window belongs to
-        // FloatTabs. Returning self here is a safety net against accidental desktop
-        // click-through; functional move/resize/tab views still win through normal
-        // subview hit testing.
-        return super.hitTest(point)
+        super.hitTest(point)
     }
 
     private func synchronizeInteractionBorderGeometry() {
-        interactionBorderView.targetWebFrame = webPanelContainerView.frame
+        interactionBorderView.targetWebFrame = webViewportLayoutView.frame
         interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)
+    }
+
+    func installFullscreenCompanionContainer(_ container: WebPanelContainerView) {
+        removeFullscreenExitPlaceholder()
+        guard container.superview !== self else {
+            fullscreenCompanionContainer = container
+            return
+        }
+        removeFullscreenCompanionContainer(container)
+        container.removeFromSuperview()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(container, positioned: .below, relativeTo: perimeterDragView)
+        fullscreenCompanionConstraints = [
+            container.leadingAnchor.constraint(equalTo: webViewportLayoutView.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: webViewportLayoutView.trailingAnchor),
+            container.topAnchor.constraint(equalTo: webViewportLayoutView.topAnchor),
+            container.bottomAnchor.constraint(equalTo: webViewportLayoutView.bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(fullscreenCompanionConstraints)
+        fullscreenCompanionContainer = container
+    }
+
+    func removeFullscreenCompanionContainer(_ container: WebPanelContainerView) {
+        if container.superview === self {
+            NSLayoutConstraint.deactivate(fullscreenCompanionConstraints)
+            fullscreenCompanionConstraints.removeAll()
+            container.removeFromSuperview()
+        }
+        if fullscreenCompanionContainer === container {
+            fullscreenCompanionContainer = nil
+        }
+    }
+
+    func installFullscreenExitPlaceholder() {
+        if let container = fullscreenCompanionContainer {
+            removeFullscreenCompanionContainer(container)
+        }
+        guard fullscreenExitPlaceholderView.superview !== self else { return }
+
+        fullscreenExitPlaceholderView.removeFromSuperview()
+        fullscreenExitPlaceholderView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(
+            fullscreenExitPlaceholderView,
+            positioned: .below,
+            relativeTo: perimeterDragView
+        )
+        fullscreenPlaceholderConstraints = [
+            fullscreenExitPlaceholderView.leadingAnchor.constraint(
+                equalTo: webViewportLayoutView.leadingAnchor
+            ),
+            fullscreenExitPlaceholderView.trailingAnchor.constraint(
+                equalTo: webViewportLayoutView.trailingAnchor
+            ),
+            fullscreenExitPlaceholderView.topAnchor.constraint(
+                equalTo: webViewportLayoutView.topAnchor
+            ),
+            fullscreenExitPlaceholderView.bottomAnchor.constraint(
+                equalTo: webViewportLayoutView.bottomAnchor
+            ),
+        ]
+        NSLayoutConstraint.activate(fullscreenPlaceholderConstraints)
+    }
+
+    func removeFullscreenExitPlaceholder() {
+        guard fullscreenExitPlaceholderView.superview === self else { return }
+        NSLayoutConstraint.deactivate(fullscreenPlaceholderConstraints)
+        fullscreenPlaceholderConstraints.removeAll()
+        fullscreenExitPlaceholderView.removeFromSuperview()
+    }
+}
+
+/// Shell-owned replacement for WebKit's source-window placeholder. WebKit's
+/// real placeholder remains ordered for reliable restoration, but is kept
+/// invisible so it never appears as a second, tab-less window.
+final class FullscreenExitPlaceholderView: NSVisualEffectView {
+    var onExitFullscreen: (() -> Void)?
+
+    private let label = NSTextField(labelWithString: "Double-click to Exit Full Screen")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+
+        material = .hudWindow
+        blendingMode = .withinWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = PanelMetrics.webPanelCornerRadius
+        layer?.masksToBounds = true
+
+        label.font = .systemFont(ofSize: 18, weight: .medium)
+        label.textColor = NSColor.white.withAlphaComponent(0.62)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard event.clickCount >= 2 else { return }
+        onExitFullscreen?()
     }
 }
 
@@ -376,7 +497,8 @@ final class PanelInteractionBorderView: NSView {
 /// Four-way movement cursor used only where FloatTabs itself will move the
 /// window. This gives immediate feedback before the user starts dragging.
 enum PanelMoveCursor {
-    static let cursor: NSCursor = {
+    @MainActor
+    static var cursor: NSCursor {
         let size = NSSize(width: 24, height: 24)
         let image = NSImage(size: size, flipped: false) { rect in
             let center = NSPoint(x: rect.midX, y: rect.midY)
@@ -420,7 +542,7 @@ enum PanelMoveCursor {
         }
 
         return NSCursor(image: image, hotSpot: NSPoint(x: 12, y: 12))
-    }()
+    }
 }
 
 /// Window movement is acquired mainly outside the Web viewport: the external
@@ -559,6 +681,7 @@ final class PanelPerimeterDragView: NSView {
 final class PanelResizeHandleView: NSView {
     var onViewportSizeChange: ((NSSize) -> Void)?
     var onResizeEnded: (() -> Void)?
+    weak var resizeTargetWindow: NSWindow?
 
     private var startingMouseLocation: NSPoint?
     private var startingFrame: NSRect?
@@ -619,14 +742,14 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
+        guard let window = resizeTargetWindow ?? window else { return }
         startingMouseLocation = NSEvent.mouseLocation
         startingFrame = window.frame
         onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: window.frame.size))
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let window,
+        guard let window = resizeTargetWindow ?? window,
               let startingMouseLocation,
               let startingFrame else {
             return

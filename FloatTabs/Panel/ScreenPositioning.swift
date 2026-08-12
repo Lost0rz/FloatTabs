@@ -20,7 +20,7 @@ struct PanelMetrics {
     /// stroke this deliberately overlaps the Web edge by 0.75 pt, eliminating
     /// subpixel / antialiasing hairline gaps between the rainbow frame and page.
     /// It is presentation-only and never participates in hit testing.
-    static let interactionBorderLineWidth: CGFloat = 2.5
+    static let interactionBorderLineWidth: CGFloat = 3.75
     static let interactionBorderOutset: CGFloat = 0.5
 
     /// Bottom-right remains the only resize affordance.

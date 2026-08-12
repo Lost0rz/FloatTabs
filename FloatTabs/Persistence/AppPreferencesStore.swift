@@ -80,6 +80,9 @@ enum PanelWindowSizeMode: String, CaseIterable, Equatable, Codable {
 }
 
 extension Notification.Name {
+    static let floatTabsAppearanceDidChange = Notification.Name(
+        "FloatTabs.appearanceDidChange"
+    )
     static let floatTabsBorderPreferenceDidChange = Notification.Name(
         "FloatTabs.borderPreferenceDidChange"
     )
@@ -225,6 +228,16 @@ final class AppPreferencesStore {
 
     private func applyAppearance(_ mode: AppAppearanceMode) {
         NSApp.appearance = mode.appKitAppearance
+        // AppKit updates effectiveAppearance on the following run-loop turn.
+        // Notify layer-backed controls after that propagation so their cached
+        // CGColors are resolved in the new Light/Dark appearance immediately.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(
+                name: .floatTabsAppearanceDidChange,
+                object: self
+            )
+        }
     }
 
     private func notifyBorderChange() {

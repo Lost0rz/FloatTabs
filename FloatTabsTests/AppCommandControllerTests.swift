@@ -6,6 +6,19 @@ import XCTest
 @MainActor
 final class AppCommandControllerTests: XCTestCase {
     func testOnlyExplicitFloatTabsShortcutsAreMatched() {
+        // KeyboardShortcuts intentionally persists user customizations. This
+        // test verifies the catalog defaults, so isolate it from the developer
+        // machine's current Settings choices and restore them afterward.
+        let originalShortcuts = AppShortcutCatalog.allBindings.map {
+            ($0.name, KeyboardShortcuts.getShortcut(for: $0.name))
+        }
+        KeyboardShortcuts.reset(AppShortcutCatalog.allNames)
+        defer {
+            for (name, shortcut) in originalShortcuts {
+                KeyboardShortcuts.setShortcut(shortcut, for: name)
+            }
+        }
+
         XCTAssertEqual(
             AppCommandController.command(characters: "1", keyCode: 18, modifiers: [.command]),
             .selectSlot(1)

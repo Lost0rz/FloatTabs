@@ -1,6 +1,18 @@
 import AppKit
 
 final class FloatingPanel: NSPanel {
+    private static let ordinaryCollectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .canJoinAllApplications,
+        .ignoresCycle,
+    ]
+
+    private static let fullscreenCompanionCollectionBehavior: NSWindow.CollectionBehavior = [
+        .moveToActiveSpace,
+        .fullScreenAuxiliary,
+        .ignoresCycle,
+    ]
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
@@ -15,13 +27,11 @@ final class FloatingPanel: NSPanel {
         isFloatingPanel = true
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        level = .floating
-        collectionBehavior = [
-            .canJoinAllSpaces,
-            .canJoinAllApplications,
-            .fullScreenAuxiliary,
-            .ignoresCycle,
-        ]
+        // Experiment: keep the shell and the ordinary Web source host at the
+        // same normal level so the source host can be ordered above the shell.
+        // The shell remains a separate NSPanel and keeps its cross-Space flags.
+        level = .normal
+        collectionBehavior = Self.ordinaryCollectionBehavior
 
         // A non-activating panel can receive the first pointer interaction while
         // another application is frontmost. The explicit show path still calls
@@ -40,5 +50,11 @@ final class FloatingPanel: NSPanel {
 
         contentMinSize = PanelMetrics.minimumPanelSize
         minSize = PanelMetrics.minimumPanelSize
+    }
+
+    func setFullscreenCompanionPresentation(_ enabled: Bool) {
+        collectionBehavior = enabled
+            ? Self.fullscreenCompanionCollectionBehavior
+            : Self.ordinaryCollectionBehavior
     }
 }
