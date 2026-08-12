@@ -4,6 +4,7 @@ import KeyboardShortcuts
 @MainActor
 final class AppCoordinator {
     private let panelController: PanelController
+    private let fullscreenLabController: FullscreenLabController
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
@@ -22,6 +23,7 @@ final class AppCoordinator {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         self.preferencesStore = resolvedPreferencesStore
         self.backupService = backupService
+        self.fullscreenLabController = FullscreenLabController()
 
         if let panelController {
             self.panelController = panelController
@@ -60,9 +62,23 @@ final class AppCoordinator {
             self?.showGlobalSettings()
         }
 
+        fullscreenLabController.onWillEnable = { [weak self] in
+            guard let self else { return }
+            if self.panelController.isVisible {
+                self.panelController.hideFloatTabs()
+            }
+        }
+        fullscreenLabController.start()
+
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
-            isVisible: { [weak self] in self?.panelController.isVisible ?? false },
+            isVisible: { [weak self] in
+                guard let self else { return false }
+                if self.fullscreenLabController.isEnabled {
+                    return self.fullscreenLabController.isVisible
+                }
+                return self.panelController.isVisible
+            },
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) }
         )
@@ -80,7 +96,9 @@ final class AppCoordinator {
 
         appCommandController = AppCommandController(
             isEnabled: { [weak self] in
-                NSApp.isActive && (self?.panelController.isVisible ?? false)
+                NSApp.isActive
+                    && !(self?.fullscreenLabController.isEnabled ?? false)
+                    && (self?.panelController.isVisible ?? false)
             },
             onCommand: { [weak self] command in
                 guard let self else { return }
@@ -110,6 +128,7 @@ final class AppCoordinator {
 #if DEBUG
         benchmarkControlServer?.stop()
 #endif
+        fullscreenLabController.stop()
         panelController.prepareForTermination()
         try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
     }
@@ -232,6 +251,11 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs() {
+        if fullscreenLabController.isEnabled {
+            fullscreenLabController.toggleOnCurrentDisplay()
+            return
+        }
+
         if panelController.isVisible {
             panelController.hideFloatTabs()
         } else {
