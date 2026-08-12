@@ -589,18 +589,17 @@ final class FullscreenLabController: NSObject {
             && sourceSequence[1] == "B"
             && sourceSequence[2] == "A"
         let passed = allSucceeded && sequenceIsABA
+        let attemptResults = firstThree.map { attempt in
+            let ok = attempt.reachedFullscreen
+                && !attempt.failedBeforeFullscreen
+                && attempt.fullscreenMatchedSource == true
+            return ok ? "PASS" : "FAIL"
+        }.joined(separator: ", ")
 
         reportWriter.append("\n---------------- MODE \(mode.rawValue) SUMMARY ----------------")
         reportWriter.append("Source sequence: \(sourceSequence.joined(separator: " -> "))")
         reportWriter.append("Actual fullscreen sequence: \(fullscreenSequence.joined(separator: " -> "))")
-        reportWriter.append(
-            "Attempt results: \(firstThree.map { attempt in
-                let ok = attempt.reachedFullscreen
-                    && !attempt.failedBeforeFullscreen
-                    && attempt.fullscreenMatchedSource == true
-                return ok ? "PASS" : "FAIL"
-            }.joined(separator: ", "))"
-        )
+        reportWriter.append("Attempt results: \(attemptResults)")
         reportWriter.append("A -> B -> A RESULT = \(passed ? "PASS" : "FAIL")")
         if !sequenceIsABA {
             reportWriter.append("Reason: first three source displays were not A -> B -> A; repeat this mode after Reset Report if needed.")
