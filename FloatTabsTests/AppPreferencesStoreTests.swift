@@ -46,6 +46,28 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(AppPreferencesStore(defaults: defaults).appearanceMode, .system)
     }
 
+    func testAppearanceModesUseSystemInheritanceOrExplicitOverrides() {
+        XCTAssertNil(AppAppearanceMode.system.appKitAppearance)
+        XCTAssertEqual(
+            AppAppearanceMode.light.appKitAppearance?.bestMatch(from: [.aqua, .darkAqua]),
+            .aqua
+        )
+        XCTAssertEqual(
+            AppAppearanceMode.dark.appKitAppearance?.bestMatch(from: [.aqua, .darkAqua]),
+            .darkAqua
+        )
+    }
+
+    func testSelectingSystemClearsAnExplicitApplicationAppearance() {
+        let store = AppPreferencesStore(defaults: defaults)
+        store.appearanceMode = .dark
+        XCTAssertEqual(NSApp.appearance?.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+
+        store.appearanceMode = .system
+
+        XCTAssertNil(NSApp.appearance)
+    }
+
     func testFollowPreferredSizeDefaultsTrueAndPersists() {
         let first = AppPreferencesStore(defaults: defaults)
         XCTAssertTrue(first.followPreferredSize)

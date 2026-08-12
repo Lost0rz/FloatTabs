@@ -162,6 +162,8 @@ The Edit Web App surface exposes advanced Browser Identity / Device Preset / Ori
 
 Menu shortcut hints are derived from the current Settings bindings. The status menu's Show/Hide and Settings items update live; per-Web-App context menus read the latest Return Home, Reload, and Zoom bindings whenever they open. Status-item presentation is deferred until status/menu tracking finishes so the explicit activation and order-front operation is not overwritten by AppKit's final tracking update.
 
+Interface Appearance has three distinct contracts: Light and Dark apply explicit Aqua/Dark Aqua overrides, while System clears the override and inherits the current macOS appearance. The shell and source windows reapply that contract during initialization, preference changes, and every hidden-to-visible presentation so new or previously hidden Tab layers cannot retain stale colors.
+
 ## 10. Backup / restore and version baseline
 
 v0.1.0 uses:

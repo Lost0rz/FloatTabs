@@ -166,6 +166,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastPresentationUptime = presentationUptime
         suppressWorkspaceAutoHideUntilUptime = presentationUptime + 0.25
         requestedVisibility = true
+        // System has no explicit override: resolve it from the current macOS
+        // appearance again whenever a hidden shell is presented. Explicit
+        // Light/Dark modes use this same path so newly created Tab layers
+        // cannot retain colors from an earlier appearance.
+        synchronizeAppearance()
         guard !sourceHostController.isSessionLocked else {
             fullscreenVisibilityIntent.requestPresentation()
             // A companion presentation is one movable window group. Remove its
@@ -570,6 +575,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func appearancePreferenceDidChange(_ notification: Notification) {
+        synchronizeAppearance()
+    }
+
+    private func synchronizeAppearance() {
         let appearance = preferencesStore.appearanceMode.appKitAppearance
         panel.appearance = appearance
         sourceHostController.window.appearance = appearance
@@ -606,6 +615,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizePreferencePresentation() {
+        synchronizeAppearance()
         synchronizeBorderTheme()
         synchronizeWindowSizeMode()
     }

@@ -585,6 +585,49 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testLightRailReapplyResolvesLayerColorsFromExplicitLightAppearance() {
+        let (_, zone) = makeZoneHarness()
+        zone.appearance = NSAppearance(named: .aqua)
+
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+    }
+
+    func testSystemRailInheritsCurrentHostAppearanceAcrossLightDarkChanges() {
+        let (host, zone) = makeZoneHarness()
+        zone.appearance = nil
+        host.appearance = NSAppearance(named: .darkAqua)
+
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+        zone.refreshAppearance()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+
+        host.appearance = NSAppearance(named: .aqua)
+        zone.refreshAppearance()
+
+        assertTabFill(
+            try! XCTUnwrap(zone.tabView(for: inactive.id)),
+            matches: NSColor.controlBackgroundColor.withAlphaComponent(0.82),
+            appearance: zone.effectiveAppearance
+        )
+    }
+
     func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
@@ -814,7 +857,7 @@ final class ExternalShellTests: XCTestCase {
 
     private func assertTabFill(
         _ tab: ExternalWebAppTabView,
-        matches expectedColor: NSColor,
+        matches expectedColor: @autoclosure () -> NSColor,
         appearance: NSAppearance,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -831,7 +874,10 @@ final class ExternalShellTests: XCTestCase {
         )
         var expected: NSColor?
         appearance.performAsCurrentDrawingAppearance {
-            expected = expectedColor.usingColorSpace(.deviceRGB)
+            // Resolve a dynamic system color only after selecting the intended
+            // Light/Dark appearance. This keeps the assertion independent from
+            // the CI runner's own System setting.
+            expected = expectedColor().usingColorSpace(.deviceRGB)
         }
         let resolvedExpected = try! XCTUnwrap(expected, file: file, line: line)
 
