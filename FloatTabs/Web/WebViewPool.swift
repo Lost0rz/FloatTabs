@@ -238,6 +238,7 @@ final class WebViewPool {
             navigationURL: navigationURL
         )
         let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
+        FullscreenDiagnostics.shared.attach(webView: webView, slotID: profile.id)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
