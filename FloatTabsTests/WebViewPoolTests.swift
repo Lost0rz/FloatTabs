@@ -300,6 +300,66 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
+    func testFullscreenCompanionVisibilityCancelsPendingColdRelease() async throws {
+        let pool = makePool()
+        var source = makeProfile(name: "FullscreenSource")
+        source.residencyPolicy = .hot
+        var companion = makeProfile(name: "Companion")
+        companion.residencyPolicy = .cold
+        _ = pool.webView(for: source)
+        _ = pool.webView(for: companion)
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.activate(profile: companion)
+        lifecycle.deactivate(profile: companion)
+        lifecycle.activate(profile: source)
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+
+        lifecycle.beginSupplementalVisibility(profile: companion)
+
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(pool.contains(slotID: companion.id))
+    }
+
+    func testHiddenFullscreenCompanionReturnsToInactiveLifecycle() async throws {
+        let pool = makePool()
+        var source = makeProfile(name: "FullscreenSource")
+        source.residencyPolicy = .hot
+        var companion = makeProfile(name: "Companion")
+        companion.residencyPolicy = .cold
+        _ = pool.webView(for: source)
+        _ = pool.webView(for: companion)
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            installsMemoryPressureSource: false
+        )
+        lifecycle.activate(profile: source)
+        lifecycle.beginSupplementalVisibility(profile: companion)
+
+        lifecycle.endSupplementalVisibility(
+            profile: companion,
+            prepareAsInactive: true
+        )
+
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(pool.contains(slotID: companion.id))
+    }
+
     func testResourceLifecycleDefaultTimingsMatchAcceptedContract() {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
@@ -436,6 +496,55 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
         try await Task.sleep(nanoseconds: 60_000_000)
         XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testHiddenSelectedDefaultMediaPausesImmediatelyBeforeRetentionGrace() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HiddenPause")
+        profile.residencyPolicy = .hot
+        profile.backgroundMediaPolicy = .pauseWhenInactive
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        var pausedIDs: [UUID] = []
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            mediaPauseAction: { pausedIDs.append($0) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        XCTAssertEqual(pausedIDs, [profile.id])
+        XCTAssertTrue(pool.contains(slotID: profile.id), "pause does not change Hot residency")
+    }
+
+    func testHiddenSelectedBackgroundAudioDoesNotPause() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HiddenBackgroundAudio")
+        profile.residencyPolicy = .hot
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = pool.webView(for: profile)
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        var pausedIDs: [UUID] = []
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            mediaPauseAction: { pausedIDs.append($0) },
+            installsMemoryPressureSource: false
+        )
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        XCTAssertTrue(pausedIDs.isEmpty)
     }
 
     func testShowingPanelCancelsHiddenActiveEviction() async throws {

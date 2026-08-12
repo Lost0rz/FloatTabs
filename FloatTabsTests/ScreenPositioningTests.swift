@@ -218,14 +218,14 @@ final class PanelRootViewLayoutTests: XCTestCase {
             PanelMetrics.outerInteractionGutter,
             accuracy: 0.001
         )
-        XCTAssertEqual(root.webPanelContainerView.frame.size, PanelMetrics.defaultViewportSize)
+        XCTAssertEqual(root.webViewportLayoutView.frame.size, PanelMetrics.defaultViewportSize)
         XCTAssertEqual(
-            root.webPanelContainerView.frame.minY,
+            root.webViewportLayoutView.frame.minY,
             PanelMetrics.outerInteractionGutter,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            root.webPanelContainerView.frame.maxX,
+            root.webViewportLayoutView.frame.maxX,
             root.bounds.maxX - PanelMetrics.outerInteractionGutter,
             accuracy: 0.001
         )
@@ -235,12 +235,12 @@ final class PanelRootViewLayoutTests: XCTestCase {
         XCTAssertEqual(root.resizeHandleView.frame.height, PanelMetrics.resizeHandleSize, accuracy: 0.001)
         XCTAssertEqual(
             root.resizeHandleView.frame.maxX,
-            root.webPanelContainerView.frame.maxX,
+            root.webViewportLayoutView.frame.maxX,
             accuracy: 0.001
         )
         XCTAssertEqual(
             root.resizeHandleView.frame.minY,
-            root.webPanelContainerView.frame.minY,
+            root.webViewportLayoutView.frame.minY,
             accuracy: 0.001
         )
     }
@@ -265,8 +265,8 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         let halfGutter = PanelMetrics.outerInteractionGutter / 2
         let points = [
             NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: root.bounds.midY),
-            NSPoint(x: root.webPanelContainerView.frame.midX, y: root.bounds.maxY - halfGutter),
-            NSPoint(x: root.webPanelContainerView.frame.midX, y: root.bounds.minY + halfGutter),
+            NSPoint(x: root.webViewportLayoutView.frame.midX, y: root.bounds.maxY - halfGutter),
+            NSPoint(x: root.webViewportLayoutView.frame.midX, y: root.bounds.minY + halfGutter),
         ]
 
         for point in points {
@@ -283,10 +283,10 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let halfOverlap = PanelMetrics.innerMovementOverlap / 2
-        let x = root.webPanelContainerView.frame.midX
+        let x = root.webViewportLayoutView.frame.midX
         let points = [
-            NSPoint(x: x, y: root.webPanelContainerView.frame.maxY - halfOverlap),
-            NSPoint(x: x, y: root.webPanelContainerView.frame.minY + halfOverlap),
+            NSPoint(x: x, y: root.webViewportLayoutView.frame.maxY - halfOverlap),
+            NSPoint(x: x, y: root.webViewportLayoutView.frame.minY + halfOverlap),
         ]
 
         for point in points {
@@ -299,11 +299,11 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
-        let x = root.webPanelContainerView.frame.midX
+        let x = root.webViewportLayoutView.frame.midX
         let inset = PanelMetrics.innerMovementOverlap + 2
         let points = [
-            NSPoint(x: x, y: root.webPanelContainerView.frame.maxY - inset),
-            NSPoint(x: x, y: root.webPanelContainerView.frame.minY + inset),
+            NSPoint(x: x, y: root.webViewportLayoutView.frame.maxY - inset),
+            NSPoint(x: x, y: root.webViewportLayoutView.frame.minY + inset),
         ]
 
         for point in points {
@@ -318,8 +318,8 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let rightWebEdge = NSPoint(
-            x: root.webPanelContainerView.frame.maxX - 1,
-            y: root.webPanelContainerView.frame.midY
+            x: root.webViewportLayoutView.frame.maxX - 1,
+            y: root.webViewportLayoutView.frame.midY
         )
 
         XCTAssertFalse(root.hitTest(rightWebEdge) is PanelPerimeterDragView)
@@ -348,7 +348,7 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
 
         var overlappingRectCount = 0
         for rect in PanelPerimeterDragView.dragRects(in: root.bounds) {
-            let overlap = rect.intersection(root.webPanelContainerView.frame)
+            let overlap = rect.intersection(root.webViewportLayoutView.frame)
             guard !overlap.isNull, overlap.width > 0, overlap.height > 0 else { continue }
             overlappingRectCount += 1
             XCTAssertLessThanOrEqual(
@@ -392,7 +392,7 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
             x: root.resizeHandleView.frame.midX,
             y: root.resizeHandleView.frame.midY
         )
-        XCTAssertTrue(root.webPanelContainerView.frame.contains(point))
+        XCTAssertTrue(root.webViewportLayoutView.frame.contains(point))
         XCTAssertTrue(root.hitTest(point) is PanelResizeHandleView)
     }
 
@@ -403,8 +403,8 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
         root.layoutSubtreeIfNeeded()
 
         let websitePoint = NSPoint(
-            x: root.webPanelContainerView.frame.midX,
-            y: root.webPanelContainerView.frame.midY
+            x: root.webViewportLayoutView.frame.midX,
+            y: root.webViewportLayoutView.frame.midY
         )
 
         XCTAssertFalse(root.hitTest(websitePoint) is PanelPerimeterDragView)

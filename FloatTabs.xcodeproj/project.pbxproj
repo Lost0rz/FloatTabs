@@ -45,6 +45,7 @@
 		A00000000000000000000025 /* AppPreferencesStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000025 /* AppPreferencesStoreTests.swift */; };
 		A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000026 /* FloatTabsBackupService.swift */; };
 		A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */; };
+		A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000028 /* FullscreenSourceHost.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,6 +98,7 @@
 		B00000000000000000000025 /* AppPreferencesStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesStoreTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000026 /* FloatTabsBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupService.swift; sourceTree = "<group>"; };
 		B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupServiceTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000028 /* FullscreenSourceHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenSourceHost.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000000000000000000004 /* FloatingPanel.swift */,
+				B00000000000000000000028 /* FullscreenSourceHost.swift */,
 				B00000000000000000000005 /* PanelController.swift */,
 				B00000000000000000000006 /* ScreenPositioning.swift */,
 			);
@@ -375,6 +378,7 @@
 				A00000000000000000000016 /* ExternalTabRail.swift in Sources */,
 				A00000000000000000000001 /* FloatTabsApp.swift in Sources */,
 				A00000000000000000000004 /* FloatingPanel.swift in Sources */,
+				A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */,
 				A00000000000000000000008 /* GlobalHotkeyController.swift in Sources */,
 				A00000000000000000000005 /* PanelController.swift in Sources */,
 				A00000000000000000000013 /* ProfileRepository.swift in Sources */,

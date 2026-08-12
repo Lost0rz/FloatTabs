@@ -1,9 +1,171 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import FloatTabs
 
 @MainActor
 final class ExternalShellTests: XCTestCase {
+    func testFullscreenVisibilityRestoresPresentationThatWasVisibleBeforeEntry() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: true)
+
+        XCTAssertTrue(intent.consumeRestore(currentVisibility: false))
+        XCTAssertFalse(intent.shouldRestoreNormalPresentation)
+    }
+
+    func testExplicitFullscreenDismissalCancelsNormalPresentationRestore() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: true)
+        intent.dismissPresentation()
+
+        XCTAssertFalse(intent.consumeRestore(currentVisibility: false))
+    }
+
+    func testExplicitFullscreenShowKeepsNormalPresentationAfterRestore() {
+        var intent = FullscreenVisibilityIntent()
+
+        intent.begin(wasVisible: false)
+        intent.requestPresentation()
+
+        XCTAssertTrue(intent.consumeRestore(currentVisibility: true))
+    }
+
+    func testFullscreenSourceSlotCannotBeRemovedWhileWebKitOwnsIt() {
+        let sourceID = UUID()
+
+        XCTAssertFalse(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: sourceID,
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: UUID(),
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PanelController.canRemoveSlotDuringFullscreen(
+                slotID: sourceID,
+                fullscreenSourceSlotID: sourceID,
+                sessionIsLocked: false
+            )
+        )
+    }
+
+    func testFullscreenSourceHostUsesOrdinaryWindowSemantics() {
+        let behavior = FullscreenSourceHostController.sourceWindowCollectionBehavior
+
+        XCTAssertTrue(behavior.contains(.managed))
+        XCTAssertTrue(behavior.contains(.fullScreenNone))
+        XCTAssertFalse(behavior.contains(.canJoinAllSpaces))
+        XCTAssertFalse(behavior.contains(.canJoinAllApplications))
+        XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(behavior.contains(.fullScreenPrimary))
+    }
+
+    func testFullscreenSourceSessionStaysLockedUntilRestorePhaseCompletes() {
+        var state = FullscreenSourceSessionState.idle
+
+        state = .next(from: state, webKitState: .enteringFullscreen)
+        XCTAssertEqual(state, .entering)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .inFullscreen)
+        XCTAssertEqual(state, .fullscreen)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .exitingFullscreen)
+        XCTAssertEqual(state, .exiting)
+        XCTAssertTrue(state.locksSourceHost)
+
+        state = .next(from: state, webKitState: .notInFullscreen)
+        XCTAssertEqual(state, .restoring)
+        XCTAssertTrue(state.locksSourceHost)
+    }
+
+    func testSourceHostFrameMatchesOnlyTheWebViewport() {
+        let shell = NSRect(x: 100, y: 200, width: 688, height: 844)
+        let source = FullscreenSourceHostController.sourceFrame(forShellFrame: shell)
+
+        XCTAssertEqual(source.origin.x, 176, accuracy: 0.001)
+        XCTAssertEqual(source.origin.y, 212, accuracy: 0.001)
+        XCTAssertEqual(source.size.width, 600, accuracy: 0.001)
+        XCTAssertEqual(source.size.height, 820, accuracy: 0.001)
+    }
+
+    func testPanelRootKeepsWebContainerOutOfFloatingShellHierarchy() {
+        let root = PanelRootView()
+
+        XCTAssertNil(root.webPanelContainerView.superview)
+        XCTAssertTrue(root.webViewportLayoutView.superview === root)
+    }
+
+    func testFullscreenExitPlaceholderOccupiesShellViewportAndReceivesClicks() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+
+        root.installFullscreenExitPlaceholder()
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(root.fullscreenExitPlaceholderView.superview === root)
+        XCTAssertEqual(
+            root.fullscreenExitPlaceholderView.frame,
+            root.webViewportLayoutView.frame
+        )
+
+        let viewportPoint = NSPoint(
+            x: root.fullscreenExitPlaceholderView.frame.midX,
+            y: root.fullscreenExitPlaceholderView.frame.midY
+        )
+        XCTAssertNotNil(root.hitTest(viewportPoint))
+    }
+
+    func testFullscreenCompanionContainerOccupiesShellViewportAndReceivesClicks() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+
+        root.installFullscreenCompanionContainer(companion)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(companion.superview === root)
+        XCTAssertEqual(companion.frame, root.webViewportLayoutView.frame)
+
+        let viewportPoint = NSPoint(x: companion.frame.midX, y: companion.frame.midY)
+        XCTAssertNotNil(root.hitTest(viewportPoint))
+
+        root.removeFullscreenCompanionContainer(companion)
+        XCTAssertNil(companion.superview)
+    }
+
+    func testInstallingCompanionReplacesFullscreenExitPlaceholder() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+
+        root.installFullscreenExitPlaceholder()
+        root.installFullscreenCompanionContainer(companion)
+
+        XCTAssertNil(root.fullscreenExitPlaceholderView.superview)
+        XCTAssertTrue(companion.superview === root)
+    }
+
+    func testInstallingFullscreenExitPlaceholderReplacesCompanion() {
+        let root = PanelRootView()
+        let companion = WebPanelContainerView()
+
+        root.installFullscreenCompanionContainer(companion)
+        root.installFullscreenExitPlaceholder()
+
+        XCTAssertNil(companion.superview)
+        XCTAssertTrue(root.fullscreenExitPlaceholderView.superview === root)
+    }
+
     func testActualTabHitAreaReturnsVisibleTabView() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
@@ -97,6 +259,42 @@ final class ExternalShellTests: XCTestCase {
             PanelController.shouldAutoHideForExternalMouseDown(
                 panelIsVisible: false,
                 isPinned: false
+            )
+        )
+    }
+
+    func testGlobalFirstMouseInsideVisibleSourceDoesNotAutoHidePresentation() {
+        XCTAssertTrue(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 150, y: 150),
+                shellFrame: NSRect(x: 0, y: 0, width: 50, height: 50),
+                shellIsVisible: true,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: true
+            )
+        )
+    }
+
+    func testGlobalMouseOutsidePresentationStillAllowsAutoHide() {
+        XCTAssertFalse(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 500, y: 500),
+                shellFrame: NSRect(x: 0, y: 0, width: 50, height: 50),
+                shellIsVisible: true,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: true
+            )
+        )
+    }
+
+    func testHiddenOrFullscreenSourceDoesNotMaskRealExternalClick() {
+        XCTAssertFalse(
+            PanelController.externalMouseDownIsInsideVisiblePresentation(
+                mouseLocation: NSPoint(x: 150, y: 150),
+                shellFrame: .zero,
+                shellIsVisible: false,
+                sourceFrame: NSRect(x: 100, y: 100, width: 200, height: 200),
+                sourceIsVisibleAndIdle: false
             )
         )
     }
@@ -332,7 +530,7 @@ final class ExternalShellTests: XCTestCase {
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
-        let webFrame = root.webPanelContainerView.frame
+        let webFrame = root.webViewportLayoutView.frame
         let insideWebCorner = NSPoint(x: webFrame.maxX - 4, y: webFrame.minY + 4)
         XCTAssertTrue(root.hitTest(insideWebCorner) is PanelResizeHandleView)
 
@@ -349,7 +547,7 @@ final class ExternalShellTests: XCTestCase {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
-        let webFrame = root.webPanelContainerView.frame
+        let webFrame = root.webViewportLayoutView.frame
 
         let topInside = NSPoint(x: webFrame.midX, y: webFrame.maxY - 8)
         let bottomInside = NSPoint(x: webFrame.midX, y: webFrame.minY + 8)

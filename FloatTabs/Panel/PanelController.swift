@@ -1,10 +1,33 @@
 import AppKit
 import WebKit
 
+struct FullscreenVisibilityIntent {
+    private(set) var shouldRestoreNormalPresentation = false
+
+    mutating func begin(wasVisible: Bool) {
+        shouldRestoreNormalPresentation = wasVisible
+    }
+
+    mutating func requestPresentation() {
+        shouldRestoreNormalPresentation = true
+    }
+
+    mutating func dismissPresentation() {
+        shouldRestoreNormalPresentation = false
+    }
+
+    mutating func consumeRestore(currentVisibility: Bool) -> Bool {
+        let restoredVisibility = currentVisibility || shouldRestoreNormalPresentation
+        shouldRestoreNormalPresentation = false
+        return restoredVisibility
+    }
+}
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     private let panel: FloatingPanel
     private let rootView: PanelRootView
+    private let sourceHostController: FullscreenSourceHostController
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
     private let frameStore: PanelFrameStore
@@ -24,9 +47,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let preferencesStore: AppPreferencesStore
     private(set) var isPinned = false
     private var externalMouseMonitor: Any?
+    private var requestedVisibility = false
+    private var pendingSlotSynchronization = false
+    private var lastPresentationUptime: TimeInterval = -.infinity
+    private var suppressWorkspaceAutoHideUntilUptime: TimeInterval = -.infinity
+    private var fullscreenProfile: WebAppProfile?
+    private var companionActiveProfile: WebAppProfile?
+    private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
 
     var isVisible: Bool {
-        panel.isVisible
+        requestedVisibility
     }
 
     var selectedSlotName: String? {
@@ -55,11 +85,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
         rootView = PanelRootView()
+        sourceHostController = FullscreenSourceHostController(
+            container: rootView.webPanelContainerView,
+            resizeHandle: rootView.resizeHandleView,
+            resizeReadout: rootView.resizeReadoutView,
+            shellWindow: panel
+        )
 
         super.init()
 
         panel.delegate = self
         panel.contentView = rootView
+
+        sourceHostController.onSessionLockChange = { [weak self] isLocked in
+            self?.handleSourceSessionLockChange(isLocked: isLocked)
+        }
+        sourceHostController.onSessionStateChange = { [weak self] state in
+            self?.handleSourceSessionStateChange(state)
+        }
 
         // The animated color outline is the only persistent shell outline.
         rootView.webPanelContainerView.layer?.borderWidth = 0
@@ -73,6 +116,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
         }
+        rootView.fullscreenExitPlaceholderView.onExitFullscreen = { [weak self] in
+            self?.sourceHostController.requestFullscreenExit()
+        }
         configureSlotInteractions()
         configurePreferenceObservers()
         synchronizePreferencePresentation()
@@ -85,9 +131,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
+        ) { [weak self] event in
+            let eventTimestamp = event.timestamp
+            let mouseLocation = NSEvent.mouseLocation
             Task { @MainActor [weak self] in
-                self?.handleExternalMouseDown()
+                self?.handleExternalMouseDown(
+                    eventTimestamp: eventTimestamp,
+                    mouseLocation: mouseLocation
+                )
             }
         }
 
@@ -101,21 +152,65 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func showFloatTabs() {
+        let presentationUptime = ProcessInfo.processInfo.systemUptime
+        lastPresentationUptime = presentationUptime
+        suppressWorkspaceAutoHideUntilUptime = presentationUptime + 0.25
+        requestedVisibility = true
+        guard !sourceHostController.isSessionLocked else {
+            fullscreenVisibilityIntent.requestPresentation()
+            // A companion presentation is one movable window group. Remove its
+            // old Space representation before placing it on the mouse display.
+            panel.orderOut(nil)
+            showFullscreenCompanionIfReady()
+            return
+        }
+
         capturePreviousApplication()
         positionPanelForCurrentScreens()
         synchronizeFixedViewportAfterPositioning()
+        synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
         activateFloatTabs()
 
+        // Establish the target display as AppKit's key-window context before
+        // handing focus to the ordinary Web source window. WebKit consults the
+        // main/key screen when it creates its element-fullscreen window; merely
+        // ordering the cross-Space shell left that context on the previously
+        // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            fullscreenExperimentLog(
+                "SHOW shell=\(self.panel.windowNumber) source=\(self.sourceHostController.window.windowNumber) "
+                    + "shellScreen=\(fullscreenExperimentScreenID(self.panel.screen)) "
+                    + "sourceScreen=\(fullscreenExperimentScreenID(self.sourceHostController.window.screen)) "
+                    + "shellKey=\(self.panel.isKeyWindow) "
+                    + "sourceKey=\(self.sourceHostController.window.isKeyWindow) "
+                    + "sourceVisible=\(self.sourceHostController.window.isVisible)"
+            )
+        }
     }
 
     func hideFloatTabs() {
+        requestedVisibility = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
+
+        // WebKit still needs the ordered, unmoved source host and placeholder
+        // until its own fullscreen controller has reattached the WKWebView.
+        guard !sourceHostController.isSessionLocked else {
+            fullscreenVisibilityIntent.dismissPresentation()
+            tearDownFullscreenCompanion(
+                pauseInactiveMedia: true,
+                hidePanel: true
+            )
+            return
+        }
+
+        sourceHostController.orderOutIfSafe()
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
 
         guard let previousApplication else {
@@ -138,6 +233,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func restoreStoredWebAppState(_ state: StoredWebAppState) -> Bool {
+        // Replacing the stored model releases every live WebView. Never allow
+        // that operation while WebKit is still using one as a fullscreen source.
+        guard !sourceHostController.isSessionLocked else { return false }
+
         let existingIDs = Set(tabStore.profiles.map(\.id))
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
         for slotID in existingIDs {
@@ -166,6 +265,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func togglePinnedState() {
         isPinned.toggle()
         rootView.externalControlZoneView.setPinned(isPinned)
+        if isPinned, sourceHostController.sessionState == .fullscreen {
+            requestedVisibility = true
+            fullscreenVisibilityIntent.requestPresentation()
+            showFullscreenCompanionIfReady()
+        }
     }
 
     static func shouldAutoHideForActivatedApplication(
@@ -186,27 +290,70 @@ final class PanelController: NSObject, NSWindowDelegate {
         shouldAutoHide(panelIsVisible: panelIsVisible, isPinned: isPinned)
     }
 
-    private func handleExternalMouseDown() {
+    static func externalMouseDownIsInsideVisiblePresentation(
+        mouseLocation: NSPoint,
+        shellFrame: NSRect,
+        shellIsVisible: Bool,
+        sourceFrame: NSRect,
+        sourceIsVisibleAndIdle: Bool
+    ) -> Bool {
+        (shellIsVisible && shellFrame.contains(mouseLocation))
+            || (sourceIsVisibleAndIdle && sourceFrame.contains(mouseLocation))
+    }
+
+    private func handleExternalMouseDown(
+        eventTimestamp: TimeInterval,
+        mouseLocation: NSPoint
+    ) {
+        // Global monitor delivery is bridged back to MainActor. A click that
+        // happened on B before the hotkey can otherwise arrive after A has been
+        // presented and incorrectly hide that new presentation.
+        guard eventTimestamp >= lastPresentationUptime else { return }
+        if Self.externalMouseDownIsInsideVisiblePresentation(
+            mouseLocation: mouseLocation,
+            shellFrame: panel.frame,
+            shellIsVisible: panel.isVisible,
+            sourceFrame: sourceHostController.window.frame,
+            sourceIsVisibleAndIdle: sourceHostController.window.isVisible
+                && !sourceHostController.isSessionLocked
+        ) {
+            fullscreenExperimentLog(
+                "GLOBAL_MOUSE_IGNORED reason=insidePresentation "
+                    + "mouse=\(NSStringFromPoint(mouseLocation))"
+            )
+            return
+        }
         guard Self.shouldAutoHideForExternalMouseDown(
-            panelIsVisible: panel.isVisible,
+            panelIsVisible: requestedVisibility,
             isPinned: isPinned
         ) else {
             return
         }
+        fullscreenExperimentLog(
+            "AUTO_HIDE reason=globalMouse event=\(eventTimestamp) "
+                + "shown=\(lastPresentationUptime) mouse=\(NSStringFromPoint(mouseLocation))"
+        )
         autoHideAfterApplicationDeactivation()
     }
 
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {
         guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication,
+              ProcessInfo.processInfo.systemUptime >= suppressWorkspaceAutoHideUntilUptime,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == activatedApplication.processIdentifier,
               Self.shouldAutoHideForActivatedApplication(
-                panelIsVisible: panel.isVisible,
+                panelIsVisible: requestedVisibility,
                 isPinned: isPinned,
                 activatedProcessIdentifier: activatedApplication.processIdentifier,
                 ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier
               ) else {
             return
         }
+        fullscreenExperimentLog(
+            "AUTO_HIDE reason=workspace app=\(activatedApplication.bundleIdentifier ?? "unknown") "
+                + "pid=\(activatedApplication.processIdentifier)"
+        )
         autoHideAfterApplicationDeactivation()
     }
 
@@ -214,9 +361,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         // The user has already selected another application. Unlike the explicit
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
+        requestedVisibility = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
+        guard !sourceHostController.isSessionLocked else {
+            fullscreenVisibilityIntent.dismissPresentation()
+            tearDownFullscreenCompanion(
+                pauseInactiveMedia: true,
+                hidePanel: true
+            )
+            previousApplication = nil
+            return
+        }
+        sourceHostController.orderOutIfSafe()
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
         previousApplication = nil
     }
@@ -246,6 +404,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             "pending_warm_release_count": slotLifecycleCoordinator.pendingWarmReleaseCount,
             "media_protected_slot_ids": slotLifecycleCoordinator.mediaProtectedIDs.map(\.uuidString).sorted(),
             "hidden_active_grace_pending": slotLifecycleCoordinator.isHiddenActiveGracePending,
+            "fullscreen_source_state": sourceHostController.sessionState.rawValue,
         ]
         snapshot["active_slot_id"] = tabStore.activeTabID?.uuidString ?? NSNull()
 
@@ -335,24 +494,24 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         NSLayoutConstraint.activate([
             addressOverlayView.leadingAnchor.constraint(
-                equalTo: rootView.webPanelContainerView.leadingAnchor,
+                equalTo: rootView.webViewportLayoutView.leadingAnchor,
                 constant: 22
             ),
             addressOverlayView.trailingAnchor.constraint(
-                equalTo: rootView.webPanelContainerView.trailingAnchor,
+                equalTo: rootView.webViewportLayoutView.trailingAnchor,
                 constant: -22
             ),
             addressOverlayView.topAnchor.constraint(
-                equalTo: rootView.webPanelContainerView.topAnchor,
+                equalTo: rootView.webViewportLayoutView.topAnchor,
                 constant: 22
             ),
             addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
 
             zoomHUDView.centerXAnchor.constraint(
-                equalTo: rootView.webPanelContainerView.centerXAnchor
+                equalTo: rootView.webViewportLayoutView.centerXAnchor
             ),
             zoomHUDView.bottomAnchor.constraint(
-                equalTo: rootView.webPanelContainerView.bottomAnchor,
+                equalTo: rootView.webViewportLayoutView.bottomAnchor,
                 constant: -28
             ),
             zoomHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
@@ -502,6 +661,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
+        guard !sourceHostController.isSessionLocked else {
+            pendingSlotSynchronization = true
+            synchronizeFullscreenCompanionSlotState()
+            return
+        }
+        pendingSlotSynchronization = false
+
         let orderedProfiles = tabStore.orderedProfiles
         rootView.externalControlZoneView.apply(
             profiles: orderedProfiles,
@@ -541,13 +707,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         slotLifecycleCoordinator.activate(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
+        sourceHostController.observeFullscreenState(of: webView)
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
         synchronizeResidentIndicators()
         onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
 
-        if panel.isKeyWindow {
-            _ = panel.makeFirstResponder(webView)
+        if panel.isVisible,
+           panel.isKeyWindow || sourceHostController.window.isKeyWindow {
+            sourceHostController.orderFrontAndFocus(webView)
         }
     }
 
@@ -556,9 +724,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func focusActiveWebViewIfAvailable() {
-        guard !addressOverlayView.isPresented,
-              let webView = rootView.webPanelContainerView.currentWebView else { return }
-        _ = panel.makeFirstResponder(webView)
+        guard !addressOverlayView.isPresented else { return }
+        if sourceHostController.isSessionLocked {
+            if let webView = sourceHostController.companionContainer.currentWebView {
+                _ = panel.makeFirstResponder(webView)
+            }
+            return
+        }
+        sourceHostController.orderFrontAndFocus(
+            rootView.webPanelContainerView.currentWebView
+        )
     }
 
     private func returnActiveSlotHome() {
@@ -658,6 +833,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func presentRemoveConfirmation(id: UUID) {
+        guard Self.canRemoveSlotDuringFullscreen(
+            slotID: id,
+            fullscreenSourceSlotID: fullscreenProfile?.id,
+            sessionIsLocked: sourceHostController.isSessionLocked
+        ) else {
+            NSSound.beep()
+            return
+        }
         guard panel.attachedSheet == nil,
               let profile = tabStore.profiles.first(where: { $0.id == id }) else {
             return
@@ -692,10 +875,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func presentAddressBar() {
         guard let url = currentAddressURL() else { return }
         addressOverlayView.present(url: url, in: panel)
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func currentAddressURL() -> URL? {
-        if let webURL = rootView.webPanelContainerView.currentWebView?.url,
+        if let webURL = selectedPresentationWebView()?.url,
            WebAppURL.isSafe(webURL) {
             return webURL
         }
@@ -704,6 +888,22 @@ final class PanelController: NSObject, NSWindowDelegate {
             return currentURL
         }
         return WebAppURL.isSafe(profile.homeURL) ? profile.homeURL : nil
+    }
+
+    private func selectedPresentationWebView() -> WKWebView? {
+        if sourceHostController.isSessionLocked,
+           let companionWebView = sourceHostController.companionContainer.currentWebView {
+            return companionWebView
+        }
+        return rootView.webPanelContainerView.currentWebView
+    }
+
+    static func canRemoveSlotDuringFullscreen(
+        slotID: UUID,
+        fullscreenSourceSlotID: UUID?,
+        sessionIsLocked: Bool
+    ) -> Bool {
+        !sessionIsLocked || slotID != fullscreenSourceSlotID
     }
 
     private func commitAddress(_ rawValue: String) -> Bool {
@@ -804,6 +1004,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         guard target != panel.frame else { return }
         panel.setFrame(target, display: true, animate: animated)
+        synchronizeSourceHostFrame(display: true)
         persistPanelFrame()
     }
 
@@ -857,6 +1058,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         panel.setFrame(targetFrame, display: false)
+        synchronizeSourceHostFrame(display: false)
         restoredFrame = nil
         hasPositionedPanel = true
     }
@@ -873,12 +1075,234 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         if clamped != panel.frame {
             panel.setFrame(clamped, display: true)
+            synchronizeSourceHostFrame(display: true)
         }
     }
 
     private func persistPanelFrame() {
         guard hasPositionedPanel else { return }
         frameStore.saveFrame(panel.frame)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        synchronizeSourceHostFrame(display: false)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        synchronizeSourceHostFrame(display: true)
+    }
+
+    private func synchronizeSourceHostFrame(display: Bool) {
+        sourceHostController.synchronizeFrame(with: panel, display: display)
+    }
+
+    private func handleSourceSessionLockChange(isLocked: Bool) {
+        if isLocked {
+            fullscreenVisibilityIntent.begin(wasVisible: requestedVisibility)
+            fullscreenProfile = lastSynchronizedActiveProfile ?? tabStore.activeProfile
+            companionActiveProfile = nil
+            pendingSlotSynchronization = false
+            addressOverlayView.dismiss()
+            panel.orderOut(nil)
+            rootView.removeFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            rootView.removeFullscreenExitPlaceholder()
+            requestedVisibility = isPinned
+            return
+        }
+
+        requestedVisibility = fullscreenVisibilityIntent.consumeRestore(
+            currentVisibility: requestedVisibility
+        )
+        let shouldKeepShellVisible = requestedVisibility
+        let shouldPauseCompanion = !shouldKeepShellVisible
+        // The companion collection behavior is tied to the fullscreen Space.
+        // Merely changing its flags while the panel remains ordered leaves the
+        // panel represented in the Space that macOS is destroying. Re-home it
+        // atomically only after WebKit has restored the real page: order out,
+        // rebuild the normal hierarchy, and order front again in this same main
+        // run-loop turn. The restored source page remains underneath throughout.
+        if shouldKeepShellVisible {
+            panel.orderOut(nil)
+        }
+        tearDownFullscreenCompanion(
+            pauseInactiveMedia: shouldPauseCompanion,
+            hidePanel: !shouldKeepShellVisible
+        )
+        fullscreenProfile = nil
+        panel.setFullscreenCompanionPresentation(false)
+        pendingSlotSynchronization = true
+
+        if pendingSlotSynchronization {
+            synchronizeSlotState()
+        }
+
+        guard requestedVisibility else {
+            sourceHostController.orderOutIfSafe()
+            slotLifecycleCoordinator.setPanelVisible(
+                false,
+                activeProfile: tabStore.activeProfile
+            )
+            return
+        }
+
+        synchronizeSourceHostFrame(display: false)
+        slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
+        synchronizeSlotState()
+        // Re-establish the queued target display before returning Web focus.
+        panel.makeKeyAndOrderFront(nil)
+        focusActiveWebViewIfAvailable()
+        fullscreenExperimentLog(
+            "RESTORE_PRESENTED shell=\(panel.windowNumber) "
+                + "source=\(sourceHostController.window.windowNumber) "
+                + "shellScreen=\(fullscreenExperimentScreenID(panel.screen)) "
+                + "sourceScreen=\(fullscreenExperimentScreenID(sourceHostController.window.screen)) "
+                + "shellVisible=\(panel.isVisible) "
+                + "sourceVisible=\(sourceHostController.window.isVisible)"
+        )
+    }
+
+    private func handleSourceSessionStateChange(_ state: FullscreenSourceSessionState) {
+        fullscreenExperimentLog(
+            "SESSION state=\(state.rawValue) requested=\(requestedVisibility) "
+                + "shellVisible=\(panel.isVisible) "
+                + "shellScreen=\(fullscreenExperimentScreenID(panel.screen))"
+        )
+        switch state {
+        case .fullscreen:
+            showFullscreenCompanionIfReady()
+        case .exiting, .restoring:
+            // Keep the requested shell in place while WebKit returns the
+            // fullscreen WebView to its source hierarchy. Ordering it out here
+            // created a visible empty frame before the normal page was shown.
+            if !requestedVisibility {
+                panel.orderOut(nil)
+            }
+        case .idle, .entering:
+            break
+        }
+    }
+
+    private func showFullscreenCompanionIfReady() {
+        guard requestedVisibility,
+              sourceHostController.sessionState == .fullscreen else {
+            return
+        }
+
+        capturePreviousApplication()
+        panel.orderOut(nil)
+        rootView.removeFullscreenCompanionContainer(
+            sourceHostController.companionContainer
+        )
+        positionPanelForCurrentScreens()
+        panel.setFullscreenCompanionPresentation(true)
+        synchronizeFullscreenCompanionSlotState()
+        activateFloatTabs()
+        panel.makeKeyAndOrderFront(nil)
+
+        if let webView = sourceHostController.companionContainer.currentWebView {
+            _ = panel.makeFirstResponder(webView)
+        }
+    }
+
+    private func synchronizeFullscreenCompanionSlotState() {
+        let orderedProfiles = tabStore.orderedProfiles
+        rootView.externalControlZoneView.apply(
+            profiles: orderedProfiles,
+            activeTabID: tabStore.activeTabID
+        )
+        synchronizeResidentIndicators()
+
+        guard let activeProfile = tabStore.activeProfile else {
+            deactivateCompanionProfile(pauseInactiveMedia: true)
+            sourceHostController.companionContainer.showEmptyState()
+            rootView.removeFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            rootView.removeFullscreenExitPlaceholder()
+            onSelectedSlotPresentationChange?(nil, nil)
+            return
+        }
+
+        onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
+
+        // Selecting the fullscreen Slot only selects its rail identity. Its
+        // WKWebView must remain exclusively owned by WebKit until restore.
+        guard activeProfile.id != fullscreenProfile?.id else {
+            deactivateCompanionProfile(pauseInactiveMedia: true)
+            sourceHostController.companionContainer.showEmptyState()
+            rootView.removeFullscreenCompanionContainer(
+                sourceHostController.companionContainer
+            )
+            rootView.installFullscreenExitPlaceholder()
+            return
+        }
+
+        if companionActiveProfile?.id != activeProfile.id {
+            deactivateCompanionProfile(pauseInactiveMedia: true)
+            if preferencesStore.followPreferredSize {
+                applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
+            }
+        }
+
+        rootView.installFullscreenCompanionContainer(
+            sourceHostController.companionContainer
+        )
+        let webView = webViewPool.webView(for: activeProfile)
+        sourceHostController.companionContainer.show(
+            webView: webView,
+            slotID: activeProfile.id,
+            residencyPolicy: activeProfile.residencyPolicy
+        )
+        slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
+        WebViewFactory.configureHiddenScrollers(in: webView)
+        companionActiveProfile = activeProfile
+
+        guard requestedVisibility,
+              sourceHostController.sessionState == .fullscreen else { return }
+        _ = panel.makeFirstResponder(webView)
+    }
+
+    private func hideFullscreenCompanion(pauseInactiveMedia: Bool) {
+        panel.orderOut(nil)
+        if pauseInactiveMedia,
+           let profile = companionActiveProfile,
+           profile.backgroundMediaPolicy == .pauseWhenInactive {
+            webViewPool.pauseMediaPlayback(slotID: profile.id)
+        }
+    }
+
+    private func tearDownFullscreenCompanion(
+        pauseInactiveMedia: Bool,
+        hidePanel: Bool
+    ) {
+        if hidePanel {
+            hideFullscreenCompanion(pauseInactiveMedia: pauseInactiveMedia)
+        }
+        deactivateCompanionProfile(pauseInactiveMedia: pauseInactiveMedia)
+        sourceHostController.companionContainer.showEmptyState()
+        rootView.removeFullscreenCompanionContainer(
+            sourceHostController.companionContainer
+        )
+        rootView.removeFullscreenExitPlaceholder()
+    }
+
+    private func deactivateCompanionProfile(pauseInactiveMedia: Bool) {
+        guard let profile = companionActiveProfile else { return }
+        if pauseInactiveMedia,
+           profile.backgroundMediaPolicy == .pauseWhenInactive {
+            webViewPool.pauseMediaPlayback(slotID: profile.id)
+        }
+        sourceHostController.companionContainer.deactivate(
+            slotID: profile.id,
+            residencyPolicy: profile.residencyPolicy
+        )
+        slotLifecycleCoordinator.endSupplementalVisibility(
+            profile: profile,
+            prepareAsInactive: pauseInactiveMedia
+        )
+        companionActiveProfile = nil
     }
 }
 
