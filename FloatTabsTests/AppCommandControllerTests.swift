@@ -6,87 +6,66 @@ import XCTest
 @MainActor
 final class AppCommandControllerTests: XCTestCase {
     func testOnlyExplicitFloatTabsShortcutsAreMatched() {
-        // KeyboardShortcuts intentionally persists user customizations. This
-        // test verifies the catalog defaults, so isolate it from the developer
-        // machine's current Settings choices and restore them afterward.
-        let originalShortcuts = AppShortcutCatalog.allBindings.map {
-            ($0.name, KeyboardShortcuts.getShortcut(for: $0.name))
-        }
-        KeyboardShortcuts.reset(AppShortcutCatalog.allNames)
-        defer {
-            for (name, shortcut) in originalShortcuts {
-                KeyboardShortcuts.setShortcut(shortcut, for: name)
-            }
-        }
-
         XCTAssertEqual(
-            AppCommandController.command(characters: "1", keyCode: 18, modifiers: [.command]),
+            defaultCommand(keyCode: 18, modifiers: [.command]),
             .selectSlot(1)
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "9", keyCode: 25, modifiers: [.command]),
+            defaultCommand(keyCode: 25, modifiers: [.command]),
             .selectSlot(9)
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "t", keyCode: 17, modifiers: [.command]),
+            defaultCommand(keyCode: 17, modifiers: [.command]),
             .addWebApp
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "l", keyCode: 37, modifiers: [.command]),
+            defaultCommand(keyCode: 37, modifiers: [.command]),
             .addressBar
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "r", keyCode: 15, modifiers: [.command]),
+            defaultCommand(keyCode: 15, modifiers: [.command]),
             .reload
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: ",", keyCode: 43, modifiers: [.command]),
+            defaultCommand(keyCode: 43, modifiers: [.command]),
             .settings
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "+", keyCode: 24, modifiers: [.command, .shift]),
+            defaultCommand(keyCode: 24, modifiers: [.command, .shift]),
             .zoomIn
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "=", keyCode: 24, modifiers: [.command]),
+            defaultCommand(keyCode: 24, modifiers: [.command]),
             .zoomIn
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "-", keyCode: 27, modifiers: [.command]),
+            defaultCommand(keyCode: 27, modifiers: [.command]),
             .zoomOut
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "0", keyCode: 29, modifiers: [.command]),
+            defaultCommand(keyCode: 29, modifiers: [.command]),
             .resetZoom
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "\t", keyCode: 48, modifiers: [.control]),
+            defaultCommand(keyCode: 48, modifiers: [.control]),
             .nextSlot
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "\t", keyCode: 48, modifiers: [.control, .shift]),
+            defaultCommand(keyCode: 48, modifiers: [.control, .shift]),
             .previousSlot
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "h", keyCode: 4, modifiers: [.command, .shift]),
+            defaultCommand(keyCode: 4, modifiers: [.command, .shift]),
             .returnHome
         )
         XCTAssertEqual(
-            AppCommandController.command(characters: "H", keyCode: 4, modifiers: [.command, .shift]),
-            .returnHome
-        )
-        XCTAssertEqual(
-            AppCommandController.command(characters: "p", keyCode: 35, modifiers: [.command, .shift]),
-            .togglePin
-        )
-        XCTAssertEqual(
-            AppCommandController.command(characters: "P", keyCode: 35, modifiers: [.command, .shift]),
+            defaultCommand(keyCode: 35, modifiers: [.command, .shift]),
             .togglePin
         )
 
-        XCTAssertNil(AppCommandController.command(characters: "a", keyCode: 0, modifiers: [.command]))
-        XCTAssertNil(AppCommandController.command(characters: "c", keyCode: 8, modifiers: [.command]))
-        XCTAssertNil(AppCommandController.command(characters: "1", keyCode: 18, modifiers: [.command, .shift]))
+        XCTAssertNil(defaultCommand(keyCode: 0, modifiers: [.command]))
+        XCTAssertNil(defaultCommand(keyCode: 8, modifiers: [.command]))
+        XCTAssertNil(defaultCommand(keyCode: 18, modifiers: [.command, .shift]))
     }
 
     func testEveryPreviouslyFixedShortcutHasAnIndividualBinding() {
@@ -99,26 +78,36 @@ final class AppCommandControllerTests: XCTestCase {
     }
 
     func testConfiguredAddressShortcutReplacesDefaultCommandL() {
-        let original = KeyboardShortcuts.getShortcut(for: .addressBar)
         let custom = KeyboardShortcuts.Shortcut(.k, modifiers: [.command, .option])
-        KeyboardShortcuts.setShortcut(custom, for: .addressBar)
-        defer { KeyboardShortcuts.setShortcut(original, for: .addressBar) }
+        let shortcutFor: (KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut? = { name in
+            name == .addressBar ? custom : name.initialShortcut
+        }
 
         XCTAssertNil(
-            AppCommandController.command(
-                characters: "l",
+            AppShortcutCatalog.command(
                 keyCode: UInt16(KeyboardShortcuts.Key.l.rawValue),
-                modifiers: [.command]
+                modifiers: [.command],
+                shortcutFor: shortcutFor
             )
         )
         XCTAssertEqual(
-            AppCommandController.command(
-                characters: "k",
+            AppShortcutCatalog.command(
                 keyCode: UInt16(KeyboardShortcuts.Key.k.rawValue),
-                modifiers: [.command, .option]
+                modifiers: [.command, .option],
+                shortcutFor: shortcutFor
             ),
             .addressBar
         )
+    }
+
+    func testDefaultCatalogAndGlobalToggleHaveNoDuplicateShortcuts() {
+        let names: [KeyboardShortcuts.Name] = [
+            .toggleFloatTabs,
+        ] + AppShortcutCatalog.allNames
+        let shortcuts = names.compactMap(\.initialShortcut)
+
+        XCTAssertEqual(shortcuts.count, names.count)
+        XCTAssertEqual(Set(shortcuts).count, shortcuts.count)
     }
 
     func testAddressBarDismissesForEscapeSecondCommandLAndOutsideClickOnly() {
@@ -210,5 +199,16 @@ final class AppCommandControllerTests: XCTestCase {
             )
         )
         XCTAssertEqual(committed, "example.com/project")
+    }
+
+    private func defaultCommand(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags
+    ) -> AppCommand? {
+        AppShortcutCatalog.command(
+            keyCode: keyCode,
+            modifiers: modifiers,
+            shortcutFor: \.initialShortcut
+        )
     }
 }

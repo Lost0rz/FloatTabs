@@ -60,6 +60,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         requestedVisibility
     }
 
+    /// Local event monitors only receive this process's events, so AppKit's
+    /// application-wide active flag is not an additional safety boundary here.
+    /// In an LSUIElement accessory app that flag can briefly be false while a
+    /// FloatTabs source window is key. A fullscreen source also remains an
+    /// interactive FloatTabs presentation when its companion shell is hidden.
+    var acceptsAppCommands: Bool {
+        Self.acceptsAppCommands(
+            requestedVisibility: requestedVisibility,
+            sourceSessionLocked: sourceHostController.isSessionLocked
+        )
+    }
+
+    static func acceptsAppCommands(
+        requestedVisibility: Bool,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        requestedVisibility || sourceSessionLocked
+    }
+
     var selectedSlotName: String? {
         tabStore.activeProfile?.name
     }

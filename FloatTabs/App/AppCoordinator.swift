@@ -84,7 +84,7 @@ final class AppCoordinator {
 
         appCommandController = AppCommandController(
             isEnabled: { [weak self] in
-                NSApp.isActive && (self?.panelController.isVisible ?? false)
+                self?.panelController.acceptsAppCommands ?? false
             },
             onCommand: { [weak self] command in
                 guard let self else { return }

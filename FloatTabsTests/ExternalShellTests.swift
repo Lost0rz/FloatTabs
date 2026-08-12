@@ -97,6 +97,27 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testAppLocalCommandsFollowFloatTabsPresentationInsteadOfAccessoryActivationFlag() {
+        XCTAssertTrue(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: true,
+                sourceSessionLocked: false
+            )
+        )
+        XCTAssertTrue(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: false,
+                sourceSessionLocked: true
+            )
+        )
+        XCTAssertFalse(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: false,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
     func testFullscreenSourceHostUsesOrdinaryWindowSemantics() {
         let behavior = FullscreenSourceHostController.sourceWindowCollectionBehavior
 
