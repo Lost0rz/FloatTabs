@@ -97,6 +97,27 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testAppLocalCommandsFollowFloatTabsPresentationInsteadOfAccessoryActivationFlag() {
+        XCTAssertTrue(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: true,
+                sourceSessionLocked: false
+            )
+        )
+        XCTAssertTrue(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: false,
+                sourceSessionLocked: true
+            )
+        )
+        XCTAssertFalse(
+            PanelController.acceptsAppCommands(
+                requestedVisibility: false,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
     func testFullscreenSourceHostUsesOrdinaryWindowSemantics() {
         let behavior = FullscreenSourceHostController.sourceWindowCollectionBehavior
 
@@ -119,6 +140,26 @@ final class ExternalShellTests: XCTestCase {
 
         XCTAssertTrue(host.window.parent === shell)
         XCTAssertTrue(shell.childWindows?.contains(where: { $0 === host.window }) == true)
+    }
+
+    func testSourceTransientUIContainerCanPlaceChromeAboveWebContent() {
+        let shell = FloatingPanel(contentRect: NSRect(x: 20, y: 20, width: 688, height: 844))
+        let container = WebPanelContainerView()
+        let host = FullscreenSourceHostController(
+            container: container,
+            resizeHandle: PanelResizeHandleView(),
+            resizeReadout: ResizeReadoutView(),
+            shellWindow: shell
+        )
+        let root = try! XCTUnwrap(host.window.contentView)
+        let containerIndex = try! XCTUnwrap(root.subviews.firstIndex(where: { $0 === container }))
+
+        let overlay = AddressOverlayView(frame: NSRect(x: 20, y: 20, width: 240, height: 52))
+        host.transientUIContainerView.addSubview(overlay)
+        let overlayIndex = try! XCTUnwrap(root.subviews.firstIndex(where: { $0 === overlay }))
+
+        XCTAssertTrue(host.transientUIContainerView === root)
+        XCTAssertGreaterThan(overlayIndex, containerIndex)
     }
 
     func testFullscreenSourceSessionStaysLockedUntilRestorePhaseCompletes() {

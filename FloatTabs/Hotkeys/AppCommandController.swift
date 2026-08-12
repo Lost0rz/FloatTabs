@@ -91,10 +91,22 @@ enum AppShortcutCatalog {
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags
     ) -> AppCommand? {
+        command(
+            keyCode: keyCode,
+            modifiers: modifiers,
+            shortcutFor: { KeyboardShortcuts.getShortcut(for: $0) }
+        )
+    }
+
+    static func command(
+        keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags,
+        shortcutFor: (KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut?
+    ) -> AppCommand? {
         let normalizedEventModifiers = normalizedModifiers(modifiers)
 
         for binding in allBindings {
-            guard let shortcut = KeyboardShortcuts.getShortcut(for: binding.name) else {
+            guard let shortcut = shortcutFor(binding.name) else {
                 continue
             }
 
