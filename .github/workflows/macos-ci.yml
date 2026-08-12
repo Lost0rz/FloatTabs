@@ -27,7 +27,7 @@ permissions:
 jobs:
   apply-native-fullscreen-host-repair:
     name: Apply native fullscreen host repair
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/fix-web-fullscreen-state' && github.actor != 'github-actions[bot]'
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'agent/fix-web-fullscreen-state' && github.actor != 'github-actions[bot]' }}
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
@@ -53,10 +53,7 @@ jobs:
 
           path = Path('FloatTabs/App/AppDelegate.swift')
           text = path.read_text()
-          pattern = re.compile(
-              r'import AppKit\nimport WebKit\n\n/// Keeps element fullscreen.*?\n@MainActor\nfinal class AppDelegate',
-              re.S,
-          )
+          pattern = re.compile(r'import AppKit\nimport WebKit\n\n/// Keeps element fullscreen.*?\n@MainActor\nfinal class AppDelegate', re.S)
           text, n = pattern.subn('import AppKit\n\n@MainActor\nfinal class AppDelegate', text, count=1)
           if n != 1:
               raise SystemExit(f'failed to remove NativeFullscreenSessionResetCoordinator: {n}')
@@ -66,13 +63,7 @@ jobs:
 
           path = Path('FloatTabs/Web/WebViewFactory.swift')
           text = path.read_text()
-          text = must_replace(
-              text,
-              '        NativeFullscreenSessionResetCoordinator.shared.install(in: configuration)\n',
-              '',
-              'bridge install',
-              1,
-          )
+          text = must_replace(text, '        NativeFullscreenSessionResetCoordinator.shared.install(in: configuration)\n', '', 'bridge install', 1)
           path.write_text(text)
 
           path = Path('FloatTabs/Panel/FloatingPanel.swift')
@@ -83,19 +74,10 @@ jobs:
 
           path = Path('FloatTabs/Web/WebViewContainer.swift')
           text = path.read_text()
-          text = must_replace(
-              text,
-              '    private let logicalHostView = NSView()\n',
-              '    private let logicalHostView = WebSlotHostView(frame: .zero)\n',
-              'stable transient host',
-              1,
-          )
+          text = must_replace(text, '    private let logicalHostView = NSView()\n', '    private let logicalHostView = WebSlotHostView(frame: .zero)\n', 'stable transient host', 1)
           if text.count('            webView.autoresizingMask = []\n') < 1:
               raise SystemExit('missing WebView autoresizing anchor')
-          text = text.replace(
-              '            webView.autoresizingMask = []\n',
-              '            webView.autoresizingMask = [.width, .height]\n',
-          )
+          text = text.replace('            webView.autoresizingMask = []\n', '            webView.autoresizingMask = [.width, .height]\n')
           old = '''            hostedWebView?.removeFromSuperview()\n            webView.removeFromSuperview()\n            webView.translatesAutoresizingMaskIntoConstraints = true\n            webView.autoresizingMask = [.width, .height]\n            logicalHostView.addSubview(webView)\n            hostedWebView = webView\n'''
           new = '''            hostedWebView?.removeFromSuperview()\n            logicalHostView.attach(webView)\n            hostedWebView = webView\n'''
           text = must_replace(text, old, new, 'transient host attachment', 1)
@@ -103,10 +85,7 @@ jobs:
 
           path = Path('FloatTabsTests/WebViewFactoryTests.swift')
           text = path.read_text()
-          pattern = re.compile(
-              r'\n    func testWebViewsUseNativeElementFullscreenWithExitOnlyResetBridge\(\) throws \{.*?\n    \}\n\n    func testFullscreenSessionResetPoliciesRequireAnActiveNativePresentation\(\) \{.*?\n    \}\n',
-              re.S,
-          )
+          pattern = re.compile(r'\n    func testWebViewsUseNativeElementFullscreenWithExitOnlyResetBridge\(\) throws \{.*?\n    \}\n\n    func testFullscreenSessionResetPoliciesRequireAnActiveNativePresentation\(\) \{.*?\n    \}\n', re.S)
           replacement = r'''
     func testWebViewsLeaveNativeElementFullscreenEntryAndExitUntouched() {
         let webView = WebViewFactory.makeWebView()
@@ -123,9 +102,7 @@ jobs:
 
     func testTransientWebViewUsesStableFrameBasedFullscreenHost() throws {
         let webView = WebViewFactory.makeWebView()
-        let container = WebPanelContainerView(
-            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
-        )
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 600, height: 820))
 
         container.show(webView: webView)
         container.layoutSubtreeIfNeeded()
@@ -146,22 +123,11 @@ jobs:
               raise SystemExit(f'failed to replace rejected fullscreen tests: {n}')
           path.write_text(text)
 
-          combined = (
-              Path('FloatTabs/App/AppDelegate.swift').read_text()
-              + Path('FloatTabs/Web/WebViewFactory.swift').read_text()
-              + Path('FloatTabs/Panel/FloatingPanel.swift').read_text()
-          )
-          for token in [
-              'NativeFullscreenSessionResetCoordinator',
-              'closeAllMediaPresentations',
-              'floatTabsNativeFullscreenExit',
-              'fullscreen_public_close_requested',
-              'fullscreen_public_close_completed',
-          ]:
+          combined = Path('FloatTabs/App/AppDelegate.swift').read_text() + Path('FloatTabs/Web/WebViewFactory.swift').read_text() + Path('FloatTabs/Panel/FloatingPanel.swift').read_text()
+          for token in ['NativeFullscreenSessionResetCoordinator', 'closeAllMediaPresentations', 'floatTabsNativeFullscreenExit', 'fullscreen_public_close_requested', 'fullscreen_public_close_completed']:
               if token in combined:
                   raise SystemExit(f'forbidden rejected-fullscreen token remains: {token}')
           PY
-
           git diff --check
 
       - name: Commit repair and restore CI definition
@@ -173,12 +139,7 @@ jobs:
           git rm -f .github/workflows/tmp-native-fullscreen-host-repair.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add FloatTabs/App/AppDelegate.swift \
-                  FloatTabs/Panel/FloatingPanel.swift \
-                  FloatTabs/Web/WebViewFactory.swift \
-                  FloatTabs/Web/WebViewContainer.swift \
-                  FloatTabsTests/WebViewFactoryTests.swift \
-                  .github/workflows/macos-ci.yml
+          git add FloatTabs/App/AppDelegate.swift FloatTabs/Panel/FloatingPanel.swift FloatTabs/Web/WebViewFactory.swift FloatTabs/Web/WebViewContainer.swift FloatTabsTests/WebViewFactoryTests.swift .github/workflows/macos-ci.yml
           git commit -m 'fix: use fullscreen-safe WebKit host hierarchy'
           git push origin HEAD:agent/fix-web-fullscreen-state
 
@@ -197,96 +158,40 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
-
       - name: Runner architecture
         run: |
           uname -m
           sysctl -n machdep.cpu.brand_string || true
-
       - name: Xcode version
         run: xcodebuild -version
-
       - name: Resolve Swift packages
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -resolvePackageDependencies
-          -onlyUsePackageVersionsFromResolvedFile
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -resolvePackageDependencies -onlyUsePackageVersionsFromResolvedFile
       - name: Verify package lock is unchanged
         run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-
       - name: Debug build
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Debug
-          -destination 'platform=macOS,arch=${{ matrix.arch }}'
-          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
-          CODE_SIGNING_ALLOWED=NO
-          build
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug -destination 'platform=macOS,arch=${{ matrix.arch }}' -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" CODE_SIGNING_ALLOWED=NO build
       - name: Release build
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Release
-          -destination 'platform=macOS,arch=${{ matrix.arch }}'
-          -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData"
-          CODE_SIGNING_ALLOWED=NO
-          build
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Release -destination 'platform=macOS,arch=${{ matrix.arch }}' -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" CODE_SIGNING_ALLOWED=NO build
       - name: Verify native Release architecture
         shell: bash
         run: |
           set -euo pipefail
           binary="$RUNNER_TEMP/FloatTabsDerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs"
-          if [[ ! -f "$binary" ]]; then
-            echo "Release binary not found: $binary" >&2
-            exit 1
-          fi
           architectures="$(lipo -archs "$binary")"
           echo "Release binary architectures: $architectures"
-          if [[ " $architectures " != *" ${{ matrix.arch }} "* ]]; then
-            echo "Expected architecture ${{ matrix.arch }} is missing." >&2
-            exit 1
-          fi
-
+          if [[ " $architectures " != *" ${{ matrix.arch }} "* ]]; then exit 1; fi
       - name: Unit tests
         shell: bash
         run: |
           set -o pipefail
-          xcodebuild \
-            -project FloatTabs.xcodeproj \
-            -scheme FloatTabs \
-            -configuration Debug \
-            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
-            -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" \
-            -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" \
-            CODE_SIGNING_ALLOWED=NO \
-            MACOSX_DEPLOYMENT_TARGET=14.0 \
-            test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Debug -destination 'platform=macOS,arch=${{ matrix.arch }}' -derivedDataPath "$RUNNER_TEMP/FloatTabsDerivedData" -resultBundlePath "$RUNNER_TEMP/FloatTabsTests.xcresult" CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=14.0 test 2>&1 | tee "$RUNNER_TEMP/xcodebuild-test.log"
       - name: Report XCTest failures
         if: failure()
-        shell: bash
         run: |
-          echo '::group::Filtered xcodebuild failures'
-          if [ -f "$RUNNER_TEMP/xcodebuild-test.log" ]; then
-            grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
-          fi
-          echo '::endgroup::'
-
-          if [ -d "$RUNNER_TEMP/FloatTabsTests.xcresult" ]; then
-            echo '::group::XCResult test summary'
-            xcrun xcresulttool get test-results summary \
-              --path "$RUNNER_TEMP/FloatTabsTests.xcresult" || true
-            echo '::endgroup::'
-          fi
-
+          grep -E 'Test Case .* failed|error:|Assertion|XCTAssert|failed \(' "$RUNNER_TEMP/xcodebuild-test.log" || true
       - name: Upload XCTest diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -303,31 +208,14 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-
       - name: Resolve Swift packages
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -resolvePackageDependencies
-          -onlyUsePackageVersionsFromResolvedFile
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -resolvePackageDependencies -onlyUsePackageVersionsFromResolvedFile
       - name: Verify package lock is unchanged
         run: git diff --exit-code -- FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-
       - name: Universal 2 Release build
         run: >-
-          xcodebuild
-          -project FloatTabs.xcodeproj
-          -scheme FloatTabs
-          -configuration Release
-          -destination 'generic/platform=macOS'
-          -derivedDataPath "$RUNNER_TEMP/FloatTabsUniversalDerivedData"
-          ARCHS='arm64 x86_64'
-          ONLY_ACTIVE_ARCH=NO
-          CODE_SIGNING_ALLOWED=NO
-          build
-
+          xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs -configuration Release -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/FloatTabsUniversalDerivedData" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
       - name: Verify Universal 2 binary
         shell: bash
         run: |
@@ -336,8 +224,5 @@ jobs:
           architectures="$(lipo -archs "$binary")"
           echo "Universal Release architectures: $architectures"
           for required in arm64 x86_64; do
-            if [[ " $architectures " != *" $required "* ]]; then
-              echo "Universal Release binary is missing $required." >&2
-              exit 1
-            fi
+            if [[ " $architectures " != *" $required "* ]]; then exit 1; fi
           done
