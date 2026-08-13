@@ -238,15 +238,51 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// The status-item click runs the normal show path synchronously so macOS
-    /// sees an activation request inside the user's click. Status/menu tracking
-    /// can still consume the key-window/first-responder transition before it
-    /// unwinds, so replay the existing show path afterward instead of manually
-    /// reordering windows. That reuses the same makeKeyAndOrderFront +
-    /// WKWebView first-responder path as the global hotkey.
+    /// The synchronous status-item show captures the user's activation intent and
+    /// establishes the Web source as first responder. AppKit status-item tracking
+    /// can then undo the cross-app ordering/key transition before the mouse action
+    /// fully unwinds. Do not replay `showFloatTabs()` here: a second asynchronous
+    /// activation request can be denied on macOS 14+. Instead, finish the explicit
+    /// user-requested activation deterministically, restore the two presentation
+    /// windows at their existing Pin-controlled levels, then restore the source's
+    /// already established first responder so WebKit/IME keyboard input resumes.
     private func reassertFloatTabsForegroundAfterStatusTracking() {
         guard panelController.isVisible else { return }
-        panelController.showFloatTabs()
+
+        // This path exists only after the user explicitly clicked FloatTabs in
+        // the menu bar. `activate()` is intentionally attempted first on macOS
+        // 14+, but AppKit documents that activation requests may be denied. The
+        // deprecated ignoring-other-apps API remains a compatibility fallback for
+        // this explicit user gesture so an LSUIElement-style menu-bar app can
+        // deterministically regain keyboard focus after status-item tracking.
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+            if !NSApp.isActive {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        let shellWindow = NSApp.windows.first {
+            $0 is FloatingPanel && $0.isVisible
+        }
+        let sourceWindow = NSApp.windows.first {
+            $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
+        }
+
+        let preservedFirstResponder = sourceWindow?.firstResponder
+        shellWindow?.orderFrontRegardless()
+        sourceWindow?.orderFrontRegardless()
+
+        if let sourceWindow {
+            sourceWindow.makeKeyAndOrderFront(nil)
+            if let preservedFirstResponder {
+                _ = sourceWindow.makeFirstResponder(preservedFirstResponder)
+            }
+        } else {
+            shellWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 
     private func toggleFloatTabs() {
