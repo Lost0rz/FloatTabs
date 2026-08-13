@@ -25,7 +25,7 @@ final class FloatingPanel: NSPanel {
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -39,11 +39,10 @@ final class FloatingPanel: NSPanel {
         level = .normal
         collectionBehavior = Self.ordinaryCollectionBehavior
 
-        // A non-activating panel can receive the first pointer interaction while
-        // another application is frontmost. The explicit show path still calls
-        // NSApp.activate() before focusing the active WKWebView, so keyboard input
-        // keeps the accepted Stage 0 behavior.
-        becomesKeyOnlyIfNeeded = true
+        // Showing FloatTabs is an explicit user request. Keep the shell
+        // activating so AppKit can transfer both frontmost ownership and the
+        // key-window chain to the separately hosted WKWebView.
+        becomesKeyOnlyIfNeeded = false
         acceptsMouseMovedEvents = true
 
         // The native resizable style is intentionally disabled. Stage 2 owns a

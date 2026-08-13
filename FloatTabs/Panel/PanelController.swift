@@ -55,6 +55,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
     private var shouldClampAfterFullscreen = false
+    private var needsFocusAfterApplicationActivation = false
 
     var isVisible: Bool {
         requestedVisibility
@@ -158,6 +159,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive(_:)),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
         externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
@@ -178,6 +185,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.synchronizeSlotState()
         }
         synchronizeSlotState()
+    }
+
+    /// macOS 14 treats activation as a contextual request. Submit it directly
+    /// from the status-item action while that user intent is still available;
+    /// the actual window presentation is completed after tracking unwinds.
+    func prepareForStatusItemPresentation() {
+        guard !requestedVisibility else { return }
+        capturePreviousApplication()
+        activateFloatTabs()
     }
 
     func showFloatTabs() {
@@ -205,6 +221,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
+        needsFocusAfterApplicationActivation = !NSApp.isActive
+
+        // Activation requests for an accessory app can be rejected while the
+        // app has no ordered windows. Establish this user-requested window group
+        // in WindowServer first, then transfer application/key focus below.
+        panel.orderFrontRegardless()
         activateFloatTabs()
 
         // Establish the target display as AppKit's key-window context before
@@ -214,6 +236,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
+        if NSApp.isActive {
+            needsFocusAfterApplicationActivation = false
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             fullscreenExperimentLog(
@@ -229,6 +254,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func hideFloatTabs() {
         requestedVisibility = false
+        needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -402,6 +428,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
         requestedVisibility = false
+        needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -845,7 +872,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard !addressOverlayView.isPresented else { return }
         if sourceHostController.isSessionLocked {
             if let webView = sourceHostController.companionContainer.currentWebView {
-                _ = panel.makeFirstResponder(webView)
+                WebViewFocus.focus(webView, in: panel)
             }
             return
         }
@@ -1143,10 +1170,38 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func activateFloatTabs() {
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
+        // This path only runs for an explicit user presentation. Current macOS
+        // treats activation as contextual, while older releases require the
+        // explicit override for an LSUIElement accessory application.
+        _ = NSRunningApplication.current.activate(options: [.activateAllWindows])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func applicationDidBecomeActive(_ notification: Notification) {
+        guard needsFocusAfterApplicationActivation else { return }
+        needsFocusAfterApplicationActivation = false
+
+        // Activation can complete after the original show call. Finish through
+        // the same window-owning controller instead of searching NSApp.windows
+        // from a separate retry state machine.
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.finishFocusAfterApplicationActivation()
+            }
+        }
+    }
+
+    private func finishFocusAfterApplicationActivation() {
+        guard requestedVisibility, NSApp.isActive else { return }
+        if sourceHostController.isSessionLocked {
+            guard panel.isVisible else { return }
+            panel.makeKeyAndOrderFront(nil)
+            if let webView = sourceHostController.companionContainer.currentWebView {
+                WebViewFocus.focus(webView, in: panel)
+            }
         } else {
-            _ = NSRunningApplication.current.activate(options: [])
+            panel.orderFrontRegardless()
+            focusActiveWebViewIfAvailable()
         }
     }
 
@@ -1364,11 +1419,16 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.setFullscreenCompanionPresentation(true)
         rootView.companionRailFoldControlView.isHidden = false
         synchronizeFullscreenCompanionSlotState()
+        needsFocusAfterApplicationActivation = !NSApp.isActive
+        panel.orderFrontRegardless()
         activateFloatTabs()
         panel.makeKeyAndOrderFront(nil)
 
         if let webView = sourceHostController.companionContainer.currentWebView {
-            _ = panel.makeFirstResponder(webView)
+            WebViewFocus.focus(webView, in: panel)
+        }
+        if NSApp.isActive {
+            needsFocusAfterApplicationActivation = false
         }
     }
 
@@ -1427,7 +1487,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         guard requestedVisibility,
               sourceHostController.sessionState == .fullscreen else { return }
-        _ = panel.makeFirstResponder(webView)
+        WebViewFocus.focus(webView, in: panel)
     }
 
     private func hideFullscreenCompanion(pauseInactiveMedia: Bool) {
