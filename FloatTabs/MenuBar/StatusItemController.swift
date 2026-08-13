@@ -22,6 +22,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     )
 
     private let onToggle: () -> Void
+    private let onWillShow: () -> Void
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
     private let onQuit: () -> Void
@@ -42,11 +43,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     init(
         onToggle: @escaping () -> Void,
+        onWillShow: @escaping () -> Void = {},
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onToggle = onToggle
+        self.onWillShow = onWillShow
         self.isVisible = isVisible
         self.onSettings = onSettings
         self.onQuit = onQuit
@@ -176,19 +179,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         requestToggleAfterStatusItemTracking()
     }
 
-    /// Status-bar and menu tracking can perform one final window-order update
-    /// after an action returns. Defer presentation by one main run-loop turn so
-    /// FloatTabs' explicit activation/order-front work is the final operation.
+    /// Preserve the user's activation intent while the status action is still
+    /// executing, but do not mutate the window group until AppKit has fully
+    /// unwound status-button or menu tracking. `DispatchQueue.main.async` is not
+    /// sufficient here because main-queue work can execute in event-tracking
+    /// modes before AppKit performs its final window-order update.
     private func requestToggleAfterStatusItemTracking() {
+        let shouldShow = !isVisible()
+        if shouldShow {
+            onWillShow()
+        }
+
         Self.scheduleAfterStatusItemTracking { [weak self] in
-            self?.onToggle()
+            guard let self,
+                  self.isVisible() != shouldShow else {
+                return
+            }
+            self.onToggle()
         }
     }
 
     static func scheduleAfterStatusItemTracking(
         _ action: @escaping @MainActor @Sendable () -> Void
     ) {
-        DispatchQueue.main.async(execute: action)
+        RunLoop.main.perform(inModes: [.default]) {
+            action()
+        }
     }
 
     func menuWillOpen(_ menu: NSMenu) {

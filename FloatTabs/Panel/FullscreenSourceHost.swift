@@ -1,6 +1,37 @@
 import AppKit
 import WebKit
 
+@MainActor
+enum WebViewFocus {
+    static func responderBelongsToWebView(
+        _ responder: NSResponder?,
+        webView: WKWebView,
+        window: NSWindow
+    ) -> Bool {
+        guard let responderView = responder as? NSView,
+              responderView.window === window,
+              webView.window === window else {
+            return false
+        }
+        return responderView === webView || responderView.isDescendant(of: webView)
+    }
+
+    /// Keep WebKit's private content/editor responder when it is already valid.
+    /// Replacing it with the outer WKWebView can discard an active DOM input
+    /// session even though the native window itself successfully became key.
+    @discardableResult
+    static func focus(_ webView: WKWebView, in window: NSWindow) -> Bool {
+        if responderBelongsToWebView(
+            window.firstResponder,
+            webView: webView,
+            window: window
+        ) {
+            return true
+        }
+        return window.makeFirstResponder(webView)
+    }
+}
+
 func fullscreenExperimentLog(_ message: String) {
 #if DEBUG
     NSLog("[FloatTabsFullscreenExperiment] %@", message)
@@ -292,11 +323,15 @@ final class FullscreenSourceHostController {
         presentationGeneration &+= 1
         window.alphaValue = 1
         window.ignoresMouseEvents = false
-        window.orderFront(nil)
+        // The shell and WebKit source are separate windows. Ordering only the
+        // shell across applications can leave this actual hit-testing surface
+        // behind the previously active app, making the page appear present but
+        // unable to receive clicks or keyboard focus.
+        window.orderFrontRegardless()
         if let webView {
             observeFullscreenState(of: webView)
             window.makeKeyAndOrderFront(nil)
-            _ = window.makeFirstResponder(webView)
+            WebViewFocus.focus(webView, in: window)
         }
     }
 

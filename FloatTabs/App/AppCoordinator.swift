@@ -66,6 +66,9 @@ final class AppCoordinator {
 
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
+            onWillShow: { [weak self] in
+                self?.panelController.prepareForStatusItemPresentation()
+            },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) }

@@ -129,6 +129,16 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(behavior.contains(.fullScreenPrimary))
     }
 
+    func testFloatingPanelUsesActivatingShellSemantics() {
+        let panel = FloatingPanel(
+            contentRect: NSRect(x: 20, y: 20, width: 688, height: 844)
+        )
+
+        XCTAssertFalse(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.becomesKeyOnlyIfNeeded)
+        XCTAssertTrue(panel.canBecomeKey)
+    }
+
     func testFullscreenSourceIsGroupedWithShellOutsideFullscreen() {
         let shell = FloatingPanel(contentRect: NSRect(x: 20, y: 20, width: 688, height: 844))
         let host = FullscreenSourceHostController(
@@ -140,6 +150,51 @@ final class ExternalShellTests: XCTestCase {
 
         XCTAssertTrue(host.window.parent === shell)
         XCTAssertTrue(shell.childWindows?.contains(where: { $0 === host.window }) == true)
+    }
+
+    func testWebFocusPreservesWebKitsExistingInternalResponder() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        let webView = WKWebView(frame: root.bounds)
+        let internalEditor = FocusableTestView(frame: NSRect(x: 10, y: 10, width: 50, height: 30))
+        window.contentView = root
+        root.addSubview(webView)
+        webView.addSubview(internalEditor)
+
+        XCTAssertTrue(window.makeFirstResponder(internalEditor))
+        XCTAssertTrue(WebViewFocus.focus(webView, in: window))
+        XCTAssertTrue(window.firstResponder === internalEditor)
+    }
+
+    func testWebFocusRejectsResponderOutsideCurrentWebHierarchy() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let unrelatedEditor = FocusableTestView(
+            frame: NSRect(x: 320, y: 10, width: 50, height: 30)
+        )
+        window.contentView = root
+        root.addSubview(webView)
+        root.addSubview(unrelatedEditor)
+
+        XCTAssertTrue(window.makeFirstResponder(unrelatedEditor))
+        XCTAssertFalse(
+            WebViewFocus.responderBelongsToWebView(
+                window.firstResponder,
+                webView: webView,
+                window: window
+            )
+        )
     }
 
     func testSourceTransientUIContainerCanPlaceChromeAboveWebContent() {
@@ -922,7 +977,7 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
-    func testStatusItemToggleRunsAfterTrackingTurnCompletes() {
+    func testStatusItemToggleWaitsUntilEventTrackingModeCompletes() {
         let callback = expectation(description: "deferred status toggle")
         var didRun = false
 
@@ -930,6 +985,15 @@ final class ExternalShellTests: XCTestCase {
             didRun = true
             callback.fulfill()
         }
+
+        XCTAssertFalse(didRun)
+
+        let trackingTimer = Timer(timeInterval: 0.01, repeats: false) { _ in }
+        RunLoop.main.add(trackingTimer, forMode: .eventTracking)
+        _ = RunLoop.main.run(
+            mode: .eventTracking,
+            before: Date(timeIntervalSinceNow: 0.1)
+        )
 
         XCTAssertFalse(didRun)
         wait(for: [callback], timeout: 1)
@@ -1062,4 +1126,8 @@ final class ExternalShellTests: XCTestCase {
             lastUsedAt: Date(timeIntervalSince1970: TimeInterval(order))
         )
     }
+}
+
+private final class FocusableTestView: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }

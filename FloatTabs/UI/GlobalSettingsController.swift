@@ -26,11 +26,11 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     var isVisible: Bool { settingsWindow.isVisible }
 
     func show() {
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            _ = NSRunningApplication.current.activate(options: [])
-        }
+        // Settings is also opened from the accessory app's status menu, so it
+        // needs the same explicit user-presentation activation semantics as the
+        // primary FloatTabs window group.
+        settingsWindow.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
         settingsWindow.makeKeyAndOrderFront(nil)
     }
 
