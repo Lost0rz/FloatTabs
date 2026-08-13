@@ -252,9 +252,9 @@ final class AppCoordinator {
         // This path exists only after the user explicitly clicked FloatTabs in
         // the menu bar. `activate()` is intentionally attempted first on macOS
         // 14+, but AppKit documents that activation requests may be denied. The
-        // deprecated ignoring-other-apps API remains a compatibility fallback for
-        // this explicit user gesture so an LSUIElement-style menu-bar app can
-        // deterministically regain keyboard focus after status-item tracking.
+        // deprecated ignoring-other-apps API remains a narrowly scoped fallback
+        // for this explicit user gesture so a menu-bar app can deterministically
+        // regain keyboard focus after status-item tracking.
         if #available(macOS 14.0, *) {
             NSApp.activate()
             if !NSApp.isActive {
