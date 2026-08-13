@@ -249,14 +249,12 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// Ordinary presentation already requests activation synchronously from
-    /// `showFloatTabs()`. A locked WebKit fullscreen session returns through the
-    /// companion path before that call, so only that no-ordinary-source case gets
-    /// a fallback activation request while the status-item user action is live.
+    /// Ordinary presentation and a ready fullscreen companion both request
+    /// activation synchronously from their existing show paths. Only a locked
+    /// fullscreen transition that has no visible FloatTabs presentation yet needs
+    /// this fallback while the status-item user action is still live.
     private func statusItemForegroundGeneration() -> UInt {
-        let hasVisibleOrdinarySource = statusItemForegroundPresentation()?.target
-            is FullscreenSourceWindow
-        if !hasVisibleOrdinarySource, !NSApp.isActive {
+        if statusItemForegroundPresentation() == nil, !NSApp.isActive {
             fullscreenExperimentLog(
                 "STATUS_ACTIVATION fallback generation=\(statusActivationGeneration)"
             )
