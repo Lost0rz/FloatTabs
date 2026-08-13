@@ -4,7 +4,8 @@ import WebKit
 
 @MainActor
 final class AppCoordinator {
-    private static let statusActivationMaxAttempts = 12
+    private static let statusActivationMaxAttempts = 25
+    private static let statusActivationRetryDelay: TimeInterval = 0.02
 
     private let panelController: PanelController
     private var statusItemController: StatusItemController?
@@ -254,9 +255,10 @@ final class AppCoordinator {
 
         statusActivationGeneration &+= 1
         let generation = statusActivationGeneration
+        let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         fullscreenExperimentLog(
             "STATUS_ACTIVATION begin generation=\(generation) active=\(NSApp.isActive) "
-                + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+                + "frontmost=\(frontmostIdentifier)"
         )
 
         // This is a narrowly scoped compatibility path for an explicit user click
@@ -280,15 +282,17 @@ final class AppCoordinator {
 
         guard NSApp.isActive else {
             guard attemptsRemaining > 0 else {
+                let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
                 fullscreenExperimentLog(
                     "STATUS_ACTIVATION failed generation=\(generation) "
-                        + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+                        + "frontmost=\(frontmostIdentifier)"
                 )
                 return
             }
 
             NSApp.activate(ignoringOtherApps: true)
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.statusActivationRetryDelay) {
+                [weak self] in
                 self?.completeStatusItemActivationWhenReady(
                     generation: generation,
                     attemptsRemaining: attemptsRemaining - 1
@@ -353,12 +357,13 @@ final class AppCoordinator {
             focused = false
         }
 
+        let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         fullscreenExperimentLog(
             "STATUS_FOCUS web generation=\(generation) active=\(NSApp.isActive) "
                 + "sourceKey=\(sourceWindow.isKeyWindow) "
                 + "webPresent=\(webView != nil) focused=\(focused) "
                 + "responder=\(String(describing: sourceWindow.firstResponder.map { type(of: $0) })) "
-                + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+                + "frontmost=\(frontmostIdentifier)"
         )
     }
 
