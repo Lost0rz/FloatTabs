@@ -227,23 +227,23 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
-    func testStatusItemToggleRunsAfterTwoMainQueueTurns() {
+    func testStatusItemToggleRunsAfterTwoMainQueueTurns() async {
         let firstQueuedTurn = expectation(description: "first queued turn")
         let toggleRan = expectation(description: "toggle ran")
-        var didRunToggle = false
 
         StatusItemController.scheduleAfterStatusItemTracking {
-            didRunToggle = true
             toggleRan.fulfill()
         }
 
         DispatchQueue.main.async {
-            XCTAssertFalse(didRunToggle)
             firstQueuedTurn.fulfill()
         }
 
-        wait(for: [firstQueuedTurn, toggleRan], timeout: 1, enforceOrder: true)
-        XCTAssertTrue(didRunToggle)
+        await fulfillment(
+            of: [firstQueuedTurn, toggleRan],
+            timeout: 1,
+            enforceOrder: true
+        )
     }
 
     private func defaultCommand(
