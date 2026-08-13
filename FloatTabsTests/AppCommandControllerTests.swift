@@ -1,5 +1,6 @@
 import AppKit
 import KeyboardShortcuts
+import WebKit
 import XCTest
 @testable import FloatTabs
 
@@ -278,6 +279,55 @@ final class AppCommandControllerTests: XCTestCase {
         shell.removeChildWindow(source)
         XCTAssertTrue(
             AppCoordinator.statusItemForegroundTargetWindow(for: shell) === shell
+        )
+    }
+
+    func testStatusItemFocusPreservesOnlyTextOrCurrentWebHierarchy() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView = root
+
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        let webDescendant = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        let unrelatedView = NSView(frame: NSRect(x: 320, y: 0, width: 10, height: 10))
+        let textView = NSTextView(frame: NSRect(x: 320, y: 30, width: 100, height: 30))
+        root.addSubview(webView)
+        webView.addSubview(webDescendant)
+        root.addSubview(unrelatedView)
+        root.addSubview(textView)
+
+        XCTAssertFalse(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                unrelatedView,
+                currentWebView: webView,
+                targetWindow: window
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                webView,
+                currentWebView: webView,
+                targetWindow: window
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                webDescendant,
+                currentWebView: webView,
+                targetWindow: window
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                textView,
+                currentWebView: webView,
+                targetWindow: window
+            )
         )
     }
 
