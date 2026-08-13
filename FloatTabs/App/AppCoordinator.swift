@@ -238,37 +238,15 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// The status-item click already ran the normal show path synchronously so
-    /// activation retained the user's intent. After menu/status tracking has
-    /// fully unwound, force only FloatTabs' two presentation windows to the front
-    /// of their existing levels. Pin still exclusively controls whether those
-    /// levels are `.normal` or `.floating`.
+    /// The status-item click runs the normal show path synchronously so macOS
+    /// sees an activation request inside the user's click. Status/menu tracking
+    /// can still consume the key-window/first-responder transition before it
+    /// unwinds, so replay the existing show path afterward instead of manually
+    /// reordering windows. That reuses the same makeKeyAndOrderFront +
+    /// WKWebView first-responder path as the global hotkey.
     private func reassertFloatTabsForegroundAfterStatusTracking() {
         guard panelController.isVisible else { return }
-
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            _ = NSRunningApplication.current.activate(options: [])
-        }
-
-        let shellWindow = NSApp.windows.first {
-            $0 is FloatingPanel && $0.isVisible
-        }
-        let sourceWindow = NSApp.windows.first {
-            $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
-        }
-
-        shellWindow?.orderFrontRegardless()
-        sourceWindow?.orderFrontRegardless()
-
-        if NSApp.isActive {
-            if let sourceWindow {
-                sourceWindow.makeKey()
-            } else {
-                shellWindow?.makeKey()
-            }
-        }
+        panelController.showFloatTabs()
     }
 
     private func toggleFloatTabs() {
