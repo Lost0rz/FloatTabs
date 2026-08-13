@@ -21,6 +21,7 @@ enum WebAppEditorController {
             initialRendering: .canonicalDefault,
             showsPrimaryRenderingControls: true,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
+            nameIsOptional: true,
             attachedTo: window,
             completion: completion
         )
@@ -39,7 +40,7 @@ enum WebAppEditorController {
         alert.addButton(withTitle: "Cancel")
 
         let nameField = NSTextField(string: "")
-        nameField.placeholderString = "New Web App name"
+        nameField.placeholderString = "Optional · defaults to site host"
         nameField.widthAnchor.constraint(equalToConstant: 400).isActive = true
 
         let urlField = NSTextField(labelWithString: currentURL.absoluteString)
@@ -56,7 +57,7 @@ enum WebAppEditorController {
         inherited.textColor = .secondaryLabelColor
 
         let stack = NSStackView(views: [
-            makeLabel("Name"),
+            makeLabel("Name (Optional)"),
             nameField,
             makeLabel("Current Page URL"),
             urlField,
@@ -76,13 +77,7 @@ enum WebAppEditorController {
             }
 
             let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else {
-                NSSound.beep()
-                completion(nil)
-                return
-            }
-
-            completion(name)
+            completion(name.isEmpty ? WebAppURL.defaultDisplayName(for: currentURL) : name)
         }
     }
 
@@ -100,6 +95,7 @@ enum WebAppEditorController {
             initialRendering: profile.renderingProfile,
             showsPrimaryRenderingControls: false,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
+            nameIsOptional: false,
             attachedTo: window,
             completion: completion
         )
@@ -130,6 +126,7 @@ enum WebAppEditorController {
         initialRendering: WebRenderingProfile,
         showsPrimaryRenderingControls: Bool,
         allowsWindowSizeEditing: Bool,
+        nameIsOptional: Bool,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -139,11 +136,13 @@ enum WebAppEditorController {
         alert.addButton(withTitle: "Cancel")
 
         let nameField = NSTextField(string: initialName)
-        nameField.placeholderString = "Name"
+        nameField.placeholderString = nameIsOptional
+            ? "Optional · defaults to site host"
+            : "Name"
         let urlField = NSTextField(string: initialURL)
         urlField.placeholderString = "https://example.com"
 
-        let nameLabel = makeLabel("Name")
+        let nameLabel = makeLabel(nameIsOptional ? "Name (Optional)" : "Name")
         let urlLabel = makeLabel("URL")
         let renderingForm = RenderingForm(
             initial: initialRendering,
@@ -181,10 +180,13 @@ enum WebAppEditorController {
             }
 
             let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty,
-                  let url = WebAppURL.normalized(from: urlField.stringValue),
-                  let rendering = renderingForm.value() else {
-                presentValidationError(attachedTo: window)
+            guard let url = WebAppURL.normalized(from: urlField.stringValue),
+                  let rendering = renderingForm.value(),
+                  nameIsOptional || !name.isEmpty else {
+                presentValidationError(
+                    nameIsOptional: nameIsOptional,
+                    attachedTo: window
+                )
                 completion(nil)
                 return
             }
@@ -205,11 +207,16 @@ enum WebAppEditorController {
         return label
     }
 
-    private static func presentValidationError(attachedTo window: NSWindow) {
+    private static func presentValidationError(
+        nameIsOptional: Bool,
+        attachedTo window: NSWindow
+    ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Enter a valid Web App"
-        alert.informativeText = "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
+        alert.informativeText = nameIsOptional
+            ? "URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
+            : "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window)
     }
