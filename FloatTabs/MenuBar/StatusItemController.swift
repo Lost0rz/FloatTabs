@@ -176,9 +176,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         requestToggleAfterStatusItemTracking()
     }
 
-    /// Status-bar and menu tracking can perform one final window-order update
-    /// after an action returns. Defer presentation by one main run-loop turn so
-    /// FloatTabs' explicit activation/order-front work is the final operation.
+    /// Status-bar and menu tracking can continue one final ordering pass after
+    /// the control action and the first queued main-thread callback. Defer two
+    /// main-queue turns so FloatTabs' activate/makeKeyAndOrderFront sequence is
+    /// the final presentation operation, matching the global-hotkey path.
     private func requestToggleAfterStatusItemTracking() {
         Self.scheduleAfterStatusItemTracking { [weak self] in
             self?.onToggle()
@@ -188,7 +189,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     static func scheduleAfterStatusItemTracking(
         _ action: @escaping @MainActor @Sendable () -> Void
     ) {
-        DispatchQueue.main.async(execute: action)
+        DispatchQueue.main.async {
+            DispatchQueue.main.async(execute: action)
+        }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
