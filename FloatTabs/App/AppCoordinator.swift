@@ -4,9 +4,9 @@ import WebKit
 
 @MainActor
 final class AppCoordinator {
-    private static let statusActivationMaxAttempts = 25
+    private static let statusActivationMaxAttempts = 50
     private static let statusActivationRetryDelay: TimeInterval = 0.02
-    private static let statusKeyWindowMaxAttempts = 15
+    private static let statusKeyWindowMaxAttempts = 50
     private static let statusKeyWindowRetryDelay: TimeInterval = 0.01
 
     private let panelController: PanelController
@@ -249,14 +249,13 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// Begin the stronger status-item activation while still inside the explicit
-    /// user action. PanelController's normal show has already run, so its previous
-    /// application capture remains intact. The returned generation token binds the
-    /// later post-tracking completion to this exact show request.
+    /// The status-item click is the real user-intent boundary. Issue exactly one
+    /// activation request while that event is still being handled, then let the
+    /// post-tracking phase observe AppKit's actual state instead of repeatedly
+    /// hammering activation after the user event has ended.
     private func beginStatusItemForegroundActivation() -> UInt {
         guard panelController.isVisible else { return statusActivationGeneration }
 
-        statusActivationGeneration &+= 1
         let generation = statusActivationGeneration
         let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         fullscreenExperimentLog(
@@ -264,15 +263,16 @@ final class AppCoordinator {
                 + "frontmost=\(frontmostIdentifier)"
         )
 
-        // Narrow compatibility fallback for a direct click on FloatTabs' own
-        // menu-bar item. Ordinary shortcut/programmatic presentation is unchanged.
-        NSApp.activate(ignoringOtherApps: true)
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         return generation
     }
 
-    /// Status-item tracking and cross-application activation are asynchronous.
-    /// Never touch the source key-window / WebKit responder chain until AppKit
-    /// reports that the application is actually active.
+    /// Activation may settle asynchronously. Poll only the observable state; do
+    /// not resend activation outside the original status-item user event.
     private func completeStatusItemActivationAfterTracking(generation: UInt) {
         guard generation == statusActivationGeneration,
               panelController.isVisible else {
@@ -304,7 +304,6 @@ final class AppCoordinator {
                 return
             }
 
-            NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.statusActivationRetryDelay) {
                 [weak self] in
                 self?.completeStatusItemActivationWhenReady(
@@ -323,72 +322,100 @@ final class AppCoordinator {
         requestStatusItemKeyWindow(generation: generation)
     }
 
-    /// Becoming active and becoming key are separate AppKit transitions. Request
-    /// the source key window, then verify `isKeyWindow` before asking WebKit to
-    /// become first responder. This removes the final race that made IME/text
-    /// input intermittently fail even after application activation succeeded.
+    /// Resolve the ordinary Web source only through the visible shell's child
+    /// relationship. The fullscreen source host intentionally detaches while
+    /// WebKit owns a fullscreen session, in which case the shell/companion is the
+    /// correct key-window target. This keeps status repair out of source-host
+    /// lifecycle, level, alpha, and parent/child ownership.
+    static func statusItemForegroundTargetWindow(for shellWindow: FloatingPanel) -> NSWindow {
+        shellWindow.childWindows?
+            .compactMap { $0 as? FullscreenSourceWindow }
+            .first(where: { $0.isVisible && $0.alphaValue > 0.01 })
+            ?? shellWindow
+    }
+
+    private func statusItemForegroundPresentation() -> (shell: FloatingPanel, target: NSWindow)? {
+        guard let shellWindow = NSApp.windows
+            .compactMap({ $0 as? FloatingPanel })
+            .first(where: { $0.isVisible }) else {
+            return nil
+        }
+        return (
+            shell: shellWindow,
+            target: Self.statusItemForegroundTargetWindow(for: shellWindow)
+        )
+    }
+
+    /// App activation and key-window ownership are separate transitions. Once the
+    /// app is actually active, make one key-window request and then observe
+    /// `isKeyWindow`; repeated make-key calls can themselves churn the responder
+    /// chain while WebKit is trying to settle input focus.
     private func requestStatusItemKeyWindow(generation: UInt) {
         guard generation == statusActivationGeneration,
               panelController.isVisible,
-              NSApp.isActive else {
-            return
-        }
-
-        let shellWindow = NSApp.windows.first {
-            $0 is FloatingPanel && $0.isVisible
-        }
-        let sourceWindow = NSApp.windows.first(where: {
-            $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
-        }) as? FullscreenSourceWindow
-
-        shellWindow?.orderFrontRegardless()
-
-        guard let sourceWindow else {
-            shellWindow?.makeKeyAndOrderFront(nil)
+              NSApp.isActive,
+              let presentation = statusItemForegroundPresentation() else {
             fullscreenExperimentLog(
-                "STATUS_KEY shell generation=\(generation) active=\(NSApp.isActive) "
-                    + "shellKey=\(shellWindow?.isKeyWindow ?? false)"
+                "STATUS_KEY missing generation=\(generation) active=\(NSApp.isActive)"
             )
             return
         }
 
-        sourceWindow.orderFrontRegardless()
-        sourceWindow.makeKeyAndOrderFront(nil)
+        presentation.shell.orderFront(nil)
+        presentation.target.makeKeyAndOrderFront(nil)
+        fullscreenExperimentLog(
+            "STATUS_KEY request generation=\(generation) "
+                + "target=\(String(describing: type(of: presentation.target))) "
+                + "window=\(presentation.target.windowNumber)"
+        )
         completeStatusItemKeyWindowWhenReady(
             generation: generation,
-            sourceWindow: sourceWindow,
+            targetWindowNumber: presentation.target.windowNumber,
             attemptsRemaining: Self.statusKeyWindowMaxAttempts
         )
     }
 
     private func completeStatusItemKeyWindowWhenReady(
         generation: UInt,
-        sourceWindow: FullscreenSourceWindow,
+        targetWindowNumber: Int,
         attemptsRemaining: Int
     ) {
         guard generation == statusActivationGeneration,
               panelController.isVisible,
               NSApp.isActive,
-              sourceWindow.isVisible else {
+              let presentation = statusItemForegroundPresentation() else {
             return
         }
 
-        guard sourceWindow.isKeyWindow else {
+        // Fullscreen transitions can legitimately change the foreground target
+        // while this short handshake is in flight. Request the new authoritative
+        // target once, rather than continuing to wait on a detached source.
+        if presentation.target.windowNumber != targetWindowNumber {
+            presentation.shell.orderFront(nil)
+            presentation.target.makeKeyAndOrderFront(nil)
+            completeStatusItemKeyWindowWhenReady(
+                generation: generation,
+                targetWindowNumber: presentation.target.windowNumber,
+                attemptsRemaining: Self.statusKeyWindowMaxAttempts
+            )
+            return
+        }
+
+        guard presentation.target.isKeyWindow else {
             guard attemptsRemaining > 0 else {
                 fullscreenExperimentLog(
                     "STATUS_KEY failed generation=\(generation) active=\(NSApp.isActive) "
-                        + "sourceKey=\(sourceWindow.isKeyWindow)"
+                        + "target=\(String(describing: type(of: presentation.target))) "
+                        + "window=\(presentation.target.windowNumber)"
                 )
                 return
             }
 
-            sourceWindow.makeKeyAndOrderFront(nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.statusKeyWindowRetryDelay) {
-                [weak self, weak sourceWindow] in
-                guard let self, let sourceWindow else { return }
-                self.completeStatusItemKeyWindowWhenReady(
+                [weak self] in
+                self?.completeStatusItemKeyWindowWhenReady(
                     generation: generation,
-                    sourceWindow: sourceWindow,
+                    targetWindowNumber: targetWindowNumber,
                     attemptsRemaining: attemptsRemaining - 1
                 )
             }
@@ -397,35 +424,48 @@ final class AppCoordinator {
 
         finishStatusItemKeyboardFocus(
             generation: generation,
-            sourceWindow: sourceWindow
+            targetWindowNumber: targetWindowNumber
         )
     }
 
     private func finishStatusItemKeyboardFocus(
         generation: UInt,
-        sourceWindow: FullscreenSourceWindow
+        targetWindowNumber: Int
     ) {
         guard generation == statusActivationGeneration,
               panelController.isVisible,
               NSApp.isActive,
-              sourceWindow.isKeyWindow else {
+              let presentation = statusItemForegroundPresentation(),
+              presentation.target.windowNumber == targetWindowNumber,
+              presentation.target.isKeyWindow else {
             return
         }
 
-        let webView = webPanelContainer(in: sourceWindow.contentView)?.currentWebView
+        let existingResponder = presentation.target.firstResponder
+        let existingViewOwnsFocus = (existingResponder as? NSView)?.window === presentation.target
+        let webView = webPanelContainer(in: presentation.target.contentView)?.currentWebView
         let focused: Bool
-        if let webView, webView.window === sourceWindow, !webView.isHidden {
-            focused = sourceWindow.makeFirstResponder(webView)
+
+        if existingViewOwnsFocus {
+            // Do not steal a newer user interaction (address field, sheet field,
+            // WebKit content view, IME field editor, etc.) that occurred while
+            // the post-tracking handshake was completing.
+            focused = true
+        } else if let webView,
+                  webView.window === presentation.target,
+                  !webView.isHidden {
+            focused = presentation.target.makeFirstResponder(webView)
         } else {
             focused = false
         }
 
         let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
         fullscreenExperimentLog(
-            "STATUS_FOCUS web generation=\(generation) active=\(NSApp.isActive) "
-                + "sourceKey=\(sourceWindow.isKeyWindow) "
+            "STATUS_FOCUS generation=\(generation) active=\(NSApp.isActive) "
+                + "target=\(String(describing: type(of: presentation.target))) "
+                + "key=\(presentation.target.isKeyWindow) "
                 + "webPresent=\(webView != nil) focused=\(focused) "
-                + "responder=\(String(describing: sourceWindow.firstResponder.map { type(of: $0) })) "
+                + "responder=\(String(describing: presentation.target.firstResponder.map { type(of: $0) })) "
                 + "frontmost=\(frontmostIdentifier)"
         )
     }
@@ -444,10 +484,11 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs() {
+        // Every explicit toggle starts a new presentation generation. This also
+        // invalidates a status-item completion that was suspended while an
+        // auto-hide occurred and a later global shortcut presented FloatTabs.
+        statusActivationGeneration &+= 1
         if panelController.isVisible {
-            // Cancel queued activation/key-window completions before hiding so a
-            // stale status-item callback cannot make a hidden source key again.
-            statusActivationGeneration &+= 1
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()

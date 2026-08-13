@@ -246,6 +246,41 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
+    func testStatusItemForegroundTargetUsesOnlyVisibleSourceChild() {
+        let shell = FloatingPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 500)
+        )
+        let source = FullscreenSourceWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 300, height: 300),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            source.orderOut(nil)
+            shell.orderOut(nil)
+        }
+
+        shell.addChildWindow(source, ordered: .above)
+        shell.orderFront(nil)
+        source.orderFront(nil)
+
+        XCTAssertTrue(
+            AppCoordinator.statusItemForegroundTargetWindow(for: shell) === source
+        )
+
+        source.alphaValue = 0
+        XCTAssertTrue(
+            AppCoordinator.statusItemForegroundTargetWindow(for: shell) === shell
+        )
+
+        source.alphaValue = 1
+        shell.removeChildWindow(source)
+        XCTAssertTrue(
+            AppCoordinator.statusItemForegroundTargetWindow(for: shell) === shell
+        )
+    }
+
     private func defaultCommand(
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags
