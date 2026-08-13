@@ -414,6 +414,21 @@ final class AppCoordinator {
         )
     }
 
+    static func statusItemResponderBelongsToCurrentWebHierarchy(
+        _ responder: NSResponder?,
+        currentWebView: WKWebView?,
+        targetWindow: NSWindow
+    ) -> Bool {
+        guard let responderView = responder as? NSView,
+              responderView.window === targetWindow,
+              let currentWebView,
+              currentWebView.window === targetWindow else {
+            return false
+        }
+        return responderView === currentWebView
+            || responderView.isDescendant(of: currentWebView)
+    }
+
     static func statusItemShouldPreserveFirstResponder(
         _ responder: NSResponder?,
         currentWebView: WKWebView?,
@@ -430,9 +445,11 @@ final class AppCoordinator {
             return true
         }
 
-        guard let currentWebView else { return false }
-        return responderView === currentWebView
-            || responderView.isDescendant(of: currentWebView)
+        return statusItemResponderBelongsToCurrentWebHierarchy(
+            responder,
+            currentWebView: currentWebView,
+            targetWindow: targetWindow
+        )
     }
 
     private func finishStatusItemKeyboardFocus(
@@ -454,15 +471,25 @@ final class AppCoordinator {
             currentWebView: webView,
             targetWindow: presentation.target
         )
+        let focusRequestAccepted: Bool
         let focused: Bool
 
         if preserveExistingFocus {
+            focusRequestAccepted = true
             focused = true
         } else if let webView,
                   webView.window === presentation.target,
-                  !webView.isHidden {
-            focused = presentation.target.makeFirstResponder(webView)
+                  !webView.isHidden,
+                  webView.acceptsFirstResponder {
+            focusRequestAccepted = presentation.target.makeFirstResponder(webView)
+            focused = focusRequestAccepted
+                && Self.statusItemResponderBelongsToCurrentWebHierarchy(
+                    presentation.target.firstResponder,
+                    currentWebView: webView,
+                    targetWindow: presentation.target
+                )
         } else {
+            focusRequestAccepted = false
             focused = false
         }
 
@@ -471,7 +498,8 @@ final class AppCoordinator {
             "STATUS_FOCUS generation=\(generation) active=\(NSApp.isActive) "
                 + "target=\(String(describing: type(of: presentation.target))) "
                 + "key=\(presentation.target.isKeyWindow) "
-                + "webPresent=\(webView != nil) focused=\(focused) "
+                + "webPresent=\(webView != nil) requestAccepted=\(focusRequestAccepted) "
+                + "focused=\(focused) "
                 + "responder=\(String(describing: presentation.target.firstResponder.map { type(of: $0) })) "
                 + "frontmost=\(frontmostIdentifier)"
         )
