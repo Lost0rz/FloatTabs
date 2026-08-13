@@ -317,13 +317,46 @@ final class AppCommandControllerTests: XCTestCase {
                 targetWindow: window
             )
         )
-        // A standalone or stale NSTextView is not enough. AppKit field editors
-        // are shared by the window and are preserved only while a visible control
-        // still reports that exact editor as its currentEditor().
         XCTAssertFalse(
             AppCoordinator.statusItemShouldPreserveFirstResponder(
                 standaloneTextView,
                 currentWebView: webView,
+                targetWindow: window
+            )
+        )
+    }
+
+    func testStatusItemFocusPreservesVisibleAddressEditorButRejectsItAfterDismiss() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView = root
+        let overlay = AddressOverlayView(frame: NSRect(x: 100, y: 300, width: 300, height: 52))
+        root.addSubview(overlay)
+        overlay.present(url: URL(string: "https://example.com")!, in: window)
+
+        guard let fieldEditor = overlay.field.currentEditor() as? NSTextView else {
+            XCTFail("Expected the presented address field to own a field editor")
+            return
+        }
+        XCTAssertTrue(fieldEditor.isFieldEditor)
+        XCTAssertTrue(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                fieldEditor,
+                currentWebView: nil,
+                targetWindow: window
+            )
+        )
+
+        overlay.dismiss()
+        XCTAssertFalse(
+            AppCoordinator.statusItemShouldPreserveFirstResponder(
+                fieldEditor,
+                currentWebView: nil,
                 targetWindow: window
             )
         )
