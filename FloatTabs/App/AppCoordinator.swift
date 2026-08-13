@@ -242,18 +242,13 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
+    /// The existing presentation paths own activation and previous-application
+    /// capture. Ordinary show and a ready fullscreen companion both activate
+    /// synchronously. During a locked fullscreen transition with no visible
+    /// presentation yet, do not activate early: the lifecycle will capture the
+    /// still-frontmost previous application when it is actually ready to present.
     private func statusItemForegroundGeneration() -> UInt {
-        if statusItemForegroundPresentation() == nil, !NSApp.isActive {
-            fullscreenExperimentLog(
-                "STATUS_ACTIVATION fallback generation=\(statusActivationGeneration)"
-            )
-            if #available(macOS 14.0, *) {
-                NSApp.activate()
-            } else {
-                _ = NSRunningApplication.current.activate(options: [])
-            }
-        }
-        return statusActivationGeneration
+        statusActivationGeneration
     }
 
     private func completeStatusItemActivationAfterTracking(generation: UInt) {
