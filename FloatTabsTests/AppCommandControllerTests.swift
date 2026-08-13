@@ -227,12 +227,12 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
-    func testStatusItemToggleRunsAfterTwoMainQueueTurns() async {
+    func testStatusItemPostTrackingReassertionRunsAfterTwoMainQueueTurns() async {
         let firstQueuedTurn = expectation(description: "first queued turn")
-        let toggleRan = expectation(description: "toggle ran")
+        let reassertionRan = expectation(description: "reassertion ran")
 
         StatusItemController.scheduleAfterStatusItemTracking {
-            toggleRan.fulfill()
+            reassertionRan.fulfill()
         }
 
         DispatchQueue.main.async {
@@ -240,7 +240,7 @@ final class AppCommandControllerTests: XCTestCase {
         }
 
         await fulfillment(
-            of: [firstQueuedTurn, toggleRan],
+            of: [firstQueuedTurn, reassertionRan],
             timeout: 1,
             enforceOrder: true
         )
