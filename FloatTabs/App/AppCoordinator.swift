@@ -66,6 +66,9 @@ final class AppCoordinator {
 
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
+            onReassertForeground: { [weak self] in
+                self?.reassertFloatTabsForegroundAfterStatusTracking()
+            },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) }
@@ -233,6 +236,35 @@ final class AppCoordinator {
 
     private func showGlobalSettings() {
         globalSettingsController?.show()
+    }
+
+    /// The status-item click already ran the normal show path synchronously so
+    /// NSApp.activate() retained the user's activation intent. After menu/status
+    /// tracking has fully unwound, force only FloatTabs' two presentation windows
+    /// to the front of their existing levels. Pin still exclusively controls
+    /// whether those levels are `.normal` or `.floating`.
+    private func reassertFloatTabsForegroundAfterStatusTracking() {
+        guard panelController.isVisible else { return }
+
+        NSApp.activate()
+
+        let shellWindow = NSApp.windows.first {
+            $0 is FloatingPanel && $0.isVisible
+        }
+        let sourceWindow = NSApp.windows.first {
+            $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
+        }
+
+        shellWindow?.orderFrontRegardless()
+        sourceWindow?.orderFrontRegardless()
+
+        if NSApp.isActive {
+            if let sourceWindow {
+                sourceWindow.makeKey()
+            } else {
+                shellWindow?.makeKey()
+            }
+        }
     }
 
     private func toggleFloatTabs() {
