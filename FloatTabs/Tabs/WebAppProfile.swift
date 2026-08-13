@@ -148,6 +148,16 @@ enum WebAppURL {
         return url
     }
 
+    static func defaultDisplayName(for url: URL) -> String {
+        guard let host = url.host?.lowercased(), !host.isEmpty else {
+            return "Web App"
+        }
+        if host.hasPrefix("www."), host.count > 4 {
+            return String(host.dropFirst(4))
+        }
+        return host
+    }
+
     static func isSafe(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme),
