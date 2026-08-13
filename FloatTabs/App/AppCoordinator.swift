@@ -249,12 +249,24 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// `PanelController.showFloatTabs()` already issues the activation request
-    /// synchronously while the status-item action is still handling the user's
-    /// click. Capture only the generation here; a second activation request would
-    /// duplicate that path and add another source of timing variance.
+    /// Ordinary presentation already requests activation synchronously from
+    /// `showFloatTabs()`. A locked WebKit fullscreen session returns through the
+    /// companion path before that call, so only that no-ordinary-source case gets
+    /// a fallback activation request while the status-item user action is live.
     private func statusItemForegroundGeneration() -> UInt {
-        statusActivationGeneration
+        let hasVisibleOrdinarySource = statusItemForegroundPresentation()?.target
+            is FullscreenSourceWindow
+        if !hasVisibleOrdinarySource, !NSApp.isActive {
+            fullscreenExperimentLog(
+                "STATUS_ACTIVATION fallback generation=\(statusActivationGeneration)"
+            )
+            if #available(macOS 14.0, *) {
+                NSApp.activate()
+            } else {
+                _ = NSRunningApplication.current.activate(options: [])
+            }
+        }
+        return statusActivationGeneration
     }
 
     /// Activation may settle asynchronously. Poll only the observable state; do
