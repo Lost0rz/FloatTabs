@@ -292,10 +292,12 @@ final class AppCoordinator {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.statusActivationRetryDelay) {
                 [weak self] in
-                self?.completeStatusItemActivationWhenReady(
-                    generation: generation,
-                    attemptsRemaining: attemptsRemaining - 1
-                )
+                RunLoop.main.perform(inModes: [.default]) { [weak self] in
+                    self?.completeStatusItemActivationWhenReady(
+                        generation: generation,
+                        attemptsRemaining: attemptsRemaining - 1
+                    )
+                }
             }
             return
         }
@@ -399,11 +401,13 @@ final class AppCoordinator {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.statusKeyWindowRetryDelay) {
                 [weak self] in
-                self?.completeStatusItemKeyWindowWhenReady(
-                    generation: generation,
-                    targetWindowNumber: targetWindowNumber,
-                    attemptsRemaining: attemptsRemaining - 1
-                )
+                RunLoop.main.perform(inModes: [.default]) { [weak self] in
+                    self?.completeStatusItemKeyWindowWhenReady(
+                        generation: generation,
+                        targetWindowNumber: targetWindowNumber,
+                        attemptsRemaining: attemptsRemaining - 1
+                    )
+                }
             }
             return
         }
