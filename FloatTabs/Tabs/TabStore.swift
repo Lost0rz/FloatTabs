@@ -60,18 +60,20 @@ final class TabStore {
 
     @discardableResult
     func add(
-        name: String,
+        name: String? = nil,
         homeURL: URL,
         renderingProfile: WebRenderingProfile = .canonicalDefault,
         now: Date = Date()
     ) -> WebAppProfile? {
         guard WebAppURL.isSafe(homeURL) else { return nil }
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return nil }
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedName = trimmedName.isEmpty
+            ? WebAppURL.defaultDisplayName(for: homeURL)
+            : trimmedName
 
         let profile = WebAppProfile(
             order: orderedProfiles.count,
-            name: trimmedName,
+            name: resolvedName,
             homeURL: homeURL,
             currentURL: homeURL,
             renderingProfile: renderingProfile.normalized(),
