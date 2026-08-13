@@ -228,23 +228,18 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
-    func testStatusItemPostTrackingReassertionRunsAfterTwoMainQueueTurns() async {
-        let firstQueuedTurn = expectation(description: "first queued turn")
+    func testStatusItemPostTrackingReassertionIsDeferred() async {
         let reassertionRan = expectation(description: "reassertion ran")
+        var didRun = false
 
         StatusItemController.scheduleAfterStatusItemTracking {
+            didRun = true
             reassertionRan.fulfill()
         }
 
-        DispatchQueue.main.async {
-            firstQueuedTurn.fulfill()
-        }
-
-        await fulfillment(
-            of: [firstQueuedTurn, reassertionRan],
-            timeout: 1,
-            enforceOrder: true
-        )
+        XCTAssertFalse(didRun)
+        await fulfillment(of: [reassertionRan], timeout: 1)
+        XCTAssertTrue(didRun)
     }
 
     func testStatusItemForegroundTargetUsesOnlyVisibleSourceChild() {

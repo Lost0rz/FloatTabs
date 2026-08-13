@@ -197,11 +197,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Status-bar buttons and NSMenu both run nested tracking modes. Main-queue
+    /// turns can still execute while those modes are active, so counting async
+    /// hops does not prove that AppKit finished tracking. Schedule explicitly for
+    /// the default main-run-loop mode; Foundation holds the block until that mode
+    /// is active again.
     static func scheduleAfterStatusItemTracking(
         _ action: @escaping @MainActor @Sendable () -> Void
     ) {
-        DispatchQueue.main.async {
-            DispatchQueue.main.async(execute: action)
+        RunLoop.main.perform(inModes: [.default]) {
+            action()
         }
     }
 
