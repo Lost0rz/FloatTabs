@@ -22,6 +22,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     )
 
     private let onToggle: () -> Void
+    private let onReassertForeground: () -> Void
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
     private let onQuit: () -> Void
@@ -42,11 +43,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     init(
         onToggle: @escaping () -> Void,
+        onReassertForeground: @escaping () -> Void = {},
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onToggle = onToggle
+        self.onReassertForeground = onReassertForeground
         self.isVisible = isVisible
         self.onSettings = onSettings
         self.onQuit = onQuit
@@ -149,7 +152,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else {
-            requestToggleAfterStatusItemTracking()
+            requestToggleFromStatusItem()
             return
         }
 
@@ -159,7 +162,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if shouldOpenMenu {
             presentMenu(from: sender)
         } else {
-            requestToggleAfterStatusItemTracking()
+            requestToggleFromStatusItem()
         }
     }
 
@@ -173,16 +176,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleFromMenu() {
-        requestToggleAfterStatusItemTracking()
+        requestToggleFromStatusItem()
     }
 
-    /// Status-bar and menu tracking can continue one final ordering pass after
-    /// the control action and the first queued main-thread callback. Defer two
-    /// main-queue turns so FloatTabs' activate/makeKeyAndOrderFront sequence is
-    /// the final presentation operation, matching the global-hotkey path.
-    private func requestToggleAfterStatusItemTracking() {
+    /// Keep the actual show/activation request inside the user's status-item
+    /// click. On macOS 14+ activation is user-intent driven; deferring the whole
+    /// toggle can lose that activation context. AppKit may still perform a final
+    /// status/menu tracking order pass, so only the z-order reassertion is queued.
+    private func requestToggleFromStatusItem() {
+        let shouldReassertForeground = !isVisible()
+        onToggle()
+
+        guard shouldReassertForeground else { return }
         Self.scheduleAfterStatusItemTracking { [weak self] in
-            self?.onToggle()
+            self?.onReassertForeground()
         }
     }
 
