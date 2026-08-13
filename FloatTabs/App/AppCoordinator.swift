@@ -337,9 +337,9 @@ final class AppCoordinator {
         let shellWindow = NSApp.windows.first {
             $0 is FloatingPanel && $0.isVisible
         }
-        let sourceWindow = NSApp.windows.first {
+        let sourceWindow = NSApp.windows.first(where: {
             $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
-        }
+        }) as? FullscreenSourceWindow
 
         shellWindow?.orderFrontRegardless()
 
