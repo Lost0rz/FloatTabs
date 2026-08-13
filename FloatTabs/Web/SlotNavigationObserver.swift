@@ -37,7 +37,8 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
 
         let disposition = value
             .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
-            .first?
+            .first
+            .map(String.init)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
