@@ -443,6 +443,24 @@ final class AppCoordinator {
             || responderView.isDescendant(of: currentWebView)
     }
 
+    private static func visibleEditingControl(
+        for fieldEditor: NSTextView,
+        in view: NSView?
+    ) -> NSControl? {
+        guard let view else { return nil }
+        if let control = view as? NSControl,
+           !control.isHiddenOrHasHiddenAncestor,
+           control.currentEditor() === fieldEditor {
+            return control
+        }
+        for subview in view.subviews {
+            if let control = visibleEditingControl(for: fieldEditor, in: subview) {
+                return control
+            }
+        }
+        return nil
+    }
+
     static func statusItemShouldPreserveFirstResponder(
         _ responder: NSResponder?,
         currentWebView: WKWebView?,
@@ -453,17 +471,25 @@ final class AppCoordinator {
             return false
         }
 
-        // Preserve a live field editor: it can represent an AppKit text field or
-        // an IME composition that began while the post-tracking repair was pending.
-        if responderView is NSTextView {
-            return true
-        }
-
-        return statusItemResponderBelongsToCurrentWebHierarchy(
+        if statusItemResponderBelongsToCurrentWebHierarchy(
             responder,
             currentWebView: currentWebView,
             targetWindow: targetWindow
-        )
+        ) {
+            return true
+        }
+
+        // An AppKit field editor is a shared NSTextView that can outlive the
+        // control it last edited. Preserve it only while a visible NSControl in
+        // this target window still reports that exact object as `currentEditor()`.
+        guard let fieldEditor = responderView as? NSTextView,
+              fieldEditor.isFieldEditor else {
+            return false
+        }
+        return visibleEditingControl(
+            for: fieldEditor,
+            in: targetWindow.contentView
+        ) != nil
     }
 
     private func finishStatusItemKeyboardFocus(

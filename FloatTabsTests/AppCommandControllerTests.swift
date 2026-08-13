@@ -277,7 +277,7 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
-    func testStatusItemFocusPreservesOnlyTextOrCurrentWebHierarchy() {
+    func testStatusItemFocusPreservesOnlyActiveInputOrCurrentWebHierarchy() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),
             styleMask: [.borderless],
@@ -290,11 +290,11 @@ final class AppCommandControllerTests: XCTestCase {
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
         let webDescendant = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
         let unrelatedView = NSView(frame: NSRect(x: 320, y: 0, width: 10, height: 10))
-        let textView = NSTextView(frame: NSRect(x: 320, y: 30, width: 100, height: 30))
+        let standaloneTextView = NSTextView(frame: NSRect(x: 320, y: 30, width: 100, height: 30))
         root.addSubview(webView)
         webView.addSubview(webDescendant)
         root.addSubview(unrelatedView)
-        root.addSubview(textView)
+        root.addSubview(standaloneTextView)
 
         XCTAssertFalse(
             AppCoordinator.statusItemShouldPreserveFirstResponder(
@@ -317,9 +317,12 @@ final class AppCommandControllerTests: XCTestCase {
                 targetWindow: window
             )
         )
-        XCTAssertTrue(
+        // A standalone or stale NSTextView is not enough. AppKit field editors
+        // are shared by the window and are preserved only while a visible control
+        // still reports that exact editor as its currentEditor().
+        XCTAssertFalse(
             AppCoordinator.statusItemShouldPreserveFirstResponder(
-                textView,
+                standaloneTextView,
                 currentWebView: webView,
                 targetWindow: window
             )
