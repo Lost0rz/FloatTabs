@@ -22,7 +22,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     )
 
     private let onToggle: () -> Void
-    private let onReassertForeground: () -> Void
+    private let onBeginForegroundActivation: () -> UInt
+    private let onReassertForeground: (UInt) -> Void
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
     private let onQuit: () -> Void
@@ -43,12 +44,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     init(
         onToggle: @escaping () -> Void,
-        onReassertForeground: @escaping () -> Void = {},
+        onBeginForegroundActivation: @escaping () -> UInt = { 0 },
+        onReassertForeground: @escaping (UInt) -> Void = { _ in },
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onToggle = onToggle
+        self.onBeginForegroundActivation = onBeginForegroundActivation
         self.onReassertForeground = onReassertForeground
         self.isVisible = isVisible
         self.onSettings = onSettings
@@ -179,17 +182,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         requestToggleFromStatusItem()
     }
 
-    /// Keep the actual show/activation request inside the user's status-item
-    /// click. On macOS 14+ activation is user-intent driven; deferring the whole
-    /// toggle can lose that activation context. AppKit may still perform a final
-    /// status/menu tracking order pass, so only the z-order reassertion is queued.
+    /// Showing from the status item has two explicit phases. The normal show path
+    /// runs first so PanelController can capture the previously active application.
+    /// Then, while still inside the user's status-item action, begin the stronger
+    /// activation request and capture a generation token. Only the completion is
+    /// deferred until status/menu tracking has unwound.
     private func requestToggleFromStatusItem() {
-        let shouldReassertForeground = !isVisible()
+        let shouldShow = !isVisible()
         onToggle()
 
-        guard shouldReassertForeground else { return }
+        guard shouldShow else { return }
+        let activationGeneration = onBeginForegroundActivation()
         Self.scheduleAfterStatusItemTracking { [weak self] in
-            self?.onReassertForeground()
+            self?.onReassertForeground(activationGeneration)
         }
     }
 
