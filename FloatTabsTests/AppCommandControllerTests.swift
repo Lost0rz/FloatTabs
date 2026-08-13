@@ -201,6 +201,51 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(committed, "example.com/project")
     }
 
+    func testBlankNewWebAppNameFallsBackToURLHost() {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let url = URL(string: "https://www.example.com/projects/123")!
+
+        let added = store.add(name: "   ", homeURL: url)
+
+        XCTAssertEqual(added?.name, "example.com")
+        XCTAssertEqual(added?.homeURL, url)
+        XCTAssertEqual(store.activeTabID, added?.id)
+    }
+
+    func testURLFallbackDisplayNameKeepsSubdomainAndDropsLeadingWWW() {
+        XCTAssertEqual(
+            WebAppURL.defaultDisplayName(
+                for: URL(string: "https://www.github.com/openai")!
+            ),
+            "github.com"
+        )
+        XCTAssertEqual(
+            WebAppURL.defaultDisplayName(
+                for: URL(string: "https://docs.example.com/start")!
+            ),
+            "docs.example.com"
+        )
+    }
+
+    func testStatusItemToggleRunsAfterTwoMainQueueTurns() {
+        let firstQueuedTurn = expectation(description: "first queued turn")
+        let toggleRan = expectation(description: "toggle ran")
+        var didRunToggle = false
+
+        StatusItemController.scheduleAfterStatusItemTracking {
+            didRunToggle = true
+            toggleRan.fulfill()
+        }
+
+        DispatchQueue.main.async {
+            XCTAssertFalse(didRunToggle)
+            firstQueuedTurn.fulfill()
+        }
+
+        wait(for: [firstQueuedTurn, toggleRan], timeout: 1, enforceOrder: true)
+        XCTAssertTrue(didRunToggle)
+    }
+
     private func defaultCommand(
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags
