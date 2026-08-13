@@ -19,6 +19,31 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
         canShowMIMEType ? .allow : .download
     }
 
+    static func responsePolicy(
+        response: URLResponse,
+        canShowMIMEType: Bool
+    ) -> WKNavigationResponsePolicy {
+        if contentDispositionRequestsDownload(response) {
+            return .download
+        }
+        return responsePolicy(canShowMIMEType: canShowMIMEType)
+    }
+
+    static func contentDispositionRequestsDownload(_ response: URLResponse) -> Bool {
+        guard let httpResponse = response as? HTTPURLResponse,
+              let value = httpResponse.value(forHTTPHeaderField: "Content-Disposition") else {
+            return false
+        }
+
+        let disposition = value
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        return disposition == "attachment"
+    }
+
     static func safeSuggestedFilename(_ suggestedFilename: String) -> String {
         guard !suggestedFilename.isEmpty else {
             return "Download"
@@ -184,6 +209,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         decisionHandler(
             DownloadCoordinator.responsePolicy(
+                response: navigationResponse.response,
                 canShowMIMEType: navigationResponse.canShowMIMEType
             )
         )
