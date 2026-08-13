@@ -22,7 +22,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     )
 
     private let onToggle: () -> Void
-    private let onBeginForegroundActivation: () -> UInt
+    private let onCaptureForegroundGeneration: () -> UInt
     private let onReassertForeground: (UInt) -> Void
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
@@ -44,14 +44,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     init(
         onToggle: @escaping () -> Void,
-        onBeginForegroundActivation: @escaping () -> UInt = { 0 },
+        onCaptureForegroundGeneration: @escaping () -> UInt = { 0 },
         onReassertForeground: @escaping (UInt) -> Void = { _ in },
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onToggle = onToggle
-        self.onBeginForegroundActivation = onBeginForegroundActivation
+        self.onCaptureForegroundGeneration = onCaptureForegroundGeneration
         self.onReassertForeground = onReassertForeground
         self.isVisible = isVisible
         self.onSettings = onSettings
@@ -182,17 +182,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         requestToggleFromStatusItem()
     }
 
-    /// Showing from the status item has two explicit phases. The normal show path
-    /// runs first so PanelController can capture the previously active application.
-    /// Then, while still inside the user's status-item action, begin the stronger
-    /// activation request and capture a generation token. Only the completion is
-    /// deferred until status/menu tracking has unwound.
+    /// Showing from the status item has two phases. The normal show path runs
+    /// synchronously inside the user's action and already performs FloatTabs'
+    /// activation request. Capture that presentation generation, then defer only
+    /// the state verification/key-window repair until status tracking unwinds.
     private func requestToggleFromStatusItem() {
         let shouldShow = !isVisible()
         onToggle()
 
         guard shouldShow else { return }
-        let activationGeneration = onBeginForegroundActivation()
+        let activationGeneration = onCaptureForegroundGeneration()
         Self.scheduleAfterStatusItemTracking { [weak self] in
             self?.onReassertForeground(activationGeneration)
         }

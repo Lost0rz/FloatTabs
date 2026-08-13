@@ -73,8 +73,8 @@ final class AppCoordinator {
 
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
-            onBeginForegroundActivation: { [weak self] in
-                self?.beginStatusItemForegroundActivation() ?? 0
+            onCaptureForegroundGeneration: { [weak self] in
+                self?.statusItemForegroundGeneration() ?? 0
             },
             onReassertForeground: { [weak self] generation in
                 self?.completeStatusItemActivationAfterTracking(generation: generation)
@@ -249,26 +249,12 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// The status-item click is the real user-intent boundary. Issue exactly one
-    /// activation request while that event is still being handled, then let the
-    /// post-tracking phase observe AppKit's actual state instead of repeatedly
-    /// hammering activation after the user event has ended.
-    private func beginStatusItemForegroundActivation() -> UInt {
-        guard panelController.isVisible else { return statusActivationGeneration }
-
-        let generation = statusActivationGeneration
-        let frontmostIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil"
-        fullscreenExperimentLog(
-            "STATUS_ACTIVATION request generation=\(generation) active=\(NSApp.isActive) "
-                + "frontmost=\(frontmostIdentifier)"
-        )
-
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        return generation
+    /// `PanelController.showFloatTabs()` already issues the activation request
+    /// synchronously while the status-item action is still handling the user's
+    /// click. Capture only the generation here; a second activation request would
+    /// duplicate that path and add another source of timing variance.
+    private func statusItemForegroundGeneration() -> UInt {
+        statusActivationGeneration
     }
 
     /// Activation may settle asynchronously. Poll only the observable state; do
@@ -428,6 +414,27 @@ final class AppCoordinator {
         )
     }
 
+    static func statusItemShouldPreserveFirstResponder(
+        _ responder: NSResponder?,
+        currentWebView: WKWebView?,
+        targetWindow: NSWindow
+    ) -> Bool {
+        guard let responderView = responder as? NSView,
+              responderView.window === targetWindow else {
+            return false
+        }
+
+        // Preserve a live field editor: it can represent an AppKit text field or
+        // an IME composition that began while the post-tracking repair was pending.
+        if responderView is NSTextView {
+            return true
+        }
+
+        guard let currentWebView else { return false }
+        return responderView === currentWebView
+            || responderView.isDescendant(of: currentWebView)
+    }
+
     private func finishStatusItemKeyboardFocus(
         generation: UInt,
         targetWindowNumber: Int
@@ -441,15 +448,15 @@ final class AppCoordinator {
             return
         }
 
-        let existingResponder = presentation.target.firstResponder
-        let existingViewOwnsFocus = (existingResponder as? NSView)?.window === presentation.target
         let webView = webPanelContainer(in: presentation.target.contentView)?.currentWebView
+        let preserveExistingFocus = Self.statusItemShouldPreserveFirstResponder(
+            presentation.target.firstResponder,
+            currentWebView: webView,
+            targetWindow: presentation.target
+        )
         let focused: Bool
 
-        if existingViewOwnsFocus {
-            // Do not steal a newer user interaction (address field, sheet field,
-            // WebKit content view, IME field editor, etc.) that occurred while
-            // the post-tracking handshake was completing.
+        if preserveExistingFocus {
             focused = true
         } else if let webView,
                   webView.window === presentation.target,
