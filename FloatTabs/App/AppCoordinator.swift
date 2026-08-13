@@ -1,8 +1,11 @@
 import AppKit
 import KeyboardShortcuts
+import WebKit
 
 @MainActor
 final class AppCoordinator {
+    private static let statusActivationMaxAttempts = 12
+
     private let panelController: PanelController
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
@@ -10,6 +13,7 @@ final class AppCoordinator {
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
     private var globalSettingsController: GlobalSettingsController?
+    private var statusActivationGeneration: UInt = 0
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -67,7 +71,7 @@ final class AppCoordinator {
         statusItemController = StatusItemController(
             onToggle: { [weak self] in self?.toggleFloatTabs() },
             onReassertForeground: { [weak self] in
-                self?.reassertFloatTabsForegroundAfterStatusTracking()
+                self?.beginStatusItemActivationHandshake()
             },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onSettings: { [weak self] in self?.showGlobalSettings() },
@@ -114,6 +118,7 @@ final class AppCoordinator {
     }
 
     func prepareForTermination() {
+        statusActivationGeneration &+= 1
 #if DEBUG
         benchmarkControlServer?.stop()
 #endif
@@ -238,30 +243,85 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// The synchronous status-item show captures the user's activation intent and
-    /// establishes the Web source as first responder. AppKit status-item tracking
-    /// can then undo the cross-app ordering/key transition before the mouse action
-    /// fully unwinds. Do not replay `showFloatTabs()` here: a second asynchronous
-    /// activation request can be denied on macOS 14+. Instead, finish the explicit
-    /// user-requested activation deterministically, restore the two presentation
-    /// windows at their existing Pin-controlled levels, then restore the source's
-    /// already established first responder so WebKit/IME keyboard input resumes.
-    private func reassertFloatTabsForegroundAfterStatusTracking() {
+    /// Status-item tracking and cross-application activation are asynchronous
+    /// systems. The old implementation tried to restore keyboard focus after a
+    /// fixed number of queued turns, which raced AppKit and produced intermittent
+    /// WebKit/IME failures. Treat activation as an explicit state transition:
+    /// never touch the Web source's key-window/first-responder chain until the
+    /// application has actually become active.
+    private func beginStatusItemActivationHandshake() {
         guard panelController.isVisible else { return }
 
-        // This path exists only after the user explicitly clicked FloatTabs in
-        // the menu bar. `activate()` is intentionally attempted first on macOS
-        // 14+, but AppKit documents that activation requests may be denied. The
-        // deprecated ignoring-other-apps API remains a narrowly scoped fallback
-        // for this explicit user gesture so a menu-bar app can deterministically
-        // regain keyboard focus after status-item tracking.
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-            if !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
+        statusActivationGeneration &+= 1
+        let generation = statusActivationGeneration
+        fullscreenExperimentLog(
+            "STATUS_ACTIVATION begin generation=\(generation) active=\(NSApp.isActive) "
+                + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+        )
+
+        // This is a narrowly scoped compatibility path for an explicit user click
+        // on FloatTabs' own menu-bar item. It is intentionally not used by global
+        // shortcuts or ordinary programmatic presentation.
+        NSApp.activate(ignoringOtherApps: true)
+        completeStatusItemActivationWhenReady(
+            generation: generation,
+            attemptsRemaining: Self.statusActivationMaxAttempts
+        )
+    }
+
+    private func completeStatusItemActivationWhenReady(
+        generation: UInt,
+        attemptsRemaining: Int
+    ) {
+        guard generation == statusActivationGeneration,
+              panelController.isVisible else {
+            return
+        }
+
+        guard NSApp.isActive else {
+            guard attemptsRemaining > 0 else {
+                fullscreenExperimentLog(
+                    "STATUS_ACTIVATION failed generation=\(generation) "
+                        + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+                )
+                return
             }
-        } else {
+
             NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.async { [weak self] in
+                self?.completeStatusItemActivationWhenReady(
+                    generation: generation,
+                    attemptsRemaining: attemptsRemaining - 1
+                )
+            }
+            return
+        }
+
+        // `isActive` is the gate, not a guessed delay. One final queue turn lets
+        // AppKit finish the activation notification/key-window bookkeeping before
+        // the source window and WebKit responder are asserted.
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  generation == self.statusActivationGeneration,
+                  self.panelController.isVisible else {
+                return
+            }
+            guard NSApp.isActive else {
+                self.completeStatusItemActivationWhenReady(
+                    generation: generation,
+                    attemptsRemaining: attemptsRemaining
+                )
+                return
+            }
+            self.finishStatusItemKeyboardFocus(generation: generation)
+        }
+    }
+
+    private func finishStatusItemKeyboardFocus(generation: UInt) {
+        guard generation == statusActivationGeneration,
+              panelController.isVisible,
+              NSApp.isActive else {
+            return
         }
 
         let shellWindow = NSApp.windows.first {
@@ -271,22 +331,55 @@ final class AppCoordinator {
             $0 is FullscreenSourceWindow && $0.isVisible && $0.alphaValue > 0.01
         }
 
-        let preservedFirstResponder = sourceWindow?.firstResponder
         shellWindow?.orderFrontRegardless()
-        sourceWindow?.orderFrontRegardless()
 
-        if let sourceWindow {
-            sourceWindow.makeKeyAndOrderFront(nil)
-            if let preservedFirstResponder {
-                _ = sourceWindow.makeFirstResponder(preservedFirstResponder)
-            }
-        } else {
+        guard let sourceWindow else {
             shellWindow?.makeKeyAndOrderFront(nil)
+            fullscreenExperimentLog(
+                "STATUS_FOCUS shell generation=\(generation) active=\(NSApp.isActive) "
+                    + "shellKey=\(shellWindow?.isKeyWindow ?? false)"
+            )
+            return
         }
+
+        sourceWindow.orderFrontRegardless()
+        sourceWindow.makeKeyAndOrderFront(nil)
+
+        let webView = webPanelContainer(in: sourceWindow.contentView)?.currentWebView
+        let focused: Bool
+        if let webView, webView.window === sourceWindow, !webView.isHidden {
+            focused = sourceWindow.makeFirstResponder(webView)
+        } else {
+            focused = false
+        }
+
+        fullscreenExperimentLog(
+            "STATUS_FOCUS web generation=\(generation) active=\(NSApp.isActive) "
+                + "sourceKey=\(sourceWindow.isKeyWindow) "
+                + "webPresent=\(webView != nil) focused=\(focused) "
+                + "responder=\(String(describing: sourceWindow.firstResponder.map { type(of: $0) })) "
+                + "frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? \"nil\")"
+        )
+    }
+
+    private func webPanelContainer(in view: NSView?) -> WebPanelContainerView? {
+        guard let view else { return nil }
+        if let container = view as? WebPanelContainerView {
+            return container
+        }
+        for subview in view.subviews {
+            if let container = webPanelContainer(in: subview) {
+                return container
+            }
+        }
+        return nil
     }
 
     private func toggleFloatTabs() {
         if panelController.isVisible {
+            // Cancel any queued status-item activation handshake before hiding so
+            // a stale completion cannot make a hidden source key again.
+            statusActivationGeneration &+= 1
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()
