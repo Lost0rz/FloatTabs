@@ -277,6 +277,51 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 
+    func testStatusItemFocusRepairYieldsToNewerKeyWindow() {
+        let shell = FloatingPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 500)
+        )
+        let target = FullscreenSourceWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let newerWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let allowed = Set([shell.windowNumber, target.windowNumber])
+
+        XCTAssertFalse(
+            AppCoordinator.statusItemShouldYieldToNewerKeyWindow(
+                nil,
+                allowedWindowNumbers: allowed
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.statusItemShouldYieldToNewerKeyWindow(
+                shell,
+                allowedWindowNumbers: allowed
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.statusItemShouldYieldToNewerKeyWindow(
+                target,
+                allowedWindowNumbers: allowed
+            )
+        )
+        XCTAssertTrue(newerWindow.canBecomeKey)
+        XCTAssertTrue(
+            AppCoordinator.statusItemShouldYieldToNewerKeyWindow(
+                newerWindow,
+                allowedWindowNumbers: allowed
+            )
+        )
+    }
+
     func testStatusItemFocusPreservesOnlyActiveInputOrCurrentWebHierarchy() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),

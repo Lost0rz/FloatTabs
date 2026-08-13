@@ -27,10 +27,6 @@ final class AppCoordinator {
         backupService: FloatTabsBackupService = FloatTabsBackupService()
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
-        // Layer-backed rail controls resolve dynamic NSColors to CGColor while
-        // they are created. Apply the stored appearance before PanelController
-        // builds any windows/views so a saved Dark choice cannot be cached as
-        // Aqua white until the next appearance transition.
         resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
         self.backupService = backupService
@@ -109,9 +105,6 @@ final class AppCoordinator {
             }
         )
 
-        // Keep one local snapshot per app version/build. It is overwritten by
-        // the same version on clean starts/exits, while older-version snapshots
-        // remain available when a newer app build is installed.
         _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
 
 #if DEBUG
@@ -249,10 +242,6 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    /// Ordinary presentation and a ready fullscreen companion both request
-    /// activation synchronously from their existing show paths. Only a locked
-    /// fullscreen transition that has no visible FloatTabs presentation yet needs
-    /// this fallback while the status-item user action is still live.
     private func statusItemForegroundGeneration() -> UInt {
         if statusItemForegroundPresentation() == nil, !NSApp.isActive {
             fullscreenExperimentLog(
@@ -267,8 +256,6 @@ final class AppCoordinator {
         return statusActivationGeneration
     }
 
-    /// Activation may settle asynchronously. Poll only the observable state; do
-    /// not resend activation outside the original status-item user event.
     private func completeStatusItemActivationAfterTracking(generation: UInt) {
         guard generation == statusActivationGeneration,
               panelController.isVisible else {
@@ -320,11 +307,6 @@ final class AppCoordinator {
         requestStatusItemKeyWindow(generation: generation)
     }
 
-    /// Resolve the ordinary Web source only through the visible shell's child
-    /// relationship. The fullscreen source host intentionally detaches while
-    /// WebKit owns a fullscreen session, in which case the shell/companion is the
-    /// correct key-window target. This keeps status repair out of source-host
-    /// lifecycle, level, alpha, and parent/child ownership.
     static func statusItemForegroundTargetWindow(for shellWindow: FloatingPanel) -> NSWindow {
         shellWindow.childWindows?
             .compactMap { $0 as? FullscreenSourceWindow }
@@ -344,10 +326,14 @@ final class AppCoordinator {
         )
     }
 
-    /// App activation and key-window ownership are separate transitions. Once the
-    /// app is actually active, make one key-window request and then observe
-    /// `isKeyWindow`; repeated make-key calls can themselves churn the responder
-    /// chain while WebKit is trying to settle input focus.
+    static func statusItemShouldYieldToNewerKeyWindow(
+        _ keyWindow: NSWindow?,
+        allowedWindowNumbers: Set<Int>
+    ) -> Bool {
+        guard let keyWindow, keyWindow.canBecomeKey else { return false }
+        return !allowedWindowNumbers.contains(keyWindow.windowNumber)
+    }
+
     private func requestStatusItemKeyWindow(generation: UInt) {
         guard generation == statusActivationGeneration,
               panelController.isVisible,
@@ -355,6 +341,21 @@ final class AppCoordinator {
               let presentation = statusItemForegroundPresentation() else {
             fullscreenExperimentLog(
                 "STATUS_KEY missing generation=\(generation) active=\(NSApp.isActive)"
+            )
+            return
+        }
+
+        let allowedWindowNumbers = Set([
+            presentation.shell.windowNumber,
+            presentation.target.windowNumber,
+        ])
+        guard !Self.statusItemShouldYieldToNewerKeyWindow(
+            NSApp.keyWindow,
+            allowedWindowNumbers: allowedWindowNumbers
+        ) else {
+            fullscreenExperimentLog(
+                "STATUS_KEY canceled generation=\(generation) reason=newerKeyWindow "
+                    + "key=\(NSApp.keyWindow?.windowNumber ?? -1)"
             )
             return
         }
@@ -385,9 +386,22 @@ final class AppCoordinator {
             return
         }
 
-        // Fullscreen transitions can legitimately change the foreground target
-        // while this short handshake is in flight. Request the new authoritative
-        // target once, rather than continuing to wait on a detached source.
+        let allowedWindowNumbers = Set([
+            presentation.shell.windowNumber,
+            presentation.target.windowNumber,
+            targetWindowNumber,
+        ])
+        guard !Self.statusItemShouldYieldToNewerKeyWindow(
+            NSApp.keyWindow,
+            allowedWindowNumbers: allowedWindowNumbers
+        ) else {
+            fullscreenExperimentLog(
+                "STATUS_KEY canceled generation=\(generation) reason=newerKeyWindow "
+                    + "key=\(NSApp.keyWindow?.windowNumber ?? -1)"
+            )
+            return
+        }
+
         if presentation.target.windowNumber != targetWindowNumber {
             presentation.shell.orderFront(nil)
             presentation.target.makeKeyAndOrderFront(nil)
@@ -479,9 +493,6 @@ final class AppCoordinator {
             return true
         }
 
-        // An AppKit field editor is a shared NSTextView that can outlive the
-        // control it last edited. Preserve it only while a visible NSControl in
-        // this target window still reports that exact object as `currentEditor()`.
         guard let fieldEditor = responderView as? NSTextView,
               fieldEditor.isFieldEditor else {
             return false
@@ -559,9 +570,6 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs() {
-        // Every explicit toggle starts a new presentation generation. This also
-        // invalidates a status-item completion that was suspended while an
-        // auto-hide occurred and a later global shortcut presented FloatTabs.
         statusActivationGeneration &+= 1
         if panelController.isVisible {
             panelController.hideFloatTabs()
