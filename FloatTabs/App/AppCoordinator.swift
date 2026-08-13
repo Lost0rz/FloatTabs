@@ -239,14 +239,18 @@ final class AppCoordinator {
     }
 
     /// The status-item click already ran the normal show path synchronously so
-    /// NSApp.activate() retained the user's activation intent. After menu/status
-    /// tracking has fully unwound, force only FloatTabs' two presentation windows
-    /// to the front of their existing levels. Pin still exclusively controls
-    /// whether those levels are `.normal` or `.floating`.
+    /// activation retained the user's intent. After menu/status tracking has
+    /// fully unwound, force only FloatTabs' two presentation windows to the front
+    /// of their existing levels. Pin still exclusively controls whether those
+    /// levels are `.normal` or `.floating`.
     private func reassertFloatTabsForegroundAfterStatusTracking() {
         guard panelController.isVisible else { return }
 
-        NSApp.activate()
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            _ = NSRunningApplication.current.activate(options: [])
+        }
 
         let shellWindow = NSApp.windows.first {
             $0 is FloatingPanel && $0.isVisible
