@@ -212,3 +212,50 @@ final class AppCommandControllerTests: XCTestCase {
         )
     }
 }
+
+final class FullscreenRestoreCompletionTests: XCTestCase {
+    func testRestoreWaitsWhileFullscreenPresentationIsStillActive() {
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 0.2,
+                isBackInSourceHierarchy: true,
+                isPresentationComplete: false,
+                stableChecks: 2
+            ),
+            .poll(stableChecks: 0, delay: 0.05)
+        )
+    }
+
+    func testRestoreRequiresStableChecksAfterPresentationCompletes() {
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 0.2,
+                isBackInSourceHierarchy: true,
+                isPresentationComplete: true,
+                stableChecks: 0
+            ),
+            .poll(stableChecks: 1, delay: 0.05)
+        )
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 0.3,
+                isBackInSourceHierarchy: true,
+                isPresentationComplete: true,
+                stableChecks: 2
+            ),
+            .restored
+        )
+    }
+
+    func testPresentationTeardownDoesNotTriggerUnsafeSourceRebuild() {
+        XCTAssertEqual(
+            FullscreenRestoreWatchdog.decision(
+                elapsed: 12,
+                isBackInSourceHierarchy: true,
+                isPresentationComplete: false,
+                stableChecks: 0
+            ),
+            .poll(stableChecks: 0, delay: 0.05)
+        )
+    }
+}
