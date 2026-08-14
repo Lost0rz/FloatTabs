@@ -220,9 +220,11 @@ enum FullscreenRestoreWatchdogDecision: Equatable {
     case rebuildSource
 }
 
-/// Keeps the normal WebKit restore path unchanged while bounding the one failure
-/// mode that previously polled at 20 Hz forever: WebKit reports that fullscreen
-/// ended but never puts the source view back into FloatTabs' public hierarchy.
+/// WebKit returns the WKWebView to the source hierarchy and exposes
+/// `.notInFullscreen` before its fullscreen presentation is fully torn down.
+/// Keep the source locked until both the public hierarchy and the WebKit-owned
+/// fullscreen window have completed restoration, then require a few stable
+/// checks to avoid racing the final presentation transaction.
 struct FullscreenRestoreWatchdog {
     static let pollInterval: TimeInterval = 0.05
     static let sourceRebuildTimeout: TimeInterval = 10
@@ -231,28 +233,49 @@ struct FullscreenRestoreWatchdog {
     static func decision(
         elapsed: TimeInterval,
         isBackInSourceHierarchy: Bool,
+        isPresentationComplete: Bool,
         stableChecks: Int
     ) -> FullscreenRestoreWatchdogDecision {
-        if isBackInSourceHierarchy {
+        if isBackInSourceHierarchy, isPresentationComplete {
             let nextStableChecks = stableChecks + 1
             return nextStableChecks >= requiredStableChecks
                 ? .restored
                 : .poll(stableChecks: nextStableChecks, delay: pollInterval)
         }
 
-        if elapsed >= sourceRebuildTimeout {
+        // Preserve the existing bounded recovery only for the original failure
+        // mode: WebKit has left fullscreen but never returns the source view.
+        // If the source hierarchy is already back while the fullscreen window is
+        // still visible, rebuilding the WKWebView would race WebKit's own exit
+        // teardown, so remain locked and keep polling instead.
+        if elapsed >= sourceRebuildTimeout, !isBackInSourceHierarchy {
             return .rebuildSource
         }
 
         return .poll(stableChecks: 0, delay: pollInterval)
+    }
+
+    /// Compatibility seam for the existing hierarchy-only tests. Production
+    /// restoration always calls the presentation-aware overload above.
+    static func decision(
+        elapsed: TimeInterval,
+        isBackInSourceHierarchy: Bool,
+        stableChecks: Int
+    ) -> FullscreenRestoreWatchdogDecision {
+        decision(
+            elapsed: elapsed,
+            isBackInSourceHierarchy: isBackInSourceHierarchy,
+            isPresentationComplete: true,
+            stableChecks: stableChecks
+        )
     }
 }
 
 /// Owns the stable, ordinary source window used by every normal WKWebView.
 ///
 /// The host frame, ordering and active WebView are frozen from the first
-/// enteringFullscreen notification until WebKit has publicly reported
-/// notInFullscreen *and* put the same WebView back in this source hierarchy.
+/// enteringFullscreen notification until WebKit has put the same WebView back
+/// in this source hierarchy and its fullscreen presentation window is gone.
 @MainActor
 final class FullscreenSourceHostController {
     static let sourceWindowCollectionBehavior: NSWindow.CollectionBehavior = [
@@ -271,6 +294,7 @@ final class FullscreenSourceHostController {
     private let container: WebPanelContainerView
     private weak var shellWindow: NSWindow?
     private weak var observedWebView: WKWebView?
+    private weak var fullscreenPresentationWindow: NSWindow?
     private var fullscreenObservation: NSKeyValueObservation?
     private var restoreGeneration = 0
     private var restoreStartedAtUptime: TimeInterval?
@@ -403,6 +427,22 @@ final class FullscreenSourceHostController {
         )
     }
 
+    /// Prefer the exact fullscreen window observed while WebKit owns the WebView.
+    /// The class-name scan is only a passive fallback for transitions where the
+    /// KVO callback arrives before AppKit has exposed that window on `webView`.
+    static func isWebKitFullscreenPresentationActive(
+        capturedWindow: NSWindow?,
+        applicationWindows: [NSWindow]
+    ) -> Bool {
+        if let capturedWindow, capturedWindow.isVisible {
+            return true
+        }
+        return applicationWindows.contains { candidate in
+            candidate.isVisible
+                && String(describing: type(of: candidate)).contains("WebCoreFullScreenWindow")
+        }
+    }
+
     private static func makeSourceWindow(frame: NSRect) -> FullscreenSourceWindow {
         let sourceWindow = FullscreenSourceWindow(
             contentRect: frame,
@@ -432,6 +472,7 @@ final class FullscreenSourceHostController {
         onSessionStateChange?(next)
 
         if !wasLocked, next.locksSourceHost {
+            fullscreenPresentationWindow = nil
             // In ordinary presentation the source is a child of the shell so
             // Mission Control treats the rail, outline and Web surface as one
             // window group. Detach before hiding the shell: WebKit must keep
@@ -450,6 +491,8 @@ final class FullscreenSourceHostController {
             onSessionLockChange?(true)
         }
 
+        captureFullscreenPresentationWindowIfNeeded(for: webView)
+
         guard next == .restoring else { return }
         if previous != .restoring {
             restoreStartedAtUptime = ProcessInfo.processInfo.systemUptime
@@ -459,6 +502,14 @@ final class FullscreenSourceHostController {
             generation: restoreGeneration,
             stableChecks: 0
         )
+    }
+
+    private func captureFullscreenPresentationWindowIfNeeded(for webView: WKWebView) {
+        guard let actualWindow = webView.window,
+              actualWindow !== window else {
+            return
+        }
+        fullscreenPresentationWindow = actualWindow
     }
 
     private func waitForPublicSourceRestoration(
@@ -476,12 +527,17 @@ final class FullscreenSourceHostController {
             && webView.window === window
             && container.window === window
             && webView.isDescendant(of: container)
+        let isPresentationComplete = !Self.isWebKitFullscreenPresentationActive(
+            capturedWindow: fullscreenPresentationWindow,
+            applicationWindows: NSApp.windows
+        )
 
         let elapsed = ProcessInfo.processInfo.systemUptime
             - (restoreStartedAtUptime ?? ProcessInfo.processInfo.systemUptime)
         let decision = FullscreenRestoreWatchdog.decision(
             elapsed: elapsed,
             isBackInSourceHierarchy: isBackInSourceHierarchy,
+            isPresentationComplete: isPresentationComplete,
             stableChecks: stableChecks
         )
 
@@ -512,6 +568,7 @@ final class FullscreenSourceHostController {
     private func finishRestoration(rebuildSource: Bool) {
         sessionState = .idle
         restoreStartedAtUptime = nil
+        fullscreenPresentationWindow = nil
         window.alphaValue = 1
         window.ignoresMouseEvents = false
         if rebuildSource {
