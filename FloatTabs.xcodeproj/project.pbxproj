@@ -22,6 +22,7 @@
 		A0000000000000000000000C /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000001 /* KeyboardShortcuts */; };
 		A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000C /* ScreenPositioningTests.swift */; };
 		A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000000D /* WebViewFactoryTests.swift */; };
+		A0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift */; };
 		A0000000000000000000000F /* AppCommandController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000010 /* AppCommandController.swift */; };
 		A00000000000000000000010 /* WebRenderingProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* WebRenderingProfile.swift */; };
 		A00000000000000000000011 /* WebAppProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* WebAppProfile.swift */; };
@@ -73,6 +74,7 @@
 		B00000000000000000000029 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0000000000000000000000C /* ScreenPositioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenPositioningTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000000D /* WebViewFactoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewFactoryTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteLayoutGeometryRegressionTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000000E /* FloatTabs.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FloatTabs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0000000000000000000000F /* FloatTabsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FloatTabsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000000000000000000010 /* AppCommandController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandController.swift; sourceTree = "<group>"; };
@@ -242,6 +244,7 @@
 			children = (
 				B0000000000000000000000C /* ScreenPositioningTests.swift */,
 				B0000000000000000000000D /* WebViewFactoryTests.swift */,
+				B0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift */,
 				B0000000000000000000001A /* TabStoreTests.swift */,
 				B0000000000000000000001B /* ProfileRepositoryTests.swift */,
 				B0000000000000000000001C /* WebViewPoolTests.swift */,
@@ -410,6 +413,7 @@
 				A0000000000000000000000D /* ScreenPositioningTests.swift in Sources */,
 				A00000000000000000000019 /* TabStoreTests.swift in Sources */,
 				A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */,
+				A0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift in Sources */,
 				A0000000000000000000001B /* WebViewPoolTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

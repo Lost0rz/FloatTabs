@@ -388,6 +388,12 @@ enum WebsiteLayoutViewport {
             return visibleSize
         }
 
+        #if DEBUG
+        if oneToOneViewportOverrideEnabled {
+            return visibleSize
+        }
+        #endif
+
         let logicalWidth = targetCSSWidth(
             forVisibleWidth: visibleSize.width,
             websiteMode: websiteMode
@@ -395,11 +401,30 @@ enum WebsiteLayoutViewport {
         guard logicalWidth > 0 else { return visibleSize }
 
         let scale = logicalWidth / visibleSize.width
+        guard scale != 1 else { return visibleSize }
+
+        // Keep the derived logical frame on integral points. WKWebView aligns
+        // its backing stores and tile grids to device pixels, so a fractional
+        // logical dimension (e.g. 820 × 1024/600 = 1399.47) leaves every tile
+        // row on a fractional physical pixel under the host's uniform mapping.
+        // Rounding up never under-covers the visible surface; the clipped
+        // overshoot stays below one visible point.
         return CGSize(
-            width: logicalWidth,
-            height: visibleSize.height * scale
+            width: logicalWidth.rounded(.up),
+            height: (visibleSize.height * scale).rounded(.up)
         )
     }
+
+    #if DEBUG
+    /// Local A/B experiment seam for rendering investigations, enabled by
+    /// launching with `-FloatTabsOneToOneViewport`. While on, Desktop hosting
+    /// falls back to a strict 1:1 WKWebView geometry (no logical viewport
+    /// fitting, no ancestor bounds scaling) so a rendering artifact can be
+    /// compared against an unscaled baseline on the same site. It must default
+    /// to off; production behavior never depends on it.
+    static var oneToOneViewportOverrideEnabled: Bool = ProcessInfo.processInfo
+        .arguments.contains("-FloatTabsOneToOneViewport")
+    #endif
 }
 
 @MainActor
@@ -507,10 +532,27 @@ enum WebViewFactory {
     /// This avoids inheriting the user's global "Show scroll bars: Always"
     /// preference and forms the native half of the permanent scrollbar
     /// suppression policy without disabling document scrolling.
+    ///
+    /// The suppression is re-applied at navigation and reparenting boundaries
+    /// because WebKit can restore its own defaults there. Scroll views that
+    /// already carry the policy are recognized and left untouched, so the
+    /// steady state performs no writes into WebKit's internal view hierarchy.
     static func configureHiddenScrollers(in webView: WKWebView) {
         for scrollView in descendantScrollViews(in: webView) {
+            guard needsHiddenScrollerConfiguration(scrollView) else { continue }
             configureHiddenScrollerStyle(scrollView)
         }
+    }
+
+    /// Whether the scroll view is missing any part of the hidden-scroller
+    /// policy and therefore still needs `configureHiddenScrollerStyle`.
+    static func needsHiddenScrollerConfiguration(_ scrollView: NSScrollView) -> Bool {
+        scrollView.scrollerStyle != .overlay
+            || !scrollView.autohidesScrollers
+            || scrollView.hasVerticalScroller
+            || scrollView.hasHorizontalScroller
+            || scrollView.verticalScroller?.isHidden == false
+            || scrollView.horizontalScroller?.isHidden == false
     }
 
     static func configureHiddenScrollerStyle(_ scrollView: NSScrollView) {

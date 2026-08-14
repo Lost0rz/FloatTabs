@@ -88,7 +88,9 @@ final class WebViewFactoryTests: XCTestCase {
             websiteMode: .desktop
         )
         XCTAssertEqual(medium.width, 1024, accuracy: 0.001)
-        XCTAssertEqual(medium.height, 820.0 * 1024.0 / 600.0, accuracy: 0.001)
+        // Derived logical heights stay on integral points (see
+        // WebsiteLayoutGeometryRegressionTests for the pixel-alignment basis).
+        XCTAssertEqual(medium.height, 1400, accuracy: 0.001)
 
         let mobile = WebsiteLayoutViewport.logicalSize(
             forVisibleSize: CGSize(width: 1080, height: 850),
@@ -104,7 +106,7 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertEqual(container.bounds.size, NSSize(width: 600, height: 820))
         XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.height, 820.0 * 1024.0 / 600.0, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, 1400, accuracy: 0.001)
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
         XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
         XCTAssertEqual(floatTabsWebView.websiteLayoutScale, 1, accuracy: 0.001)
@@ -123,7 +125,7 @@ final class WebViewFactoryTests: XCTestCase {
 
         XCTAssertEqual(container.bounds.size, NSSize(width: 820, height: 850))
         XCTAssertEqual(webView.frame.width, 1280, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.height, 850.0 * 1280.0 / 820.0, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, 1327, accuracy: 0.001)
         XCTAssertEqual(webView.bounds.size, webView.frame.size)
         XCTAssertEqual(container.websiteLayoutScale, 820.0 / 1280.0, accuracy: 0.001)
         XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
