@@ -167,4 +167,21 @@ enum WebAppURL {
         }
         return true
     }
+
+    /// The single-retry http:// fallback candidate for an entry load.
+    ///
+    /// Bare address input defaults to `https://`, but plenty of self-hosted
+    /// services live on custom ports that speak plain HTTP only. Only an
+    /// https entry URL on an explicit non-443 port is eligible: default-port
+    /// https never downgrades, keeping the fallback surface too narrow for
+    /// ssl-strip-style attacks against ordinary sites.
+    static func httpFallbackCandidate(for url: URL) -> URL? {
+        guard url.scheme?.lowercased() == "https",
+              (url.port ?? 443) != 443,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.scheme = "http"
+        return components.url
+    }
 }

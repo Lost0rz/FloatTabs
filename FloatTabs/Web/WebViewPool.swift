@@ -114,7 +114,15 @@ final class WebViewPool {
     func navigate(slotID: UUID, to url: URL) {
         guard WebAppURL.isSafe(url), let webView = webViews[slotID] else { return }
         lastKnownURLs[slotID] = url
+        navigationObservers[slotID]?.allowHTTPEntryFallback(for: url)
         load(webView, URLRequest(url: url))
+    }
+
+    /// Whether the current entry load of a Slot is eligible for the one-shot
+    /// https → http fallback (see `SlotNavigationObserver`). Diagnostic seam
+    /// used by tests.
+    func isHTTPEntryFallbackPending(slotID: UUID) -> Bool {
+        navigationObservers[slotID]?.isHTTPEntryFallbackPending ?? false
     }
 
     @discardableResult
@@ -262,6 +270,7 @@ final class WebViewPool {
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
+        observer.allowHTTPEntryFallback(for: navigationURL)
         // Store the effective runtime profile so warm-slot reuse compares against
         // the identity actually applied to this WKWebView.
         appliedRenderingProfiles[profile.id] = runtimeRendering

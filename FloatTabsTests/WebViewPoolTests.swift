@@ -929,6 +929,183 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
+    // MARK: - HTTPS entry fallback to HTTP (non-443 ports)
+
+    /// Only an https entry URL on an explicit non-443 port has an http
+    /// fallback candidate. Default-port https must never downgrade.
+    func testHTTPFallbackCandidateEligibility() {
+        XCTAssertEqual(
+            WebAppURL.httpFallbackCandidate(for: URL(string: "https://nas.example.com:3010/")!),
+            URL(string: "http://nas.example.com:3010/")
+        )
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "https://example.com")!))
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "https://example.com:443")!))
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "http://nas.example.com:3010")!))
+    }
+
+    /// The fallback decision is a pure function: connection-level failures on
+    /// a matching pending entry fall back; certificate-trust failures and
+    /// mismatched URLs never do.
+    func testHTTPFallbackDecisionRequiresConnectionFailureAndMatchingURL() {
+        let pending = URL(string: "https://nas.example.com:3010")!
+        let connectionFailures = [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        for code in connectionFailures {
+            let error = NSError(
+                domain: NSURLErrorDomain,
+                code: code,
+                userInfo: ["NSErrorFailingURLStringKey": pending.absoluteString]
+            )
+            XCTAssertEqual(
+                SlotNavigationObserver.httpFallbackURL(
+                    pending: pending,
+                    failingURL: URL(string: pending.absoluteString),
+                    error: error
+                ),
+                URL(string: "http://nas.example.com:3010"),
+                "expected fallback for \(code)"
+            )
+        }
+
+        // Certificate-trust problems must never downgrade to http.
+        let certificateError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorServerCertificateUntrusted,
+            userInfo: ["NSErrorFailingURLStringKey": pending.absoluteString]
+        )
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: pending,
+            error: certificateError
+        ))
+
+        // Non-network domains, mismatched failing URLs, and absent pending
+        // state all decline.
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: URL(string: "https://other.example.com:3010"),
+            error: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        ))
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: nil,
+            failingURL: pending,
+            error: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        ))
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: pending,
+            error: NSError(domain: "OtherDomain", code: 1)
+        ))
+    }
+
+    /// The observer retries once with http when the https entry navigation
+    /// fails at the connection layer, and never retries twice.
+    func testObserverFallsBackToHTTPOnceOnConnectionFailure() {
+        let webView = WKWebView(frame: .zero)
+        var loadedURLs: [URL] = []
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            loadHandler: { _, url in loadedURLs.append(url) }
+        )
+
+        let entry = URL(string: "https://nas.example.com:3010")!
+        observer.allowHTTPEntryFallback(for: entry)
+        XCTAssertTrue(observer.isHTTPEntryFallbackPending)
+
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorSecureConnectionFailed,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+
+        XCTAssertEqual(loadedURLs, [URL(string: "http://nas.example.com:3010")!])
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+
+        // A second failure must not trigger another fallback load.
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorSecureConnectionFailed,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+        XCTAssertEqual(loadedURLs.count, 1)
+    }
+
+    /// A successful https commit consumes the fallback eligibility, so a
+    /// later in-page https failure never downgrades.
+    func testObserverCommitCancelsPendingEntryFallback() {
+        let webView = WKWebView(frame: .zero)
+        var loadedURLs: [URL] = []
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            loadHandler: { _, url in loadedURLs.append(url) }
+        )
+
+        let entry = URL(string: "https://nas.example.com:3010")!
+        observer.allowHTTPEntryFallback(for: entry)
+        observer.webView(webView, didCommit: nil)
+
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorCannotConnectToHost,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+
+        XCTAssertTrue(loadedURLs.isEmpty)
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+    }
+
+    /// Pool entry loads mark the observer: non-443 https entries become
+    /// pending; default-port entries never do.
+    func testPoolEntryLoadsMarkHTTPFallbackEligibility() {
+        let pool = makePool()
+        let profile = makeProfile(name: "A")
+        _ = pool.webView(for: profile)
+
+        let nonStandardPort = URL(string: "https://nas.example.com:3010")!
+        pool.navigate(slotID: profile.id, to: nonStandardPort)
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+
+        pool.navigate(slotID: profile.id, to: URL(string: "https://example.com")!)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+    }
+
+    /// A Web App whose home URL is itself a non-443 https entry gets the same
+    /// first-load fallback eligibility as an address-bar entry.
+    func testPoolInitialLoadMarksHTTPFallbackEligibility() {
+        let pool = makePool()
+        let profile = makeProfile(name: "NAS", homeURL: URL(string: "https://nas.example.com:3010")!)
+        _ = pool.webView(for: profile)
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+
+        let defaultPortProfile = makeProfile(name: "B")
+        _ = pool.webView(for: defaultPortProfile)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: defaultPortProfile.id))
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
