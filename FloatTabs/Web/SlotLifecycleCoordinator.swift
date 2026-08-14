@@ -1,5 +1,25 @@
 import Dispatch
 import Foundation
+import WebKit
+
+private func floatTabsRuntimeDiagnostic(_ message: String) {
+    NSLog("[FloatTabsRuntimeDiag] %@", message)
+}
+
+private func floatTabsDiagnosticSlotID(_ id: UUID?) -> String {
+    guard let id else { return "nil" }
+    return String(id.uuidString.prefix(8))
+}
+
+private func floatTabsDiagnosticWebViewID(_ webView: WKWebView?) -> String {
+    guard let webView else { return "nil" }
+    return String(describing: ObjectIdentifier(webView))
+}
+
+private func floatTabsDiagnosticSuperview(_ webView: WKWebView?) -> String {
+    guard let superview = webView?.superview else { return "nil" }
+    return String(describing: type(of: superview))
+}
 
 enum SlotMemoryPressureLevel {
     case warning
@@ -74,6 +94,10 @@ final class SlotLifecycleCoordinator {
             webViewPool?.pauseMediaPlayback(slotID: slotID)
         }
 
+        floatTabsRuntimeDiagnostic(
+            "LIFECYCLE_INIT cold=\(self.coldReleaseDelay) warm=\(self.warmReleaseDelay) hidden=\(self.hiddenActiveGraceDelay) mediaPoll=\(self.mediaProtectionPollDelay) warmLimit=\(self.warmResidentLimit)"
+        )
+
         if installsMemoryPressureSource {
             configureMemoryPressureSource()
         }
@@ -120,6 +144,9 @@ final class SlotLifecycleCoordinator {
     }
 
     func setPanelVisible(_ visible: Bool, activeProfile: WebAppProfile?) {
+        floatTabsRuntimeDiagnostic(
+            "PANEL_VISIBLE value=\(visible) slot=\(floatTabsDiagnosticSlotID(activeProfile?.id)) active=\(floatTabsDiagnosticSlotID(activeSlotID)) fullscreen=\(floatTabsDiagnosticSlotID(fullscreenSourceProfile?.id))"
+        )
         panelIsVisible = visible
         hiddenActiveToken = nil
 
@@ -131,7 +158,12 @@ final class SlotLifecycleCoordinator {
             // Element fullscreen remains foreground content even when the
             // FloatTabs shell is hidden. Never pause it or start the hidden
             // active eviction chain while WebKit owns the fullscreen source.
-            guard fullscreenSourceProfile?.id != activeProfile.id else { return }
+            guard fullscreenSourceProfile?.id != activeProfile.id else {
+                floatTabsRuntimeDiagnostic(
+                    "PANEL_HIDE_PROTECTED_FULLSCREEN slot=\(floatTabsDiagnosticSlotID(activeProfile.id))"
+                )
+                return
+            }
             if activeProfile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(activeProfile.id)
             }
@@ -140,6 +172,9 @@ final class SlotLifecycleCoordinator {
     }
 
     func activate(profile: WebAppProfile) {
+        floatTabsRuntimeDiagnostic(
+            "ACTIVATE slot=\(floatTabsDiagnosticSlotID(profile.id)) policy=\(profile.residencyPolicy.rawValue) panelVisible=\(panelIsVisible) previousActive=\(floatTabsDiagnosticSlotID(activeSlotID)) web=\(floatTabsDiagnosticWebViewID(webViewPool.existingWebView(for: profile.id))) super=\(floatTabsDiagnosticSuperview(webViewPool.existingWebView(for: profile.id)))"
+        )
         activeSlotID = profile.id
         cancelInactivePlan(slotID: profile.id)
         hiddenActiveToken = nil
@@ -150,7 +185,17 @@ final class SlotLifecycleCoordinator {
     }
 
     func deactivate(profile: WebAppProfile) {
-        guard fullscreenSourceProfile?.id != profile.id else { return }
+        guard fullscreenSourceProfile?.id != profile.id else {
+            floatTabsRuntimeDiagnostic(
+                "DEACTIVATE_SKIPPED_FULLSCREEN slot=\(floatTabsDiagnosticSlotID(profile.id))"
+            )
+            return
+        }
+        let targetWebView = webViewPool.existingWebView(for: profile.id)
+        let currentWebView = container.currentWebView
+        floatTabsRuntimeDiagnostic(
+            "DEACTIVATE slot=\(floatTabsDiagnosticSlotID(profile.id)) policy=\(profile.residencyPolicy.rawValue) active=\(floatTabsDiagnosticSlotID(activeSlotID)) targetWeb=\(floatTabsDiagnosticWebViewID(targetWebView)) currentWeb=\(floatTabsDiagnosticWebViewID(currentWebView)) same=\(targetWebView === currentWebView) targetSuper=\(floatTabsDiagnosticSuperview(targetWebView)) currentSuper=\(floatTabsDiagnosticSuperview(currentWebView))"
+        )
         if activeSlotID == profile.id {
             activeSlotID = nil
         }
@@ -163,6 +208,9 @@ final class SlotLifecycleCoordinator {
     /// fullscreen. This is independent from shell visibility and active Tab
     /// selection so a hidden shell can never pause or evict visible content.
     func beginFullscreenSourceVisibility(profile: WebAppProfile) {
+        floatTabsRuntimeDiagnostic(
+            "FULLSCREEN_BEGIN slot=\(floatTabsDiagnosticSlotID(profile.id)) active=\(floatTabsDiagnosticSlotID(activeSlotID)) web=\(floatTabsDiagnosticWebViewID(webViewPool.existingWebView(for: profile.id)))"
+        )
         fullscreenSourceProfile = profile
         cancelInactivePlan(slotID: profile.id)
         if hiddenActiveToken != nil, activeSlotID == profile.id {
@@ -172,6 +220,9 @@ final class SlotLifecycleCoordinator {
 
     func endFullscreenSourceVisibility(profile: WebAppProfile) {
         guard fullscreenSourceProfile?.id == profile.id else { return }
+        floatTabsRuntimeDiagnostic(
+            "FULLSCREEN_END slot=\(floatTabsDiagnosticSlotID(profile.id)) active=\(floatTabsDiagnosticSlotID(activeSlotID))"
+        )
         fullscreenSourceProfile = nil
     }
 
@@ -180,6 +231,9 @@ final class SlotLifecycleCoordinator {
     /// one-active-Slot contract while preventing a visible companion from being
     /// evicted by an older inactive timer or memory-pressure pass.
     func beginSupplementalVisibility(profile: WebAppProfile) {
+        floatTabsRuntimeDiagnostic(
+            "SUPPLEMENTAL_BEGIN slot=\(floatTabsDiagnosticSlotID(profile.id)) previous=\(floatTabsDiagnosticSlotID(supplementalVisibleProfile?.id))"
+        )
         if let previous = supplementalVisibleProfile,
            previous.id != profile.id {
             endSupplementalVisibility(profile: previous, prepareAsInactive: true)
@@ -193,12 +247,18 @@ final class SlotLifecycleCoordinator {
         prepareAsInactive: Bool
     ) {
         guard supplementalVisibleProfile?.id == profile.id else { return }
+        floatTabsRuntimeDiagnostic(
+            "SUPPLEMENTAL_END slot=\(floatTabsDiagnosticSlotID(profile.id)) prepareInactive=\(prepareAsInactive) active=\(floatTabsDiagnosticSlotID(activeSlotID))"
+        )
         supplementalVisibleProfile = nil
         guard prepareAsInactive, activeSlotID != profile.id else { return }
         prepareInactive(profile: profile, resetWarmRecency: true)
     }
 
     func remove(slotID: UUID) {
+        floatTabsRuntimeDiagnostic(
+            "REMOVE_SLOT slot=\(floatTabsDiagnosticSlotID(slotID)) active=\(floatTabsDiagnosticSlotID(activeSlotID))"
+        )
         if activeSlotID == slotID {
             activeSlotID = nil
         }
@@ -213,6 +273,7 @@ final class SlotLifecycleCoordinator {
     }
 
     func reset(slotIDs: Set<UUID>) {
+        floatTabsRuntimeDiagnostic("RESET slots=\(slotIDs.count)")
         hiddenActiveToken = nil
         activeSlotID = nil
         fullscreenSourceProfile = nil
@@ -227,6 +288,9 @@ final class SlotLifecycleCoordinator {
     }
 
     func handleMemoryPressure(_ level: SlotMemoryPressureLevel) {
+        floatTabsRuntimeDiagnostic(
+            "MEMORY_PRESSURE level=\(String(describing: level)) active=\(floatTabsDiagnosticSlotID(activeSlotID)) resident=\(webViewPool.count)"
+        )
         switch level {
         case .warning:
             evictInactiveWarmUntilResidentLimit(min(1, warmResidentLimit))
@@ -304,6 +368,9 @@ final class SlotLifecycleCoordinator {
             backgroundMediaPolicy: profile.backgroundMediaPolicy
         )
         inactivePlans[profile.id] = plan
+        floatTabsRuntimeDiagnostic(
+            "PLAN_CREATE slot=\(floatTabsDiagnosticSlotID(profile.id)) policy=\(profile.residencyPolicy.rawValue) media=\(profile.backgroundMediaPolicy.rawValue) token=\(String(plan.token.uuidString.prefix(8))) active=\(floatTabsDiagnosticSlotID(activeSlotID)) panelVisible=\(panelIsVisible)"
+        )
 
         if profile.residencyPolicy == .warm {
             if resetWarmRecency || inactiveWarmRecency[profile.id] == nil {
@@ -332,6 +399,9 @@ final class SlotLifecycleCoordinator {
                 return
             }
 
+            floatTabsRuntimeDiagnostic(
+                "MEDIA_STATE slot=\(floatTabsDiagnosticSlotID(profile.id)) playing=\(isPlaying) policy=\(profile.residencyPolicy.rawValue)"
+            )
             if isPlaying {
                 self.mediaProtectedSlotIDs.insert(profile.id)
                 self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
@@ -381,13 +451,18 @@ final class SlotLifecycleCoordinator {
             guard planMatches(plan, slotID: profile.id) else { return }
         }
 
+        floatTabsRuntimeDiagnostic(
+            "RELEASE_SCHEDULE slot=\(floatTabsDiagnosticSlotID(profile.id)) policy=\(profile.residencyPolicy.rawValue) delay=\(delay) token=\(String(plan.token.uuidString.prefix(8))) active=\(floatTabsDiagnosticSlotID(activeSlotID))"
+        )
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self,
-                  self.planMatches(plan, slotID: profile.id),
-                  !self.isVisibleSlot(profile.id),
-                  self.webViewPool.contains(slotID: profile.id) else {
-                return
-            }
+            guard let self else { return }
+            let matches = self.planMatches(plan, slotID: profile.id)
+            let visible = self.isVisibleSlot(profile.id)
+            let resident = self.webViewPool.contains(slotID: profile.id)
+            floatTabsRuntimeDiagnostic(
+                "RELEASE_TIMER_WAKE slot=\(floatTabsDiagnosticSlotID(profile.id)) policy=\(profile.residencyPolicy.rawValue) matches=\(matches) visible=\(visible) resident=\(resident) active=\(floatTabsDiagnosticSlotID(self.activeSlotID)) fullscreen=\(floatTabsDiagnosticSlotID(self.fullscreenSourceProfile?.id)) supplemental=\(floatTabsDiagnosticSlotID(self.supplementalVisibleProfile?.id))"
+            )
+            guard matches, !visible, resident else { return }
 
             if profile.backgroundMediaPolicy == .allowBackgroundAudio {
                 self.mediaPlayingQuery(profile.id) { [weak self] isPlaying in
@@ -396,6 +471,9 @@ final class SlotLifecycleCoordinator {
                           !self.isVisibleSlot(profile.id) else {
                         return
                     }
+                    floatTabsRuntimeDiagnostic(
+                        "RELEASE_MEDIA_CHECK slot=\(floatTabsDiagnosticSlotID(profile.id)) playing=\(isPlaying)"
+                    )
                     if isPlaying {
                         self.mediaProtectedSlotIDs.insert(profile.id)
                         self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
@@ -412,14 +490,18 @@ final class SlotLifecycleCoordinator {
     private func scheduleHiddenActiveTransition(profile: WebAppProfile) {
         let token = UUID()
         hiddenActiveToken = token
+        floatTabsRuntimeDiagnostic(
+            "HIDDEN_ACTIVE_SCHEDULE slot=\(floatTabsDiagnosticSlotID(profile.id)) delay=\(hiddenActiveGraceDelay) token=\(String(token.uuidString.prefix(8))) policy=\(profile.residencyPolicy.rawValue)"
+        )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + hiddenActiveGraceDelay) { [weak self] in
-            guard let self,
-                  self.hiddenActiveToken == token,
-                  !self.panelIsVisible,
-                  self.activeSlotID == profile.id else {
-                return
-            }
+            guard let self else { return }
+            let tokenMatches = self.hiddenActiveToken == token
+            let isActive = self.activeSlotID == profile.id
+            floatTabsRuntimeDiagnostic(
+                "HIDDEN_ACTIVE_WAKE slot=\(floatTabsDiagnosticSlotID(profile.id)) tokenMatches=\(tokenMatches) panelVisible=\(self.panelIsVisible) activeMatches=\(isActive) active=\(floatTabsDiagnosticSlotID(self.activeSlotID))"
+            )
+            guard tokenMatches, !self.panelIsVisible, isActive else { return }
 
             self.hiddenActiveToken = nil
             self.activeSlotID = nil
@@ -449,6 +531,9 @@ final class SlotLifecycleCoordinator {
         let excess = max(candidates.count - target, 0)
         guard excess > 0 else { return }
         for candidate in candidates.prefix(excess) {
+            floatTabsRuntimeDiagnostic(
+                "LRU_EVICT slot=\(floatTabsDiagnosticSlotID(candidate.key)) active=\(floatTabsDiagnosticSlotID(activeSlotID)) targetLimit=\(target)"
+            )
             releaseInactiveSlot(slotID: candidate.key)
         }
     }
@@ -459,13 +544,31 @@ final class SlotLifecycleCoordinator {
     }
 
     private func releaseInactiveSlot(slotID: UUID) {
-        guard !isVisibleSlot(slotID) else { return }
+        let visible = isVisibleSlot(slotID)
+        let targetWebView = webViewPool.existingWebView(for: slotID)
+        let currentWebView = container.currentWebView
+        floatTabsRuntimeDiagnostic(
+            "RELEASE_BEGIN slot=\(floatTabsDiagnosticSlotID(slotID)) visible=\(visible) active=\(floatTabsDiagnosticSlotID(activeSlotID)) fullscreen=\(floatTabsDiagnosticSlotID(fullscreenSourceProfile?.id)) supplemental=\(floatTabsDiagnosticSlotID(supplementalVisibleProfile?.id)) targetWeb=\(floatTabsDiagnosticWebViewID(targetWebView)) currentWeb=\(floatTabsDiagnosticWebViewID(currentWebView)) same=\(targetWebView === currentWebView) targetSuper=\(floatTabsDiagnosticSuperview(targetWebView)) currentSuper=\(floatTabsDiagnosticSuperview(currentWebView)) residentCount=\(webViewPool.count)"
+        )
+        guard !visible else {
+            floatTabsRuntimeDiagnostic("RELEASE_ABORT_VISIBLE slot=\(floatTabsDiagnosticSlotID(slotID))")
+            return
+        }
         container.removeSlot(slotID)
         webViewPool.release(slotID: slotID)
         cancelInactivePlan(slotID: slotID)
+        let currentAfter = container.currentWebView
+        floatTabsRuntimeDiagnostic(
+            "RELEASE_END slot=\(floatTabsDiagnosticSlotID(slotID)) active=\(floatTabsDiagnosticSlotID(activeSlotID)) currentWeb=\(floatTabsDiagnosticWebViewID(currentAfter)) currentSuper=\(floatTabsDiagnosticSuperview(currentAfter)) residentCount=\(webViewPool.count)"
+        )
     }
 
     private func cancelInactivePlan(slotID: UUID) {
+        if let plan = inactivePlans[slotID] {
+            floatTabsRuntimeDiagnostic(
+                "PLAN_CANCEL slot=\(floatTabsDiagnosticSlotID(slotID)) policy=\(plan.residencyPolicy.rawValue) token=\(String(plan.token.uuidString.prefix(8))) active=\(floatTabsDiagnosticSlotID(activeSlotID))"
+            )
+        }
         inactivePlans.removeValue(forKey: slotID)
         mediaProtectedSlotIDs.remove(slotID)
         inactiveWarmRecency.removeValue(forKey: slotID)
