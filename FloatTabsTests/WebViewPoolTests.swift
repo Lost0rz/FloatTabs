@@ -931,6 +931,17 @@ final class WebViewPoolTests: XCTestCase {
 
     // MARK: - HTTPS entry fallback to HTTP (non-443 ports)
 
+    /// The http fallback can only work if the host app permits cleartext
+    /// loads: without an ATS exception the OS blocks the downgraded request
+    /// with NSURLErrorAppTransportSecurityRequiresSecureConnection and the
+    /// page dies even though the fallback fired. Guards the Info.plist.
+    func testHostAppAllowsCleartextLoadsForBrowserUse() {
+        let ats = Bundle.main.object(
+            forInfoDictionaryKey: "NSAppTransportSecurity"
+        ) as? [String: Any]
+        XCTAssertEqual(ats?["NSAllowsArbitraryLoads"] as? Bool, true)
+    }
+
     /// Only an https entry URL on an explicit non-443 port has an http
     /// fallback candidate. Default-port https must never downgrade.
     func testHTTPFallbackCandidateEligibility() {

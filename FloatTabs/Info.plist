@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- FloatTabs is a general-purpose web browser: the user may legitimately
+	     open cleartext http:// sites (self-hosted NAS panels, dev servers,
+	     legacy intranets), so ATS cannot blanket-forbid insecure loads the
+	     way a pure API client should. Entry loads still default to https and
+	     downgrade only through the bounded SlotNavigationObserver fallback;
+	     this key only stops the OS from hard-blocking the resulting http
+	     request (NSURLErrorAppTransportSecurityRequiresSecureConnection). -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
