@@ -136,6 +136,37 @@ final class WebViewPool {
         hotHostOwners[slotID]?.values.filter { $0.container != nil }.count ?? 0
     }
 
+    /// Authoritative Hot-host attachment registration. The production order is
+    /// `webView(for:)` → `container.show(...)`, so the owner only exists after
+    /// `show` returns; callers must register the actual owner here instead of
+    /// waiting for a future `webView(for:)` lookup to notice the superview.
+    /// Only FloatTabs' own `WebSlotHostView` inside a `WebPanelContainerView`
+    /// is ever registered; WebKit-private fullscreen superviews fail the
+    /// hierarchy check and are ignored.
+    func recordHotHostOwner(webView: WKWebView, slotID: UUID) {
+        rememberHotHostOwnerIfNeeded(webView, slotID: slotID)
+    }
+
+    /// Authoritative policy cleanup for dedicated Hot hosts. Slots that are no
+    /// longer Hot lose every known main/companion Hot host immediately, while
+    /// their WKWebView runtime stays resident — Warm/Cold release timing is
+    /// owned by SlotLifecycleCoordinator and must not be preempted here.
+    func reconcileHotHostOwners(validHotSlotIDs: Set<UUID>) {
+        for (slotID, owners) in hotHostOwners where !validHotSlotIDs.contains(slotID) {
+            hotHostOwners.removeValue(forKey: slotID)
+            for owner in owners.values {
+                owner.container?.removeSlot(slotID)
+            }
+            // Defensive fallback for a dedicated host that was attached but
+            // never registered (e.g. registration raced a policy change).
+            if let webView = webViews[slotID],
+               let host = webView.superview as? WebSlotHostView,
+               let container = host.superview?.superview as? WebPanelContainerView {
+                container.removeSlot(slotID)
+            }
+        }
+    }
+
     /// Starts a FloatTabs-owned top-level navigation. HTTP fallback is opt-in
     /// and must come from raw user-entry provenance; the default is deliberately
     /// false so page-derived URLs, explicit HTTPS, redirects, and ordinary
