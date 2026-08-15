@@ -67,6 +67,16 @@ final class WebViewPool {
 
         if let existing = webViews[profile.id],
            let appliedRendering = appliedRenderingProfiles[profile.id] {
+            // Hot uses a dedicated per-Slot host. If the persisted policy has
+            // changed to Warm/Cold while this runtime is owned by either the
+            // normal shell or the fullscreen companion, remove that old host
+            // through its owning container before the transient presentation is
+            // installed. This keeps each container's hotHostViews dictionary in
+            // sync with the real policy instead of leaving an empty stale host.
+            if profile.residencyPolicy != .hot {
+                removeHotHostOwnershipIfNeeded(existing, slotID: profile.id)
+            }
+
             let compatibilityURL = Self.rebuildNavigationURL(
                 initialURL: nil,
                 visibleURL: existing.url,
@@ -157,7 +167,10 @@ final class WebViewPool {
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
         let removed = webViews.removeValue(forKey: slotID)
-        removed?.removeFromSuperview()
+        if let removed {
+            removeHotHostOwnershipIfNeeded(removed, slotID: slotID)
+            removed.removeFromSuperview()
+        }
         if removed != nil {
             onResidentSetChange?()
         }
@@ -239,7 +252,10 @@ final class WebViewPool {
         lastKnownURLs.removeValue(forKey: profile.id)
         deferredReloadSlotIDs.remove(profile.id)
         let replaced = webViews.removeValue(forKey: profile.id)
-        replaced?.removeFromSuperview()
+        if let replaced {
+            removeHotHostOwnershipIfNeeded(replaced, slotID: profile.id)
+            replaced.removeFromSuperview()
+        }
 
         // A rendering-profile rebuild replaces the transient runtime for the same
         // resident Slot. Do not emit a resident-set change merely because the
@@ -344,6 +360,20 @@ final class WebViewPool {
             cachePolicy: .useProtocolCachePolicy,
             timeoutInterval: 60
         )
+    }
+
+    /// If a live runtime is currently inside a dedicated Hot host, remove the
+    /// Slot through that host's owning container rather than only pulling the
+    /// WKWebView out of its superview. The container owns the hotHostViews map;
+    /// bypassing it leaves stale companion/main hosts retained indefinitely.
+    private func removeHotHostOwnershipIfNeeded(_ webView: WKWebView, slotID: UUID) {
+        guard let host = webView.superview as? WebSlotHostView else { return }
+        if let container = host.superview?.superview as? WebPanelContainerView {
+            container.removeSlot(slotID)
+        } else {
+            webView.removeFromSuperview()
+            host.removeFromSuperview()
+        }
     }
 
     private func discardPopupCoordinator(slotID: UUID) {
