@@ -62,6 +62,7 @@ final class TabStore {
     func add(
         name: String? = nil,
         homeURL: URL,
+        homeURLSchemeWasInferred: Bool = false,
         renderingProfile: WebRenderingProfile = .canonicalDefault,
         now: Date = Date()
     ) -> WebAppProfile? {
@@ -76,6 +77,7 @@ final class TabStore {
             name: resolvedName,
             homeURL: homeURL,
             currentURL: homeURL,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred,
             renderingProfile: renderingProfile.normalized(),
             createdAt: now,
             lastUsedAt: now
@@ -108,6 +110,7 @@ final class TabStore {
             name: trimmedName,
             homeURL: homeURL,
             currentURL: homeURL,
+            homeURLSchemeWasInferred: false,
             renderingProfile: source.renderingProfile.normalized(),
             residencyPolicy: source.residencyPolicy,
             backgroundMediaPolicy: source.backgroundMediaPolicy,
@@ -127,6 +130,7 @@ final class TabStore {
         id: UUID,
         name: String,
         homeURL: URL,
+        homeURLSchemeWasInferred: Bool? = nil,
         renderingProfile: WebRenderingProfile? = nil
     ) -> Bool {
         guard WebAppURL.isSafe(homeURL),
@@ -140,6 +144,9 @@ final class TabStore {
         let homeURLChanged = profiles[index].homeURL != homeURL
         profiles[index].name = trimmedName
         profiles[index].homeURL = homeURL
+        if let homeURLSchemeWasInferred {
+            profiles[index].homeURLSchemeWasInferred = homeURLSchemeWasInferred
+        }
         if let renderingProfile {
             profiles[index].renderingProfile = renderingProfile.normalized()
         }
