@@ -601,8 +601,9 @@ final class PanelPerimeterDragView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
-        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
+        guard frame.contains(point) else { return nil }
+        let localPoint = convert(point, from: superview)
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -721,7 +722,7 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        frame.contains(point) ? self : nil
     }
 
     override func updateTrackingAreas() {
