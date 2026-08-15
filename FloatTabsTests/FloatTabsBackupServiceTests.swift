@@ -33,7 +33,8 @@ final class FloatTabsBackupServiceTests: XCTestCase {
                 appearanceMode: .dark,
                 followPreferredSize: false,
                 borderTheme: .green,
-                customBorderColorHex: "#123456FF"
+                customBorderColorHex: "#123456FF",
+                isTabRailCollapsed: true
             ),
             globalShowHideShortcut: FloatTabsBackupShortcut(
                 carbonKeyCode: 50,
@@ -52,6 +53,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertFalse(decoded.globalPreferences.followPreferredSize)
         XCTAssertEqual(decoded.globalPreferences.borderTheme, .green)
         XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
+        XCTAssertEqual(decoded.globalPreferences.isTabRailCollapsed, true)
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
     }
 
@@ -105,5 +107,88 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertTrue(automatic.lastPathComponent.hasPrefix("FloatTabs-auto-0.1.0-1"))
         XCTAssertTrue(rollback.lastPathComponent.hasPrefix("FloatTabs-before-restore-"))
         XCTAssertEqual(try service.load(from: automatic), document)
+    }
+
+    func testLatestValidAutomaticSnapshotSkipsCorruptAndRollbackFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsBackupRecoveryTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FloatTabsBackupService(backupDirectoryURL: directory)
+
+        func document(version: String, build: String, createdAt: TimeInterval) -> FloatTabsBackupDocument {
+            FloatTabsBackupDocument(
+                schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+                createdAt: Date(timeIntervalSince1970: createdAt),
+                sourceAppVersion: version,
+                sourceBuild: build,
+                webAppState: .empty,
+                globalPreferences: FloatTabsBackupPreferences(
+                    appearanceMode: .system,
+                    followPreferredSize: true
+                ),
+                globalShowHideShortcut: nil
+            )
+        }
+
+        let older = document(version: "0.1.0", build: "1", createdAt: 100)
+        let newest = document(version: "0.1.1", build: "2", createdAt: 300)
+        let rollbackOnly = document(version: "0.1.2", build: "3", createdAt: 900)
+        _ = try service.writeAutomaticVersionSnapshot(older)
+        let newestURL = try service.writeAutomaticVersionSnapshot(newest)
+        _ = try service.writeRollback(rollbackOnly, now: Date(timeIntervalSince1970: 900))
+
+        let corruptURL = directory.appendingPathComponent(
+            "FloatTabs-auto-corrupt-999.\(FloatTabsBackupService.fileExtension)"
+        )
+        try Data("not a backup".utf8).write(to: corruptURL, options: [.atomic])
+
+        let latest = try XCTUnwrap(service.latestValidAutomaticSnapshot())
+        XCTAssertEqual(
+            latest.url.resolvingSymlinksInPath(),
+            newestURL.resolvingSymlinksInPath()
+        )
+        XCTAssertEqual(latest.document, newest)
+    }
+
+    func testEmptyStartupRecoveryPreservesAutomaticBackupUntilConfigurationExists() {
+        XCTAssertFalse(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: true,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: false,
+                webAppState: .empty
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: true,
+                webAppState: .empty
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: false,
+                webAppState: .empty
+            )
+        )
+
+        let profile = WebAppProfile(
+            order: 0,
+            name: "Recovered",
+            homeURL: URL(string: "https://example.com")!
+        )
+        let recoveredState = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [profile],
+            lastActiveTabID: profile.id
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: true,
+                webAppState: recoveredState
+            )
+        )
     }
 }

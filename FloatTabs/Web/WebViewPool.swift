@@ -238,18 +238,26 @@ final class WebViewPool {
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
         deferredReloadSlotIDs.remove(profile.id)
-        webViews.removeValue(forKey: profile.id)
+        let replaced = webViews.removeValue(forKey: profile.id)
+        replaced?.removeFromSuperview()
+
+        // A rendering-profile rebuild replaces the transient runtime for the same
+        // resident Slot. Do not emit a resident-set change merely because the
+        // dictionary entry is recreated; callers observe residency identity, not
+        // WKWebView object identity.
         return createWebView(
             for: profile,
             navigationURL: navigationURL,
-            cachePolicy: .useProtocolCachePolicy
+            cachePolicy: .useProtocolCachePolicy,
+            notifyResidentSetChange: false
         )
     }
 
     private func createWebView(
         for profile: WebAppProfile,
         navigationURL: URL,
-        cachePolicy: URLRequest.CachePolicy
+        cachePolicy: URLRequest.CachePolicy,
+        notifyResidentSetChange: Bool = true
     ) -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
@@ -297,7 +305,7 @@ final class WebViewPool {
         appliedRenderingProfiles[profile.id] = runtimeRendering
         lastKnownURLs[profile.id] = navigationURL
         deferredReloadSlotIDs.remove(profile.id)
-        if !wasResident {
+        if notifyResidentSetChange, !wasResident {
             onResidentSetChange?()
         }
 

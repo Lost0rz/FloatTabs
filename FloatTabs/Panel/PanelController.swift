@@ -187,6 +187,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSlotState()
     }
 
+    deinit {
+        if let externalMouseMonitor {
+            NSEvent.removeMonitor(externalMouseMonitor)
+        }
+    }
+
     /// macOS 14 treats activation as a contextual request. Submit it directly
     /// from the status-item action while that user intent is still available;
     /// the actual window presentation is completed after tracking unwinds.
@@ -297,18 +303,21 @@ final class PanelController: NSObject, NSWindowDelegate {
         // that operation while WebKit is still using one as a fullscreen source.
         guard !sourceHostController.isSessionLocked else { return false }
 
+        // Persist and validate the replacement before touching live runtimes. A
+        // failed restore must leave the current page/DOM/session presentation
+        // untouched as well as leaving the durable model unchanged.
         let existingIDs = Set(tabStore.profiles.map(\.id))
+        guard tabStore.replaceStoredState(state, notifyOnSuccess: false) else {
+            return false
+        }
+
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
         for slotID in existingIDs {
             webViewPool.release(slotID: slotID)
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
-
-        guard tabStore.replaceStoredState(state) else {
-            synchronizeSlotState()
-            return false
-        }
+        synchronizeSlotState()
         return true
     }
 
@@ -756,11 +765,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             guard let self,
                   self.preferencesStore.windowSizeMode == .perWebApp,
                   let profile = self.tabStore.profiles.first(where: { $0.id == id }),
-                  let size = preset.size else { return }
-            _ = self.tabStore.updateRenderingProfile(
-                id: id,
-                renderingProfile: profile.renderingProfile.settingSimplePreset(preset)
-            )
+                  let size = preset.size,
+                  self.tabStore.updateRenderingProfile(
+                    id: id,
+                    renderingProfile: profile.renderingProfile.settingSimplePreset(preset)
+                  ) else { return }
             if self.tabStore.activeTabID == id {
                 self.applyPreferredViewport(size)
             }
@@ -1003,8 +1012,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         WebAppEditorController.confirmRemove(profile: profile, attachedTo: panel) { [weak self] confirmed in
             Task { @MainActor [weak self] in
-                guard let self, confirmed else { return }
-                _ = self.tabStore.remove(id: id)
+                guard let self, confirmed,
+                      self.tabStore.remove(id: id) else { return }
                 self.slotLifecycleCoordinator.remove(slotID: id)
                 self.webViewPool.remove(slotID: id)
             }
@@ -1126,11 +1135,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         switch preferencesStore.windowSizeMode {
         case .perWebApp:
-            if let id = tabStore.activeTabID {
-                _ = tabStore.updatePreferredViewport(
-                    id: id,
+            if let active = tabStore.activeProfile {
+                let previousViewport = active.renderingProfile.viewportSize
+                if !tabStore.updatePreferredViewport(
+                    id: active.id,
                     size: CGSize(width: viewport.width, height: viewport.height)
-                )
+                ) {
+                    // The configuration save was rejected and TabStore restored
+                    // its model. Restore the physical panel as part of the same
+                    // transaction so UI and durable preference cannot diverge.
+                    applyViewportSize(previousViewport, animated: false)
+                    return
+                }
             }
         case .fixed:
             // Manual resizing updates only the shared Fixed viewport. Every Web

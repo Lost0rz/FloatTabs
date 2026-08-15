@@ -12,6 +12,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let customBorderColorHex: String?
     let fixedViewportWidth: Double?
     let fixedViewportHeight: Double?
+    let isTabRailCollapsed: Bool?
 
     init(
         appearanceMode: AppAppearanceMode,
@@ -19,7 +20,8 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         borderTheme: PanelBorderTheme? = nil,
         customBorderColorHex: String? = nil,
         fixedViewportWidth: Double? = nil,
-        fixedViewportHeight: Double? = nil
+        fixedViewportHeight: Double? = nil,
+        isTabRailCollapsed: Bool? = nil
     ) {
         self.appearanceMode = appearanceMode
         self.followPreferredSize = followPreferredSize
@@ -27,6 +29,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.customBorderColorHex = customBorderColorHex
         self.fixedViewportWidth = fixedViewportWidth
         self.fixedViewportHeight = fixedViewportHeight
+        self.isTabRailCollapsed = isTabRailCollapsed
     }
 }
 
@@ -46,6 +49,7 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
     case unsupportedSchema(Int)
     case unsupportedWebAppStateVersion(Int)
     case restoreFailed
+    case startupRecoveryFailed
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +59,8 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
             return "This backup contains unsupported Web App state version \(version)."
         case .restoreFailed:
             return "FloatTabs could not replace the current configuration. The rollback backup was kept."
+        case .startupRecoveryFailed:
+            return "FloatTabs could not safely preserve and replace the unreadable startup configuration. The original profile store remains protected."
         }
     }
 }
@@ -140,6 +146,32 @@ struct FloatTabsBackupService {
         )
         try write(document, to: url)
         return url
+    }
+
+    /// Returns the newest decodable automatic snapshot by the timestamp stored
+    /// inside the document. Corrupt or incompatible snapshots are skipped so a
+    /// damaged backup can never become the default startup recovery choice.
+    func latestValidAutomaticSnapshot() -> (url: URL, document: FloatTabsBackupDocument)? {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: backupDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        return urls
+            .filter {
+                $0.pathExtension == Self.fileExtension
+                    && $0.lastPathComponent.hasPrefix("FloatTabs-auto-")
+            }
+            .compactMap { url -> (url: URL, document: FloatTabsBackupDocument)? in
+                guard let document = try? load(from: url) else { return nil }
+                return (url, document)
+            }
+            .max { lhs, rhs in
+                lhs.document.createdAt < rhs.document.createdAt
+            }
     }
 
     static func suggestedExportFileName(now: Date = Date()) -> String {

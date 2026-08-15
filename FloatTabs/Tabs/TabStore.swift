@@ -6,6 +6,7 @@ final class TabStore {
     private(set) var activeTabID: UUID?
 
     var onChange: (() -> Void)?
+    var onPersistenceFailure: (() -> Void)?
 
     private let repository: any ProfileRepositoryProtocol
 
@@ -83,10 +84,14 @@ final class TabStore {
             lastUsedAt: now
         )
 
-        profiles.append(profile)
-        normalizeInPlace()
-        activeTabID = profile.id
-        persistAndNotify()
+        guard persistConfigurationMutation({
+            profiles.append(profile)
+            normalizeInPlace()
+            activeTabID = profile.id
+            return true
+        }) else {
+            return nil
+        }
         return profiles.first(where: { $0.id == profile.id })
     }
 
@@ -118,10 +123,14 @@ final class TabStore {
             lastUsedAt: now
         )
 
-        profiles.append(profile)
-        normalizeInPlace()
-        activeTabID = profile.id
-        persistAndNotify()
+        guard persistConfigurationMutation({
+            profiles.append(profile)
+            normalizeInPlace()
+            activeTabID = profile.id
+            return true
+        }) else {
+            return nil
+        }
         return profiles.first(where: { $0.id == profile.id })
     }
 
@@ -141,20 +150,21 @@ final class TabStore {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return false }
 
-        let homeURLChanged = profiles[index].homeURL != homeURL
-        profiles[index].name = trimmedName
-        profiles[index].homeURL = homeURL
-        if let homeURLSchemeWasInferred {
-            profiles[index].homeURLSchemeWasInferred = homeURLSchemeWasInferred
+        return persistConfigurationMutation {
+            let homeURLChanged = profiles[index].homeURL != homeURL
+            profiles[index].name = trimmedName
+            profiles[index].homeURL = homeURL
+            if let homeURLSchemeWasInferred {
+                profiles[index].homeURLSchemeWasInferred = homeURLSchemeWasInferred
+            }
+            if let renderingProfile {
+                profiles[index].renderingProfile = renderingProfile.normalized()
+            }
+            if homeURLChanged {
+                profiles[index].currentURL = homeURL
+            }
+            return true
         }
-        if let renderingProfile {
-            profiles[index].renderingProfile = renderingProfile.normalized()
-        }
-        if homeURLChanged {
-            profiles[index].currentURL = homeURL
-        }
-        persistAndNotify()
-        return true
     }
 
     @discardableResult
@@ -162,9 +172,10 @@ final class TabStore {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let normalized = renderingProfile.normalized()
         guard profiles[index].renderingProfile != normalized else { return true }
-        profiles[index].renderingProfile = normalized
-        persistAndNotify()
-        return true
+        return persistConfigurationMutation {
+            profiles[index].renderingProfile = normalized
+            return true
+        }
     }
 
     @discardableResult
@@ -174,21 +185,21 @@ final class TabStore {
         backgroundMediaPolicy: BackgroundMediaPolicy? = nil
     ) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
-        var changed = false
+        let residencyChanged = residencyPolicy.map { profiles[index].residencyPolicy != $0 } ?? false
+        let mediaChanged = backgroundMediaPolicy.map {
+            profiles[index].backgroundMediaPolicy != $0
+        } ?? false
+        guard residencyChanged || mediaChanged else { return true }
 
-        if let residencyPolicy, profiles[index].residencyPolicy != residencyPolicy {
-            profiles[index].residencyPolicy = residencyPolicy
-            changed = true
+        return persistConfigurationMutation {
+            if let residencyPolicy {
+                profiles[index].residencyPolicy = residencyPolicy
+            }
+            if let backgroundMediaPolicy {
+                profiles[index].backgroundMediaPolicy = backgroundMediaPolicy
+            }
+            return true
         }
-        if let backgroundMediaPolicy,
-           profiles[index].backgroundMediaPolicy != backgroundMediaPolicy {
-            profiles[index].backgroundMediaPolicy = backgroundMediaPolicy
-            changed = true
-        }
-
-        guard changed else { return true }
-        persistAndNotify()
-        return true
     }
 
     @discardableResult
@@ -196,9 +207,10 @@ final class TabStore {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let updated = profiles[index].renderingProfile.settingViewport(size)
         guard profiles[index].renderingProfile != updated else { return true }
-        profiles[index].renderingProfile = updated
-        persistAndNotify()
-        return true
+        return persistConfigurationMutation {
+            profiles[index].renderingProfile = updated
+            return true
+        }
     }
 
     @discardableResult
@@ -206,9 +218,10 @@ final class TabStore {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let updated = profiles[index].renderingProfile.settingZoom(zoom)
         guard profiles[index].renderingProfile != updated else { return true }
-        profiles[index].renderingProfile = updated
-        persistAndNotify()
-        return true
+        return persistConfigurationMutation {
+            profiles[index].renderingProfile = updated
+            return true
+        }
     }
 
     @discardableResult
@@ -216,10 +229,12 @@ final class TabStore {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return false }
+        guard profiles[index].name != trimmedName else { return true }
 
-        profiles[index].name = trimmedName
-        persistAndNotify()
-        return true
+        return persistConfigurationMutation {
+            profiles[index].name = trimmedName
+            return true
+        }
     }
 
     @discardableResult
@@ -229,25 +244,25 @@ final class TabStore {
             return false
         }
 
-        profiles.removeAll(where: { $0.id == id })
-        normalizeInPlace()
+        return persistConfigurationMutation {
+            profiles.removeAll(where: { $0.id == id })
+            normalizeInPlace()
 
-        if activeTabID == id {
-            let remaining = orderedProfiles
-            if remaining.isEmpty {
-                activeTabID = nil
-            } else {
-                let neighborIndex = min(removedIndex, remaining.count - 1)
-                activeTabID = remaining[neighborIndex].id
-                touchLastUsed(id: activeTabID)
+            if activeTabID == id {
+                let remaining = orderedProfiles
+                if remaining.isEmpty {
+                    activeTabID = nil
+                } else {
+                    let neighborIndex = min(removedIndex, remaining.count - 1)
+                    activeTabID = remaining[neighborIndex].id
+                    touchLastUsed(id: activeTabID)
+                }
+            } else if let activeTabID,
+                      !profiles.contains(where: { $0.id == activeTabID }) {
+                self.activeTabID = orderedProfiles.first?.id
             }
-        } else if let activeTabID,
-                  !profiles.contains(where: { $0.id == activeTabID }) {
-            self.activeTabID = orderedProfiles.first?.id
+            return true
         }
-
-        persistAndNotify()
-        return true
     }
 
     @discardableResult
@@ -262,12 +277,13 @@ final class TabStore {
         let moved = ordered.remove(at: sourceIndex)
         ordered.insert(moved, at: destination)
 
-        // `ordered` is now the user's intended sequence. Do not feed it back
-        // through `normalizedProfiles`, which sorts by the pre-move order values
-        // and would undo the reorder. Reindex this sequence in place instead.
-        profiles = Self.reindexedProfilesPreservingSequence(ordered)
-        persistAndNotify()
-        return true
+        return persistConfigurationMutation {
+            // `ordered` is now the user's intended sequence. Do not feed it back
+            // through `normalizedProfiles`, which sorts by the pre-move order values
+            // and would undo the reorder. Reindex this sequence in place instead.
+            profiles = Self.reindexedProfilesPreservingSequence(ordered)
+            return true
+        }
     }
 
     @discardableResult
@@ -275,7 +291,7 @@ final class TabStore {
         guard profiles.contains(where: { $0.id == id }) else { return false }
         activeTabID = id
         touchLastUsed(id: id, now: now)
-        persistAndNotify()
+        persistRuntimeAndNotify()
         return true
     }
 
@@ -327,6 +343,9 @@ final class TabStore {
         return ordered[index]
     }
 
+    /// Browser position is runtime state rather than user configuration. Keep it
+    /// in memory even if the best-effort persistence write fails so navigation is
+    /// never blocked by a transient local I/O problem.
     func updateCurrentURL(id: UUID, url: URL) {
         guard WebAppURL.isSafe(url),
               let index = profiles.firstIndex(where: { $0.id == id }),
@@ -335,19 +354,18 @@ final class TabStore {
         }
 
         profiles[index].currentURL = url
-        persist()
+        persistRuntimeState()
     }
 
     func storedStateSnapshot() -> StoredWebAppState {
-        StoredWebAppState(
-            version: StoredWebAppState.currentVersion,
-            profiles: orderedProfiles,
-            lastActiveTabID: activeTabID
-        )
+        currentState()
     }
 
     @discardableResult
-    func replaceStoredState(_ state: StoredWebAppState) -> Bool {
+    func replaceStoredState(
+        _ state: StoredWebAppState,
+        notifyOnSuccess: Bool = true
+    ) -> Bool {
         guard state.version == StoredWebAppState.currentVersion else { return false }
 
         let sanitized = state.sanitizedForUse()
@@ -374,7 +392,9 @@ final class TabStore {
 
         profiles = normalized
         activeTabID = restoredActiveID
-        onChange?()
+        if notifyOnSuccess {
+            onChange?()
+        }
         return true
     }
 
@@ -420,17 +440,44 @@ final class TabStore {
         }
     }
 
-    private func persistAndNotify() {
-        persist()
+    /// User-authored configuration is transactional: the in-memory model is
+    /// published only if the corresponding durable write succeeds. A failed
+    /// write restores the exact previous model so the UI cannot report a change
+    /// that will disappear on relaunch.
+    private func persistConfigurationMutation(_ mutation: () -> Bool) -> Bool {
+        let previousProfiles = profiles
+        let previousActiveTabID = activeTabID
+        guard mutation() else { return false }
+
+        do {
+            try repository.save(currentState())
+        } catch {
+            profiles = previousProfiles
+            activeTabID = previousActiveTabID
+            onPersistenceFailure?()
+            return false
+        }
+
+        onChange?()
+        return true
+    }
+
+    /// Selection/last-used state is runtime interaction. Preserve the live UI
+    /// even if its relaunch snapshot cannot be written on this particular turn.
+    private func persistRuntimeAndNotify() {
+        persistRuntimeState()
         onChange?()
     }
 
-    private func persist() {
-        let state = StoredWebAppState(
+    private func persistRuntimeState() {
+        try? repository.save(currentState())
+    }
+
+    private func currentState() -> StoredWebAppState {
+        StoredWebAppState(
             version: StoredWebAppState.currentVersion,
             profiles: orderedProfiles,
             lastActiveTabID: activeTabID
         )
-        try? repository.save(state)
     }
 }

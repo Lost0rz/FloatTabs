@@ -16,6 +16,7 @@ struct StoredWebAppState: Codable, Equatable {
 
 enum ProfileRepositoryError: Error, Equatable {
     case unsupportedVersion(Int)
+    case startupRecoveryRequired
 }
 
 protocol ProfileRepositoryProtocol: AnyObject {
@@ -28,6 +29,9 @@ final class ProfileRepository: ProfileRepositoryProtocol {
     private let fileURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+
+    private(set) var startupRecoveryRequired = false
+    private(set) var startupRecoveryArchiveURL: URL?
 
     init(fileManager: FileManager = .default, fileURL: URL? = nil) {
         self.fileManager = fileManager
@@ -43,19 +47,61 @@ final class ProfileRepository: ProfileRepositoryProtocol {
 
     func load() throws -> StoredWebAppState {
         guard fileManager.fileExists(atPath: fileURL.path) else {
+            startupRecoveryRequired = false
+            startupRecoveryArchiveURL = nil
             return .empty
         }
 
-        let data = try Data(contentsOf: fileURL)
-        let decoded = try decoder.decode(StoredWebAppState.self, from: data)
-        guard decoded.version == StoredWebAppState.currentVersion else {
-            throw ProfileRepositoryError.unsupportedVersion(decoded.version)
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let decoded = try decoder.decode(StoredWebAppState.self, from: data)
+            guard decoded.version == StoredWebAppState.currentVersion else {
+                throw ProfileRepositoryError.unsupportedVersion(decoded.version)
+            }
+
+            startupRecoveryRequired = false
+            startupRecoveryArchiveURL = nil
+            return decoded.sanitizedForUse()
+        } catch {
+            // An unreadable on-disk profile store is never treated as permission
+            // to replace it with the empty in-memory fallback. All writes remain
+            // blocked until the startup recovery flow has copied the exact bytes
+            // aside for manual recovery.
+            startupRecoveryRequired = true
+            startupRecoveryArchiveURL = nil
+            throw error
+        }
+    }
+
+    @discardableResult
+    func preserveUnreadableStoreForRecovery(now: Date = Date()) throws -> URL? {
+        guard startupRecoveryRequired else { return startupRecoveryArchiveURL }
+        if let startupRecoveryArchiveURL {
+            return startupRecoveryArchiveURL
+        }
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            return nil
         }
 
-        return decoded.sanitizedForUse()
+        let directory = fileURL.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let archiveURL = directory.appendingPathComponent(
+            "WebAppProfiles-recovery-\(Self.timestamp(now))-\(UUID().uuidString.prefix(8)).json",
+            isDirectory: false
+        )
+        try fileManager.copyItem(at: fileURL, to: archiveURL)
+        startupRecoveryArchiveURL = archiveURL
+        return archiveURL
     }
 
     func save(_ state: StoredWebAppState) throws {
+        if startupRecoveryRequired, startupRecoveryArchiveURL == nil {
+            throw ProfileRepositoryError.startupRecoveryRequired
+        }
+
         let directory = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(
             at: directory,
@@ -69,6 +115,11 @@ final class ProfileRepository: ProfileRepositoryProtocol {
         )
         let data = try encoder.encode(normalizedState)
         try data.write(to: fileURL, options: [.atomic])
+
+        // A successful atomic replacement is the only transition that clears
+        // recovery mode. If the save throws, the protected copy remains and the
+        // app continues to block further ordinary persistence.
+        startupRecoveryRequired = false
     }
 
     private static func defaultFileURL(fileManager: FileManager) -> URL {
@@ -85,6 +136,14 @@ final class ProfileRepository: ProfileRepositoryProtocol {
             .appendingPathComponent("WebAppProfiles.json", isDirectory: false)
     }
 
+    private static func timestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: date)
+    }
 }
 
 extension StoredWebAppState {

@@ -4,8 +4,20 @@ import WebKit
 
 @MainActor
 final class DownloadCoordinator: NSObject, WKDownloadDelegate {
+    private struct PendingDestination {
+        let stagingURL: URL
+        let finalURL: URL
+    }
+
     private var activeDownloads: [ObjectIdentifier: WKDownload] = [:]
     private var presentingWindows: [ObjectIdentifier: NSWindow] = [:]
+    private var pendingDestinations: [ObjectIdentifier: PendingDestination] = [:]
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        super.init()
+    }
 
     static func actionPolicy(
         shouldPerformDownload: Bool
@@ -54,6 +66,14 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
         return candidate.isEmpty ? "Download" : candidate
     }
 
+    static func stagingURL(for finalURL: URL, token: UUID = UUID()) -> URL {
+        let filename = finalURL.lastPathComponent.isEmpty ? "Download" : finalURL.lastPathComponent
+        return finalURL.deletingLastPathComponent().appendingPathComponent(
+            ".FloatTabs-\(token.uuidString)-\(filename).download",
+            isDirectory: false
+        )
+    }
+
     func attach(_ download: WKDownload, presentingWindow: NSWindow?) {
         let id = ObjectIdentifier(download)
         activeDownloads[id] = download
@@ -79,23 +99,25 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
                 return
             }
 
-            guard result == .OK, let destination = panel.url else {
+            guard result == .OK, let finalURL = panel.url else {
                 self.cleanup(download)
                 completionHandler(nil)
                 return
             }
 
-            if FileManager.default.fileExists(atPath: destination.path) {
-                do {
-                    try FileManager.default.removeItem(at: destination)
-                } catch {
-                    self.cleanup(download)
-                    completionHandler(nil)
-                    return
-                }
+            let id = ObjectIdentifier(download)
+            let stagingURL = Self.stagingURL(for: finalURL)
+            // WKDownload requires an unused destination. Always download into a
+            // same-directory staging file so an existing user file is never
+            // deleted before the transfer has actually succeeded.
+            if self.fileManager.fileExists(atPath: stagingURL.path) {
+                try? self.fileManager.removeItem(at: stagingURL)
             }
-
-            completionHandler(destination)
+            self.pendingDestinations[id] = PendingDestination(
+                stagingURL: stagingURL,
+                finalURL: finalURL
+            )
+            completionHandler(stagingURL)
         }
 
         if let window = presentingWindows[ObjectIdentifier(download)] {
@@ -106,6 +128,7 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        finalizeSuccessfulDownload(download)
         cleanup(download)
     }
 
@@ -114,7 +137,65 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
         didFailWithError error: Error,
         resumeData: Data?
     ) {
+        discardStagingFile(download)
         cleanup(download)
+    }
+
+    private func finalizeSuccessfulDownload(_ download: WKDownload) {
+        let id = ObjectIdentifier(download)
+        guard let destination = pendingDestinations.removeValue(forKey: id) else { return }
+
+        do {
+            if fileManager.fileExists(atPath: destination.finalURL.path) {
+                _ = try fileManager.replaceItemAt(
+                    destination.finalURL,
+                    withItemAt: destination.stagingURL,
+                    backupItemName: nil,
+                    options: []
+                )
+            } else {
+                try fileManager.moveItem(
+                    at: destination.stagingURL,
+                    to: destination.finalURL
+                )
+            }
+        } catch {
+            presentFinalizationFailure(
+                stagingURL: destination.stagingURL,
+                finalURL: destination.finalURL,
+                window: presentingWindows[id]
+            )
+        }
+    }
+
+    private func discardStagingFile(_ download: WKDownload) {
+        let id = ObjectIdentifier(download)
+        guard let destination = pendingDestinations.removeValue(forKey: id) else { return }
+        if fileManager.fileExists(atPath: destination.stagingURL.path) {
+            try? fileManager.removeItem(at: destination.stagingURL)
+        }
+    }
+
+    private func presentFinalizationFailure(
+        stagingURL: URL,
+        finalURL: URL,
+        window: NSWindow?
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t Finish Saving Download"
+        alert.informativeText = "The existing file was kept. The completed download remains at \(stagingURL.path)."
+        alert.addButton(withTitle: "OK")
+        if let window, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        } else {
+            NSSound.beep()
+        }
+        NSLog(
+            "FloatTabs download finalization failed staging=%@ final=%@",
+            stagingURL.path,
+            finalURL.path
+        )
     }
 
     private func cleanup(_ download: WKDownload) {

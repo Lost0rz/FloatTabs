@@ -1,5 +1,6 @@
 import AppKit
 import KeyboardShortcuts
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppCoordinator {
@@ -9,7 +10,9 @@ final class AppCoordinator {
     private var appCommandController: AppCommandController?
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
+    private let profileRepository: ProfileRepository?
     private var globalSettingsController: GlobalSettingsController?
+    private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -30,8 +33,14 @@ final class AppCoordinator {
 
         if let panelController {
             self.panelController = panelController
+            profileRepository = nil
         } else {
-            let tabStore = TabStore(repository: ProfileRepository())
+            let profileRepository = ProfileRepository()
+            self.profileRepository = profileRepository
+            let tabStore = TabStore(repository: profileRepository)
+            tabStore.onPersistenceFailure = {
+                Self.presentConfigurationSaveFailure()
+            }
             let webViewPool = WebViewPool(
                 onURLChange: { slotID, url in
                     tabStore.updateCurrentURL(id: slotID, url: url)
@@ -49,6 +58,8 @@ final class AppCoordinator {
     }
 
     func start() {
+        resolveStartupConfigurationRecoveryIfNeeded()
+
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
             onExportBackup: { [weak self] url in
@@ -101,8 +112,10 @@ final class AppCoordinator {
 
         // Keep one local snapshot per app version/build. It is overwritten by
         // the same version on clean starts/exits, while older-version snapshots
-        // remain available when a newer app build is installed.
-        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+        // remain available when a newer app build is installed. Startup
+        // recovery is resolved before reaching this point, so an unreadable
+        // profile store can never generate an automatic empty snapshot.
+        writeAutomaticVersionSnapshotIfSafe()
 
 #if DEBUG
         let benchmarkControlServer = BenchmarkControlServer { [weak self] request in
@@ -118,7 +131,10 @@ final class AppCoordinator {
         benchmarkControlServer?.stop()
 #endif
         panelController.prepareForTermination()
-        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+        // Recovery protection applies on exit too. If the user explicitly chose
+        // Start Empty after a corrupt store, keep the previous automatic backup
+        // until a new Web App configuration actually exists.
+        writeAutomaticVersionSnapshotIfSafe()
     }
 
 #if DEBUG
@@ -169,6 +185,127 @@ final class AppCoordinator {
     }
 #endif
 
+    private func resolveStartupConfigurationRecoveryIfNeeded() {
+        guard let profileRepository,
+              profileRepository.startupRecoveryRequired else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        while profileRepository.startupRecoveryRequired {
+            let latest = backupService.latestValidAutomaticSnapshot()
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "FloatTabs Couldn’t Read Its Configuration"
+            alert.informativeText = "The existing WebAppProfiles.json will not be overwritten until FloatTabs preserves an exact recovery copy. Restore a known-good backup, choose another backup file, or explicitly start with an empty configuration."
+
+            let restoreLatestButton = alert.addButton(withTitle: "Restore Latest Backup")
+            restoreLatestButton.isEnabled = latest != nil
+            alert.addButton(withTitle: "Choose Backup…")
+            alert.addButton(withTitle: "Start Empty")
+
+            do {
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    guard let latest else { continue }
+                    try restoreStartupBackup(latest.document)
+
+                case .alertSecondButtonReturn:
+                    guard let selectedURL = chooseStartupBackupURL() else { continue }
+                    let document = try backupService.load(from: selectedURL)
+                    try restoreStartupBackup(document)
+
+                case .alertThirdButtonReturn:
+                    try beginWithEmptyStartupConfiguration()
+
+                default:
+                    continue
+                }
+            } catch {
+                presentStartupRecoveryFailure(error)
+            }
+        }
+    }
+
+    private func chooseStartupBackupURL() -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = "Choose FloatTabs Backup"
+        panel.prompt = "Restore"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        if let backupType = UTType(filenameExtension: FloatTabsBackupService.fileExtension) {
+            panel.allowedContentTypes = [backupType]
+        }
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    private func restoreStartupBackup(_ document: FloatTabsBackupDocument) throws {
+        try prepareUnreadableProfileStoreForReplacement()
+        do {
+            try applyBackupDocument(document)
+        } catch let error as FloatTabsBackupError where error == .restoreFailed {
+            throw FloatTabsBackupError.startupRecoveryFailed
+        }
+    }
+
+    private func beginWithEmptyStartupConfiguration() throws {
+        try prepareUnreadableProfileStoreForReplacement()
+        guard panelController.restoreStoredWebAppState(.empty) else {
+            throw FloatTabsBackupError.startupRecoveryFailed
+        }
+        // The user deliberately chose an empty live configuration, but the last
+        // automatic backup may still be the only known-good structured recovery
+        // point. Do not immediately overwrite it with an empty snapshot. Normal
+        // automatic snapshots resume once a new Web App configuration exists.
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery = true
+    }
+
+    private func prepareUnreadableProfileStoreForReplacement() throws {
+        guard let profileRepository,
+              profileRepository.startupRecoveryRequired else {
+            return
+        }
+        guard try profileRepository.preserveUnreadableStoreForRecovery() != nil else {
+            throw FloatTabsBackupError.startupRecoveryFailed
+        }
+    }
+
+    private func presentStartupRecoveryFailure(_ error: Error) {
+        let alert = NSAlert(error: error)
+        alert.alertStyle = .critical
+        alert.messageText = "Recovery Was Not Completed"
+        alert.informativeText = "FloatTabs has kept the unreadable configuration protected and has not written an automatic empty backup. Choose another recovery option to continue.\n\n\(error.localizedDescription)"
+        alert.runModal()
+    }
+
+    nonisolated static func shouldWriteAutomaticVersionSnapshot(
+        startupRecoveryRequired: Bool,
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery: Bool,
+        webAppState: StoredWebAppState
+    ) -> Bool {
+        guard !startupRecoveryRequired else { return false }
+        if preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+           webAppState.profiles.isEmpty {
+            return false
+        }
+        return true
+    }
+
+    private func writeAutomaticVersionSnapshotIfSafe() {
+        let webAppState = panelController.storedWebAppStateSnapshot()
+        guard Self.shouldWriteAutomaticVersionSnapshot(
+            startupRecoveryRequired: profileRepository?.startupRecoveryRequired == true,
+            preserveExistingAutomaticBackupAfterEmptyStartupRecovery:
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+            webAppState: webAppState
+        ) else {
+            return
+        }
+        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+    }
+
     private func makeBackupDocument(now: Date = Date()) -> FloatTabsBackupDocument {
         let shortcut = KeyboardShortcuts.getShortcut(for: .toggleFloatTabs)
         let shortcutBackup = shortcut.map {
@@ -196,7 +333,8 @@ final class AppCoordinator {
                 borderTheme: preferencesStore.borderTheme,
                 customBorderColorHex: preferencesStore.customBorderColorHex,
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
-                fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height)
+                fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
+                isTabRailCollapsed: preferencesStore.isTabRailCollapsed
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -209,7 +347,11 @@ final class AppCoordinator {
     private func restoreBackup(from url: URL) throws -> URL {
         let imported = try backupService.load(from: url)
         let rollbackURL = try backupService.writeRollback(makeBackupDocument())
+        try applyBackupDocument(imported)
+        return rollbackURL
+    }
 
+    private func applyBackupDocument(_ imported: FloatTabsBackupDocument) throws {
         guard panelController.restoreStoredWebAppState(imported.webAppState) else {
             throw FloatTabsBackupError.restoreFailed
         }
@@ -223,6 +365,10 @@ final class AppCoordinator {
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
         }
+        if let isTabRailCollapsed = imported.globalPreferences.isTabRailCollapsed {
+            preferencesStore.isTabRailCollapsed = isTabRailCollapsed
+            synchronizeRestoredRailCollapsePresentation(isTabRailCollapsed)
+        }
 
         let shortcut = imported.globalShowHideShortcut.map {
             KeyboardShortcuts.Shortcut(
@@ -231,7 +377,38 @@ final class AppCoordinator {
             )
         }
         KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
-        return rollbackURL
+    }
+
+    /// Backup restore is a rare one-shot operation and happens only while the
+    /// fullscreen source is unlocked. Update the already-created rail and both
+    /// fold affordances immediately so the restored UserDefaults value and the
+    /// live shell cannot disagree until the next launch.
+    private func synchronizeRestoredRailCollapsePresentation(_ collapsed: Bool) {
+        for window in NSApp.windows {
+            guard let contentView = window.contentView else { continue }
+            synchronizeRestoredRailCollapsePresentation(
+                in: contentView,
+                collapsed: collapsed
+            )
+        }
+    }
+
+    private func synchronizeRestoredRailCollapsePresentation(
+        in view: NSView,
+        collapsed: Bool
+    ) {
+        if let rail = view as? ExternalControlZoneView {
+            rail.setCollapsed(collapsed, animated: false)
+        }
+        if let foldControl = view as? RailFoldControl {
+            foldControl.setExpanded(!collapsed, animated: false)
+        }
+        for subview in view.subviews {
+            synchronizeRestoredRailCollapsePresentation(
+                in: subview,
+                collapsed: collapsed
+            )
+        }
     }
 
     private func showGlobalSettings() {
@@ -243,6 +420,20 @@ final class AppCoordinator {
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()
+        }
+    }
+
+    private static func presentConfigurationSaveFailure() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t Save Changes"
+        alert.informativeText = "FloatTabs couldn’t save its configuration. Your previous settings were kept."
+        alert.addButton(withTitle: "OK")
+
+        if let window = NSApp.keyWindow, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        } else {
+            NSSound.beep()
         }
     }
 }
