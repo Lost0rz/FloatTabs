@@ -33,7 +33,8 @@ final class FloatTabsBackupServiceTests: XCTestCase {
                 appearanceMode: .dark,
                 followPreferredSize: false,
                 borderTheme: .green,
-                customBorderColorHex: "#123456FF"
+                customBorderColorHex: "#123456FF",
+                isTabRailCollapsed: true
             ),
             globalShowHideShortcut: FloatTabsBackupShortcut(
                 carbonKeyCode: 50,
@@ -52,6 +53,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertFalse(decoded.globalPreferences.followPreferredSize)
         XCTAssertEqual(decoded.globalPreferences.borderTheme, .green)
         XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
+        XCTAssertEqual(decoded.globalPreferences.isTabRailCollapsed, true)
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
     }
 
