@@ -1,3 +1,4 @@
+import AppKit
 import Dispatch
 import Foundation
 
@@ -418,6 +419,15 @@ final class SlotLifecycleCoordinator {
                   self.hiddenActiveToken == token,
                   !self.panelIsVisible,
                   self.activeSlotID == profile.id else {
+                return
+            }
+
+            // The lifecycle Boolean is an intent signal, not proof that the
+            // Web surface is off-screen. WebKit fullscreen restoration can
+            // reorder the source window independently, so never detach the
+            // selected page while its real host window is still presented.
+            guard self.container.window?.isVisible != true else {
+                self.hiddenActiveToken = nil
                 return
             }
 
