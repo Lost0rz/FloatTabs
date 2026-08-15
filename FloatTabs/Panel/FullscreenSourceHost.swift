@@ -138,9 +138,8 @@ final class WebSourceEdgeDragView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
-        let localPoint = convert(point, from: superview)
-        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
+        guard bounds.contains(point) else { return nil }
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -274,7 +273,6 @@ final class FullscreenSourceHostController {
     private var fullscreenObservation: NSKeyValueObservation?
     private var restoreGeneration = 0
     private var restoreStartedAtUptime: TimeInterval?
-    private var presentationGeneration = 0
     private(set) var sessionState: FullscreenSourceSessionState = .idle
 
     var onSessionLockChange: ((Bool) -> Void)?
@@ -320,7 +318,6 @@ final class FullscreenSourceHostController {
     func orderFrontAndFocus(_ webView: WKWebView?) {
         guard !isSessionLocked else { return }
         attachSourceWindowToShell()
-        presentationGeneration &+= 1
         window.alphaValue = 1
         window.ignoresMouseEvents = false
         // The shell and WebKit source are separate windows. Ordering only the
@@ -345,7 +342,6 @@ final class FullscreenSourceHostController {
 
     func orderOutIfSafe() {
         guard !isSessionLocked else { return }
-        presentationGeneration &+= 1
         window.alphaValue = 1
         window.ignoresMouseEvents = false
         window.collectionBehavior = Self.sourceWindowCollectionBehavior
@@ -435,7 +431,6 @@ final class FullscreenSourceHostController {
         onSessionStateChange?(next)
 
         if !wasLocked, next.locksSourceHost {
-            presentationGeneration &+= 1
             // In ordinary presentation the source is a child of the shell so
             // Mission Control treats the rail, outline and Web surface as one
             // window group. Detach before hiding the shell: WebKit must keep
