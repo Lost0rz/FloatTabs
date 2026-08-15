@@ -133,6 +133,18 @@ struct FloatTabsBackupService {
         return url
     }
 
+    /// Arms the durable guard used only by the explicit Start Empty recovery
+    /// path. It must succeed before the protected corrupt profile store is
+    /// replaced by an empty configuration; otherwise recovery remains blocked.
+    func beginEmptyStartupRecoverySnapshotPreservation() throws {
+        let markerURL = startupRecoverySnapshotPreservationMarkerURL
+        try fileManager.createDirectory(
+            at: markerURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: markerURL, options: [.atomic])
+    }
+
     @discardableResult
     func writeAutomaticVersionSnapshot(
         _ document: FloatTabsBackupDocument
@@ -148,9 +160,8 @@ struct FloatTabsBackupService {
             atPath: preservationMarkerURL.path
         )
         if isPreservingRecoveredSnapshot, document.webAppState.profiles.isEmpty {
-            // An unreadable profile store may have been explicitly replaced by
-            // an empty one. Keep the last valid automatic snapshot intact across
-            // later launches until real Web App configuration exists again.
+            // Start Empty recovery may span multiple app launches. Keep the last
+            // valid automatic snapshot intact until real configuration exists.
             return url
         }
 
