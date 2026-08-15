@@ -148,3 +148,133 @@ final class ProfileRepositoryTests: XCTestCase {
         try body(ProfileRepository(fileURL: fileURL), fileURL)
     }
 }
+
+private enum TestProfilePersistenceError: Error {
+    case forcedFailure
+}
+
+private final class FailingProfileRepository: ProfileRepositoryProtocol {
+    var state: StoredWebAppState
+    var shouldFailSaves = false
+    private(set) var saveAttempts = 0
+
+    init(state: StoredWebAppState = .empty) {
+        self.state = state
+    }
+
+    func load() throws -> StoredWebAppState {
+        state
+    }
+
+    func save(_ state: StoredWebAppState) throws {
+        saveAttempts += 1
+        if shouldFailSaves {
+            throw TestProfilePersistenceError.forcedFailure
+        }
+        self.state = state
+    }
+}
+
+@MainActor
+final class TabStorePersistenceFailureTests: XCTestCase {
+    private let urlA = URL(string: "https://example.com/a")!
+    private let urlB = URL(string: "https://example.com/b")!
+
+    func testConfigurationSaveFailureRollsBackModelAndReportsOnce() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        let durableBefore = repository.state
+        var changeCount = 0
+        var failureCount = 0
+        store.onChange = { changeCount += 1 }
+        store.onPersistenceFailure = { failureCount += 1 }
+        repository.shouldFailSaves = true
+
+        XCTAssertFalse(store.rename(id: profile.id, name: "Renamed"))
+
+        XCTAssertEqual(store.profiles.first?.name, "A")
+        XCTAssertEqual(repository.state, durableBefore)
+        XCTAssertEqual(changeCount, 0)
+        XCTAssertEqual(failureCount, 1)
+    }
+
+    func testFailedAddAndRemoveLeaveIdentityAndSelectionUntouched() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(repository: repository)
+        let original = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        let durableBefore = repository.state
+        var failureCount = 0
+        store.onPersistenceFailure = { failureCount += 1 }
+        repository.shouldFailSaves = true
+
+        XCTAssertNil(store.add(name: "B", homeURL: urlB))
+        XCTAssertFalse(store.remove(id: original.id))
+
+        XCTAssertEqual(store.profiles.map(\.id), [original.id])
+        XCTAssertEqual(store.activeTabID, original.id)
+        XCTAssertEqual(repository.state, durableBefore)
+        XCTAssertEqual(failureCount, 2)
+    }
+
+    func testRuntimeSelectionStaysLiveWhenPersistenceFails() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(repository: repository)
+        let first = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        let second = try XCTUnwrap(store.add(name: "B", homeURL: urlB))
+        XCTAssertEqual(store.activeTabID, second.id)
+        let durableBefore = repository.state
+        var failureCount = 0
+        store.onPersistenceFailure = { failureCount += 1 }
+        repository.shouldFailSaves = true
+
+        XCTAssertTrue(store.select(id: first.id))
+
+        XCTAssertEqual(store.activeTabID, first.id)
+        XCTAssertEqual(repository.state, durableBefore)
+        XCTAssertEqual(failureCount, 0)
+    }
+
+    func testCurrentURLStaysLiveWhenPersistenceFails() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        let durableBefore = repository.state
+        var failureCount = 0
+        store.onPersistenceFailure = { failureCount += 1 }
+        repository.shouldFailSaves = true
+
+        store.updateCurrentURL(id: profile.id, url: urlB)
+
+        XCTAssertEqual(store.profiles.first?.currentURL, urlB)
+        XCTAssertEqual(repository.state, durableBefore)
+        XCTAssertEqual(failureCount, 0)
+    }
+
+    func testRenderingAndResourceChangesRollbackOnSaveFailure() throws {
+        let repository = FailingProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        let before = try XCTUnwrap(store.profiles.first)
+        repository.shouldFailSaves = true
+
+        XCTAssertFalse(
+            store.updateRenderingProfile(
+                id: profile.id,
+                renderingProfile: before.renderingProfile.settingWebsiteMode(.mobile)
+            )
+        )
+        XCTAssertFalse(
+            store.updateResourcePolicy(
+                id: profile.id,
+                residencyPolicy: .hot,
+                backgroundMediaPolicy: .allowBackgroundAudio
+            )
+        )
+
+        let after = try XCTUnwrap(store.profiles.first)
+        XCTAssertEqual(after.renderingProfile, before.renderingProfile)
+        XCTAssertEqual(after.residencyPolicy, before.residencyPolicy)
+        XCTAssertEqual(after.backgroundMediaPolicy, before.backgroundMediaPolicy)
+    }
+}
