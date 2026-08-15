@@ -12,6 +12,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let customBorderColorHex: String?
     let fixedViewportWidth: Double?
     let fixedViewportHeight: Double?
+    let isTabRailCollapsed: Bool?
 
     init(
         appearanceMode: AppAppearanceMode,
@@ -19,7 +20,8 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         borderTheme: PanelBorderTheme? = nil,
         customBorderColorHex: String? = nil,
         fixedViewportWidth: Double? = nil,
-        fixedViewportHeight: Double? = nil
+        fixedViewportHeight: Double? = nil,
+        isTabRailCollapsed: Bool? = nil
     ) {
         self.appearanceMode = appearanceMode
         self.followPreferredSize = followPreferredSize
@@ -27,6 +29,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.customBorderColorHex = customBorderColorHex
         self.fixedViewportWidth = fixedViewportWidth
         self.fixedViewportHeight = fixedViewportHeight
+        self.isTabRailCollapsed = isTabRailCollapsed
     }
 }
 
