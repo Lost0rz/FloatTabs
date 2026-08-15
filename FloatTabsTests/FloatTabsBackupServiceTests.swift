@@ -143,7 +143,10 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         try Data("not a backup".utf8).write(to: corruptURL, options: [.atomic])
 
         let latest = try XCTUnwrap(service.latestValidAutomaticSnapshot())
-        XCTAssertEqual(latest.url, newestURL)
+        XCTAssertEqual(
+            latest.url.resolvingSymlinksInPath(),
+            newestURL.resolvingSymlinksInPath()
+        )
         XCTAssertEqual(latest.document, newest)
     }
 }
