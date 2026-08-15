@@ -252,6 +252,10 @@ final class AppCoordinator {
 
     private func beginWithEmptyStartupConfiguration() throws {
         try prepareUnreadableProfileStoreForReplacement()
+        // Arm the durable guard before replacing the protected store. If this
+        // small marker cannot be written, recovery remains blocked and the
+        // unreadable profile store is not replaced by an empty configuration.
+        try backupService.beginEmptyStartupRecoverySnapshotPreservation()
         guard panelController.restoreStoredWebAppState(.empty) else {
             throw FloatTabsBackupError.startupRecoveryFailed
         }
