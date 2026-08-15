@@ -601,9 +601,8 @@ final class PanelPerimeterDragView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
-        let localPoint = convert(point, from: superview)
-        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
+        guard bounds.contains(point) else { return nil }
+        return Self.dragRects(in: bounds).contains(where: { $0.contains(point) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -722,7 +721,7 @@ final class PanelResizeHandleView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func updateTrackingAreas() {
@@ -942,14 +941,29 @@ final class WebSlotHostView: NSView {
 
     func attach(_ webView: WKWebView) {
         if self.webView !== webView {
-            self.webView?.removeFromSuperview()
+            if let previous = self.webView, previous.superview === self {
+                previous.removeFromSuperview()
+            }
+            self.webView = webView
+        }
+
+        // Weak identity is only bookkeeping. Fullscreen/companion presentation
+        // can legitimately reparent the same WKWebView while this host still
+        // remembers it, so physical ownership must be checked independently.
+        if webView.superview !== self {
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
             webView.autoresizingMask = []
             addSubview(webView)
-            self.webView = webView
         }
         applyWebsiteLayoutIfNeeded()
+    }
+
+    func detachOwnedWebView() {
+        if let webView, webView.superview === self {
+            webView.removeFromSuperview()
+        }
+        webView = nil
     }
 
     override func layout() {
@@ -960,6 +974,7 @@ final class WebSlotHostView: NSView {
     private func applyWebsiteLayoutIfNeeded() {
         guard !isApplyingWebsiteLayout,
               let webView,
+              webView.superview === self,
               frame.width > 0,
               frame.height > 0 else {
             return
@@ -1064,8 +1079,7 @@ final class WebPanelContainerView: NSView {
                 host.isHidden = true
             }
         case .warm, .cold:
-            hostedWebView?.removeFromSuperview()
-            hostedWebView = nil
+            detachHostedTransientIfOwned()
         }
 
         activeSlotID = nil
@@ -1076,33 +1090,40 @@ final class WebPanelContainerView: NSView {
         let staleHotSlotIDs = hotHostViews.keys.filter { !validHotSlotIDs.contains($0) }
         for slotID in staleHotSlotIDs {
             guard let host = hotHostViews.removeValue(forKey: slotID) else { continue }
-            host.webView?.removeFromSuperview()
+            host.detachOwnedWebView()
             host.removeFromSuperview()
         }
     }
 
     func removeSlot(_ slotID: UUID) {
         if activeSlotID == slotID {
-            hostedWebView?.removeFromSuperview()
-            hostedWebView = nil
+            detachHostedTransientIfOwned()
             activeWebView = nil
             activeSlotID = nil
         }
         if let host = hotHostViews.removeValue(forKey: slotID) {
-            host.webView?.removeFromSuperview()
+            host.detachOwnedWebView()
             host.removeFromSuperview()
         }
     }
 
     func showEmptyState() {
-        guard currentContentView !== emptyView else { return }
-        hostedWebView?.removeFromSuperview()
-        hostedWebView = nil
+        // Presentation bookkeeping must be cleared even when emptyView is already
+        // the last transient content view. Hot presentation is independent from
+        // currentContentView, so the old early-return left an active WebView live.
+        detachHostedTransientIfOwned()
         activeWebView = nil
         activeSlotID = nil
         websiteLayoutScale = 1
         logicalHostView.bounds = NSRect(origin: .zero, size: logicalHostView.frame.size)
-        setContentView(emptyView)
+        for host in hotHostViews.values {
+            host.autoresizingMask = []
+            host.isHidden = true
+        }
+
+        if currentContentView !== emptyView || emptyView.superview !== clipView {
+            setContentView(emptyView)
+        }
         emptyView.isHidden = false
         bringToFront(emptyView)
     }
@@ -1136,8 +1157,7 @@ final class WebPanelContainerView: NSView {
     }
 
     private func showHot(webView: WKWebView, slotID: UUID) {
-        hostedWebView?.removeFromSuperview()
-        hostedWebView = nil
+        detachHostedTransientIfOwned()
         currentContentView?.isHidden = true
 
         let host: WebSlotHostView
@@ -1151,6 +1171,12 @@ final class WebPanelContainerView: NSView {
             clipView.addSubview(host)
         }
 
+        // A host that survived bookkeeping but was physically detached must be
+        // restored to this container before it can present the slot again.
+        if host.superview !== clipView {
+            host.removeFromSuperview()
+            clipView.addSubview(host)
+        }
         host.frame = clipView.bounds
         host.autoresizingMask = [.width, .height]
         host.isHidden = false
@@ -1163,8 +1189,12 @@ final class WebPanelContainerView: NSView {
     }
 
     private func showTransient(webView: WKWebView, slotID: UUID?) {
-        if hostedWebView !== webView {
-            hostedWebView?.removeFromSuperview()
+        if hostedWebView !== webView || webView.superview !== logicalHostView {
+            if let hostedWebView,
+               hostedWebView !== webView,
+               hostedWebView.superview === logicalHostView {
+                hostedWebView.removeFromSuperview()
+            }
             webView.removeFromSuperview()
             webView.translatesAutoresizingMaskIntoConstraints = true
             webView.autoresizingMask = []
@@ -1183,6 +1213,13 @@ final class WebPanelContainerView: NSView {
         needsLayout = true
         layoutSubtreeIfNeeded()
         updateWebsiteLayoutIfNeeded()
+    }
+
+    private func detachHostedTransientIfOwned() {
+        if let hostedWebView, hostedWebView.superview === logicalHostView {
+            hostedWebView.removeFromSuperview()
+        }
+        hostedWebView = nil
     }
 
     private func configureShell() {
@@ -1239,7 +1276,8 @@ final class WebPanelContainerView: NSView {
     }
 
     private func updateWebsiteLayoutIfNeeded() {
-        guard let webView = hostedWebView else { return }
+        guard let webView = hostedWebView,
+              webView.superview === logicalHostView else { return }
 
         let visibleSize = clipView.bounds.size
         guard visibleSize.width > 0, visibleSize.height > 0 else { return }
