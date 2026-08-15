@@ -93,17 +93,6 @@ final class ProfileRepository: ProfileRepositoryProtocol {
             isDirectory: false
         )
         try fileManager.copyItem(at: fileURL, to: archiveURL)
-
-        // The exact corrupt bytes are now protected, but an empty recovery can
-        // span multiple launches. Persist a tiny marker beside the profile store
-        // so a later clean launch cannot overwrite the last known-good automatic
-        // backup until a non-empty configuration has actually been rebuilt.
-        let markerURL = directory.appendingPathComponent(
-            FloatTabsBackupService.startupRecoverySnapshotPreservationMarkerFileName,
-            isDirectory: false
-        )
-        try Data().write(to: markerURL, options: [.atomic])
-
         startupRecoveryArchiveURL = archiveURL
         return archiveURL
     }
