@@ -929,15 +929,259 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
+    // MARK: - HTTPS entry fallback to HTTP (inferred scheme, non-443 ports)
+
+    func testHostAppAllowsCleartextOnlyForWebContent() {
+        let ats = Bundle.main.object(
+            forInfoDictionaryKey: "NSAppTransportSecurity"
+        ) as? [String: Any]
+        XCTAssertEqual(ats?["NSAllowsArbitraryLoadsInWebContent"] as? Bool, true)
+        XCTAssertNil(ats?["NSAllowsArbitraryLoads"])
+    }
+
+    func testURLNormalizationTracksInferredVersusExplicitScheme() {
+        let inferred = WebAppURL.normalizedEntry(from: "nas.example.com:3010")
+        XCTAssertEqual(inferred?.url, URL(string: "https://nas.example.com:3010"))
+        XCTAssertEqual(inferred?.schemeWasInferred, true)
+
+        let explicitHTTPS = WebAppURL.normalizedEntry(from: "https://nas.example.com:3010")
+        XCTAssertEqual(explicitHTTPS?.url, URL(string: "https://nas.example.com:3010"))
+        XCTAssertEqual(explicitHTTPS?.schemeWasInferred, false)
+
+        let explicitHTTP = WebAppURL.normalizedEntry(from: "http://nas.example.com:3010")
+        XCTAssertEqual(explicitHTTP?.url, URL(string: "http://nas.example.com:3010"))
+        XCTAssertEqual(explicitHTTP?.schemeWasInferred, false)
+    }
+
+    func testHTTPFallbackCandidateRequiresNon443HTTPSShape() {
+        XCTAssertEqual(
+            WebAppURL.httpFallbackCandidate(for: URL(string: "https://nas.example.com:3010/")!),
+            URL(string: "http://nas.example.com:3010/")
+        )
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "https://example.com")!))
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "https://example.com:443")!))
+        XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "http://nas.example.com:3010")!))
+    }
+
+    func testHTTPFallbackDecisionRequiresConnectionFailureAndMatchingURL() {
+        let pending = URL(string: "https://nas.example.com:3010")!
+        let connectionFailures = [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        for code in connectionFailures {
+            let error = NSError(
+                domain: NSURLErrorDomain,
+                code: code,
+                userInfo: ["NSErrorFailingURLStringKey": pending.absoluteString]
+            )
+            XCTAssertEqual(
+                SlotNavigationObserver.httpFallbackURL(
+                    pending: pending,
+                    failingURL: URL(string: pending.absoluteString),
+                    error: error
+                ),
+                URL(string: "http://nas.example.com:3010"),
+                "expected fallback for \(code)"
+            )
+        }
+
+        let certificateError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorServerCertificateUntrusted,
+            userInfo: ["NSErrorFailingURLStringKey": pending.absoluteString]
+        )
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: pending,
+            error: certificateError
+        ))
+
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: URL(string: "https://other.example.com:3010"),
+            error: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        ))
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: nil,
+            failingURL: pending,
+            error: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        ))
+        XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
+            pending: pending,
+            failingURL: pending,
+            error: NSError(domain: "OtherDomain", code: 1)
+        ))
+    }
+
+    func testObserverFallsBackToHTTPOnceOnlyWhenCallerAllowsInferredEntry() {
+        let webView = WKWebView(frame: .zero)
+        var loadedURLs: [URL] = []
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            loadHandler: { _, url in loadedURLs.append(url) }
+        )
+
+        let entry = URL(string: "https://nas.example.com:3010")!
+        observer.configureHTTPEntryFallback(for: entry, allowed: true)
+        XCTAssertTrue(observer.isHTTPEntryFallbackPending)
+
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorSecureConnectionFailed,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+
+        XCTAssertEqual(loadedURLs, [URL(string: "http://nas.example.com:3010")!])
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorSecureConnectionFailed,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+        XCTAssertEqual(loadedURLs.count, 1)
+    }
+
+    func testObserverNeverArmsFallbackForExplicitHTTPSPermissionFalse() {
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: WKWebView(frame: .zero),
+            websiteMode: .desktop,
+            onURLChange: { _, _ in }
+        )
+        let entry = URL(string: "https://nas.example.com:3010")!
+
+        observer.configureHTTPEntryFallback(for: entry, allowed: false)
+
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+    }
+
+    func testObserverCommitCancelsPendingEntryFallback() {
+        let webView = WKWebView(frame: .zero)
+        var loadedURLs: [URL] = []
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            loadHandler: { _, url in loadedURLs.append(url) }
+        )
+
+        let entry = URL(string: "https://nas.example.com:3010")!
+        observer.configureHTTPEntryFallback(for: entry, allowed: true)
+        observer.webView(webView, didCommit: nil)
+
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorCannotConnectToHost,
+                userInfo: ["NSErrorFailingURLStringKey": entry.absoluteString]
+            )
+        )
+
+        XCTAssertTrue(loadedURLs.isEmpty)
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+    }
+
+    func testPoolNavigationRequiresExplicitFallbackPermission() {
+        let pool = makePool()
+        let profile = makeProfile(name: "A")
+        _ = pool.webView(for: profile)
+        let nonStandardPort = URL(string: "https://nas.example.com:3010")!
+
+        pool.navigate(slotID: profile.id, to: nonStandardPort)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+
+        pool.navigate(
+            slotID: profile.id,
+            to: nonStandardPort,
+            allowHTTPEntryFallback: true
+        )
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+
+        pool.navigate(slotID: profile.id, to: URL(string: "https://example.com")!)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+    }
+
+    func testPoolInitialHomeFallbackRequiresPersistedInferredScheme() {
+        let pool = makePool()
+        let inferred = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+        _ = pool.webView(for: inferred)
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: inferred.id))
+
+        let explicit = makeProfile(
+            name: "ExplicitNAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: false
+        )
+        _ = pool.webView(for: explicit)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: explicit.id))
+    }
+
+    func testPageCurrentURLDoesNotRegainFallbackAfterRuntimeRecreation() {
+        let pool = makePool()
+        var profile = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+        profile.currentURL = URL(string: "https://nas.example.com:3010/account")!
+
+        _ = pool.webView(for: profile)
+
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+    }
+
+    func testProfilePersistsHomeURLSchemeProvenance() throws {
+        let profile = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(WebAppProfile.self, from: data)
+
+        XCTAssertTrue(decoded.homeURLSchemeWasInferred)
+        XCTAssertEqual(decoded.homeURL, profile.homeURL)
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
 
-    private func makeProfile(name: String, homeURL: URL? = nil) -> WebAppProfile {
+    private func makeProfile(
+        name: String,
+        homeURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false
+    ) -> WebAppProfile {
         WebAppProfile(
             order: 0,
             name: name,
-            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!
+            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
     }
 }

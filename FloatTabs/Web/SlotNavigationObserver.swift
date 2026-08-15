@@ -140,6 +140,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
+    private let loadHandler: @MainActor (WKWebView, URL) -> Void
+
+    /// Set only for a FloatTabs-issued entry whose `https://` scheme was
+    /// inferred from a bare user address. Any successful commit or a handled
+    /// failure consumes the one-shot permission.
+    private var pendingHTTPEntryFallback: URL?
+
+    /// Whether an entry load is currently eligible for the http fallback.
+    /// Exposed for tests and diagnostics.
+    var isHTTPEntryFallbackPending: Bool {
+        pendingHTTPEntryFallback != nil
+    }
 
     init(
         slotID: UUID,
@@ -148,7 +160,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
         downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
-        onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in }
+        onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
+        loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
+            webView.load(URLRequest(url: url))
+        }
     ) {
         self.slotID = slotID
         self.webView = webView
@@ -157,6 +172,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
+        self.loadHandler = loadHandler
         super.init()
 
         observation = webView.observe(\.url, options: [.new]) { [weak self] _, _ in
@@ -250,6 +266,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        // Once an https entry commits, later in-page failures can never inherit
+        // the entry-only downgrade permission.
+        pendingHTTPEntryFallback = nil
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -276,10 +295,62 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+
+        let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
+            .flatMap { URL(string: $0) }
+            ?? webView.url
+        if let fallback = Self.httpFallbackURL(
+            pending: pendingHTTPEntryFallback,
+            failingURL: failingURL,
+            error: error
+        ) {
+            pendingHTTPEntryFallback = nil
+            loadHandler(webView, fallback)
+        } else {
+            pendingHTTPEntryFallback = nil
+        }
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         onContentProcessTermination(slotID)
+    }
+
+    /// Configures one-shot fallback for the next FloatTabs-issued entry load.
+    /// `allowed` must represent user-input provenance: true only when FloatTabs
+    /// supplied the https scheme. Passing false also clears any stale pending
+    /// permission before an explicit HTTPS, HTTP, reload-equivalent, or internal
+    /// navigation is started.
+    func configureHTTPEntryFallback(for url: URL, allowed: Bool) {
+        pendingHTTPEntryFallback = allowed && WebAppURL.httpFallbackCandidate(for: url) != nil
+            ? url
+            : nil
+    }
+
+    /// Pure fallback decision: a connection-level failure of exactly the
+    /// pending inferred entry URL yields the http candidate. Certificate-trust
+    /// failures, other URLs, and absent pending state never downgrade.
+    static func httpFallbackURL(pending: URL?, failingURL: URL?, error: Error) -> URL? {
+        guard let pending,
+              let failingURL,
+              failingURL == pending || failingURL.absoluteString == pending.absoluteString else {
+            return nil
+        }
+
+        let nsError = error as NSError
+        let connectionLevelFailureCodes: Set<Int> = [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        guard nsError.domain == NSURLErrorDomain,
+              connectionLevelFailureCodes.contains(nsError.code) else {
+            return nil
+        }
+
+        return WebAppURL.httpFallbackCandidate(for: pending)
     }
 
     private func restoreWebsiteMode(in webView: WKWebView) {

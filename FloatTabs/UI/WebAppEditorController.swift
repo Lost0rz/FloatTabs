@@ -3,6 +3,7 @@ import AppKit
 struct WebAppEditorValue {
     var name: String
     var url: URL
+    var homeURLSchemeWasInferred: Bool
     var renderingProfile: WebRenderingProfile
 }
 
@@ -18,6 +19,7 @@ enum WebAppEditorController {
             actionTitle: "Add Web App",
             initialName: "",
             initialURL: "",
+            initialURLSchemeWasInferred: false,
             initialRendering: .canonicalDefault,
             showsPrimaryRenderingControls: true,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
@@ -92,6 +94,7 @@ enum WebAppEditorController {
             actionTitle: "Save",
             initialName: profile.name,
             initialURL: profile.homeURL.absoluteString,
+            initialURLSchemeWasInferred: profile.homeURLSchemeWasInferred,
             initialRendering: profile.renderingProfile,
             showsPrimaryRenderingControls: false,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
@@ -123,6 +126,7 @@ enum WebAppEditorController {
         actionTitle: String,
         initialName: String,
         initialURL: String,
+        initialURLSchemeWasInferred: Bool,
         initialRendering: WebRenderingProfile,
         showsPrimaryRenderingControls: Bool,
         allowsWindowSizeEditing: Bool,
@@ -180,7 +184,8 @@ enum WebAppEditorController {
             }
 
             let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = WebAppURL.normalized(from: urlField.stringValue),
+            let rawURL = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let normalized = WebAppURL.normalizedEntry(from: rawURL),
                   let rendering = renderingForm.value(),
                   nameIsOptional || !name.isEmpty else {
                 presentValidationError(
@@ -191,10 +196,25 @@ enum WebAppEditorController {
                 return
             }
 
+            // Edit fields display the canonical absolute URL. If an existing
+            // profile originally came from a bare address, merely changing its
+            // name/rendering and pressing Save must not silently erase that
+            // provenance. Any actual URL text change is parsed normally, so an
+            // explicit scheme remains explicit and never receives fallback.
+            let schemeWasInferred: Bool
+            if rawURL == initialURL,
+               normalized.url == WebAppURL.normalized(from: initialURL),
+               initialURLSchemeWasInferred {
+                schemeWasInferred = true
+            } else {
+                schemeWasInferred = normalized.schemeWasInferred
+            }
+
             completion(
                 WebAppEditorValue(
                     name: name,
-                    url: url,
+                    url: normalized.url,
+                    homeURLSchemeWasInferred: schemeWasInferred,
                     renderingProfile: rendering
                 )
             )

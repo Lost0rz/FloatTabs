@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- FloatTabs is a browser shell, so user-selected WKWebView content may
+	     legitimately use cleartext http:// (self-hosted NAS panels, dev servers,
+	     legacy intranets). Keep that exception scoped to WebKit content instead
+	     of disabling ATS for the app's own networking. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

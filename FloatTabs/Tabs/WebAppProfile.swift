@@ -43,6 +43,12 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
     var name: String
     var homeURL: URL
     var currentURL: URL?
+    /// True only when FloatTabs itself supplied the `https://` scheme for the
+    /// configured Home URL because the user entered a bare address. This is
+    /// persisted so a later app launch or Cold rebuild can still correct that
+    /// *inferred* scheme, while an explicitly entered `https://` URL is never
+    /// eligible for automatic downgrade.
+    var homeURLSchemeWasInferred: Bool
     var renderingProfile: WebRenderingProfile
     var residencyPolicy: SlotResidencyPolicy
     var backgroundMediaPolicy: BackgroundMediaPolicy
@@ -55,6 +61,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
         name: String,
         homeURL: URL,
         currentURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false,
         renderingProfile: WebRenderingProfile = .canonicalDefault,
         residencyPolicy: SlotResidencyPolicy = .warm,
         backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive,
@@ -66,6 +73,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
         self.name = name
         self.homeURL = homeURL
         self.currentURL = currentURL
+        self.homeURLSchemeWasInferred = homeURLSchemeWasInferred
         self.renderingProfile = renderingProfile
         self.residencyPolicy = residencyPolicy
         self.backgroundMediaPolicy = backgroundMediaPolicy
@@ -81,6 +89,7 @@ extension WebAppProfile {
         case name
         case homeURL
         case currentURL
+        case homeURLSchemeWasInferred
         case renderingProfile
         case residencyPolicy
         case backgroundMediaPolicy
@@ -95,6 +104,12 @@ extension WebAppProfile {
         name = try container.decode(String.self, forKey: .name)
         homeURL = try container.decode(URL.self, forKey: .homeURL)
         currentURL = try container.decodeIfPresent(URL.self, forKey: .currentURL)
+        // Existing v0.1.1 profiles predate entry-provenance persistence. Treat
+        // them as explicit by default rather than silently weakening HTTPS.
+        homeURLSchemeWasInferred = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .homeURLSchemeWasInferred
+        ) ?? false
         renderingProfile = try container.decode(WebRenderingProfile.self, forKey: .renderingProfile)
         residencyPolicy = try container.decodeIfPresent(
             SlotResidencyPolicy.self,
@@ -115,6 +130,7 @@ extension WebAppProfile {
         try container.encode(name, forKey: .name)
         try container.encode(homeURL, forKey: .homeURL)
         try container.encodeIfPresent(currentURL, forKey: .currentURL)
+        try container.encode(homeURLSchemeWasInferred, forKey: .homeURLSchemeWasInferred)
         try container.encode(renderingProfile, forKey: .renderingProfile)
         try container.encode(residencyPolicy, forKey: .residencyPolicy)
         try container.encode(backgroundMediaPolicy, forKey: .backgroundMediaPolicy)
@@ -123,17 +139,20 @@ extension WebAppProfile {
     }
 }
 
+struct WebAppURLNormalization: Equatable {
+    let url: URL
+    /// True only when FloatTabs prepended `https://` because the raw user entry
+    /// did not contain a scheme.
+    let schemeWasInferred: Bool
+}
+
 enum WebAppURL {
-    static func normalized(from rawValue: String) -> URL? {
+    static func normalizedEntry(from rawValue: String) -> WebAppURLNormalization? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let candidate: String
-        if trimmed.contains("://") {
-            candidate = trimmed
-        } else {
-            candidate = "https://\(trimmed)"
-        }
+        let schemeWasInferred = !trimmed.contains("://")
+        let candidate = schemeWasInferred ? "https://\(trimmed)" : trimmed
 
         guard let components = URLComponents(string: candidate),
               let scheme = components.scheme?.lowercased(),
@@ -145,7 +164,16 @@ enum WebAppURL {
             return nil
         }
 
-        return url
+        return WebAppURLNormalization(
+            url: url,
+            schemeWasInferred: schemeWasInferred
+        )
+    }
+
+    /// Compatibility helper for call sites that only need a validated URL and
+    /// do not participate in entry-protocol fallback decisions.
+    static func normalized(from rawValue: String) -> URL? {
+        normalizedEntry(from: rawValue)?.url
     }
 
     static func defaultDisplayName(for url: URL) -> String {
@@ -166,5 +194,20 @@ enum WebAppURL {
             return false
         }
         return true
+    }
+
+    /// The single-retry http:// candidate for a caller-approved inferred entry.
+    ///
+    /// Eligibility here deliberately checks only URL shape. The caller must also
+    /// prove that the user omitted the scheme. An explicitly entered `https://`
+    /// URL is therefore never downgraded, even on a custom port.
+    static func httpFallbackCandidate(for url: URL) -> URL? {
+        guard url.scheme?.lowercased() == "https",
+              (url.port ?? 443) != 443,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.scheme = "http"
+        return components.url
     }
 }
