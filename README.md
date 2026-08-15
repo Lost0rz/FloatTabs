@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.0"><strong>Download FloatTabs v0.1.0</strong></a>
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.2"><strong>Download FloatTabs v0.1.2</strong></a>
   · macOS 13 or later · Apple Silicon and Intel
 </p>
 
@@ -31,21 +31,31 @@ It is intentionally not a full browser. FloatTabs is a compact native shell for 
 - Light, Dark, and System appearance modes with rainbow, preset, or custom border colors.
 - Collapsible Tab rail controlled by the colored grip inside the bottom-left page corner.
 - Configurable keyboard shortcuts with live menu shortcut labels.
-- Configuration backup and restore.
+- Configuration backup and restore with guarded recovery of damaged configuration files.
+- Staged downloads that preserve an existing destination until a transfer succeeds.
 
-## Install v0.1.0
+## What's New in v0.1.2
 
-1. Download [`FloatTabs-0.1.0.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg).
+- Fixes dynamic CJK/text ghosting and overlap in scaled Desktop WebViews by stabilizing logical viewport geometry and WebKit scroller configuration.
+- Fixes the post-fullscreen black-page failure caused by presentation/lifecycle state drifting before the 120-second hidden-active transition.
+- Preserves a physically visible active WebView from hidden-active retirement even if logical shell visibility becomes stale.
+- Improves configuration persistence/recovery and WebView host ownership hardening.
+- Makes attachment downloads safer by staging transfers before replacing an existing file.
+- Supports inferred HTTP fallback for user-entered self-hosted services on custom ports without downgrading explicit HTTPS URLs.
+
+## Install v0.1.2
+
+1. Download [`FloatTabs-0.1.2.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.2/FloatTabs-0.1.2.dmg).
 2. Open the DMG.
 3. Drag **FloatTabs** onto the **Applications** shortcut in the DMG window. Replacing an older copy does not remove your saved configuration or WebKit website data.
 4. Open FloatTabs from Applications.
 
-FloatTabs v0.1.0 is an unsigned, unnotarized personal-distribution build. If macOS blocks the first launch, Control-click or right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
+FloatTabs v0.1.2 is an unsigned, unnotarized personal-distribution build. If macOS blocks the first launch, Control-click or right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
 
 Verify the downloaded image with the accompanying checksum:
 
 ```bash
-shasum -a 256 -c FloatTabs-0.1.0.dmg.sha256
+shasum -a 256 -c FloatTabs-0.1.2.dmg.sha256
 ```
 
 Only install an unsigned build when you trust this repository and the checksum matches.
@@ -54,7 +64,7 @@ Only install an unsigned build when you trust this repository and the checksum m
 
 1. Launch FloatTabs. It runs as a menu-bar application without a Dock icon.
 2. Press Command–backtick (⌘ + backtick) or click the menu-bar icon to show FloatTabs.
-3. Select **+** to add a Web App and enter its home URL.
+3. Select **+** to add a Web App and enter its home URL. Name is optional; leaving it blank derives the display name from the URL host.
 4. Use the left Tab rail to switch apps.
 5. Drag the page edge to move the panel and use the bottom-right grip to resize it.
 6. Click the colored bottom-left grip to hide or reveal the Tab rail.
@@ -100,6 +110,8 @@ FloatTabs separates the floating shell from WebKit's ordinary source window. Thi
 
 While one Slot is fullscreen, you can show the shell on the current or another display, select another Slot, or use the fullscreen Slot's exit placeholder. The fullscreen page and companion shell keep independent but synchronized lifecycles until WebKit has fully restored the source page.
 
+v0.1.2 additionally makes the post-fullscreen presentation decision authoritative: a hidden restore is no longer followed by an unconditional source-window reattach, and the hidden-active lifecycle will not detach a selected page whose real host window is still visible.
+
 ## Privacy and Data
 
 - Website content is rendered by the system WebKit framework.
@@ -107,6 +119,7 @@ While one Slot is fullscreen, you can show the shell on the current or another d
 - FloatTabs does not implement its own password store.
 - `.floattabsbackup` exports configuration, not cookies, passwords, OAuth tokens, caches, or live page state.
 - Opening a normal HTTP(S) link stays in the current Slot. Sending a link to the default browser or a separate floating browser is an explicit context-menu action.
+- A bare custom-port entry may retry once over HTTP after an eligible connection failure; an explicitly entered `https://` URL is never downgraded.
 
 ## Build from Source
 
@@ -129,22 +142,22 @@ xcodebuild \
   test
 ```
 
-Build the same unsigned Universal 2 DMG used by the v0.1.0 release:
+Build the same unsigned Universal 2 DMG used by the v0.1.2 release:
 
 ```bash
 tools/release/build_dmg.sh
 ```
 
-Artifacts are written to `.release/`:
+Artifacts are written to `.release/` using the current app version:
 
 ```text
-FloatTabs-0.1.0.dmg
-FloatTabs-0.1.0.dmg.sha256
-FloatTabs-0.1.0.dSYM.zip
-FloatTabs-0.1.0.dSYM.zip.sha256
+FloatTabs-<version>.dmg
+FloatTabs-<version>.dmg.sha256
+FloatTabs-<version>.dSYM.zip
+FloatTabs-<version>.dSYM.zip.sha256
 ```
 
-The release script verifies every bundled Mach-O binary contains both `arm64` and `x86_64`, verifies the DMG, and generates SHA-256 sidecars. Developer ID signing and Apple notarization can be enabled later through the script's environment variables; neither is used for the current v0.1.0 package.
+The release script verifies every bundled Mach-O binary contains both `arm64` and `x86_64`, verifies the DMG, and generates SHA-256 sidecars. Developer ID signing and Apple notarization can be enabled through the script's environment variables; neither is used for the current personal-distribution package.
 
 ## Architecture and Project Documentation
 
@@ -159,12 +172,12 @@ FloatTabs/Web          WKWebView creation, navigation, popups, and lifecycle
 FloatTabsTests         XCTest regression suite
 ```
 
-Detailed product, architecture, design, release, performance, and validation records live under [`docs/`](docs/). The v0.1.0 behavioral source of truth is [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md), supplemented by the accepted current implementation and tests.
+Detailed product, architecture, design, release, performance, and validation records live under [`docs/`](docs/). The original v0.1.0 behavioral baseline remains in [`docs/product/FloatTabs_v0.1.0_Release_Baseline.md`](docs/product/FloatTabs_v0.1.0_Release_Baseline.md); current release deltas are recorded in [`docs/release/FloatTabs_v0.1.2.md`](docs/release/FloatTabs_v0.1.2.md) and the accepted implementation/tests.
 
 ## Release
 
-FloatTabs v0.1.0 is the first published release. It is distributed as one Universal 2 DMG for Apple Silicon and Intel Macs:
+FloatTabs v0.1.2 is distributed as one Universal 2 DMG for Apple Silicon and Intel Macs:
 
-- [Release page](https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.0)
-- [DMG](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg)
-- [SHA-256 checksum](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.0/FloatTabs-0.1.0.dmg.sha256)
+- [Release page](https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.2)
+- [DMG](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.2/FloatTabs-0.1.2.dmg)
+- [SHA-256 checksum](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.2/FloatTabs-0.1.2.dmg.sha256)
