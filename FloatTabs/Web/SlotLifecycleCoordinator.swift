@@ -16,6 +16,7 @@ final class SlotLifecycleCoordinator {
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
+    typealias PresentationVisibleQuery = () -> Bool
 
     private struct InactivePlan {
         let token: UUID
@@ -32,6 +33,7 @@ final class SlotLifecycleCoordinator {
     private let warmResidentLimit: Int
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
+    private let presentationVisibleQuery: PresentationVisibleQuery
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
@@ -54,6 +56,7 @@ final class SlotLifecycleCoordinator {
         warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
+        presentationVisibleQuery: PresentationVisibleQuery? = nil,
         installsMemoryPressureSource: Bool = true
     ) {
         self.webViewPool = webViewPool
@@ -73,6 +76,7 @@ final class SlotLifecycleCoordinator {
         self.mediaPauseAction = mediaPauseAction ?? { [weak webViewPool] slotID in
             webViewPool?.pauseMediaPlayback(slotID: slotID)
         }
+        self.presentationVisibleQuery = presentationVisibleQuery ?? { false }
 
         if installsMemoryPressureSource {
             configureMemoryPressureSource()
@@ -418,6 +422,14 @@ final class SlotLifecycleCoordinator {
                   self.hiddenActiveToken == token,
                   !self.panelIsVisible,
                   self.activeSlotID == profile.id else {
+                return
+            }
+
+            // Logical visibility can briefly diverge from the actual AppKit
+            // presentation around WebKit fullscreen restoration. Never detach
+            // an active page that WindowServer is still presenting to the user.
+            guard !self.presentationVisibleQuery() else {
+                self.hiddenActiveToken = nil
                 return
             }
 
