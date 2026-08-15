@@ -301,7 +301,8 @@ final class AppCoordinator {
                 borderTheme: preferencesStore.borderTheme,
                 customBorderColorHex: preferencesStore.customBorderColorHex,
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
-                fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height)
+                fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
+                isTabRailCollapsed: preferencesStore.isTabRailCollapsed
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -331,6 +332,9 @@ final class AppCoordinator {
         if let width = imported.globalPreferences.fixedViewportWidth,
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
+        }
+        if let isTabRailCollapsed = imported.globalPreferences.isTabRailCollapsed {
+            preferencesStore.isTabRailCollapsed = isTabRailCollapsed
         }
 
         let shortcut = imported.globalShowHideShortcut.map {
