@@ -303,7 +303,21 @@ final class AppCoordinator {
         ) else {
             return
         }
-        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+
+        do {
+            try backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+            if preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+               !webAppState.profiles.isEmpty {
+                // Protection ends only after a real rebuilt configuration has
+                // been durably committed to the automatic snapshot. A later
+                // intentional empty configuration in this same process should
+                // once again follow the ordinary snapshot contract.
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
+            }
+        } catch {
+            // Automatic snapshots are intentionally best-effort. Keep the
+            // in-memory recovery guard armed when the durable replacement failed.
+        }
     }
 
     private func makeBackupDocument(now: Date = Date()) -> FloatTabsBackupDocument {
