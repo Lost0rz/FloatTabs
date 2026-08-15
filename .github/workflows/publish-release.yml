@@ -1,0 +1,100 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'FloatTabs.xcodeproj/project.pbxproj'
+      - 'docs/release/FloatTabs_v*.md'
+      - '.github/workflows/publish-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
+          if [[ -z "$VERSION" ]]; then
+            echo "error: MARKETING_VERSION not found" >&2
+            exit 1
+          fi
+          TAG="v$VERSION"
+          NOTES="docs/release/FloatTabs_${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "error: release notes not found: $NOTES" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and verify Universal 2 release package
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
+        shell: bash
+        run: |
+          chmod +x tools/release/build_dmg.sh
+          tools/release/build_dmg.sh
+
+      - name: Verify release filenames
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$OUTPUT_DIR/FloatTabs-$VERSION.dmg"
+          test -f "$OUTPUT_DIR/FloatTabs-$VERSION.dmg.sha256"
+          test -f "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip"
+          test -f "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip.sha256"
+          (
+            cd "$OUTPUT_DIR"
+            shasum -a 256 -c "FloatTabs-$VERSION.dmg.sha256"
+            shasum -a 256 -c "FloatTabs-$VERSION.dSYM.zip.sha256"
+          )
+
+      - name: Publish GitHub Release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES: ${{ steps.release.outputs.notes }}
+          OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "FloatTabs $TAG" \
+            --notes-file "$NOTES" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dmg" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dmg.sha256" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip.sha256"
