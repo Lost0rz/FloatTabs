@@ -24,11 +24,10 @@ jobs:
           chmod +x tools/release/build_dmg.sh
           tools/release/build_dmg.sh
 
-      # The repository is public, while QA builds are intentionally unsigned and
-      # private. Pull requests still build and verify the image, but only an
-      # explicit maintainer dispatch retains the binary artifacts.
+      # Temporary QA branch only: retain the binary for this pull-request build
+      # so the current unmerged application tree can be tested locally.
       - name: Upload manually requested Universal 2 QA DMG and debug symbols
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: FloatTabs-0.1.1-Universal-QA-DMG
