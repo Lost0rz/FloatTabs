@@ -246,13 +246,17 @@ final class AppCoordinator {
 
     private func restoreStartupBackup(_ document: FloatTabsBackupDocument) throws {
         try prepareUnreadableProfileStoreForReplacement()
-        try applyBackupDocument(document)
+        do {
+            try applyBackupDocument(document)
+        } catch let error as FloatTabsBackupError where error == .restoreFailed {
+            throw FloatTabsBackupError.startupRecoveryFailed
+        }
     }
 
     private func beginWithEmptyStartupConfiguration() throws {
         try prepareUnreadableProfileStoreForReplacement()
         guard panelController.restoreStoredWebAppState(.empty) else {
-            throw FloatTabsBackupError.restoreFailed
+            throw FloatTabsBackupError.startupRecoveryFailed
         }
     }
 
@@ -262,7 +266,7 @@ final class AppCoordinator {
             return
         }
         guard try profileRepository.preserveUnreadableStoreForRecovery() != nil else {
-            throw FloatTabsBackupError.restoreFailed
+            throw FloatTabsBackupError.startupRecoveryFailed
         }
     }
 
