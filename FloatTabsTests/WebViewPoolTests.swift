@@ -929,22 +929,31 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
-    // MARK: - HTTPS entry fallback to HTTP (non-443 ports)
+    // MARK: - HTTPS entry fallback to HTTP (inferred scheme, non-443 ports)
 
-    /// The http fallback can only work if the host app permits cleartext
-    /// loads: without an ATS exception the OS blocks the downgraded request
-    /// with NSURLErrorAppTransportSecurityRequiresSecureConnection and the
-    /// page dies even though the fallback fired. Guards the Info.plist.
-    func testHostAppAllowsCleartextLoadsForBrowserUse() {
+    func testHostAppAllowsCleartextOnlyForWebContent() {
         let ats = Bundle.main.object(
             forInfoDictionaryKey: "NSAppTransportSecurity"
         ) as? [String: Any]
-        XCTAssertEqual(ats?["NSAllowsArbitraryLoads"] as? Bool, true)
+        XCTAssertEqual(ats?["NSAllowsArbitraryLoadsInWebContent"] as? Bool, true)
+        XCTAssertNil(ats?["NSAllowsArbitraryLoads"])
     }
 
-    /// Only an https entry URL on an explicit non-443 port has an http
-    /// fallback candidate. Default-port https must never downgrade.
-    func testHTTPFallbackCandidateEligibility() {
+    func testURLNormalizationTracksInferredVersusExplicitScheme() {
+        let inferred = WebAppURL.normalizedEntry(from: "nas.example.com:3010")
+        XCTAssertEqual(inferred?.url, URL(string: "https://nas.example.com:3010"))
+        XCTAssertEqual(inferred?.schemeWasInferred, true)
+
+        let explicitHTTPS = WebAppURL.normalizedEntry(from: "https://nas.example.com:3010")
+        XCTAssertEqual(explicitHTTPS?.url, URL(string: "https://nas.example.com:3010"))
+        XCTAssertEqual(explicitHTTPS?.schemeWasInferred, false)
+
+        let explicitHTTP = WebAppURL.normalizedEntry(from: "http://nas.example.com:3010")
+        XCTAssertEqual(explicitHTTP?.url, URL(string: "http://nas.example.com:3010"))
+        XCTAssertEqual(explicitHTTP?.schemeWasInferred, false)
+    }
+
+    func testHTTPFallbackCandidateRequiresNon443HTTPSShape() {
         XCTAssertEqual(
             WebAppURL.httpFallbackCandidate(for: URL(string: "https://nas.example.com:3010/")!),
             URL(string: "http://nas.example.com:3010/")
@@ -954,9 +963,6 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "http://nas.example.com:3010")!))
     }
 
-    /// The fallback decision is a pure function: connection-level failures on
-    /// a matching pending entry fall back; certificate-trust failures and
-    /// mismatched URLs never do.
     func testHTTPFallbackDecisionRequiresConnectionFailureAndMatchingURL() {
         let pending = URL(string: "https://nas.example.com:3010")!
         let connectionFailures = [
@@ -984,7 +990,6 @@ final class WebViewPoolTests: XCTestCase {
             )
         }
 
-        // Certificate-trust problems must never downgrade to http.
         let certificateError = NSError(
             domain: NSURLErrorDomain,
             code: NSURLErrorServerCertificateUntrusted,
@@ -996,8 +1001,6 @@ final class WebViewPoolTests: XCTestCase {
             error: certificateError
         ))
 
-        // Non-network domains, mismatched failing URLs, and absent pending
-        // state all decline.
         XCTAssertNil(SlotNavigationObserver.httpFallbackURL(
             pending: pending,
             failingURL: URL(string: "https://other.example.com:3010"),
@@ -1015,9 +1018,7 @@ final class WebViewPoolTests: XCTestCase {
         ))
     }
 
-    /// The observer retries once with http when the https entry navigation
-    /// fails at the connection layer, and never retries twice.
-    func testObserverFallsBackToHTTPOnceOnConnectionFailure() {
+    func testObserverFallsBackToHTTPOnceOnlyWhenCallerAllowsInferredEntry() {
         let webView = WKWebView(frame: .zero)
         var loadedURLs: [URL] = []
         let observer = SlotNavigationObserver(
@@ -1029,7 +1030,7 @@ final class WebViewPoolTests: XCTestCase {
         )
 
         let entry = URL(string: "https://nas.example.com:3010")!
-        observer.allowHTTPEntryFallback(for: entry)
+        observer.configureHTTPEntryFallback(for: entry, allowed: true)
         XCTAssertTrue(observer.isHTTPEntryFallbackPending)
 
         observer.webView(
@@ -1045,7 +1046,6 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedURLs, [URL(string: "http://nas.example.com:3010")!])
         XCTAssertFalse(observer.isHTTPEntryFallbackPending)
 
-        // A second failure must not trigger another fallback load.
         observer.webView(
             webView,
             didFailProvisionalNavigation: nil,
@@ -1058,8 +1058,20 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedURLs.count, 1)
     }
 
-    /// A successful https commit consumes the fallback eligibility, so a
-    /// later in-page https failure never downgrades.
+    func testObserverNeverArmsFallbackForExplicitHTTPSPermissionFalse() {
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: WKWebView(frame: .zero),
+            websiteMode: .desktop,
+            onURLChange: { _, _ in }
+        )
+        let entry = URL(string: "https://nas.example.com:3010")!
+
+        observer.configureHTTPEntryFallback(for: entry, allowed: false)
+
+        XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+    }
+
     func testObserverCommitCancelsPendingEntryFallback() {
         let webView = WKWebView(frame: .zero)
         var loadedURLs: [URL] = []
@@ -1072,7 +1084,7 @@ final class WebViewPoolTests: XCTestCase {
         )
 
         let entry = URL(string: "https://nas.example.com:3010")!
-        observer.allowHTTPEntryFallback(for: entry)
+        observer.configureHTTPEntryFallback(for: entry, allowed: true)
         observer.webView(webView, didCommit: nil)
 
         observer.webView(
@@ -1089,43 +1101,87 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(observer.isHTTPEntryFallbackPending)
     }
 
-    /// Pool entry loads mark the observer: non-443 https entries become
-    /// pending; default-port entries never do.
-    func testPoolEntryLoadsMarkHTTPFallbackEligibility() {
+    func testPoolNavigationRequiresExplicitFallbackPermission() {
         let pool = makePool()
         let profile = makeProfile(name: "A")
         _ = pool.webView(for: profile)
-
         let nonStandardPort = URL(string: "https://nas.example.com:3010")!
+
         pool.navigate(slotID: profile.id, to: nonStandardPort)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+
+        pool.navigate(
+            slotID: profile.id,
+            to: nonStandardPort,
+            allowHTTPEntryFallback: true
+        )
         XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
 
         pool.navigate(slotID: profile.id, to: URL(string: "https://example.com")!)
         XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
     }
 
-    /// A Web App whose home URL is itself a non-443 https entry gets the same
-    /// first-load fallback eligibility as an address-bar entry.
-    func testPoolInitialLoadMarksHTTPFallbackEligibility() {
+    func testPoolInitialHomeFallbackRequiresPersistedInferredScheme() {
         let pool = makePool()
-        let profile = makeProfile(name: "NAS", homeURL: URL(string: "https://nas.example.com:3010")!)
-        _ = pool.webView(for: profile)
-        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+        let inferred = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+        _ = pool.webView(for: inferred)
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: inferred.id))
 
-        let defaultPortProfile = makeProfile(name: "B")
-        _ = pool.webView(for: defaultPortProfile)
-        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: defaultPortProfile.id))
+        let explicit = makeProfile(
+            name: "ExplicitNAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: false
+        )
+        _ = pool.webView(for: explicit)
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: explicit.id))
+    }
+
+    func testPageCurrentURLDoesNotRegainFallbackAfterRuntimeRecreation() {
+        let pool = makePool()
+        var profile = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+        profile.currentURL = URL(string: "https://nas.example.com:3010/account")!
+
+        _ = pool.webView(for: profile)
+
+        XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+    }
+
+    func testProfilePersistsHomeURLSchemeProvenance() throws {
+        let profile = makeProfile(
+            name: "NAS",
+            homeURL: URL(string: "https://nas.example.com:3010")!,
+            homeURLSchemeWasInferred: true
+        )
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(WebAppProfile.self, from: data)
+
+        XCTAssertTrue(decoded.homeURLSchemeWasInferred)
+        XCTAssertEqual(decoded.homeURL, profile.homeURL)
     }
 
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
 
-    private func makeProfile(name: String, homeURL: URL? = nil) -> WebAppProfile {
+    private func makeProfile(
+        name: String,
+        homeURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false
+    ) -> WebAppProfile {
         WebAppProfile(
             order: 0,
             name: name,
-            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!
+            homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
     }
 }
