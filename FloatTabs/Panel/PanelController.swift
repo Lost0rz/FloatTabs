@@ -909,7 +909,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         // cold inactive Slot without clearing a warm WebView's history list.
         tabStore.updateCurrentURL(id: id, url: profile.homeURL)
         if webViewPool.contains(slotID: id) {
-            webViewPool.navigate(slotID: id, to: profile.homeURL)
+            webViewPool.navigate(
+                slotID: id,
+                to: profile.homeURL,
+                allowHTTPEntryFallback: profile.homeURLSchemeWasInferred
+            )
         }
 
         if tabStore.activeTabID == id {
@@ -932,6 +936,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                       let added = self.tabStore.add(
                         name: value.name,
                         homeURL: value.url,
+                        homeURLSchemeWasInferred: value.homeURLSchemeWasInferred,
                         renderingProfile: value.renderingProfile
                       ) else {
                     return
@@ -962,12 +967,17 @@ final class PanelController: NSObject, NSWindowDelegate {
                     id: id,
                     name: value.name,
                     homeURL: value.url,
+                    homeURLSchemeWasInferred: value.homeURLSchemeWasInferred,
                     renderingProfile: value.renderingProfile
                 ) else {
                     return
                 }
                 if oldHomeURL != value.url {
-                    self.webViewPool.navigate(slotID: id, to: value.url)
+                    self.webViewPool.navigate(
+                        slotID: id,
+                        to: value.url,
+                        allowHTTPEntryFallback: value.homeURLSchemeWasInferred
+                    )
                 }
                 if self.tabStore.activeTabID == id,
                    self.preferencesStore.windowSizeMode == .perWebApp {
@@ -1058,14 +1068,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func commitAddress(_ rawValue: String) -> Bool {
         guard let id = tabStore.activeTabID,
-              let url = WebAppURL.normalized(from: rawValue) else {
+              let normalized = WebAppURL.normalizedEntry(from: rawValue) else {
             NSSound.beep()
             addressOverlayView.markInvalid()
             return false
         }
 
-        tabStore.updateCurrentURL(id: id, url: url)
-        webViewPool.navigate(slotID: id, to: url)
+        tabStore.updateCurrentURL(id: id, url: normalized.url)
+        webViewPool.navigate(
+            slotID: id,
+            to: normalized.url,
+            allowHTTPEntryFallback: normalized.schemeWasInferred
+        )
         addressOverlayView.dismiss()
         focusActiveWebViewIfAvailable()
         return true
