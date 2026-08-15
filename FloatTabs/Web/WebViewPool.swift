@@ -130,6 +130,12 @@ final class WebViewPool {
         webViews[slotID]
     }
 
+    /// Diagnostic seam used by tests. Counts live (non-deallocated) containers
+    /// currently registered as Hot host owners for a Slot.
+    func knownHotHostOwnerCount(for slotID: UUID) -> Int {
+        hotHostOwners[slotID]?.values.filter { $0.container != nil }.count ?? 0
+    }
+
     /// Starts a FloatTabs-owned top-level navigation. HTTP fallback is opt-in
     /// and must come from raw user-entry provenance; the default is deliberately
     /// false so page-derived URLs, explicit HTTPS, redirects, and ordinary
@@ -385,6 +391,9 @@ final class WebViewPool {
         }
         let key = ObjectIdentifier(container)
         var owners = hotHostOwners[slotID] ?? [:]
+        // Compact dead weak owners on every mutation so a long-lived pool never
+        // accumulates entries for containers that were already deallocated.
+        owners = owners.filter { $0.value.container != nil }
         owners[key] = WeakHotHostOwner(container)
         hotHostOwners[slotID] = owners
     }

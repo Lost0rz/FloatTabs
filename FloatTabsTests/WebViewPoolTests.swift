@@ -1168,6 +1168,185 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(decoded.homeURL, profile.homeURL)
     }
 
+    // MARK: - Hot host owner registry
+
+    private func makeHotContainer() -> WebPanelContainerView {
+        WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+    }
+
+    /// Hosts live at container -> clipView -> WebSlotHostView depth.
+    private func hotHostViews(in container: NSView) -> [WebSlotHostView] {
+        container.subviews.flatMap { subview -> [NSView] in
+            [subview] + subview.subviews
+        }.compactMap { $0 as? WebSlotHostView }
+    }
+
+    /// Spec case: one Slot's Hot WKWebView moved main → companion leaves a
+    /// stale (webView-less) host in the main container; release must clean
+    /// hosts in every known owner container and drop the registry entry.
+    func testReleaseCleansStaleHotHostsInAllKnownOwnerContainers() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotBoth")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 1)
+
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+
+        // The main container still holds a stale dedicated host: its weak
+        // bookkeeping remembers the WKWebView, but the physical superview has
+        // moved to the companion. This is exactly the stale-host gap.
+        let staleHosts = hotHostViews(in: main)
+        XCTAssertEqual(staleHosts.count, 1)
+        XCTAssertTrue(staleHosts[0].webView === webView)
+        XCTAssertFalse(webView.superview === staleHosts[0])
+
+        pool.release(slotID: profile.id)
+
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    /// Spec case: Hot → Warm must clear stale Hot hosts in every known owner
+    /// without changing the resident runtime identity.
+    func testHotToWarmTransitionClearsStaleHotHostsInAllKnownOwners() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotToWarm")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+
+        profile.residencyPolicy = .warm
+        let warmView = pool.webView(for: profile)
+
+        XCTAssertTrue(warmView === webView)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+    }
+
+    /// Spec case: Hot → Cold follows the same all-owner stale-host cleanup.
+    func testHotToColdTransitionClearsStaleHotHostsInAllKnownOwners() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotToCold")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+
+        profile.residencyPolicy = .cold
+        let coldView = pool.webView(for: profile)
+
+        XCTAssertTrue(coldView === webView)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+    }
+
+    /// Spec case: a rendering-profile rebuild must not keep the old dedicated
+    /// hosts alive in any known owner container.
+    func testRuntimeRebuildLeavesNoOldHotHostBehind() {
+        let pool = makePool()
+        var profile = makeProfile(name: "Rebuild")
+        profile.residencyPolicy = .hot
+        let firstView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: firstView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+
+        profile.renderingProfile = profile.renderingProfile
+            .settingBrowserIdentity(.windowsChrome)
+        let rebuiltView = pool.webView(for: profile)
+
+        XCTAssertFalse(rebuiltView === firstView)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+    }
+
+    /// Spec case: the registry must not extend container lifetimes.
+    func testOwnerRegistryDoesNotExtendContainerLifetime() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotWeak")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        weak var weakMain: WebPanelContainerView?
+        autoreleasepool {
+            let main = makeHotContainer()
+            weakMain = main
+            main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+            _ = pool.webView(for: profile)
+            XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 1)
+        }
+        XCTAssertNil(weakMain)
+        // Dead weak owners are compacted out of the live count.
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+
+        pool.release(slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+    }
+
+    /// Spec case: reparenting between main and companion containers must not
+    /// change runtime identity or residency for a Hot slot.
+    func testCompanionReparentingKeepsRuntimeIdentityAndResidency() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotMove")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        _ = pool.webView(for: profile)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        let afterMove = pool.webView(for: profile)
+
+        XCTAssertTrue(afterMove === webView)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+    }
+
+    /// WebSlotHostView.attach invariant: when weak bookkeeping still reports
+    /// the same WKWebView but the physical superview has moved elsewhere, a
+    /// later attach must physically reparent instead of skipping.
+    func testHostAttachReparentsWhenPhysicalSuperviewChangedButWeakIdentityMatches() {
+        let webView = WKWebView(frame: .zero)
+        let host = WebSlotHostView(webView: webView)
+        XCTAssertTrue(webView.superview === host)
+
+        // Physically move the WKWebView without telling the old host.
+        let otherContainer = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        otherContainer.addSubview(webView)
+        XCTAssertFalse(webView.superview === host)
+
+        host.attach(webView)
+        XCTAssertTrue(webView.superview === host)
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }
