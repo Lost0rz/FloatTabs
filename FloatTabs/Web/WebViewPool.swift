@@ -111,10 +111,21 @@ final class WebViewPool {
         webViews[slotID]
     }
 
-    func navigate(slotID: UUID, to url: URL) {
+    /// Starts a FloatTabs-owned top-level navigation. HTTP fallback is opt-in
+    /// and must come from raw user-entry provenance; the default is deliberately
+    /// false so page-derived URLs, explicit HTTPS, redirects, and ordinary
+    /// programmatic navigation never gain downgrade permission accidentally.
+    func navigate(
+        slotID: UUID,
+        to url: URL,
+        allowHTTPEntryFallback: Bool = false
+    ) {
         guard WebAppURL.isSafe(url), let webView = webViews[slotID] else { return }
         lastKnownURLs[slotID] = url
-        navigationObservers[slotID]?.allowHTTPEntryFallback(for: url)
+        navigationObservers[slotID]?.configureHTTPEntryFallback(
+            for: url,
+            allowed: allowHTTPEntryFallback
+        )
         load(webView, URLRequest(url: url))
     }
 
@@ -270,7 +281,17 @@ final class WebViewPool {
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
-        observer.allowHTTPEntryFallback(for: navigationURL)
+
+        // A recreated runtime may inherit `currentURL` from arbitrary page
+        // navigation. Only the configured Home URL can reuse persisted entry
+        // provenance; an internal currentURL must never become a fresh downgrade
+        // candidate merely because a Cold eviction or rendering rebuild occurred.
+        let isConfiguredHomeEntry = navigationURL == profile.homeURL
+        observer.configureHTTPEntryFallback(
+            for: navigationURL,
+            allowed: isConfiguredHomeEntry && profile.homeURLSchemeWasInferred
+        )
+
         // Store the effective runtime profile so warm-slot reuse compares against
         // the identity actually applied to this WKWebView.
         appliedRenderingProfiles[profile.id] = runtimeRendering
