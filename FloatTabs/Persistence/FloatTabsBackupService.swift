@@ -211,12 +211,10 @@ struct FloatTabsBackupService {
     }
 
     private var startupRecoverySnapshotPreservationMarkerURL: URL {
-        backupDirectoryURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(
-                Self.startupRecoverySnapshotPreservationMarkerFileName,
-                isDirectory: false
-            )
+        backupDirectoryURL.appendingPathComponent(
+            Self.startupRecoverySnapshotPreservationMarkerFileName,
+            isDirectory: false
+        )
     }
 
     private static func defaultBackupDirectory(fileManager: FileManager) -> URL {
