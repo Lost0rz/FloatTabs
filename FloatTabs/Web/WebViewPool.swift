@@ -394,7 +394,7 @@ final class WebViewPool {
     /// superviews are never registered because they are not WebSlotHostView.
     private func removeKnownHotHostOwnership(_ webView: WKWebView, slotID: UUID) {
         rememberHotHostOwnerIfNeeded(webView, slotID: slotID)
-        let owners = hotHostOwners.removeValue(forKey: slotID)?.values ?? []
+        let owners = hotHostOwners.removeValue(forKey: slotID)?.values.map { $0 } ?? []
         for owner in owners {
             owner.container?.removeSlot(slotID)
         }
