@@ -191,4 +191,83 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             )
         )
     }
+
+    func testRecoverySnapshotProtectionSurvivesRelaunchUntilNonEmptyConfigurationExists() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsPersistentRecoveryTests-\(UUID().uuidString)", isDirectory: true)
+        let profileURL = root.appendingPathComponent("WebAppProfiles.json")
+        let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let repository = ProfileRepository(fileURL: profileURL)
+        let service = FloatTabsBackupService(backupDirectoryURL: backupDirectory)
+        let knownGoodProfile = WebAppProfile(
+            order: 0,
+            name: "Known Good",
+            homeURL: URL(string: "https://example.com/good")!
+        )
+        let knownGoodState = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [knownGoodProfile],
+            lastActiveTabID: knownGoodProfile.id
+        )
+
+        func document(state: StoredWebAppState, createdAt: TimeInterval) -> FloatTabsBackupDocument {
+            FloatTabsBackupDocument(
+                schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+                createdAt: Date(timeIntervalSince1970: createdAt),
+                sourceAppVersion: "0.1.1",
+                sourceBuild: "2",
+                webAppState: state,
+                globalPreferences: FloatTabsBackupPreferences(
+                    appearanceMode: .system,
+                    followPreferredSize: true
+                ),
+                globalShowHideShortcut: nil
+            )
+        }
+
+        let knownGoodDocument = document(state: knownGoodState, createdAt: 100)
+        let automaticURL = try service.writeAutomaticVersionSnapshot(knownGoodDocument)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("broken-profile-store".utf8).write(to: profileURL, options: [.atomic])
+        XCTAssertThrowsError(try repository.load())
+        _ = try repository.preserveUnreadableStoreForRecovery(
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        try repository.save(.empty)
+
+        let emptyDocument = document(state: .empty, createdAt: 200)
+        _ = try service.writeAutomaticVersionSnapshot(emptyDocument)
+        XCTAssertEqual(try service.load(from: automaticURL), knownGoodDocument)
+
+        // A fresh service instance models the next app launch. The on-disk
+        // marker, rather than AppCoordinator process memory, must keep the same
+        // automatic snapshot protected while configuration is still empty.
+        let relaunchedService = FloatTabsBackupService(backupDirectoryURL: backupDirectory)
+        _ = try relaunchedService.writeAutomaticVersionSnapshot(
+            document(state: .empty, createdAt: 300)
+        )
+        XCTAssertEqual(try relaunchedService.load(from: automaticURL), knownGoodDocument)
+
+        let rebuiltProfile = WebAppProfile(
+            order: 0,
+            name: "Rebuilt",
+            homeURL: URL(string: "https://example.com/rebuilt")!
+        )
+        let rebuiltState = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [rebuiltProfile],
+            lastActiveTabID: rebuiltProfile.id
+        )
+        let rebuiltDocument = document(state: rebuiltState, createdAt: 400)
+        _ = try relaunchedService.writeAutomaticVersionSnapshot(rebuiltDocument)
+        XCTAssertEqual(try relaunchedService.load(from: automaticURL), rebuiltDocument)
+
+        // Once a real configuration has been committed, normal automatic
+        // snapshot behavior resumes; a later intentional empty state is valid.
+        let laterEmptyDocument = document(state: .empty, createdAt: 500)
+        _ = try relaunchedService.writeAutomaticVersionSnapshot(laterEmptyDocument)
+        XCTAssertEqual(try relaunchedService.load(from: automaticURL), laterEmptyDocument)
+    }
 }
