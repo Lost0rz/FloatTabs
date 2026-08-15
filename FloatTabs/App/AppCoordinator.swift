@@ -12,6 +12,7 @@ final class AppCoordinator {
     private let backupService: FloatTabsBackupService
     private let profileRepository: ProfileRepository?
     private var globalSettingsController: GlobalSettingsController?
+    private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -114,9 +115,7 @@ final class AppCoordinator {
         // remain available when a newer app build is installed. Startup
         // recovery is resolved before reaching this point, so an unreadable
         // profile store can never generate an automatic empty snapshot.
-        if profileRepository?.startupRecoveryRequired != true {
-            _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
-        }
+        writeAutomaticVersionSnapshotIfSafe()
 
 #if DEBUG
         let benchmarkControlServer = BenchmarkControlServer { [weak self] request in
@@ -132,12 +131,10 @@ final class AppCoordinator {
         benchmarkControlServer?.stop()
 #endif
         panelController.prepareForTermination()
-        // If recovery is still unresolved (for example the user quits from a
-        // modal chooser), never overwrite the last known-good automatic backup
-        // with the empty fallback model created after the failed load.
-        if profileRepository?.startupRecoveryRequired != true {
-            _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
-        }
+        // Recovery protection applies on exit too. If the user explicitly chose
+        // Start Empty after a corrupt store, keep the previous automatic backup
+        // until a new Web App configuration actually exists.
+        writeAutomaticVersionSnapshotIfSafe()
     }
 
 #if DEBUG
@@ -258,6 +255,11 @@ final class AppCoordinator {
         guard panelController.restoreStoredWebAppState(.empty) else {
             throw FloatTabsBackupError.startupRecoveryFailed
         }
+        // The user deliberately chose an empty live configuration, but the last
+        // automatic backup may still be the only known-good structured recovery
+        // point. Do not immediately overwrite it with an empty snapshot. Normal
+        // automatic snapshots resume once a new Web App configuration exists.
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery = true
     }
 
     private func prepareUnreadableProfileStoreForReplacement() throws {
@@ -276,6 +278,32 @@ final class AppCoordinator {
         alert.messageText = "Recovery Was Not Completed"
         alert.informativeText = "FloatTabs has kept the unreadable configuration protected and has not written an automatic empty backup. Choose another recovery option to continue.\n\n\(error.localizedDescription)"
         alert.runModal()
+    }
+
+    nonisolated static func shouldWriteAutomaticVersionSnapshot(
+        startupRecoveryRequired: Bool,
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery: Bool,
+        webAppState: StoredWebAppState
+    ) -> Bool {
+        guard !startupRecoveryRequired else { return false }
+        if preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+           webAppState.profiles.isEmpty {
+            return false
+        }
+        return true
+    }
+
+    private func writeAutomaticVersionSnapshotIfSafe() {
+        let webAppState = panelController.storedWebAppStateSnapshot()
+        guard Self.shouldWriteAutomaticVersionSnapshot(
+            startupRecoveryRequired: profileRepository?.startupRecoveryRequired == true,
+            preserveExistingAutomaticBackupAfterEmptyStartupRecovery:
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+            webAppState: webAppState
+        ) else {
+            return
+        }
+        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
     }
 
     private func makeBackupDocument(now: Date = Date()) -> FloatTabsBackupDocument {
