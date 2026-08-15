@@ -6,6 +6,7 @@ final class TabStore {
     private(set) var activeTabID: UUID?
 
     var onChange: (() -> Void)?
+    var onPersistenceFailure: (() -> Void)?
 
     private let repository: any ProfileRepositoryProtocol
 
@@ -448,6 +449,7 @@ final class TabStore {
         } catch {
             profiles = previousProfiles
             activeTabID = previousActiveTabID
+            onPersistenceFailure?()
             return false
         }
 
