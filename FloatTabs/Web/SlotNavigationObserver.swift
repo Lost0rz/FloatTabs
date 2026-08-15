@@ -142,10 +142,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onContentProcessTermination: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
 
-    /// Set when FloatTabs itself issued the entry load for an https URL that
-    /// is eligible for the one-shot http:// fallback (see
-    /// `allowHTTPEntryFallback`). Any successful commit or a handled failure
-    /// consumes it.
+    /// Set only for a FloatTabs-issued entry whose `https://` scheme was
+    /// inferred from a bare user address. Any successful commit or a handled
+    /// failure consumes the one-shot permission.
     private var pendingHTTPEntryFallback: URL?
 
     /// Whether an entry load is currently eligible for the http fallback.
@@ -267,8 +266,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
-        // The https entry committed successfully; the http fallback loses its
-        // eligibility so later in-page failures can never downgrade.
+        // Once an https entry commits, later in-page failures can never inherit
+        // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
     }
 
@@ -316,17 +315,20 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onContentProcessTermination(slotID)
     }
 
-    /// Marks the next load as a FloatTabs entry (address bar, Web App first
-    /// load, Return to Home) eligible for the one-shot https → http fallback.
-    /// Ineligible URLs (default-port https, explicit http) store nothing.
-    func allowHTTPEntryFallback(for url: URL) {
-        pendingHTTPEntryFallback = WebAppURL.httpFallbackCandidate(for: url) != nil ? url : nil
+    /// Configures one-shot fallback for the next FloatTabs-issued entry load.
+    /// `allowed` must represent user-input provenance: true only when FloatTabs
+    /// supplied the https scheme. Passing false also clears any stale pending
+    /// permission before an explicit HTTPS, HTTP, reload-equivalent, or internal
+    /// navigation is started.
+    func configureHTTPEntryFallback(for url: URL, allowed: Bool) {
+        pendingHTTPEntryFallback = allowed && WebAppURL.httpFallbackCandidate(for: url) != nil
+            ? url
+            : nil
     }
 
     /// Pure fallback decision: a connection-level failure of exactly the
-    /// pending entry URL yields the http candidate. Certificate-trust
-    /// failures, other domains, mismatched URLs, and absent pending state
-    /// never downgrade.
+    /// pending inferred entry URL yields the http candidate. Certificate-trust
+    /// failures, other URLs, and absent pending state never downgrade.
     static func httpFallbackURL(pending: URL?, failingURL: URL?, error: Error) -> URL? {
         guard let pending,
               let failingURL,
