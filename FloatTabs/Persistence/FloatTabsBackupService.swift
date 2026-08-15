@@ -49,6 +49,7 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
     case unsupportedSchema(Int)
     case unsupportedWebAppStateVersion(Int)
     case restoreFailed
+    case startupRecoveryFailed
 
     var errorDescription: String? {
         switch self {
@@ -58,6 +59,8 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
             return "This backup contains unsupported Web App state version \(version)."
         case .restoreFailed:
             return "FloatTabs could not replace the current configuration. The rollback backup was kept."
+        case .startupRecoveryFailed:
+            return "FloatTabs could not safely preserve and replace the unreadable startup configuration. The original profile store remains protected."
         }
     }
 }
