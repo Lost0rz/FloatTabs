@@ -142,6 +142,32 @@ struct FloatTabsBackupService {
         return url
     }
 
+    /// Returns the newest decodable automatic snapshot by the timestamp stored
+    /// inside the document. Corrupt or incompatible snapshots are skipped so a
+    /// damaged backup can never become the default startup recovery choice.
+    func latestValidAutomaticSnapshot() -> (url: URL, document: FloatTabsBackupDocument)? {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: backupDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        return urls
+            .filter {
+                $0.pathExtension == Self.fileExtension
+                    && $0.lastPathComponent.hasPrefix("FloatTabs-auto-")
+            }
+            .compactMap { url -> (url: URL, document: FloatTabsBackupDocument)? in
+                guard let document = try? load(from: url) else { return nil }
+                return (url, document)
+            }
+            .max { lhs, rhs in
+                lhs.document.createdAt < rhs.document.createdAt
+            }
+    }
+
     static func suggestedExportFileName(now: Date = Date()) -> String {
         "FloatTabs-Backup-\(timestamp(now)).\(fileExtension)"
     }
