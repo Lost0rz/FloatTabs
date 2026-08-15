@@ -362,7 +362,10 @@ final class TabStore {
     }
 
     @discardableResult
-    func replaceStoredState(_ state: StoredWebAppState) -> Bool {
+    func replaceStoredState(
+        _ state: StoredWebAppState,
+        notifyOnSuccess: Bool = true
+    ) -> Bool {
         guard state.version == StoredWebAppState.currentVersion else { return false }
 
         let sanitized = state.sanitizedForUse()
@@ -389,7 +392,9 @@ final class TabStore {
 
         profiles = normalized
         activeTabID = restoredActiveID
-        onChange?()
+        if notifyOnSuccess {
+            onChange?()
+        }
         return true
     }
 
