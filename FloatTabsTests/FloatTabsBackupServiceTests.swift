@@ -197,6 +197,9 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             .appendingPathComponent("FloatTabsPersistentRecoveryTests-\(UUID().uuidString)", isDirectory: true)
         let profileURL = root.appendingPathComponent("WebAppProfiles.json")
         let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
+        let markerURL = root.appendingPathComponent(
+            FloatTabsBackupService.startupRecoverySnapshotPreservationMarkerFileName
+        )
         defer { try? FileManager.default.removeItem(at: root) }
 
         let repository = ProfileRepository(fileURL: profileURL)
@@ -235,6 +238,12 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         _ = try repository.preserveUnreadableStoreForRecovery(
             now: Date(timeIntervalSince1970: 1_700_000_000)
         )
+
+        // Preserving corrupt bytes alone must not broaden the snapshot policy.
+        // Only the explicit Start Empty path arms durable backup protection.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markerURL.path))
+        try service.beginEmptyStartupRecoverySnapshotPreservation()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: markerURL.path))
         try repository.save(.empty)
 
         let emptyDocument = document(state: .empty, createdAt: 200)
@@ -263,6 +272,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         let rebuiltDocument = document(state: rebuiltState, createdAt: 400)
         _ = try relaunchedService.writeAutomaticVersionSnapshot(rebuiltDocument)
         XCTAssertEqual(try relaunchedService.load(from: automaticURL), rebuiltDocument)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markerURL.path))
 
         // Once a real configuration has been committed, normal automatic
         // snapshot behavior resumes; a later intentional empty state is valid.
