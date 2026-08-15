@@ -85,11 +85,65 @@ final class ProfileRepositoryTests: XCTestCase {
             try Data("{ definitely-not-json".utf8).write(to: fileURL, options: [.atomic])
 
             XCTAssertThrowsError(try repository.load())
+            XCTAssertTrue(repository.startupRecoveryRequired)
 
             let store = TabStore(repository: repository)
             XCTAssertTrue(store.profiles.isEmpty)
             XCTAssertNil(store.activeTabID)
+            XCTAssertTrue(repository.startupRecoveryRequired)
             XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        }
+    }
+
+    func testUnreadableStoreBlocksWritesUntilExactRecoveryCopyExists() throws {
+        try withRepository { repository, fileURL in
+            let original = Data("{ broken-but-important-profile-data".utf8)
+            try original.write(to: fileURL, options: [.atomic])
+
+            XCTAssertThrowsError(try repository.load())
+            XCTAssertTrue(repository.startupRecoveryRequired)
+
+            XCTAssertThrowsError(try repository.save(.empty)) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .startupRecoveryRequired)
+            }
+            XCTAssertEqual(try Data(contentsOf: fileURL), original)
+
+            let archiveURL = try XCTUnwrap(
+                repository.preserveUnreadableStoreForRecovery(
+                    now: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            )
+            XCTAssertTrue(archiveURL.lastPathComponent.hasPrefix("WebAppProfiles-recovery-"))
+            XCTAssertEqual(try Data(contentsOf: archiveURL), original)
+            XCTAssertEqual(repository.startupRecoveryArchiveURL, archiveURL)
+
+            try repository.save(.empty)
+
+            XCTAssertFalse(repository.startupRecoveryRequired)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), original)
+            XCTAssertEqual(try repository.load(), .empty)
+        }
+    }
+
+    func testFailedStartupLoadCannotBeSilentlyOverwrittenByTabMutation() throws {
+        try withRepository { repository, fileURL in
+            let original = Data("not-json".utf8)
+            try original.write(to: fileURL, options: [.atomic])
+            let store = TabStore(repository: repository)
+            var failureCount = 0
+            store.onPersistenceFailure = { failureCount += 1 }
+
+            XCTAssertTrue(repository.startupRecoveryRequired)
+            XCTAssertNil(
+                store.add(
+                    name: "Should Not Replace Corrupt Store",
+                    homeURL: URL(string: "https://example.com")!
+                )
+            )
+
+            XCTAssertTrue(store.profiles.isEmpty)
+            XCTAssertEqual(failureCount, 1)
+            XCTAssertEqual(try Data(contentsOf: fileURL), original)
         }
     }
 
