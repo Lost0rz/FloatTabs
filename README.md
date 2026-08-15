@@ -125,7 +125,7 @@ FloatTabs runs as a menu-bar application without a Dock icon.
 
 Use either:
 
-- **Command–backtick (`⌘``)** to show / hide FloatTabs; or
+- **Command–backtick (⌘ + backtick)** to show / hide FloatTabs; or
 - the **FloatTabs menu-bar icon**.
 
 ### 3. Add your first Web App
