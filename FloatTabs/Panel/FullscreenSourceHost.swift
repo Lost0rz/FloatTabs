@@ -521,10 +521,13 @@ final class FullscreenSourceHostController {
             "FULLSCREEN_RESTORED source=\(window.windowNumber) "
                 + "screen=\(fullscreenExperimentScreenID(window.screen))"
         )
+
+        // PanelController owns the post-fullscreen presentation decision. A
+        // hidden restore may order the source window out inside this callback;
+        // reattaching it unconditionally afterwards can order that source above
+        // the shell again and recreate a physical-visible/logical-hidden split.
+        // Visible restores already reattach through orderFrontAndFocus().
         onSessionLockChange?(false)
-        // The callback has rebuilt/repositioned the normal hierarchy. Restore
-        // the parent-child relationship only after that atomic presentation.
-        attachSourceWindowToShell()
     }
 
     private func attachSourceWindowToShell() {
