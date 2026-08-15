@@ -32,6 +32,9 @@ final class AppCoordinator {
             self.panelController = panelController
         } else {
             let tabStore = TabStore(repository: ProfileRepository())
+            tabStore.onPersistenceFailure = {
+                Self.presentConfigurationSaveFailure()
+            }
             let webViewPool = WebViewPool(
                 onURLChange: { slotID, url in
                     tabStore.updateCurrentURL(id: slotID, url: url)
@@ -243,6 +246,20 @@ final class AppCoordinator {
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()
+        }
+    }
+
+    private static func presentConfigurationSaveFailure() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t Save Changes"
+        alert.informativeText = "FloatTabs couldn’t save its configuration. Your previous settings were kept."
+        alert.addButton(withTitle: "OK")
+
+        if let window = NSApp.keyWindow, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        } else {
+            NSSound.beep()
         }
     }
 }
