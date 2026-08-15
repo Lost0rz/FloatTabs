@@ -34,12 +34,21 @@ final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
 
+    private final class WeakHotHostOwner {
+        weak var container: WebPanelContainerView?
+
+        init(_ container: WebPanelContainerView) {
+            self.container = container
+        }
+    }
+
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
+    private var hotHostOwners: [UUID: [ObjectIdentifier: WeakHotHostOwner]] = [:]
 
     var onResidentSetChange: (() -> Void)?
 
@@ -67,14 +76,14 @@ final class WebViewPool {
 
         if let existing = webViews[profile.id],
            let appliedRendering = appliedRenderingProfiles[profile.id] {
-            // Hot uses a dedicated per-Slot host. If the persisted policy has
-            // changed to Warm/Cold while this runtime is owned by either the
-            // normal shell or the fullscreen companion, remove that old host
-            // through its owning container before the transient presentation is
-            // installed. This keeps each container's hotHostViews dictionary in
-            // sync with the real policy instead of leaving an empty stale host.
+            // Remember every dedicated Hot host this runtime has physically used.
+            // A Slot can move between the normal shell and fullscreen companion,
+            // leaving the previous container with a reusable host that no longer
+            // owns the WKWebView. Weak owner tracking lets later policy/release
+            // cleanup remove both the physical owner and any such stale host.
+            rememberHotHostOwnerIfNeeded(existing, slotID: profile.id)
             if profile.residencyPolicy != .hot {
-                removeHotHostOwnershipIfNeeded(existing, slotID: profile.id)
+                removeKnownHotHostOwnership(existing, slotID: profile.id)
             }
 
             let compatibilityURL = Self.rebuildNavigationURL(
@@ -168,8 +177,11 @@ final class WebViewPool {
         deferredReloadSlotIDs.remove(slotID)
         let removed = webViews.removeValue(forKey: slotID)
         if let removed {
-            removeHotHostOwnershipIfNeeded(removed, slotID: slotID)
+            rememberHotHostOwnerIfNeeded(removed, slotID: slotID)
+            removeKnownHotHostOwnership(removed, slotID: slotID)
             removed.removeFromSuperview()
+        } else {
+            hotHostOwners.removeValue(forKey: slotID)
         }
         if removed != nil {
             onResidentSetChange?()
@@ -253,8 +265,11 @@ final class WebViewPool {
         deferredReloadSlotIDs.remove(profile.id)
         let replaced = webViews.removeValue(forKey: profile.id)
         if let replaced {
-            removeHotHostOwnershipIfNeeded(replaced, slotID: profile.id)
+            rememberHotHostOwnerIfNeeded(replaced, slotID: profile.id)
+            removeKnownHotHostOwnership(replaced, slotID: profile.id)
             replaced.removeFromSuperview()
+        } else {
+            hotHostOwners.removeValue(forKey: profile.id)
         }
 
         // A rendering-profile rebuild replaces the transient runtime for the same
@@ -302,6 +317,7 @@ final class WebViewPool {
         webView.uiDelegate = popupCoordinator
 
         let wasResident = webViews[profile.id] != nil
+        hotHostOwners.removeValue(forKey: profile.id)
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
@@ -362,17 +378,37 @@ final class WebViewPool {
         )
     }
 
-    /// If a live runtime is currently inside a dedicated Hot host, remove the
-    /// Slot through that host's owning container rather than only pulling the
-    /// WKWebView out of its superview. The container owns the hotHostViews map;
-    /// bypassing it leaves stale companion/main hosts retained indefinitely.
-    private func removeHotHostOwnershipIfNeeded(_ webView: WKWebView, slotID: UUID) {
-        guard let host = webView.superview as? WebSlotHostView else { return }
-        if let container = host.superview?.superview as? WebPanelContainerView {
-            container.removeSlot(slotID)
-        } else {
-            webView.removeFromSuperview()
-            host.removeFromSuperview()
+    private func rememberHotHostOwnerIfNeeded(_ webView: WKWebView, slotID: UUID) {
+        guard let host = webView.superview as? WebSlotHostView,
+              let container = host.superview?.superview as? WebPanelContainerView else {
+            return
+        }
+        let key = ObjectIdentifier(container)
+        var owners = hotHostOwners[slotID] ?? [:]
+        owners[key] = WeakHotHostOwner(container)
+        hotHostOwners[slotID] = owners
+    }
+
+    /// Clears every container this runtime has used as a dedicated Hot host.
+    /// Only weak container references are retained. WebKit's private fullscreen
+    /// superviews are never registered because they are not WebSlotHostView.
+    private func removeKnownHotHostOwnership(_ webView: WKWebView, slotID: UUID) {
+        rememberHotHostOwnerIfNeeded(webView, slotID: slotID)
+        let owners = hotHostOwners.removeValue(forKey: slotID)?.values ?? []
+        for owner in owners {
+            owner.container?.removeSlot(slotID)
+        }
+
+        // Defensive fallback for a dedicated host whose container hierarchy was
+        // changed before it could be registered. Never touches a WebKit-private
+        // fullscreen superview because of the WebSlotHostView type check.
+        if let host = webView.superview as? WebSlotHostView {
+            if let container = host.superview?.superview as? WebPanelContainerView {
+                container.removeSlot(slotID)
+            } else {
+                webView.removeFromSuperview()
+                host.removeFromSuperview()
+            }
         }
     }
 
