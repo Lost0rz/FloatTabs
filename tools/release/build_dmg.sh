@@ -22,9 +22,9 @@ xcodebuild \
   -resolvePackageDependencies \
   -onlyUsePackageVersionsFromResolvedFile
 
-# v0.1.0 ships one Universal 2 application containing both Apple Silicon and
-# Intel slices. Build against a generic macOS destination so the result does not
-# collapse to the architecture of whichever runner happens to execute the job.
+# Release packages ship one Universal 2 application containing both Apple
+# Silicon and Intel slices. Build against a generic macOS destination so the
+# result does not collapse to the architecture of whichever runner executes it.
 xcodebuild \
   -project FloatTabs.xcodeproj \
   -scheme FloatTabs \
