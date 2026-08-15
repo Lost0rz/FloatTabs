@@ -197,7 +197,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             .appendingPathComponent("FloatTabsPersistentRecoveryTests-\(UUID().uuidString)", isDirectory: true)
         let profileURL = root.appendingPathComponent("WebAppProfiles.json")
         let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
-        let markerURL = root.appendingPathComponent(
+        let markerURL = backupDirectory.appendingPathComponent(
             FloatTabsBackupService.startupRecoverySnapshotPreservationMarkerFileName
         )
         defer { try? FileManager.default.removeItem(at: root) }
