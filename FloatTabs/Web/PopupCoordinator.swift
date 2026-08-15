@@ -406,6 +406,7 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
     ) {
         decisionHandler(
             DownloadCoordinator.responsePolicy(
+                response: navigationResponse.response,
                 canShowMIMEType: navigationResponse.canShowMIMEType
             )
         )
