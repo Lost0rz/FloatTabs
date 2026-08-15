@@ -149,4 +149,46 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         )
         XCTAssertEqual(latest.document, newest)
     }
+
+    func testEmptyStartupRecoveryPreservesAutomaticBackupUntilConfigurationExists() {
+        XCTAssertFalse(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: true,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: false,
+                webAppState: .empty
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: true,
+                webAppState: .empty
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: false,
+                webAppState: .empty
+            )
+        )
+
+        let profile = WebAppProfile(
+            order: 0,
+            name: "Recovered",
+            homeURL: URL(string: "https://example.com")!
+        )
+        let recoveredState = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [profile],
+            lastActiveTabID: profile.id
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldWriteAutomaticVersionSnapshot(
+                startupRecoveryRequired: false,
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery: true,
+                webAppState: recoveredState
+            )
+        )
+    }
 }
