@@ -390,6 +390,23 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testWorkspaceAutoHideSuppressionArmsGraceWindowAtPresentation() {
+        var suppression = WorkspaceAutoHideSuppression()
+
+        suppression.arm(atUptime: 100)
+
+        XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 100.1))
+        XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 100.249))
+        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 100.25))
+        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 101))
+    }
+
+    func testWorkspaceAutoHideSuppressionStartsDisarmed() {
+        let suppression = WorkspaceAutoHideSuppression()
+
+        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 0))
+    }
+
     func testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange() {
         XCTAssertTrue(
             PanelController.shouldAutoHideForExternalMouseDown(

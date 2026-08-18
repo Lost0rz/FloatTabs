@@ -23,6 +23,26 @@ struct FullscreenVisibilityIntent {
     }
 }
 
+/// The shell is re-presented by more paths than the explicit status-item
+/// show: the fullscreen restore re-presents it from inside WebKit's Space
+/// teardown. Workspace activation events that macOS delivers while that
+/// transition is still settling describe the pre-exit Space's frontmost
+/// application rather than a fresh user choice, so a just-restored shell
+/// needs the same short auto-hide grace that showFloatTabs arms.
+struct WorkspaceAutoHideSuppression: Equatable {
+    static let graceInterval: TimeInterval = 0.25
+
+    private(set) var deadline: TimeInterval = -.infinity
+
+    mutating func arm(atUptime uptime: TimeInterval) {
+        deadline = uptime + Self.graceInterval
+    }
+
+    func suppressesAutoHide(nowUptime uptime: TimeInterval) -> Bool {
+        uptime < deadline
+    }
+}
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     private let panel: FloatingPanel
@@ -50,7 +70,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
     private var lastPresentationUptime: TimeInterval = -.infinity
-    private var suppressWorkspaceAutoHideUntilUptime: TimeInterval = -.infinity
+    private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
     private var fullscreenProfile: WebAppProfile?
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
@@ -205,7 +225,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func showFloatTabs() {
         let presentationUptime = ProcessInfo.processInfo.systemUptime
         lastPresentationUptime = presentationUptime
-        suppressWorkspaceAutoHideUntilUptime = presentationUptime + 0.25
+        workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
         requestedVisibility = true
         // System has no explicit override: resolve it from the current macOS
         // appearance again whenever a hidden shell is presented. Explicit
@@ -414,7 +434,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {
         guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication,
-              ProcessInfo.processInfo.systemUptime >= suppressWorkspaceAutoHideUntilUptime,
+              !workspaceAutoHideSuppression.suppressesAutoHide(
+                  nowUptime: ProcessInfo.processInfo.systemUptime
+              ),
               NSWorkspace.shared.frontmostApplication?.processIdentifier
                 == activatedApplication.processIdentifier,
               Self.shouldAutoHideForActivatedApplication(
@@ -1386,6 +1408,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
+        // The restore re-presents the shell from inside WebKit's Space
+        // teardown. Arm the same workspace auto-hide grace that an explicit
+        // show uses: activation notifications still describing the pre-exit
+        // frontmost application must not hide the just-restored shell, and the
+        // global mouse monitor can deliver clicks made on the exiting
+        // fullscreen presentation after the shell is back.
+        let restoreUptime = ProcessInfo.processInfo.systemUptime
+        lastPresentationUptime = restoreUptime
+        workspaceAutoHideSuppression.arm(atUptime: restoreUptime)
         // Re-establish the queued target display before returning Web focus.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
