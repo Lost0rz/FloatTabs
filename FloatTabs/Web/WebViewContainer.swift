@@ -767,9 +767,33 @@ final class PanelResizeHandleView: NSView {
         }
 
         let currentMouseLocation = NSEvent.mouseLocation
-        let deltaX = currentMouseLocation.x - startingMouseLocation.x
-        let deltaY = currentMouseLocation.y - startingMouseLocation.y
+        let resizedFrame = Self.resizedFrame(
+            startingFrame: startingFrame,
+            deltaX: currentMouseLocation.x - startingMouseLocation.x,
+            deltaY: currentMouseLocation.y - startingMouseLocation.y,
+            visibleFrame: window.screen?.visibleFrame
+        )
 
+        window.setFrame(resizedFrame, display: true)
+        onViewportSizeChange?(
+            PanelMetrics.viewportSize(forPanelSize: resizedFrame.size)
+        )
+    }
+
+    /// Live-resize math for the bottom-right handle, extracted so the geometry
+    /// contract is testable without a window. Height keeps the top-left anchor:
+    /// it can never grow past the top edge the drag started from, matching the
+    /// grip the user is holding. Width is capped by the viewport itself instead
+    /// of by the distance from the anchored left edge, so the panel can span
+    /// the full available width from any starting position: once the grown
+    /// width no longer fits right of the starting origin, the origin slides
+    /// left (never past visibleFrame.minX) instead of stalling the resize.
+    static func resizedFrame(
+        startingFrame: NSRect,
+        deltaX: CGFloat,
+        deltaY: CGFloat,
+        visibleFrame: NSRect?
+    ) -> NSRect {
         var size = PanelMetrics.clampedPanelSize(
             NSSize(
                 width: startingFrame.width + deltaX,
@@ -777,10 +801,10 @@ final class PanelResizeHandleView: NSView {
             )
         )
 
-        if let visibleFrame = window.screen?.visibleFrame {
+        if let visibleFrame {
             let maximumWidth = max(
                 PanelMetrics.minimumPanelSize.width,
-                visibleFrame.maxX - startingFrame.minX
+                visibleFrame.width
             )
             let maximumHeight = max(
                 PanelMetrics.minimumPanelSize.height,
@@ -790,15 +814,23 @@ final class PanelResizeHandleView: NSView {
             size.height = min(size.height, maximumHeight)
         }
 
-        let resizedFrame = NSRect(
-            x: startingFrame.minX,
+        let originX: CGFloat
+        if let visibleFrame {
+            // A full-width result must stay inside the viewport: give ground on
+            // the left edge rather than truncating the size the pointer asked
+            // for. Width never exceeds visibleFrame.width, so the slide lands
+            // exactly on visibleFrame.minX and cannot overshoot.
+            originX = min(startingFrame.minX, visibleFrame.maxX - size.width)
+        } else {
+            originX = startingFrame.minX
+        }
+
+        return NSRect(
+            x: originX,
             y: startingFrame.maxY - size.height,
             width: size.width,
             height: size.height
         )
-
-        window.setFrame(resizedFrame, display: true)
-        onViewportSizeChange?(PanelMetrics.viewportSize(forPanelSize: size))
     }
 
     override func mouseUp(with event: NSEvent) {

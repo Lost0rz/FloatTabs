@@ -403,6 +403,106 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
     }
 }
 
+@MainActor
+final class PanelResizeHandleGeometryTests: XCTestCase {
+    private let visibleFrame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+
+    func testLiveResizeCanSpanFullViewportWidthFromOffsetOrigin() {
+        let frame = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 200, y: 0, width: 500, height: 600),
+            deltaX: 5000,
+            deltaY: 100,
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(frame.width, 1000, accuracy: 0.001)
+        XCTAssertEqual(frame.minX, 0, accuracy: 0.001)
+        XCTAssertEqual(frame.maxX, visibleFrame.maxX, accuracy: 0.001)
+        XCTAssertEqual(frame.maxY, 600, accuracy: 0.001)
+    }
+
+    func testLiveResizeWidthCapsAtViewportWidthWhenFlushLeft() {
+        let flush = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 0, y: 0, width: 500, height: 600),
+            deltaX: 5000,
+            deltaY: 0,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(flush.width, 1000, accuracy: 0.001)
+        XCTAssertEqual(flush.minX, 0, accuracy: 0.001)
+
+        let moderate = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 0, y: 0, width: 500, height: 600),
+            deltaX: 100,
+            deltaY: 0,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(moderate.width, 600, accuracy: 0.001)
+        XCTAssertEqual(moderate.minX, 0, accuracy: 0.001)
+    }
+
+    func testLiveResizeSlidesLeftEdgeNoFartherThanViewportMinX() {
+        let frame = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 300, y: 0, width: 500, height: 600),
+            deltaX: 5000,
+            deltaY: 0,
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(frame.minX, visibleFrame.minX, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(frame.minX, visibleFrame.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, visibleFrame.maxX + 0.001)
+    }
+
+    func testLiveResizeHeightKeepsTopEdgeAnchoredAndPositionDependent() {
+        let growing = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 100, y: 100, width: 500, height: 600),
+            deltaX: 0,
+            deltaY: -500,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(growing.height, 700, accuracy: 0.001)
+        XCTAssertEqual(growing.maxY, 700, accuracy: 0.001)
+        XCTAssertEqual(growing.minY, 0, accuracy: 0.001)
+
+        let shrinking = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 100, y: 100, width: 500, height: 600),
+            deltaX: 0,
+            deltaY: 300,
+            visibleFrame: visibleFrame
+        )
+        XCTAssertEqual(shrinking.height, PanelMetrics.minimumPanelSize.height, accuracy: 0.001)
+        XCTAssertEqual(shrinking.maxY, 700, accuracy: 0.001)
+    }
+
+    func testLiveResizeEnforcesMinimumPanelSizeOnBothAxes() {
+        let frame = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 100, y: 100, width: 500, height: 600),
+            deltaX: -5000,
+            deltaY: 5000,
+            visibleFrame: visibleFrame
+        )
+
+        XCTAssertEqual(frame.width, PanelMetrics.minimumPanelSize.width, accuracy: 0.001)
+        XCTAssertEqual(frame.height, PanelMetrics.minimumPanelSize.height, accuracy: 0.001)
+        XCTAssertEqual(frame.minX, 100, accuracy: 0.001)
+        XCTAssertEqual(frame.maxY, 700, accuracy: 0.001)
+    }
+
+    func testLiveResizeWithoutVisibleFrameOnlyEnforcesMinimum() {
+        let frame = PanelResizeHandleView.resizedFrame(
+            startingFrame: NSRect(x: 100, y: 100, width: 500, height: 600),
+            deltaX: 5000,
+            deltaY: 0,
+            visibleFrame: nil
+        )
+
+        XCTAssertEqual(frame.width, 5500, accuracy: 0.001)
+        XCTAssertEqual(frame.minX, 100, accuracy: 0.001)
+        XCTAssertEqual(frame.maxY, 700, accuracy: 0.001)
+    }
+}
+
 private extension NSRect {
     var center: NSPoint {
         NSPoint(x: midX, y: midY)
