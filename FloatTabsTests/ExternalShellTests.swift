@@ -786,6 +786,49 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertNil(handle.hitTest(NSPoint(x: 150, y: 150)))
     }
 
+    func testRailControlsAcceptFirstMouseForSingleClickActivation() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: active.id)).acceptsFirstMouse(for: nil))
+        XCTAssertTrue(RailFoldControl().acceptsFirstMouse(for: nil))
+    }
+
+    func testRailSystemControlsAcceptFirstMouseForSingleClickActivation() {
+        XCTAssertTrue(AddWebAppControl().acceptsFirstMouse(for: nil))
+        XCTAssertTrue(PinPanelControl().acceptsFirstMouse(for: nil))
+        XCTAssertTrue(GlobalSettingsControl().acceptsFirstMouse(for: nil))
+    }
+
+    func testRailControlsResetArrowCursorRectsWhenInstalledInWindow() {
+        let shell = FloatingPanel(
+            contentRect: NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        )
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        shell.contentView = root
+        let active = makeProfile(order: 0, name: "GPT")
+        root.externalControlZoneView.apply(profiles: [active], activeTabID: active.id)
+        root.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(root.externalControlZoneView.tabView(for: active.id))
+        let addControl = AddWebAppControl(frame: NSRect(x: 0, y: 400, width: 32, height: 32))
+        let pinControl = PinPanelControl(frame: NSRect(x: 0, y: 360, width: 32, height: 32))
+        let settingsControl = GlobalSettingsControl(frame: NSRect(x: 0, y: 320, width: 32, height: 32))
+        root.externalControlZoneView.addSubview(addControl)
+        root.externalControlZoneView.addSubview(pinControl)
+        root.externalControlZoneView.addSubview(settingsControl)
+
+        for control: NSView in [tab, addControl, pinControl, settingsControl] {
+            control.resetCursorRects()
+            let center = NSPoint(x: control.bounds.midX, y: control.bounds.midY)
+            let centerInZoneSuperview = control.convert(center, to: root)
+            XCTAssertNotNil(root.externalControlZoneView.hitTest(centerInZoneSuperview))
+        }
+    }
+
     func testResizeHandleLivesInsideWebCornerInsteadOfOuterTransparentGutter() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
