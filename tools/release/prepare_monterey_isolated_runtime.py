@@ -66,7 +66,7 @@ old_observe = '''        if #available(macOS 13.0, *) {
         }
 '''
 new_observe = '''        // Monterey Compatibility Edition: fullscreen observation is disabled.
-        // The standard release owns the macOS 13+ WKWebView.FullscreenState path.
+        // The standard release owns the modern fullscreen implementation.
         legacyFullscreenPollGeneration &+= 1
 '''
 if old_observe not in text:
