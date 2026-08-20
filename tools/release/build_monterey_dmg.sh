@@ -12,6 +12,8 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
 DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 REQUIRED_ARCHITECTURES=(arm64 x86_64)
 
+python3 tools/release/prepare_monterey_sources.py
+
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
 
