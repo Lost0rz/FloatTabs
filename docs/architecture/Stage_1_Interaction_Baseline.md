@@ -1,111 +1,40 @@
 # FloatTabs — Stage 1 Interaction Baseline
 
-> Status: Accepted Stage 1 engineering baseline
-> Supplements: `FloatTabs_Technical_Architecture_v1.2.md` and `FloatTabs_UI_Design_System_v1.2.md`
-> Purpose: Record the concrete native-window interaction decisions validated during Stage 1 before the Stage 2 external shell is implemented.
+> **Status: HISTORICAL.**  
+> This document records the pre-Slot Stage 1 engineering baseline and must not be treated as the current shell / interaction authority.
 
-## 1. Geometry
+Current production interaction and geometry are defined by:
 
-User-visible Window Size continues to mean WKWebView viewport size, not total `NSPanel` frame size.
+- [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md)
+- current `main` code and regression tests
+- the current release record under `docs/release/`
 
-```text
-External Control Zone = 76 pt
-Default WebView       = 430 × 820 pt
-Default Panel         ≈ 506 × 820 pt
-Minimum WebView       = 320 × 400 pt
-Minimum Panel         = 396 × 400 pt
-```
+## Historical context
 
-The left control zone is visually transparent and is outside the viewport width.
+Stage 1 established several ideas that still explain the architecture:
 
-The visible website rectangle remains zero-padding FloatTabs chrome: no permanent address bar, top tab strip, toolbar or title bar is introduced.
+- user-facing Window Size means WKWebView viewport size rather than total panel frame;
+- FloatTabs-owned permanent browser chrome stays outside the Web surface;
+- narrow perimeter regions provide window movement without turning the page into a title bar;
+- visible controls must win hit testing over generic movement regions;
+- multi-display positioning clamps the panel into the target display's visible frame.
 
-## 2. Window movement
+However, the original Stage 1 numbers and interaction assumptions predate persistent Slots, the current external rail, the separate Web source window, fold/reclaim geometry, first-click rail controls and current fullscreen lifecycle.
 
-Stage 1 uses a predictable perimeter drag model instead of a hidden single-point drag target.
+## Current overrides
 
-Accepted metrics:
+Do **not** derive current implementation from the old Stage 1 geometry.
 
-```text
-perimeterDragResizeInset     = 6 pt
-perimeterDragBandWidth       = 12 pt
-perimeterDragCornerExclusion = 28 pt
-```
-
-Semantics:
+Current rail geometry is:
 
 ```text
-outermost edge lane
-→ reserved for native resize
-
-next inward edge band
-→ window movement through NSWindow.performDrag(with:)
-
-corners
-→ excluded from drag to preserve diagonal resize
+expanded nominal rail reservation = 76 pt
+collapsed physical leading inset  = 12 pt
+reclaimed Web content width       = 64 pt
 ```
 
-All four sides participate.
+The 12 pt collapsed gutter remains a movement target, while reclaimed Web content must not be intercepted by shell drag hit testing.
 
-## 3. Hit-test priority
+Bottom-right resize remains ordinary floating-window resize and does not auto-maximize or auto-slide the panel to full visible width.
 
-Required interaction priority:
-
-```text
-future visible external controls
-(Tab / + / Gear / FT)
-        ↑
-perimeter movement layer
-        ↑
-WKWebView / web content
-```
-
-The movement layer must return no hit away from its narrow perimeter bands.
-
-The external control zone must not become a conventional invisible sidebar. Blank space without a real control must remain non-interactive/click-through where the platform behavior allows it.
-
-## 4. Website-interaction guardrail
-
-The four-sided perimeter model is an accepted Stage 1 engineering baseline, not permission to sacrifice website usability.
-
-Stage 2/3 must revalidate it against real Web Apps, especially:
-
-- right-edge overlay/visible scrollbars;
-- bottom-edge horizontal scrolling controls;
-- top-edge website buttons/navigation;
-- left-edge site controls;
-- tab/control hit regions that overlap the panel perimeter.
-
-If a real website edge interaction conflicts with the movement band, website interaction wins. The implementation should narrow, relocate or remove the conflicting drag band rather than consume website controls.
-
-## 5. Multi-display and frame behavior
-
-First show after process launch:
-
-- restore a valid saved frame on its still-connected display;
-- otherwise clamp/fallback to the current valid target display.
-
-Subsequent show/hide summons in the same process:
-
-- follow the current target display behavior established by Stage 0;
-- preserve current size while clamping the frame into the target `visibleFrame`.
-
-Persist frame only after the panel has actually been positioned; never persist the implementation-only initial `.zero` origin.
-
-## 6. Stage boundary
-
-Stage 1 intentionally contains only one WKWebView and no real persistent slots.
-
-Stage 2 is responsible for introducing:
-
-- `TabStore`;
-- persistent Web App profiles;
-- external index tabs;
-- `+` Add;
-- Edit/Rename/Remove;
-- drag reorder;
-- `⌘1…⌘9`;
-- `⌃Tab` navigation;
-- current URL persistence and relaunch restore.
-
-When those controls exist, the external-zone and perimeter interaction rules in this document must be revalidated with real visible controls rather than only the empty Stage 1 shell.
+The detailed original Stage 1 implementation is preserved in Git history for archaeology only.
