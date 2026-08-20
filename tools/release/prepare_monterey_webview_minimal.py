@@ -25,6 +25,8 @@ if marker not in text:
             configuration.applicationNameForUserAgent = UserAgentProvider.safariApplicationName(
                 versions: versions
             )
+            configuration.defaultWebpagePreferences.preferredContentMode =
+                rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
             configuration.userContentController.addUserScript(hiddenScrollbarUserScript())
 
             let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
@@ -36,9 +38,10 @@ if marker not in text:
 
         // Monterey minimal WebView path. Keep first construction deliberately
         // close to a stock WKWebViewConfiguration: no element-fullscreen opt-in,
-        // no application-name UA override, no injected scrollbar script, and no
-        // traversal of WebKit's internal AppKit view hierarchy. These optional
-        // behaviors can be restored individually after real 12.7.6 validation.
+        // no content-mode mutation, no application-name UA override, no injected
+        // scrollbar script, and no traversal of WebKit's internal AppKit view
+        // hierarchy. These optional behaviors can be restored individually only
+        // after real 12.7.6 validation.
         NSLog("[FloatTabs Monterey] WebViewFactory.makeWebView begin")
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -123,6 +126,7 @@ required = [
     "Monterey minimal WebView path",
     "guard #available(macOS 13.0, *) else { return }",
     "[FloatTabs Monterey] WebViewFactory.makeWebView begin",
+    "configuration.defaultWebpagePreferences.preferredContentMode =",
 ]
 for item in required:
     if item not in prepared:
@@ -134,6 +138,7 @@ end = prepared.find("    static func makeStageZeroWebView()", start)
 minimal = prepared[start:end]
 for forbidden in [
     "isElementFullscreenEnabled",
+    "preferredContentMode",
     "applicationNameForUserAgent",
     "hiddenScrollbarUserScript",
     "BrowserVersionCatalog.current",
@@ -141,4 +146,4 @@ for forbidden in [
     if forbidden in minimal:
         raise SystemExit(f"error: {forbidden} survived in Monterey minimal WebView path")
 
-print("Applied Monterey minimal WebView initialization path.")
+print("Applied Monterey minimal WebView initialization path while preserving macOS 13+ behavior.")
