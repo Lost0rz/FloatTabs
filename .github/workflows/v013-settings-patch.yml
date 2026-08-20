@@ -1,239 +1,37 @@
-name: Apply v0.1.3 Settings Patch and Republish
+name: Republish v0.1.3 Build 5
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-    paths:
-      - '.github/workflows/v013-settings-patch.yml'
-  workflow_dispatch:
+    types:
+      - closed
 
 permissions:
   contents: write
 
 jobs:
-  patch-test-republish:
+  republish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'patch/v0.1.3-settings-build5'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
-      - name: Apply Settings version footer patch
+      - name: Verify v0.1.3 build 5 metadata
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          settings_path = Path('FloatTabs/UI/GlobalSettingsController.swift')
-          settings = settings_path.read_text()
-
-          release_info = '''enum AppReleaseInfo {
-              static let latestFixes = [
-                  "Tab, Add, Pin and Settings controls respond on the first click.",
-                  "Collapsed Tab rail width is reclaimed for Web content while retaining the 12 pt move gutter.",
-                  "Fullscreen restore waits for WebKit presentation teardown and keeps shell/source state synchronized.",
-                  "Settings now shows the exact app version, build number and latest fixes.",
-              ]
-
-              static func displayVersion(shortVersion: String?, build: String?) -> String {
-                  let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
-                  let buildNumber = build?.trimmingCharacters(in: .whitespacesAndNewlines)
-                  let resolvedVersion = (version?.isEmpty == false) ? version! : "Unknown"
-                  guard let buildNumber, !buildNumber.isEmpty else {
-                      return "Version \\(resolvedVersion)"
-                  }
-                  return "Version \\(resolvedVersion) (Build \\(buildNumber))"
-              }
-
-              static var currentVersionDisplay: String {
-                  displayVersion(
-                      shortVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-                      build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-                  )
-              }
-
-              static var latestFixesDisplay: String {
-                  latestFixes.map { "• \\($0)" }.joined(separator: "\\n")
-              }
-          }
-
-          '''
-
-          class_marker = '@MainActor\nprivate final class AccountLanguageSettingsViewController: NSViewController {'
-          if 'enum AppReleaseInfo {' not in settings:
-              pos = settings.index(class_marker)
-              settings = settings[:pos] + release_info + settings[pos:]
-
-          class_pos = settings.index(class_marker)
-          load_start = settings.index('    override func loadView() {', class_pos)
-          export_start = settings.index('    @objc private func exportBackup()', load_start)
-
-          new_load = '''    override func loadView() {
-              let root = NSView()
-              let scrollView = NSScrollView()
-              scrollView.translatesAutoresizingMaskIntoConstraints = false
-              scrollView.hasVerticalScroller = true
-              scrollView.drawsBackground = false
-              scrollView.borderType = .noBorder
-              scrollView.autohidesScrollers = true
-
-              let document = SettingsDocumentView()
-              document.translatesAutoresizingMaskIntoConstraints = false
-              scrollView.documentView = document
-
-              let exportButton = NSButton(
-                  title: "Export Backup…",
-                  target: self,
-                  action: #selector(exportBackup)
-              )
-              let restoreButton = NSButton(
-                  title: "Restore Backup…",
-                  target: self,
-                  action: #selector(restoreBackup)
-              )
-              let actions = NSStackView(views: [exportButton, restoreButton])
-              actions.orientation = .horizontal
-              actions.alignment = .centerY
-              actions.spacing = 10
-
-              let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
-              versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-              versionLabel.textColor = .labelColor
-
-              let stack = NSStackView(views: [
-                  sectionTitle("Account"),
-                  detailLabel(
-                      "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
-                  ),
-                  spacer(8),
-                  sectionTitle("Backup & Restore"),
-                  detailLabel(
-                      "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
-                  ),
-                  detailLabel(
-                      "Website passwords, cookies, OAuth/login sessions, WebKit caches, and page runtime state are not exported. A new Mac may require website sign-in again."
-                  ),
-                  actions,
-                  detailLabel(
-                      "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
-                  ),
-                  spacer(10),
-                  sectionTitle("Language"),
-                  detailLabel(
-                      "A per-app language override is not exposed in V1. No non-functional language selector is shown."
-                  ),
-                  spacer(14),
-                  sectionTitle("About FloatTabs"),
-                  versionLabel,
-                  detailLabel("Latest fixes in this build:"),
-                  detailLabel(AppReleaseInfo.latestFixesDisplay),
-                  spacer(8),
-              ])
-              stack.orientation = .vertical
-              stack.alignment = .leading
-              stack.spacing = 8
-              stack.translatesAutoresizingMaskIntoConstraints = false
-              document.addSubview(stack)
-              root.addSubview(scrollView)
-
-              NSLayoutConstraint.activate([
-                  scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-                  scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                  scrollView.topAnchor.constraint(equalTo: root.topAnchor),
-                  scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-                  document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-                  document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-                  document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-                  document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-
-                  stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
-                  stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
-                  stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
-                  stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
-              ])
-              view = root
-          }
-
-          '''
-
-          settings = settings[:load_start] + new_load + settings[export_start:]
-          settings_path.write_text(settings)
-
-          tests_path = Path('FloatTabsTests/ExternalShellTests.swift')
-          tests = tests_path.read_text()
-          test_marker = '@MainActor\nfinal class ExternalShellTests: XCTestCase {\n'
-          test_case = '''    func testReleaseInfoFormatsVersionAndBuild() {
-              XCTAssertEqual(
-                  AppReleaseInfo.displayVersion(shortVersion: "0.1.3", build: "5"),
-                  "Version 0.1.3 (Build 5)"
-              )
-              XCTAssertFalse(AppReleaseInfo.latestFixes.isEmpty)
-          }
-
-          '''
-          if 'testReleaseInfoFormatsVersionAndBuild' not in tests:
-              tests = tests.replace(test_marker, test_marker + test_case, 1)
-              tests_path.write_text(tests)
-
-          project_path = Path('FloatTabs.xcodeproj/project.pbxproj')
-          project = project_path.read_text()
-          old_build = 'CURRENT_PROJECT_VERSION = 4;'
-          if old_build in project:
-              count = project.count(old_build)
-              if count != 2:
-                  raise SystemExit(f'expected 2 build-number entries, found {count}')
-              project = project.replace(old_build, 'CURRENT_PROJECT_VERSION = 5;')
-              project_path.write_text(project)
-          elif project.count('CURRENT_PROJECT_VERSION = 5;') != 2:
-              raise SystemExit('unexpected CURRENT_PROJECT_VERSION state')
-
-          readme_path = Path('README.md')
-          readme = readme_path.read_text()
-          new_readme_bullet = '- Settings → Account & Language now shows the exact Version / Build and latest fixes for the installed build.\n'
-          anchor = '- Fixed first-click Tab / rail control activation from a background application.\n'
-          if new_readme_bullet not in readme:
-              if anchor not in readme:
-                  raise SystemExit('README v0.1.3 anchor not found')
-              readme = readme.replace(anchor, new_readme_bullet + anchor, 1)
-              readme_path.write_text(readme)
-
-          notes_path = Path('docs/release/FloatTabs_v0.1.3.md')
-          notes = notes_path.read_text()
-          build_refresh = '''## Build 5 refresh
-
-The v0.1.3 release assets were refreshed in place with build 5. The marketing version remains `0.1.3`, while the build number distinguishes this corrected package from the original build 4 package.
-
-Settings → Account & Language now ends with an **About FloatTabs** section that shows:
-
-- the exact installed `Version` and `Build` from the app bundle;
-- a short “Latest fixes in this build” summary for quick package identification.
-
-This refresh does not create a new release version; the existing `v0.1.3` tag and release assets are replaced after validation.
-
-'''
-          if '## Build 5 refresh' not in notes:
-              anchor = '## Highlights\n'
-              if anchor not in notes:
-                  raise SystemExit('release notes Highlights anchor not found')
-              notes = notes.replace(anchor, build_refresh + anchor, 1)
-              notes_path.write_text(notes)
-          PY
-
-          git diff --check
-
-      - name: Validate version metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(grep -c 'CURRENT_PROJECT_VERSION = 5;' FloatTabs.xcodeproj/project.pbxproj)" = "2"
-          test "$(grep -c 'MARKETING_VERSION = 0.1.3;' FloatTabs.xcodeproj/project.pbxproj)" = "2"
+          VERSION="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
+          BUILD="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
+          test "$VERSION" = "0.1.3"
+          test "$BUILD" = "5"
           grep -q 'About FloatTabs' FloatTabs/UI/GlobalSettingsController.swift
-          grep -q 'Version 0.1.3 (Build 5)' FloatTabsTests/ExternalShellTests.swift
 
-      - name: Run XCTest
+      - name: Run XCTest on merged source
         shell: bash
         run: |
           set -euo pipefail
@@ -256,30 +54,11 @@ This refresh does not create a new release version; the existing `v0.1.3` tag an
           shasum -a 256 -c FloatTabs-0.1.3.dmg.sha256
           shasum -a 256 -c FloatTabs-0.1.3.dSYM.zip.sha256
 
-      - name: Commit validated patch to main and remove one-off workflow
-        id: patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/v013-settings-patch.yml
-          git add -- \
-            FloatTabs/UI/GlobalSettingsController.swift \
-            FloatTabsTests/ExternalShellTests.swift \
-            FloatTabs.xcodeproj/project.pbxproj \
-            README.md \
-            docs/release/FloatTabs_v0.1.3.md
-          git commit -m "fix: show release version in Settings"
-          PATCH_SHA="$(git rev-parse HEAD)"
-          echo "sha=$PATCH_SHA" >> "$GITHUB_OUTPUT"
-          git push origin HEAD:main
-
       - name: Replace existing v0.1.3 release assets and tag
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v0.1.3
-          PATCH_SHA: ${{ steps.patch.outputs.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
         shell: bash
         run: |
@@ -294,7 +73,7 @@ This refresh does not create a new release version; the existing `v0.1.3` tag an
           gh release edit "$TAG" \
             --title "FloatTabs $TAG" \
             --notes-file docs/release/FloatTabs_v0.1.3.md \
-            --target "$PATCH_SHA"
-          git tag -f "$TAG" "$PATCH_SHA"
+            --target "$MERGE_SHA"
+          git tag -f "$TAG" "$MERGE_SHA"
           git push --force origin "refs/tags/$TAG"
           gh release view "$TAG" --json tagName,targetCommitish,assets
