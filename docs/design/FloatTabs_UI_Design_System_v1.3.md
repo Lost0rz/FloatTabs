@@ -3,7 +3,7 @@
 > **Status:** Current production interaction / geometry contract  
 > **Effective:** 2026-08-20 / FloatTabs v0.1.3  
 > **Scope:** Shell interaction, Tab rail, folding, movement, resize, fullscreen coordination.  
-> **Inheritance:** Visual tokens and unaffected component guidance from v1.2 remain usable only where they do not conflict with this file or current production code.
+> **Inheritance:** Visual tokens and unaffected component guidance from the archived [`v1.2`](archive/FloatTabs_UI_Design_System_v1.2.md) remain usable only where they do not conflict with this file or current production code.
 
 ## 1. Source-of-truth priority
 
@@ -15,7 +15,7 @@ For current behavior:
 4. older design, architecture and stage documents as historical context;
 5. generated Stitch references.
 
-`FloatTabs_UI_Design_System_v1.2.md` is superseded for shell interaction and geometry.
+`FloatTabs_UI_Design_System_v1.2.md` is superseded for shell interaction and geometry. Its full historical contents are retained under `docs/design/archive/`.
 
 ## 2. Product boundary
 
@@ -151,6 +151,8 @@ A release candidate changing shell geometry must verify at minimum:
 
 Older files remain useful for design history but do not override this contract. In particular:
 
-- `FloatTabs_UI_Design_System_v1.2.md` — superseded shell interaction / geometry baseline;
-- `../architecture/Stage_1_Interaction_Baseline.md` — pre-Slot Stage 1 historical baseline;
+- `FloatTabs_UI_Design_System_v1.2.md` — superseded pointer for the prior shell interaction / geometry baseline;
+- `archive/FloatTabs_UI_Design_System_v1.2.md` — complete archived v1.2 document;
+- `../architecture/Stage_1_Interaction_Baseline.md` — historical pointer for the pre-Slot Stage 1 baseline;
+- `../architecture/archive/Stage_1_Interaction_Baseline.md` — complete archived Stage 1 document;
 - Stitch-generated screenshots / HTML — visual references only.
