@@ -1,6 +1,21 @@
 name: Monterey Compatibility CI
 
 on:
+  push:
+    branches:
+      - audit/v013-monterey-candidate-f
+    paths:
+      - 'tools/release/build_monterey_dmg.sh'
+      - 'tools/release/monterey_transform_lib.py'
+      - 'tools/release/prepare_monterey_sources.py'
+      - 'tools/release/prepare_monterey_webview.py'
+      - 'tools/release/prepare_monterey_runtime_safe_mode.py'
+      - 'tools/release/prepare_monterey_webview_minimal.py'
+      - 'tools/release/prepare_monterey_lazy_restore.py'
+      - 'tools/release/prepare_monterey_isolated_runtime.py'
+      - 'tools/release/prepare_monterey_candidate_f.py'
+      - '.github/workflows/monterey-compat-ci.yml'
+      - 'docs/release/compatibility/**'
   pull_request:
     branches:
       - main
@@ -13,6 +28,7 @@ on:
       - 'tools/release/prepare_monterey_webview_minimal.py'
       - 'tools/release/prepare_monterey_lazy_restore.py'
       - 'tools/release/prepare_monterey_isolated_runtime.py'
+      - 'tools/release/prepare_monterey_candidate_f.py'
       - '.github/workflows/monterey-compat-ci.yml'
       - '.github/workflows/publish-monterey-release.yml'
       - 'docs/release/compatibility/**'
@@ -42,7 +58,7 @@ jobs:
             exit 1
           fi
 
-      - name: Apply isolated Monterey compatibility preparation
+      - name: Apply isolated Monterey Candidate F preparation
         run: |
           python3 tools/release/prepare_monterey_sources.py
           python3 tools/release/prepare_monterey_webview.py
@@ -50,14 +66,24 @@ jobs:
           python3 tools/release/prepare_monterey_webview_minimal.py
           python3 tools/release/prepare_monterey_lazy_restore.py
           python3 tools/release/prepare_monterey_isolated_runtime.py
+          python3 tools/release/prepare_monterey_candidate_f.py
 
-      - name: Verify Monterey edition does not carry standard runtime branches
+      - name: Verify Candidate F generated runtime boundary
         run: |
           set -euo pipefail
           grep -Fq 'Monterey Compatibility Edition' FloatTabs/Web/WebViewFactory.swift
           grep -Fq 'Monterey Compatibility Edition' FloatTabs/Panel/PanelController.swift
-          grep -Fq '[FloatTabs Monterey] navigation committed slot=' FloatTabs/Web/SlotNavigationObserver.swift
-          grep -Fq '[FloatTabs Monterey] createWebView before load' FloatTabs/Web/WebViewPool.swift
+          grep -Fq 'final class MontereyNavigationObserver: NSObject, WKNavigationDelegate' FloatTabs/Web/SlotNavigationObserver.swift
+          grep -Fq '[FloatTabs Monterey Candidate F] navigation committed slot=' FloatTabs/Web/SlotNavigationObserver.swift
+          grep -Fq 'let observer = MontereyNavigationObserver(' FloatTabs/Web/WebViewPool.swift
+          grep -Fq 'webView.uiDelegate = popupCoordinator' FloatTabs/Web/WebViewPool.swift
+          grep -Fq 'websiteMode: activeProfile.renderingProfile.effectiveWebsiteMode' FloatTabs/Panel/PanelController.swift
+          grep -Fq 'private(set) var websiteMode: WebsiteMode = .desktop' FloatTabs/Web/WebViewContainer.swift
+          observer="$(sed -n '/final class MontereyNavigationObserver: NSObject, WKNavigationDelegate/,/typealias SlotNavigationObserver = MontereyNavigationObserver/p' FloatTabs/Web/SlotNavigationObserver.swift)"
+          if printf '%s\n' "$observer" | grep -Eq 'decidePolicyFor|shouldPerformDownload|WKNavigationActionPolicy\.download|WKNavigationResponsePolicy\.download|didBecome download|preferredContentMode|customUserAgent|applicationNameForUserAgent|pageZoom[[:space:]]*='; then
+            echo 'error: forbidden navigation policy/download/rendering behavior leaked into Candidate F minimal observer' >&2
+            exit 1
+          fi
           if grep -Fq '.canJoinAllApplications' FloatTabs/Panel/FloatingPanel.swift; then
             echo 'error: standard macOS 13 collection behavior leaked into Monterey edition' >&2
             exit 1
@@ -68,10 +94,6 @@ jobs:
           fi
           if grep -Fq 'WKWebView.FullscreenState' FloatTabs/Panel/FullscreenSourceHost.swift; then
             echo 'error: macOS 13 FullscreenState API leaked into Monterey edition' >&2
-            exit 1
-          fi
-          if grep -Fq 'observation = webView.observe(\.url' FloatTabs/Web/SlotNavigationObserver.swift; then
-            echo 'error: standard provisional URL KVO leaked into Monterey edition' >&2
             exit 1
           fi
 
@@ -109,37 +131,38 @@ jobs:
           git reset --hard HEAD
           git clean -fd
 
-      - name: Build and verify isolated Monterey Universal 2 DMG
+      - name: Build and verify Candidate F Universal 2 DMG
         env:
-          FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsMonterey
+          FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsMontereyCandidateF
           FLOATTABS_MONTEREY_TARGET: '12.0'
+          FLOATTABS_PACKAGE_SUFFIX: 'Monterey-Candidate-F'
         run: |
           chmod +x tools/release/build_monterey_dmg.sh
           tools/release/build_monterey_dmg.sh
 
-      - name: Verify expected compatibility assets
+      - name: Verify expected Candidate F assets
         env:
-          OUTPUT_DIR: ${{ runner.temp }}/FloatTabsMonterey
+          OUTPUT_DIR: ${{ runner.temp }}/FloatTabsMontereyCandidateF
         run: |
           set -euo pipefail
-          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-monterey.dmg"
-          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-monterey.dmg.sha256"
-          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-monterey.dSYM.zip"
-          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-monterey.dSYM.zip.sha256"
+          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-Monterey-Candidate-F.dmg"
+          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-Monterey-Candidate-F.dmg.sha256"
+          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip"
+          test -f "$OUTPUT_DIR/FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip.sha256"
           (
             cd "$OUTPUT_DIR"
-            shasum -a 256 -c FloatTabs-0.1.3-monterey.dmg.sha256
-            shasum -a 256 -c FloatTabs-0.1.3-monterey.dSYM.zip.sha256
+            shasum -a 256 -c FloatTabs-0.1.3-Monterey-Candidate-F.dmg.sha256
+            shasum -a 256 -c FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip.sha256
           )
 
-      - name: Upload Monterey test package and symbols
+      - name: Upload Monterey Candidate F test package and symbols
         uses: actions/upload-artifact@v4
         with:
-          name: FloatTabs-0.1.3-monterey-test
+          name: FloatTabs-0.1.3-Monterey-Candidate-F-test
           path: |
-            ${{ runner.temp }}/FloatTabsMonterey/FloatTabs-0.1.3-monterey.dmg
-            ${{ runner.temp }}/FloatTabsMonterey/FloatTabs-0.1.3-monterey.dmg.sha256
-            ${{ runner.temp }}/FloatTabsMonterey/FloatTabs-0.1.3-monterey.dSYM.zip
-            ${{ runner.temp }}/FloatTabsMonterey/FloatTabs-0.1.3-monterey.dSYM.zip.sha256
+            ${{ runner.temp }}/FloatTabsMontereyCandidateF/FloatTabs-0.1.3-Monterey-Candidate-F.dmg
+            ${{ runner.temp }}/FloatTabsMontereyCandidateF/FloatTabs-0.1.3-Monterey-Candidate-F.dmg.sha256
+            ${{ runner.temp }}/FloatTabsMontereyCandidateF/FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip
+            ${{ runner.temp }}/FloatTabsMontereyCandidateF/FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip.sha256
           if-no-files-found: error
           retention-days: 7
