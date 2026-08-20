@@ -1,25 +1,28 @@
 name: Apply and Republish v0.1.3 Build 5
 
 on:
-  pull_request:
-    branches:
-      - main
+  issue_comment:
     types:
-      - closed
+      - created
 
 permissions:
   contents: write
 
+concurrency:
+  group: v013-build5-republish
+  cancel-in-progress: false
+
 jobs:
   patch-test-republish:
     if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.ref == 'patch/v0.1.3-settings-build5'
+      github.event.issue.number == 50 &&
+      github.event.comment.body == '/run-v013-build5' &&
+      github.event.comment.user.login == 'Lost0rz'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: main
 
       - name: Apply Settings version and build-information patch
         shell: bash
