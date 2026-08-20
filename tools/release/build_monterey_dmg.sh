@@ -15,6 +15,8 @@ REQUIRED_ARCHITECTURES=(arm64 x86_64)
 python3 tools/release/prepare_monterey_sources.py
 python3 tools/release/prepare_monterey_webview.py
 python3 tools/release/prepare_monterey_runtime_safe_mode.py
+python3 tools/release/prepare_monterey_webview_minimal.py
+python3 tools/release/prepare_monterey_lazy_restore.py
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
