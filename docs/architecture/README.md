@@ -18,7 +18,11 @@ Still useful for the broader native/WebKit architecture and module boundaries, b
 
 ### `Stage_1_Interaction_Baseline.md`
 
-Historical pre-Slot baseline only. It is retained to explain early design decisions and is not a current implementation specification.
+Historical pointer only. The complete original pre-Slot baseline is retained at [`archive/Stage_1_Interaction_Baseline.md`](archive/Stage_1_Interaction_Baseline.md).
+
+## Archived design history
+
+The complete superseded UI Design System v1.2 is retained at [`../design/archive/FloatTabs_UI_Design_System_v1.2.md`](../design/archive/FloatTabs_UI_Design_System_v1.2.md).
 
 ## Rule
 
