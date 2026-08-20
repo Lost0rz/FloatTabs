@@ -18,6 +18,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Resolve release metadata
         id: release
@@ -25,8 +27,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
-          if [[ -z "$VERSION" ]]; then
-            echo "error: MARKETING_VERSION not found" >&2
+          BUILD="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
+          if [[ -z "$VERSION" || -z "$BUILD" ]]; then
+            echo "error: release version/build metadata not found" >&2
             exit 1
           fi
           TAG="v$VERSION"
@@ -36,33 +39,49 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether release already exists
+      - name: Resolve existing release state
         id: existing
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+          BUILD: ${{ steps.release.outputs.build }}
         shell: bash
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "refresh=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          EXISTING_BUILD="$(git show "$TAG:FloatTabs.xcodeproj/project.pbxproj" | sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION = \([^;]*\);/\1/p' | head -n 1 || true)"
+          echo "Existing release build: ${EXISTING_BUILD:-unknown}"
+          echo "Current source build: $BUILD"
+
+          if [[ "$EXISTING_BUILD" != "$BUILD" ]]; then
+            echo "refresh=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "refresh=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and verify Universal 2 release package
-        if: steps.existing.outputs.exists != 'true'
+        if: steps.existing.outputs.exists != 'true' || steps.existing.outputs.refresh == 'true'
         env:
           FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
         shell: bash
         run: |
+          set -euo pipefail
           chmod +x tools/release/build_dmg.sh
           tools/release/build_dmg.sh
 
-      - name: Verify release filenames
-        if: steps.existing.outputs.exists != 'true'
+      - name: Verify release filenames and checksums
+        if: steps.existing.outputs.exists != 'true' || steps.existing.outputs.refresh == 'true'
         env:
           VERSION: ${{ steps.release.outputs.version }}
           OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
@@ -79,7 +98,7 @@ jobs:
             shasum -a 256 -c "FloatTabs-$VERSION.dSYM.zip.sha256"
           )
 
-      - name: Publish GitHub Release
+      - name: Publish new GitHub Release
         if: steps.existing.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,3 +117,28 @@ jobs:
             "$OUTPUT_DIR/FloatTabs-$VERSION.dmg.sha256" \
             "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip" \
             "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip.sha256"
+
+      - name: Refresh existing GitHub Release in place
+        if: steps.existing.outputs.exists == 'true' && steps.existing.outputs.refresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES: ${{ steps.release.outputs.notes }}
+          OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$TAG"
+          gh release upload "$TAG" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dmg" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dmg.sha256" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip" \
+            "$OUTPUT_DIR/FloatTabs-$VERSION.dSYM.zip.sha256" \
+            --clobber
+          gh release edit "$TAG" \
+            --title "FloatTabs $TAG" \
+            --notes-file "$NOTES" \
+            --target "$GITHUB_SHA"
+          gh release view "$TAG" --json tagName,targetCommitish,assets
