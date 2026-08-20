@@ -578,6 +578,36 @@ private final class ShortcutsSettingsViewController: NSViewController {
     }
 }
 
+enum AppReleaseInfo {
+    static let latestFixes = [
+        "Tab, Add, Pin and Settings controls respond on the first click.",
+        "Collapsed Tab rail width is reclaimed for Web content while retaining the 12 pt move gutter.",
+        "Fullscreen restore waits for WebKit presentation teardown and keeps shell/source state synchronized.",
+        "Settings now shows the exact app version, build number and latest fixes.",
+    ]
+
+    static func displayVersion(shortVersion: String?, build: String?) -> String {
+        let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let buildNumber = build?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedVersion = version.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown"
+        guard let buildNumber, !buildNumber.isEmpty else {
+            return "Version \(resolvedVersion)"
+        }
+        return "Version \(resolvedVersion) (Build \(buildNumber))"
+    }
+
+    static var currentVersionDisplay: String {
+        displayVersion(
+            shortVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        )
+    }
+
+    static var latestFixesDisplay: String {
+        latestFixes.map { "• \($0)" }.joined(separator: "\n")
+    }
+}
+
 @MainActor
 private final class AccountLanguageSettingsViewController: NSViewController {
     private let onExportBackup: GlobalSettingsController.ExportBackupHandler
@@ -599,6 +629,17 @@ private final class AccountLanguageSettingsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
+
         let exportButton = NSButton(
             title: "Export Backup…",
             target: self,
@@ -613,6 +654,10 @@ private final class AccountLanguageSettingsViewController: NSViewController {
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 10
+
+        let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
+        versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        versionLabel.textColor = .labelColor
 
         let stack = NSStackView(views: [
             sectionTitle("Account"),
@@ -636,17 +681,35 @@ private final class AccountLanguageSettingsViewController: NSViewController {
             detailLabel(
                 "A per-app language override is not exposed in V1. No non-functional language selector is shown."
             ),
+            spacer(14),
+            sectionTitle("About FloatTabs"),
+            versionLabel,
+            detailLabel("Latest fixes in this build:"),
+            detailLabel(AppReleaseInfo.latestFixesDisplay),
+            spacer(8),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
+        document.addSubview(stack)
+        root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
         view = root
     }
