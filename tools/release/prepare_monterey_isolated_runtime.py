@@ -49,9 +49,10 @@ replace_required(
     "dual-path FloatingPanel collection behavior",
 )
 
-# Fullscreen: the compatibility edition does not carry a second modern runtime
-# path. Element fullscreen is disabled by the earlier compatibility preparation,
-# so observation is deliberately inert on this edition.
+# Fullscreen: the compatibility edition carries neither the modern observer nor
+# the synthetic Monterey polling loop. Preserve the ordinary source-window
+# geometry/presentation helpers because they are also required by normal browser
+# hosting even when element fullscreen itself is disabled.
 fullscreen = ROOT / "FloatTabs/Panel/FullscreenSourceHost.swift"
 text = fullscreen.read_text()
 old_observe = '''        if #available(macOS 13.0, *) {
@@ -79,11 +80,20 @@ if modern_extension_start < 0 or modern_extension_end < 0:
     raise SystemExit("error: modern FullscreenState adapter boundaries not found")
 text = text[:modern_extension_start] + text[modern_extension_end:]
 
+# Remove only the modern observer and the synthetic polling helpers. Do not slice
+# through sourceFrame/makeSourceWindow/presentation detection: those helpers are
+# ordinary source-host infrastructure and are needed even with fullscreen off.
 modern_helper_start = text.find("    @available(macOS 13.0, *)\n    private func observeModernFullscreenState")
-handler_start = text.find("    private func handleFullscreenStateChange(", modern_helper_start)
-if modern_helper_start < 0 or handler_start < 0:
-    raise SystemExit("error: modern/legacy fullscreen helper boundaries not found")
-text = text[:modern_helper_start] + text[handler_start:]
+legacy_helper_start = text.find("    private func startLegacyFullscreenPolling", modern_helper_start)
+if modern_helper_start < 0 or legacy_helper_start < 0:
+    raise SystemExit("error: modern fullscreen observer boundaries not found")
+text = text[:modern_helper_start] + text[legacy_helper_start:]
+
+legacy_helper_start = text.find("    private func startLegacyFullscreenPolling")
+source_frame_start = text.find("    static func sourceFrame(", legacy_helper_start)
+if legacy_helper_start < 0 or source_frame_start < 0:
+    raise SystemExit("error: legacy polling/source-host helper boundaries not found")
+text = text[:legacy_helper_start] + text[source_frame_start:]
 fullscreen.write_text(text)
 
 # WebViewFactory: make the compatibility package a Monterey-only implementation
@@ -273,6 +283,13 @@ if "observeModernFullscreenState" in prepared_fullscreen:
     raise SystemExit("error: modern fullscreen observer leaked into compatibility edition")
 if "WKWebView.FullscreenState" in prepared_fullscreen:
     raise SystemExit("error: modern FullscreenState API leaked into compatibility edition")
+for required_helper in [
+    "static func sourceFrame(",
+    "static func isWebKitFullscreenPresentationActive(",
+    "private static func makeSourceWindow(",
+]:
+    if required_helper not in prepared_fullscreen:
+        raise SystemExit(f"error: ordinary source-host helper was removed: {required_helper}")
 for forbidden in [
     "configuration.preferences.isElementFullscreenEnabled = true",
     "configuration.defaultWebpagePreferences.preferredContentMode =",
