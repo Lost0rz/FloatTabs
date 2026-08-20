@@ -13,14 +13,15 @@ DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 REQUIRED_ARCHITECTURES=(arm64 x86_64)
 
 # Compatibility Edition source preparation is deliberately build-time only.
-# The dedicated release branch never commits modified FloatTabs/*.swift files,
-# and none of these transforms are part of the standard v0.1.3 build path.
+# The dedicated audit/release branches never commit modified FloatTabs/*.swift
+# files, and none of these transforms are part of the standard v0.1.3 build path.
 python3 tools/release/prepare_monterey_sources.py
 python3 tools/release/prepare_monterey_webview.py
 python3 tools/release/prepare_monterey_runtime_safe_mode.py
 python3 tools/release/prepare_monterey_webview_minimal.py
 python3 tools/release/prepare_monterey_lazy_restore.py
 python3 tools/release/prepare_monterey_isolated_runtime.py
+python3 tools/release/prepare_monterey_candidate_f.py
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
@@ -92,7 +93,7 @@ fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
-PACKAGE_SUFFIX="${FLOATTABS_PACKAGE_SUFFIX:-monterey}"
+PACKAGE_SUFFIX="${FLOATTABS_PACKAGE_SUFFIX:-Monterey-Candidate-F}"
 PACKAGE_BASE="FloatTabs-${VERSION}-${PACKAGE_SUFFIX}"
 DMG_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dmg"
 DSYM_ARCHIVE_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dSYM.zip"
@@ -109,7 +110,7 @@ ln -s /Applications "$STAGE_DIR/Applications"
 rm -f "$DMG_PATH"
 
 hdiutil create \
-  -volname "FloatTabs $VERSION Monterey" \
+  -volname "FloatTabs $VERSION Monterey Candidate F" \
   -srcfolder "$STAGE_DIR" \
   -ov \
   -format UDZO \
@@ -123,8 +124,8 @@ hdiutil verify "$DMG_PATH"
   /usr/bin/shasum -a 256 "$PACKAGE_BASE.dSYM.zip" > "$PACKAGE_BASE.dSYM.zip.sha256"
 )
 
-echo "Monterey compatibility package ready"
-echo "Edition: Monterey Compatibility (separate from standard v0.1.3)"
+echo "Monterey Candidate F compatibility package ready"
+echo "Edition: Monterey Candidate F (separate from standard v0.1.3)"
 echo "Version: $VERSION (Build $BUILD)"
 echo "Minimum macOS: $DEPLOYMENT_TARGET"
 echo "Architectures: $ARCHS_FOUND"
