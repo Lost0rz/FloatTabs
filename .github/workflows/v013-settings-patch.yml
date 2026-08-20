@@ -1,30 +1,23 @@
-name: v0.1.3 Settings Patch and Republish
+name: Apply v0.1.3 Settings Patch and Republish
 
 on:
   push:
     branches:
-      - patch/v0.1.3-settings-version
       - main
     paths:
       - '.github/workflows/v013-settings-patch.yml'
-      - 'FloatTabs/UI/GlobalSettingsController.swift'
-      - 'FloatTabsTests/ExternalShellTests.swift'
-      - 'FloatTabs.xcodeproj/project.pbxproj'
-      - 'README.md'
-      - 'docs/release/FloatTabs_v0.1.3.md'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  apply-patch:
-    if: github.ref_name == 'patch/v0.1.3-settings-version'
-    runs-on: ubuntu-latest
+  patch-test-republish:
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: patch/v0.1.3-settings-version
+          ref: main
 
       - name: Apply Settings version footer patch
         shell: bash
@@ -218,7 +211,7 @@ Settings → Account & Language now ends with an **About FloatTabs** section tha
 - the exact installed `Version` and `Build` from the app bundle;
 - a short “Latest fixes in this build” summary for quick package identification.
 
-This refresh does not create a new release version; the existing `v0.1.3` tag and release assets are replaced after the patch passes CI/QA.
+This refresh does not create a new release version; the existing `v0.1.3` tag and release assets are replaced after validation.
 
 '''
           if '## Build 5 refresh' not in notes:
@@ -231,42 +224,25 @@ This refresh does not create a new release version; the existing `v0.1.3` tag an
 
           git diff --check
 
-      - name: Commit patch to branch
+      - name: Validate version metadata
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet; then
-            echo "Patch already applied."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            FloatTabs/UI/GlobalSettingsController.swift \
-            FloatTabsTests/ExternalShellTests.swift \
-            FloatTabs.xcodeproj/project.pbxproj \
-            README.md \
-            docs/release/FloatTabs_v0.1.3.md
-          git commit -m "fix: show release version in Settings"
-          git push origin HEAD:patch/v0.1.3-settings-version
+          test "$(grep -c 'CURRENT_PROJECT_VERSION = 5;' FloatTabs.xcodeproj/project.pbxproj)" = "2"
+          test "$(grep -c 'MARKETING_VERSION = 0.1.3;' FloatTabs.xcodeproj/project.pbxproj)" = "2"
+          grep -q 'About FloatTabs' FloatTabs/UI/GlobalSettingsController.swift
+          grep -q 'Version 0.1.3 (Build 5)' FloatTabsTests/ExternalShellTests.swift
 
-  republish-v013:
-    if: github.ref_name == 'main'
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Verify this is the intended v0.1.3 build 5 refresh
-        id: release
+      - name: Run XCTest
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(sed -n 's/^[[:space:]]*MARKETING_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
-          BUILD="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION = \([^;]*\);/\1/p' FloatTabs.xcodeproj/project.pbxproj | head -n 1)"
-          test "$VERSION" = "0.1.3"
-          test "$BUILD" = "5"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -destination 'platform=macOS' \
+            test \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Build and verify replacement Universal 2 package
         env:
@@ -280,10 +256,30 @@ This refresh does not create a new release version; the existing `v0.1.3` tag an
           shasum -a 256 -c FloatTabs-0.1.3.dmg.sha256
           shasum -a 256 -c FloatTabs-0.1.3.dSYM.zip.sha256
 
-      - name: Replace existing v0.1.3 release assets and metadata
+      - name: Commit validated patch to main and remove one-off workflow
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/v013-settings-patch.yml
+          git add -- \
+            FloatTabs/UI/GlobalSettingsController.swift \
+            FloatTabsTests/ExternalShellTests.swift \
+            FloatTabs.xcodeproj/project.pbxproj \
+            README.md \
+            docs/release/FloatTabs_v0.1.3.md
+          git commit -m "fix: show release version in Settings"
+          PATCH_SHA="$(git rev-parse HEAD)"
+          echo "sha=$PATCH_SHA" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main
+
+      - name: Replace existing v0.1.3 release assets and tag
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
+          TAG: v0.1.3
+          PATCH_SHA: ${{ steps.patch.outputs.sha }}
           OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
         shell: bash
         run: |
@@ -298,17 +294,7 @@ This refresh does not create a new release version; the existing `v0.1.3` tag an
           gh release edit "$TAG" \
             --title "FloatTabs $TAG" \
             --notes-file docs/release/FloatTabs_v0.1.3.md \
-            --target "$GITHUB_SHA"
-          git tag -f "$TAG" "$GITHUB_SHA"
+            --target "$PATCH_SHA"
+          git tag -f "$TAG" "$PATCH_SHA"
           git push --force origin "refs/tags/$TAG"
           gh release view "$TAG" --json tagName,targetCommitish,assets
-
-      - name: Remove one-off republish workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/v013-settings-patch.yml
-          git commit -m "chore: remove v0.1.3 republish workflow"
-          git push origin HEAD:main
