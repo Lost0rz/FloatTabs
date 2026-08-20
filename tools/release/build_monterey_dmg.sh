@@ -12,11 +12,15 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
 DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 REQUIRED_ARCHITECTURES=(arm64 x86_64)
 
+# Compatibility Edition source preparation is deliberately build-time only.
+# The dedicated release branch never commits modified FloatTabs/*.swift files,
+# and none of these transforms are part of the standard v0.1.3 build path.
 python3 tools/release/prepare_monterey_sources.py
 python3 tools/release/prepare_monterey_webview.py
 python3 tools/release/prepare_monterey_runtime_safe_mode.py
 python3 tools/release/prepare_monterey_webview_minimal.py
 python3 tools/release/prepare_monterey_lazy_restore.py
+python3 tools/release/prepare_monterey_isolated_runtime.py
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
@@ -104,6 +108,7 @@ hdiutil verify "$DMG_PATH"
 )
 
 echo "Monterey compatibility package ready"
+echo "Edition: Monterey Compatibility (separate from standard v0.1.3)"
 echo "Version: $VERSION (Build $BUILD)"
 echo "Minimum macOS: $DEPLOYMENT_TARGET"
 echo "Architectures: $ARCHS_FOUND"
