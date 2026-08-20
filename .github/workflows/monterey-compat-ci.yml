@@ -5,15 +5,13 @@ on:
     branches:
       - main
     paths:
-      - 'FloatTabs/**'
-      - 'FloatTabsTests/**'
-      - 'FloatTabs.xcodeproj/**'
       - 'tools/release/build_monterey_dmg.sh'
       - 'tools/release/prepare_monterey_sources.py'
       - 'tools/release/prepare_monterey_webview.py'
       - 'tools/release/prepare_monterey_runtime_safe_mode.py'
       - 'tools/release/prepare_monterey_webview_minimal.py'
       - 'tools/release/prepare_monterey_lazy_restore.py'
+      - 'tools/release/prepare_monterey_isolated_runtime.py'
       - '.github/workflows/monterey-compat-ci.yml'
       - '.github/workflows/publish-monterey-release.yml'
       - 'docs/release/compatibility/**'
@@ -23,27 +21,56 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Apply deterministic Monterey source compatibility patches
+      - name: Enforce standard-edition source isolation
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          changed="$(git diff --name-only origin/main...HEAD)"
+          echo "$changed"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(\.github/workflows/monterey-compat-ci\.yml|\.github/workflows/publish-monterey-release\.yml|docs/release/compatibility/.*|tools/release/build_monterey_dmg\.sh|tools/release/prepare_monterey_[A-Za-z0-9_]+\.py)$' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo 'error: Monterey branch modified standard-edition source or unrelated files:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+          if printf '%s\n' "$changed" | grep -Eq '^(FloatTabs/|FloatTabsTests/|FloatTabs\.xcodeproj/)'; then
+            echo 'error: committed product source changes are forbidden on the Monterey compatibility branch' >&2
+            exit 1
+          fi
+
+      - name: Apply isolated Monterey compatibility preparation
         run: |
           python3 tools/release/prepare_monterey_sources.py
           python3 tools/release/prepare_monterey_webview.py
           python3 tools/release/prepare_monterey_runtime_safe_mode.py
           python3 tools/release/prepare_monterey_webview_minimal.py
           python3 tools/release/prepare_monterey_lazy_restore.py
+          python3 tools/release/prepare_monterey_isolated_runtime.py
 
-      - name: Verify Monterey runtime hardening source
+      - name: Verify Monterey edition does not carry standard runtime branches
         run: |
           set -euo pipefail
-          grep -Fq 'Monterey minimal WebView path' FloatTabs/Web/WebViewFactory.swift
-          grep -Fq 'guard #available(macOS 13.0, *) else { return }' FloatTabs/Web/WebViewFactory.swift
-          grep -Fq 'Monterey lazy restore: do not create/load a saved WKWebView' FloatTabs/Panel/PanelController.swift
-          grep -Fq 'Monterey navigation safe mode: do not persist provisional URL KVO' FloatTabs/Web/SlotNavigationObserver.swift
-          grep -Fq 'observation = webView.observe(\.url' FloatTabs/Web/SlotNavigationObserver.swift
+          grep -Fq 'Monterey Compatibility Edition' FloatTabs/Web/WebViewFactory.swift
+          grep -Fq 'Monterey Compatibility Edition' FloatTabs/Panel/PanelController.swift
           grep -Fq '[FloatTabs Monterey] navigation committed slot=' FloatTabs/Web/SlotNavigationObserver.swift
           grep -Fq '[FloatTabs Monterey] createWebView before load' FloatTabs/Web/WebViewPool.swift
-          if grep -Fq 'if #available(macOS 12.3, *) {' FloatTabs/Web/WebViewFactory.swift; then
-            echo 'error: macOS 12.3 WebView availability guard survived runtime hardening' >&2
+          if grep -Fq '.canJoinAllApplications' FloatTabs/Panel/FloatingPanel.swift; then
+            echo 'error: standard macOS 13 collection behavior leaked into Monterey edition' >&2
+            exit 1
+          fi
+          if grep -Fq 'observeModernFullscreenState' FloatTabs/Panel/FullscreenSourceHost.swift; then
+            echo 'error: standard fullscreen observer leaked into Monterey edition' >&2
+            exit 1
+          fi
+          if grep -Fq 'WKWebView.FullscreenState' FloatTabs/Panel/FullscreenSourceHost.swift; then
+            echo 'error: macOS 13 FullscreenState API leaked into Monterey edition' >&2
+            exit 1
+          fi
+          if grep -Fq 'observation = webView.observe(\.url' FloatTabs/Web/SlotNavigationObserver.swift; then
+            echo 'error: standard provisional URL KVO leaked into Monterey edition' >&2
             exit 1
           fi
 
@@ -76,7 +103,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             test
 
-      - name: Build and verify Monterey Universal 2 DMG
+      - name: Reset checkout before packaging
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+
+      - name: Build and verify isolated Monterey Universal 2 DMG
         env:
           FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsMonterey
           FLOATTABS_MONTEREY_TARGET: '12.0'
