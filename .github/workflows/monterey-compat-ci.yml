@@ -33,6 +33,10 @@ on:
       - '.github/workflows/publish-monterey-release.yml'
       - 'docs/release/compatibility/**'
 
+permissions:
+  contents: read
+  statuses: write
+
 jobs:
   macos-12-compile-and-package:
     runs-on: macos-26
@@ -166,3 +170,21 @@ jobs:
             ${{ runner.temp }}/FloatTabsMontereyCandidateF/FloatTabs-0.1.3-Monterey-Candidate-F.dSYM.zip.sha256
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish Candidate F push validation status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          case "$JOB_STATUS" in
+            success) state=success ;;
+            *) state=failure ;;
+          esac
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="$state" \
+            -f context='candidate-f/monterey-compat' \
+            -f description="Candidate F ${JOB_STATUS}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
