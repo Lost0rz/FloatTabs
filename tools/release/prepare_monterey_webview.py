@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
+"""Stage 2: Monterey WebKit runtime and availability guards (app + tests).
+
+Removes the private `userAgent` KVC probe, availability-guards
+`isElementFullscreenEnabled`, and strips the `preferredContentMode` mutation
+from the Monterey-prepared source. All anchors validate exactly one match.
+"""
+
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from monterey_transform_lib import (
+    read_source,
+    replace_exact_once,
+    replace_once_regex,
+    replace_span_once,
+    require_absent,
+    require_present,
+    write_source,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
-
-def replace_once(path: Path, old: str, new: str, marker: str) -> None:
-    text = path.read_text()
-    if marker in text:
-        return
-    if old not in text:
-        raise SystemExit(f"error: expected Monterey WebKit patch context not found in {path}")
-    path.write_text(text.replace(old, new, 1))
-
-
 source = ROOT / "FloatTabs/Web/WebViewFactory.swift"
+text = read_source(source)
 
 # Monterey runtime hardening: WKWebView's private KVC `userAgent` key is not a
 # public API contract. A missing KVC key throws an Objective-C exception rather
@@ -22,29 +33,11 @@ source = ROOT / "FloatTabs/Web/WebViewFactory.swift"
 # The Monterey package therefore uses the existing conservative WebKit UA token
 # fallback instead of probing the private key. The standard macOS 13+ package is
 # untouched by this compatibility preparation.
-replace_once(
-    source,
-    '''    @MainActor
-    static func webKitVersion() -> String {
-        if let cachedWebKitVersion {
-            return cachedWebKitVersion
-        }
-
-        let webView = WKWebView(frame: .zero)
-        guard let nativeUserAgent = webView.value(forKey: "userAgent") as? String,
-              let version = firstMatch(
-                pattern: #"AppleWebKit\\s*/\\s*([\\d.]+)"#,
-                in: nativeUserAgent
-              ) else {
-            cachedWebKitVersion = fallbackWebKit
-            return fallbackWebKit
-        }
-
-        cachedWebKitVersion = version
-        return version
-    }
-''',
-    '''    @MainActor
+text = replace_span_once(
+    text,
+    r"^    @MainActor\n    static func webKitVersion\(\) -> String \{",
+    r"^    static func chromeVersion\(\) -> String \{",
+    """    @MainActor
     static func webKitVersion() -> String {
         if let cachedWebKitVersion {
             return cachedWebKitVersion
@@ -57,18 +50,19 @@ replace_once(
         cachedWebKitVersion = fallbackWebKit
         return fallbackWebKit
     }
-''',
-    'Monterey compatibility build deliberately avoids private WKWebView',
+
+""",
+    label="WebViewFactory.webKitVersion KVC probe removal",
 )
 
-replace_once(
-    source,
-    "        configuration.preferences.isElementFullscreenEnabled = true\n",
+text = replace_once_regex(
+    text,
+    r"^        configuration\.preferences\.isElementFullscreenEnabled = true$",
     """        if #available(macOS 12.3, *) {
             configuration.preferences.isElementFullscreenEnabled = true
         }
 """,
-    "if #available(macOS 12.3, *) {\n            configuration.preferences.isElementFullscreenEnabled = true",
+    label="WebViewFactory element-fullscreen availability guard",
 )
 
 # WKWebpagePreferences.preferredContentMode is an iOS content-mode API in
@@ -79,78 +73,86 @@ replace_once(
 # exactly matches the real-Monterey A/B: no saved profile -> no WKWebView -> app
 # stays alive; saved active profile -> makeWebView() -> SIGILL/132. Remove the
 # preference mutation from the Monterey-prepared source entirely.
-replace_once(
-    source,
-    '''        configuration.defaultWebpagePreferences.preferredContentMode =
-            rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
-''',
-    '''        // Monterey compatibility: do not touch preferredContentMode.
-        // FloatTabs owns macOS Website Mode through its AppKit/WebView host.
-''',
-    'Monterey compatibility: do not touch preferredContentMode',
+text = replace_once_regex(
+    text,
+    r"        configuration\.defaultWebpagePreferences\.preferredContentMode =\s*"
+    r"            rendering\.effectiveWebsiteMode == \.desktop \? \.desktop : \.mobile",
+    """        // Monterey compatibility: do not touch preferredContentMode.
+        // FloatTabs owns macOS Website Mode through its AppKit/WebView host.""",
+    label="WebViewFactory preferredContentMode removal",
 )
+write_source(source, text)
 
-prepared_source = source.read_text()
-if 'value(forKey: "userAgent")' in prepared_source:
-    raise SystemExit("error: Monterey source still contains private WKWebView userAgent KVC")
-if 'defaultWebpagePreferences.preferredContentMode' in prepared_source:
-    raise SystemExit("error: Monterey source still mutates WKWebpagePreferences.preferredContentMode")
+prepared_source = read_source(source)
+require_absent(
+    prepared_source,
+    'value(forKey: "userAgent")',
+    label="Monterey WebViewFactory private KVC",
+)
+require_absent(
+    prepared_source,
+    "defaultWebpagePreferences.preferredContentMode",
+    label="Monterey WebViewFactory preferredContentMode",
+)
 
 # Both macOS layout hosts carry the same fallback read. FloatTabsWebView itself
 # always owns Website Mode; a non-FloatTabs fallback is conservatively desktop,
 # matching Safari/WebKit's native Mac behavior without touching the iOS-oriented
 # content-mode preference.
 container = ROOT / "FloatTabs/Web/WebViewContainer.swift"
-container_old = '''        let mode = (webView as? FloatTabsWebView)?.websiteMode
+container_old = """        let mode = (webView as? FloatTabsWebView)?.websiteMode
             ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
                 ? .mobile
                 : .desktop)
-'''
-container_new = '''        let mode = (webView as? FloatTabsWebView)?.websiteMode ?? .desktop
+"""
+container_new = """        let mode = (webView as? FloatTabsWebView)?.websiteMode ?? .desktop
         // Monterey compatibility: macOS fallback stays desktop without reading
         // WKWebpagePreferences.preferredContentMode.
-'''
-container_marker = 'Monterey compatibility: macOS fallback stays desktop without reading'
-container_text = container.read_text()
-if container_marker not in container_text:
-    count = container_text.count(container_old)
-    if count != 2:
-        raise SystemExit(
-            f"error: expected exactly 2 Monterey preferredContentMode fallbacks in {container}, found {count}"
-        )
-    container.write_text(container_text.replace(container_old, container_new))
-prepared_container = container.read_text()
-if 'defaultWebpagePreferences.preferredContentMode' in prepared_container:
-    raise SystemExit("error: Monterey container still references WKWebpagePreferences.preferredContentMode")
+"""
+text = read_source(container)
+text = replace_exact_once(
+    text,
+    container_old,
+    container_new,
+    expected=2,
+    label="WebViewContainer preferredContentMode fallbacks",
+)
+write_source(container, text)
+require_absent(
+    read_source(container),
+    "defaultWebpagePreferences.preferredContentMode",
+    label="Monterey WebViewContainer preferredContentMode",
+)
 
 tests = ROOT / "FloatTabsTests/WebViewFactoryTests.swift"
-replace_once(
-    tests,
-    "        XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)\n",
+text = read_source(tests)
+text = replace_once_regex(
+    text,
+    r"^        XCTAssertTrue\(webView\.configuration\.preferences\.isElementFullscreenEnabled\)$",
     """        if #available(macOS 12.3, *) {
             XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
-        }
-""",
-    "if #available(macOS 12.3, *) {\n            XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled",
+        }""",
+    label="WebViewFactoryTests stage-zero fullscreen assertion guard",
 )
-replace_once(
-    tests,
-    "        configuration.preferences.isElementFullscreenEnabled = true\n",
+text = replace_once_regex(
+    text,
+    r"^        configuration\.preferences\.isElementFullscreenEnabled = true$",
     """        if #available(macOS 12.3, *) {
             configuration.preferences.isElementFullscreenEnabled = true
-        }
-""",
-    "if #available(macOS 12.3, *) {\n            configuration.preferences.isElementFullscreenEnabled = true",
+        }""",
+    label="WebViewFactoryTests policy-webview fullscreen guard",
 )
-replace_once(
-    tests,
-    "        XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)\n",
-    "        // Monterey: Website Mode is verified through UA/viewport behavior, not preferredContentMode.\n",
-    "Monterey: Website Mode is verified through UA/viewport behavior, not preferredContentMode",
+text = replace_once_regex(
+    text,
+    r"^        XCTAssertEqual\(webView\.configuration\.defaultWebpagePreferences\.preferredContentMode, \.mobile\)$",
+    "        // Monterey: Website Mode is verified through UA/viewport behavior, not preferredContentMode.",
+    label="WebViewFactoryTests preferredContentMode assertion",
 )
-
-prepared_tests = tests.read_text()
-if 'defaultWebpagePreferences.preferredContentMode' in prepared_tests:
-    raise SystemExit("error: Monterey tests still reference WKWebpagePreferences.preferredContentMode")
+write_source(tests, text)
+require_absent(
+    read_source(tests),
+    "XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode",
+    label="Monterey WebViewFactoryTests preferredContentMode assertion",
+)
 
 print("Applied Monterey WebKit runtime and availability guards to app and tests.")

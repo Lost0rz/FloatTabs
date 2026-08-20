@@ -1,316 +1,953 @@
 #!/usr/bin/env python3
+"""Stage 6: isolated Monterey Compatibility Edition runtime semantics.
+
+Collapses every dual-path (macOS 13+ / Monterey) branch left by stages 1-5 to
+the Monterey-only behavior, reduces final WebView construction to a stock
+WKWebView (no FloatTabsWebView rendering layer, no setRendering during
+construction), adapts the test suite to the compatibility contract, and runs
+the final static isolation checks.
+"""
+
+import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from monterey_transform_lib import (
+    read_source,
+    replace_once_regex,
+    replace_span_once,
+    require_absent,
+    require_present,
+    span_of,
+    write_source,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
-
-def replace_required(path: Path, old: str, new: str, description: str) -> None:
-    text = path.read_text()
-    if old not in text:
-        raise SystemExit(f"error: expected {description} context not found in {path}")
-    path.write_text(text.replace(old, new, 1))
-
+DOTALL = re.MULTILINE | re.DOTALL
 
 # ---------------------------------------------------------------------------
-# Monterey Compatibility Edition isolation contract
-# ---------------------------------------------------------------------------
-# This script runs only inside the dedicated Monterey compatibility build.
-# It intentionally removes the macOS 13+ runtime branches introduced by the
-# compile-compatibility preparation scripts. The standard product keeps those
-# behaviors in the untouched repository source / standard release line.
-#
-# Compatibility Edition = Monterey behavior only.
-# Standard Edition      = existing macOS 13+ behavior only.
-# ---------------------------------------------------------------------------
-
 # FloatingPanel: Monterey never adopts the macOS-13-only collection behavior.
+# ---------------------------------------------------------------------------
 floating = ROOT / "FloatTabs/Panel/FloatingPanel.swift"
-replace_required(
-    floating,
-    '''    private static var ordinaryCollectionBehavior: NSWindow.CollectionBehavior {
-        var behavior: NSWindow.CollectionBehavior = [
-            .canJoinAllSpaces,
-            .ignoresCycle,
-        ]
-        if #available(macOS 13.0, *) {
-            behavior.insert(.canJoinAllApplications)
-        }
-        return behavior
-    }
-''',
-    '''    // Monterey Compatibility Edition intentionally keeps a Monterey-only
+text = read_source(floating)
+text = replace_span_once(
+    text,
+    r"^    private static var ordinaryCollectionBehavior: NSWindow\.CollectionBehavior \{",
+    r"^    private static let fullscreenCompanionCollectionBehavior",
+    """    // Monterey Compatibility Edition intentionally keeps a Monterey-only
     // collection behavior. Standard macOS 13+ behavior lives in the standard
     // release and is not carried inside this compatibility package.
     private static let ordinaryCollectionBehavior: NSWindow.CollectionBehavior = [
         .canJoinAllSpaces,
         .ignoresCycle,
     ]
-''',
-    "dual-path FloatingPanel collection behavior",
+
+""",
+    label="FloatingPanel Monterey-only collection behavior",
+)
+write_source(floating, text)
+
+# ---------------------------------------------------------------------------
+# FullscreenSourceHost: no modern observer, no polling loop. Preserve the
+# ordinary source-window geometry/presentation helpers because normal browser
+# hosting needs them even with element fullscreen disabled.
+# ---------------------------------------------------------------------------
+fullscreen = ROOT / "FloatTabs/Panel/FullscreenSourceHost.swift"
+text = read_source(fullscreen)
+
+text = replace_once_regex(
+    text,
+    r"        if #available\(macOS 13\.0, \*\) \{\s*"
+    r"observeModernFullscreenState\(of: webView\)\s*"
+    r"\} else \{.*?"
+    r"legacyFullscreenPollGeneration &\+= 1\s*"
+    r"\}",
+    """        // Monterey Compatibility Edition: fullscreen observation is disabled.
+        // The standard release owns the modern fullscreen implementation.
+        legacyFullscreenPollGeneration &+= 1""",
+    label="FullscreenSourceHost disabled observation stub",
+    flags=DOTALL,
 )
 
-# Fullscreen: the compatibility edition carries neither the modern observer nor
-# the synthetic Monterey polling loop. Preserve the ordinary source-window
-# geometry/presentation helpers because they are also required by normal browser
-# hosting even when element fullscreen itself is disabled.
-fullscreen = ROOT / "FloatTabs/Panel/FullscreenSourceHost.swift"
-text = fullscreen.read_text()
-old_observe = '''        if #available(macOS 13.0, *) {
-            observeModernFullscreenState(of: webView)
-        } else {
-            // Monterey runtime safe mode: do not start the compatibility polling
-            // loop during ordinary WebView creation. The polling implementation
-            // is compile-valid but cannot be runtime-validated on GitHub's newer
-            // macOS runner. Element fullscreen is disabled for the Monterey
-            // compatibility package below, so there is no state to infer here.
-            legacyFullscreenPollGeneration &+= 1
-        }
-'''
-new_observe = '''        // Monterey Compatibility Edition: fullscreen observation is disabled.
-        // The standard release owns the modern fullscreen implementation.
-        legacyFullscreenPollGeneration &+= 1
-'''
-if old_observe not in text:
-    raise SystemExit("error: expected dual-path fullscreen observation context not found")
-text = text.replace(old_observe, new_observe, 1)
+# Remove only the modern FullscreenState adapter; the state enum itself stays
+# because handleFullscreenStateChange is ordinary source-host infrastructure.
+text = replace_span_once(
+    text,
+    r"^@available\(macOS 13\.0, \*\)\nprivate extension FullscreenWebKitState",
+    r"^enum FullscreenSourceSessionState",
+    "",
+    label="FullscreenSourceHost modern state adapter removal",
+)
 
-modern_extension_start = text.find("@available(macOS 13.0, *)\nprivate extension FullscreenWebKitState")
-modern_extension_end = text.find("enum FullscreenSourceSessionState", modern_extension_start)
-if modern_extension_start < 0 or modern_extension_end < 0:
-    raise SystemExit("error: modern FullscreenState adapter boundaries not found")
-text = text[:modern_extension_start] + text[modern_extension_end:]
+# Remove the modern observer and the synthetic polling helpers. Do not slice
+# through sourceFrame/makeSourceWindow/presentation detection.
+text = replace_span_once(
+    text,
+    r"^    @available\(macOS 13\.0, \*\)\n    private func observeModernFullscreenState",
+    r"^    private func startLegacyFullscreenPolling",
+    "",
+    label="FullscreenSourceHost modern observer removal",
+)
+text = replace_span_once(
+    text,
+    r"^    private func startLegacyFullscreenPolling",
+    r"^    static func sourceFrame\(",
+    "",
+    label="FullscreenSourceHost legacy polling removal",
+)
+write_source(fullscreen, text)
 
-# Remove only the modern observer and the synthetic polling helpers. Do not slice
-# through sourceFrame/makeSourceWindow/presentation detection: those helpers are
-# ordinary source-host infrastructure and are needed even with fullscreen off.
-modern_helper_start = text.find("    @available(macOS 13.0, *)\n    private func observeModernFullscreenState")
-legacy_helper_start = text.find("    private func startLegacyFullscreenPolling", modern_helper_start)
-if modern_helper_start < 0 or legacy_helper_start < 0:
-    raise SystemExit("error: modern fullscreen observer boundaries not found")
-text = text[:modern_helper_start] + text[legacy_helper_start:]
-
-legacy_helper_start = text.find("    private func startLegacyFullscreenPolling")
-source_frame_start = text.find("    static func sourceFrame(", legacy_helper_start)
-if legacy_helper_start < 0 or source_frame_start < 0:
-    raise SystemExit("error: legacy polling/source-host helper boundaries not found")
-text = text[:legacy_helper_start] + text[source_frame_start:]
-fullscreen.write_text(text)
-
-# WebViewFactory: make the compatibility package a Monterey-only implementation
-# rather than a dual macOS12/macOS13 binary behavior switch.
+# ---------------------------------------------------------------------------
+# WebViewFactory: Monterey-only implementation with a fully stock public
+# WebKit construction path.
+# ---------------------------------------------------------------------------
 web_factory = ROOT / "FloatTabs/Web/WebViewFactory.swift"
-text = web_factory.read_text()
-start = text.find("    static func makeWebView(\n")
-end = text.find("    static func makeStageZeroWebView()", start)
-if start < 0 or end < 0:
-    raise SystemExit("error: WebViewFactory.makeWebView boundaries not found")
-compat_make = '''    static func makeWebView(
+text = read_source(web_factory)
+
+compat_make = """    static func makeWebView(
         renderingProfile: WebRenderingProfile = .canonicalDefault
     ) -> WKWebView {
-        let rendering = renderingProfile.normalized()
-
-        // Monterey Compatibility Edition: keep construction deliberately close
-        // to stock WKWebViewConfiguration. The standard release separately owns
-        // UA overrides, preferredContentMode, injected scrollbar policy, and
-        // element-fullscreen behavior.
+        // Monterey Compatibility Edition: fully stock public WebKit path. The
+        // standard release separately owns UA overrides, content-mode
+        // selection, injected scrollbar policy, element-fullscreen behavior,
+        // and the custom rendering layer.
         NSLog("[FloatTabs Monterey] WebViewFactory.makeWebView begin")
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
-        let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
-        webView.setRendering(
-            websiteMode: rendering.effectiveWebsiteMode,
-            userPageZoom: rendering.zoom
-        )
         NSLog("[FloatTabs Monterey] WebViewFactory.makeWebView ready")
         return webView
     }
 
-'''
-text = text[:start] + compat_make + text[end:]
+"""
+text = replace_span_once(
+    text,
+    r"^    static func makeWebView\(",
+    r"^    static func makeStageZeroWebView\(",
+    compat_make,
+    label="WebViewFactory stock WKWebView construction",
+)
 
-old_runtime = '''    static func applyRuntimeRendering(
+text = replace_span_once(
+    text,
+    r"^    static func applyRuntimeRendering\(\n        _ renderingProfile: WebRenderingProfile,\n        to webView: WKWebView\n    \) \{",
+    r"^    /// AppKit scrollers stay visually disabled",
+    """    static func applyRuntimeRendering(
         _ renderingProfile: WebRenderingProfile,
         to webView: WKWebView
     ) {
-        if #available(macOS 13.0, *) {
-            applyRuntimeRendering(
-                renderingProfile,
-                to: webView,
-                versions: .current
-            )
-            return
-        }
-
-        let rendering = renderingProfile.normalized()
-        if let floatTabsWebView = webView as? FloatTabsWebView {
-            floatTabsWebView.setRendering(
-                websiteMode: rendering.effectiveWebsiteMode,
-                userPageZoom: rendering.zoom
-            )
-        } else {
-            webView.pageZoom = rendering.zoom
-        }
+        // Monterey Compatibility Edition intentionally leaves stock WKWebView
+        // rendering untouched. Persisted rendering metadata remains available
+        // to the profile/editor, but it has no runtime WebKit effect here.
+        _ = renderingProfile
+        _ = webView
     }
-'''
-new_runtime = '''    static func applyRuntimeRendering(
+
+    static func applyRuntimeRendering(
         _ renderingProfile: WebRenderingProfile,
-        to webView: WKWebView
+        to webView: WKWebView,
+        versions: BrowserVersionCatalog
     ) {
-        let rendering = renderingProfile.normalized()
-        if let floatTabsWebView = webView as? FloatTabsWebView {
-            floatTabsWebView.setRendering(
-                websiteMode: rendering.effectiveWebsiteMode,
-                userPageZoom: rendering.zoom
-            )
-        } else {
-            webView.pageZoom = rendering.zoom
-        }
+        // Keep the overload for source compatibility; Monterey does not apply
+        // UA, Website Mode, zoom, content mode, or scroll-hierarchy changes.
+        _ = renderingProfile
+        _ = webView
+        _ = versions
     }
-'''
-if old_runtime not in text:
-    raise SystemExit("error: dual-path runtime rendering context not found")
-text = text.replace(old_runtime, new_runtime, 1)
 
-old_scrollers = '''    static func configureHiddenScrollers(in webView: WKWebView) {
-        guard #available(macOS 13.0, *) else { return }
-        for scrollView in descendantScrollViews(in: webView) {
-            guard needsHiddenScrollerConfiguration(scrollView) else { continue }
-            configureHiddenScrollerStyle(scrollView)
-        }
+""",
+    label="WebViewFactory Monterey-only runtime rendering",
+)
+write_source(web_factory, text)
+
+# Monterey keeps persisted rendering metadata but none of those settings have
+# a runtime WebKit effect. Make the compatibility-only rebuild decision a no-op
+# so warm slots are never destructively recreated for inert profile changes.
+profile = ROOT / "FloatTabs/Tabs/WebRenderingProfile.swift"
+text = read_source(profile)
+text = replace_span_once(
+    text,
+    r"^    func requiresWebViewRebuild\(comparedTo previous: WebRenderingProfile\) -> Bool \{",
+    r"^    private enum CodingKeys:",
+    """    func requiresWebViewRebuild(comparedTo previous: WebRenderingProfile) -> Bool {
+        // Monterey Compatibility Edition has no runtime rendering mutation;
+        // profile metadata changes therefore never require WKWebView rebuild.
+        _ = previous
+        return false
     }
-'''
-new_scrollers = '''    static func configureHiddenScrollers(in webView: WKWebView) {
+
+""",
+    label="WebRenderingProfile Monterey no-op rebuild decision",
+)
+write_source(profile, text)
+text = read_source(web_factory)
+
+text = replace_once_regex(
+    text,
+    r"    static func configureHiddenScrollers\(in webView: WKWebView\) \{\s*"
+    r"guard #available\(macOS 13\.0, \*\) else \{ return \}\s*"
+    r"for scrollView in descendantScrollViews\(in: webView\) \{\s*"
+    r"guard needsHiddenScrollerConfiguration\(scrollView\) else \{ continue \}\s*"
+    r"configureHiddenScrollerStyle\(scrollView\)\s*"
+    r"\}\s*"
+    r"\}",
+    """    static func configureHiddenScrollers(in webView: WKWebView) {
         // Monterey Compatibility Edition intentionally leaves WebKit's internal
         // AppKit scroll hierarchy untouched.
-    }
-'''
-if old_scrollers not in text:
-    raise SystemExit("error: dual-path hidden-scroller context not found")
-text = text.replace(old_scrollers, new_scrollers, 1)
-web_factory.write_text(text)
+    }""",
+    label="WebViewFactory no-op hidden scrollers",
+)
+write_source(web_factory, text)
 
-# Panel restore / typed-address persistence: compatibility semantics are used
-# unconditionally inside this edition. Standard semantics remain in standard
-# source and are not embedded behind an availability branch here.
+# ---------------------------------------------------------------------------
+# PanelController restore / typed-address persistence: compatibility semantics
+# are used unconditionally inside this edition.
+# ---------------------------------------------------------------------------
 panel = ROOT / "FloatTabs/Panel/PanelController.swift"
-text = panel.read_text()
-old_init = '''        if #available(macOS 13.0, *) {
-            synchronizeSlotState()
-        } else {
-            // Monterey lazy restore: do not create/load a saved WKWebView while
-            // PanelController itself is being initialized. showFloatTabs()
-            // performs the first full synchronization after user presentation.
-            NSLog("[FloatTabs Monterey] PanelController initialized without WebView restore")
-        }
-'''
-new_init = '''        // Monterey Compatibility Edition defers saved WebView restoration until
+text = read_source(panel)
+text = replace_once_regex(
+    text,
+    r"        if #available\(macOS 13\.0, \*\) \{\s*"
+    r"synchronizeSlotState\(\)\s*"
+    r"\} else \{.*?"
+    r"PanelController initialized without WebView restore\"\)\s*"
+    r"\}",
+    """        // Monterey Compatibility Edition defers saved WebView restoration until
         // explicit presentation; the standard release keeps its own eager path.
-        NSLog("[FloatTabs Monterey] PanelController initialized without WebView restore")
-'''
-if old_init not in text:
-    raise SystemExit("error: dual-path PanelController restore context not found")
-text = text.replace(old_init, new_init, 1)
-
-old_nav = '''        if #available(macOS 13.0, *) {
-            tabStore.updateCurrentURL(id: id, url: normalized.url)
-        } else {
-            NSLog("[FloatTabs Monterey] address commit begin slot=%@", id.uuidString)
-        }
+        NSLog("[FloatTabs Monterey] PanelController initialized without WebView restore")""",
+    label="PanelController Monterey-only lazy restore",
+    flags=DOTALL,
+)
+text = replace_once_regex(
+    text,
+    r"        if #available\(macOS 13\.0, \*\) \{\s*"
+    r"tabStore\.updateCurrentURL\(id: id, url: normalized\.url\)\s*"
+    r"\} else \{\s*"
+    r"NSLog\(\"\[FloatTabs Monterey\] address commit begin slot=%@\", id\.uuidString\)\s*"
+    r"\}\s*"
+    r"webViewPool\.navigate\(\s*"
+    r"slotID: id,\s*"
+    r"to: normalized\.url,\s*"
+    r"allowHTTPEntryFallback: normalized\.schemeWasInferred\s*"
+    r"\)\s*"
+    r"if #available\(macOS 13\.0, \*\) \{.*?"
+    r"address navigation submitted slot=%@\", id\.uuidString\)\s*"
+    r"\}",
+    """        NSLog("[FloatTabs Monterey] address commit begin slot=%@", id.uuidString)
         webViewPool.navigate(
             slotID: id,
             to: normalized.url,
             allowHTTPEntryFallback: normalized.schemeWasInferred
         )
-        if #available(macOS 13.0, *) {
-            // Preserve the accepted modern navigation/persistence sequence.
-        } else {
-            NSLog("[FloatTabs Monterey] address navigation submitted slot=%@", id.uuidString)
-        }
-'''
-new_nav = '''        NSLog("[FloatTabs Monterey] address commit begin slot=%@", id.uuidString)
-        webViewPool.navigate(
-            slotID: id,
-            to: normalized.url,
-            allowHTTPEntryFallback: normalized.schemeWasInferred
-        )
-        NSLog("[FloatTabs Monterey] address navigation submitted slot=%@", id.uuidString)
-'''
-if old_nav not in text:
-    raise SystemExit("error: dual-path typed-address context not found")
-text = text.replace(old_nav, new_nav, 1)
-panel.write_text(text)
+        NSLog("[FloatTabs Monterey] address navigation submitted slot=%@", id.uuidString)""",
+    label="PanelController Monterey-only typed address",
+    flags=DOTALL,
+)
+write_source(panel, text)
 
+# ---------------------------------------------------------------------------
+# SlotNavigationObserver: committed-URL persistence only.
+# ---------------------------------------------------------------------------
 observer = ROOT / "FloatTabs/Web/SlotNavigationObserver.swift"
-text = observer.read_text()
-obs_start = text.find("        if #available(macOS 13.0, *) {\n            observation = webView.observe(\\.url")
-obs_end = text.find("\n\n        webView.navigationDelegate = self", obs_start)
-if obs_start < 0 or obs_end < 0:
-    raise SystemExit("error: dual-path URL observation boundaries not found")
-compat_observer = '''        // Monterey Compatibility Edition persists only committed URLs.
-        NSLog("[FloatTabs Monterey] navigation observer ready slot=%@", slotID.uuidString)'''
-text = text[:obs_start] + compat_observer + text[obs_end:]
+text = read_source(observer)
+text = replace_span_once(
+    text,
+    r"^        if #available\(macOS 13\.0, \*\) \{\s*observation = webView\.observe\(",
+    r"\n\n        webView\.navigationDelegate = self",
+    """        // Monterey Compatibility Edition persists only committed URLs.
+        NSLog("[FloatTabs Monterey] navigation observer ready slot=%@", slotID.uuidString)""",
+    label="SlotNavigationObserver committed-only observation",
+)
+text = replace_once_regex(
+    text,
+    r"        if #available\(macOS 13\.0, \*\) \{\s*"
+    r"// URL KVO preserves the accepted modern persistence behavior\.\s*"
+    r"\} else if let url = webView\.url, WebAppURL\.isSafe\(url\) \{",
+    """        if let url = webView.url, WebAppURL.isSafe(url) {""",
+    label="SlotNavigationObserver Monterey-only committed persistence",
+)
+write_source(observer, text)
 
-old_commit = '''        if #available(macOS 13.0, *) {
-            // URL KVO preserves the accepted modern persistence behavior.
-        } else if let url = webView.url, WebAppURL.isSafe(url) {
-            NSLog("[FloatTabs Monterey] navigation committed slot=%@", slotID.uuidString)
-            onURLChange(slotID, url)
-        }
-'''
-new_commit = '''        if let url = webView.url, WebAppURL.isSafe(url) {
-            NSLog("[FloatTabs Monterey] navigation committed slot=%@", slotID.uuidString)
-            onURLChange(slotID, url)
-        }
-'''
-if old_commit not in text:
-    raise SystemExit("error: dual-path committed-URL context not found")
-text = text.replace(old_commit, new_commit, 1)
-observer.write_text(text)
+# ---------------------------------------------------------------------------
+# Test contract: the standard suite asserts standard-edition behaviors that
+# the compatibility edition intentionally strips. Adapt those expectations to
+# the Monterey contract so CI verifies the compatibility behavior itself.
+# ---------------------------------------------------------------------------
+tests = ROOT / "FloatTabsTests/WebViewFactoryTests.swift"
+text = read_source(tests)
 
-# Hard isolation assertions. These are intentionally stronger than availability
-# checks: the compatibility edition must not contain a second standard runtime
-# branch in the areas we are hardening.
-prepared_floating = floating.read_text()
-prepared_fullscreen = fullscreen.read_text()
-prepared_web = web_factory.read_text()
-prepared_panel = panel.read_text()
-prepared_observer = observer.read_text()
+text = replace_once_regex(
+    text,
+    r"        if #available\(macOS 12\.3, \*\) \{\s*"
+    r"XCTAssertTrue\(webView\.configuration\.preferences\.isElementFullscreenEnabled\)\s*"
+    r"\}",
+    """        if #available(macOS 12.3, *) {
+            // Monterey Compatibility Edition: element fullscreen is never
+            // enabled by this package, so the preference stays off.
+            XCTAssertFalse(webView.configuration.preferences.isElementFullscreenEnabled)
+        }""",
+    label="WebViewFactoryTests stage-zero fullscreen contract",
+)
 
-if ".canJoinAllApplications" in prepared_floating:
-    raise SystemExit("error: standard macOS 13 collection behavior leaked into compatibility edition")
-if "observeModernFullscreenState" in prepared_fullscreen:
-    raise SystemExit("error: modern fullscreen observer leaked into compatibility edition")
-if "WKWebView.FullscreenState" in prepared_fullscreen:
-    raise SystemExit("error: modern FullscreenState API leaked into compatibility edition")
+text = replace_span_once(
+    text,
+    r"^    func testAutomaticMobileUsesCurrentIPhoneSafariIdentity\(\) \{",
+    r"^    func testWebsiteLayoutViewportMapsVisibleWidthsToDistinctDesktopExperiences\(",
+    """    func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingZoom(1.25)
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+
+        // Monterey Compatibility Edition: stock WKWebView baseline. Construction
+        // applies no UA identity, no content-mode preference, and no rendering
+        // layer; WebKit owns its native user agent and default zoom.
+        XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
+        XCTAssertFalse(webView is FloatTabsWebView)
+        XCTAssertTrue((webView.customUserAgent ?? "").isEmpty)
+        XCTAssertTrue((webView.configuration.applicationNameForUserAgent ?? "").isEmpty)
+
+        loadTestHTML(in: webView)
+        let hasMobileRuntimeIdentity = evaluateNumber(
+            "navigator.userAgent.includes('iPhone') ? 1 : 0",
+            in: webView
+        )
+        XCTAssertEqual(hasMobileRuntimeIdentity, 0, accuracy: 0.001)
+        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
+    }
+
+""",
+    label="WebViewFactoryTests mobile identity contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testMediumDesktopHostUsesBalancedLogicalLayoutWithoutPageZoomFit\(\) \{",
+    r"^    func testVisibleResizeMovesBetweenDesktopExperienceClassesWithoutPageZoomFit\(",
+    """    func testMediumDesktopHostUsesBalancedLogicalLayoutWithoutPageZoomFit() {
+        let webView = WebViewFactory.makeWebView(renderingProfile: .canonicalDefault)
+        let container = host(webView, visibleSize: NSSize(width: 600, height: 820))
+
+        // Monterey Compatibility Edition: desktop hosting stays on the stock
+        // WKWebView; there is no FloatTabsWebView layout-scale participant.
+        XCTAssertEqual(container.bounds.size, NSSize(width: 600, height: 820))
+        XCTAssertEqual(webView.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.height, 1400, accuracy: 0.001)
+        XCTAssertEqual(webView.bounds.size, webView.frame.size)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
+        XCTAssertEqual(webView.magnification, 1, accuracy: 0.001)
+    }
+
+""",
+    label="WebViewFactoryTests medium desktop host contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testMobileModeRemainsNativeOneToOneAtWideWindowSize\(\) \{",
+    r"^    func testDesktopHostMapsVisibleCenterIntoLogicalWebCoordinates\(",
+    """    func testMobileModeFallsBackToDesktopClassHostingOnStockWebView() {
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingSimplePreset(.wide)
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        let container = host(webView, visibleSize: NSSize(width: 1080, height: 850))
+        loadTestHTML(in: webView)
+
+        // Monterey Compatibility Edition: the stock WKWebView carries no
+        // Website Mode, so hosting conservatively maps the visible surface to
+        // the standard desktop experience class instead of native 1:1.
+        let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
+        XCTAssertEqual(container.bounds.width, 1080, accuracy: 0.001)
+        XCTAssertEqual(webView.frame.width, 1440, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
+        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
+        XCTAssertEqual(cssWidth, 1440, accuracy: 3)
+    }
+
+""",
+    label="WebViewFactoryTests mobile host fallback contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testUserZoomStaysIndependentFromDesktopHostLayoutFit\(\) \{",
+    r"^    func testNavigationObserverRestoresWebsiteModeWithoutDiscardingUserZoom\(",
+    """    func testUserZoomStaysIndependentFromDesktopHostLayoutFit() {
+        // Monterey Compatibility Edition: construction and warm reuse never
+        // apply persisted rendering metadata to the stock WKWebView.
+        let desktopRendering = WebRenderingProfile.canonicalDefault.settingZoom(1.25)
+        let desktopWebView = WebViewFactory.makeWebView(renderingProfile: desktopRendering)
+        let desktopContainer = host(desktopWebView, visibleSize: NSSize(width: 600, height: 820))
+
+        XCTAssertEqual(desktopContainer.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertEqual(desktopWebView.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(desktopWebView.pageZoom, 1, accuracy: 0.001)
+        XCTAssertEqual(desktopWebView.magnification, 1, accuracy: 0.001)
+
+        let mobileRendering = desktopRendering
+            .settingWebsiteMode(.mobile)
+            .settingSimplePreset(.wide)
+        let mobileWebView = WebViewFactory.makeWebView(renderingProfile: mobileRendering)
+        let mobileContainer = host(mobileWebView, visibleSize: NSSize(width: 1080, height: 850))
+
+        // Stock WKWebView hosting conservatively uses the desktop experience
+        // class; zoom stays neutral at construction in both modes.
+        XCTAssertEqual(mobileContainer.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
+        XCTAssertEqual(mobileWebView.frame.width, 1440, accuracy: 0.001)
+        XCTAssertEqual(mobileWebView.pageZoom, 1, accuracy: 0.001)
+        XCTAssertEqual(mobileWebView.magnification, 1, accuracy: 0.001)
+    }
+
+""",
+    label="WebViewFactoryTests zoom neutrality contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testNavigationObserverRestoresWebsiteModeWithoutDiscardingUserZoom\(\) \{",
+    r"^    func testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix\(",
+    """    func testNavigationObserverRestoresWebsiteModeWithoutDiscardingUserZoom() {
+        // Monterey Compatibility Edition: navigation finish must not mutate the
+        // stock WKWebView; there is no rendering layer to restore.
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingZoom(1.25)
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        _ = host(webView, visibleSize: NSSize(width: 900, height: 850))
+
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .mobile,
+            onURLChange: { _, _ in }
+        )
+        observer.webView(webView, didFinish: nil)
+
+        XCTAssertFalse(webView is FloatTabsWebView)
+        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
+    }
+
+""",
+    label="WebViewFactoryTests navigation observer contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix\(\) \{",
+    r"^    func testSafariCompatibilityIdentityUsesResolvedWebKitVersion\(",
+    """    func testMacOSSafariRuntimeUsesNativeWebKitUAWithSafariSuffix() {
+        // Monterey Compatibility Edition: the stock WKWebView keeps WebKit's
+        // native UA; no application-name suffix is applied at construction.
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingBrowserIdentity(.macosSafari)
+
+        XCTAssertNil(
+            UserAgentProvider.customUserAgent(
+                for: rendering,
+                versions: versions
+            )
+        )
+
+        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
+        XCTAssertTrue((webView.configuration.applicationNameForUserAgent ?? "").isEmpty)
+        XCTAssertTrue((webView.customUserAgent ?? "").isEmpty)
+    }
+
+""",
+    label="WebViewFactoryTests native UA contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testNavigationFinishRestoresHiddenScrollerPolicyAfterWebKitReenablesIt\(\) \{",
+    r"^    func testConfiguredScrollerIsCompletelyHiddenAtRest\(",
+    """    func testNavigationFinishRestoresHiddenScrollerPolicyAfterWebKitReenablesIt() {
+        // Monterey Compatibility Edition: WebKit's internal scroll hierarchy is
+        // deliberately untouched at navigation boundaries.
+        let webView = WebViewFactory.makeWebView()
+        let simulatedWebKitScrollView = NSScrollView(
+            frame: NSRect(x: 0, y: 0, width: 300, height: 500)
+        )
+        simulatedWebKitScrollView.scrollerStyle = .legacy
+        simulatedWebKitScrollView.autohidesScrollers = false
+        simulatedWebKitScrollView.hasVerticalScroller = true
+        simulatedWebKitScrollView.hasHorizontalScroller = true
+        webView.addSubview(simulatedWebKitScrollView)
+
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in }
+        )
+        observer.webView(webView, didFinish: nil)
+
+        XCTAssertEqual(simulatedWebKitScrollView.scrollerStyle, .legacy)
+        XCTAssertFalse(simulatedWebKitScrollView.autohidesScrollers)
+        XCTAssertTrue(simulatedWebKitScrollView.hasVerticalScroller)
+        XCTAssertTrue(simulatedWebKitScrollView.hasHorizontalScroller)
+    }
+
+""",
+    label="WebViewFactoryTests scroller neutrality contract",
+)
+
+text = replace_span_once(
+    text,
+    r"^    func testWebViewInstallsPermanentContentScrollbarSuppression\(\) \{",
+    r"^    func testContentScrollbarSuppressionPreservesDocumentScrolling\(",
+    """    func testWebViewInstallsPermanentContentScrollbarSuppression() {
+        // Monterey Compatibility Edition: no user scripts are injected; the
+        // scrollbar-suppression script belongs to the standard release only.
+        let webView = WebViewFactory.makeWebView()
+        XCTAssertTrue(webView.configuration.userContentController.userScripts.isEmpty)
+    }
+
+""",
+    label="WebViewFactoryTests no-injection contract",
+)
+
+text = replace_once_regex(
+    text,
+    r"^        XCTAssertEqual\(styleInstalled, 1, accuracy: 0\.001\)$",
+    """        // Monterey Compatibility Edition: nothing is injected, so the count
+        // must stay at zero while document scrolling keeps working.
+        XCTAssertEqual(styleInstalled, 0, accuracy: 0.001)""",
+    label="WebViewFactoryTests scrollbar style count contract",
+)
+write_source(tests, text)
+
+pool_tests = ROOT / "FloatTabsTests/WebViewPoolTests.swift"
+text = read_source(pool_tests)
+text = replace_once_regex(
+    text,
+    r"        XCTAssertEqual\(second\.pageZoom, 1\.25, accuracy: 0\.001\)$",
+    """        // Monterey Compatibility Edition: zoom metadata is persisted but
+        // runtime rendering is intentionally untouched on warm reuse.
+        XCTAssertEqual(second.pageZoom, first.pageZoom, accuracy: 0.001)""",
+    label="WebViewPoolTests zoom no-op contract",
+)
+text = replace_span_once(
+    text,
+    r"^    func testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL\(\) \{",
+    r"^    func testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL\(",
+    """    func testBrowserIdentityChangeDoesNotReplaceResidentSlotAndNavigationStillWorks() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(name: "Identity")
+        let firstView = pool.webView(for: profile)
+
+        profile.renderingProfile = profile.renderingProfile
+            .settingBrowserIdentity(.windowsChrome)
+        let reused = pool.webView(for: profile)
+        let destination = URL(string: "https://example.com/identity-change")!
+        pool.navigate(slotID: profile.id, to: destination)
+
+        XCTAssertTrue(firstView === reused)
+        XCTAssertTrue(reused.configuration.websiteDataStore.isPersistent)
+        XCTAssertTrue((reused.customUserAgent ?? "").isEmpty)
+        XCTAssertEqual(loadedRequests.count, 2)
+        XCTAssertEqual(loadedRequests.last?.url, destination)
+        XCTAssertEqual(pool.count, 1)
+    }
+
+""",
+    label="WebViewPoolTests browser identity no-op contract",
+)
+text = replace_span_once(
+    text,
+    r"^    func testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking\(\) \{",
+    r"^    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity\(",
+    """    func testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(name: "A")
+
+        // Monterey Compatibility Edition: inert Website Mode metadata does not
+        // replace the resident stock WKWebView or reload its navigation.
+        let desktop = pool.webView(for: profile)
+        let initialZoom = desktop.pageZoom
+        XCTAssertEqual(
+            desktop.configuration.defaultWebpagePreferences.preferredContentMode,
+            .recommended
+        )
+        XCTAssertTrue((desktop.configuration.applicationNameForUserAgent ?? "").isEmpty)
+        XCTAssertTrue((desktop.customUserAgent ?? "").isEmpty)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+        let mobile = pool.webView(for: profile)
+        XCTAssertTrue(desktop === mobile)
+        XCTAssertEqual(
+            mobile.configuration.defaultWebpagePreferences.preferredContentMode,
+            .recommended
+        )
+        XCTAssertTrue((mobile.customUserAgent ?? "").isEmpty)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
+        let desktopAgain = pool.webView(for: profile)
+        XCTAssertTrue(mobile === desktopAgain)
+        XCTAssertEqual(
+            desktopAgain.configuration.defaultWebpagePreferences.preferredContentMode,
+            .recommended
+        )
+        XCTAssertTrue((desktopAgain.configuration.applicationNameForUserAgent ?? "").isEmpty)
+        XCTAssertTrue((desktopAgain.customUserAgent ?? "").isEmpty)
+        XCTAssertEqual(desktopAgain.pageZoom, initialZoom, accuracy: 0.001)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertEqual(loadedRequests[0].cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(pool.count, 1)
+    }
+
+""",
+    label="WebViewPoolTests website-mode rebuild contract",
+)
+text = replace_span_once(
+    text,
+    r"^    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity\(\) \{",
+    r"^    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload\(",
+    """    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() {
+        // Monterey Compatibility Edition: the ChatGPT site policy still resolves
+        // a desktop-pointer runtime profile, but construction stays on the
+        // stock WKWebView without any UA override.
+        let pool = makePool()
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let webView = pool.webView(for: profile)
+
+        XCTAssertEqual(
+            webView.configuration.defaultWebpagePreferences.preferredContentMode,
+            .recommended
+        )
+        XCTAssertTrue((webView.customUserAgent ?? "").isEmpty)
+    }
+
+""",
+    label="WebViewPoolTests ChatGPT identity contract",
+)
+text = replace_span_once(
+    text,
+    r"^    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload\(\) \{",
+    r"^    func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity\(",
+    """    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload() {
+        // Monterey Compatibility Edition: warm reuse must not introduce a UA
+        // override on the stock WKWebView.
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        let first = pool.webView(for: profile)
+        let second = pool.webView(for: profile)
+        let third = pool.webView(for: profile)
+
+        XCTAssertTrue(first === second)
+        XCTAssertTrue(second === third)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertTrue((first.customUserAgent ?? "").isEmpty)
+        XCTAssertTrue((second.customUserAgent ?? "").isEmpty)
+        XCTAssertTrue((third.customUserAgent ?? "").isEmpty)
+    }
+
+""",
+    label="WebViewPoolTests warm reuse contract",
+)
+text = replace_once_regex(
+    text,
+    r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+    """    func testMontereyPanelControllerDefersSavedWebViewRestoreUntilPresentation() {
+        _ = NSApplication.shared
+        let profile = makeProfile(name: "Saved")
+        let repository = MemoryProfileRepository(
+            state: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id
+            )
+        )
+        let tabStore = TabStore(repository: repository)
+        let pool = makePool()
+        let defaults = UserDefaults(
+            suiteName: "FloatTabsMontereyLazyRestore.\\(UUID().uuidString)"
+        )!
+        let controller = PanelController(
+            tabStore: tabStore,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(
+                defaults: defaults,
+                key: "FloatTabsMontereyLazyRestore.frame"
+            ),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+
+        // Monterey Compatibility Edition: initialization alone must not create
+        // or load the saved slot; presentation is the explicit restore boundary.
+        XCTAssertEqual(pool.count, 0)
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 1)
+        controller.hideFloatTabs()
+    }
+
+    func testMontereyWarmReuseDoesNotMutatePageZoomOrStockRendering() {
+        let pool = makePool()
+        var profile = makeProfile(name: "WarmRendering")
+        profile.renderingProfile = profile.renderingProfile
+            .settingWebsiteMode(.mobile)
+            .settingBrowserIdentity(.iphoneChrome)
+            .settingZoom(1.25)
+
+        let initial = pool.webView(for: profile)
+        initial.pageZoom = 1.35
+        let reused = pool.webView(for: profile)
+
+        XCTAssertTrue(initial === reused)
+        XCTAssertFalse(initial is FloatTabsWebView)
+        XCTAssertEqual(initial.configuration.defaultWebpagePreferences.preferredContentMode, .recommended)
+        XCTAssertTrue((initial.configuration.applicationNameForUserAgent ?? "").isEmpty)
+        XCTAssertTrue((initial.customUserAgent ?? "").isEmpty)
+        XCTAssertEqual(reused.pageZoom, 1.35, accuracy: 0.001)
+    }
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
+    label="WebViewPoolTests warm rendering no-op contract",
+)
+write_source(pool_tests, text)
+
+tab_store_tests = ROOT / "FloatTabsTests/TabStoreTests.swift"
+text = read_source(tab_store_tests)
+text = replace_span_once(
+    text,
+    r"^    func testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild\(\) \{",
+    r"^}\n\nfinal class WebAppURLTests",
+    """    func testRenderingProfileChangesDoNotRequireWebViewRebuildInMontereyRuntime() {
+        let base = WebRenderingProfile.canonicalDefault
+
+        // Rendering metadata remains persisted and editable, but every WebKit
+        // rendering mutation is disabled in the Monterey compatibility edition.
+        XCTAssertFalse(base.settingZoom(1.25).requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingViewport(CGSize(width: 600, height: 800)).requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingDevicePreset(id: "iphone-17-pro").requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingBrowserIdentity(.windowsChrome).requiresWebViewRebuild(comparedTo: base))
+        XCTAssertFalse(base.settingWebsiteMode(.mobile).requiresWebViewRebuild(comparedTo: base))
+    }
+
+""",
+    label="TabStoreTests Monterey no-op rebuild contract",
+)
+write_source(tab_store_tests, text)
+
+geometry_tests = ROOT / "FloatTabsTests/WebsiteLayoutGeometryRegressionTests.swift"
+text = read_source(geometry_tests)
+text = replace_once_regex(
+    text,
+    r"^        XCTAssertEqual\(mainFrameStyleCount, 1, accuracy: 0\.001\)$",
+    """        // Monterey Compatibility Edition: no scrollbar-suppression style is
+        // injected, so the count must stay at zero.
+        XCTAssertEqual(mainFrameStyleCount, 0, accuracy: 0.001)""",
+    label="WebsiteLayoutGeometryRegressionTests injection contract",
+)
+write_source(geometry_tests, text)
+
+# ---------------------------------------------------------------------------
+# Final static contract: hard isolation assertions plus the stock-WKWebView
+# baseline. These are intentionally stronger than availability checks.
+# ---------------------------------------------------------------------------
+prepared_floating = read_source(floating)
+prepared_fullscreen = read_source(fullscreen)
+prepared_web = read_source(web_factory)
+prepared_panel = read_source(panel)
+prepared_observer = read_source(observer)
+prepared_tests = read_source(tests)
+prepared_pool_tests = read_source(pool_tests)
+prepared_geometry_tests = read_source(geometry_tests)
+
+require_absent(
+    prepared_floating,
+    ".canJoinAllApplications",
+    label="standard macOS 13 collection behavior leaked into compatibility edition",
+)
+require_absent(
+    prepared_fullscreen,
+    "observeModernFullscreenState",
+    label="modern fullscreen observer leaked into compatibility edition",
+)
+require_absent(
+    prepared_fullscreen,
+    "WKWebView.FullscreenState",
+    label="modern FullscreenState API leaked into compatibility edition",
+)
 for required_helper in [
     "static func sourceFrame(",
     "static func isWebKitFullscreenPresentationActive(",
     "private static func makeSourceWindow(",
 ]:
-    if required_helper not in prepared_fullscreen:
-        raise SystemExit(f"error: ordinary source-host helper was removed: {required_helper}")
+    require_present(
+        prepared_fullscreen,
+        required_helper,
+        label="ordinary source-host helper was removed",
+    )
+
+# The final WebViewFactory creation path must be a stock WKWebView.
+make_span = span_of(
+    prepared_web,
+    r"^    static func makeWebView\(",
+    r"^    static func makeStageZeroWebView\(",
+    label="final makeWebView span",
+)
+require_present(
+    make_span,
+    "WKWebView(frame:",
+    label="stock WKWebView construction missing from compatibility edition",
+)
 for forbidden in [
-    "configuration.preferences.isElementFullscreenEnabled = true",
-    "configuration.defaultWebpagePreferences.preferredContentMode =",
-    "configuration.applicationNameForUserAgent =",
+    "FloatTabsWebView(frame:",
+    ".setRendering(",
+    "preferredContentMode",
+    "applicationNameForUserAgent",
+    "isElementFullscreenEnabled",
+    "hiddenScrollbarUserScript",
     "BrowserVersionCatalog.current",
+    "if #available",
 ]:
-    make_end = prepared_web.find("    static func makeStageZeroWebView()")
-    if forbidden in prepared_web[:make_end]:
-        raise SystemExit(f"error: standard WebView behavior leaked into compatibility edition: {forbidden}")
-if "if #available(macOS 13.0, *)" in prepared_panel:
-    # PanelController may legitimately contain unrelated availability checks; only
-    # reject the ones surrounding the compatibility markers.
-    for marker in [
-        "PanelController initialized without WebView restore",
-        "address commit begin slot=",
-    ]:
-        marker_index = prepared_panel.find(marker)
-        nearby = prepared_panel[max(0, marker_index - 220): marker_index + 220]
-        if "if #available(macOS 13.0, *)" in nearby:
-            raise SystemExit(f"error: standard runtime branch still surrounds compatibility marker: {marker}")
-if "observation = webView.observe(\\.url" in prepared_observer:
-    raise SystemExit("error: provisional URL KVO leaked into compatibility edition")
+    require_absent(
+        make_span,
+        forbidden,
+        label=f"standard WebView behavior leaked into compatibility makeWebView: {forbidden}",
+    )
+
+runtime_rendering_span = span_of(
+    prepared_web,
+    r"^    static func applyRuntimeRendering\(\n        _ renderingProfile: WebRenderingProfile,\n        to webView: WKWebView\n    \) \{",
+    r"^    /// AppKit scrollers stay visually disabled",
+    label="final applyRuntimeRendering span",
+)
+for forbidden in [
+    ".setRendering(",
+    "pageZoom =",
+    "customUserAgent =",
+    "preferredContentMode",
+    "applicationNameForUserAgent",
+    "hiddenScrollbarUserScript",
+    "FloatTabsWebView",
+]:
+    require_absent(
+        runtime_rendering_span,
+        forbidden,
+        label=f"Monterey applyRuntimeRendering mutated stock WebKit: {forbidden}",
+    )
+require_present(
+    runtime_rendering_span,
+    "_ = renderingProfile\n        _ = webView",
+    label="Monterey applyRuntimeRendering no-op overload",
+)
+require_present(
+    read_source(profile),
+    "return false\n    }",
+    label="Monterey profile rebuild decision is not a no-op",
+)
+
+# No FloatTabsWebView may be constructed anywhere in the compatibility app.
+for source_path in sorted((ROOT / "FloatTabs").rglob("*.swift")):
+    require_absent(
+        source_path.read_text(),
+        "FloatTabsWebView(frame:",
+        label=f"FloatTabsWebView construction survived in {source_path.relative_to(ROOT)}",
+    )
+require_absent(
+    prepared_web,
+    "preferredContentMode",
+    label="preferredContentMode survived in compatibility WebViewFactory",
+)
+require_absent(
+    prepared_web,
+    "applicationNameForUserAgent",
+    label="applicationNameForUserAgent survived in compatibility WebViewFactory",
+)
+require_present(
+    prepared_web,
+    "final class FloatTabsWebView: WKWebView",
+    label="FloatTabsWebView type removed (peripheral as? paths must keep compiling)",
+)
+
+# Lazy restore semantics must survive.
+require_present(
+    prepared_panel,
+    "[FloatTabs Monterey] PanelController initialized without WebView restore",
+    label="lazy restore breadcrumb missing",
+)
+for marker in [
+    "PanelController initialized without WebView restore",
+    "address commit begin slot=",
+]:
+    marker_index = prepared_panel.find(marker)
+    nearby = prepared_panel[max(0, marker_index - 220): marker_index + 220]
+    require_absent(
+        nearby,
+        "if #available(macOS 13.0, *)",
+        label=f"standard runtime branch still surrounds compatibility marker: {marker}",
+    )
+require_absent(
+    prepared_observer,
+    "observation = webView.observe(\\.url",
+    label="provisional URL KVO leaked into compatibility edition",
+)
+require_present(
+    prepared_observer,
+    "[FloatTabs Monterey] navigation committed slot=",
+    label="committed-URL persistence missing",
+)
+
+# Test contract markers.
+for required_marker in [
+    "Monterey Compatibility Edition: stock WKWebView baseline",
+    "Monterey Compatibility Edition: desktop hosting stays on the stock",
+    "Monterey Compatibility Edition: navigation finish must not mutate the",
+]:
+    require_present(
+        prepared_tests,
+        required_marker,
+        label="WebViewFactoryTests compatibility contract missing",
+    )
+require_absent(
+    prepared_tests,
+    "= tryUnwrapFloatTabsWebView(",
+    label="WebViewFactoryTests still unwraps FloatTabsWebView",
+)
+require_present(
+    prepared_pool_tests,
+    "Monterey Compatibility Edition: inert Website Mode metadata does not",
+    label="WebViewPoolTests compatibility contract missing",
+)
+require_present(
+    prepared_pool_tests,
+    "testMontereyPanelControllerDefersSavedWebViewRestoreUntilPresentation",
+    label="WebViewPoolTests lazy restore contract missing",
+)
+require_present(
+    prepared_geometry_tests,
+    "XCTAssertEqual(mainFrameStyleCount, 0, accuracy: 0.001)",
+    label="WebsiteLayoutGeometryRegressionTests compatibility contract missing",
+)
 
 print("Applied isolated Monterey Compatibility Edition runtime semantics.")

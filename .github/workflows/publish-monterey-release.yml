@@ -41,7 +41,7 @@ jobs:
 
           changed="$(git diff --name-only "$STANDARD_BASE_SHA"...HEAD)"
           echo "$changed"
-          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(\.github/workflows/monterey-compat-ci\.yml|\.github/workflows/publish-monterey-release\.yml|docs/release/compatibility/.*|tools/release/build_monterey_dmg\.sh|tools/release/prepare_monterey_[A-Za-z0-9_]+\.py)$' || true)"
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^(\.github/workflows/monterey-compat-ci\.yml|\.github/workflows/publish-monterey-release\.yml|docs/release/compatibility/.*|tools/release/build_monterey_dmg\.sh|tools/release/monterey_transform_lib\.py|tools/release/prepare_monterey_[A-Za-z0-9_]+\.py)$' || true)"
           if [[ -n "$unexpected" ]]; then
             echo 'error: compatibility tag contains standard-edition source or unrelated changes:' >&2
             echo "$unexpected" >&2

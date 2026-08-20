@@ -1,18 +1,35 @@
 #!/usr/bin/env python3
+"""Stage 4: minimal macOS 12 WebView initialization path.
+
+makeWebView keeps the accepted macOS 13+ construction and adds a deliberately
+stock-like macOS 12 branch (no element-fullscreen opt-in, no content-mode
+mutation, no UA override, no scrollbar script, no WebKit view-hierarchy
+traversal). Stage 6 later collapses the function to the Monterey-only path.
+"""
+
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from monterey_transform_lib import (
+    read_source,
+    replace_once_regex,
+    replace_span_once,
+    require_absent,
+    require_present,
+    span_of,
+    write_source,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 path = ROOT / "FloatTabs/Web/WebViewFactory.swift"
-text = path.read_text()
+text = read_source(path)
 
-marker = "Monterey minimal WebView path"
-if marker not in text:
-    start = text.find("    static func makeWebView(\n")
-    end = text.find("    static func makeStageZeroWebView()", start)
-    if start < 0 or end < 0:
-        raise SystemExit("error: WebViewFactory.makeWebView boundaries not found")
+make_start = r"^    static func makeWebView\("
+make_end = r"^    static func makeStageZeroWebView\("
 
-    replacement = '''    static func makeWebView(
+replacement = """    static func makeWebView(
         renderingProfile: WebRenderingProfile = .canonicalDefault
     ) -> WKWebView {
         let rendering = renderingProfile.normalized()
@@ -55,22 +72,21 @@ if marker not in text:
         return webView
     }
 
-'''
-    text = text[:start] + replacement + text[end:]
+"""
+text = replace_span_once(
+    text,
+    make_start,
+    make_end,
+    replacement,
+    label="WebViewFactory.makeWebView minimal dual path",
+)
 
 # Later rendering changes must not re-introduce UA/version probing on Monterey.
-old_runtime = '''    static func applyRuntimeRendering(
-        _ renderingProfile: WebRenderingProfile,
-        to webView: WKWebView
-    ) {
-        applyRuntimeRendering(
-            renderingProfile,
-            to: webView,
-            versions: .current
-        )
-    }
-'''
-new_runtime = '''    static func applyRuntimeRendering(
+text = replace_span_once(
+    text,
+    r"^    static func applyRuntimeRendering\(\n        _ renderingProfile: WebRenderingProfile,\n        to webView: WKWebView\n    \) \{",
+    r"^    static func applyRuntimeRendering\(",
+    """    static func applyRuntimeRendering(
         _ renderingProfile: WebRenderingProfile,
         to webView: WKWebView
     ) {
@@ -93,49 +109,46 @@ new_runtime = '''    static func applyRuntimeRendering(
             webView.pageZoom = rendering.zoom
         }
     }
-'''
-if old_runtime in text:
-    text = text.replace(old_runtime, new_runtime, 1)
-elif new_runtime not in text:
-    raise SystemExit("error: applyRuntimeRendering compatibility context not found")
 
-old_scrollers = '''    static func configureHiddenScrollers(in webView: WKWebView) {
-        for scrollView in descendantScrollViews(in: webView) {
-            guard needsHiddenScrollerConfiguration(scrollView) else { continue }
-            configureHiddenScrollerStyle(scrollView)
-        }
-    }
-'''
-new_scrollers = '''    static func configureHiddenScrollers(in webView: WKWebView) {
+""",
+    label="WebViewFactory.applyRuntimeRendering dual path",
+)
+
+text = replace_once_regex(
+    text,
+    r"    static func configureHiddenScrollers\(in webView: WKWebView\) \{\s*"
+    r"for scrollView in descendantScrollViews\(in: webView\) \{\s*"
+    r"guard needsHiddenScrollerConfiguration\(scrollView\) else \{ continue \}\s*"
+    r"configureHiddenScrollerStyle\(scrollView\)\s*"
+    r"\}\s*"
+    r"\}",
+    """    static func configureHiddenScrollers(in webView: WKWebView) {
         guard #available(macOS 13.0, *) else { return }
         for scrollView in descendantScrollViews(in: webView) {
             guard needsHiddenScrollerConfiguration(scrollView) else { continue }
             configureHiddenScrollerStyle(scrollView)
         }
-    }
-'''
-if old_scrollers in text:
-    text = text.replace(old_scrollers, new_scrollers, 1)
-elif new_scrollers not in text:
-    raise SystemExit("error: hidden-scroller compatibility context not found")
+    }""",
+    label="WebViewFactory.configureHiddenScrollers dual path",
+)
+write_source(path, text)
 
-path.write_text(text)
-
-prepared = path.read_text()
-required = [
+prepared = read_source(path)
+for item in [
     "Monterey minimal WebView path",
     "guard #available(macOS 13.0, *) else { return }",
     "[FloatTabs Monterey] WebViewFactory.makeWebView begin",
     "configuration.defaultWebpagePreferences.preferredContentMode =",
-]
-for item in required:
-    if item not in prepared:
-        raise SystemExit(f"error: Monterey WebView hardening marker missing: {item}")
+]:
+    require_present(prepared, item, label="Monterey WebView hardening marker")
 
 # Verify the macOS 12 path itself contains none of the optional configuration.
-start = prepared.find("// Monterey minimal WebView path")
-end = prepared.find("    static func makeStageZeroWebView()", start)
-minimal = prepared[start:end]
+minimal = span_of(
+    prepared,
+    r"// Monterey minimal WebView path",
+    r"^    static func makeStageZeroWebView\(",
+    label="Monterey minimal path span",
+)
 for forbidden in [
     "isElementFullscreenEnabled",
     "preferredContentMode",
@@ -143,7 +156,6 @@ for forbidden in [
     "hiddenScrollbarUserScript",
     "BrowserVersionCatalog.current",
 ]:
-    if forbidden in minimal:
-        raise SystemExit(f"error: {forbidden} survived in Monterey minimal WebView path")
+    require_absent(minimal, forbidden, label=f"{forbidden} in Monterey minimal WebView path")
 
 print("Applied Monterey minimal WebView initialization path while preserving macOS 13+ behavior.")
