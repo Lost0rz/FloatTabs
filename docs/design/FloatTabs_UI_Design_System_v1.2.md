@@ -9,7 +9,11 @@ The current production interaction and geometry contract is:
 - repository `main` production code and regression tests
 - the current release record under `docs/release/`
 
-v1.2 remains part of Git history as the historical design baseline. Do not use its old collapsed-rail, Gear/FT persistence, rail timing, or early shell-geometry statements to override v1.3 or current code.
+The complete original v1.2 specification is preserved at:
+
+- [`archive/FloatTabs_UI_Design_System_v1.2.md`](archive/FloatTabs_UI_Design_System_v1.2.md)
+
+Do not use the archived file's old collapsed-rail, Gear/FT persistence, rail timing, or early shell-geometry statements to override v1.3 or current code.
 
 In particular, the following v1.2-era assumptions are no longer canonical:
 
