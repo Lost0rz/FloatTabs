@@ -258,7 +258,7 @@ final class ExternalControlZoneView: NSView {
             let slide = CABasicAnimation(keyPath: "transform.translation.x")
             slide.fromValue = collapsed ? 0 : translation
             slide.toValue = collapsed ? translation : 0
-            slide.duration = 0.26
+            slide.duration = ExternalTabMetrics.railFoldAnimationDuration
             slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.78, 0.22, 1)
             layer.add(slide, forKey: "FloatTabs.railFoldSlide")
         }
@@ -686,7 +686,7 @@ final class RailFoldControl: NSView {
             let fold = CABasicAnimation(keyPath: "path")
             fold.fromValue = oldPaths[index]
             fold.toValue = newPath
-            fold.duration = 0.25
+            fold.duration = ExternalTabMetrics.railFoldAnimationDuration
             fold.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.82, 0.2, 1)
             stroke.add(fold, forKey: "FloatTabs.railGripFold")
         }
