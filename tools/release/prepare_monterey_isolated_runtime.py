@@ -341,9 +341,9 @@ text = replace_once_regex(
 write_source(panel, text)
 
 # ---------------------------------------------------------------------------
-# Candidate C first-presentation probes: generated only when explicitly
-# requested. The normal Candidate B path remains byte-for-byte untouched by
-# this section when FLOATTABS_MONTEREY_PROBE_MODE is absent.
+# Candidate C first-presentation probes remain available when explicitly
+# requested. With no probe mode, Candidate D generates the complete
+# shell-first/deferred normal WebView runtime ordering.
 # ---------------------------------------------------------------------------
 if PROBE_MODE:
     text = replace_once_regex(
@@ -432,6 +432,81 @@ if PROBE_MODE:
         guard MontereyProbeMode.configured == nil else { return }
 """,
         label="Monterey probe lifecycle bypass",
+    )
+    write_source(panel, text)
+else:
+    text = replace_once_regex(
+        text,
+        r"    private var needsFocusAfterApplicationActivation = false\n",
+        """    private var needsFocusAfterApplicationActivation = false
+    private var presentationGeneration: UInt64 = 0
+
+""",
+        label="Monterey deferred presentation generation property",
+    )
+    deferred_show = """    func showFloatTabs() {
+        let presentationUptime = ProcessInfo.processInfo.systemUptime
+        lastPresentationUptime = presentationUptime
+        workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
+        requestedVisibility = true
+        synchronizeAppearance()
+
+        capturePreviousApplication()
+        positionPanelForCurrentScreens()
+        synchronizeFixedViewportAfterPositioning()
+        synchronizeSourceHostFrame(display: false)
+
+        // Candidate D: establish the visible shell/window group before the
+        // normal pool/lifecycle path can construct or attach a WebView.
+        panel.orderFrontRegardless()
+        activateFloatTabs()
+        panel.makeKeyAndOrderFront(nil)
+        needsFocusAfterApplicationActivation = !NSApp.isActive
+        if NSApp.isActive {
+            needsFocusAfterApplicationActivation = false
+        }
+
+        presentationGeneration &+= 1
+        let generation = presentationGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.requestedVisibility,
+                  generation == self.presentationGeneration else {
+                return
+            }
+
+            self.slotLifecycleCoordinator.setPanelVisible(
+                true,
+                activeProfile: self.tabStore.activeProfile
+            )
+            self.synchronizeSlotState()
+
+            guard self.requestedVisibility,
+                  self.panel.isVisible,
+                  generation == self.presentationGeneration else {
+                return
+            }
+            self.focusActiveWebViewIfAvailable()
+            if NSApp.isActive {
+                self.needsFocusAfterApplicationActivation = false
+            }
+        }
+    }
+"""
+    text = replace_span_once(
+        text,
+        r"^    func showFloatTabs\(\) \{",
+        r"^    func hideFloatTabs\(\) \{",
+        deferred_show,
+        label="Monterey Candidate D shell-first deferred presentation",
+    )
+    text = replace_once_regex(
+        text,
+        r"    func hideFloatTabs\(\) \{\n",
+        """    func hideFloatTabs() {
+        presentationGeneration &+= 1
+""",
+        label="Monterey deferred presentation cancellation",
     )
     write_source(panel, text)
 
@@ -992,6 +1067,121 @@ if PROBE_MODE:
     func testPooledWebViewsUsePersistentWebsiteDataStore() {{''',
         label="WebViewPoolTests Candidate C generated probe contract",
     )
+else:
+    text = replace_once_regex(
+        text,
+        r"        XCTAssertEqual\(pool\.count, 0\)\n        controller\.showFloatTabs\(\)\n        XCTAssertEqual\(pool\.count, 1\)\n        controller\.hideFloatTabs\(\)",
+        """        XCTAssertEqual(pool.count, 0)
+        controller.showFloatTabs()
+        // Candidate D must not construct a WebView during synchronous shell
+        // presentation.
+        XCTAssertEqual(pool.count, 0)
+
+        let presentationTurn = expectation(description: "deferred presentation")
+        DispatchQueue.main.async {
+            presentationTurn.fulfill()
+        }
+        wait(for: [presentationTurn], timeout: 1)
+        XCTAssertEqual(pool.count, 1)
+        controller.hideFloatTabs()""",
+        label="WebViewPoolTests Candidate D deferred restore contract",
+    )
+    text = replace_once_regex(
+        text,
+        r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+        """    func testMontereyDeferredPresentationCancelsAfterImmediateHide() {
+        _ = NSApplication.shared
+        let profile = makeProfile(name: "CancelledPresentation")
+        let repository = MemoryProfileRepository(
+            state: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id
+            )
+        )
+        let tabStore = TabStore(repository: repository)
+        let pool = makePool()
+        let defaults = UserDefaults(
+            suiteName: "FloatTabsMontereyCancelledPresentation.\\(UUID().uuidString)"
+        )!
+        let controller = PanelController(
+            tabStore: tabStore,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(
+                defaults: defaults,
+                key: "FloatTabsMontereyCancelledPresentation.frame"
+            ),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 0)
+        controller.hideFloatTabs()
+
+        let nextTurn = expectation(description: "stale presentation turn")
+        DispatchQueue.main.async {
+            nextTurn.fulfill()
+        }
+        wait(for: [nextTurn], timeout: 1)
+        XCTAssertEqual(pool.count, 0)
+    }
+
+    func testMontereyDeferredPresentationReusesResidentWebViewAfterHideAndShow() {
+        _ = NSApplication.shared
+        let profile = makeProfile(name: "RepeatedPresentation")
+        let repository = MemoryProfileRepository(
+            state: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id
+            )
+        )
+        let tabStore = TabStore(repository: repository)
+        let pool = makePool()
+        let defaults = UserDefaults(
+            suiteName: "FloatTabsMontereyRepeatedPresentation.\\(UUID().uuidString)"
+        )!
+        let controller = PanelController(
+            tabStore: tabStore,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(
+                defaults: defaults,
+                key: "FloatTabsMontereyRepeatedPresentation.frame"
+            ),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 0)
+        let firstTurn = expectation(description: "first deferred presentation")
+        DispatchQueue.main.async {
+            firstTurn.fulfill()
+        }
+        wait(for: [firstTurn], timeout: 1)
+        XCTAssertEqual(pool.count, 1)
+        guard let firstWebView = pool.existingWebView(for: profile.id) else {
+            return XCTFail("first deferred presentation did not create a WebView")
+        }
+
+        controller.hideFloatTabs()
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 1)
+        let secondTurn = expectation(description: "second deferred presentation")
+        DispatchQueue.main.async {
+            secondTurn.fulfill()
+        }
+        wait(for: [secondTurn], timeout: 1)
+        XCTAssertEqual(pool.count, 1)
+        guard let secondWebView = pool.existingWebView(for: profile.id) else {
+            return XCTFail("second deferred presentation lost the resident WebView")
+        }
+        XCTAssertTrue(firstWebView === secondWebView)
+        controller.hideFloatTabs()
+    }
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
+        label="WebViewPoolTests Candidate D cancellation and reuse tests",
+    )
 write_source(pool_tests, text)
 
 tab_store_tests = ROOT / "FloatTabsTests/TabStoreTests.swift"
@@ -1389,6 +1579,75 @@ if PROBE_MODE:
         prepared_pool_tests,
         "testMontereyGeneratedPresentationProbeContract",
         label="Candidate C generated probe test is missing",
+    )
+else:
+    require_present(
+        prepared_panel,
+        "private var presentationGeneration: UInt64 = 0",
+        label="Candidate D presentation generation state is missing",
+    )
+    candidate_d_span = span_of(
+        prepared_panel,
+        r"^    func showFloatTabs\(\) \{",
+        r"^    func hideFloatTabs\(\) \{",
+        label="Candidate D first-presentation span",
+    )
+    shell_index = candidate_d_span.find("panel.orderFrontRegardless()")
+    lifecycle_index = candidate_d_span.find("slotLifecycleCoordinator.setPanelVisible")
+    sync_index = candidate_d_span.find("synchronizeSlotState()")
+    dispatch_index = candidate_d_span.find("DispatchQueue.main.async")
+    if min(shell_index, lifecycle_index, sync_index, dispatch_index) < 0:
+        raise SystemExit("error: Candidate D ordering anchors are incomplete")
+    if not (
+        shell_index < dispatch_index < lifecycle_index
+        and shell_index < dispatch_index < sync_index
+    ):
+        raise SystemExit(
+            "error: Candidate D normal WebView synchronization precedes shell presentation"
+        )
+
+    synchronous_candidate_d = candidate_d_span[:dispatch_index]
+    for forbidden in [
+        "slotLifecycleCoordinator.setPanelVisible",
+        "synchronizeSlotState()",
+        "focusActiveWebViewIfAvailable",
+        "WebViewPool",
+        "WebViewFactory.makeWebView",
+    ]:
+        require_absent(
+            synchronous_candidate_d,
+            forbidden,
+            label=f"Candidate D synchronous shell phase crossed runtime boundary: {forbidden}",
+        )
+
+    deferred_candidate_d = candidate_d_span[dispatch_index:]
+    for required in [
+        "guard let self",
+        "self.requestedVisibility",
+        "generation == self.presentationGeneration",
+        "self.slotLifecycleCoordinator.setPanelVisible",
+        "self.synchronizeSlotState()",
+        "self.focusActiveWebViewIfAvailable()",
+    ]:
+        require_present(
+            deferred_candidate_d,
+            required,
+            label=f"Candidate D deferred phase missing: {required}",
+        )
+    require_present(
+        prepared_pool_tests,
+        "testMontereyDeferredPresentationCancelsAfterImmediateHide",
+        label="Candidate D stale presentation cancellation test is missing",
+    )
+    require_present(
+        prepared_pool_tests,
+        "testMontereyDeferredPresentationReusesResidentWebViewAfterHideAndShow",
+        label="Candidate D repeated presentation reuse test is missing",
+    )
+    require_present(
+        prepared_pool_tests,
+        'let presentationTurn = expectation(description: "deferred presentation")',
+        label="Candidate D next-runloop pool assertion is missing",
     )
 
 print("Applied isolated Monterey Compatibility Edition runtime semantics.")
