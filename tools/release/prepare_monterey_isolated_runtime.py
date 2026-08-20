@@ -550,6 +550,167 @@ else:
     write_source(panel, text)
 
 # ---------------------------------------------------------------------------
+# Candidate F: pass Website Mode explicitly into the Monterey AppKit host.
+# ---------------------------------------------------------------------------
+if not PROBE_MODE:
+    text = read_source(panel)
+    website_mode_panel_input = (
+        "            residencyPolicy: activeProfile.residencyPolicy\n"
+    )
+    if text.count(website_mode_panel_input) != 2:
+        raise SystemExit(
+            "error: Candidate F PanelController explicit Website Mode input: "
+            f"expected exactly 2 matches, got {text.count(website_mode_panel_input)}"
+        )
+    text = text.replace(
+        website_mode_panel_input,
+        "            residencyPolicy: activeProfile.residencyPolicy,\n"
+        "            websiteMode: activeProfile.renderingProfile.effectiveWebsiteMode\n",
+    )
+    write_source(panel, text)
+
+container = ROOT / "FloatTabs/Web/WebViewContainer.swift"
+text = read_source(container)
+text = replace_once_regex(
+    text,
+    r"^final class WebSlotHostView: NSView \{\n    private\(set\) weak var webView: WKWebView\?\n",
+    """final class WebSlotHostView: NSView {
+    private(set) weak var webView: WKWebView?
+    private(set) var websiteMode: WebsiteMode = .desktop
+""",
+    label="Candidate F WebSlotHostView explicit Website Mode storage",
+)
+text = replace_once_regex(
+    text,
+    r"    convenience init\(webView: WKWebView\) \{\n        self\.init\(frame: \.zero\)\n        attach\(webView\)\n    \}\n",
+    """    convenience init(webView: WKWebView) {
+        self.init(frame: .zero)
+        attach(webView)
+    }
+
+    convenience init(webView: WKWebView, websiteMode: WebsiteMode) {
+        self.init(frame: .zero)
+        self.websiteMode = websiteMode
+        attach(webView)
+    }
+""",
+    label="Candidate F WebSlotHostView Website Mode initializer",
+)
+text = replace_once_regex(
+    text,
+    r"    func attach\(_ webView: WKWebView\) \{\n",
+    """    func setWebsiteMode(_ mode: WebsiteMode) {
+        guard websiteMode != mode else { return }
+        websiteMode = mode
+        applyWebsiteLayoutIfNeeded()
+    }
+
+    func attach(_ webView: WKWebView) {
+""",
+    label="Candidate F WebSlotHostView Website Mode setter",
+)
+text = replace_once_regex(
+    text,
+    r"        let visibleSize = frame\.size\n        let mode = \(webView as\? FloatTabsWebView\)\?\.websiteMode \?\? \.desktop",
+    """        let visibleSize = frame.size
+        let mode = websiteMode""",
+    label="Candidate F WebSlotHostView explicit Website Mode layout",
+)
+text = replace_once_regex(
+    text,
+    r"    private weak var activeWebView: WKWebView\?\n",
+    "    private weak var activeWebView: WKWebView?\n"
+    "    private var websiteMode: WebsiteMode = .desktop\n",
+    label="Candidate F WebPanelContainerView Website Mode storage",
+)
+text = replace_span_once(
+    text,
+    r"^    func show\(webView: WKWebView\) \{",
+    r"^    func deactivate\(slotID: UUID, residencyPolicy: SlotResidencyPolicy\) \{",
+    """    func show(webView: WKWebView) {
+        showTransient(webView: webView, slotID: nil, websiteMode: .desktop)
+    }
+
+    func show(
+        webView: WKWebView,
+        slotID: UUID,
+        residencyPolicy: SlotResidencyPolicy,
+        websiteMode: WebsiteMode = .desktop
+    ) {
+        switch residencyPolicy {
+        case .hot:
+            showHot(webView: webView, slotID: slotID, websiteMode: websiteMode)
+        case .warm, .cold:
+            showTransient(webView: webView, slotID: slotID, websiteMode: websiteMode)
+        }
+    }
+
+""",
+    label="Candidate F WebPanelContainerView explicit Website Mode API",
+)
+text = replace_once_regex(
+    text,
+    r"        websiteLayoutScale = 1\n        logicalHostView\.bounds",
+    "        websiteLayoutScale = 1\n"
+    "        websiteMode = .desktop\n"
+    "        logicalHostView.bounds",
+    label="Candidate F WebPanelContainerView empty-state Website Mode reset",
+)
+text = replace_once_regex(
+    text,
+    r"    private func showHot\(webView: WKWebView, slotID: UUID\) \{",
+    "    private func showHot(\n"
+    "        webView: WKWebView,\n"
+    "        slotID: UUID,\n"
+    "        websiteMode: WebsiteMode\n"
+    "    ) {",
+    label="Candidate F hot host Website Mode input",
+)
+text = replace_once_regex(
+    text,
+    r"        if let existing = hotHostViews\[slotID\] \{\n            host = existing\n            host\.attach\(webView\)\n        \} else \{\n            host = WebSlotHostView\(webView: webView\)",
+    "        if let existing = hotHostViews[slotID] {\n"
+    "            host = existing\n"
+    "            host.setWebsiteMode(websiteMode)\n"
+    "            host.attach(webView)\n"
+    "        } else {\n"
+    "            host = WebSlotHostView(webView: webView, websiteMode: websiteMode)",
+    label="Candidate F hot host Website Mode propagation",
+)
+text = replace_once_regex(
+    text,
+    r"    private func showTransient\(webView: WKWebView, slotID: UUID\?\) \{\n",
+    "    private func showTransient(\n"
+    "        webView: WKWebView,\n"
+    "        slotID: UUID?,\n"
+    "        websiteMode: WebsiteMode\n"
+    "    ) {\n"
+    "        self.websiteMode = websiteMode\n",
+    label="Candidate F transient host Website Mode input",
+)
+text = replace_once_regex(
+    text,
+    r"        let visibleSize = clipView\.bounds\.size\n"
+    r"        guard visibleSize\.width > 0, visibleSize\.height > 0 else \{ return \}\n\n"
+    r"        let mode = \(webView as\? FloatTabsWebView\)\?\.websiteMode \?\? \.desktop",
+    "        let visibleSize = clipView.bounds.size\n"
+    "        guard visibleSize.width > 0, visibleSize.height > 0 else { return }\n\n"
+    "        let mode = websiteMode",
+    label="Candidate F transient host explicit Website Mode layout",
+)
+website_mode_fallback_comment = (
+    "        // Monterey compatibility: macOS fallback stays desktop without reading\n"
+    "        // WKWebpagePreferences.preferredContentMode.\n"
+)
+if text.count(website_mode_fallback_comment) != 2:
+    raise SystemExit(
+        "error: Candidate F stale WebKit Website Mode fallback comments: "
+        f"expected exactly 2 matches, got {text.count(website_mode_fallback_comment)}"
+    )
+text = text.replace(website_mode_fallback_comment, "")
+write_source(container, text)
+
+# ---------------------------------------------------------------------------
 # SlotNavigationObserver: committed-URL persistence only.
 # ---------------------------------------------------------------------------
 observer = ROOT / "FloatTabs/Web/SlotNavigationObserver.swift"
@@ -570,6 +731,141 @@ text = replace_once_regex(
     """        if let url = webView.url, WebAppURL.isSafe(url) {""",
     label="SlotNavigationObserver Monterey-only committed persistence",
 )
+text = replace_span_once(
+    text,
+    r"^@MainActor\nfinal class SlotNavigationObserver: NSObject, WKNavigationDelegate \{",
+    r"\Z",
+    """@MainActor
+final class MontereyNavigationObserver: NSObject, WKNavigationDelegate {
+    private let slotID: UUID
+    private let onURLChange: @MainActor (UUID, URL) -> Void
+    private let onContentProcessTermination: @MainActor (UUID) -> Void
+    private let loadHandler: @MainActor (WKWebView, URL) -> Void
+
+    private var pendingHTTPEntryFallback: URL?
+
+    var isHTTPEntryFallbackPending: Bool {
+        pendingHTTPEntryFallback != nil
+    }
+
+    init(
+        slotID: UUID,
+        webView: WKWebView,
+        websiteMode: WebsiteMode,
+        navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
+        downloadCoordinator: DownloadCoordinator? = nil,
+        onURLChange: @escaping @MainActor (UUID, URL) -> Void,
+        onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
+        loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
+            webView.load(URLRequest(url: url))
+        }
+    ) {
+        self.slotID = slotID
+        self.onURLChange = onURLChange
+        self.onContentProcessTermination = onContentProcessTermination
+        self.loadHandler = loadHandler
+        _ = websiteMode
+        _ = navigationCoordinator
+        _ = downloadCoordinator
+        super.init()
+
+        // Candidate F deliberately registers only this lifecycle delegate.
+        webView.navigationDelegate = self
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        pendingHTTPEntryFallback = nil
+        persistSafeURL(from: webView)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        persistSafeURL(from: webView)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        _ = webView
+        _ = navigation
+        _ = error
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        _ = navigation
+        let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
+            .flatMap { URL(string: $0) }
+            ?? webView.url
+        if let fallback = Self.httpFallbackURL(
+            pending: pendingHTTPEntryFallback,
+            failingURL: failingURL,
+            error: error
+        ) {
+            pendingHTTPEntryFallback = nil
+            loadHandler(webView, fallback)
+        } else {
+            pendingHTTPEntryFallback = nil
+        }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        _ = webView
+        onContentProcessTermination(slotID)
+    }
+
+    func configureHTTPEntryFallback(for url: URL, allowed: Bool) {
+        pendingHTTPEntryFallback = allowed && WebAppURL.httpFallbackCandidate(for: url) != nil
+            ? url
+            : nil
+    }
+
+    static func shouldOpenInCurrentSlot(targetFrame: WKFrameInfo?, url: URL?) -> Bool {
+        WebNavigationCoordinator.stage3FallbackDisposition(
+            hasTargetFrame: targetFrame != nil,
+            url: url
+        ) == .loadInCurrentSlot
+    }
+
+    static func httpFallbackURL(pending: URL?, failingURL: URL?, error: Error) -> URL? {
+        guard let pending,
+              let failingURL,
+              failingURL == pending || failingURL.absoluteString == pending.absoluteString else {
+            return nil
+        }
+
+        let nsError = error as NSError
+        let connectionLevelFailureCodes: Set<Int> = [
+            NSURLErrorTimedOut,
+            NSURLErrorCannotFindHost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorSecureConnectionFailed,
+        ]
+        guard nsError.domain == NSURLErrorDomain,
+              connectionLevelFailureCodes.contains(nsError.code) else {
+            return nil
+        }
+
+        return WebAppURL.httpFallbackCandidate(for: pending)
+    }
+
+    private func persistSafeURL(from webView: WKWebView) {
+        guard let url = webView.url, WebAppURL.isSafe(url) else { return }
+        NSLog("[FloatTabs Monterey] navigation committed slot=%@", slotID.uuidString)
+        onURLChange(slotID, url)
+    }
+}
+
+typealias SlotNavigationObserver = MontereyNavigationObserver
+""",
+    label="Candidate F Monterey minimal navigation observer",
+)
 if RUNTIME_DIAG == "delegates-off":
     text = replace_once_regex(
         text,
@@ -581,9 +877,9 @@ if RUNTIME_DIAG == "delegates-off":
     )
 write_source(observer, text)
 
-pool = ROOT / "FloatTabs/Web/WebViewPool.swift"
+web_view_pool = ROOT / "FloatTabs/Web/WebViewPool.swift"
 if RUNTIME_DIAG == "delegates-off":
-    text = read_source(pool)
+    text = read_source(web_view_pool)
     text = replace_once_regex(
         text,
         r"        webView\.uiDelegate = popupCoordinator\n",
@@ -593,7 +889,23 @@ if RUNTIME_DIAG == "delegates-off":
 """,
         label="Monterey delegates-off UI delegate registration",
     )
-    write_source(pool, text)
+    write_source(web_view_pool, text)
+
+if not PROBE_MODE:
+    text = read_source(web_view_pool)
+    text = replace_once_regex(
+        text,
+        r"private var navigationObservers: \[UUID: SlotNavigationObserver\]",
+        "private var navigationObservers: [UUID: MontereyNavigationObserver]",
+        label="Candidate F WebViewPool minimal observer storage",
+    )
+    text = replace_once_regex(
+        text,
+        r"let observer = SlotNavigationObserver\(",
+        "let observer = MontereyNavigationObserver(",
+        label="Candidate F primary Monterey minimal observer",
+    )
+    write_source(web_view_pool, text)
 
 # ---------------------------------------------------------------------------
 # Test contract: the standard suite asserts standard-edition behaviors that
@@ -674,27 +986,72 @@ text = replace_span_once(
     text,
     r"^    func testMobileModeRemainsNativeOneToOneAtWideWindowSize\(\) \{",
     r"^    func testDesktopHostMapsVisibleCenterIntoLogicalWebCoordinates\(",
-    """    func testMobileModeFallsBackToDesktopClassHostingOnStockWebView() {
-        let rendering = WebRenderingProfile.canonicalDefault
-            .settingWebsiteMode(.mobile)
-            .settingSimplePreset(.wide)
-        let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
-        let container = host(webView, visibleSize: NSSize(width: 1080, height: 850))
-        loadTestHTML(in: webView)
+    """    func testMontereyExplicitWebsiteModeControlsHostLayoutWithoutWebKitMutation() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = WebAppProfile(
+            order: 0,
+            name: "ExplicitWebsiteMode",
+            homeURL: URL(string: "https://example.com")!
+        )
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
 
-        // Monterey Compatibility Edition: the stock WKWebView carries no
-        // Website Mode, so hosting conservatively maps the visible surface to
-        // the standard desktop experience class instead of native 1:1.
-        let cssWidth = evaluateNumber("document.body.clientWidth", in: webView)
-        XCTAssertEqual(container.bounds.width, 1080, accuracy: 0.001)
-        XCTAssertEqual(webView.frame.width, 1440, accuracy: 0.001)
-        XCTAssertEqual(container.websiteLayoutScale, 1080.0 / 1440.0, accuracy: 0.001)
-        XCTAssertEqual(webView.pageZoom, 1, accuracy: 0.001)
-        XCTAssertEqual(cssWidth, 1440, accuracy: 3)
+        let desktop = pool.webView(for: profile)
+        container.show(
+            webView: desktop,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .desktop
+        )
+        container.layoutSubtreeIfNeeded()
+        desktop.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(desktop.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertTrue((desktop.customUserAgent ?? "").isEmpty)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+        let mobile = pool.webView(for: profile)
+        XCTAssertTrue(desktop === mobile)
+        container.show(
+            webView: mobile,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .mobile
+        )
+        container.layoutSubtreeIfNeeded()
+        mobile.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(desktop === mobile)
+        XCTAssertEqual(mobile.frame.width, 600, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 1, accuracy: 0.001)
+        XCTAssertTrue((mobile.customUserAgent ?? "").isEmpty)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
+        let restored = pool.webView(for: profile)
+        XCTAssertTrue(mobile === restored)
+        container.show(
+            webView: restored,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .desktop
+        )
+        container.layoutSubtreeIfNeeded()
+        restored.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(mobile === restored)
+        XCTAssertEqual(restored.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertEqual(loadedRequests.count, 1)
     }
 
 """,
-    label="WebViewFactoryTests mobile host fallback contract",
+    label="Candidate F explicit Website Mode geometry contract",
 )
 
 text = replace_span_once(
@@ -1376,6 +1733,72 @@ else:
             label="WebViewPoolTests Candidate E delegates-off runtime contract",
         )
 
+if not PROBE_MODE and not RUNTIME_DIAG:
+    text = replace_once_regex(
+        text,
+        r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+        """    func testMontereyPrimaryUsesMinimalNavigationAndPopupDelegates() {
+        let pool = makePool()
+        let webView = pool.webView(for: makeProfile(name: "MinimalDelegate"))
+
+        XCTAssertTrue(webView.navigationDelegate is MontereyNavigationObserver)
+        XCTAssertTrue(webView.uiDelegate is PopupCoordinator)
+    }
+
+    func testMontereyExplicitWebsiteModeSwitchRetainsResidentWebView() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(name: "LayoutSwitch")
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 820)
+        )
+
+        let desktop = pool.webView(for: profile)
+        container.show(
+            webView: desktop,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .desktop
+        )
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(desktop.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+        let mobile = pool.webView(for: profile)
+        XCTAssertTrue(desktop === mobile)
+        container.show(
+            webView: mobile,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .mobile
+        )
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(mobile.frame.width, 600, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 1, accuracy: 0.001)
+
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
+        let restored = pool.webView(for: profile)
+        XCTAssertTrue(mobile === restored)
+        container.show(
+            webView: restored,
+            slotID: profile.id,
+            residencyPolicy: .warm,
+            websiteMode: .desktop
+        )
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(restored.frame.width, 1024, accuracy: 0.001)
+        XCTAssertEqual(container.websiteLayoutScale, 600.0 / 1024.0, accuracy: 0.001)
+        XCTAssertEqual(loadedRequests.count, 1)
+    }
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
+        label="WebViewPoolTests Candidate F delegate and layout contracts",
+    )
+
 write_source(pool_tests, text)
 
 tab_store_tests = ROOT / "FloatTabsTests/TabStoreTests.swift"
@@ -1423,6 +1846,7 @@ prepared_web = read_source(web_factory)
 prepared_popup = read_source(popup)
 prepared_pool = read_source(ROOT / "FloatTabs/Web/WebViewPool.swift")
 prepared_panel = read_source(panel)
+prepared_container = read_source(container)
 prepared_observer = read_source(observer)
 prepared_tests = read_source(tests)
 prepared_pool_tests = read_source(pool_tests)
@@ -1554,7 +1978,7 @@ primary_create_span = span_of(
 )
 primary_create_requirements = [
     "WebViewFactory.makeWebView",
-    "SlotNavigationObserver(",
+    "MontereyNavigationObserver(",
     "PopupCoordinator(",
     "load(webView, request)",
 ]
@@ -1565,6 +1989,12 @@ for required in primary_create_requirements:
         primary_create_span,
         required,
         label=f"primary WebViewPool creation path missing: {required}",
+    )
+if not PROBE_MODE and not RUNTIME_DIAG:
+    require_absent(
+        primary_create_span,
+        "SlotNavigationObserver(",
+        label="Candidate F primary WebViewPool creation retained the full observer",
     )
 for forbidden in [
     "addUserScript",
@@ -1630,6 +2060,88 @@ require_present(
     "[FloatTabs Monterey] navigation committed slot=",
     label="committed-URL persistence missing",
 )
+
+if not PROBE_MODE and not RUNTIME_DIAG:
+    minimal_observer_span = span_of(
+        prepared_observer,
+        r"^@MainActor\nfinal class MontereyNavigationObserver: NSObject, WKNavigationDelegate \{",
+        r"^}\n\ntypealias SlotNavigationObserver",
+        label="Candidate F Monterey minimal navigation observer span",
+    )
+    for required in [
+        "didCommit",
+        "didFinish",
+        "didFail navigation",
+        "didFailProvisionalNavigation",
+        "webViewWebContentProcessDidTerminate",
+        "persistSafeURL",
+    ]:
+        require_present(
+            minimal_observer_span,
+            required,
+            label=f"Candidate F minimal observer missing lifecycle callback: {required}",
+        )
+    for forbidden in [
+        "decidePolicyFor",
+        "shouldPerformDownload",
+        "WKNavigationActionPolicy.download",
+        "WKNavigationResponsePolicy.download",
+        "didBecome download",
+        "pageZoom",
+        "customUserAgent",
+        "preferredContentMode",
+        "configureHiddenScrollers",
+        "restoreWebsiteMode",
+    ]:
+        require_absent(
+            minimal_observer_span,
+            forbidden,
+            label=f"Candidate F minimal observer retained forbidden behavior: {forbidden}",
+        )
+    require_present(
+        prepared_pool,
+        "private var navigationObservers: [UUID: MontereyNavigationObserver]",
+        label="Candidate F WebViewPool observer storage is not minimal",
+    )
+    require_present(
+        prepared_pool,
+        "let observer = MontereyNavigationObserver(",
+        label="Candidate F WebViewPool does not install the minimal observer",
+    )
+    require_present(
+        prepared_panel,
+        "websiteMode: activeProfile.renderingProfile.effectiveWebsiteMode",
+        label="Candidate F PanelController did not pass explicit Website Mode",
+    )
+    for required in [
+        "private(set) var websiteMode: WebsiteMode = .desktop",
+        "func setWebsiteMode(_ mode: WebsiteMode)",
+        "websiteMode: WebsiteMode = .desktop",
+    ]:
+        require_present(
+            prepared_container,
+            required,
+            label=f"Candidate F host Website Mode contract missing: {required}",
+        )
+    for forbidden in [
+        "preferredContentMode",
+        "(webView as? FloatTabsWebView)?.websiteMode",
+    ]:
+        require_absent(
+            prepared_container,
+            forbidden,
+            label=f"Candidate F host layout still derives Website Mode from WebKit: {forbidden}",
+        )
+    for required in [
+        "testMontereyExplicitWebsiteModeControlsHostLayoutWithoutWebKitMutation",
+        "testMontereyPrimaryUsesMinimalNavigationAndPopupDelegates",
+        "testMontereyExplicitWebsiteModeSwitchRetainsResidentWebView",
+    ]:
+        require_present(
+            prepared_pool_tests if "Primary" in required or "Switch" in required else prepared_tests,
+            required,
+            label=f"Candidate F generated test contract missing: {required}",
+        )
 
 # Test contract markers.
 for required_marker in [
