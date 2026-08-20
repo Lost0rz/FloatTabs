@@ -21,7 +21,7 @@ python3 tools/release/prepare_monterey_runtime_safe_mode.py
 python3 tools/release/prepare_monterey_webview_minimal.py
 python3 tools/release/prepare_monterey_lazy_restore.py
 python3 tools/release/prepare_monterey_isolated_runtime.py
-python3 tools/release/prepare_monterey_candidate_f.py
+python3 tools/release/prepare_monterey_candidate_f_runner.py
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
