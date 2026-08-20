@@ -1,41 +1,74 @@
 # FloatTabs v0.1.3 Monterey Compatibility
 
-Release date: 2026-08-20
+Release date: pending real-Monterey acceptance
 
-This is a compatibility build of **FloatTabs v0.1.3 Build 5** for Macs that cannot run macOS 13 or later.
+This is a **separate Monterey Compatibility Edition** based on the accepted FloatTabs v0.1.3 Build 5 product baseline. It is not the standard v0.1.3 package and is not a unified macOS 12/macOS 13+ build.
+
+## Release-line isolation
+
+- Standard edition: `v0.1.3`, unchanged, normal macOS 13+ package.
+- Compatibility edition: `v0.1.3-monterey`, built only from `release/v013-monterey-compat`.
+- The compatibility branch is not merged into `main`.
+- Compatibility source changes are applied only at build time; committed standard `FloatTabs/**` source remains untouched.
+- The compatibility publisher is triggered only by the exact `v0.1.3-monterey` tag.
+- The standard `v0.1.3` tag and Release are never replaced, refreshed, or repackaged by this workflow.
 
 ## Compatibility target
 
 - Intended for **macOS Monterey 12.7.6** and later Monterey 12.x systems.
-- The binary is built with `MACOSX_DEPLOYMENT_TARGET=12.0`, so macOS 12.7.6 is within the supported binary deployment range.
+- Binary deployment target: `MACOSX_DEPLOYMENT_TARGET=12.0`.
 - Universal 2 package: Apple Silicon `arm64` + Intel `x86_64`.
-- The application version shown in Settings remains **Version 0.1.3 (Build 5)**.
-- This compatibility Release is separate from the standard `v0.1.3` Release and does not replace it.
+- Application version remains **Version 0.1.3 (Build 5)**.
+- Distribution artifact: `FloatTabs-0.1.3-monterey.dmg`.
 
-## Included v0.1.3 behavior
+## Monterey-specific runtime behavior
 
-The compatibility package contains the same accepted Build 5 product behavior as the standard v0.1.3 package, including:
+The Compatibility Edition intentionally uses Monterey-specific runtime behavior rather than embedding the standard macOS 13+ runtime as a second path.
 
-- first-click Tab / Add / Pin / Settings activation;
-- collapsible Tab rail with Web-content width reclaim and the 12 pt movement gutter;
-- synchronized fullscreen restoration and WebKit presentation teardown handling;
-- Settings → About FloatTabs version/build/latest-fixes information;
-- Hot / Warm / Cold WebView residency policies;
-- Universal 2 Apple Silicon and Intel support.
+Current hardening includes:
 
-## Compatibility validation contract
+- minimal WKWebView construction on Monterey;
+- no BrowserVersion/private user-agent probing during initial WebView creation;
+- no preferred-content-mode override during initial WebView creation;
+- no injected hidden-scrollbar policy during initial WebView creation;
+- no traversal/mutation of WebKit internal AppKit scroll views;
+- deferred saved-WebView restoration to avoid startup crash loops;
+- typed URLs are persisted only after WebKit commits navigation;
+- provisional URL KVO is not used as the Monterey durability boundary;
+- element fullscreen / FloatTabs fullscreen ownership handling is intentionally disabled for this compatibility release candidate;
+- stage-only runtime breadcrumbs and exact dSYM artifacts are retained for crash diagnosis.
 
-Before publishing, CI must pass all of the following with a macOS 12.0 deployment target:
+The standard v0.1.3 package keeps its existing accepted macOS 13+ behavior and is not modified by these compatibility decisions.
 
-- Debug build;
-- XCTest build/run on the current CI runner while compiling all app/test code against macOS 12 availability constraints;
+## Validation contract
+
+Compatibility CI must pass:
+
+- release-line isolation allowlist check;
+- deterministic Monterey source preparation;
+- assertions that standard runtime branches do not leak into the compatibility build path;
+- Debug build with macOS 12.0 deployment target;
+- XCTest with macOS 12.0 deployment target;
 - Universal 2 Release build;
-- `arm64` and `x86_64` architecture verification;
+- `arm64` and `x86_64` verification;
 - Mach-O `LC_BUILD_VERSION` minimum OS verification;
 - `LSMinimumSystemVersion` verification;
-- DMG verification and SHA-256 checksum verification.
+- DMG verification;
+- DMG and dSYM SHA-256 verification.
 
-Because GitHub-hosted CI is not running the application on an actual Monterey 12.7.6 machine, this Release establishes compile/link/package compatibility for Monterey. A final real-Mac Monterey smoke test is still recommended for WebKit/runtime-specific behavior.
+CI compile/link/package success is **not** sufficient for release approval because GitHub-hosted runners do not exercise the application on a real Monterey 12.7.6 host.
+
+## Required real macOS 12.7.6 acceptance
+
+Do not create the `v0.1.3-monterey` tag or Release until all of the following pass on a real Monterey machine:
+
+1. Launch with an existing saved Profile and keep the process alive.
+2. Present FloatTabs and load the saved Web App.
+3. Add another Web App and load a page.
+4. Enter a new address and press Return without a crash.
+5. Quit and relaunch with the saved active Profile.
+6. Switch Tabs and reload.
+7. Confirm ordinary non-fullscreen use is stable; fullscreen is intentionally out of scope for this Compatibility Edition candidate.
 
 ## Assets
 
