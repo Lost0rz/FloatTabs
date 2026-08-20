@@ -9,3 +9,5 @@ Expected runner sequence:
 4. Build and verify the Universal 2 DMG/dSYM package.
 5. Commit the validated product patch to main and remove this marker plus the temporary runner.
 6. Replace the existing v0.1.3 release assets/tag in place.
+
+Synchronization token: stage-product-2026-08-20T03:13Z
