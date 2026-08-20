@@ -14,6 +14,7 @@ on:
       - 'tools/release/prepare_monterey_lazy_restore.py'
       - 'tools/release/prepare_monterey_isolated_runtime.py'
       - 'tools/release/prepare_monterey_candidate_f.py'
+      - 'tools/release/prepare_monterey_candidate_f_runner.py'
       - '.github/workflows/monterey-compat-ci.yml'
       - 'docs/release/compatibility/**'
   pull_request:
@@ -29,6 +30,7 @@ on:
       - 'tools/release/prepare_monterey_lazy_restore.py'
       - 'tools/release/prepare_monterey_isolated_runtime.py'
       - 'tools/release/prepare_monterey_candidate_f.py'
+      - 'tools/release/prepare_monterey_candidate_f_runner.py'
       - '.github/workflows/monterey-compat-ci.yml'
       - '.github/workflows/publish-monterey-release.yml'
       - 'docs/release/compatibility/**'
@@ -70,7 +72,7 @@ jobs:
           python3 tools/release/prepare_monterey_webview_minimal.py
           python3 tools/release/prepare_monterey_lazy_restore.py
           python3 tools/release/prepare_monterey_isolated_runtime.py
-          python3 tools/release/prepare_monterey_candidate_f.py
+          python3 tools/release/prepare_monterey_candidate_f_runner.py
 
       - name: Verify Candidate F generated runtime boundary
         run: |
