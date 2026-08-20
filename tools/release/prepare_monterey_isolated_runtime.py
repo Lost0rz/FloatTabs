@@ -186,6 +186,43 @@ text = replace_span_once(
 write_source(profile, text)
 text = read_source(web_factory)
 
+# ---------------------------------------------------------------------------
+# PopupCoordinator: retain native delegate functionality, but keep the
+# primary Monterey WebView free of JavaScript and script-message injection.
+# Floating child windows retain their optional link/window behavior.
+# ---------------------------------------------------------------------------
+popup = ROOT / "FloatTabs/Web/PopupCoordinator.swift"
+text = read_source(popup)
+text = replace_span_once(
+    text,
+    r"^    init\(\n        parentWebView: WKWebView,\n        openExternal: @escaping ExternalOpenHandler = \{ url in\n            _ = NSWorkspace\.shared\.open\(url\)\n        \},\n        uploadCoordinator: UploadCoordinator\? = nil,\n        downloadCoordinator: DownloadCoordinator\? = nil\n    \) \{",
+    r"^    static func disposition\(",
+    """    init(
+        parentWebView: WKWebView,
+        openExternal: @escaping ExternalOpenHandler = { url in
+            _ = NSWorkspace.shared.open(url)
+        },
+        uploadCoordinator: UploadCoordinator? = nil,
+        downloadCoordinator: DownloadCoordinator? = nil
+    ) {
+        self.parentWebView = parentWebView
+        self.openExternal = openExternal
+        self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()
+        self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
+        super.init()
+
+        // Monterey Compatibility Edition: the primary pool-created WebView
+        // remains genuinely stock. Keep this coordinator as the native
+        // WKUIDelegate/WKNavigationDelegate surface, but do not install
+        // JavaScript, user scripts, or script-message handlers here.
+    }
+
+""",
+    label="PopupCoordinator primary WebView no-injection initialization",
+)
+write_source(popup, text)
+text = read_source(web_factory)
+
 text = replace_once_regex(
     text,
     r"    static func configureHiddenScrollers\(in webView: WKWebView\) \{\s*"
@@ -676,7 +713,50 @@ text = replace_span_once(
 text = replace_once_regex(
     text,
     r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
-    """    func testMontereyPanelControllerDefersSavedWebViewRestoreUntilPresentation() {
+    """    func testMontereyFullPoolCreationIsStockAndScriptFree() {
+        var loadedRequests: [URLRequest] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) }
+        )
+        var profile = makeProfile(name: "PrimaryCreation")
+        profile.renderingProfile = profile.renderingProfile
+            .settingWebsiteMode(.mobile)
+            .settingBrowserIdentity(.iphoneChrome)
+            .settingZoom(1.25)
+
+        let first = pool.webView(for: profile)
+
+        XCTAssertFalse(first is FloatTabsWebView)
+        XCTAssertTrue(first.configuration.websiteDataStore.isPersistent)
+        XCTAssertTrue(first.configuration.userContentController.userScripts.isEmpty)
+        XCTAssertTrue((first.customUserAgent ?? "").isEmpty)
+        XCTAssertTrue((first.configuration.applicationNameForUserAgent ?? "").isEmpty)
+        XCTAssertEqual(
+            first.configuration.defaultWebpagePreferences.preferredContentMode,
+            .recommended
+        )
+        XCTAssertEqual(first.pageZoom, 1, accuracy: 0.001)
+
+        // Warm reuse must preserve identity and must not reapply inert metadata.
+        first.pageZoom = 1.35
+        let warm = pool.webView(for: profile)
+        XCTAssertTrue(first === warm)
+        XCTAssertEqual(warm.pageZoom, 1.35, accuracy: 0.001)
+        XCTAssertTrue(warm.configuration.userContentController.userScripts.isEmpty)
+
+        profile.renderingProfile = profile.renderingProfile
+            .settingWebsiteMode(.desktop)
+            .settingBrowserIdentity(.windowsChrome)
+        let metadataChanged = pool.webView(for: profile)
+        XCTAssertTrue(warm === metadataChanged)
+        XCTAssertEqual(metadataChanged.pageZoom, 1.35, accuracy: 0.001)
+        XCTAssertTrue(metadataChanged.configuration.userContentController.userScripts.isEmpty)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertEqual(pool.count, 1)
+    }
+
+    func testMontereyPanelControllerDefersSavedWebViewRestoreUntilPresentation() {
         _ = NSApplication.shared
         let profile = makeProfile(name: "Saved")
         let repository = MemoryProfileRepository(
@@ -776,6 +856,8 @@ write_source(geometry_tests, text)
 prepared_floating = read_source(floating)
 prepared_fullscreen = read_source(fullscreen)
 prepared_web = read_source(web_factory)
+prepared_popup = read_source(popup)
+prepared_pool = read_source(ROOT / "FloatTabs/Web/WebViewPool.swift")
 prepared_panel = read_source(panel)
 prepared_observer = read_source(observer)
 prepared_tests = read_source(tests)
@@ -867,6 +949,71 @@ require_present(
     label="Monterey profile rebuild decision is not a no-op",
 )
 
+# The primary pool-created WebView may retain PopupCoordinator's native
+# delegate surface, but its initializer must not mutate WKWebKit content.
+popup_init_span = span_of(
+    prepared_popup,
+    r"^    init\(\n        parentWebView: WKWebView,\n        openExternal: @escaping ExternalOpenHandler",
+    r"^    static func disposition\(",
+    label="final PopupCoordinator primary initializer span",
+)
+for forbidden in [
+    "installCurrentSlotWindowOpenPolicy(on: parentWebView)",
+    "installExplicitLinkContextMenu(on: parentWebView)",
+    "addUserScript",
+    "controller.add(self, name:",
+    "userContentController.add(",
+]:
+    require_absent(
+        popup_init_span,
+        forbidden,
+        label=f"Monterey PopupCoordinator primary initializer injected WebKit content: {forbidden}",
+    )
+for required in [
+    "self.parentWebView = parentWebView",
+    "self.openExternal = openExternal",
+    "self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()",
+    "self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()",
+    "super.init()",
+]:
+    require_present(
+        popup_init_span,
+        required,
+        label=f"PopupCoordinator native initialization missing: {required}",
+    )
+
+primary_create_span = span_of(
+    prepared_pool,
+    r"^    private func createWebView\(",
+    r"^        return webView\n    \}",
+    label="final WebViewPool primary creation span",
+)
+for required in [
+    "WebViewFactory.makeWebView",
+    "SlotNavigationObserver(",
+    "PopupCoordinator(",
+    "webView.uiDelegate = popupCoordinator",
+    "load(webView, request)",
+]:
+    require_present(
+        primary_create_span,
+        required,
+        label=f"primary WebViewPool creation path missing: {required}",
+    )
+for forbidden in [
+    "addUserScript",
+    "userContentController.add(",
+    "userContentController.addUserScript(",
+    "customUserAgent =",
+    "preferredContentMode =",
+    "pageZoom =",
+]:
+    require_absent(
+        primary_create_span,
+        forbidden,
+        label=f"primary WebViewPool creation path mutated WebKit: {forbidden}",
+    )
+
 # No FloatTabsWebView may be constructed anywhere in the compatibility app.
 for source_path in sorted((ROOT / "FloatTabs").rglob("*.swift")):
     require_absent(
@@ -938,6 +1085,11 @@ require_present(
     prepared_pool_tests,
     "Monterey Compatibility Edition: inert Website Mode metadata does not",
     label="WebViewPoolTests compatibility contract missing",
+)
+require_present(
+    prepared_pool_tests,
+    "testMontereyFullPoolCreationIsStockAndScriptFree",
+    label="full WebViewPool creation contract missing",
 )
 require_present(
     prepared_pool_tests,

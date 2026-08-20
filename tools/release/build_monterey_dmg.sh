@@ -75,9 +75,25 @@ if [[ "$PLIST_MIN_OS" != "$DEPLOYMENT_TARGET" ]]; then
   exit 1
 fi
 
+# Monterey test artifacts must be launchable on a real machine. This is an
+# ad-hoc signature only; it is not notarization or Developer ID signing.
+/usr/bin/codesign \
+  --force \
+  --deep \
+  --sign - \
+  "$APP_PATH"
+/usr/bin/codesign \
+  --verify \
+  --deep \
+  --strict \
+  --verbose=2 \
+  "$APP_PATH"
+/usr/bin/codesign --display --verbose=4 "$APP_PATH"
+
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
-PACKAGE_BASE="FloatTabs-${VERSION}-monterey"
+PACKAGE_SUFFIX="${FLOATTABS_PACKAGE_SUFFIX:-monterey}"
+PACKAGE_BASE="FloatTabs-${VERSION}-${PACKAGE_SUFFIX}"
 DMG_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dmg"
 DSYM_ARCHIVE_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dSYM.zip"
 
