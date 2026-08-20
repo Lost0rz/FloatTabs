@@ -6,6 +6,26 @@ Release date: 2026-08-20
 
 v0.1.3 is a focused interaction and presentation-stability release. It makes the left Tab rail behave like part of a compact floating browser rather than a permanently reserved sidebar, fixes first-click control activation, and closes the latest fullscreen restore edge cases verified on real hardware.
 
+## Build 5 refresh
+
+The existing v0.1.3 release is refreshed in place with **Build 5**. The marketing version remains `0.1.3`; the build number distinguishes this corrected package from the original Build 4 package.
+
+Settings → Account & Language now ends with an **About FloatTabs** section that shows:
+
+- the exact installed Version and Build from `CFBundleShortVersionString` and `CFBundleVersion`;
+- a short **Latest fixes in this build** summary;
+- the existing Account, Backup & Restore, and Language content in a scrollable settings page.
+
+Build 5 validation:
+
+- QA DMG #220: PASS;
+- macOS CI #683: PASS;
+- local real-Mac XCTest: PASS;
+- local real-Mac Release build: PASS;
+- local Settings acceptance confirmed `Version 0.1.3 (Build 5)` and the latest-fixes section are visible.
+
+This is an in-place v0.1.3 package refresh, not a new release version.
+
 ## Highlights
 
 ### Collapsed rail now reclaims its width
@@ -71,7 +91,7 @@ Functional integration PR #45 completed before this release branch:
 - latest Real-Mac fullscreen black-screen acceptance: PASS
 - manual rail collapse / expand, 12 pt movement gutter, resize persistence, relaunch persistence and fullscreen rail-lock checks: PASS
 
-The v0.1.3 release branch is additionally gated by the repository macOS CI and QA DMG workflows before merge. The post-merge `Publish Release` workflow builds and verifies the final Universal 2 package and checksum sidecars before creating the GitHub Release.
+The v0.1.3 release branch is additionally gated by the repository macOS CI and QA DMG workflows before merge. The post-merge `Publish Release` workflow builds and verifies the final Universal 2 package and checksum sidecars before creating or refreshing the GitHub Release.
 
 ## Distribution
 
