@@ -14,6 +14,8 @@
   · macOS 13 or later · Apple Silicon and Intel
 </p>
 
+**Current release package:** **v0.1.3 Build 5**. Build 5 supersedes the original Build 4 package while keeping the same `v0.1.3` release and download URL.
+
 FloatTabs keeps a small set of long-lived Web Apps one shortcut away: AI tools, social feeds, dashboards, documentation, media players, self-hosted services, or anything else you want available without opening a full browser window.
 
 Each Web App lives in its own persistent **Slot** with independent rendering, viewport, browser identity, zoom, resource policy, and background-media behavior.
@@ -184,6 +186,8 @@ All shortcuts are configurable in **FloatTabs Settings → Shortcuts**.
 - Attachment downloads use a staged transfer so an existing destination is not replaced until the new download succeeds.
 
 ## What's New in v0.1.3
+
+The current v0.1.3 package is **Build 5**, an in-place refresh of the original Build 4 package. Build 5 adds exact version/build and latest-fixes information in Settings while retaining the same v0.1.3 release URL.
 
 v0.1.3 focuses on rail interaction and fullscreen restore consistency:
 
