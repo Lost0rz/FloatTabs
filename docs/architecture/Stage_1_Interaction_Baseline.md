@@ -9,6 +9,10 @@ Current production interaction and geometry are defined by:
 - current `main` code and regression tests
 - the current release record under `docs/release/`
 
+The complete original Stage 1 baseline is preserved at:
+
+- [`archive/Stage_1_Interaction_Baseline.md`](archive/Stage_1_Interaction_Baseline.md)
+
 ## Historical context
 
 Stage 1 established several ideas that still explain the architecture:
@@ -36,5 +40,3 @@ reclaimed Web content width       = 64 pt
 The 12 pt collapsed gutter remains a movement target, while reclaimed Web content must not be intercepted by shell drag hit testing.
 
 Bottom-right resize remains ordinary floating-window resize and does not auto-maximize or auto-slide the panel to full visible width.
-
-The detailed original Stage 1 implementation is preserved in Git history for archaeology only.
