@@ -71,9 +71,30 @@ replace_once(
     "if #available(macOS 12.3, *) {\n            configuration.preferences.isElementFullscreenEnabled = true",
 )
 
+# WKWebpagePreferences.preferredContentMode is an iOS content-mode API in
+# WebKit's public header, and FloatTabs' macOS rendering architecture does not
+# need it: Website Mode is already implemented by FloatTabsWebView plus the
+# AppKit logical viewport host. Older macOS WebKit can runtime-trap when this
+# preference is touched even though a newer SDK can compile the call. That
+# exactly matches the real-Monterey A/B: no saved profile -> no WKWebView -> app
+# stays alive; saved active profile -> makeWebView() -> SIGILL/132. Remove the
+# preference mutation from the Monterey-prepared source entirely.
+replace_once(
+    source,
+    '''        configuration.defaultWebpagePreferences.preferredContentMode =
+            rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
+''',
+    '''        // Monterey compatibility: do not touch preferredContentMode.
+        // FloatTabs owns macOS Website Mode through its AppKit/WebView host.
+''',
+    'Monterey compatibility: do not touch preferredContentMode',
+)
+
 prepared_source = source.read_text()
 if 'value(forKey: "userAgent")' in prepared_source:
     raise SystemExit("error: Monterey source still contains private WKWebView userAgent KVC")
+if 'defaultWebpagePreferences.preferredContentMode' in prepared_source:
+    raise SystemExit("error: Monterey source still mutates WKWebpagePreferences.preferredContentMode")
 
 tests = ROOT / "FloatTabsTests/WebViewFactoryTests.swift"
 replace_once(
@@ -94,5 +115,15 @@ replace_once(
 """,
     "if #available(macOS 12.3, *) {\n            configuration.preferences.isElementFullscreenEnabled = true",
 )
+replace_once(
+    tests,
+    "        XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)\n",
+    "        // Monterey: Website Mode is verified through UA/viewport behavior, not preferredContentMode.\n",
+    "Monterey: Website Mode is verified through UA/viewport behavior, not preferredContentMode",
+)
+
+prepared_tests = tests.read_text()
+if 'defaultWebpagePreferences.preferredContentMode' in prepared_tests:
+    raise SystemExit("error: Monterey tests still reference WKWebpagePreferences.preferredContentMode")
 
 print("Applied Monterey WebKit runtime and availability guards to app and tests.")
