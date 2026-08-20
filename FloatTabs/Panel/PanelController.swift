@@ -23,6 +23,26 @@ struct FullscreenVisibilityIntent {
     }
 }
 
+/// The shell is re-presented by more paths than the explicit status-item
+/// show: the fullscreen restore re-presents it from inside WebKit's Space
+/// teardown. Workspace activation events that macOS delivers while that
+/// transition is still settling describe the pre-exit Space's frontmost
+/// application rather than a fresh user choice, so a just-restored shell
+/// needs the same short auto-hide grace that showFloatTabs arms.
+struct WorkspaceAutoHideSuppression: Equatable {
+    static let graceInterval: TimeInterval = 0.25
+
+    private(set) var deadline: TimeInterval = -.infinity
+
+    mutating func arm(atUptime uptime: TimeInterval) {
+        deadline = uptime + Self.graceInterval
+    }
+
+    func suppressesAutoHide(nowUptime uptime: TimeInterval) -> Bool {
+        uptime < deadline
+    }
+}
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
     private let panel: FloatingPanel
@@ -50,7 +70,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
     private var lastPresentationUptime: TimeInterval = -.infinity
-    private var suppressWorkspaceAutoHideUntilUptime: TimeInterval = -.infinity
+    private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
     private var fullscreenProfile: WebAppProfile?
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
@@ -205,7 +225,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func showFloatTabs() {
         let presentationUptime = ProcessInfo.processInfo.systemUptime
         lastPresentationUptime = presentationUptime
-        suppressWorkspaceAutoHideUntilUptime = presentationUptime + 0.25
+        workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
         requestedVisibility = true
         // System has no explicit override: resolve it from the current macOS
         // appearance again whenever a hidden shell is presented. Explicit
@@ -295,6 +315,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func storedWebAppStateSnapshot() -> StoredWebAppState {
         tabStore.storedStateSnapshot()
+    }
+
+    /// Backup import must use the same geometry-aware path as the in-app
+    /// toggle: the shell constraint and the separately hosted source window
+    /// cannot be left at the previous leading inset until the next launch.
+    func applyRestoredRailCollapse(_ collapsed: Bool) {
+        setTabRailCollapsed(collapsed, animated: false)
     }
 
     @discardableResult
@@ -414,7 +441,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {
         guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
                 as? NSRunningApplication,
-              ProcessInfo.processInfo.systemUptime >= suppressWorkspaceAutoHideUntilUptime,
+              !workspaceAutoHideSuppression.suppressesAutoHide(
+                  nowUptime: ProcessInfo.processInfo.systemUptime
+              ),
               NSWorkspace.shared.frontmostApplication?.processIdentifier
                 == activatedApplication.processIdentifier,
               Self.shouldAutoHideForActivatedApplication(
@@ -794,6 +823,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         let toggleRail: () -> Void = { [weak self] in
             guard let self else { return }
+            // The fullscreen source frame is frozen by design while WebKit
+            // owns the WebView; the companion fold grip stays reachable during
+            // element fullscreen, so refuse geometry changes there instead of
+            // letting shell and source drift apart until restore.
+            guard !self.sourceHostController.isSessionLocked else {
+                NSSound.beep()
+                return
+            }
             self.setTabRailCollapsed(
                 !self.rootView.externalControlZoneView.isRailCollapsed,
                 animated: true
@@ -804,14 +841,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         setTabRailCollapsed(preferencesStore.isTabRailCollapsed, animated: false)
     }
 
+    /// Collapse is physical-only (see PanelRootView.setTabRailCollapsed). The
+    /// persisted window frame, nominal panel/viewport formulas and
+    /// manual-resize persistence all stay 76-based; only the shell's zone
+    /// width, the drag bands and the source window's physical frame move.
+    /// Re-expanding therefore returns the content to exactly the persisted
+    /// nominal viewport size.
     private func setTabRailCollapsed(_ collapsed: Bool, animated: Bool) {
+        guard !sourceHostController.isSessionLocked else { return }
         preferencesStore.isTabRailCollapsed = collapsed
-        rootView.externalControlZoneView.setCollapsed(collapsed, animated: animated)
+        sourceHostController.railLeadingInset = collapsed
+            ? PanelMetrics.collapsedRailLeadingInset
+            : PanelMetrics.externalControlZoneWidth
+        rootView.setTabRailCollapsed(collapsed, animated: animated)
         sourceHostController.railFoldControl.setExpanded(!collapsed, animated: animated)
         rootView.companionRailFoldControlView.setExpanded(
             !collapsed,
             animated: animated
         )
+        synchronizeSourceHostFrame(display: true, animated: animated)
     }
 
     private func synchronizeSlotState() {
@@ -1308,8 +1356,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: true)
     }
 
-    private func synchronizeSourceHostFrame(display: Bool) {
-        sourceHostController.synchronizeFrame(with: panel, display: display)
+    private func synchronizeSourceHostFrame(display: Bool, animated: Bool = false) {
+        sourceHostController.synchronizeFrame(with: panel, display: display, animated: animated)
     }
 
     private func handleSourceSessionLockChange(isLocked: Bool) {
@@ -1386,6 +1434,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
+        // The restore re-presents the shell from inside WebKit's Space
+        // teardown. Arm the same workspace auto-hide grace that an explicit
+        // show uses: activation notifications still describing the pre-exit
+        // frontmost application must not hide the just-restored shell, and the
+        // global mouse monitor can deliver clicks made on the exiting
+        // fullscreen presentation after the shell is back.
+        let restoreUptime = ProcessInfo.processInfo.systemUptime
+        lastPresentationUptime = restoreUptime
+        workspaceAutoHideSuppression.arm(atUptime: restoreUptime)
         // Re-establish the queued target display before returning Web focus.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()

@@ -12,6 +12,11 @@ struct ExternalTabMetrics {
     static let activeHoverWidth: CGFloat = 76
     static let topOffset: CGFloat = 23
     static let tabGap: CGFloat = 4
+
+    /// One clock for every surface that must move together when the rail
+    /// folds: the rail's alpha fade, the shell's zone-width constraint, and
+    /// the separately hosted source window frame.
+    static let railFoldAnimationDuration: TimeInterval = 0.22
     static let addGap: CGFloat = 8
 
     // Add / Settings / Pin are members of the same rail, not separate
@@ -253,7 +258,7 @@ final class ExternalControlZoneView: NSView {
             let slide = CABasicAnimation(keyPath: "transform.translation.x")
             slide.fromValue = collapsed ? 0 : translation
             slide.toValue = collapsed ? translation : 0
-            slide.duration = 0.26
+            slide.duration = ExternalTabMetrics.railFoldAnimationDuration
             slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.78, 0.22, 1)
             layer.add(slide, forKey: "FloatTabs.railFoldSlide")
         }
@@ -262,7 +267,7 @@ final class ExternalControlZoneView: NSView {
             controls.forEach { $0.alphaValue = 0 }
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
+            context.duration = ExternalTabMetrics.railFoldAnimationDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             controls.forEach { $0.animator().alphaValue = collapsed ? 0 : 1 }
         } completionHandler: {
@@ -681,7 +686,7 @@ final class RailFoldControl: NSView {
             let fold = CABasicAnimation(keyPath: "path")
             fold.fromValue = oldPaths[index]
             fold.toValue = newPath
-            fold.duration = 0.25
+            fold.duration = ExternalTabMetrics.railFoldAnimationDuration
             fold.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.82, 0.2, 1)
             stroke.add(fold, forKey: "FloatTabs.railGripFold")
         }
@@ -905,13 +910,29 @@ final class ExternalWebAppTabView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // The shell is an activating panel in an LSUIElement app. Without this the
+    // first click from a background application is spent on activation alone,
+    // so selecting a tab would take two clicks. Drag and resize affordances
+    // already accept first mouse; tab selection must fire on the same click.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
     }
 
     override func layout() {
         super.layout()
+        // Rail magnification animates the tab's width. Refresh cursor rects so
+        // the registered arrow rect always covers the expanded row.
+        window?.invalidateCursorRects(for: self)
         updateShape()
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // The whole rail column doubles as the shell's blank movement zone. A
+        // tab's own cursor rect must win so tab hits never advertise dragging.
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     func setDockInfluence(_ influence: CGFloat) {
@@ -1385,8 +1406,27 @@ final class AddWebAppControl: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // Same activation contract as ExternalWebAppTabView: the first click from
+    // a background application must reach the control, not be spent activating
+    // the shell. Every drag and resize affordance already accepts first mouse.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        // Dock influence animates the control's width. Refresh cursor rects so
+        // the registered arrow rect always covers the expanded row.
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // The whole rail column doubles as the shell's blank movement zone. The
+        // control's own cursor rect must win so hits never advertise dragging.
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     func setDockInfluence(_ influence: CGFloat) {
@@ -1504,8 +1544,27 @@ final class PinPanelControl: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // Same activation contract as ExternalWebAppTabView: the first click from
+    // a background application must reach the control, not be spent activating
+    // the shell. Every drag and resize affordance already accepts first mouse.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        // Dock influence animates the control's width. Refresh cursor rects so
+        // the registered arrow rect always covers the expanded row.
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // The whole rail column doubles as the shell's blank movement zone. The
+        // control's own cursor rect must win so hits never advertise dragging.
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     func setDockInfluence(_ influence: CGFloat) {
@@ -1638,8 +1697,27 @@ final class GlobalSettingsControl: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // Same activation contract as ExternalWebAppTabView: the first click from
+    // a background application must reach the control, not be spent activating
+    // the shell. Every drag and resize affordance already accepts first mouse.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         frame.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        // Dock influence animates the control's width. Refresh cursor rects so
+        // the registered arrow rect always covers the expanded row.
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // The whole rail column doubles as the shell's blank movement zone. The
+        // control's own cursor rect must win so hits never advertise dragging.
+        addCursorRect(bounds, cursor: .arrow)
     }
 
     func setDockInfluence(_ influence: CGFloat) {

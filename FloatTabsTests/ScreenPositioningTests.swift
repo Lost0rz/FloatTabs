@@ -248,6 +248,58 @@ final class PanelRootViewLayoutTests: XCTestCase {
 
         XCTAssertNil(root.interactionBorderView.hitTest(root.interactionBorderView.bounds.center))
     }
+
+    func testCollapsedPanelKeepsViewportFlushAgainstTwelvePointLeadingGutter() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            root.externalControlZoneView.frame.width,
+            PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webViewportLayoutView.frame.minX,
+            PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webViewportLayoutView.frame.width,
+            PanelMetrics.defaultViewportSize.width + PanelMetrics.externalControlZoneWidth
+                - PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.resizeHandleView.frame.maxX,
+            root.webViewportLayoutView.frame.maxX,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.companionRailFoldControlView.frame.minX,
+            PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+    }
+
+    func testRailCollapseRoundTripRestoresExactNominalViewport() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+        let expandedFrame = root.webViewportLayoutView.frame
+
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+        root.setTabRailCollapsed(false, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(root.webViewportLayoutView.frame, expandedFrame)
+    }
 }
 
 @MainActor
@@ -270,6 +322,70 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
                 root.hitTest(point) is PanelPerimeterDragView,
                 "Expected external movement target at \(point)"
             )
+        }
+    }
+
+    func testCollapsedLeftGutterRemainsMovementTarget() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        let gutterPoint = NSPoint(
+            x: PanelMetrics.collapsedRailLeadingInset / 2,
+            y: root.bounds.midY
+        )
+        XCTAssertTrue(root.hitTest(gutterPoint) is PanelPerimeterDragView)
+    }
+
+    func testCollapsedDragBandsAvoidReclaimedContentArea() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        let reclaimedColumn = NSRect(
+            x: PanelMetrics.collapsedRailLeadingInset,
+            y: 2 * PanelMetrics.outerInteractionGutter,
+            width: PanelMetrics.externalControlZoneWidth - PanelMetrics.collapsedRailLeadingInset,
+            height: root.bounds.height - 4 * PanelMetrics.outerInteractionGutter
+        )
+        for rect in PanelPerimeterDragView.dragRects(
+            in: root.bounds,
+            leadingInset: PanelMetrics.collapsedRailLeadingInset
+        ) {
+            let overlap = rect.intersection(reclaimedColumn)
+            XCTAssertTrue(overlap.isNull || overlap.isEmpty)
+        }
+
+        let reclaimedPoint = NSPoint(
+            x: PanelMetrics.collapsedRailLeadingInset + reclaimedColumn.width / 2,
+            y: root.bounds.midY
+        )
+        XCTAssertFalse(root.hitTest(reclaimedPoint) is PanelPerimeterDragView)
+    }
+
+    func testCollapsedShellMovementBandsStayOutsideReclaimedWebFrame() {
+        let webView = WKWebView(frame: .zero)
+        let root = PanelRootView(webView: webView)
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
+
+        for rect in PanelPerimeterDragView.dragRects(
+            in: root.bounds,
+            leadingInset: PanelMetrics.collapsedRailLeadingInset
+        ) {
+            let overlap = rect.intersection(root.webViewportLayoutView.frame)
+            XCTAssertTrue(overlap.isNull || overlap.isEmpty)
         }
     }
 

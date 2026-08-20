@@ -14,6 +14,13 @@ struct PanelMetrics {
     static let outerInteractionGutter: CGFloat = 12
     static let innerMovementOverlap = outerInteractionGutter
 
+    /// Physical-only collapse geometry. Folding the rail away hands its
+    /// reserved 76 pt column to the Web content while the shell window frame
+    /// — and every persisted/nominal size formula — stays untouched. Only the
+    /// symmetric movement gutter remains on the left edge so the panel keeps
+    /// its move affordance on every side.
+    static let collapsedRailLeadingInset: CGFloat = outerInteractionGutter
+
     /// The visible frame is deliberately much thinner than its hit target.
     /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt
     /// stroke this deliberately overlaps the Web edge by 0.75 pt, eliminating
@@ -124,15 +131,15 @@ enum PanelMovementGeometry {
             .filter { !$0.isNull && !$0.isEmpty }
     }
 
-    static func webFrame(in panelBounds: NSRect) -> NSRect {
+    static func webFrame(
+        in panelBounds: NSRect,
+        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
+    ) -> NSRect {
         let outer = max(PanelMetrics.outerInteractionGutter, 0)
         return NSRect(
-            x: panelBounds.minX + PanelMetrics.externalControlZoneWidth,
+            x: panelBounds.minX + leadingInset,
             y: panelBounds.minY + outer,
-            width: max(
-                panelBounds.width - PanelMetrics.externalControlZoneWidth - outer,
-                0
-            ),
+            width: max(panelBounds.width - leadingInset - outer, 0),
             height: max(panelBounds.height - 2 * outer, 0)
         )
     }

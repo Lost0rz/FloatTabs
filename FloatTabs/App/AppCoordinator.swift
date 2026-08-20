@@ -367,7 +367,7 @@ final class AppCoordinator {
         }
         if let isTabRailCollapsed = imported.globalPreferences.isTabRailCollapsed {
             preferencesStore.isTabRailCollapsed = isTabRailCollapsed
-            synchronizeRestoredRailCollapsePresentation(isTabRailCollapsed)
+            panelController.applyRestoredRailCollapse(isTabRailCollapsed)
         }
 
         let shortcut = imported.globalShowHideShortcut.map {
@@ -377,38 +377,6 @@ final class AppCoordinator {
             )
         }
         KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
-    }
-
-    /// Backup restore is a rare one-shot operation and happens only while the
-    /// fullscreen source is unlocked. Update the already-created rail and both
-    /// fold affordances immediately so the restored UserDefaults value and the
-    /// live shell cannot disagree until the next launch.
-    private func synchronizeRestoredRailCollapsePresentation(_ collapsed: Bool) {
-        for window in NSApp.windows {
-            guard let contentView = window.contentView else { continue }
-            synchronizeRestoredRailCollapsePresentation(
-                in: contentView,
-                collapsed: collapsed
-            )
-        }
-    }
-
-    private func synchronizeRestoredRailCollapsePresentation(
-        in view: NSView,
-        collapsed: Bool
-    ) {
-        if let rail = view as? ExternalControlZoneView {
-            rail.setCollapsed(collapsed, animated: false)
-        }
-        if let foldControl = view as? RailFoldControl {
-            foldControl.setExpanded(!collapsed, animated: false)
-        }
-        for subview in view.subviews {
-            synchronizeRestoredRailCollapsePresentation(
-                in: subview,
-                collapsed: collapsed
-            )
-        }
     }
 
     private func showGlobalSettings() {
