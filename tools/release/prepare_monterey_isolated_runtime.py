@@ -9,6 +9,7 @@ the final static isolation checks.
 """
 
 import re
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,53 @@ from monterey_transform_lib import (
 ROOT = Path(__file__).resolve().parents[2]
 
 DOTALL = re.MULTILINE | re.DOTALL
+
+PROBE_MODE = os.environ.get("FLOATTABS_MONTEREY_PROBE_MODE", "").strip().lower()
+PROBE_MODES = {"", "shell", "construct", "attach", "blank", "https"}
+if PROBE_MODE not in PROBE_MODES:
+    raise SystemExit(
+        "error: FLOATTABS_MONTEREY_PROBE_MODE must be one of: "
+        "shell, construct, attach, blank, https"
+    )
+
+PROBE_MODE_SWIFT = "nil" if not PROBE_MODE else f".{PROBE_MODE}"
+
+
+def probe_mode_declaration() -> str:
+    return f'''enum MontereyProbeMode: String {{
+    case shell
+    case construct
+    case attach
+    case blank
+    case https
+
+    // This value is generated into the compatibility build. The absent value
+    // is the unmodified Candidate B runtime path.
+    static let configured: MontereyProbeMode? = {PROBE_MODE_SWIFT}
+
+    var createsWebView: Bool {{
+        self != .shell
+    }}
+
+    var attachesWebView: Bool {{
+        switch self {{
+        case .shell, .construct:
+            return false
+        case .attach, .blank, .https:
+            return true
+        }}
+    }}
+
+    var loadsAboutBlank: Bool {{
+        self == .blank
+    }}
+
+    var loadsProfileURL: Bool {{
+        self == .https
+    }}
+}}
+
+'''
 
 # ---------------------------------------------------------------------------
 # FloatingPanel: Monterey never adopts the macOS-13-only collection behavior.
@@ -248,6 +296,12 @@ panel = ROOT / "FloatTabs/Panel/PanelController.swift"
 text = read_source(panel)
 text = replace_once_regex(
     text,
+    r"^struct FullscreenVisibilityIntent",
+    probe_mode_declaration() + "struct FullscreenVisibilityIntent",
+    label="Monterey probe mode declaration",
+)
+text = replace_once_regex(
+    text,
     r"        if #available\(macOS 13\.0, \*\) \{\s*"
     r"synchronizeSlotState\(\)\s*"
     r"\} else \{.*?"
@@ -285,6 +339,101 @@ text = replace_once_regex(
     flags=DOTALL,
 )
 write_source(panel, text)
+
+# ---------------------------------------------------------------------------
+# Candidate C first-presentation probes: generated only when explicitly
+# requested. The normal Candidate B path remains byte-for-byte untouched by
+# this section when FLOATTABS_MONTEREY_PROBE_MODE is absent.
+# ---------------------------------------------------------------------------
+if PROBE_MODE:
+    text = replace_once_regex(
+        text,
+        r"    private var needsFocusAfterApplicationActivation = false\n",
+        """    private var needsFocusAfterApplicationActivation = false
+    private var montereyProbeWebView: WKWebView?
+
+""",
+        label="Monterey probe strong WebView retention property",
+    )
+
+    probe_load = ""
+    if PROBE_MODE == "blank":
+        probe_load = """
+        webView.load(URLRequest(url: URL(string: \"about:blank\")!))
+"""
+    elif PROBE_MODE == "https":
+        probe_load = """
+        if let profile = tabStore.activeProfile {
+            let destination = profile.currentURL ?? profile.homeURL
+            webView.load(URLRequest(url: destination))
+        }
+"""
+
+    probe_webkit_action = ""
+    if PROBE_MODE == "shell":
+        probe_webkit_action = """    // C0: the shell is the complete first-presentation boundary.
+"""
+    else:
+        probe_webkit_action = f'''    private func performMontereyProbe() {{
+        guard montereyProbeWebView == nil else {{ return }}
+        let webView = WebViewFactory.makeWebView()
+        montereyProbeWebView = webView
+'''
+        if PROBE_MODE in {"attach", "blank", "https"}:
+            probe_webkit_action += """        rootView.webPanelContainerView.show(webView: webView)
+        sourceHostController.window.orderFrontRegardless()
+"""
+        probe_webkit_action += probe_load
+        probe_webkit_action += "    }\n\n"
+
+    probe_deferred_action = ""
+    if PROBE_MODE != "shell":
+        probe_deferred_action = """        // C1-C4: let the shell presentation reach WindowServer first.
+        DispatchQueue.main.async { [weak self] in
+            self?.performMontereyProbe()
+        }
+"""
+
+    probe_show = f'''    func showFloatTabs() {{
+        let presentationUptime = ProcessInfo.processInfo.systemUptime
+        lastPresentationUptime = presentationUptime
+        workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
+        requestedVisibility = true
+        synchronizeAppearance()
+
+        capturePreviousApplication()
+        positionPanelForCurrentScreens()
+        synchronizeFixedViewportAfterPositioning()
+        synchronizeSourceHostFrame(display: false)
+        needsFocusAfterApplicationActivation = !NSApp.isActive
+
+        // Candidate C deliberately presents only the shell before any WebKit
+        // construction, attachment, or navigation boundary under test.
+        panel.orderFrontRegardless()
+        activateFloatTabs()
+        panel.makeKeyAndOrderFront(nil)
+        if NSApp.isActive {{
+            needsFocusAfterApplicationActivation = false
+        }}
+{probe_deferred_action}    }}
+
+{probe_webkit_action}'''
+    text = replace_span_once(
+        text,
+        r"^    func showFloatTabs\(\) \{",
+        r"^    func hideFloatTabs\(\) \{",
+        probe_show,
+        label="Monterey Candidate C first-presentation probe",
+    )
+    text = replace_once_regex(
+        text,
+        r"    private func synchronizeSlotState\(\) \{\n",
+        """    private func synchronizeSlotState() {
+        guard MontereyProbeMode.configured == nil else { return }
+""",
+        label="Monterey probe lifecycle bypass",
+    )
+    write_source(panel, text)
 
 # ---------------------------------------------------------------------------
 # SlotNavigationObserver: committed-URL persistence only.
@@ -812,6 +961,37 @@ text = replace_once_regex(
     func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
     label="WebViewPoolTests warm rendering no-op contract",
 )
+if PROBE_MODE:
+    text = replace_once_regex(
+        text,
+        r"        controller\.showFloatTabs\(\)\n        XCTAssertEqual\(pool\.count, 1\)",
+        """        controller.showFloatTabs()
+        // Candidate C intentionally bypasses the normal pool/lifecycle path;
+        // each probe owns only the boundary named by its generated mode.
+        XCTAssertEqual(pool.count, 0)""",
+        label="WebViewPoolTests Candidate C lifecycle bypass contract",
+    )
+    expected_creates = "true" if PROBE_MODE != "shell" else "false"
+    expected_attaches = "true" if PROBE_MODE in {"attach", "blank", "https"} else "false"
+    expected_blank = "true" if PROBE_MODE == "blank" else "false"
+    expected_https = "true" if PROBE_MODE == "https" else "false"
+    text = replace_once_regex(
+        text,
+        r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+        f'''    func testMontereyGeneratedPresentationProbeContract() {{
+        guard let mode = MontereyProbeMode.configured else {{
+            return XCTFail("Candidate C probe mode was not generated")
+        }}
+        XCTAssertEqual(mode.rawValue, "{PROBE_MODE}")
+        XCTAssertEqual(mode.createsWebView, {expected_creates})
+        XCTAssertEqual(mode.attachesWebView, {expected_attaches})
+        XCTAssertEqual(mode.loadsAboutBlank, {expected_blank})
+        XCTAssertEqual(mode.loadsProfileURL, {expected_https})
+    }}
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {{''',
+        label="WebViewPoolTests Candidate C generated probe contract",
+    )
 write_source(pool_tests, text)
 
 tab_store_tests = ROOT / "FloatTabsTests/TabStoreTests.swift"
@@ -1101,5 +1281,114 @@ require_present(
     "XCTAssertEqual(mainFrameStyleCount, 0, accuracy: 0.001)",
     label="WebsiteLayoutGeometryRegressionTests compatibility contract missing",
 )
+
+if PROBE_MODE:
+    require_present(
+        prepared_panel,
+        f"static let configured: MontereyProbeMode? = .{PROBE_MODE}",
+        label="Candidate C generated probe mode is missing",
+    )
+    probe_presentation_span = span_of(
+        prepared_panel,
+        r"^    func showFloatTabs\(\) \{",
+        r"^    func hideFloatTabs\(\) \{",
+        label="Candidate C first-presentation span",
+    )
+    for forbidden in [
+        "synchronizeSlotState()",
+        "slotLifecycleCoordinator",
+        "sourceHostController.observeFullscreenState",
+        "focusActiveWebViewIfAvailable",
+        "WebViewPool",
+        "PopupCoordinator",
+        "SlotNavigationObserver",
+        "evaluateJavaScript",
+        "addUserScript",
+        "navigationDelegate",
+        "uiDelegate",
+        "pageZoom",
+        "setRendering(",
+        "customUserAgent",
+        "preferredContentMode",
+    ]:
+        require_absent(
+            probe_presentation_span,
+            forbidden,
+            label=f"Candidate C {PROBE_MODE} probe crossed forbidden boundary: {forbidden}",
+        )
+    require_present(
+        probe_presentation_span,
+        "panel.orderFrontRegardless()",
+        label="Candidate C probe does not present the shell first",
+    )
+
+    if PROBE_MODE == "shell":
+        for forbidden in [
+            "DispatchQueue.main.async",
+            "WebViewFactory.makeWebView",
+            "webPanelContainerView.show(webView:",
+            ".load(URLRequest",
+        ]:
+            require_absent(
+                probe_presentation_span,
+                forbidden,
+                label=f"C0 shell probe crossed boundary: {forbidden}",
+            )
+    else:
+        require_present(
+            probe_presentation_span,
+            "DispatchQueue.main.async",
+            label=f"Candidate C {PROBE_MODE} probe was not deferred",
+        )
+        require_present(
+            probe_presentation_span,
+            "WebViewFactory.makeWebView()",
+            label=f"Candidate C {PROBE_MODE} probe did not construct a stock WebView",
+        )
+        require_present(
+            probe_presentation_span,
+            "montereyProbeWebView = webView",
+            label=f"Candidate C {PROBE_MODE} probe did not retain its WebView",
+        )
+        if PROBE_MODE in {"attach", "blank", "https"}:
+            require_present(
+                probe_presentation_span,
+                "rootView.webPanelContainerView.show(webView: webView)",
+                label=f"Candidate C {PROBE_MODE} probe did not use the host attach path",
+            )
+        else:
+            require_absent(
+                probe_presentation_span,
+                "webPanelContainerView.show(webView:",
+                label="C1 construct probe attached the WebView",
+            )
+        if PROBE_MODE == "construct":
+            require_absent(
+                probe_presentation_span,
+                ".load(URLRequest",
+                label="C1 construct probe loaded a URL",
+            )
+        elif PROBE_MODE == "blank":
+            require_present(
+                probe_presentation_span,
+                'URL(string: "about:blank")!',
+                label="C3 blank probe missing about:blank load",
+            )
+        elif PROBE_MODE == "https":
+            require_present(
+                probe_presentation_span,
+                "let destination = profile.currentURL ?? profile.homeURL",
+                label="C4 HTTPS probe missing profile URL selection",
+            )
+            require_present(
+                probe_presentation_span,
+                "webView.load(URLRequest(url: destination))",
+                label="C4 HTTPS probe missing plain load",
+            )
+    require_present(
+        prepared_pool_tests,
+        "testMontereyGeneratedPresentationProbeContract",
+        label="Candidate C generated probe test is missing",
+    )
 
 print("Applied isolated Monterey Compatibility Edition runtime semantics.")
