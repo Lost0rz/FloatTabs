@@ -39,6 +39,19 @@ if PROBE_MODE not in PROBE_MODES:
 
 PROBE_MODE_SWIFT = "nil" if not PROBE_MODE else f".{PROBE_MODE}"
 
+RUNTIME_DIAG = os.environ.get("FLOATTABS_MONTEREY_RUNTIME_DIAG", "").strip().lower()
+RUNTIME_DIAG_MODES = {"", "focus-off", "delegates-off"}
+if RUNTIME_DIAG not in RUNTIME_DIAG_MODES:
+    raise SystemExit(
+        "error: FLOATTABS_MONTEREY_RUNTIME_DIAG must be one of: "
+        "focus-off, delegates-off"
+    )
+if PROBE_MODE and RUNTIME_DIAG:
+    raise SystemExit(
+        "error: FLOATTABS_MONTEREY_RUNTIME_DIAG cannot be combined with "
+        "FLOATTABS_MONTEREY_PROBE_MODE"
+    )
+
 
 def probe_mode_declaration() -> str:
     return f'''enum MontereyProbeMode: String {{
@@ -147,6 +160,25 @@ text = replace_span_once(
     label="FullscreenSourceHost legacy polling removal",
 )
 write_source(fullscreen, text)
+
+if RUNTIME_DIAG == "focus-off":
+    text = read_source(fullscreen)
+    text = replace_once_regex(
+        text,
+        r"    func orderFrontAndFocus\(_ webView: WKWebView\?\) \{\n",
+        """    func orderFrontWithoutFocus() {
+        guard !isSessionLocked else { return }
+        attachSourceWindowToShell()
+        window.alphaValue = 1
+        window.ignoresMouseEvents = false
+        window.orderFrontRegardless()
+    }
+
+    func orderFrontAndFocus(_ webView: WKWebView?) {
+""",
+        label="Monterey focus-off source-window ordering seam",
+    )
+    write_source(fullscreen, text)
 
 # ---------------------------------------------------------------------------
 # WebViewFactory: Monterey-only implementation with a fully stock public
@@ -486,7 +518,6 @@ else:
                   generation == self.presentationGeneration else {
                 return
             }
-            self.focusActiveWebViewIfAvailable()
             if NSApp.isActive {
                 self.needsFocusAfterApplicationActivation = false
             }
@@ -508,6 +539,14 @@ else:
 """,
         label="Monterey deferred presentation cancellation",
     )
+    if RUNTIME_DIAG == "focus-off":
+        text = replace_once_regex(
+            text,
+            r"        sourceHostController\.orderFrontAndFocus\(webView\)\n",
+            """        sourceHostController.orderFrontWithoutFocus()
+""",
+            label="Monterey focus-off synchronizeSlotState seam",
+        )
     write_source(panel, text)
 
 # ---------------------------------------------------------------------------
@@ -531,7 +570,30 @@ text = replace_once_regex(
     """        if let url = webView.url, WebAppURL.isSafe(url) {""",
     label="SlotNavigationObserver Monterey-only committed persistence",
 )
+if RUNTIME_DIAG == "delegates-off":
+    text = replace_once_regex(
+        text,
+        r"        webView\.navigationDelegate = self\n",
+        """        // Candidate E delegates-off diagnostic: retain the observer
+        // for lifecycle ownership, but leave WKWebView's navigation delegate nil.
+""",
+        label="Monterey delegates-off navigation delegate registration",
+    )
 write_source(observer, text)
+
+pool = ROOT / "FloatTabs/Web/WebViewPool.swift"
+if RUNTIME_DIAG == "delegates-off":
+    text = read_source(pool)
+    text = replace_once_regex(
+        text,
+        r"        webView\.uiDelegate = popupCoordinator\n",
+        """        // Candidate E delegates-off diagnostic: retain the popup
+        // coordinator for lifecycle ownership, but leave the primary WebView's
+        // UI delegate nil.
+""",
+        label="Monterey delegates-off UI delegate registration",
+    )
+    write_source(pool, text)
 
 # ---------------------------------------------------------------------------
 # Test contract: the standard suite asserts standard-edition behaviors that
@@ -1182,6 +1244,138 @@ else:
     func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
         label="WebViewPoolTests Candidate D cancellation and reuse tests",
     )
+    if RUNTIME_DIAG == "delegates-off":
+        text = replace_once_regex(
+            text,
+            r"    func testPooledWebViewsInstallPopupCoordinator\(\) \{\n"
+            r"        let pool = makePool\(\)\n"
+            r"        let webView = pool\.webView\(for: makeProfile\(name: \"A\"\)\)\n\n"
+            r"        XCTAssertTrue\(webView\.uiDelegate is PopupCoordinator\)\n"
+            r"    \}",
+            """    func testPooledWebViewsLeavePrimaryDelegatesUnregistered() {
+        let pool = makePool()
+        let webView = pool.webView(for: makeProfile(name: "A"))
+
+        XCTAssertNil(webView.navigationDelegate)
+        XCTAssertNil(webView.uiDelegate)
+    }""",
+            label="WebViewPoolTests Candidate E delegates-off existing delegate contract",
+        )
+    if RUNTIME_DIAG == "focus-off":
+        text = replace_once_regex(
+            text,
+            r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+            """    func testMontereyFocusOffRetainsDelegatesAndLeavesSourceWindowNonKey() {
+        _ = NSApplication.shared
+        let profile = makeProfile(name: "FocusOff")
+        let repository = MemoryProfileRepository(
+            state: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id
+            )
+        )
+        let tabStore = TabStore(repository: repository)
+        let pool = makePool()
+        let defaults = UserDefaults(
+            suiteName: "FloatTabsMontereyFocusOff.\\(UUID().uuidString)"
+        )!
+        let controller = PanelController(
+            tabStore: tabStore,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(
+                defaults: defaults,
+                key: "FloatTabsMontereyFocusOff.frame"
+            ),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 0)
+        let presentationTurn = expectation(description: "focus-off presentation")
+        DispatchQueue.main.async {
+            presentationTurn.fulfill()
+        }
+        wait(for: [presentationTurn], timeout: 1)
+
+        guard let webView = pool.existingWebView(for: profile.id) else {
+            controller.hideFloatTabs()
+            return XCTFail("focus-off presentation did not create a WebView")
+        }
+        XCTAssertNotNil(webView.navigationDelegate)
+        XCTAssertNotNil(webView.uiDelegate)
+        guard let sourceWindow = NSApp.windows
+            .compactMap({ $0 as? FullscreenSourceWindow })
+            .first(where: { $0.isVisible }) else {
+            controller.hideFloatTabs()
+            return XCTFail("focus-off presentation did not show its source window")
+        }
+        XCTAssertTrue(sourceWindow.isVisible)
+        XCTAssertFalse(sourceWindow.isKeyWindow)
+        controller.hideFloatTabs()
+    }
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
+            label="WebViewPoolTests Candidate E focus-off runtime contract",
+        )
+    elif RUNTIME_DIAG == "delegates-off":
+        text = replace_once_regex(
+            text,
+            r"^    func testPooledWebViewsUsePersistentWebsiteDataStore\(\) \{",
+            """    func testMontereyDelegatesOffLeavesPrimaryWebViewWithoutDelegates() {
+        _ = NSApplication.shared
+        let profile = makeProfile(name: "DelegatesOff")
+        let repository = MemoryProfileRepository(
+            state: StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [profile],
+                lastActiveTabID: profile.id
+            )
+        )
+        let tabStore = TabStore(repository: repository)
+        let pool = makePool()
+        let defaults = UserDefaults(
+            suiteName: "FloatTabsMontereyDelegatesOff.\\(UUID().uuidString)"
+        )!
+        let controller = PanelController(
+            tabStore: tabStore,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(
+                defaults: defaults,
+                key: "FloatTabsMontereyDelegatesOff.frame"
+            ),
+            preferencesStore: AppPreferencesStore(defaults: defaults)
+        )
+
+        controller.showFloatTabs()
+        XCTAssertEqual(pool.count, 0)
+        let presentationTurn = expectation(description: "delegates-off presentation")
+        DispatchQueue.main.async {
+            presentationTurn.fulfill()
+        }
+        wait(for: [presentationTurn], timeout: 1)
+
+        guard let webView = pool.existingWebView(for: profile.id) else {
+            controller.hideFloatTabs()
+            return XCTFail("delegates-off presentation did not create a WebView")
+        }
+        XCTAssertNil(webView.navigationDelegate)
+        XCTAssertNil(webView.uiDelegate)
+        guard let sourceWindow = NSApp.windows
+            .compactMap({ $0 as? FullscreenSourceWindow })
+            .first(where: { $0.isVisible }) else {
+            controller.hideFloatTabs()
+            return XCTFail("delegates-off presentation did not show its source window")
+        }
+        XCTAssertTrue(sourceWindow.isVisible)
+        XCTAssertTrue(sourceWindow.isKeyWindow)
+        controller.hideFloatTabs()
+    }
+
+    func testPooledWebViewsUsePersistentWebsiteDataStore() {""",
+            label="WebViewPoolTests Candidate E delegates-off runtime contract",
+        )
+
 write_source(pool_tests, text)
 
 tab_store_tests = ROOT / "FloatTabsTests/TabStoreTests.swift"
@@ -1358,13 +1552,15 @@ primary_create_span = span_of(
     r"^        return webView\n    \}",
     label="final WebViewPool primary creation span",
 )
-for required in [
+primary_create_requirements = [
     "WebViewFactory.makeWebView",
     "SlotNavigationObserver(",
     "PopupCoordinator(",
-    "webView.uiDelegate = popupCoordinator",
     "load(webView, request)",
-]:
+]
+if RUNTIME_DIAG != "delegates-off":
+    primary_create_requirements.append("webView.uiDelegate = popupCoordinator")
+for required in primary_create_requirements:
     require_present(
         primary_create_span,
         required,
@@ -1627,7 +1823,6 @@ else:
         "generation == self.presentationGeneration",
         "self.slotLifecycleCoordinator.setPanelVisible",
         "self.synchronizeSlotState()",
-        "self.focusActiveWebViewIfAvailable()",
     ]:
         require_present(
             deferred_candidate_d,
@@ -1649,5 +1844,75 @@ else:
         'let presentationTurn = expectation(description: "deferred presentation")',
         label="Candidate D next-runloop pool assertion is missing",
     )
+
+    require_absent(
+        candidate_d_span,
+        "self.focusActiveWebViewIfAvailable()",
+        label="Candidate E duplicate first-presentation focus survived",
+    )
+
+    if RUNTIME_DIAG == "focus-off":
+        synchronize_slot_span = span_of(
+            prepared_panel,
+            r"^    private func synchronizeSlotState\(\) \{",
+            r"^    private func focusActiveWebViewIfAvailable\(\) \{",
+            label="Candidate E focus-off slot synchronization span",
+        )
+        require_present(
+            prepared_fullscreen,
+            "func orderFrontWithoutFocus()",
+            label="Candidate E focus-off source-window ordering helper is missing",
+        )
+        require_present(
+            synchronize_slot_span,
+            "sourceHostController.orderFrontWithoutFocus()",
+            label="Candidate E focus-off synchronization does not use the no-focus path",
+        )
+        for forbidden in [
+            "sourceHostController.orderFrontAndFocus(webView)",
+            "WebViewFocus.focus",
+            "focusActiveWebViewIfAvailable",
+        ]:
+            require_absent(
+                synchronize_slot_span,
+                forbidden,
+                label=f"Candidate E focus-off first path retained explicit focus: {forbidden}",
+            )
+        require_present(
+            prepared_observer,
+            "webView.navigationDelegate = self",
+            label="Candidate E focus-off removed the navigation delegate unexpectedly",
+        )
+        require_present(
+            prepared_pool,
+            "webView.uiDelegate = popupCoordinator",
+            label="Candidate E focus-off removed the UI delegate unexpectedly",
+        )
+        require_present(
+            prepared_pool_tests,
+            "testMontereyFocusOffRetainsDelegatesAndLeavesSourceWindowNonKey",
+            label="Candidate E focus-off runtime contract test is missing",
+        )
+    elif RUNTIME_DIAG == "delegates-off":
+        require_absent(
+            prepared_observer,
+            "webView.navigationDelegate = self",
+            label="Candidate E delegates-off navigation delegate registration survived",
+        )
+        require_absent(
+            primary_create_span,
+            "webView.uiDelegate = popupCoordinator",
+            label="Candidate E delegates-off UI delegate registration survived",
+        )
+        require_present(
+            prepared_panel,
+            "sourceHostController.orderFrontAndFocus(webView)",
+            label="Candidate E delegates-off removed the normal focus path",
+        )
+        require_present(
+            prepared_pool_tests,
+            "testMontereyDelegatesOffLeavesPrimaryWebViewWithoutDelegates",
+            label="Candidate E delegates-off runtime contract test is missing",
+        )
 
 print("Applied isolated Monterey Compatibility Edition runtime semantics.")
