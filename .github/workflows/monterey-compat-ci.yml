@@ -39,14 +39,11 @@ jobs:
           grep -Fq 'guard #available(macOS 13.0, *) else { return }' FloatTabs/Web/WebViewFactory.swift
           grep -Fq 'Monterey lazy restore: do not create/load a saved WKWebView' FloatTabs/Panel/PanelController.swift
           grep -Fq 'Monterey navigation safe mode: do not persist provisional URL KVO' FloatTabs/Web/SlotNavigationObserver.swift
+          grep -Fq 'observation = webView.observe(\.url' FloatTabs/Web/SlotNavigationObserver.swift
+          grep -Fq '[FloatTabs Monterey] navigation committed slot=' FloatTabs/Web/SlotNavigationObserver.swift
           grep -Fq '[FloatTabs Monterey] createWebView before load' FloatTabs/Web/WebViewPool.swift
-          if grep -Fq 'if #available(macOS 12.3, *) {' FloatTabs/Web/WebViewFactory.swift && \
-             grep -Fq 'configuration.preferences.isElementFullscreenEnabled = true' FloatTabs/Web/WebViewFactory.swift; then
-            echo 'error: review macOS 12 element-fullscreen guard' >&2
-            exit 1
-          fi
-          if grep -Fq 'webView.observe(\.url' FloatTabs/Web/SlotNavigationObserver.swift; then
-            echo 'error: provisional URL KVO survived Monterey preparation' >&2
+          if grep -Fq 'if #available(macOS 12.3, *) {' FloatTabs/Web/WebViewFactory.swift; then
+            echo 'error: macOS 12.3 WebView availability guard survived runtime hardening' >&2
             exit 1
           fi
 
