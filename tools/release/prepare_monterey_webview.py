@@ -96,6 +96,28 @@ if 'value(forKey: "userAgent")' in prepared_source:
 if 'defaultWebpagePreferences.preferredContentMode' in prepared_source:
     raise SystemExit("error: Monterey source still mutates WKWebpagePreferences.preferredContentMode")
 
+# Remove the only remaining fallback read as well. Normal FloatTabs WebViews
+# always carry Website Mode on FloatTabsWebView itself. A non-FloatTabs fallback
+# is conservatively desktop on macOS, matching Safari and WebKit's native Mac
+# behavior without touching the iOS-oriented content-mode preference.
+container = ROOT / "FloatTabs/Web/WebViewContainer.swift"
+replace_once(
+    container,
+    '''        let mode = (webView as? FloatTabsWebView)?.websiteMode
+            ?? (webView.configuration.defaultWebpagePreferences.preferredContentMode == .mobile
+                ? .mobile
+                : .desktop)
+''',
+    '''        let mode = (webView as? FloatTabsWebView)?.websiteMode ?? .desktop
+        // Monterey compatibility: macOS fallback stays desktop without reading
+        // WKWebpagePreferences.preferredContentMode.
+''',
+    'Monterey compatibility: macOS fallback stays desktop without reading',
+)
+prepared_container = container.read_text()
+if 'defaultWebpagePreferences.preferredContentMode' in prepared_container:
+    raise SystemExit("error: Monterey container still references WKWebpagePreferences.preferredContentMode")
+
 tests = ROOT / "FloatTabsTests/WebViewFactoryTests.swift"
 replace_once(
     tests,
