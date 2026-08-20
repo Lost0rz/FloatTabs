@@ -13,10 +13,9 @@ def replace_once(path: Path, old: str, new: str, marker: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
-# Do not instantiate a saved WKWebView synchronously while AppCoordinator is
-# still constructing the accessory app. A persisted profile can therefore no
-# longer turn a WebKit runtime failure into an app-launch crash loop. The first
-# explicit FloatTabs presentation still calls synchronizeSlotState().
+# Do not instantiate a saved WKWebView synchronously on macOS 12 while
+# AppCoordinator is still constructing the accessory app. macOS 13+ keeps the
+# accepted eager-restore behavior unchanged.
 panel = ROOT / "FloatTabs/Panel/PanelController.swift"
 replace_once(
     panel,
@@ -29,19 +28,22 @@ replace_once(
     '''        tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
         }
-        // Monterey lazy restore: do not create/load a saved WKWebView while
-        // PanelController itself is being initialized. showFloatTabs() performs
-        // the first full synchronization after the shell has been requested.
-        NSLog("[FloatTabs Monterey] PanelController initialized without WebView restore")
+        if #available(macOS 13.0, *) {
+            synchronizeSlotState()
+        } else {
+            // Monterey lazy restore: do not create/load a saved WKWebView while
+            // PanelController itself is being initialized. showFloatTabs()
+            // performs the first full synchronization after user presentation.
+            NSLog("[FloatTabs Monterey] PanelController initialized without WebView restore")
+        }
     }
 ''',
     "Monterey lazy restore: do not create/load a saved WKWebView",
 )
 
-# A typed address used to be persisted before WebKit was even asked to navigate.
-# On a runtime crash that made the same URL auto-load on every later start. In
-# the compatibility build, navigation begins first and the navigation observer
-# persists only a URL that WebKit actually commits.
+# Keep the accepted macOS 13+ pre-navigation runtime-state update. On Monterey,
+# navigation starts without persisting the candidate URL; didCommit below is the
+# durability boundary, preventing a failed WebKit load from poisoning startup.
 replace_once(
     panel,
     '''        tabStore.updateCurrentURL(id: id, url: normalized.url)
@@ -51,19 +53,26 @@ replace_once(
             allowHTTPEntryFallback: normalized.schemeWasInferred
         )
 ''',
-    '''        NSLog("[FloatTabs Monterey] address commit begin slot=%@", id.uuidString)
+    '''        if #available(macOS 13.0, *) {
+            tabStore.updateCurrentURL(id: id, url: normalized.url)
+        } else {
+            NSLog("[FloatTabs Monterey] address commit begin slot=%@", id.uuidString)
+        }
         webViewPool.navigate(
             slotID: id,
             to: normalized.url,
             allowHTTPEntryFallback: normalized.schemeWasInferred
         )
-        NSLog("[FloatTabs Monterey] address navigation submitted slot=%@", id.uuidString)
+        if #available(macOS 13.0, *) {
+            // Preserve the accepted modern navigation/persistence sequence.
+        } else {
+            NSLog("[FloatTabs Monterey] address navigation submitted slot=%@", id.uuidString)
+        }
 ''',
     "[FloatTabs Monterey] address commit begin",
 )
 
-# Avoid url-KVO persistence at provisional-navigation time. Persist currentURL
-# only after WKNavigationDelegate reports a real commit.
+# Preserve standard URL KVO on macOS 13+. Monterey persists only committed URLs.
 observer = ROOT / "FloatTabs/Web/SlotNavigationObserver.swift"
 replace_once(
     observer,
@@ -80,9 +89,23 @@ replace_once(
 
         webView.navigationDelegate = self
 ''',
-    '''        // Monterey navigation safe mode: do not persist provisional URL KVO
-        // changes. didCommit below is the durability boundary for currentURL.
-        NSLog("[FloatTabs Monterey] navigation observer ready slot=%@", slotID.uuidString)
+    '''        if #available(macOS 13.0, *) {
+            observation = webView.observe(\\.url, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          let url = self.webView?.url,
+                          WebAppURL.isSafe(url) else {
+                        return
+                    }
+                    self.onURLChange(self.slotID, url)
+                }
+            }
+        } else {
+            // Monterey navigation safe mode: do not persist provisional URL KVO
+            // changes. didCommit below is the durability boundary for currentURL.
+            NSLog("[FloatTabs Monterey] navigation observer ready slot=%@", slotID.uuidString)
+        }
+
         webView.navigationDelegate = self
 ''',
     "Monterey navigation safe mode: do not persist provisional URL KVO",
@@ -101,7 +124,9 @@ replace_once(
     '''    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
-        if let url = webView.url, WebAppURL.isSafe(url) {
+        if #available(macOS 13.0, *) {
+            // URL KVO preserves the accepted modern persistence behavior.
+        } else if let url = webView.url, WebAppURL.isSafe(url) {
             NSLog("[FloatTabs Monterey] navigation committed slot=%@", slotID.uuidString)
             onURLChange(slotID, url)
         }
@@ -177,29 +202,27 @@ replace_once(
     "[FloatTabs Monterey] createWebView before load slot=",
 )
 
-# Verify the dangerous pre-navigation persistence and eager-init call are gone
-# from the specific compatibility seams we patched.
 panel_text = panel.read_text()
-commit_start = panel_text.find("    private func commitAddress(")
-commit_end = panel_text.find("    private func copyAddressToPasteboard", commit_start)
-if commit_start < 0 or commit_end < 0:
-    raise SystemExit("error: commitAddress boundaries not found after Monterey patch")
-if "tabStore.updateCurrentURL" in panel_text[commit_start:commit_end]:
-    raise SystemExit("error: address URL is still persisted before Monterey navigation")
-
 observer_text = observer.read_text()
-if "webView.observe(\\.url" in observer_text:
-    raise SystemExit("error: provisional URL KVO persistence survived Monterey patch")
-if "onURLChange(slotID, url)" not in observer_text:
-    raise SystemExit("error: committed-navigation persistence is missing")
+pool_text = pool.read_text()
 
-for required in [
+required = [
     "Monterey lazy restore: do not create/load a saved WKWebView",
-    "[FloatTabs Monterey] createWebView before load",
-    "[FloatTabs Monterey] navigation committed",
-]:
-    combined = panel_text + observer_text + pool.read_text()
-    if required not in combined:
-        raise SystemExit(f"error: Monterey runtime hardening marker missing: {required}")
+    "Monterey navigation safe mode: do not persist provisional URL KVO",
+    "[FloatTabs Monterey] navigation committed slot=",
+    "[FloatTabs Monterey] createWebView before load slot=",
+]
+combined = panel_text + observer_text + pool_text
+for item in required:
+    if item not in combined:
+        raise SystemExit(f"error: Monterey runtime hardening marker missing: {item}")
 
-print("Applied Monterey lazy restore, committed-URL persistence, and runtime breadcrumbs.")
+# Modern source semantics must remain present behind macOS 13 availability.
+if "synchronizeSlotState()" not in panel_text:
+    raise SystemExit("error: modern eager restore was not preserved")
+if "tabStore.updateCurrentURL(id: id, url: normalized.url)" not in panel_text:
+    raise SystemExit("error: modern address persistence was not preserved")
+if "observation = webView.observe(\\.url" not in observer_text:
+    raise SystemExit("error: modern URL KVO was not preserved")
+
+print("Applied macOS-12-only lazy restore, committed-URL persistence, and runtime breadcrumbs.")
