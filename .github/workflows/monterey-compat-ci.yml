@@ -10,6 +10,7 @@ on:
       - 'FloatTabs.xcodeproj/**'
       - 'tools/release/build_monterey_dmg.sh'
       - 'tools/release/prepare_monterey_sources.py'
+      - 'tools/release/prepare_monterey_webview.py'
       - '.github/workflows/monterey-compat-ci.yml'
       - '.github/workflows/publish-monterey-release.yml'
       - 'docs/release/compatibility/**'
@@ -23,6 +24,7 @@ jobs:
       - name: Apply deterministic Monterey source compatibility patches
         run: |
           python3 tools/release/prepare_monterey_sources.py
+          python3 tools/release/prepare_monterey_webview.py
 
       - name: Resolve Swift packages
         run: |
