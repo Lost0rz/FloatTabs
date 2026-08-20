@@ -317,6 +317,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.storedStateSnapshot()
     }
 
+    /// Backup import must use the same geometry-aware path as the in-app
+    /// toggle: the shell constraint and the separately hosted source window
+    /// cannot be left at the previous leading inset until the next launch.
+    func applyRestoredRailCollapse(_ collapsed: Bool) {
+        setTabRailCollapsed(collapsed, animated: false)
+    }
+
     @discardableResult
     func restoreStoredWebAppState(_ state: StoredWebAppState) -> Bool {
         // Replacing the stored model releases every live WebView. Never allow
@@ -816,6 +823,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         let toggleRail: () -> Void = { [weak self] in
             guard let self else { return }
+            // The fullscreen source frame is frozen by design while WebKit
+            // owns the WebView; the companion fold grip stays reachable during
+            // element fullscreen, so refuse geometry changes there instead of
+            // letting shell and source drift apart until restore.
+            guard !self.sourceHostController.isSessionLocked else {
+                NSSound.beep()
+                return
+            }
             self.setTabRailCollapsed(
                 !self.rootView.externalControlZoneView.isRailCollapsed,
                 animated: true
@@ -826,14 +841,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         setTabRailCollapsed(preferencesStore.isTabRailCollapsed, animated: false)
     }
 
+    /// Collapse is physical-only (see PanelRootView.setTabRailCollapsed). The
+    /// persisted window frame, nominal panel/viewport formulas and
+    /// manual-resize persistence all stay 76-based; only the shell's zone
+    /// width, the drag bands and the source window's physical frame move.
+    /// Re-expanding therefore returns the content to exactly the persisted
+    /// nominal viewport size.
     private func setTabRailCollapsed(_ collapsed: Bool, animated: Bool) {
+        guard !sourceHostController.isSessionLocked else { return }
         preferencesStore.isTabRailCollapsed = collapsed
-        rootView.externalControlZoneView.setCollapsed(collapsed, animated: animated)
+        sourceHostController.railLeadingInset = collapsed
+            ? PanelMetrics.collapsedRailLeadingInset
+            : PanelMetrics.externalControlZoneWidth
+        rootView.setTabRailCollapsed(collapsed, animated: animated)
         sourceHostController.railFoldControl.setExpanded(!collapsed, animated: animated)
         rootView.companionRailFoldControlView.setExpanded(
             !collapsed,
             animated: animated
         )
+        synchronizeSourceHostFrame(display: true, animated: animated)
     }
 
     private func synchronizeSlotState() {
@@ -1330,8 +1356,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: true)
     }
 
-    private func synchronizeSourceHostFrame(display: Bool) {
-        sourceHostController.synchronizeFrame(with: panel, display: display)
+    private func synchronizeSourceHostFrame(display: Bool, animated: Bool = false) {
+        sourceHostController.synchronizeFrame(with: panel, display: display, animated: animated)
     }
 
     private func handleSourceSessionLockChange(isLocked: Bool) {

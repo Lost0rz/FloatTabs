@@ -300,6 +300,13 @@ final class FullscreenSourceHostController {
     private var restoreStartedAtUptime: TimeInterval?
     private(set) var sessionState: FullscreenSourceSessionState = .idle
 
+    /// Rail collapse reclaims the rail's physical column without touching the
+    /// shell frame: the source window shifts to the collapsed leading inset
+    /// and widens by the reclaimed width. Like every other frame input it is
+    /// frozen while a fullscreen session owns the source, and the post-restore
+    /// sync reapplies it automatically.
+    var railLeadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
+
     var onSessionLockChange: ((Bool) -> Void)?
     var onSessionStateChange: ((FullscreenSourceSessionState) -> Void)?
     var onSourceRebuildRequired: (() -> Void)?
@@ -333,11 +340,25 @@ final class FullscreenSourceHostController {
         fullscreenObservation?.invalidate()
     }
 
-    func synchronizeFrame(with shellWindow: NSWindow, display: Bool) {
+    func synchronizeFrame(with shellWindow: NSWindow, display: Bool, animated: Bool = false) {
         guard !isSessionLocked else { return }
-        let target = Self.sourceFrame(forShellFrame: shellWindow.frame)
+        let target = Self.sourceFrame(
+            forShellFrame: shellWindow.frame,
+            leadingInset: railLeadingInset
+        )
         guard !Self.approximatelyEqual(window.frame, target) else { return }
-        window.setFrame(target, display: display)
+        if animated {
+            // The visible content lives in this window, so its frame change is
+            // the user-visible half of the collapse animation. Match the rail
+            // fade's duration and timing so page and rail move as one.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = ExternalTabMetrics.railFoldAnimationDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().setFrame(target, display: display)
+            }
+        } else {
+            window.setFrame(target, display: display)
+        }
     }
 
     func orderFrontAndFocus(_ webView: WKWebView?) {
@@ -416,13 +437,15 @@ final class FullscreenSourceHostController {
         handleFullscreenStateChange(of: webView)
     }
 
-    static func sourceFrame(forShellFrame frame: NSRect) -> NSRect {
+    static func sourceFrame(
+        forShellFrame frame: NSRect,
+        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
+    ) -> NSRect {
         let gutter = PanelMetrics.outerInteractionGutter
-        let controlWidth = PanelMetrics.externalControlZoneWidth
         return NSRect(
-            x: frame.minX + controlWidth,
+            x: frame.minX + leadingInset,
             y: frame.minY + gutter,
-            width: max(frame.width - controlWidth - gutter, 1),
+            width: max(frame.width - leadingInset - gutter, 1),
             height: max(frame.height - 2 * gutter, 1)
         )
     }

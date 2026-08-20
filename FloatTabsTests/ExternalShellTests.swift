@@ -247,6 +247,23 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(source.size.height, 820, accuracy: 0.001)
     }
 
+    func testSourceHostFrameMatchesCollapsedWebViewport() {
+        let shell = NSRect(x: 100, y: 200, width: 688, height: 844)
+
+        let collapsed = FullscreenSourceHostController.sourceFrame(
+            forShellFrame: shell,
+            leadingInset: PanelMetrics.collapsedRailLeadingInset
+        )
+        XCTAssertEqual(collapsed.origin.x, 112, accuracy: 0.001)
+        XCTAssertEqual(collapsed.origin.y, 212, accuracy: 0.001)
+        XCTAssertEqual(collapsed.size.width, 664, accuracy: 0.001)
+        XCTAssertEqual(collapsed.size.height, 820, accuracy: 0.001)
+
+        let expandedDefault = FullscreenSourceHostController.sourceFrame(forShellFrame: shell)
+        XCTAssertEqual(expandedDefault.origin.x, 176, accuracy: 0.001)
+        XCTAssertEqual(expandedDefault.size.width, 600, accuracy: 0.001)
+    }
+
     func testPanelRootKeepsWebContainerOutOfFloatingShellHierarchy() {
         let root = PanelRootView()
 
@@ -931,20 +948,39 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(path.boundingBox.maxX, web.maxX)
     }
 
-    func testFoldControlCollapsesRailWithoutChangingViewportGeometry() {
+    func testFoldControlCollapsesRailAndReclaimsRailColumnForWebContent() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         let active = makeProfile(order: 0, name: "GPT")
         root.externalControlZoneView.apply(profiles: [active], activeTabID: active.id)
         root.layoutSubtreeIfNeeded()
 
-        let webFrameBefore = root.webViewportLayoutView.frame
-        root.externalControlZoneView.setCollapsed(true, animated: false)
+        root.setTabRailCollapsed(true, animated: false)
         root.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(root.externalControlZoneView.isRailCollapsed)
         XCTAssertNil(root.externalControlZoneView.activeTabFrame(in: root))
-        XCTAssertEqual(root.webViewportLayoutView.frame, webFrameBefore)
+        XCTAssertEqual(
+            root.externalControlZoneView.frame.width,
+            PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webViewportLayoutView.frame.minX,
+            PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webViewportLayoutView.frame.width,
+            PanelMetrics.defaultViewportSize.width + PanelMetrics.externalControlZoneWidth
+                - PanelMetrics.collapsedRailLeadingInset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            root.webViewportLayoutView.frame.maxX,
+            root.bounds.maxX - PanelMetrics.outerInteractionGutter,
+            accuracy: 0.001
+        )
         XCTAssertTrue(try! XCTUnwrap(
             root.externalControlZoneView.tabView(for: active.id)
         ).isHidden)
@@ -1093,6 +1129,26 @@ final class ExternalShellTests: XCTestCase {
 
         let dragRects = PanelPerimeterDragView.dragRects(in: bounds)
         XCTAssertTrue(dragRects.contains(where: { $0.contains(topPoint) }))
+        XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
+    }
+
+    func testCollapsedMoveCursorRectsCoverLeadingGutterOnly() {
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        let collapsedInset = PanelMetrics.collapsedRailLeadingInset
+        let gutterPoint = NSPoint(x: collapsedInset / 2, y: bounds.midY)
+        let reclaimedPoint = NSPoint(
+            x: collapsedInset + (PanelMetrics.externalControlZoneWidth - collapsedInset) / 2,
+            y: bounds.midY
+        )
+        let websiteCenter = NSPoint(
+            x: collapsedInset
+                + (bounds.width - collapsedInset - PanelMetrics.outerInteractionGutter) / 2,
+            y: bounds.midY
+        )
+
+        let dragRects = PanelPerimeterDragView.dragRects(in: bounds, leadingInset: collapsedInset)
+        XCTAssertTrue(dragRects.contains(where: { $0.contains(gutterPoint) }))
+        XCTAssertFalse(dragRects.contains(where: { $0.contains(reclaimedPoint) }))
         XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
     }
 

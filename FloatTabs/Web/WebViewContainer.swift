@@ -17,6 +17,7 @@ final class PanelRootView: NSView {
     private weak var fullscreenCompanionContainer: WebPanelContainerView?
     private var fullscreenCompanionConstraints: [NSLayoutConstraint] = []
     private var fullscreenPlaceholderConstraints: [NSLayoutConstraint] = []
+    private let externalZoneWidthConstraint: NSLayoutConstraint
 
     var onResizeEnded: (() -> Void)?
 
@@ -30,6 +31,9 @@ final class PanelRootView: NSView {
         resizeReadoutView = ResizeReadoutView()
         companionRailFoldControlView = RailFoldControl()
         fullscreenExitPlaceholderView = FullscreenExitPlaceholderView()
+        externalZoneWidthConstraint = externalControlZoneView.widthAnchor.constraint(
+            equalToConstant: PanelMetrics.externalControlZoneWidth
+        )
 
         super.init(frame: .zero)
 
@@ -72,9 +76,7 @@ final class PanelRootView: NSView {
                 equalTo: bottomAnchor,
                 constant: -PanelMetrics.outerInteractionGutter
             ),
-            externalControlZoneView.widthAnchor.constraint(
-                equalToConstant: PanelMetrics.externalControlZoneWidth
-            ),
+            externalZoneWidthConstraint,
 
             webViewportLayoutView.leadingAnchor.constraint(
                 equalTo: externalControlZoneView.trailingAnchor
@@ -179,6 +181,36 @@ final class PanelRootView: NSView {
     private func synchronizeInteractionBorderGeometry() {
         interactionBorderView.targetWebFrame = webViewportLayoutView.frame
         interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)
+    }
+
+    /// Collapsing the rail is a physical-only change: the zone column narrows
+    /// to the movement gutter so everything chained off webViewportLayoutView
+    /// — resize grip, readout, companion grip/container, exit placeholder,
+    /// border outline — follows the reclaimed Web frame without touching the
+    /// shell window frame or any nominal size math.
+    func setTabRailCollapsed(_ collapsed: Bool, animated: Bool) {
+        let targetInset = collapsed
+            ? PanelMetrics.collapsedRailLeadingInset
+            : PanelMetrics.externalControlZoneWidth
+        // Movement bands track the physical frame immediately: they are
+        // invisible, and updating them at animation start guarantees no stale
+        // band lingers over content that is sliding into the reclaimed column.
+        perimeterDragView.railLeadingInset = targetInset
+        externalControlZoneView.setCollapsed(collapsed, animated: animated)
+
+        guard externalZoneWidthConstraint.constant != targetInset else { return }
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = ExternalTabMetrics.railFoldAnimationDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.allowsImplicitAnimation = true
+                externalZoneWidthConstraint.constant = targetInset
+                layoutSubtreeIfNeeded()
+            }
+        } else {
+            externalZoneWidthConstraint.constant = targetInset
+            needsLayout = true
+        }
     }
 
     func installFullscreenCompanionContainer(_ container: WebPanelContainerView) {
@@ -579,6 +611,17 @@ final class PanelPerimeterDragView: NSView {
     /// movement band a real composited surface and therefore a reliable hit.
     static let acquisitionSurfaceAlpha: CGFloat = 0.003
 
+    /// The shell's bands are glued to the *physical* Web frame, whose leading
+    /// edge shifts when the rail folds away. Cursor rects, the acquisition
+    /// surface and hit testing keep sharing this one value.
+    var railLeadingInset: CGFloat = PanelMetrics.externalControlZoneWidth {
+        didSet {
+            guard railLeadingInset != oldValue else { return }
+            window?.invalidateCursorRects(for: self)
+            needsDisplay = true
+        }
+    }
+
     private var startingMouseLocation: NSPoint?
     private var startingWindowOrigin: NSPoint?
 
@@ -603,7 +646,8 @@ final class PanelPerimeterDragView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard frame.contains(point) else { return nil }
         let localPoint = convert(point, from: superview)
-        return Self.dragRects(in: bounds).contains(where: { $0.contains(localPoint) }) ? self : nil
+        return Self.dragRects(in: bounds, leadingInset: railLeadingInset)
+            .contains(where: { $0.contains(localPoint) }) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -634,7 +678,7 @@ final class PanelPerimeterDragView: NSView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for rect in Self.dragRects(in: bounds) {
+        for rect in Self.dragRects(in: bounds, leadingInset: railLeadingInset) {
             addCursorRect(rect, cursor: PanelMoveCursor.cursor)
         }
     }
@@ -652,7 +696,8 @@ final class PanelPerimeterDragView: NSView {
         // `self` from hitTest receive the acquisition surface. Cursor feedback,
         // pixel ownership and drag handling consequently share one geometry.
         NSColor.black.withAlphaComponent(Self.acquisitionSurfaceAlpha).setFill()
-        for rect in Self.dragRects(in: bounds) where rect.intersects(dirtyRect) {
+        for rect in Self.dragRects(in: bounds, leadingInset: railLeadingInset)
+        where rect.intersects(dirtyRect) {
             rect.fill(using: .sourceOver)
         }
     }
@@ -668,18 +713,23 @@ final class PanelPerimeterDragView: NSView {
         )
     }
 
-    static func dragRects(in bounds: NSRect) -> [NSRect] {
+    static func dragRects(
+        in bounds: NSRect,
+        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
+    ) -> [NSRect] {
         let edgeBands = PanelMovementGeometry.edgeBands(
-            around: PanelMovementGeometry.webFrame(in: bounds),
+            around: PanelMovementGeometry.webFrame(in: bounds, leadingInset: leadingInset),
             outerDepth: PanelMetrics.outerInteractionGutter,
             innerDepth: 0,
             clippingBounds: bounds
         )
         let outer = max(PanelMetrics.outerInteractionGutter, 0)
+        // While collapsed this shrinks to the same 12 pt strip the left edge
+        // band already covers; the source window owns everything right of it.
         let blankRail = NSRect(
             x: bounds.minX,
             y: bounds.minY + outer,
-            width: min(PanelMetrics.externalControlZoneWidth, bounds.width),
+            width: min(leadingInset, bounds.width),
             height: max(bounds.height - 2 * outer, 0)
         )
         return edgeBands + (blankRail.isEmpty ? [] : [blankRail])

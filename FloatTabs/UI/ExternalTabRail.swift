@@ -12,6 +12,11 @@ struct ExternalTabMetrics {
     static let activeHoverWidth: CGFloat = 76
     static let topOffset: CGFloat = 23
     static let tabGap: CGFloat = 4
+
+    /// One clock for every surface that must move together when the rail
+    /// folds: the rail's alpha fade, the shell's zone-width constraint, and
+    /// the separately hosted source window frame.
+    static let railFoldAnimationDuration: TimeInterval = 0.22
     static let addGap: CGFloat = 8
 
     // Add / Settings / Pin are members of the same rail, not separate
@@ -262,7 +267,7 @@ final class ExternalControlZoneView: NSView {
             controls.forEach { $0.alphaValue = 0 }
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
+            context.duration = ExternalTabMetrics.railFoldAnimationDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             controls.forEach { $0.animator().alphaValue = collapsed ? 0 : 1 }
         } completionHandler: {
