@@ -400,23 +400,71 @@ def patch_generated_tests() -> None:
 
     pool_path = ROOT / "FloatTabsTests/WebViewPoolTests.swift"
     text = read_source(pool_path)
-    text = text.replace("https://www.bilibili.com/", "https://example.com/")
-    text = text.replace("https://bilibili.com/video/BV123", "https://example.com/video/123")
-    text = text.replace("https://chatgpt.com/", "https://example.com/")
-    text = text.replace('name: "ChatGPT"', 'name: "AutomaticMobile"')
-    text = text.replace(
-        "testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity",
-        "testAutomaticMobileUsesGenericIdentity",
-    )
-    text = text.replace(
-        "testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload",
-        "testAutomaticMobileWarmReuseKeepsIdentityWithoutReload",
-    )
-    text = text.replace(
-        "        // Monterey Compatibility Edition: the ChatGPT site policy still resolves\n"
-        "        // a desktop-pointer runtime profile, but construction stays on the\n"
-        "        // stock WKWebView without any UA override.\n",
-        "        // MC-B2 applies one generic Automatic identity independent of hostname.\n",
+    identity_matrix_tests = r'''    func testAutomaticIdentityIsHostnameIndependentAcrossRealHostFixtures() {
+        let fixtures = [
+            URL(string: "https://example.com/")!,
+            URL(string: "https://chatgpt.com/")!,
+            URL(string: "https://www.bilibili.com/")!,
+        ]
+        let rendering = WebRenderingProfile.canonicalDefault
+        let pool = makePool()
+        var webViews: [WKWebView] = []
+        var runtimeProfiles: [WebRenderingProfile] = []
+
+        for (index, fixture) in fixtures.enumerated() {
+            var profile = makeProfile(
+                name: "AutomaticFixture-\(index)",
+                homeURL: fixture
+            )
+            profile.renderingProfile = rendering
+            runtimeProfiles.append(
+                SiteCompatibilityPolicy.runtimeRendering(
+                    for: rendering,
+                    navigationURL: fixture
+                )
+            )
+
+            let first = pool.webView(for: profile)
+            profile.currentURL = fixture.appendingPathComponent("follow-up")
+            let second = pool.webView(for: profile)
+            XCTAssertTrue(first === second)
+            webViews.append(second)
+        }
+
+        XCTAssertEqual(
+            runtimeProfiles,
+            Array(repeating: rendering.normalized(), count: fixtures.count)
+        )
+        XCTAssertEqual(
+            runtimeProfiles.map(\.browserIdentity),
+            Array(repeating: .automatic, count: fixtures.count)
+        )
+        XCTAssertEqual(
+            runtimeProfiles.map(\.websiteMode),
+            Array(repeating: .desktop, count: fixtures.count)
+        )
+        XCTAssertEqual(
+            webViews.map { $0.configuration.applicationNameForUserAgent },
+            Array(
+                repeating: MontereySafariIdentity.applicationName,
+                count: fixtures.count
+            )
+        )
+        XCTAssertTrue(
+            webViews.allSatisfy {
+                $0.customUserAgent == nil || $0.customUserAgent?.isEmpty == true
+            }
+        )
+        XCTAssertTrue(webViews.allSatisfy { $0.configuration.websiteDataStore.isPersistent })
+        XCTAssertEqual(pool.count, fixtures.count)
+    }
+
+'''
+    text = replace_once_regex(
+        text,
+        r"^final class WebViewPoolTests: XCTestCase \{\n",
+        "final class WebViewPoolTests: XCTestCase {\n" + identity_matrix_tests,
+        label="MC-B2 real-host automatic identity matrix",
     )
     text = re.sub(
         r'XCTAssertTrue\(\((\w+)\.configuration\.applicationNameForUserAgent \?\? ""\)\.isEmpty\)',
@@ -447,34 +495,22 @@ def patch_generated_tests() -> None:
     text = text.replace(
         "        let configuration = WKWebViewConfiguration()\n"
         "        let popup = coordinator.makeTemporaryPopupWebView(\n",
-        "        let configuration = WKWebViewConfiguration()\n"
-        "        configuration.websiteDataStore = .default()\n"
-        "        configuration.applicationNameForUserAgent = source.configuration.applicationNameForUserAgent\n"
+        "        guard let configuration = source.configuration.copy() as? WKWebViewConfiguration else {\n"
+        "            XCTFail(\"Unable to copy WKWebViewConfiguration\")\n"
+        "            return\n"
+        "        }\n"
         "        let popup = coordinator.makeTemporaryPopupWebView(\n",
     )
     text = text.replace(
         "        XCTAssertTrue(popup.configuration.processPool === configuration.processPool)\n",
+        "        XCTAssertEqual(configuration.applicationNameForUserAgent, source.configuration.applicationNameForUserAgent)\n"
+        "        XCTAssertTrue(popup.configuration.websiteDataStore === configuration.websiteDataStore)\n"
         "        XCTAssertTrue(popup.configuration.processPool === configuration.processPool)\n"
         "        XCTAssertEqual(popup.configuration.applicationNameForUserAgent, configuration.applicationNameForUserAgent)\n"
         "        XCTAssertEqual(popup.configuration.applicationNameForUserAgent, source.configuration.applicationNameForUserAgent)\n",
     )
     text = text.replace('        source.customUserAgent = "FloatTabs-Test-UA/1.0"\n', "")
     write_source(pool_path, text)
-
-    external_path = ROOT / "FloatTabsTests/ExternalShellTests.swift"
-    text = read_source(external_path)
-    text = text.replace('"ChatGPT"', '"Selected Site"')
-    text = text.replace("https://chatgpt.com/c/123", "https://example.com/c/123")
-    text = text.replace('"https://chatgpt.com"', '"https://example.com"')
-    write_source(external_path, text)
-
-    factory_path = ROOT / "FloatTabsTests/WebViewFactoryTests.swift"
-    text = read_source(factory_path)
-    text = text.replace(
-        "https://www.bilibili.com/video/BV1234",
-        "https://example.com/video/1234",
-    )
-    write_source(factory_path, text)
 
 
 def verify_contract() -> None:
@@ -486,7 +522,6 @@ def verify_contract() -> None:
     ui = read_source(ROOT / "FloatTabs/UI/WebAppEditorController.swift")
     factory_tests = read_source(ROOT / "FloatTabsTests/WebViewFactoryTests.swift")
     pool_tests = read_source(ROOT / "FloatTabsTests/WebViewPoolTests.swift")
-    external_tests = read_source(ROOT / "FloatTabsTests/ExternalShellTests.swift")
 
     require_present(
         build_script,
@@ -570,12 +605,10 @@ def verify_contract() -> None:
         "System WebKit · Installed Safari Identity",
         label="MC-B2 honest identity UI wording",
     )
-    require_absent(pool, "chatgpt.com", label="MC-B2 ChatGPT hostname policy")
-    require_absent(pool, "chat.openai.com", label="MC-B2 OpenAI hostname policy")
-    for tests, label in [
-        (factory_tests, "WebViewFactory tests"),
-        (pool_tests, "WebViewPool tests"),
-        (external_tests, "ExternalShell tests"),
+    for source, label in [
+        (web_factory, "WebViewFactory production source"),
+        (popup, "PopupCoordinator production source"),
+        (pool, "WebViewPool production source"),
     ]:
         for forbidden in [
             "chatgpt.com",
@@ -586,9 +619,9 @@ def verify_contract() -> None:
             "ChatGPT",
         ]:
             require_absent(
-                tests,
+                source,
                 forbidden,
-                label=f"MC-B2 hostname-specific {label} content: {forbidden}",
+                label=f"MC-B2 hostname-specific {label}: {forbidden}",
             )
     for source, label in [
         (web_factory, "WebViewFactory"),
@@ -618,10 +651,30 @@ def verify_contract() -> None:
         "testMontereyPrimaryWebViewUsesPublicIdentityAndNoCustomUserAgent",
         label="MC-B2 primary identity test",
     )
+    require_present(
+        pool_tests,
+        "testAutomaticIdentityIsHostnameIndependentAcrossRealHostFixtures",
+        label="MC-B2 real-host automatic identity matrix",
+    )
+    for fixture in [
+        "https://example.com/",
+        "https://chatgpt.com/",
+        "https://www.bilibili.com/",
+    ]:
+        require_present(
+            pool_tests,
+            fixture,
+            label=f"MC-B2 real-host fixture: {fixture}",
+        )
     require_absent(
         pool_tests,
         "source.customUserAgent =",
         label="MC-B2 test customUserAgent assignment",
+    )
+    require_absent(
+        pool_tests,
+        "configuration.applicationNameForUserAgent =",
+        label="MC-B2 popup test applicationNameForUserAgent assignment",
     )
     generated_swift = "\n".join(
         path.read_text(encoding="utf-8")
@@ -632,6 +685,19 @@ def verify_contract() -> None:
         "preferredContentMode",
         "pageZoom =",
         'value(forKey: "userAgent")',
+    ]:
+        require_absent(
+            generated_swift,
+            forbidden,
+            label=f"MC-B2 forbidden generated Swift content: {forbidden}",
+        )
+
+    generated_production_swift = "\n".join(
+        path.read_text(encoding="utf-8")
+        for directory in (ROOT / "FloatTabs",)
+        for path in sorted(directory.rglob("*.swift"))
+    )
+    for forbidden in [
         "chatgpt.com",
         "chat.openai.com",
         "openai.com",
@@ -640,9 +706,9 @@ def verify_contract() -> None:
         "ChatGPT",
     ]:
         require_absent(
-            generated_swift,
+            generated_production_swift,
             forbidden,
-            label=f"MC-B2 forbidden generated Swift content: {forbidden}",
+            label=f"MC-B2 forbidden generated production Swift content: {forbidden}",
         )
 
 
