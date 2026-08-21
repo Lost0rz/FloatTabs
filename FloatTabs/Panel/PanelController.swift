@@ -57,7 +57,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var transientUIConstraints: [NSLayoutConstraint] = []
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
-        container: rootView.webPanelContainerView
+        container: rootView.webPanelContainerView,
+        attentionProtectionQuery: { [weak self] slotID in
+            self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
+        }
     )
 
     /// Stage C routing boundary: normalized bridge observations become
@@ -215,7 +218,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.synchronizeResidentIndicators()
         }
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
-            self?.attentionRouter.handle(observation, for: slotID)
+            self?.handleAttentionObservation(slotID: slotID, observation: observation)
         }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -952,6 +955,30 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     // MARK: Attention visibility + acknowledgement
+
+    /// Routes an observation through the Stage C authority, then compares the
+    /// same authority on both sides of the observation. A protection-ending
+    /// runtime reset may arrive after an old inactive timer was skipped, so an
+    /// already-inactive Warm/Cold Slot gets a fresh lifecycle boundary here.
+    private func handleAttentionObservation(
+        slotID: UUID,
+        observation: ChatGPTAttentionObservation
+    ) {
+        let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
+
+        attentionRouter.handle(observation, for: slotID)
+
+        let isProtected = attentionCoordinator.isAttentionProtected(slotID)
+        guard wasProtected,
+              !isProtected,
+              let profile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            return
+        }
+
+        slotLifecycleCoordinator.restartAfterAttentionProtectionEnded(
+            profile: profile
+        )
+    }
 
     /// The one authoritative attention-visibility mapping. Gathers the actual
     /// physical presentation facts — pooled runtime identity, current normal
