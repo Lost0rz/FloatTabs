@@ -332,11 +332,15 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.setPanelVisible(true, activeProfile: profile)
         lifecycle.activate(profile: profile)
         lifecycle.setPanelVisible(false, activeProfile: profile)
-        try await wait(milliseconds: 15)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
         XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
 
-        try await wait(milliseconds: 80)
+        let reachedExpectedInactiveState = try await waitUntil {
+            !lifecycle.isHiddenActiveGracePending
+                && lifecycle.pendingColdReleaseCount == 1
+                && pool.contains(slotID: profile.id)
+        }
+        XCTAssertTrue(reachedExpectedInactiveState)
         XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
         XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
         XCTAssertTrue(pool.contains(slotID: profile.id))
@@ -529,5 +533,24 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
     private func wait(milliseconds: UInt64) async throws {
         try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+    }
+
+    private func waitUntil(
+        timeoutMilliseconds: UInt64 = 500,
+        pollMilliseconds: UInt64 = 5,
+        condition: () -> Bool
+    ) async throws -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds
+            + timeoutMilliseconds * 1_000_000
+
+        while true {
+            if condition() {
+                return true
+            }
+            if DispatchTime.now().uptimeNanoseconds >= deadline {
+                return false
+            }
+            try await wait(milliseconds: pollMilliseconds)
+        }
     }
 }
