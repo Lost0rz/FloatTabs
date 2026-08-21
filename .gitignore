@@ -24,6 +24,7 @@ __pycache__/
 dist/
 .release/
 *.dmg
+node_modules/
 
 # Environment / secrets
 .env

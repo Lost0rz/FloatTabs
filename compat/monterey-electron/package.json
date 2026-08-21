@@ -1,0 +1,16 @@
+{
+  "name": "floattabs-monterey-chromium-baseline",
+  "version": "0.1.3",
+  "description": "Diagnostic Electron baseline for Monterey ChatGPT feasibility testing.",
+  "productName": "FloatTabs Monterey Chromium Baseline",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/c0-contract.test.js",
+    "build:x64": "bash scripts/build-c0.sh"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "43.4.0"
+  }
+}
