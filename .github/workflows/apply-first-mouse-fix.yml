@@ -4,17 +4,22 @@ on:
   push:
     branches:
       - fix/chatgpt-first-mouse
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == '' || github.head_ref == 'fix/chatgpt-first-mouse'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: fix/chatgpt-first-mouse
 
       - name: Apply focused source and regression-test patch
         shell: bash
