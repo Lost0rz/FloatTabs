@@ -146,7 +146,7 @@ final class PrivacySettingsViewController: NSViewController {
         let stack = NSStackView(views: [
             sectionTitle("Browsing Data"),
             detailLabel(
-                "Reset removes cookies, website storage, caches, and other persistent WebKit browsing data for FloatTabs. Web App names, Home URLs, rendering profiles, residency policies, and other configuration are preserved. Downloads are not restored by this operation."
+                "Reset removes cookies, website storage, caches, and other persistent WebKit browsing data for FloatTabs. Web App names, Home URLs, rendering profiles, residency policies, and other configuration are preserved. All Web Apps return to their Home URLs. Downloads are not restored by this operation."
             ),
             resetButton,
             statusLabel,
@@ -171,7 +171,7 @@ final class PrivacySettingsViewController: NSViewController {
         confirmationPresented = true
         let alert = NSAlert()
         alert.messageText = "Reset All Browsing Data?"
-        alert.informativeText = "This removes FloatTabs' WebKit cookies, website storage, caches, and related browsing data. Your configured Web Apps and their settings will be preserved."
+        alert.informativeText = "This removes FloatTabs' WebKit cookies, website storage, caches, and related browsing data. Your configured Web Apps and their settings will be preserved. All Web Apps return to their Home URLs."
         alert.addButton(withTitle: "Reset")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { [weak self] response in
@@ -344,15 +344,24 @@ def patch_tab_store() -> None:
         text,
         "    func storedStateSnapshot() -> StoredWebAppState {\n",
         """    /// Resets only volatile navigation positions. All Web App configuration
-    /// fields remain byte-for-byte equivalent in the durable state.
+    /// fields remain byte-for-byte equivalent in the durable state. Unlike a
+    /// user-authored configuration mutation, a failed reset save does not roll
+    /// these in-memory positions back to a stale OAuth callback.
     @discardableResult
-    func resetCurrentURLsToHome() -> Bool {
-        persistConfigurationMutation {
-            for index in profiles.indices {
-                profiles[index].currentURL = profiles[index].homeURL
-            }
-            return true
+    func resetCurrentURLsToHomeForBrowsingDataReset() -> Bool {
+        for index in profiles.indices {
+            profiles[index].currentURL = profiles[index].homeURL
         }
+
+        do {
+            try repository.save(currentState())
+        } catch {
+            onPersistenceFailure?()
+            return false
+        }
+
+        onChange?()
+        return true
     }
 
     func storedStateSnapshot() -> StoredWebAppState {
@@ -421,18 +430,25 @@ def patch_panel_controller() -> None:
 
         browserDataStoreManager.resetAllBrowsingData { [weak self] in
             guard let self else { return }
-            guard self.tabStore.resetCurrentURLsToHome() else {
-                self.browsingDataResetInProgress = false
-                completion(.failure(MontereyBrowsingDataResetError.configurationSaveFailed))
-                return
-            }
 
-            // The barrier stays up through data removal and URL persistence.
-            // Only this final path may recreate the active runtime; reconcile
-            // never creates inactive slots.
-            self.browsingDataResetInProgress = false
-            self.synchronizeSlotState()
-            completion(.success(()))
+            let persistenceSucceeded = Self.completeBrowsingDataReset(
+                panelIsVisible: self.requestedVisibility,
+                normalizeCurrentURLs: {
+                    self.tabStore.resetCurrentURLsToHomeForBrowsingDataReset()
+                },
+                clearBarrier: {
+                    self.browsingDataResetInProgress = false
+                },
+                recreateActive: {
+                    self.synchronizeSlotState()
+                }
+            )
+
+            if persistenceSucceeded {
+                completion(.success(()))
+            } else {
+                completion(.failure(MontereyBrowsingDataResetError.configurationSaveFailed))
+            }
         }
         return true
     }
@@ -445,6 +461,31 @@ def patch_panel_controller() -> None:
         browsingDataResetInProgress: Bool
     ) -> Bool {
         !browsingDataResetInProgress
+    }
+
+    static func shouldRecreateActiveWebViewAfterBrowsingDataReset(
+        panelIsVisible: Bool
+    ) -> Bool {
+        panelIsVisible
+    }
+
+    /// The reset completion seam makes the required ordering explicit and
+    /// testable without launching a real AppKit panel or taking screenshots.
+    @discardableResult
+    static func completeBrowsingDataReset(
+        panelIsVisible: Bool,
+        normalizeCurrentURLs: () -> Bool,
+        clearBarrier: () -> Void,
+        recreateActive: () -> Void
+    ) -> Bool {
+        let persistenceSucceeded = normalizeCurrentURLs()
+        clearBarrier()
+        if shouldRecreateActiveWebViewAfterBrowsingDataReset(
+            panelIsVisible: panelIsVisible
+        ) {
+            recreateActive()
+        }
+        return persistenceSucceeded
     }
 
 '''
@@ -625,9 +666,33 @@ def patch_global_settings() -> None:
 
 TAB_STORE_TESTS = r'''
 
+private enum MontereyTestPersistenceError: Error {
+    case forcedFailure
+}
+
+private final class MontereyFailingProfileRepository: ProfileRepositoryProtocol {
+    var state: StoredWebAppState
+    var shouldFailSaves = false
+
+    init(state: StoredWebAppState) {
+        self.state = state
+    }
+
+    func load() throws -> StoredWebAppState {
+        state
+    }
+
+    func save(_ state: StoredWebAppState) throws {
+        if shouldFailSaves {
+            throw MontereyTestPersistenceError.forcedFailure
+        }
+        self.state = state
+    }
+}
+
 @MainActor
 final class MontereyBrowsingDataPersistenceTests: XCTestCase {
-    func testResetCurrentURLsToHomePreservesEveryConfigurationField() {
+    func testResetCurrentURLsToHomeForBrowsingDataResetPreservesEveryConfigurationField() {
         let homeURL = URL(string: "https://example.com/home")!
         let currentURL = URL(string: "https://example.com/visited")!
         let rendering = WebRenderingProfile(
@@ -661,11 +726,37 @@ final class MontereyBrowsingDataPersistenceTests: XCTestCase {
         let store = TabStore(repository: repository)
         let persistedBeforeReset = store.profiles
 
-        XCTAssertTrue(store.resetCurrentURLsToHome())
+        XCTAssertTrue(store.resetCurrentURLsToHomeForBrowsingDataReset())
         var expected = persistedBeforeReset[0]
         expected.currentURL = expected.homeURL
         XCTAssertEqual(store.profiles, [expected])
         XCTAssertEqual(repository.state.profiles, [expected])
+    }
+
+    func testResetCurrentURLsSaveFailureKeepsHomeInMemoryAndDurableStateUntouched() {
+        let homeURL = URL(string: "https://example.com/")!
+        let callbackURL = URL(string: "https://example.com/oauth/callback")!
+        let original = WebAppProfile(
+            order: 0,
+            name: "OAuth App",
+            homeURL: homeURL,
+            currentURL: callbackURL
+        )
+        let durableBefore = StoredWebAppState(
+            version: StoredWebAppState.currentVersion,
+            profiles: [original],
+            lastActiveTabID: original.id
+        )
+        let repository = MontereyFailingProfileRepository(state: durableBefore)
+        let store = TabStore(repository: repository)
+        var persistenceFailureCount = 0
+        store.onPersistenceFailure = { persistenceFailureCount += 1 }
+        repository.shouldFailSaves = true
+
+        XCTAssertFalse(store.resetCurrentURLsToHomeForBrowsingDataReset())
+        XCTAssertEqual(store.profiles.first?.currentURL, homeURL)
+        XCTAssertEqual(repository.state, durableBefore)
+        XCTAssertEqual(persistenceFailureCount, 1)
     }
 }
 '''
@@ -751,6 +842,108 @@ final class MontereyBrowsingDataResetTests: XCTestCase {
             )
         )
     }
+
+    func testHiddenResetKeepsRuntimeEmptyAndVisibleResetAllowsOnlyActiveRecreation() {
+        XCTAssertFalse(
+            PanelController.shouldRecreateActiveWebViewAfterBrowsingDataReset(
+                panelIsVisible: false
+            )
+        )
+        XCTAssertTrue(
+            PanelController.shouldRecreateActiveWebViewAfterBrowsingDataReset(
+                panelIsVisible: true
+            )
+        )
+    }
+
+    func testResetCompletionNormalizesThenClearsBarrierThenAppliesVisiblePolicy() {
+        var visibleEvents: [String] = []
+        let visibleResult = PanelController.completeBrowsingDataReset(
+            panelIsVisible: true,
+            normalizeCurrentURLs: {
+                visibleEvents.append("currentURLsHome")
+                return true
+            },
+            clearBarrier: {
+                visibleEvents.append("barrierCleared")
+            },
+            recreateActive: {
+                visibleEvents.append("recreateActive")
+            }
+        )
+
+        XCTAssertTrue(visibleResult)
+        XCTAssertEqual(
+            visibleEvents,
+            ["currentURLsHome", "barrierCleared", "recreateActive"]
+        )
+
+        var hiddenEvents: [String] = []
+        let hiddenResult = PanelController.completeBrowsingDataReset(
+            panelIsVisible: false,
+            normalizeCurrentURLs: {
+                hiddenEvents.append("currentURLsHome")
+                return false
+            },
+            clearBarrier: {
+                hiddenEvents.append("barrierCleared")
+            },
+            recreateActive: {
+                hiddenEvents.append("recreateActive")
+            }
+        )
+
+        XCTAssertFalse(hiddenResult)
+        XCTAssertEqual(hiddenEvents, ["currentURLsHome", "barrierCleared"])
+    }
+
+    func testNoRuntimeRecreationBeforeWebsiteDataRemovalCompletion() {
+        var events: [String] = []
+        var underlyingCompletion: (() -> Void)?
+        var resetCompletionCalled = false
+        var browsingDataResetInProgress = true
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        let profile = WebAppProfile(
+            order: 0,
+            name: "Pending",
+            homeURL: URL(string: "https://example.com/pending")!
+        )
+        _ = pool.webView(for: profile)
+        pool.releaseAll()
+
+        let manager = MontereyBrowserDataStoreManager(
+            websiteDataStore: .default(),
+            removalHandler: { _, _, _, completion in
+                events.append("removeDataStarted")
+                underlyingCompletion = completion
+            }
+        )
+        manager.resetAllBrowsingData {
+            events.append("removeDataCompleted")
+            resetCompletionCalled = true
+            browsingDataResetInProgress = false
+        }
+
+        XCTAssertTrue(browsingDataResetInProgress)
+        XCTAssertEqual(pool.count, 0)
+        XCTAssertFalse(
+            PanelController.shouldSynchronizeSlotState(
+                browsingDataResetInProgress: browsingDataResetInProgress
+            )
+        )
+        XCTAssertFalse(resetCompletionCalled)
+        XCTAssertEqual(events, ["removeDataStarted"])
+
+        underlyingCompletion?()
+
+        XCTAssertFalse(browsingDataResetInProgress)
+        XCTAssertTrue(resetCompletionCalled)
+        XCTAssertEqual(events, ["removeDataStarted", "removeDataCompleted"])
+        XCTAssertEqual(pool.count, 0)
+    }
 }
 '''
 
@@ -803,17 +996,25 @@ def verify_contract() -> None:
     require_present(panel, "guard !browsingDataResetInProgress else { return }", label="MC-B3 synchronization barrier")
     require_present(panel, "slotLifecycleCoordinator.reset(slotIDs: existingIDs)", label="MC-B3 lifecycle reset")
     require_present(panel, "webViewPool.releaseAll()", label="MC-B3 runtime release transaction")
-    require_present(panel, "resetCurrentURLsToHome()", label="MC-B3 post-removal URL normalization")
-    require_present(store, "func resetCurrentURLsToHome()", label="MC-B3 durable URL normalization")
+    require_present(panel, "resetCurrentURLsToHomeForBrowsingDataReset()", label="MC-B3 post-removal URL normalization")
+    require_present(panel, "panelIsVisible: self.requestedVisibility", label="MC-B3 logical visibility authority")
+    require_present(panel, "completeBrowsingDataReset(", label="MC-B3 ordered reset completion seam")
+    require_present(store, "func resetCurrentURLsToHomeForBrowsingDataReset()", label="MC-B3 durable URL normalization")
+    require_present(store, "onPersistenceFailure?()", label="MC-B3 reset persistence failure reporting")
     require_present(settings, "title: \"Privacy\"", label="MC-B3 Privacy tab")
     require_present(settings, "symbol: \"hand.raised\"", label="MC-B3 Privacy icon")
     require_present(settings, "Reset All Browsing Data…", label="MC-B3 Privacy reset button")
     require_present(settings, "Resetting…", label="MC-B3 pending UI state")
     require_present(settings, "Browsing Data Reset", label="MC-B3 completed UI state")
+    require_present(settings, "All Web Apps return to their Home URLs.", label="MC-B3 Privacy Home URL explanation")
     require_present(app, "onResetBrowsingData:", label="MC-B3 AppCoordinator reset wiring")
     require_present(factory_tests, "testManagerUsesAllTypesAndDistantPastAndWaitsForInjectedCompletion", label="MC-B3 manager test")
     require_present(factory_tests, "testWebViewPoolReleaseAllClearsTransientRuntimeAndNotifiesOnce", label="MC-B3 releaseAll test")
-    require_present(tab_tests, "testResetCurrentURLsToHomePreservesEveryConfigurationField", label="MC-B3 persistence test")
+    require_present(factory_tests, "testHiddenResetKeepsRuntimeEmptyAndVisibleResetAllowsOnlyActiveRecreation", label="MC-B3 visibility policy test")
+    require_present(factory_tests, "testResetCompletionNormalizesThenClearsBarrierThenAppliesVisiblePolicy", label="MC-B3 reset order test")
+    require_present(factory_tests, "testNoRuntimeRecreationBeforeWebsiteDataRemovalCompletion", label="MC-B3 pending removal test")
+    require_present(tab_tests, "testResetCurrentURLsToHomeForBrowsingDataResetPreservesEveryConfigurationField", label="MC-B3 persistence test")
+    require_present(tab_tests, "testResetCurrentURLsSaveFailureKeepsHomeInMemoryAndDurableStateUntouched", label="MC-B3 persistence failure test")
     require_absent(factory, "WKWebsiteDataStore(forIdentifier:", label="MC-B3 isolated non-default data store")
     require_absent(factory, "fetchDataRecords", label="MC-B3 private data-record API")
     for source, label in [(factory, "WebViewFactory"), (pool, "WebViewPool"), (panel, "PanelController")]:
