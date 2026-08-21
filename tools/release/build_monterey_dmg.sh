@@ -24,6 +24,7 @@ python3 tools/release/prepare_monterey_isolated_runtime.py
 python3 tools/release/prepare_monterey_candidate_g.py
 python3 tools/release/prepare_monterey_edition_isolation.py
 python3 tools/release/prepare_monterey_browser_identity.py
+python3 tools/release/prepare_monterey_browsing_data.py
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
