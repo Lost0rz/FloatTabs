@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
+DEPLOYMENT_TARGET="${FLOATTABS_MONTEREY_TARGET:-12.0}"
+OUTPUT_DIR="${FLOATTABS_OUTPUT_DIR:-$ROOT_DIR/.release-monterey-auth-baseline}"
+DERIVED_DATA="$OUTPUT_DIR/DerivedData"
+STAGE_DIR="$OUTPUT_DIR/dmg-root"
+APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
+DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
+REQUIRED_ARCHITECTURES=(arm64 x86_64)
+PACKAGE_BASE="FloatTabs-0.1.3-Monterey-Auth-Baseline"
+DMG_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dmg"
+DSYM_ARCHIVE_PATH="$OUTPUT_DIR/$PACKAGE_BASE.dSYM.zip"
+
+# This is a separate diagnostic entry point.  The normal MC-B4 build script
+# is intentionally not called, and the following transforms touch only this
+# temporary build tree.
+python3 tools/release/prepare_monterey_sources.py
+python3 tools/release/prepare_monterey_webview.py
+python3 tools/release/prepare_monterey_runtime_safe_mode.py
+python3 tools/release/prepare_monterey_webview_minimal.py
+python3 tools/release/prepare_monterey_lazy_restore.py
+python3 tools/release/prepare_monterey_isolated_runtime.py
+python3 tools/release/prepare_monterey_candidate_g.py
+python3 tools/release/prepare_monterey_edition_isolation.py
+python3 tools/release/prepare_monterey_browser_identity.py
+python3 tools/release/prepare_monterey_browsing_data.py
+python3 tools/release/prepare_monterey_one_to_one_geometry.py
+python3 tools/release/prepare_monterey_auth_baseline.py
+python3 tools/release/test_monterey_auth_baseline.py
+
+rm -rf "$DERIVED_DATA" "$STAGE_DIR"
+mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
+
+xcodebuild \
+  -project FloatTabs.xcodeproj \
+  -scheme FloatTabs \
+  -resolvePackageDependencies \
+  -onlyUsePackageVersionsFromResolvedFile
+
+xcodebuild \
+  -project FloatTabs.xcodeproj \
+  -scheme FloatTabs \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  -derivedDataPath "$DERIVED_DATA" \
+  ARCHS='arm64 x86_64' \
+  ONLY_ACTIVE_ARCH=NO \
+  MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+  PRODUCT_BUNDLE_IDENTIFIER='com.lost0rz.FloatTabs.MontereyAuthBaseline' \
+  INFOPLIST_KEY_CFBundleDisplayName='FloatTabs Monterey Auth Baseline' \
+  INFOPLIST_KEY_CFBundleName='FloatTabs Monterey Auth Baseline' \
+  INFOPLIST_KEY_LSUIElement=NO \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+
+if [[ ! -d "$APP_PATH" ]]; then
+  echo "error: Release app not found at $APP_PATH" >&2
+  exit 1
+fi
+
+MAIN_BINARY="$APP_PATH/Contents/MacOS/FloatTabs"
+ARCHS_FOUND="$(lipo -archs "$MAIN_BINARY")"
+for required in "${REQUIRED_ARCHITECTURES[@]}"; do
+  if [[ " $ARCHS_FOUND " != *" $required "* ]]; then
+    echo "error: missing architecture $required (found: $ARCHS_FOUND)" >&2
+    exit 1
+  fi
+done
+
+MIN_OS_VALUES="$(otool -l "$MAIN_BINARY" | awk '$1 == "minos" {print $2}' | sort -u)"
+if [[ -z "$MIN_OS_VALUES" ]]; then
+  echo "error: could not resolve LC_BUILD_VERSION minos" >&2
+  exit 1
+fi
+while IFS= read -r min_os; do
+  if [[ "$min_os" != "$DEPLOYMENT_TARGET" ]]; then
+    echo "error: binary minos is $min_os, expected $DEPLOYMENT_TARGET" >&2
+    exit 1
+  fi
+done <<< "$MIN_OS_VALUES"
+
+PLIST_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP_PATH/Contents/Info.plist")"
+if [[ "$PLIST_MIN_OS" != "$DEPLOYMENT_TARGET" ]]; then
+  echo "error: Info.plist LSMinimumSystemVersion is $PLIST_MIN_OS, expected $DEPLOYMENT_TARGET" >&2
+  exit 1
+fi
+
+/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PATH/Contents/Info.plist"
+
+# This is an ad-hoc diagnostic artifact, not a notarized release.
+/usr/bin/codesign --force --deep --sign - "$APP_PATH"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+if [[ ! -d "$DSYM_PATH" ]]; then
+  echo "error: Release dSYM not found at $DSYM_PATH" >&2
+  exit 1
+fi
+
+rm -f "$DSYM_ARCHIVE_PATH"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$DSYM_PATH" "$DSYM_ARCHIVE_PATH"
+/usr/bin/ditto "$APP_PATH" "$STAGE_DIR/FloatTabs Monterey Auth Baseline.app"
+ln -s /Applications "$STAGE_DIR/Applications"
+rm -f "$DMG_PATH"
+
+hdiutil create \
+  -volname "FloatTabs Monterey Auth Baseline" \
+  -srcfolder "$STAGE_DIR" \
+  -ov \
+  -format UDZO \
+  "$DMG_PATH"
+hdiutil verify "$DMG_PATH"
+
+(
+  cd "$OUTPUT_DIR"
+  /usr/bin/shasum -a 256 "$PACKAGE_BASE.dmg" > "$PACKAGE_BASE.dmg.sha256"
+  /usr/bin/shasum -a 256 "$PACKAGE_BASE.dSYM.zip" > "$PACKAGE_BASE.dSYM.zip.sha256"
+)
+
+echo "Monterey stock auth baseline package ready"
+echo "Bundle ID: com.lost0rz.FloatTabs.MontereyAuthBaseline"
+echo "Minimum macOS: $DEPLOYMENT_TARGET"
+echo "Architectures: $ARCHS_FOUND"
+echo "DMG: $DMG_PATH"
+echo "dSYM: $DSYM_ARCHIVE_PATH"
