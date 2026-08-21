@@ -1,6 +1,6 @@
 # FloatTabs — ChatGPT Attention Contract V1
 
-> Status: proposed contract; docs-only. No runtime implementation in this PR.
+> Status: **FROZEN** — business-confirmed, docs-only. Runtime implementation has not started.
 > Base: `main` at `ad810e94549cade77ec00bd0f2aee1b170d8023c`
 > Scope: ChatGPT only. Generic website attention and X/Slack/Gmail adapters are intentionally deferred.
 
@@ -41,7 +41,7 @@ Ready
   -> Generating if a new generation starts before acknowledgement
 ```
 
-A newly attached observer must establish a baseline and must not infer `Ready` merely because an already-idle ChatGPT page exists. `Ready` requires an observed generation lifecycle or an equally strong provider-specific completion signal.
+A newly attached observer must establish a baseline and must not infer `Ready` merely because an already-idle ChatGPT page exists. A baseline that positively observes an in-progress generation may establish `Generating`; a later observed completion may then produce `Ready` according to visibility. `Ready` must never be synthesized from an idle baseline alone.
 
 ## 3. User-visible acknowledgement
 
@@ -57,7 +57,15 @@ Therefore:
 - showing FloatTabs with that Slot selected acknowledges Ready because the completed page becomes visible;
 - merely keeping a Slot logically selected in the background must never clear the red dot.
 
-The V1 contract does not require dwell-time heuristics or scroll-position proof. Becoming visibly presented is the acknowledgement boundary.
+For V1, an actually presented ChatGPT WebView counts as user-visible in all existing FloatTabs presentation modes:
+
+- the normal visible Web source;
+- the WebKit-owned element-fullscreen source while the fullscreen session is active/locked;
+- the visible fullscreen companion Web surface.
+
+Logical selection, residency, or a hidden shell alone do not count as visibility. V1 does not attempt to prove foreground occlusion, dwell time, scroll position, or whether the user visually read the text.
+
+`PanelController` remains the presentation authority that determines this mapping from existing window/fullscreen state. The attention subsystem must not create a second independent visibility model.
 
 ## 4. Attention indicator
 
@@ -167,9 +175,29 @@ Attention state must not be added to `WebAppProfile` and must not be persisted i
 
 Relaunch starts without stale Ready dots. The website/session itself remains governed by the existing persistent `WKWebsiteDataStore.default()` architecture.
 
-The source of truth for V1 attention is the live ChatGPT runtime bridge associated with the Slot's live WKWebView plus the native runtime attention state derived from its normalized events.
+The sole native runtime authority for V1 attention is one Slot-keyed attention state coordinator. The ChatGPT bridge is an observation/event source only. `WebViewPool`, `SlotLifecycleCoordinator`, `PanelController`, and the Tab rail may consume or project that state, but must not maintain competing authoritative copies of `Idle` / `Generating` / `Ready`.
 
-## 9. ChatGPT adapter boundary
+The rail's Ready-ID set, if used for rendering, is a transient projection only. Residency protection is likewise derived from the authoritative attention state and must not become a separately persisted policy.
+
+## 9. Runtime replacement and failure boundaries
+
+Attention belongs to the current live supported ChatGPT document/runtime, not permanently to a Slot identity.
+
+The following boundaries reset the Slot's V1 attention state to `Idle`, clear its Ready indicator, and remove FloatTabs attention protection without synthesizing a completion:
+
+- WKWebView release/removal;
+- WKWebView rebuild/replacement;
+- a new top-level document replacing the observed document;
+- navigation to an unsupported host;
+- WebContent process termination.
+
+A new supported ChatGPT document establishes a fresh observation baseline. It must not inherit `Ready` from the replaced document.
+
+If attention protection ends because of a reset while the Slot is already lifecycle-inactive, normal Stage 5E Warm/Cold handling must restart from a fresh boundary rather than leaving the Slot permanently resident because an older release timer was skipped while protected.
+
+OS/WebKit process termination cannot be treated as successful generation completion. FloatTabs may recover/reload according to the existing WebContent recovery policy, after which the new document begins from a fresh attention baseline.
+
+## 10. ChatGPT adapter boundary
 
 V1 is explicitly provider-specific.
 
@@ -183,34 +211,39 @@ The ChatGPT adapter must normalize provider-specific DOM/runtime observations in
 ```text
 generationStarted
 generationFinished
+runtimeReset
 ```
 
 Provider DOM selectors, CSS class names and fallback probes are implementation details and are not frozen by this Product Contract.
 
 The adapter should prefer semantic signals such as roles, accessibility attributes, stable data attributes and generation controls over volatile visual class names.
 
-## 10. Observation and performance boundary
+Only main-frame supported ChatGPT documents may drive the native attention state. Iframes and unrelated hosts must not produce attention transitions.
+
+## 11. Observation and performance boundary
 
 The implementation should be event-driven rather than high-frequency polling.
 
 Expected strategy:
 
-- isolated WebKit user script / content world;
+- isolated WebKit user script / named content world;
 - `MutationObserver` or equivalent provider-aware observation;
 - coalescing/debouncing of noisy DOM mutations;
 - native messages only when normalized state changes.
 
 Streaming token-by-token DOM mutations must not generate token-by-token native messages.
 
-## 11. Privacy boundary
+The implementation must clean up native message-handler/bridge ownership when a WKWebView is released or rebuilt and must not create retain cycles or stale callbacks from superseded runtimes.
+
+## 12. Privacy boundary
 
 V1 exists to detect status, not to ingest conversation content.
 
 The ChatGPT bridge must not intentionally persist or transmit ChatGPT prompt/response bodies into FloatTabs native storage.
 
-The normalized bridge contract should carry only the minimum state required for attention handling, such as generation state transitions and bridge lifecycle metadata.
+The normalized bridge contract should carry only the minimum state required for attention handling, such as generation state transitions and document/bridge lifecycle metadata.
 
-## 12. Existing contracts that remain authoritative
+## 13. Existing contracts that remain authoritative
 
 This Contract extends, but does not rewrite, the accepted Stage 5E Resource Lifecycle Contract.
 
@@ -227,7 +260,7 @@ Unchanged semantics include:
 
 If both media protection and ChatGPT attention protection apply, either condition is sufficient to prevent proactive eviction. Removing one protection must not remove the other.
 
-## 13. V1 acceptance scenarios
+## 14. V1 acceptance scenarios
 
 ### A. Inactive Warm ChatGPT completes
 
@@ -283,7 +316,22 @@ If both media protection and ChatGPT attention protection apply, either conditio
 3. A later generation starts.
 4. The same protection and Ready rules apply again from a clean cycle.
 
-## 14. Explicit V1 non-goals
+### G. Element fullscreen remains visible
+
+1. ChatGPT A is generating and its WebView is the active element-fullscreen source.
+2. The normal FloatTabs shell may be hidden by the fullscreen presentation.
+3. A completes while the fullscreen source remains presented.
+4. A returns to Idle without latching Ready because the user was already viewing the actual WebView.
+
+### H. Runtime/process replacement does not create stale Ready
+
+1. ChatGPT A is Generating or Ready.
+2. Its WebContent process terminates, or its WKWebView/document is replaced.
+3. FloatTabs clears the old runtime attention state without treating the loss as completion.
+4. Any recovered/reloaded supported ChatGPT document begins from a fresh baseline.
+5. No stale Ready dot or permanent eviction protection survives the replaced runtime.
+
+## 15. Explicit V1 non-goals
 
 V1 does not include:
 
@@ -299,3 +347,18 @@ V1 does not include:
 - guaranteeing recovery from an operating-system/WebKit process kill.
 
 Those capabilities may be added later without changing the core `Generating -> Ready -> acknowledged` lifecycle defined here.
+
+## 16. Frozen implementation prohibitions
+
+V1 must not:
+
+- store attention in `WebAppProfile`, backups, preferences, or URL persistence;
+- use title parsing as the primary ChatGPT completion detector;
+- treat `activeTabID` alone as proof of acknowledgement;
+- modify Hot/Warm/Cold user policy to implement protection;
+- let Warm LRU, Warm/Cold timers, or FloatTabs memory pressure bypass attention protection;
+- make media protection and attention protection overwrite each other;
+- send prompt/response text through the native bridge;
+- emit native events for every streaming token/DOM mutation;
+- add generic multi-site notification architecture beyond the small seams required by this ChatGPT-only V1;
+- change Stage 5D geometry, Website Mode, browser identity, Window Size, Zoom, Pin, navigation, downloads, OAuth, or compatibility-edition behavior.
