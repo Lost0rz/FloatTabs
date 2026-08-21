@@ -51,6 +51,7 @@
 		A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */; };
 		A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002C /* ChatGPTAttentionBridge.swift */; };
 		A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */; };
+		A0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +111,7 @@
 		B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCoordinatorTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000002C /* ChatGPTAttentionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridge.swift; sourceTree = "<group>"; };
 		B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridgeTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTGenerationDetectorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -266,6 +268,7 @@
 				B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */,
 				B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */,
 				B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */,
+				B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -433,6 +436,7 @@
 				A0000000000000000000001B /* WebViewPoolTests.swift in Sources */,
 				A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */,
 				A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */,
+				A0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
