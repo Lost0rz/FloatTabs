@@ -47,6 +47,8 @@
 		A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000026 /* FloatTabsBackupService.swift */; };
 		A00000000000000000000027 /* FloatTabsBackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */; };
 		A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000028 /* FullscreenSourceHost.swift */; };
+		A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002A /* WebAttentionCoordinator.swift */; };
+		A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -102,6 +104,8 @@
 		B00000000000000000000026 /* FloatTabsBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupService.swift; sourceTree = "<group>"; };
 		B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsBackupServiceTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000028 /* FullscreenSourceHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenSourceHost.swift; sourceTree = "<group>"; };
+		B0000000000000000000002A /* WebAttentionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCoordinator.swift; sourceTree = "<group>"; };
+		B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCoordinatorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -218,6 +222,7 @@
 				B0000000000000000000001F /* WebNavigationCoordinator.swift */,
 				B00000000000000000000020 /* PopupCoordinator.swift */,
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
+				B0000000000000000000002A /* WebAttentionCoordinator.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -254,6 +259,7 @@
 				B0000000000000000000001E /* AppCommandControllerTests.swift */,
 				B00000000000000000000025 /* AppPreferencesStoreTests.swift */,
 				B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */,
+				B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -400,6 +406,7 @@
 				A00000000000000000000009 /* WebViewFactory.swift in Sources */,
 				A00000000000000000000014 /* WebViewPool.swift in Sources */,
 				A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */,
+				A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -417,6 +424,7 @@
 				A0000000000000000000000E /* WebViewFactoryTests.swift in Sources */,
 				A0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift in Sources */,
 				A0000000000000000000001B /* WebViewPoolTests.swift in Sources */,
+				A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
