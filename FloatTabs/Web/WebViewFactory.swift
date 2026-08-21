@@ -469,7 +469,8 @@ enum WebViewFactory {
     }
 
     static func makeWebView(
-        renderingProfile: WebRenderingProfile = .canonicalDefault
+        renderingProfile: WebRenderingProfile = .canonicalDefault,
+        configureUserContentController: ((WKUserContentController) -> Void)? = nil
     ) -> WKWebView {
         let rendering = renderingProfile.normalized()
         let versions = BrowserVersionCatalog.current
@@ -482,6 +483,11 @@ enum WebViewFactory {
         configuration.defaultWebpagePreferences.preferredContentMode =
             rendering.effectiveWebsiteMode == .desktop ? .desktop : .mobile
         configuration.userContentController.addUserScript(hiddenScrollbarUserScript())
+        // Pre-creation configuration seam. The Factory remains the only
+        // WKWebViewConfiguration owner; callers that need document-start user
+        // scripts (attention observation) configure them here, before the
+        // WKWebView exists, so `.atDocumentStart` is reliable for first load.
+        configureUserContentController?(configuration.userContentController)
 
         let webView = FloatTabsWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true

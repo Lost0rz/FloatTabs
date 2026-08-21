@@ -1,0 +1,400 @@
+import Foundation
+import WebKit
+
+/// The one shared ChatGPT host-family predicate. `SiteCompatibilityPolicy`
+/// (rendering) and attention observation validation both route through this
+/// type so the two host lists can never drift.
+enum ChatGPTSitePolicy {
+    static let chatGPTHost = "chatgpt.com"
+    static let legacyChatHost = "chat.openai.com"
+
+    static func isSupportedHost(_ host: String) -> Bool {
+        let normalized = host.lowercased()
+        return normalized == chatGPTHost
+            || normalized.hasSuffix(".\(chatGPTHost)")
+            || normalized == legacyChatHost
+    }
+
+    static func isSupportedChatGPTURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = url.host else {
+            return false
+        }
+        return isSupportedHost(host)
+    }
+}
+
+/// Normalized bridge observations. These are sensor facts about the current
+/// ChatGPT document, not attention state: `WebAttentionCoordinator` stays the
+/// sole authority and is not connected to the bridge until Stage C.
+enum ChatGPTAttentionObservation: Equatable, Sendable {
+    case generationStarted
+    case generationFinished
+    case runtimeReset
+}
+
+/// Minimal bridge payload. Metadata only: prompt text, response text, and any
+/// other page content must never appear in this protocol.
+struct ChatGPTBridgePayload: Equatable {
+    static let currentVersion = 1
+    static let baselineKind = "baseline"
+    static let stateKind = "state"
+
+    private static let tokenLengthRange = 8...128
+
+    let version: Int
+    let kind: String
+    /// Opaque per-document identity created by the injected script. Carries no
+    /// page content.
+    let token: String
+    let generating: Bool
+
+    static func parse(_ body: [String: Any]) -> ChatGPTBridgePayload? {
+        guard let version = body["version"] as? Int,
+              version == currentVersion,
+              let kind = body["kind"] as? String,
+              kind == baselineKind || kind == stateKind,
+              let token = body["token"] as? String,
+              tokenLengthRange.contains(token.count),
+              let generating = body["generating"] as? Bool else {
+            return nil
+        }
+        return ChatGPTBridgePayload(
+            version: version,
+            kind: kind,
+            token: token,
+            generating: generating
+        )
+    }
+}
+
+/// Pure per-document baseline/transition reducer. The first observation for a
+/// document establishes its baseline — an idle baseline can never synthesize a
+/// finish — and duplicate states never re-emit, so noisy injected JS cannot
+/// produce duplicate native observations even before the native-side checks.
+struct ChatGPTDocumentGenerationTracker {
+    private var hasBaseline = false
+    private var isGenerating = false
+
+    mutating func observe(_ generating: Bool) -> ChatGPTAttentionObservation? {
+        guard hasBaseline else {
+            hasBaseline = true
+            isGenerating = generating
+            return generating ? .generationStarted : nil
+        }
+        guard generating != isGenerating else { return nil }
+        isGenerating = generating
+        return generating ? .generationStarted : .generationFinished
+    }
+}
+
+/// Per-WKWebView ChatGPT generation sensor.
+///
+/// The bridge owns no business state. It validates incoming script messages,
+/// reduces them to the document's generation baseline/transitions, and forwards
+/// normalized observations only. Its lifetime follows the WKWebView it was
+/// installed on: `WebViewPool` creates it before the WKWebView exists, the
+/// Factory invokes `install(into:)` on the pre-creation user content
+/// controller, and invalidation removes only this bridge's own message
+/// handler so Factory scripts stay intact.
+@MainActor
+final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
+    static let contentWorldName = "FloatTabsChatGPTAttention"
+    static let messageHandlerName = "floatTabsChatGPTAttention"
+
+    /// The single shared world instance used for both the injected script and
+    /// the message handler. One instance is required: worlds with equal names
+    /// are still distinct objects.
+    static let contentWorld = WKContentWorld.world(name: contentWorldName)
+
+    private static let scriptSource = """
+    (() => {
+      "use strict";
+      if (window.top !== window) { return; }
+      const supportedHost = (host) =>
+        host === "chatgpt.com" ||
+        host.endsWith(".chatgpt.com") ||
+        host === "chat.openai.com";
+      if (!supportedHost(location.hostname)) { return; }
+      const handler = () => {
+        try {
+          return window.webkit &&
+            window.webkit.messageHandlers &&
+            window.webkit.messageHandlers["floatTabsChatGPTAttention"];
+        } catch (_) {
+          return undefined;
+        }
+      };
+      if (!handler()) { return; }
+
+      const STOP_SELECTORS = [
+        '[data-testid="stop-button"]',
+        '[data-testid="fruitjuice-stop-button"]'
+      ];
+      const COALESCE_MS = 250;
+      const TOKEN = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : "tok-" + Date.now().toString(36) + "-" +
+          Math.random().toString(36).slice(2, 10);
+
+      let lastSent = null;
+      let timer = null;
+      let lastCheck = 0;
+      let observer = null;
+
+      const post = (generating) => {
+        const target = handler();
+        if (!target) { return; }
+        target.postMessage({
+          version: 1,
+          kind: lastSent === null ? "baseline" : "state",
+          token: TOKEN,
+          generating: generating
+        });
+      };
+
+      const isGenerating = () => {
+        for (const selector of STOP_SELECTORS) {
+          const element = document.querySelector(selector);
+          if (element && element.isConnected && element.getClientRects().length > 0) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      const evaluate = () => {
+        const generating = isGenerating();
+        if (generating === lastSent) { return; }
+        post(generating);
+        lastSent = generating;
+      };
+
+      // Trailing coalescing: a burst of DOM mutations collapses into at most
+      // one state read per window, while a sustained mutation stream (streamed
+      // tokens) still gets periodic reads instead of postponing forever.
+      const schedule = () => {
+        if (timer !== null) { return; }
+        const wait = Math.max(0, COALESCE_MS - (Date.now() - lastCheck));
+        timer = setTimeout(() => {
+          timer = null;
+          lastCheck = Date.now();
+          evaluate();
+        }, wait);
+      };
+
+      const startObserving = () => {
+        if (observer || !document.documentElement) { return; }
+        observer = new MutationObserver(schedule);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      };
+
+      if (document.documentElement) {
+        startObserving();
+      } else {
+        const boot = new MutationObserver(() => {
+          if (document.documentElement) {
+            boot.disconnect();
+            startObserving();
+          }
+        });
+        boot.observe(document, { childList: true });
+      }
+
+      document.addEventListener("DOMContentLoaded", schedule, { once: true });
+
+      // BFCache/history restoration does not rerun document-start injection.
+      // A restored document re-reports its current state so the native side
+      // can re-establish a baseline from the still-current token.
+      window.addEventListener("pageshow", () => {
+        lastSent = null;
+        schedule();
+      });
+    })();
+    """
+
+    private struct DocumentSession {
+        let token: String
+        var tracker = ChatGPTDocumentGenerationTracker()
+        var suspendedObservations: [ChatGPTAttentionObservation] = []
+    }
+
+    let slotID: UUID
+    private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    private weak var webView: WKWebView?
+    private weak var userContentController: WKUserContentController?
+    private var document: DocumentSession?
+    /// True until a document's own `baseline` report is accepted — including
+    /// from bridge creation, so the very first load can establish its epoch.
+    private var isAwaitingNewDocumentBaseline = true
+    private var provisionalNavigationDepth = 0
+    private(set) var isInvalidated = false
+
+    init(
+        slotID: UUID,
+        onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    ) {
+        self.slotID = slotID
+        self.onObservation = onObservation
+        super.init()
+    }
+
+    // MARK: Installation
+
+    /// Adds the document-start main-frame script and the same-world message
+    /// handler. Must run on the Factory-owned `WKUserContentController` before
+    /// the WKWebView is constructed so `.atDocumentStart` is reliable for the
+    /// first load.
+    func install(into userContentController: WKUserContentController) {
+        guard !isInvalidated else { return }
+        userContentController.addUserScript(
+            WKUserScript(
+                source: Self.scriptSource,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true,
+                in: Self.contentWorld
+            )
+        )
+        userContentController.add(
+            self,
+            contentWorld: Self.contentWorld,
+            name: Self.messageHandlerName
+        )
+        self.userContentController = userContentController
+    }
+
+    func attach(to webView: WKWebView) {
+        guard !isInvalidated else { return }
+        self.webView = webView
+    }
+
+    // MARK: WKScriptMessageHandler
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard let body = message.body as? [String: Any],
+              let payload = ChatGPTBridgePayload.parse(body) else {
+            return
+        }
+        accept(
+            payload: payload,
+            messageWebView: message.webView,
+            isMainFrame: message.frameInfo.isMainFrame,
+            originHost: message.frameInfo.securityOrigin.host,
+            originProtocol: message.frameInfo.securityOrigin.`protocol`
+        )
+    }
+
+    /// Validation pipeline and acceptance, split from the message-handler
+    /// entry point so tests exercise the exact production semantics. Every
+    /// check below must pass independently; origin comes from the message's
+    /// own security origin, never from `webView.url`, because stale
+    /// old-document messages race navigation.
+    func accept(
+        payload: ChatGPTBridgePayload,
+        messageWebView: WKWebView?,
+        isMainFrame: Bool,
+        originHost: String?,
+        originProtocol: String?
+    ) {
+        guard !isInvalidated,
+              let attachedWebView = webView,
+              messageWebView === attachedWebView,
+              isMainFrame,
+              let host = originHost?.lowercased(), !host.isEmpty,
+              let protocolScheme = originProtocol?.lowercased(),
+              protocolScheme == "https" || protocolScheme == "http",
+              ChatGPTSitePolicy.isSupportedHost(host) else {
+            return
+        }
+
+        if isAwaitingNewDocumentBaseline {
+            // Only a document's own baseline report may open an epoch: the
+            // document-start script's first message and a pageshow re-report
+            // both carry the baseline kind, while a late `state` message from
+            // a superseded document must never re-baseline.
+            guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
+            document = DocumentSession(token: payload.token)
+            isAwaitingNewDocumentBaseline = false
+        } else if document?.token != payload.token {
+            return
+        }
+        guard let observation = document?.tracker.observe(payload.generating) else {
+            return
+        }
+        if provisionalNavigationDepth > 0 {
+            document?.suspendedObservations.append(observation)
+        } else {
+            emit(observation)
+        }
+    }
+
+    // MARK: Navigation / runtime lifecycle
+
+    /// A provisional navigation started. The old document may still survive a
+    /// failure, so its observations are only suspended, never reset yet.
+    /// Depth-based so a cancelled provisional followed by a fresh request
+    /// stays suspended.
+    func suspendForProvisionalNavigation() {
+        provisionalNavigationDepth += 1
+    }
+
+    /// The provisional navigation failed and the old document is still the
+    /// displayed runtime: resume it without any false reset and flush what it
+    /// produced while suspended.
+    func resumeAfterProvisionalNavigationFailure() {
+        guard provisionalNavigationDepth > 0 else { return }
+        provisionalNavigationDepth -= 1
+        guard provisionalNavigationDepth == 0,
+              let suspended = document?.suspendedObservations,
+              !suspended.isEmpty else {
+            return
+        }
+        document?.suspendedObservations.removeAll()
+        suspended.forEach(emit)
+    }
+
+    /// The runtime was authoritatively replaced — a new top-level document
+    /// committed or the WebContent process terminated. Forward one reset
+    /// boundary for the old runtime, clear the accepted document epoch, and
+    /// wait for the new document's baseline. The installation itself stays
+    /// usable for the recovered/replacement document.
+    func handleRuntimeReplacement() {
+        let hadActiveDocument = document != nil
+        document = nil
+        isAwaitingNewDocumentBaseline = true
+        provisionalNavigationDepth = 0
+        if hadActiveDocument {
+            emit(.runtimeReset)
+        }
+    }
+
+    /// Permanently detaches the bridge from its WKWebView. Removes only this
+    /// bridge's own message handler — Factory scripts and any unrelated user
+    /// scripts stay untouched — drops the document epoch, and rejects every
+    /// later callback. Forwards one reset boundary if a document was active.
+    func invalidate() {
+        guard !isInvalidated else { return }
+        isInvalidated = true
+        let hadActiveDocument = document != nil
+        document = nil
+        isAwaitingNewDocumentBaseline = false
+        provisionalNavigationDepth = 0
+        userContentController?.removeScriptMessageHandler(
+            forName: Self.messageHandlerName,
+            contentWorld: Self.contentWorld
+        )
+        userContentController = nil
+        webView = nil
+        if hadActiveDocument {
+            emit(.runtimeReset)
+        }
+    }
+
+    private func emit(_ observation: ChatGPTAttentionObservation) {
+        onObservation(slotID, observation)
+    }
+}

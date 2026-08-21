@@ -49,6 +49,8 @@
 		A00000000000000000000028 /* FullscreenSourceHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000028 /* FullscreenSourceHost.swift */; };
 		A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002A /* WebAttentionCoordinator.swift */; };
 		A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */; };
+		A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002C /* ChatGPTAttentionBridge.swift */; };
+		A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +108,8 @@
 		B00000000000000000000028 /* FullscreenSourceHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenSourceHost.swift; sourceTree = "<group>"; };
 		B0000000000000000000002A /* WebAttentionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCoordinator.swift; sourceTree = "<group>"; };
 		B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCoordinatorTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000002C /* ChatGPTAttentionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridge.swift; sourceTree = "<group>"; };
+		B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridgeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -223,6 +227,7 @@
 				B00000000000000000000020 /* PopupCoordinator.swift */,
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
 				B0000000000000000000002A /* WebAttentionCoordinator.swift */,
+				B0000000000000000000002C /* ChatGPTAttentionBridge.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -260,6 +265,7 @@
 				B00000000000000000000025 /* AppPreferencesStoreTests.swift */,
 				B00000000000000000000027 /* FloatTabsBackupServiceTests.swift */,
 				B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */,
+				B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -407,6 +413,7 @@
 				A00000000000000000000014 /* WebViewPool.swift in Sources */,
 				A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */,
 				A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */,
+				A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -425,6 +432,7 @@
 				A0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift in Sources */,
 				A0000000000000000000001B /* WebViewPoolTests.swift in Sources */,
 				A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */,
+				A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

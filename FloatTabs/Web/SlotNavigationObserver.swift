@@ -221,6 +221,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
+    /// Top-level navigation lifecycle forwarding for the attention bridge.
+    /// These are the main-frame delegate callbacks only; same-document SPA
+    /// navigations never reach them and therefore never reset the bridge.
+    private let onProvisionalNavigationStart: @MainActor (UUID) -> Void
+    private let onNavigationCommit: @MainActor (UUID) -> Void
+    private let onProvisionalNavigationFailure: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
 
     /// Set only for a FloatTabs-issued entry whose `https://` scheme was
@@ -242,6 +248,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
+        onProvisionalNavigationStart: @escaping @MainActor (UUID) -> Void = { _ in },
+        onNavigationCommit: @escaping @MainActor (UUID) -> Void = { _ in },
+        onProvisionalNavigationFailure: @escaping @MainActor (UUID) -> Void = { _ in },
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
         }
@@ -253,6 +262,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
+        self.onProvisionalNavigationStart = onProvisionalNavigationStart
+        self.onNavigationCommit = onNavigationCommit
+        self.onProvisionalNavigationFailure = onProvisionalNavigationFailure
         self.loadHandler = loadHandler
         super.init()
 
@@ -342,6 +354,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        onProvisionalNavigationStart(slotID)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -350,6 +363,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
+        onNavigationCommit(slotID)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -376,6 +390,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        // The still-present old document resumes first; an HTTP-fallback
+        // request launched below then receives its own provisional start.
+        onProvisionalNavigationFailure(slotID)
 
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
