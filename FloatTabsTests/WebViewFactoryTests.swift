@@ -18,6 +18,12 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
+    func testFloatTabsWebViewAcceptsInactiveWindowFirstMouse() {
+        let webView = WebViewFactory.makeWebView()
+
+        XCTAssertTrue(webView.acceptsFirstMouse(for: nil))
+    }
+
     func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)
