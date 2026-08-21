@@ -87,6 +87,7 @@ final class ExternalControlZoneView: NSView {
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
     private var residentSlotIDs = Set<UUID>()
+    private var readySlotIDs = Set<UUID>()
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
@@ -204,6 +205,7 @@ final class ExternalControlZoneView: NSView {
                 isActive: profile.id == activeTabID,
                 isResident: residentSlotIDs.contains(profile.id)
             )
+            view.setReadyAttention(readySlotIDs.contains(profile.id))
         }
 
         needsLayout = true
@@ -285,6 +287,14 @@ final class ExternalControlZoneView: NSView {
         residentSlotIDs = slotIDs
         for (slotID, tab) in tabViews {
             tab.setResident(slotIDs.contains(slotID))
+        }
+    }
+
+    func setReadySlotIDs(_ slotIDs: Set<UUID>) {
+        guard readySlotIDs != slotIDs else { return }
+        readySlotIDs = slotIDs
+        for (slotID, tab) in tabViews {
+            tab.setReadyAttention(slotIDs.contains(slotID))
         }
     }
 
@@ -830,6 +840,7 @@ final class ExternalWebAppTabView: NSView {
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let shapeLayer = CAShapeLayer()
+    private let readyAttentionLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
     private var isResident = false
@@ -846,6 +857,7 @@ final class ExternalWebAppTabView: NSView {
     private var grayscaleIcon: NSImage?
 
     private static let grayscaleContext = CIContext(options: nil)
+    private static let readyAttentionDiameter: CGFloat = 6
 
     var preferredWidth: CGFloat {
         // Resting tabs are icon-only. Only the hovered row fully expands;
@@ -858,6 +870,12 @@ final class ExternalWebAppTabView: NSView {
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
+    var isShowingReadyAttention: Bool { !readyAttentionLayer.isHidden }
+    var readyAttentionFrame: NSRect { readyAttentionLayer.frame }
+    var iconFrame: NSRect { iconView.frame }
+    var readyAttentionColor: NSColor? {
+        readyAttentionLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -866,6 +884,10 @@ final class ExternalWebAppTabView: NSView {
         wantsLayer = true
         layer?.masksToBounds = false
         layer?.addSublayer(shapeLayer)
+        readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
+        readyAttentionLayer.isHidden = true
+        readyAttentionLayer.zPosition = 1
+        layer?.addSublayer(readyAttentionLayer)
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
@@ -926,6 +948,7 @@ final class ExternalWebAppTabView: NSView {
         // the registered arrow rect always covers the expanded row.
         window?.invalidateCursorRects(for: self)
         updateShape()
+        updateReadyAttentionGeometry()
     }
 
     override func resetCursorRects() {
@@ -951,6 +974,11 @@ final class ExternalWebAppTabView: NSView {
         isResident = resident
         updateAppearance()
         updateRuntimeToolTip()
+    }
+
+    func setReadyAttention(_ ready: Bool) {
+        guard isShowingReadyAttention != ready else { return }
+        readyAttentionLayer.isHidden = !ready
     }
 
     func setWindowSizeEditingEnabled(_ enabled: Bool) {
@@ -1255,6 +1283,8 @@ final class ExternalWebAppTabView: NSView {
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
         applyIconAppearance()
         updateShape()
+        readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
+        updateReadyAttentionGeometry()
     }
 
     private func setSourceIcon(_ image: NSImage?) {
@@ -1327,6 +1357,23 @@ final class ExternalWebAppTabView: NSView {
             layer?.shadowOffset = NSSize(width: -1, height: -1)
             layer?.shadowPath = path
         }
+    }
+
+    private func updateReadyAttentionGeometry() {
+        guard layer != nil else { return }
+        let iconFrame = iconView.convert(iconView.bounds, to: self)
+        let diameter = Self.readyAttentionDiameter
+        let frame = NSRect(
+            x: iconFrame.maxX - diameter * 0.75,
+            y: iconFrame.maxY - diameter * 0.75,
+            width: diameter,
+            height: diameter
+        )
+        readyAttentionLayer.frame = frame
+        readyAttentionLayer.path = CGPath(
+            ellipseIn: CGRect(origin: .zero, size: frame.size),
+            transform: nil
+        )
     }
 
     private static func grayscaleImage(from image: NSImage) -> NSImage? {

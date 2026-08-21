@@ -900,6 +900,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
+        synchronizeAttentionIndicators()
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
@@ -954,6 +955,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setResidentSlotIDs(webViewPool.residentSlotIDs)
     }
 
+    private func synchronizeAttentionIndicators() {
+        rootView.externalControlZoneView.setReadySlotIDs(
+            attentionCoordinator.readySlotIDs
+        )
+    }
+
     // MARK: Attention visibility + acknowledgement
 
     /// Routes an observation through the Stage C authority, then compares the
@@ -967,6 +974,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
         attentionRouter.handle(observation, for: slotID)
+        synchronizeAttentionIndicators()
 
         let isProtected = attentionCoordinator.isAttentionProtected(slotID)
         guard wasProtected,
@@ -1014,6 +1022,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: slotID,
             userVisible: isAttentionUserVisible(slotID: slotID)
         )
+        synchronizeAttentionIndicators()
     }
 
     private func acknowledgeActiveAttentionIfActuallyPresented() {
@@ -1636,6 +1645,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
+        synchronizeAttentionIndicators()
         synchronizeResidentIndicators()
 
         guard let activeProfile = tabStore.activeProfile else {
