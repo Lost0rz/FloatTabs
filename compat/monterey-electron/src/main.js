@@ -10,7 +10,7 @@ const STORAGE_TYPES = [
   'localstorage',
   'shadercache',
   'websql',
-  'indexeddb',
+  'indexdb',
   'serviceworkers',
   'cachestorage'
 ];

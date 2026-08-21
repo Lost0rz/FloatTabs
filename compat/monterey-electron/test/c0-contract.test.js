@@ -59,6 +59,22 @@ test('provides a targeted Chromium session reset action', () => {
   assert.match(mainSource, /await diagnosticSession\.clearCache\(\)/);
   assert.match(mainSource, /await diagnosticSession\.clearStorageData\(\{ storages: STORAGE_TYPES \}\)/);
   assert.match(mainSource, /await diagnosticSession\.clearAuthCache\(\)/);
+
+  const storageTypesMatch = mainSource.match(/const STORAGE_TYPES = \[([\s\S]*?)\];/);
+  assert.ok(storageTypesMatch, 'production STORAGE_TYPES list is present');
+  const productionStorageTypes = [...storageTypesMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  for (const storageType of [
+    'cookies',
+    'filesystem',
+    'localstorage',
+    'shadercache',
+    'indexdb',
+    'serviceworkers',
+    'cachestorage'
+  ]) {
+    assert.ok(productionStorageTypes.includes(storageType), `production reset includes ${storageType}`);
+  }
+  assert.equal(productionStorageTypes.includes('indexeddb'), false, 'stale indexeddb token is absent');
 });
 
 test('builds only the Intel artifact with a Monterey minimum', () => {
