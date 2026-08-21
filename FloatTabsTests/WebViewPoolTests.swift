@@ -1168,6 +1168,263 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(decoded.homeURL, profile.homeURL)
     }
 
+    // MARK: - Hot host owner registry
+
+    private func makeHotContainer() -> WebPanelContainerView {
+        WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+    }
+
+    /// Hosts live at container -> clipView -> WebSlotHostView depth.
+    private func hotHostViews(in container: NSView) -> [WebSlotHostView] {
+        container.subviews.flatMap { subview -> [NSView] in
+            [subview] + subview.subviews
+        }.compactMap { $0 as? WebSlotHostView }
+    }
+
+    /// Spec case: one Slot's Hot WKWebView moved main → companion leaves a
+    /// stale (webView-less) host in the main container; release must clean
+    /// hosts in every known owner container and drop the registry entry.
+    func testReleaseCleansStaleHotHostsInAllKnownOwnerContainers() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotBoth")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        // Production order: registration happens right after `show`, never via
+        // an extra `webView(for:)` lookup that real code does not perform.
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 1)
+
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+
+        // The main container still holds a stale dedicated host: its weak
+        // bookkeeping remembers the WKWebView, but the physical superview has
+        // moved to the companion. This is exactly the stale-host gap.
+        let staleHosts = hotHostViews(in: main)
+        XCTAssertEqual(staleHosts.count, 1)
+        XCTAssertTrue(staleHosts[0].webView === webView)
+        XCTAssertFalse(webView.superview === staleHosts[0])
+
+        pool.release(slotID: profile.id)
+
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    /// Spec case: Hot → Warm must clear stale Hot hosts in every known owner
+    /// without changing the resident runtime identity.
+    /// Spec case: Hot → Warm must clear stale Hot hosts in every known owner
+    /// without changing the resident runtime identity — via the authoritative
+    /// policy reconciliation, with no `webView(for:)` lookup after the change.
+    func testHotToWarmPolicyReconciliationClearsStaleHotHostsInAllKnownOwners() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotToWarm")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+
+        profile.residencyPolicy = .warm
+        pool.reconcileHotHostOwners(validHotSlotIDs: [])
+
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+    }
+
+    /// Spec case: Hot → Cold follows the same all-owner policy cleanup.
+    func testHotToColdPolicyReconciliationClearsStaleHotHostsInAllKnownOwners() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotToCold")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+
+        profile.residencyPolicy = .cold
+        pool.reconcileHotHostOwners(validHotSlotIDs: [])
+
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+    }
+
+    /// Spec case: a `webView(for:)` lookup after a policy change still clears
+    /// the current physical Hot host defensively when the explicit
+    /// post-`show` registration was missed (kept as a fallback path). A stale
+    /// host in a *different*, never-registered container cannot be discovered
+    /// by this fallback — which is exactly why the production path registers
+    /// every owner at `show` time and reconciles by policy.
+    func testHotToWarmLookupDefensivelyClearsUnregisteredCurrentHost() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotToWarmDefensive")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        // Registration intentionally skipped: models a missed registration.
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+
+        profile.residencyPolicy = .warm
+        let warmView = pool.webView(for: profile)
+
+        XCTAssertTrue(warmView === webView)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+    }
+
+    /// The key case previous tests missed: Hot slot shown in main, then in the
+    /// fullscreen companion, then becomes inactive and changes policy. Cleanup
+    /// must happen through policy-owner reconciliation alone — no later
+    /// `webView(for:)` call exists — while the runtime stays resident with its
+    /// identity intact and release timing still belongs to the lifecycle rules.
+    func testInactiveHotPolicyChangeReconcilesOwnersWithoutPrematureRelease() {
+        var releaseNotifications = 0
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            isSlotActive: { _ in false }
+        )
+        pool.onResidentSetChange = { releaseNotifications += 1 }
+
+        var profile = makeProfile(name: "HotInactive")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+        XCTAssertEqual(releaseNotifications, 1)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+
+        // The slot goes inactive and its policy drops from Hot. Production
+        // responds with reconcileHotHostOwners only — never a fresh lookup.
+        profile.residencyPolicy = .warm
+        pool.reconcileHotHostOwners(validHotSlotIDs: [])
+
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+        XCTAssertTrue(hotHostViews(in: companion).isEmpty)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+        // Host cleanup must not look like a runtime release.
+        XCTAssertEqual(releaseNotifications, 1)
+        // Frozen lifecycle contract untouched by host cleanup.
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
+
+        // Hot → Cold variant: same reconciliation, 30s frozen Cold grace.
+        profile.residencyPolicy = .cold
+        pool.reconcileHotHostOwners(validHotSlotIDs: [])
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+        XCTAssertEqual(releaseNotifications, 1)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
+    }
+
+    /// Spec case: a rendering-profile rebuild must not keep the old dedicated
+    /// hosts alive in any known owner container.
+    func testRuntimeRebuildLeavesNoOldHotHostBehind() {
+        let pool = makePool()
+        var profile = makeProfile(name: "Rebuild")
+        profile.residencyPolicy = .hot
+        let firstView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: firstView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: firstView, slotID: profile.id)
+
+        profile.renderingProfile = profile.renderingProfile
+            .settingBrowserIdentity(.windowsChrome)
+        let rebuiltView = pool.webView(for: profile)
+
+        XCTAssertFalse(rebuiltView === firstView)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+        XCTAssertTrue(hotHostViews(in: main).isEmpty)
+    }
+
+    /// Spec case: the registry must not extend container lifetimes.
+    func testOwnerRegistryDoesNotExtendContainerLifetime() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotWeak")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        weak var weakMain: WebPanelContainerView?
+        autoreleasepool {
+            let main = makeHotContainer()
+            weakMain = main
+            main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+            pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+            XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 1)
+        }
+        XCTAssertNil(weakMain)
+        // Dead weak owners are compacted out of the live count.
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+
+        pool.release(slotID: profile.id)
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 0)
+    }
+
+    /// Spec case: reparenting between main and companion containers must not
+    /// change runtime identity or residency for a Hot slot.
+    func testCompanionReparentingKeepsRuntimeIdentityAndResidency() {
+        let pool = makePool()
+        var profile = makeProfile(name: "HotMove")
+        profile.residencyPolicy = .hot
+        let webView = pool.webView(for: profile)
+
+        let main = makeHotContainer()
+        main.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+        let companion = makeHotContainer()
+        companion.show(webView: webView, slotID: profile.id, residencyPolicy: .hot)
+        pool.recordHotHostOwner(webView: webView, slotID: profile.id)
+
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.knownHotHostOwnerCount(for: profile.id), 2)
+    }
+
+    /// WebSlotHostView.attach invariant: when weak bookkeeping still reports
+    /// the same WKWebView but the physical superview has moved elsewhere, a
+    /// later attach must physically reparent instead of skipping.
+    func testHostAttachReparentsWhenPhysicalSuperviewChangedButWeakIdentityMatches() {
+        let webView = WKWebView(frame: .zero)
+        let host = WebSlotHostView(webView: webView)
+        XCTAssertTrue(webView.superview === host)
+
+        // Physically move the WKWebView without telling the old host.
+        let otherContainer = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        otherContainer.addSubview(webView)
+        XCTAssertFalse(webView.superview === host)
+
+        host.attach(webView)
+        XCTAssertTrue(webView.superview === host)
+    }
+
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
     }

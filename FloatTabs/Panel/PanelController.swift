@@ -877,6 +877,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
+        webViewPool.reconcileHotHostOwners(
+            validHotSlotIDs: Set(
+                orderedProfiles
+                    .filter { $0.residencyPolicy == .hot }
+                    .map(\.id)
+            )
+        )
 
         guard let activeProfile = tabStore.activeProfile else {
             if let previous = lastSynchronizedActiveProfile {
@@ -907,6 +914,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        // The dedicated Hot host only exists once `show` has attached it, and
+        // no later `webView(for:)` lookup is guaranteed. Register the actual
+        // owner immediately so policy cleanup stays authoritative.
+        if activeProfile.residencyPolicy == .hot {
+            webViewPool.recordHotHostOwner(webView: webView, slotID: activeProfile.id)
+        }
         slotLifecycleCoordinator.activate(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         sourceHostController.observeFullscreenState(of: webView)
@@ -1526,6 +1539,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             activeTabID: tabStore.activeTabID
         )
         synchronizeResidentIndicators()
+        // The locked fullscreen path bypasses SlotLifecycleCoordinator.reconcile,
+        // so dedicated Hot-host policy cleanup must run here explicitly.
+        webViewPool.reconcileHotHostOwners(
+            validHotSlotIDs: Set(
+                orderedProfiles
+                    .filter { $0.residencyPolicy == .hot }
+                    .map(\.id)
+            )
+        )
 
         guard let activeProfile = tabStore.activeProfile else {
             deactivateCompanionProfile(pauseInactiveMedia: true)
@@ -1568,6 +1590,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        // Same production rule as the main container: the companion host only
+        // exists after `show`, so the actual owner is registered right here.
+        if activeProfile.residencyPolicy == .hot {
+            webViewPool.recordHotHostOwner(webView: webView, slotID: activeProfile.id)
+        }
         slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         companionActiveProfile = activeProfile

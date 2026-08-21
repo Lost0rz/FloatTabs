@@ -67,6 +67,8 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
 
 struct FloatTabsBackupService {
     static let fileExtension = "floattabsbackup"
+    static let startupRecoverySnapshotPreservationMarkerFileName =
+        ".FloatTabs-preserve-automatic-snapshot-after-recovery"
 
     private let fileManager: FileManager
     private let backupDirectoryURL: URL
@@ -131,20 +133,50 @@ struct FloatTabsBackupService {
         return url
     }
 
+    /// Arms the durable guard used only by the explicit Start Empty recovery
+    /// path. It must succeed before the protected corrupt profile store is
+    /// replaced by an empty configuration; otherwise recovery remains blocked.
+    func beginEmptyStartupRecoverySnapshotPreservation() throws {
+        let markerURL = startupRecoverySnapshotPreservationMarkerURL
+        try fileManager.createDirectory(
+            at: markerURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: markerURL, options: [.atomic])
+    }
+
     @discardableResult
     func writeAutomaticVersionSnapshot(
         _ document: FloatTabsBackupDocument
     ) throws -> URL {
-        try fileManager.createDirectory(
-            at: backupDirectoryURL,
-            withIntermediateDirectories: true
-        )
         let version = Self.safeFileComponent(document.sourceAppVersion)
         let build = Self.safeFileComponent(document.sourceBuild)
         let url = backupDirectoryURL.appendingPathComponent(
             "FloatTabs-auto-\(version)-\(build).\(Self.fileExtension)"
         )
+
+        let preservationMarkerURL = startupRecoverySnapshotPreservationMarkerURL
+        let isPreservingRecoveredSnapshot = fileManager.fileExists(
+            atPath: preservationMarkerURL.path
+        )
+        if isPreservingRecoveredSnapshot, document.webAppState.profiles.isEmpty {
+            // Start Empty recovery may span multiple app launches. Keep the last
+            // valid automatic snapshot intact until real configuration exists.
+            return url
+        }
+
+        try fileManager.createDirectory(
+            at: backupDirectoryURL,
+            withIntermediateDirectories: true
+        )
         try write(document, to: url)
+
+        if isPreservingRecoveredSnapshot {
+            // Clear only after a non-empty replacement snapshot was committed.
+            // If removal itself fails, keeping the marker is conservative: a
+            // later empty state still cannot erase this newly valid snapshot.
+            try? fileManager.removeItem(at: preservationMarkerURL)
+        }
         return url
     }
 
@@ -176,6 +208,13 @@ struct FloatTabsBackupService {
 
     static func suggestedExportFileName(now: Date = Date()) -> String {
         "FloatTabs-Backup-\(timestamp(now)).\(fileExtension)"
+    }
+
+    private var startupRecoverySnapshotPreservationMarkerURL: URL {
+        backupDirectoryURL.appendingPathComponent(
+            Self.startupRecoverySnapshotPreservationMarkerFileName,
+            isDirectory: false
+        )
     }
 
     private static func defaultBackupDirectory(fileManager: FileManager) -> URL {

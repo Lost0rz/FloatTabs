@@ -252,6 +252,10 @@ final class AppCoordinator {
 
     private func beginWithEmptyStartupConfiguration() throws {
         try prepareUnreadableProfileStoreForReplacement()
+        // Arm the durable guard before replacing the protected store. If this
+        // small marker cannot be written, recovery remains blocked and the
+        // unreadable profile store is not replaced by an empty configuration.
+        try backupService.beginEmptyStartupRecoverySnapshotPreservation()
         guard panelController.restoreStoredWebAppState(.empty) else {
             throw FloatTabsBackupError.startupRecoveryFailed
         }
@@ -303,7 +307,34 @@ final class AppCoordinator {
         ) else {
             return
         }
-        _ = try? backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+
+        do {
+            try backupService.writeAutomaticVersionSnapshot(makeBackupDocument())
+            if Self.shouldDisarmEmptyStartupRecoveryPreservation(
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery:
+                    preserveExistingAutomaticBackupAfterEmptyStartupRecovery,
+                webAppState: webAppState
+            ) {
+                // Protection ends only after a real rebuilt configuration has
+                // been durably committed to the automatic snapshot. A later
+                // intentional empty configuration in this same process should
+                // once again follow the ordinary snapshot contract.
+                preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
+            }
+        } catch {
+            // Automatic snapshots are intentionally best-effort. Keep the
+            // in-memory recovery guard armed when the durable replacement failed.
+        }
+    }
+
+    /// The in-memory Start Empty guard may only be disarmed after a non-empty
+    /// automatic snapshot was durably committed. Pure decision seam for tests.
+    nonisolated static func shouldDisarmEmptyStartupRecoveryPreservation(
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery: Bool,
+        webAppState: StoredWebAppState
+    ) -> Bool {
+        preserveExistingAutomaticBackupAfterEmptyStartupRecovery
+            && !webAppState.profiles.isEmpty
     }
 
     private func makeBackupDocument(now: Date = Date()) -> FloatTabsBackupDocument {
