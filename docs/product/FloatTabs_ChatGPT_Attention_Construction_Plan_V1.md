@@ -1,289 +1,545 @@
 # FloatTabs — ChatGPT Attention Construction Plan V1
 
-> Status: **FROZEN PLAN** — implementation has not started.
-> Contract authority: `docs/product/FloatTabs_ChatGPT_Attention_Contract_V1.md`
-> Contract branch: `contract/chatgpt-ready-attention-v1`
+> Status: **ACTIVE FROZEN DELIVERY PLAN**
+> Business Contract: `docs/product/FloatTabs_ChatGPT_Attention_Contract_V1.md` — FROZEN
 > Base main: `ad810e94549cade77ec00bd0f2aee1b170d8023c`
+> Stage A implementation: `83e98ec8f4763b792148a5a6c492b9befe087205` — independently audited PASS
+> Revision: 2026-08-21 — technical stage order and WebKit installation boundary corrected after Stage A audit. Business semantics unchanged.
 
 ## 1. Delivery objective
 
-Implement ChatGPT generation attention without changing existing Slot persistence or Hot/Warm/Cold policy semantics.
+Implement ChatGPT generation attention without changing persisted Slot semantics or Hot/Warm/Cold policy semantics.
 
-The finished V1 must provide this loop:
+Finished V1:
 
 ```text
-Idle -> Generating -> Ready when completion occurs off-screen
-Ready -> Idle when the actual ChatGPT WebView becomes user-visible
+Idle -> Generating
+Generating -> Idle   when completion occurs while actually user-visible
+Generating -> Ready  when completion occurs while not user-visible
+Ready -> Idle        when the actual WebView becomes user-visible
 ```
 
 `Generating` and `Ready` are protected from FloatTabs-initiated eviction. Only `Ready` renders the favicon red dot.
 
-## 2. Current architecture and ownership
+## 2. Authority and ownership
 
-Existing authoritative boundaries remain:
+Existing authorities remain:
 
 - `TabStore` / `WebAppProfile`: persisted Web App configuration and selected Slot identity.
-- `WebViewPool`: ownership of live WKWebView runtimes and actual resident Slot IDs.
-- `SlotLifecycleCoordinator`: Hot/Warm/Cold release timing, Warm LRU/memory-pressure handling, media protection, hidden-active grace.
-- `PanelController`: real FloatTabs presentation/fullscreen state and coordination of selected WebView presentation.
-- `ExternalControlZoneView`: transient Tab rail rendering.
+- `WebViewPool`: live WKWebView ownership and resident Slot IDs.
+- `SlotLifecycleCoordinator`: Hot/Warm/Cold lifecycle, Warm LRU, memory pressure, media protection, hidden-active grace.
+- `PanelController`: actual presentation/fullscreen coordination.
+- `ExternalControlZoneView`: transient rail rendering.
 
-New V1 ownership must be:
+Attention V1 ownership:
 
-- `WebAttentionCoordinator`: sole native runtime authority for Slot attention state (`Idle`, `Generating`, `Ready`).
-- `ChatGPTAttentionBridge`: per-WKWebView sensor/adapter. It reports normalized events only and owns no persisted/product state.
-- `WebViewPool`: owns bridge lifetime together with its WKWebView and forwards normalized events/reset signals.
-- `SlotLifecycleCoordinator`: consumes derived attention protection; it must not become a second attention state store.
-- `PanelController`: remains visibility authority and performs acknowledgement routing; it must not contain ChatGPT DOM detection logic.
-- `ExternalControlZoneView`: receives a transient Ready-ID projection for red-dot rendering only.
+- `WebAttentionCoordinator`: **sole native runtime authority** for Slot `Idle / Generating / Ready`.
+- `ChatGPTAttentionBridge`: per-WKWebView sensor only; emits normalized observations and owns no business state.
+- `WebViewPool`: owns bridge lifetime with WKWebView and forwards normalized observations/reset signals.
+- `PanelController`: authoritative real-visibility mapping and state-routing/acknowledgement boundary.
+- `SlotLifecycleCoordinator`: consumes a derived attention-protection query; never stores duplicate attention state.
+- Tab rail: receives a transient Ready-ID projection only.
 
-## 3. Architecture constraints
+No attention state may be persisted in `WebAppProfile`, profile JSON, backups, preferences, or current URL.
 
-1. Do not add attention fields to `WebAppProfile`, profile JSON, backups, or preferences.
-2. Do not change residency policy to Hot when generation begins.
-3. Media protection and attention protection are independent OR conditions.
-4. Every eviction path must re-check attention protection, including timer expiry, Warm LRU, and memory pressure.
-5. Releasing/rebuilding/removing a WKWebView must invalidate its bridge and old callbacks.
-6. WebContent process termination and document/runtime replacement reset old attention without synthesizing Ready.
-7. A newly attached supported ChatGPT document establishes a baseline; idle baseline cannot create Ready.
-8. Only supported main-frame ChatGPT documents may drive attention.
-9. No prompt/response content is persisted or forwarded natively.
-10. Do not build a generic website notification framework in V1.
-11. Avoid expanding already-large `PanelController.swift`; state-machine and ChatGPT adapter logic belong in dedicated Web-layer files.
-12. Avoid touching `WebViewFactory.swift` unless technically unavoidable. PR #59 independently modifies that file, and the attention bridge can be installed on the created WKWebView before its first load from `WebViewPool`.
+## 3. Corrected stage order
 
-## 4. Planned files
+Stage A established that `generationFinished` needs authoritative `userVisible` as an input. Therefore visibility/state routing must exist before residency protection consumes the state.
 
-Expected new production files:
+Correct order:
 
-- `FloatTabs/Web/WebAttentionCoordinator.swift`
-- `FloatTabs/Web/ChatGPTAttentionBridge.swift`
+```text
+Stage A  Runtime State Authority                     PASS
+Stage B  ChatGPT Bridge + WKWebView/Document Lifetime
+Stage C  Real Visibility + State Routing/Acknowledgement
+Stage D  Residency Protection
+Stage E  Ready Red Dot
+Stage F  Cross-feature Closure
+Final Audit Round 1
+Final Audit Round 2
+Real User Validation
+Merge main
+Release
+```
 
-Expected existing production files touched across the feature:
+This revision changes construction order only. It does not change the frozen business Contract.
 
-- `FloatTabs/Web/WebViewPool.swift`
-- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
-- `FloatTabs/Panel/PanelController.swift`
-- `FloatTabs/UI/ExternalTabRail.swift`
-- `FloatTabs.xcodeproj/project.pbxproj`
+## 4. Global architecture constraints
 
-Expected tests:
+1. Never add attention fields to persisted Slot/profile state.
+2. Never convert a generating/Ready Slot to Hot as an implementation shortcut.
+3. `mediaProtected || attentionProtected` must independently block proactive eviction.
+4. `PanelController` is the only real-presentation authority; `activeTabID` alone is never visibility proof.
+5. `WebAttentionCoordinator` is the only `Idle/Generating/Ready` authority.
+6. Bridge events are observations, not state.
+7. Bridge lifetime follows WKWebView lifetime.
+8. New committed top-level documents, unsupported hosts, runtime replacement, release/rebuild, and WebContent termination reset the old attention runtime without synthesizing completion.
+9. A failed provisional navigation must not prematurely discard the still-present old document's attention runtime.
+10. Only supported main-frame ChatGPT documents may drive observations.
+11. Reject stale messages from superseded documents/WKWebViews.
+12. No prompt/response text may be intentionally copied into native payloads, logs, persistence, or analytics.
+13. Observation must be event-driven and debounced/coalesced; no token-by-token native messages.
+14. V1 does not build a generic website notification framework.
+15. Avoid growing the already-large `PanelController.swift`; provider logic and state-machine logic remain in dedicated Web-layer types.
+16. `WKUserScript` installation must be configured **before WKWebView creation** so `.atDocumentStart` is reliable. Use a narrow pre-creation `WKUserContentController` configuration seam in `WebViewFactory.makeWebView`; do not duplicate Factory configuration in `WebViewPool`.
+17. PR #59 also modifies `WebViewFactory.swift`, but only the `FloatTabsWebView.acceptsFirstMouse` area. Keep Stage B's Factory change confined to the creation/configuration area and perform a final combined-file audit before merge.
 
-- new focused attention/state-machine tests, preferably `FloatTabsTests/WebAttentionCoordinatorTests.swift`
-- bridge/WebViewPool coverage in a focused new test file or `WebViewPoolTests.swift`
-- lifecycle protection regression coverage in `WebViewPoolTests.swift`
-- visibility/rail rendering coverage in focused tests or `ExternalShellTests.swift`
+## 5. Stage A — Runtime State Authority — CLOSED
 
-Do not keep adding unrelated helpers into already-large test files when a focused test file gives cleaner ownership.
+Implemented and independently audited at:
 
-## 5. Stage plan
+`83e98ec8f4763b792148a5a6c492b9befe087205`
 
-### Stage A — Runtime state authority
+Authority:
 
-Goal: establish the pure native state machine before WebKit/DOM integration.
+```text
+private var states: [UUID: WebAttentionState]
+```
 
-Implement:
+Derived projections only:
 
-- `WebAttentionState`: `idle`, `generating`, `ready`.
-- normalized events: generation started, generation finished, runtime reset.
-- `WebAttentionCoordinator` keyed by Slot ID.
-- explicit methods for event handling, acknowledgement, reset, Ready projection, and protection query.
-- completion decision receives authoritative current visibility from caller.
+- `state(for:)`
+- `isAttentionProtected(_:)`
+- `readySlotIDs`
 
-Required semantics:
+No WebKit/lifecycle/UI wiring exists yet.
 
-- Idle + started -> Generating.
-- Generating + finished + visible -> Idle.
-- Generating + finished + not visible -> Ready.
-- Ready + visible acknowledgement -> Idle.
-- Ready + started -> Generating.
-- runtime reset -> Idle.
-- idle baseline/reset must never synthesize Ready.
+```text
+Business Contract: PASS
+Contract Alignment: PASS
+Source of Truth: PASS
+Persistence Boundary: PASS
+Implementation: PASS
+Tests: PASS
+Stage A: CLOSED
+```
 
-Non-scope:
+## 6. Stage B — ChatGPT Bridge + WKWebView/Document Lifetime
 
-- no WKUserScript;
-- no WebViewPool wiring;
-- no lifecycle changes;
-- no UI changes.
+### Goal
 
-Gate: independent audit PASS before Stage B.
+Create a conservative ChatGPT sensor that produces only normalized observations:
 
-### Stage B — ChatGPT bridge and WKWebView lifetime
+```text
+generationStarted
+generationFinished
+runtimeReset
+```
 
-Goal: observe current ChatGPT generation state and feed only normalized events into Stage A.
+Stage B must **not** mutate `WebAttentionCoordinator`; authoritative real visibility is wired in Stage C.
 
-Implement:
+### Required files / ownership
 
-- per-WKWebView `ChatGPTAttentionBridge`;
-- supported host validation for `chatgpt.com` subdomains and practical legacy `chat.openai.com`;
-- main-frame-only script/message path;
+Expected production changes:
+
+- new `FloatTabs/Web/ChatGPTAttentionBridge.swift`;
+- `FloatTabs/Web/WebViewPool.swift`;
+- `FloatTabs/Web/SlotNavigationObserver.swift`;
+- narrowly `FloatTabs/Web/WebViewFactory.swift` for a pre-creation user-content configuration seam;
+- `FloatTabs.xcodeproj/project.pbxproj`.
+
+Expected focused tests:
+
+- new `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`;
+- only add to large existing test files when a focused new test cannot cover the integration boundary.
+
+`WebViewPool` owns one bridge per live WKWebView/Slot:
+
+```text
+slotID -> WKWebView
+       -> SlotNavigationObserver
+       -> PopupCoordinator
+       -> ChatGPTAttentionBridge
+```
+
+Expose one transient observation callback from `WebViewPool` for Stage C. It is not state and must not be persisted.
+
+### Shared ChatGPT host policy
+
+Stage B needs the same ChatGPT host family already used by `SiteCompatibilityPolicy`. Do not create two drifting host lists.
+
+Use one small shared provider predicate (it may live in the bridge/provider file) and reuse it from both attention validation and existing ChatGPT compatibility logic without changing existing rendering behavior.
+
+Accept:
+
+- `chatgpt.com`;
+- subdomains of `chatgpt.com`;
+- legacy `chat.openai.com` where practical.
+
+Reject lookalikes such as:
+
+- `evilchatgpt.com`;
+- `chatgpt.com.evil.example`;
+- unrelated `openai.com` pages.
+
+### WebKit pre-creation installation
+
+`WebViewFactory` currently creates `WKWebViewConfiguration` internally. Add only an optional configuration seam, conceptually:
+
+```text
+makeWebView(renderingProfile:, configureUserContentController: ... = nil)
+```
+
+Factory remains authoritative for:
+
+- persistent website data store;
+- fullscreen preference;
+- browser identity;
+- website mode;
+- existing hidden-scrollbar script;
+- actual `FloatTabsWebView` creation.
+
+The optional callback receives the Factory-owned `WKUserContentController` **before** `FloatTabsWebView` is constructed.
+
+Then `WebViewPool.createWebView()` uses this order:
+
+```text
+create bridge object
+-> WebViewFactory.makeWebView(... configureUserContentController: bridge.install)
+-> attach returned WKWebView identity to bridge
+-> install SlotNavigationObserver / PopupCoordinator ownership
+-> store bridge in pool
+-> first load(...)
+```
+
+Do not recreate a separate `WKWebViewConfiguration` in `WebViewPool`.
+
+Use:
+
 - named `WKContentWorld`;
-- event-driven `MutationObserver` with debounce/coalescing;
-- semantic detection using stable controls/roles/aria/data attributes where possible;
-- per-document identity/baseline so top-level document replacement resets stale state;
-- bridge install in `WebViewPool` before first load;
-- bridge invalidation on release/rebuild/remove;
-- process-termination reset signal before existing recovery policy proceeds.
+- main-frame-only `WKUserScript` at document start;
+- script message handler in the same content world;
+- individual handler removal for that name/content world on invalidation.
 
-Native message payload must contain status/lifecycle metadata only, never prompt/response bodies.
+Do **not** call `removeAllUserScripts()` because it would remove unrelated Factory scripts.
 
-Non-scope:
+### Generation detector
 
-- no lifecycle eviction changes;
-- no red dot;
-- no generic site adapters.
+Use conservative exact controls.
 
-Gate: independent audit PASS before Stage C.
+Primary current signal:
 
-### Stage C — Residency protection integration
+- `[data-testid="stop-button"]`
 
-Goal: make Stage 5E honor attention protection without changing residency policy.
+Narrow compatibility fallback may include:
+
+- `[data-testid="fruitjuice-stop-button"]`
+
+Do not use broad `aria-label*="Stop"`, broad class scans, response text, page text, or send-button-disabled state as primary detection.
+
+Only a rendered/current control should count as generating.
+
+Use `MutationObserver` or equivalent event-driven observation with a short trailing debounce/coalescing window. Native output is emitted only when normalized generation state changes.
+
+### Baseline semantics
+
+Each supported document establishes a baseline:
+
+- first observed idle => baseline only, no finish;
+- first observed generating => `generationStarted` is allowed;
+- subsequent generating -> idle => one `generationFinished`;
+- duplicate same-state observations => no native event.
+
+The bridge must de-duplicate defensively even if injected JS is noisy.
+
+### Message validation / privacy
+
+Native acceptance must validate:
+
+- expected WKWebView identity;
+- main-frame source;
+- supported source security origin/host;
+- protocol/version;
+- current accepted document token;
+- valid minimal payload types.
+
+Do not validate only against `webView.url`, because stale old-document messages can race navigation.
+
+Payload may contain only minimal metadata such as:
+
+- protocol version;
+- opaque document token;
+- baseline/state kind;
+- generating boolean.
+
+Never include prompt text, response text, conversation HTML/body, or user content.
+
+### Document identity / BFCache / stale-event protection
+
+Every active document/runtime epoch carries an opaque document token created by injected JS.
+
+Requirements:
+
+- superseded document messages cannot affect the current document;
+- rebuilt/released WKWebView callbacks cannot affect the Slot;
+- committed replacement clears the accepted epoch and requires a current-document baseline;
+- BFCache/history restoration must re-establish a baseline, e.g. via `pageshow`, because a restored document may not receive a fresh document-start injection;
+- SPA route changes that do not replace the top-level document do not automatically reset the bridge.
+
+V1 follows generation state represented by the Slot's **current ChatGPT document**. It does not attempt to track multiple server-side conversation jobs no longer represented by that current DOM inside one Slot.
+
+### Navigation lifecycle
+
+Reuse `SlotNavigationObserver`; do not create a second `WKNavigationDelegate`.
+
+Forward the minimum top-level lifecycle events to the bridge.
+
+**didStartProvisionalNavigation**
+
+- suspend acceptance of old-document observations during transition;
+- do not emit `runtimeReset` yet because the old document may remain if navigation fails.
+
+**didCommit**
+
+- document replacement is real;
+- emit/forward `runtimeReset` for the old runtime;
+- clear accepted document identity and accept/await a fresh baseline.
+
+**didFailProvisionalNavigation**
+
+- resume the still-present old document without a false reset;
+- preserve existing one-shot HTTP fallback semantics;
+- if fallback starts another load, that new load gets its own provisional-start boundary.
+
+**didFail after commit**
+
+- do not resurrect pre-commit state.
+
+**WebContent process termination**
+
+- emit/forward `runtimeReset` before current reload/deferred-reload recovery;
+- clear current document identity;
+- keep the bridge installation usable for the recovered document unless the WKWebView itself is replaced.
+
+### Release / rebuild / remove
+
+Before dropping/replacing a WKWebView:
+
+- invalidate its bridge;
+- remove its specific message handler;
+- reject queued callbacks after invalidation;
+- forward one reset boundary where applicable;
+- then drop bridge/WKWebView ownership.
+
+Rendering-profile rebuild must invalidate the old bridge and create a new bridge for the replacement WebView while preserving the existing resident-set semantics.
+
+### Stage B non-scope
+
+Do not:
+
+- apply observations to `WebAttentionCoordinator`;
+- decide `userVisible`;
+- change Hot/Warm/Cold;
+- add attention eviction protection;
+- acknowledge Ready;
+- render the red dot;
+- modify persisted models/backups/preferences;
+- alter first-mouse semantics from PR #59;
+- touch compatibility branches.
+
+### Stage B test gate
+
+Focused tests must cover at least:
+
+1. supported host acceptance and lookalike rejection;
+2. existing ChatGPT compatibility identity behavior remains unchanged after shared-host refactor;
+3. script is document-start + main-frame-only + named content world;
+4. another WKWebView/source frame is rejected;
+5. idle baseline emits no finish;
+6. generating baseline emits one start;
+7. duplicate generating emits nothing extra;
+8. generating -> idle emits one finish;
+9. duplicate idle emits nothing extra;
+10. unsupported host cannot emit observations;
+11. provisional start suspends old observations without reset;
+12. provisional failure resumes old document without reset;
+13. committed replacement emits reset and requires current epoch;
+14. stale old-document message after commit is rejected;
+15. BFCache/pageshow baseline behavior is represented/tested at the bridge reducer/lifecycle level;
+16. WebContent termination emits reset before existing recovery action;
+17. release invalidates bridge/stale callbacks;
+18. rendering-profile rebuild invalidates old bridge and creates new bridge;
+19. one Slot bridge removal does not disturb another;
+20. bridge configuration is installed before first load;
+21. bridge invalidation removes only its own message handler, not all user scripts;
+22. existing HTTP fallback/content-process tests remain green;
+23. full existing test suite passes;
+24. `git diff --check` passes.
+
+Gate: independent Stage B audit PASS before Stage C.
+
+## 7. Stage C — Real Visibility + State Routing/Acknowledgement
+
+### Goal
+
+Connect Stage B observations to the Stage A authority using actual presentation visibility.
+
+Recommended composition:
+
+- application composition creates/injects one `WebAttentionCoordinator`;
+- `PanelController` receives it and owns only routing/presentation decisions;
+- `WebViewPool` remains observation source;
+- no second attention map is added anywhere.
+
+Routing:
+
+```text
+Bridge observation
+-> WebViewPool callback
+-> PanelController actual visibility
+-> WebAttentionCoordinator.apply(...)
+```
+
+- `generationStarted` -> `.generationStarted`;
+- `generationFinished` -> compute actual visibility, then `.generationFinished(userVisible:)`;
+- `runtimeReset` -> `.runtimeReset`.
+
+Actual visibility must distinguish:
+
+1. normal active WebView actually presented in visible source host;
+2. WebKit-owned fullscreen source;
+3. visible fullscreen companion.
+
+Inactive Hot WebViews can remain attached/resident and must not count as visible merely because their window exists.
+
+When a Ready Slot becomes actually presented, acknowledge `Ready -> Idle`. Selected-but-hidden never acknowledges.
+
+Gate: independent Stage C audit PASS before Stage D.
+
+## 8. Stage D — Residency Protection
+
+Extend accepted Stage 5E rules with:
+
+```text
+proactive eviction allowed only when
+!mediaProtected && !attentionProtected
+```
+
+`attentionProtected` is queried from the one coordinator; do not copy state into lifecycle storage.
+
+Protect Generating/Ready from:
+
+- Cold expiry;
+- Warm TTL;
+- Warm LRU;
+- warning memory-pressure Warm eviction;
+- critical memory-pressure Warm eviction;
+- final proactive release path.
+
+Attention protection does not prevent logical deactivation/detachment; it only prevents FloatTabs-initiated runtime eviction.
+
+If attention protection ends because of reset/failure while a Warm/Cold Slot is already inactive, restart normal policy timing from a fresh lifecycle boundary.
+
+Media protection remains independent; removing one protection cannot bypass the other.
+
+Gate: independent Stage D audit PASS before Stage E.
+
+## 9. Stage E — Ready Red Dot
 
 Implement:
 
-- attention protection query derived from `WebAttentionCoordinator` state;
-- protect Generating and Ready in Cold expiry;
-- protect Generating and Ready in Warm TTL;
-- exclude protected Slots from Warm LRU;
-- exclude protected Slots from warning/critical memory-pressure proactive eviction;
-- retain independent media protection behavior;
-- when protection ends because of runtime reset while already inactive, restart normal Warm/Cold handling from a fresh lifecycle boundary.
-
-Do not duplicate `Idle/Generating/Ready` inside `SlotLifecycleCoordinator`.
-
-Gate: independent audit PASS before Stage D.
-
-### Stage D — Real visibility and acknowledgement
-
-Goal: acknowledge Ready only when the actual ChatGPT WebView is presented.
-
-Implement a narrow `PanelController` visibility mapping that covers:
-
-- normal visible Web source;
-- WebKit-owned fullscreen source during locked fullscreen session;
-- visible fullscreen companion.
-
-Rules:
-
-- selected + hidden is not visible;
-- showing a Ready selected normal Slot acknowledges when presented;
-- selecting a Ready Slot in a visible presentation acknowledges when presented;
-- fullscreen source completion while presented does not latch Ready;
-- companion presentation can acknowledge its own Ready state;
-- no dwell/scroll/occlusion heuristics.
-
-Gate: independent audit PASS before Stage E.
-
-### Stage E — Ready indicator
-
-Goal: render Ready independently from residency color.
-
-Implement:
-
-- transient `readySlotIDs` projection in `ExternalControlZoneView`;
-- `ExternalWebAppTabView` Ready state;
+- transient `readySlotIDs` projection into `ExternalControlZoneView`;
+- Ready state on `ExternalWebAppTabView`;
 - small red dot anchored to favicon top-right;
-- no trailing-row badge that moves with Dock magnification;
-- full-color/grayscale residency semantics unchanged;
-- Ready updates must not write through `TabStore` persistence.
+- no trailing-edge badge tied to Dock width animation;
+- existing full-color/grayscale residency semantics unchanged;
+- no persistence/TabStore write.
 
-Gate: independent audit PASS before Stage F.
+Gate: independent Stage E audit PASS before Stage F.
 
-### Stage F — Cross-feature closure
+## 10. Stage F — Cross-feature Closure
 
-Goal: validate all stages together and remove temporary/duplicated logic.
+Required combined coverage:
 
-Required coverage:
-
-- Warm generating survives TTL/LRU and becomes Ready off-screen.
-- Cold generating survives 30-second grace and becomes Ready off-screen.
-- Ready survives time/memory-pressure proactive eviction attempts.
-- viewed Ready clears and later deactivation starts fresh Warm/Cold lifecycle.
-- Hot remains resident before/after acknowledgement.
-- selected hidden completion -> Ready; show -> acknowledge.
-- visible completion -> no Ready.
-- fullscreen-source completion -> no false Ready.
-- bridge/runtime replacement -> no stale Ready/protection.
-- media + attention protection coexist without one clearing the other.
-- relaunch has no stale Ready persistence.
-- non-ChatGPT Slots remain unaffected.
+- Warm generating survives TTL/LRU and becomes Ready off-screen;
+- Cold generating survives grace and becomes Ready off-screen;
+- Ready survives proactive memory-pressure eviction attempts;
+- viewed Ready clears; later deactivation starts fresh policy lifecycle;
+- Hot remains Hot;
+- selected hidden completion -> Ready; show -> acknowledgement;
+- visible completion -> Idle/no dot;
+- fullscreen source completion -> no false Ready;
+- companion completion while presented -> no false Ready;
+- committed replacement -> reset/no stale Ready;
+- failed provisional navigation preserves valid old runtime state;
+- process termination -> reset then normal recovery;
+- release/rebuild -> no stale bridge callbacks;
+- media + attention protection coexist independently;
+- relaunch has no persisted Ready;
+- non-ChatGPT sites unaffected;
+- PR #59 behavior remains isolated.
 
 Gate: FEATURE IMPLEMENTED only after independent Stage F audit PASS.
 
-## 6. Per-stage execution loop
+## 11. Per-stage execution loop
 
-Every stage follows:
+Every stage:
 
 ```text
 pre-construction repository audit
 -> exact AI Assistant construction command
--> AI construction result
--> independent real diff/code/test audit
--> precise fix command if needed
--> repeat until stage audit PASS
+-> implementation
+-> independent actual diff/source/test audit
+-> precise repair command if needed
+-> repeat until PASS
 ```
 
-Before each stage verify branch/HEAD/main/PR/Contract again. Do not trust prior summaries if repository state moved.
+Before every stage verify branch / HEAD / origin/main / Contract / active plan / open PRs / relevant code / tests / worktree.
 
-## 7. Final audit gate
+## 12. Final audit gate
 
-Feature implementation is not completion.
-
-After Stage F passes, run full affected-architecture audits for:
+After Stage F, audit the whole affected architecture for:
 
 - stale/dead/duplicate code;
 - second Source of Truth;
 - Contract/business conflict;
-- races, stale callbacks, retain cycles, resource leaks;
+- stale callbacks / races / retain cycles / resource leaks;
 - timer/lifecycle holes;
-- WKWebView rebuild/process termination problems;
+- navigation/BFCache/rebuild/process-termination holes;
 - oversized/God Object growth and misplaced responsibilities;
-- test gaps and tests that only assert implementation details.
+- test gaps / implementation-detail-only tests.
 
 Requirement: **TWO CONSECUTIVE CLEAN ROUNDS**.
 
-Any material finding resets the clean-round count after repair.
+Any material finding resets the clean count after repair.
 
-## 8. Real validation gate
+## 13. Real validation gate
 
-Only after two consecutive clean rounds provide the real-Mac acceptance checklist.
+After two clean rounds, real-Mac validation must cover at least:
 
-Real validation must include at least:
-
-- two or more ChatGPT Slots generating independently;
+- two or more independent ChatGPT Slots;
 - Warm and Cold off-screen completion;
 - hidden FloatTabs completion;
 - completion while actively viewing;
-- returning to Ready Slot clears dot;
-- normal post-ack residency behavior;
-- fullscreen ChatGPT behavior;
-- no prompt/response content exposed by FloatTabs UI/log/storage;
-- ordinary non-ChatGPT Web Apps unaffected.
+- Ready dot clears on actual return;
+- post-ack residency behavior;
+- element fullscreen source;
+- fullscreen companion;
+- non-ChatGPT sites unaffected;
+- no conversation content written/logged by the feature.
 
-Failure returns to diagnosis/fix/audit. No merge on failed real validation.
+Failure => diagnose/fix/audit again. No merge.
 
-## 9. Merge and Release gate
+## 14. Merge and Release gate
 
 After real validation PASS:
 
-1. fetch latest main;
-2. audit whether main moved;
-3. final PR/commit/diff audit;
-4. deliberately integrate independent PR #59 if still desired and compatible;
-5. merge approved feature work to main;
+1. fetch latest `main`;
+2. audit main movement;
+3. audit final PR/commit/diff;
+4. deliberately integrate PR #59 only if still desired/compatible;
+5. merge approved feature to main;
 6. test/build merged main;
-7. follow current FloatTabs version/build and Release conventions;
+7. follow version/build conventions;
 8. build official artifact from merged main;
-9. publish latest Release;
-10. verify tag/version/build/artifact identity.
+9. publish Release;
+10. verify tag/version/build/artifact.
 
 Never publish the official Release directly from an unmerged feature branch.
 
-## 10. Current known branch interaction
+## 15. Current branch interaction
 
-PR #59 (`fix/chatgpt-first-mouse`) is independent, Draft, and unmerged. It modifies `WebViewFactory.swift` and its tests.
-
-This attention plan should avoid `WebViewFactory.swift` unless required. If both features are later merged in one release, perform a final combined diff audit instead of silently stacking branches during construction.
-
-PR #60 remains the docs/Contract authority until the implementation branch is created from its frozen HEAD or the Contract is deliberately merged first.
+- PR #59: `fix/chatgpt-first-mouse`, Draft/unmerged. Its `WebViewFactory.swift` patch is confined to `FloatTabsWebView.acceptsFirstMouse`; Stage B Factory edits must remain in the creation/configuration area.
+- PR #60: docs/Contract authority, Draft/unmerged.
+- PR #40: old Draft branch is materially diverged from current main and also touches `WebViewPool`/`PanelController`; do not stack or merge it into this feature.
+- Implementation branch: `feature/chatgpt-attention-v1`.
