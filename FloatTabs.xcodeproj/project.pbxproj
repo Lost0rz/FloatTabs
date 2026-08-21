@@ -52,6 +52,9 @@
 		A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002C /* ChatGPTAttentionBridge.swift */; };
 		A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */; };
 		A0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */; };
+		A0000000000000000000002F /* AttentionPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002F /* AttentionPresentation.swift */; };
+		A00000000000000000000030 /* WebAttentionRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000030 /* WebAttentionRouting.swift */; };
+		A00000000000000000000031 /* WebAttentionPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000031 /* WebAttentionPresentationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +115,9 @@
 		B0000000000000000000002C /* ChatGPTAttentionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridge.swift; sourceTree = "<group>"; };
 		B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAttentionBridgeTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTGenerationDetectorTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000002F /* AttentionPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPresentation.swift; sourceTree = "<group>"; };
+		B00000000000000000000030 /* WebAttentionRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionRouting.swift; sourceTree = "<group>"; };
+		B00000000000000000000031 /* WebAttentionPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionPresentationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +183,8 @@
 				B00000000000000000000028 /* FullscreenSourceHost.swift */,
 				B00000000000000000000005 /* PanelController.swift */,
 				B00000000000000000000006 /* ScreenPositioning.swift */,
+				B0000000000000000000002F /* AttentionPresentation.swift */,
+				B00000000000000000000030 /* WebAttentionRouting.swift */,
 			);
 			path = Panel;
 			sourceTree = "<group>";
@@ -269,6 +277,7 @@
 				B0000000000000000000002B /* WebAttentionCoordinatorTests.swift */,
 				B0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift */,
 				B0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift */,
+				B00000000000000000000031 /* WebAttentionPresentationTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -417,6 +426,8 @@
 				A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */,
 				A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */,
 				A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */,
+				A0000000000000000000002F /* AttentionPresentation.swift in Sources */,
+				A00000000000000000000030 /* WebAttentionRouting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -437,6 +448,7 @@
 				A0000000000000000000002B /* WebAttentionCoordinatorTests.swift in Sources */,
 				A0000000000000000000002D /* ChatGPTAttentionBridgeTests.swift in Sources */,
 				A0000000000000000000002E /* ChatGPTGenerationDetectorTests.swift in Sources */,
+				A00000000000000000000031 /* WebAttentionPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

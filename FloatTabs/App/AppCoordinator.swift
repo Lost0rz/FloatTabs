@@ -49,9 +49,14 @@ final class AppCoordinator {
                     tabStore.activeTabID == slotID
                 }
             )
+            // Exactly one runtime attention authority for the whole app,
+            // injected into the presentation owner. AppCoordinator itself
+            // never routes provider observations.
+            let attentionCoordinator = WebAttentionCoordinator()
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool,
+                attentionCoordinator: attentionCoordinator,
                 preferencesStore: resolvedPreferencesStore
             )
         }

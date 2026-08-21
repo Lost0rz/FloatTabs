@@ -50,6 +50,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let sourceHostController: FullscreenSourceHostController
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
+    private let attentionCoordinator: WebAttentionCoordinator
     private let frameStore: PanelFrameStore
     private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
@@ -57,6 +58,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
         container: rootView.webPanelContainerView
+    )
+
+    /// Stage C routing boundary: normalized bridge observations become
+    /// coordinator events, with actual visibility resolved only for
+    /// completion. The owner gathers the facts; the router stays stateless.
+    private lazy var attentionRouter = WebAttentionObservationRouter(
+        attentionCoordinator: attentionCoordinator,
+        isUserVisible: { [weak self] slotID in
+            self?.isAttentionUserVisible(slotID: slotID) ?? false
+        }
     )
 
     private var previousApplication: NSRunningApplication?
@@ -114,11 +125,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     init(
         tabStore: TabStore,
         webViewPool: WebViewPool,
+        attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         frameStore: PanelFrameStore = PanelFrameStore(),
         preferencesStore: AppPreferencesStore? = nil
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
+        self.attentionCoordinator = attentionCoordinator
         self.frameStore = frameStore
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
         restoredFrame = frameStore.loadFrame()
@@ -201,6 +214,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onResidentSetChange = { [weak self] in
             self?.synchronizeResidentIndicators()
         }
+        webViewPool.onAttentionObservation = { [weak self] slotID, observation in
+            self?.attentionRouter.handle(observation, for: slotID)
+        }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
         }
@@ -265,6 +281,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         if NSApp.isActive {
             needsFocusAfterApplicationActivation = false
         }
+        // The source host has now actually been ordered/presented/focused,
+        // so a previously hidden selected Ready Slot can be acknowledged.
+        acknowledgeActiveAttentionIfActuallyPresented()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             fullscreenExperimentLog(
@@ -341,6 +360,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
         for slotID in existingIDs {
             webViewPool.release(slotID: slotID)
+            // Replacement Slots are new identities: their attention
+            // bookkeeping starts fresh rather than being restored.
+            attentionCoordinator.removeSlot(slotID)
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
@@ -915,6 +937,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeResidentIndicators()
         onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
 
+        // The new WebView is now the physically current presentation; the
+        // helper itself refuses to acknowledge while nothing is visible.
+        acknowledgeAttentionIfActuallyVisible(slotID: activeProfile.id)
+
         if panel.isVisible,
            panel.isKeyWindow || sourceHostController.window.isKeyWindow {
             sourceHostController.orderFrontAndFocus(webView)
@@ -923,6 +949,49 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func synchronizeResidentIndicators() {
         rootView.externalControlZoneView.setResidentSlotIDs(webViewPool.residentSlotIDs)
+    }
+
+    // MARK: Attention visibility + acknowledgement
+
+    /// The one authoritative attention-visibility mapping. Gathers the actual
+    /// physical presentation facts — pooled runtime identity, current normal
+    /// presentation, source-window visibility, fullscreen source/companion
+    /// state — and lets `AttentionPresentation` decide. Logical selection or
+    /// residency alone never make a Slot visible.
+    func isAttentionUserVisible(slotID: UUID) -> Bool {
+        let pooledWebView = webViewPool.existingWebView(for: slotID)
+        let facts = AttentionPresentation.Facts(
+            slotID: slotID,
+            sessionIsLocked: sourceHostController.isSessionLocked,
+            pooledWebViewExists: pooledWebView != nil,
+            normalCurrentWebViewIsSlotWebView: pooledWebView.map { webView in
+                rootView.webPanelContainerView.currentWebView === webView
+            } ?? false,
+            sourceWindowIsVisible: sourceHostController.window.isVisible,
+            fullscreenSourceSlotID: fullscreenProfile?.id,
+            panelIsVisible: panel.isVisible,
+            companionSlotID: companionActiveProfile?.id,
+            companionCurrentWebViewIsSlotWebView: pooledWebView.map { webView in
+                sourceHostController.companionContainer.currentWebView === webView
+            } ?? false
+        )
+        return AttentionPresentation.isUserVisible(facts)
+    }
+
+    /// Acknowledges a Slot's completed-but-unseen output only when that
+    /// output is actually presented right now. Calling this for Idle or
+    /// Generating Slots is harmless: the coordinator is the transition
+    /// authority and ignores it.
+    func acknowledgeAttentionIfActuallyVisible(slotID: UUID) {
+        attentionCoordinator.acknowledge(
+            slotID: slotID,
+            userVisible: isAttentionUserVisible(slotID: slotID)
+        )
+    }
+
+    private func acknowledgeActiveAttentionIfActuallyPresented() {
+        guard let activeSlotID = tabStore.activeTabID else { return }
+        acknowledgeAttentionIfActuallyVisible(slotID: activeSlotID)
     }
 
     private func focusActiveWebViewIfAvailable() {
@@ -1064,6 +1133,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                       self.tabStore.remove(id: id) else { return }
                 self.slotLifecycleCoordinator.remove(slotID: id)
                 self.webViewPool.remove(slotID: id)
+                // Pool removal already routed the bridge's final runtimeReset;
+                // dropping the bookkeeping fully forgets the deleted Slot.
+                self.attentionCoordinator.removeSlot(id)
             }
         }
     }
@@ -1281,6 +1353,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             panel.orderFrontRegardless()
             focusActiveWebViewIfAvailable()
         }
+        // Completes the deferred presentation half of showFloatTabs.
+        acknowledgeActiveAttentionIfActuallyPresented()
     }
 
     private func capturePreviousApplication() {
@@ -1368,6 +1442,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 slotLifecycleCoordinator.beginFullscreenSourceVisibility(
                     profile: fullscreenProfile
                 )
+                // WebKit now owns the actual fullscreen presentation of this
+                // Slot, so a Ready result is genuinely being shown.
+                acknowledgeAttentionIfActuallyVisible(slotID: fullscreenProfile.id)
             }
             companionActiveProfile = nil
             pendingSlotSynchronization = false
@@ -1446,6 +1523,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         // Re-establish the queued target display before returning Web focus.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable()
+        // The restored source presentation is physically visible again.
+        acknowledgeActiveAttentionIfActuallyPresented()
         fullscreenExperimentLog(
             "RESTORE_PRESENTED shell=\(panel.windowNumber) "
                 + "source=\(sourceHostController.window.windowNumber) "
@@ -1517,6 +1596,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         if NSApp.isActive {
             needsFocusAfterApplicationActivation = false
         }
+        // The companion shell has actually been ordered visible, so the
+        // presented companion Slot's Ready output can be acknowledged.
+        if let companionSlotID = companionActiveProfile?.id {
+            acknowledgeAttentionIfActuallyVisible(slotID: companionSlotID)
+        }
     }
 
     private func synchronizeFullscreenCompanionSlotState() {
@@ -1575,6 +1659,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard requestedVisibility,
               sourceHostController.sessionState == .fullscreen else { return }
         WebViewFocus.focus(webView, in: panel)
+        // Selecting a new companion Slot during an already-visible companion
+        // presentation acknowledges it once it is actually presented.
+        acknowledgeAttentionIfActuallyVisible(slotID: activeProfile.id)
     }
 
     private func hideFullscreenCompanion(pauseInactiveMedia: Bool) {
