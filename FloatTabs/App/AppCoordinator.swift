@@ -428,10 +428,10 @@ final class AppCoordinator {
     }
 
     private static func playAttentionReadySound() {
-        if let sound = NSSound(named: NSSound.Name("Ping")) {
-            sound.play()
-        } else {
+        guard let sound = NSSound(named: NSSound.Name("Ping")),
+              sound.play() else {
             NSSound.beep()
+            return
         }
     }
 
