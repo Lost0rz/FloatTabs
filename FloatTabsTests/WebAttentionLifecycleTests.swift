@@ -322,11 +322,15 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         let profile = makeProfile(name: "HiddenGenerating", policy: .cold)
         _ = pool.webView(for: profile)
+        var attentionProtectionQueryCount = 0
         let lifecycle = makeLifecycle(
             pool: pool,
             coldReleaseDelay: 0.02,
             hiddenActiveGraceDelay: 0.02,
-            attentionProtectionQuery: { _ in true }
+            attentionProtectionQuery: { _ in
+                attentionProtectionQueryCount += 1
+                return true
+            }
         )
 
         lifecycle.setPanelVisible(true, activeProfile: profile)
@@ -335,14 +339,20 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
         XCTAssertTrue(pool.contains(slotID: profile.id))
 
-        let reachedExpectedInactiveState = try await waitUntil {
+        // The Cold release callback's proactive-protection check is the only
+        // reachable attention query for this pauseWhenInactive Cold fixture,
+        // so a non-zero count proves the eviction timer reached its live
+        // protection boundary instead of merely having been scheduled.
+        let reachedEvictionProtectionBoundary = try await waitUntil {
             !lifecycle.isHiddenActiveGracePending
                 && lifecycle.pendingColdReleaseCount == 1
+                && attentionProtectionQueryCount >= 1
                 && pool.contains(slotID: profile.id)
         }
-        XCTAssertTrue(reachedExpectedInactiveState)
+        XCTAssertTrue(reachedEvictionProtectionBoundary)
         XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
         XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
+        XCTAssertGreaterThanOrEqual(attentionProtectionQueryCount, 1)
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
