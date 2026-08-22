@@ -346,6 +346,20 @@ final class WebViewPool {
                     return
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
+            },
+            onInstantBackActivation: { [weak self, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                // Instant Back resumes an existing document. It is a
+                // presentation-only history activation and must not reuse the
+                // didCommit callback that resets the Attention runtime.
+                guard let committedURL = self.committedURL(for: slotID) else {
+                    return
+                }
+                self.onCommittedURLChange?(slotID, committedURL)
             }
         )
         let popupCoordinator = PopupCoordinator(

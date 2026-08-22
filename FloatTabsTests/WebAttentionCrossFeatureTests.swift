@@ -748,6 +748,248 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.selectedSlotFaviconURL, committedB)
     }
 
+    func testCommittedHistoryBackForwardRedirectAndReturnHomeStayCommitBound() throws {
+        let home = URL(string: "https://home.example.test/home")!
+        let pageA = URL(string: "https://a.example.test/page-a")!
+        let pageB = URL(string: "https://b.example.test/page-b")!
+        let redirectC = URL(string: "https://c.example.test/redirect-c")!
+        let redirectD = URL(string: "https://d.example.test/final")!
+        var committedURLs: [ObjectIdentifier: URL] = [:]
+        let (controller, _, store, pool) = makeController(
+            profiles: [(name: "Site", url: home)],
+            committedURLProvider: { webView in
+                committedURLs[ObjectIdentifier(webView)]
+            }
+        )
+        let statusItem = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            faviconLoader: { _, _ in }
+        )
+        controller.onSelectedSlotPresentationChange = { name, faviconURL in
+            statusItem.setActiveWebApp(name: name, faviconURL: faviconURL)
+        }
+        statusItem.setActiveWebApp(
+            name: controller.selectedSlotName,
+            faviconURL: controller.selectedSlotFaviconURL
+        )
+
+        let slot = try profile(named: "Site", in: store)
+        let webView = try XCTUnwrap(pool.existingWebView(for: slot.id))
+        let observer = try navigationObserver(of: webView)
+        let homeOrigin = try XCTUnwrap(StatusItemController.faviconOriginKey(for: home))
+        let originA = try XCTUnwrap(StatusItemController.faviconOriginKey(for: pageA))
+        let originB = try XCTUnwrap(StatusItemController.faviconOriginKey(for: pageB))
+        let originD = try XCTUnwrap(StatusItemController.faviconOriginKey(for: redirectD))
+
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeOrigin)
+
+        // A normal committed navigation establishes the first current page.
+        committedURLs[ObjectIdentifier(webView)] = pageA
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originA)
+
+        // Ordinary Forward and Back remain didCommit-owned.
+        committedURLs[ObjectIdentifier(webView)] = pageB
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originB)
+        committedURLs[ObjectIdentifier(webView)] = pageA
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originA)
+
+        // Redirect intermediates never enter the menu route.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        committedURLs[ObjectIdentifier(webView)] = redirectC
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        committedURLs[ObjectIdentifier(webView)] = redirectD
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originA)
+
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originD)
+
+        // Return Home mutates restore/navigation state before WebKit commits;
+        // the menu remains on the last committed page until that boundary.
+        controller.handle(.returnHome)
+        XCTAssertEqual(
+            store.activeProfile?.currentURL,
+            home,
+            "Return Home may update restore state before the live page commits"
+        )
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originD)
+
+        committedURLs[ObjectIdentifier(webView)] = home
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeOrigin)
+    }
+
+    func testColdRecreationUsesHomeUntilTheFirstLiveCommit() throws {
+        let home = URL(string: "https://home.example.test/home")!
+        let persistedCurrent = URL(string: "https://restored.example.test/page")!
+        var committedURLs: [ObjectIdentifier: URL] = [:]
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                (name: "Site", url: home),
+                (name: "Other", url: URL(string: "https://other.example.test/")!)
+            ],
+            committedURLProvider: { webView in
+                committedURLs[ObjectIdentifier(webView)]
+            }
+        )
+        let statusItem = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            faviconLoader: { _, _ in }
+        )
+        controller.onSelectedSlotPresentationChange = { name, faviconURL in
+            statusItem.setActiveWebApp(name: name, faviconURL: faviconURL)
+        }
+        statusItem.setActiveWebApp(
+            name: controller.selectedSlotName,
+            faviconURL: controller.selectedSlotFaviconURL
+        )
+
+        let site = try profile(named: "Site", in: store)
+        store.updateCurrentURL(id: site.id, url: persistedCurrent)
+        XCTAssertTrue(store.select(id: try profile(named: "Other", in: store).id))
+        pool.release(slotID: site.id)
+
+        // Selecting a cold/recreated Slot starts from persisted currentURL for
+        // navigation, but no committed history item exists yet.
+        XCTAssertTrue(store.select(id: site.id))
+        let recreatedWebView = try XCTUnwrap(pool.existingWebView(for: site.id))
+        let observer = try navigationObserver(of: recreatedWebView)
+        let homeOrigin = try XCTUnwrap(StatusItemController.faviconOriginKey(for: home))
+        let currentOrigin = try XCTUnwrap(
+            StatusItemController.faviconOriginKey(for: persistedCurrent)
+        )
+        XCTAssertNil(pool.committedURL(for: site.id))
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeOrigin)
+
+        committedURLs[ObjectIdentifier(recreatedWebView)] = persistedCurrent
+        observer.webView(recreatedWebView, didCommit: nil)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, currentOrigin)
+        XCTAssertEqual(store.activeProfile?.currentURL, persistedCurrent)
+    }
+
+    func testInstantBackRequiresConfirmedCurrentHistoryItemAndRejectsStaleTarget() throws {
+        let targetA = NSObject()
+        let targetB = NSObject()
+        let urlA = URL(string: "https://a.example.test/")!
+        let urlB = URL(string: "https://b.example.test/")!
+
+        // A request is insufficient: the current history item must be the
+        // exact target, and the observed URL must agree with that item.
+        XCTAssertNil(
+            SlotNavigationObserver.confirmedInstantBackURL(
+                expectedItemID: ObjectIdentifier(targetA),
+                currentItemID: ObjectIdentifier(targetB),
+                expectedURL: urlA,
+                currentItemURL: urlB,
+                observedURL: urlB
+            )
+        )
+        XCTAssertNil(
+            SlotNavigationObserver.confirmedInstantBackURL(
+                expectedItemID: ObjectIdentifier(targetA),
+                currentItemID: ObjectIdentifier(targetA),
+                expectedURL: urlA,
+                currentItemURL: urlA,
+                observedURL: urlB
+            )
+        )
+        XCTAssertEqual(
+            SlotNavigationObserver.confirmedInstantBackURL(
+                expectedItemID: ObjectIdentifier(targetA),
+                currentItemID: ObjectIdentifier(targetA),
+                expectedURL: urlA,
+                currentItemURL: urlA,
+                observedURL: urlA
+            ),
+            urlA
+        )
+
+        // The false branch is deliberately covered by the SDK-shaped policy
+        // contract: ordinary didCommit remains the only projection boundary.
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: WKWebView(frame: .zero),
+            websiteMode: .desktop,
+            onURLChange: { _, _ in }
+        )
+        XCTAssertFalse(observer.isInstantBackActivationPending)
+    }
+
+    func testInstantBackDelegateRecordsOnlyInstantRequestsAndAlwaysAllowsNavigation() async throws {
+        guard #available(macOS 26.0, *) else { return }
+
+        let firstURL = URL(string: "x-ft-instant://history.example.test/first")!
+        let secondURL = URL(string: "x-ft-instant://history.example.test/second")!
+        let schemeHandler = InstantBackTestSchemeHandler()
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "x-ft-instant")
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820),
+            configuration: configuration
+        )
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        container.show(webView: webView)
+        retainedContainers.append(container)
+
+        var instantActivations = 0
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onInstantBackActivation: { _ in instantActivations += 1 }
+        )
+
+        webView.load(URLRequest(url: firstURL))
+        let firstReady = try await waitUntil {
+            webView.backForwardList.currentItem?.url == firstURL
+        }
+        XCTAssertTrue(firstReady)
+        guard firstReady else { return }
+        webView.load(URLRequest(url: secondURL))
+        let secondReady = try await waitUntil {
+            webView.backForwardList.currentItem?.url == secondURL
+        }
+        XCTAssertTrue(secondReady)
+        guard secondReady else { return }
+
+        let firstItem = try XCTUnwrap(webView.backForwardList.backItem)
+        let secondItem = try XCTUnwrap(webView.backForwardList.currentItem)
+        var instantDecision: Bool?
+        observer.webView(
+            webView,
+            shouldGoTo: firstItem,
+            willUseInstantBack: true,
+            completionHandler: { instantDecision = $0 }
+        )
+        XCTAssertEqual(instantDecision, true)
+        XCTAssertTrue(observer.isInstantBackActivationPending)
+        XCTAssertEqual(instantActivations, 0)
+
+        // A non-Instant request clears the older correlation and leaves the
+        // ordinary didCommit path authoritative.
+        var ordinaryDecision: Bool?
+        observer.webView(
+            webView,
+            shouldGoTo: secondItem,
+            willUseInstantBack: false,
+            completionHandler: { ordinaryDecision = $0 }
+        )
+        XCTAssertEqual(ordinaryDecision, true)
+        XCTAssertFalse(observer.isInstantBackActivationPending)
+        XCTAssertEqual(instantActivations, 0)
+    }
+
     // MARK: 4.8 Provisional navigation completion visibility
 
     func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
@@ -1310,4 +1552,28 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
         return keys
     }
+}
+
+@MainActor
+private final class InstantBackTestSchemeHandler: NSObject, WKURLSchemeHandler {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        let url = urlSchemeTask.request.url ?? URL(string: "x-ft-instant://history.example.test/")!
+        let body = "<!doctype html><html><body>\(url.path)</body></html>"
+        guard let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/html; charset=utf-8"]
+        ) else {
+            urlSchemeTask.didFailWithError(
+                NSError(domain: "InstantBackTestSchemeHandler", code: 1)
+            )
+            return
+        }
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(Data(body.utf8))
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }

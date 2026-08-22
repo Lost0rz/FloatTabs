@@ -222,7 +222,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
     private let onNavigationCommit: @MainActor (UUID) -> Void
+    private let onInstantBackActivation: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
+
+    private struct PendingInstantBack {
+        let targetItem: WKBackForwardListItem
+        let targetURL: URL?
+    }
 
     /// Set only for a FloatTabs-issued entry whose `https://` scheme was
     /// inferred from a bare user address. Any successful commit or a handled
@@ -235,6 +241,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         pendingHTTPEntryFallback != nil
     }
 
+    /// Whether WebKit has asked us to correlate a possible Instant Back
+    /// activation. This marker is transient and is never a committed-URL
+    /// authority.
+    var isInstantBackActivationPending: Bool {
+        pendingInstantBack != nil
+    }
+
+    private var pendingInstantBack: PendingInstantBack?
+
     init(
         slotID: UUID,
         webView: WKWebView,
@@ -244,6 +259,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
         onNavigationCommit: @escaping @MainActor (UUID) -> Void = { _ in },
+        onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
         }
@@ -256,17 +272,21 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
         self.onNavigationCommit = onNavigationCommit
+        self.onInstantBackActivation = onInstantBackActivation
         self.loadHandler = loadHandler
         super.init()
 
         observation = webView.observe(\.url, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor [weak self] in
+            Task { @MainActor [weak self, weak webView] in
                 guard let self,
-                      let url = self.webView?.url,
+                      let webView,
+                      self.webView === webView,
+                      let url = webView.url,
                       WebAppURL.isSafe(url) else {
                     return
                 }
                 self.onURLChange(self.slotID, url)
+                self.confirmInstantBackActivation(in: webView, observedURL: url)
             }
         }
 
@@ -345,11 +365,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        // If Instant Back falls back to normal loading, ordinary didCommit is
+        // authoritative again. A new provisional navigation also invalidates
+        // any older correlation marker.
+        pendingInstantBack = nil
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        pendingInstantBack = nil
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
@@ -359,6 +384,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+
+        if let url = webView.url, WebAppURL.isSafe(url) {
+            confirmInstantBackActivation(in: webView, observedURL: url)
+        }
 
         DispatchQueue.main.async { [weak webView] in
             guard let webView else { return }
@@ -380,6 +409,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        pendingInstantBack = nil
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
             ?? webView.url
@@ -397,6 +427,52 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         onContentProcessTermination(slotID)
+    }
+
+    /// Called by WebKit before a back/forward transition. The request itself
+    /// is not evidence that the historical page became current, so Instant
+    /// Back only records the target and waits for the existing URL observation
+    /// (or didFinish) to verify WebKit's current history item.
+    @available(macOS 26.0, *)
+    func webView(
+        _ webView: WKWebView,
+        shouldGoTo backForwardListItem: WKBackForwardListItem,
+        willUseInstantBack: Bool,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        if willUseInstantBack {
+            pendingInstantBack = PendingInstantBack(
+                targetItem: backForwardListItem,
+                targetURL: backForwardListItem.url
+            )
+        } else {
+            pendingInstantBack = nil
+        }
+
+        completionHandler(true)
+    }
+
+    /// Deterministic policy gate used by the production correlation path and
+    /// by tests on runners that cannot force WebKit's Instant Back runtime.
+    /// The current history-item identity remains the authority; URLs only
+    /// verify that the observed WebView URL and target item agree.
+    static func confirmedInstantBackURL(
+        expectedItemID: ObjectIdentifier,
+        currentItemID: ObjectIdentifier?,
+        expectedURL: URL?,
+        currentItemURL: URL?,
+        observedURL: URL?
+    ) -> URL? {
+        guard expectedItemID == currentItemID,
+              let expectedURL,
+              let currentItemURL,
+              let observedURL,
+              WebAppURL.isSafe(currentItemURL),
+              expectedURL.absoluteString == currentItemURL.absoluteString,
+              currentItemURL.absoluteString == observedURL.absoluteString else {
+            return nil
+        }
+        return currentItemURL
     }
 
     /// Configures one-shot fallback for the next FloatTabs-issued entry load.
@@ -443,5 +519,36 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     private func restoreHiddenScrollerPolicy(in webView: WKWebView) {
         WebViewFactory.configureHiddenScrollers(in: webView)
+    }
+
+    private func confirmInstantBackActivation(
+        in webView: WKWebView,
+        observedURL: URL
+    ) {
+        guard let pendingInstantBack,
+              let currentItem = webView.backForwardList.currentItem else {
+            return
+        }
+
+        guard Self.confirmedInstantBackURL(
+            expectedItemID: ObjectIdentifier(pendingInstantBack.targetItem),
+            currentItemID: ObjectIdentifier(currentItem),
+            expectedURL: pendingInstantBack.targetURL,
+            currentItemURL: currentItem.url,
+            observedURL: observedURL
+        ) != nil else {
+            // A URL observation matching another current history item proves
+            // that this request was superseded. If the observed URL is only a
+            // transient value ahead of WebKit's current item, retain the marker
+            // for the next authoritative observation.
+            if currentItem.url.absoluteString == observedURL.absoluteString,
+               currentItem !== pendingInstantBack.targetItem {
+                self.pendingInstantBack = nil
+            }
+            return
+        }
+
+        self.pendingInstantBack = nil
+        onInstantBackActivation(slotID)
     }
 }
