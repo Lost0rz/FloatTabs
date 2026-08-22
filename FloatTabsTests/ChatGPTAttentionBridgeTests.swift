@@ -334,23 +334,21 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Navigation lifecycle
 
-    func testProvisionalStartSuspendsOldDocumentObservations() {
+    func testProvisionalStartDoesNotResetCurrentDocumentObservations() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
-
-        harness.bridge.suspendForProvisionalNavigation()
         harness.accept(false, token: tokenA)
 
-        XCTAssertEqual(harness.observations, [.generationStarted])
+        XCTAssertEqual(
+            harness.observations,
+            [.generationStarted, .generationFinished]
+        )
     }
 
-    func testProvisionalFailureRestoresOldDocumentWithoutReset() {
+    func testProvisionalFailureRequiresNoReplayOrRuntimeReset() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
-        harness.bridge.suspendForProvisionalNavigation()
         harness.accept(false, token: tokenA)
-
-        harness.bridge.resumeAfterProvisionalNavigationFailure()
 
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
         XCTAssertFalse(harness.observations.contains(.runtimeReset))
@@ -359,7 +357,6 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
     func testCommittedReplacementEmitsRuntimeResetAndClearsEpoch() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
-        harness.bridge.suspendForProvisionalNavigation()
 
         harness.bridge.handleRuntimeReplacement()
 
@@ -549,7 +546,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - SlotNavigationObserver forwarding (HTTP fallback interaction)
 
-    func testObserverForwardsLifecycleAndResumesBeforeHTTPFallbackLoad() {
+    func testObserverKeepsHTTPFallbackIndependentOfAttentionLifecycle() {
         var events: [String] = []
         let webView = WKWebView()
         let entryURL = URL(string: "https://chat.example.com:8443/")!
@@ -558,14 +555,8 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
-            onProvisionalNavigationStart: { _ in
-                events.append("suspend")
-            },
             onNavigationCommit: { _ in
                 events.append("commit")
-            },
-            onProvisionalNavigationFailure: { _ in
-                events.append("resume")
             },
             loadHandler: { _, url in
                 events.append("fallback:\(url.scheme ?? "")")
@@ -574,7 +565,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         observer.configureHTTPEntryFallback(for: entryURL, allowed: true)
 
         observer.webView(webView, didStartProvisionalNavigation: nil)
-        XCTAssertEqual(events, ["suspend"])
+        XCTAssertTrue(events.isEmpty)
 
         let failure = NSError(
             domain: NSURLErrorDomain,
@@ -586,13 +577,13 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             didFailProvisionalNavigation: nil,
             withError: failure
         )
-        XCTAssertEqual(events, ["suspend", "resume", "fallback:http"])
+        XCTAssertEqual(events, ["fallback:http"])
 
         // The fallback request receives its own provisional boundary normally.
         observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(events, [
-            "suspend", "resume", "fallback:http", "suspend", "commit",
+            "fallback:http", "commit",
         ])
     }
 

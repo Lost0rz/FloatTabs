@@ -309,14 +309,8 @@ final class WebViewPool {
             onContentProcessTermination: { [weak self] slotID in
                 self?.handleContentProcessTermination(slotID: slotID)
             },
-            onProvisionalNavigationStart: { [weak attentionBridge] _ in
-                attentionBridge?.suspendForProvisionalNavigation()
-            },
             onNavigationCommit: { [weak attentionBridge] _ in
                 attentionBridge?.handleRuntimeReplacement()
-            },
-            onProvisionalNavigationFailure: { [weak attentionBridge] _ in
-                attentionBridge?.resumeAfterProvisionalNavigationFailure()
             }
         )
         let popupCoordinator = PopupCoordinator(

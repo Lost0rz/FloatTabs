@@ -484,9 +484,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
     }
 
-    // MARK: 4.8 Provisional navigation failure
+    // MARK: 4.8 Provisional navigation completion visibility
 
-    func testProvisionalFailurePreservesOldRuntimeAndResumesSuspendedCompletion() throws {
+    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -495,17 +495,24 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: slot)
         let observer = try navigationObserver(of: webView)
 
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.isVisible)
+
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
 
-        // Provisional navigation suspends the bridge: the completion is held,
-        // never dropped, and never applied to a mid-navigation runtime.
+        // The old accepted document remains authoritative until commit, so a
+        // completion observed while its WebView is visible must resolve Idle
+        // before any later provisional-failure callback can run.
         observer.webView(webView, didStartProvisionalNavigation: nil)
         acceptState(generating: false, bridge: bridge, webView: webView)
-        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 
-        // The failure restores the still-valid old document; the suspended
-        // valid completion resumes correctly.
+        // Hiding before the provisional failure must not retroactively change
+        // the visibility decision already made at completion time.
+        controller.hideFloatTabs()
         let error = NSError(
             domain: NSURLErrorDomain,
             code: NSURLErrorTimedOut,
@@ -519,9 +526,55 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             withError: error
         )
 
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+    }
+
+    func testHiddenCompletionDuringProvisionalNavigationBecomesReadyBeforeFailureAndAcknowledges() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let observer = try navigationObserver(of: webView)
+
+        XCTAssertFalse(controller.isVisible)
+        acceptBaseline(generating: true, bridge: bridge, webView: webView)
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+
+        // The same accepted document is hidden, so its completion becomes
+        // Ready immediately even though a provisional navigation is pending.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
         XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
-        XCTAssertTrue(pool.contains(slotID: slot.id))
+
+        // Presentation acknowledges the real Ready result before the failed
+        // provisional navigation returns; failure must not replay it.
+        controller.showFloatTabs()
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorTimedOut,
+            userInfo: [
+                NSURLErrorFailingURLErrorKey: URL(string: "https://chatgpt.com/c/abc")!
+            ]
+        )
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: error
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
     }
 
     // MARK: 4.8 Release / rebuild stale callbacks

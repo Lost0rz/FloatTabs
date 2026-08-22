@@ -267,7 +267,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private struct DocumentSession {
         let token: String
         var tracker = ChatGPTDocumentGenerationTracker()
-        var suspendedObservations: [ChatGPTAttentionObservation] = []
     }
 
     let slotID: UUID
@@ -278,7 +277,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// True until a document's own `baseline` report is accepted — including
     /// from bridge creation, so the very first load can establish its epoch.
     private var isAwaitingNewDocumentBaseline = true
-    private var provisionalNavigationDepth = 0
     private(set) var isInvalidated = false
 
     init(
@@ -375,37 +373,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         guard let observation = document?.tracker.observe(payload.generating) else {
             return
         }
-        if provisionalNavigationDepth > 0 {
-            document?.suspendedObservations.append(observation)
-        } else {
-            emit(observation)
-        }
+        emit(observation)
     }
 
     // MARK: Navigation / runtime lifecycle
-
-    /// A provisional navigation started. The old document may still survive a
-    /// failure, so its observations are only suspended, never reset yet.
-    /// Depth-based so a cancelled provisional followed by a fresh request
-    /// stays suspended.
-    func suspendForProvisionalNavigation() {
-        provisionalNavigationDepth += 1
-    }
-
-    /// The provisional navigation failed and the old document is still the
-    /// displayed runtime: resume it without any false reset and flush what it
-    /// produced while suspended.
-    func resumeAfterProvisionalNavigationFailure() {
-        guard provisionalNavigationDepth > 0 else { return }
-        provisionalNavigationDepth -= 1
-        guard provisionalNavigationDepth == 0,
-              let suspended = document?.suspendedObservations,
-              !suspended.isEmpty else {
-            return
-        }
-        document?.suspendedObservations.removeAll()
-        suspended.forEach(emit)
-    }
 
     /// The runtime was authoritatively replaced — a new top-level document
     /// committed or the WebContent process terminated. Forward one reset
@@ -416,7 +387,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let hadActiveDocument = document != nil
         document = nil
         isAwaitingNewDocumentBaseline = true
-        provisionalNavigationDepth = 0
         if hadActiveDocument {
             emit(.runtimeReset)
         }
@@ -432,7 +402,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let hadActiveDocument = document != nil
         document = nil
         isAwaitingNewDocumentBaseline = false
-        provisionalNavigationDepth = 0
         userContentController?.removeScriptMessageHandler(
             forName: Self.messageHandlerName,
             contentWorld: Self.contentWorld

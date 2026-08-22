@@ -4,7 +4,7 @@
 > Business Contract: `docs/product/FloatTabs_ChatGPT_Attention_Contract_V1.md` — FROZEN
 > Base main: `ad810e94549cade77ec00bd0f2aee1b170d8023c`
 > Stage A implementation: `83e98ec8f4763b792148a5a6c492b9befe087205` — independently audited PASS
-> Revision: 2026-08-21 — technical stage order and WebKit installation boundary corrected after Stage A audit. Business semantics unchanged.
+> Revision: 2026-08-22 — final cross-feature audit corrected provisional observation timing. Business semantics unchanged.
 
 ## 1. Delivery objective
 
@@ -286,8 +286,10 @@ Forward the minimum top-level lifecycle events to the bridge.
 
 **didStartProvisionalNavigation**
 
-- suspend acceptance of old-document observations during transition;
-- do not emit `runtimeReset` yet because the old document may remain if navigation fails.
+- do not reset the old runtime before commit;
+- continue accepting and emitting validated observations from the current
+  accepted old-document epoch;
+- document identity does not change until commit.
 
 **didCommit**
 
@@ -297,7 +299,8 @@ Forward the minimum top-level lifecycle events to the bridge.
 
 **didFailProvisionalNavigation**
 
-- resume the still-present old document without a false reset;
+- do not reset or replay attention observations;
+- the still-present old document simply remains the current epoch;
 - preserve existing one-shot HTTP fallback semantics;
 - if fallback starts another load, that new load gets its own provisional-start boundary.
 
@@ -351,8 +354,9 @@ Focused tests must cover at least:
 8. generating -> idle emits one finish;
 9. duplicate idle emits nothing extra;
 10. unsupported host cannot emit observations;
-11. provisional start suspends old observations without reset;
-12. provisional failure resumes old document without reset;
+11. provisional start leaves the current old-document observation stream
+    emitting without reset;
+12. provisional failure emits no reset and does not replay observations;
 13. committed replacement emits reset and requires current epoch;
 14. stale old-document message after commit is rejected;
 15. BFCache/pageshow baseline behavior is represented/tested at the bridge reducer/lifecycle level;
@@ -461,7 +465,8 @@ Required combined coverage:
 - fullscreen source completion -> no false Ready;
 - companion completion while presented -> no false Ready;
 - committed replacement -> reset/no stale Ready;
-- failed provisional navigation preserves valid old runtime state;
+- failed provisional navigation preserves valid old runtime state and does not
+  defer or replay same-document observations;
 - process termination -> reset then normal recovery;
 - release/rebuild -> no stale bridge callbacks;
 - media + attention protection coexist independently;
