@@ -283,6 +283,16 @@ final class SlotLifecycleCoordinator {
         hiddenActiveToken != nil
     }
 
+    #if DEBUG
+    /// Read-only diagnostic: the current inactive-plan identity for a Slot.
+    /// Exposes existing internal state only — no mutation, no second plan
+    /// authority. Lets cross-feature tests observe that a protection-ending
+    /// attention reset actually produced a fresh plan boundary.
+    func debugInactivePlanToken(slotID: UUID) -> UUID? {
+        inactivePlans[slotID]?.token
+    }
+    #endif
+
     private func configureMemoryPressureSource() {
         let source = DispatchSource.makeMemoryPressureSource(
             eventMask: [.warning, .critical],

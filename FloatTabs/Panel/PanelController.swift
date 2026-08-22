@@ -541,6 +541,32 @@ final class PanelController: NSObject, NSWindowDelegate {
         return snapshot
     }
 
+    /// Read-only cross-feature diagnostics. Each accessor exposes one piece
+    /// of already-existing internal state — the rail's current Ready
+    /// projection and the lifecycle coordinator's current plan bookkeeping —
+    /// so integration tests can observe real wiring without any mutation,
+    /// second source of truth, or test-specific business path.
+    func debugIsProjectingReadyAttention(slotID: UUID) -> Bool {
+        rootView.externalControlZoneView
+            .tabView(for: slotID)?.isShowingReadyAttention ?? false
+    }
+
+    var debugPendingColdReleaseCount: Int {
+        slotLifecycleCoordinator.pendingColdReleaseCount
+    }
+
+    var debugPendingWarmReleaseCount: Int {
+        slotLifecycleCoordinator.pendingWarmReleaseCount
+    }
+
+    var debugIsHiddenActiveGracePending: Bool {
+        slotLifecycleCoordinator.isHiddenActiveGracePending
+    }
+
+    func debugInactivePlanToken(slotID: UUID) -> UUID? {
+        slotLifecycleCoordinator.debugInactivePlanToken(slotID: slotID)
+    }
+
     func benchmarkSetResourcePolicy(
         slotIDStrings: [String],
         residencyRawValue: String?,

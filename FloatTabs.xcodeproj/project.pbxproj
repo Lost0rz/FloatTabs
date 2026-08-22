@@ -57,6 +57,7 @@
 		A00000000000000000000031 /* WebAttentionPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000031 /* WebAttentionPresentationTests.swift */; };
 		A00000000000000000000032 /* WebAttentionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000032 /* WebAttentionLifecycleTests.swift */; };
 		A00000000000000000000033 /* WebAttentionIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000033 /* WebAttentionIndicatorTests.swift */; };
+		A00000000000000000000034 /* WebAttentionCrossFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -122,6 +123,7 @@
 		B00000000000000000000031 /* WebAttentionPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionPresentationTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000032 /* WebAttentionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionLifecycleTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000033 /* WebAttentionIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionIndicatorTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCrossFeatureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -284,6 +286,7 @@
 				B00000000000000000000031 /* WebAttentionPresentationTests.swift */,
 				B00000000000000000000032 /* WebAttentionLifecycleTests.swift */,
 				B00000000000000000000033 /* WebAttentionIndicatorTests.swift */,
+				B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -457,6 +460,7 @@
 				A00000000000000000000031 /* WebAttentionPresentationTests.swift in Sources */,
 				A00000000000000000000032 /* WebAttentionLifecycleTests.swift in Sources */,
 				A00000000000000000000033 /* WebAttentionIndicatorTests.swift in Sources */,
+				A00000000000000000000034 /* WebAttentionCrossFeatureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
