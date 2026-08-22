@@ -375,7 +375,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations.last, .runtimeReset)
     }
 
-    func testUnsupportedCurrentDocumentClosesAdmissionUntilSupportedReplacement() {
+    func testUnsupportedCurrentDocumentClosesAdmissionUntilSupportedCommitResync() {
         let harness = ChatGPTAttentionBridgeHarness()
         let unsupportedURL = URL(string: "https://example.com/document")!
         let supportedURL = URL(string: "https://chatgpt.com/c/fresh")!
@@ -391,31 +391,29 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         harness.accept(false, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
         XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
 
+        // A supported ordinary commit now enters the same authorization
+        // barrier used by confirmed Instant Back. The detached harness cannot
+        // return a named-world resync result, so neither the old document's
+        // queued baseline nor the replacement document's natural baseline may
+        // claim the epoch by racing the direct current-document read.
         harness.bridge.handleRuntimeReplacement(committedURL: supportedURL)
-        harness.accept(false, token: tokenB)
-        XCTAssertEqual(
-            harness.observations,
-            [.generationStarted, .runtimeReset]
-        )
-        harness.accept(true, token: tokenB, kind: ChatGPTBridgePayload.stateKind)
-        XCTAssertEqual(
-            harness.observations,
-            [.generationStarted, .runtimeReset, .generationStarted]
-        )
+        harness.accept(true, token: tokenA)
+        harness.accept(true, token: tokenB)
+        XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
     }
 
-    func testStaleOldDocumentMessageIsRejectedAfterCommit() {
+    func testStaleOldDocumentMessageIsRejectedAfterUnknownCommitBoundary() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
         harness.bridge.handleRuntimeReplacement()
         let observationsAfterReset = harness.observations.count
 
         // A late in-flight state message from the superseded document cannot
-        // re-baseline the replacement epoch.
+        // re-baseline the replacement epoch when no committed URL is available.
         harness.accept(false, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
         XCTAssertEqual(harness.observations.count, observationsAfterReset)
 
-        // The replacement document establishes its own baseline token.
+        // Unknown/runtime-recovery boundaries retain natural-baseline recovery.
         harness.accept(true, token: tokenB)
         XCTAssertEqual(harness.observations.last, .generationStarted)
     }
@@ -462,8 +460,8 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         harness.bridge.confirmInstantBackHandoff()
         XCTAssertEqual(harness.observations, [.runtimeReset])
 
-        // The actual current document's natural/explicit resync baseline now
-        // opens the fresh epoch.
+        // Without a known supported target, the generic handoff test seam
+        // retains natural-baseline recovery after its reset boundary.
         harness.accept(true, token: tokenA)
         XCTAssertEqual(
             harness.observations,
@@ -485,7 +483,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
         // The direct resync is unavailable on this detached harness, so the
         // identity barrier remains closed rather than accepting A2 by token
-        // guesswork. The real named-world test covers the authorized result.
+        // guesswork.
         harness.accept(true, token: "instant-back-a2")
         XCTAssertEqual(harness.observations, [.runtimeReset])
     }
