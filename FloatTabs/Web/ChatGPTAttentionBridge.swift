@@ -49,6 +49,24 @@ struct ChatGPTBridgePayload: Equatable {
     /// page content.
     let token: String
     let generating: Bool
+    /// The current document URL is navigation metadata used only to correlate
+    /// a transient Instant Back baseline with the confirmed history target.
+    /// It is not persisted or used as Attention state.
+    let documentURL: URL?
+
+    init(
+        version: Int,
+        kind: String,
+        token: String,
+        generating: Bool,
+        documentURL: URL? = nil
+    ) {
+        self.version = version
+        self.kind = kind
+        self.token = token
+        self.generating = generating
+        self.documentURL = documentURL
+    }
 
     static func parse(_ body: [String: Any]) -> ChatGPTBridgePayload? {
         guard let version = body["version"] as? Int,
@@ -60,11 +78,13 @@ struct ChatGPTBridgePayload: Equatable {
               let generating = body["generating"] as? Bool else {
             return nil
         }
+        let documentURL = (body["documentURL"] as? String).flatMap(URL.init(string:))
         return ChatGPTBridgePayload(
             version: version,
             kind: kind,
             token: token,
-            generating: generating
+            generating: generating,
+            documentURL: documentURL
         )
     }
 }
@@ -165,6 +185,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               version: 1,
               kind: lastSent === null ? "baseline" : "state",
               token: TOKEN,
+              documentURL: location.href,
               generating: generating
             });
           };
@@ -269,6 +290,14 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         var tracker = ChatGPTDocumentGenerationTracker()
     }
 
+    /// A single in-flight Instant Back transition may briefly deliver the
+    /// restored document's baseline before native history confirmation. The
+    /// candidate is deliberately not an Attention state or document history;
+    /// it is only a deferred baseline payload for this one handoff.
+    private struct PendingInstantBackHandoff {
+        var candidate: ChatGPTBridgePayload?
+    }
+
     let slotID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     private weak var webView: WKWebView?
@@ -277,7 +306,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// True until a document's own `baseline` report is accepted — including
     /// from bridge creation, so the very first load can establish its epoch.
     private var isAwaitingNewDocumentBaseline = true
+    private var pendingInstantBackHandoff: PendingInstantBackHandoff?
+    private var pendingInstantBackTargetURL: URL?
     private(set) var isInvalidated = false
+
+    /// Whether a transient Instant Back baseline handoff is awaiting either
+    /// cancellation or authoritative current-history confirmation.
+    var isInstantBackHandoffPending: Bool {
+        pendingInstantBackHandoff != nil
+    }
 
     init(
         slotID: UUID,
@@ -359,6 +396,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
+        if pendingInstantBackHandoff != nil {
+            // During the handoff, only a new document's own baseline may be
+            // a candidate. Existing-document state messages, including late
+            // messages from the document that is leaving, are ignored until
+            // the navigation boundary is confirmed or cancelled.
+            guard payload.kind == ChatGPTBridgePayload.baselineKind,
+                  document?.token != payload.token,
+                  instantBackCandidateMatchesTarget(payload) else {
+                return
+            }
+            pendingInstantBackHandoff?.candidate = payload
+            return
+        }
+
         if isAwaitingNewDocumentBaseline {
             // Only a document's own baseline report may open an epoch: the
             // document-start script's first message and a pageshow re-report
@@ -378,12 +429,56 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: Navigation / runtime lifecycle
 
+    /// Begins the one bounded bridge handoff for a WebKit Instant Back
+    /// request. The request itself is not authority: until the navigation
+    /// observer confirms the requested current history item, a new baseline is
+    /// held without mutating the Attention observation stream.
+    func beginInstantBackHandoff(targetURL: URL? = nil) {
+        guard !isInvalidated else {
+            pendingInstantBackHandoff = nil
+            pendingInstantBackTargetURL = nil
+            return
+        }
+        if let targetURL,
+           !ChatGPTSitePolicy.isSupportedChatGPTURL(targetURL) {
+            pendingInstantBackHandoff = nil
+            pendingInstantBackTargetURL = nil
+            return
+        }
+        pendingInstantBackHandoff = PendingInstantBackHandoff()
+        pendingInstantBackTargetURL = targetURL
+    }
+
+    /// Cancels a pending handoff when Instant Back falls back to ordinary
+    /// loading, fails, or another navigation supersedes it. The old document
+    /// epoch remains untouched until the ordinary didCommit boundary.
+    func cancelInstantBackHandoff() {
+        pendingInstantBackHandoff = nil
+        pendingInstantBackTargetURL = nil
+    }
+
+    /// Confirms the handoff only after SlotNavigationObserver has established
+    /// that the requested WKBackForwardList item is the current item. Reset the
+    /// old runtime first, then replay the one held baseline (if any) as a fresh
+    /// current-document epoch.
+    func confirmInstantBackHandoff() {
+        guard let handoff = pendingInstantBackHandoff else { return }
+        pendingInstantBackHandoff = nil
+        pendingInstantBackTargetURL = nil
+        handleRuntimeReplacement()
+
+        guard let candidate = handoff.candidate else { return }
+        acceptFreshBaseline(candidate)
+    }
+
     /// The runtime was authoritatively replaced — a new top-level document
     /// committed or the WebContent process terminated. Forward one reset
     /// boundary for the old runtime, clear the accepted document epoch, and
     /// wait for the new document's baseline. The installation itself stays
     /// usable for the recovered/replacement document.
     func handleRuntimeReplacement() {
+        pendingInstantBackHandoff = nil
+        pendingInstantBackTargetURL = nil
         let hadActiveDocument = document != nil
         document = nil
         isAwaitingNewDocumentBaseline = true
@@ -399,6 +494,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     func invalidate() {
         guard !isInvalidated else { return }
         isInvalidated = true
+        pendingInstantBackHandoff = nil
+        pendingInstantBackTargetURL = nil
         let hadActiveDocument = document != nil
         document = nil
         isAwaitingNewDocumentBaseline = false
@@ -415,5 +512,22 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func emit(_ observation: ChatGPTAttentionObservation) {
         onObservation(slotID, observation)
+    }
+
+    private func acceptFreshBaseline(_ payload: ChatGPTBridgePayload) {
+        guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
+        document = DocumentSession(token: payload.token)
+        isAwaitingNewDocumentBaseline = false
+        if let observation = document?.tracker.observe(payload.generating) {
+            emit(observation)
+        }
+    }
+
+    private func instantBackCandidateMatchesTarget(
+        _ payload: ChatGPTBridgePayload
+    ) -> Bool {
+        guard let targetURL = pendingInstantBackTargetURL else { return true }
+        guard let documentURL = payload.documentURL else { return false }
+        return documentURL.absoluteString == targetURL.absoluteString
     }
 }

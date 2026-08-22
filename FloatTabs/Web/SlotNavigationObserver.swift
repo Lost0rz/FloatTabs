@@ -222,6 +222,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
     private let onNavigationCommit: @MainActor (UUID) -> Void
+    private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
+    private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
 
@@ -259,6 +261,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
         onNavigationCommit: @escaping @MainActor (UUID) -> Void = { _ in },
+        onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
+        onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
@@ -272,6 +276,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
         self.onNavigationCommit = onNavigationCommit
+        self.onInstantBackRequest = onInstantBackRequest
+        self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
         self.loadHandler = loadHandler
         super.init()
@@ -368,12 +374,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // If Instant Back falls back to normal loading, ordinary didCommit is
         // authoritative again. A new provisional navigation also invalidates
         // any older correlation marker.
+        onInstantBackCancellation(slotID)
         pendingInstantBack = nil
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        onInstantBackCancellation(slotID)
         pendingInstantBack = nil
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
@@ -409,6 +417,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        onInstantBackCancellation(slotID)
         pendingInstantBack = nil
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
@@ -445,7 +454,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 targetItem: backForwardListItem,
                 targetURL: backForwardListItem.url
             )
+            onInstantBackRequest(slotID, backForwardListItem.url)
         } else {
+            onInstantBackCancellation(slotID)
             pendingInstantBack = nil
         }
 

@@ -946,11 +946,15 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         retainedContainers.append(container)
 
         var instantActivations = 0
+        var instantBackRequests = 0
+        var instantBackCancellations = 0
         let observer = SlotNavigationObserver(
             slotID: UUID(),
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
+            onInstantBackRequest: { _, _ in instantBackRequests += 1 },
+            onInstantBackCancellation: { _ in instantBackCancellations += 1 },
             onInstantBackActivation: { _ in instantActivations += 1 }
         )
 
@@ -969,6 +973,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         let firstItem = try XCTUnwrap(webView.backForwardList.backItem)
         let secondItem = try XCTUnwrap(webView.backForwardList.currentItem)
+        let cancellationsBeforeRequest = instantBackCancellations
         var instantDecision: Bool?
         observer.webView(
             webView,
@@ -979,6 +984,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(instantDecision, true)
         XCTAssertTrue(observer.isInstantBackActivationPending)
         XCTAssertEqual(instantActivations, 0)
+        XCTAssertEqual(instantBackRequests, 1)
+        XCTAssertEqual(instantBackCancellations, cancellationsBeforeRequest)
 
         // A non-Instant request clears the older correlation and leaves the
         // ordinary didCommit path authoritative.
@@ -992,6 +999,250 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(ordinaryDecision, true)
         XCTAssertFalse(observer.isInstantBackActivationPending)
         XCTAssertEqual(instantActivations, 0)
+        XCTAssertEqual(instantBackRequests, 1)
+        XCTAssertEqual(instantBackCancellations, cancellationsBeforeRequest + 1)
+    }
+
+    func testConfirmedInstantBackIdleBaselineClearsCurrentAttentionWithoutRestoringReady() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        // The current B runtime has an old unseen completion.
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+
+        bridge.beginInstantBackHandoff()
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+
+        // The baseline races before confirmation and cannot mutate the old
+        // runtime or restore its historical Ready state.
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+    }
+
+    func testInstantBackBaselineBeforeConfirmationReestablishesGenerating() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
+    }
+
+    func testInstantBackConfirmationBeforeBaselineAcceptsFreshIdleBaseline() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+    }
+
+    func testRestoredGeneratingInstantBackCompletionUsesHiddenVisibilityAndProtection() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        bridge.confirmInstantBackHandoff()
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+
+        XCTAssertFalse(controller.isVisible)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
+    }
+
+    func testRestoredGeneratingInstantBackCompletionUsesVisiblePresentation() async throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        defer { controller.hideFloatTabs() }
+
+        try await showAndWaitForAttentionVisible(
+            controller: controller,
+            slotID: slot.id
+        )
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        bridge.confirmInstantBackHandoff()
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+
+        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+    }
+
+    func testStaleHistoricalInstantBackStateRemainsRejectedUntilConfirmation() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+
+        // A stale state report is not a candidate baseline and cannot finish
+        // the current generation or steal the pending epoch.
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-stale-a"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+
+        bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+    }
+
+    func testInstantBackFallbackKeepsOrdinaryDidCommitAsTheOnlyReplacementBoundary() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let observer = try navigationObserver(of: webView)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+        XCTAssertTrue(bridge.isInstantBackHandoffPending)
+
+        // A fallback provisional load cancels the candidate. Only didCommit
+        // resets the old runtime, after which a fresh baseline is accepted.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        XCTAssertFalse(bridge.isInstantBackHandoffPending)
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-ordinary-c"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
     }
 
     // MARK: 4.8 Provisional navigation completion visibility
@@ -1109,11 +1360,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        bridge.beginInstantBackHandoff()
+        XCTAssertTrue(bridge.isInstantBackHandoffPending)
 
         // Releasing the runtime invalidates its bridge and forwards exactly
         // one reset boundary through the real chain.
         pool.release(slotID: slot.id)
         XCTAssertFalse(pool.contains(slotID: slot.id))
+        XCTAssertFalse(bridge.isInstantBackHandoffPending)
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 

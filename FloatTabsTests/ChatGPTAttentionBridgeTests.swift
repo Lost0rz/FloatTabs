@@ -38,14 +38,16 @@ private final class ChatGPTAttentionBridgeHarness {
         originProtocol: String = "https",
         isMainFrame: Bool = true,
         kind: String = ChatGPTBridgePayload.baselineKind,
-        messageWebView: WKWebView? = nil
+        messageWebView: WKWebView? = nil,
+        documentURL: URL? = nil
     ) {
         bridge.accept(
             payload: ChatGPTBridgePayload(
                 version: ChatGPTBridgePayload.currentVersion,
                 kind: kind,
                 token: token,
-                generating: generating
+                generating: generating,
+                documentURL: documentURL
             ),
             messageWebView: messageWebView ?? webView,
             isMainFrame: isMainFrame,
@@ -393,6 +395,88 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         // The re-established epoch de-duplicates like any other document.
         harness.accept(true, token: tokenA)
         XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
+    }
+
+    func testInstantBackBaselineBeforeConfirmationIsHeldAndReplayedFresh() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(false, token: tokenB)
+        harness.bridge.beginInstantBackHandoff()
+
+        // The restored document can report before the native current-item
+        // confirmation. Its baseline is held, while a late state message from
+        // the leaving document is rejected without mutating the stream.
+        harness.accept(true, token: tokenA)
+        harness.accept(false, token: tokenB, kind: ChatGPTBridgePayload.stateKind)
+
+        XCTAssertTrue(harness.bridge.isInstantBackHandoffPending)
+        XCTAssertEqual(harness.observations, [])
+
+        harness.bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(
+            harness.observations,
+            [.runtimeReset, .generationStarted]
+        )
+        XCTAssertFalse(harness.bridge.isInstantBackHandoffPending)
+    }
+
+    func testInstantBackConfirmationBeforeBaselineAcceptsRestoredBaselineLater() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(true, token: tokenB)
+        harness.bridge.beginInstantBackHandoff()
+        harness.bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
+
+        // The target document's pageshow baseline arrives after confirmation
+        // and opens the fresh epoch normally.
+        harness.accept(true, token: tokenA)
+
+        XCTAssertEqual(
+            harness.observations,
+            [.generationStarted, .runtimeReset, .generationStarted]
+        )
+    }
+
+    func testUnrelatedHistoricalBaselineCannotStealConfirmedInstantBackHandoff() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        let urlA = URL(string: "https://chatgpt.com/chat-a")!
+        let urlC = URL(string: "https://chatgpt.com/chat-c")!
+
+        harness.accept(false, token: tokenB, documentURL: URL(string: "https://chatgpt.com/chat-b")!)
+        harness.bridge.beginInstantBackHandoff(targetURL: urlA)
+
+        // A different historical document may race the request, but its
+        // baseline is not the requested history target and is discarded.
+        harness.accept(true, token: "instant-back-stale-c", documentURL: urlC)
+        harness.bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(harness.observations, [.runtimeReset])
+
+        harness.accept(true, token: tokenA, documentURL: urlA)
+        XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
+    }
+
+    func testCancelledInstantBackCandidateCannotRebaselineOldRuntime() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(true, token: tokenB)
+        harness.bridge.beginInstantBackHandoff()
+        harness.accept(false, token: tokenA)
+        harness.bridge.cancelInstantBackHandoff()
+
+        XCTAssertFalse(harness.bridge.isInstantBackHandoffPending)
+        harness.accept(false, token: tokenA)
+        XCTAssertEqual(harness.observations, [.generationStarted])
+    }
+
+    func testReleaseClearsPendingInstantBackHandoff() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(false, token: tokenB)
+        harness.bridge.beginInstantBackHandoff()
+
+        harness.bridge.invalidate()
+
+        XCTAssertFalse(harness.bridge.isInstantBackHandoffPending)
+        XCTAssertTrue(harness.bridge.isInvalidated)
     }
 
     // MARK: - WebContent termination

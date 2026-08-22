@@ -341,11 +341,28 @@ final class WebViewPool {
                       self.existingWebView(for: slotID) === webView else {
                     return
                 }
+                attentionBridge?.cancelInstantBackHandoff()
                 attentionBridge?.handleRuntimeReplacement()
                 guard let committedURL = self.committedURL(for: slotID) else {
                     return
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
+            },
+            onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                attentionBridge?.beginInstantBackHandoff(targetURL: targetURL)
+            },
+            onInstantBackCancellation: { [weak self, weak attentionBridge, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                attentionBridge?.cancelInstantBackHandoff()
             },
             onInstantBackActivation: { [weak self, weak webView] slotID in
                 guard let self,
@@ -353,6 +370,7 @@ final class WebViewPool {
                       self.existingWebView(for: slotID) === webView else {
                     return
                 }
+                self.attentionBridges[slotID]?.confirmInstantBackHandoff()
                 // Instant Back resumes an existing document. It is a
                 // presentation-only history activation and must not reuse the
                 // didCommit callback that resets the Attention runtime.
