@@ -604,6 +604,13 @@ final class FloatTabsWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// FloatTabs can remain visible while another app owns key focus. Accept the
+    /// activation click so page controls such as ChatGPT Copy receive the same
+    /// first physical click instead of requiring a second click after activation.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     func setRendering(
         websiteMode: WebsiteMode,
         userPageZoom: CGFloat
