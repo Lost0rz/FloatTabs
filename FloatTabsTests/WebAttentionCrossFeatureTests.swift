@@ -360,6 +360,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         setResidency(.cold, for: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
+        defer { controller.hideFloatTabs() }
 
         // Hidden selected completion → Ready (never presented so far).
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
@@ -532,18 +533,21 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
     }
 
-    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() throws {
+    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() async throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
         let slot = try profile(named: "ChatA", in: store)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        defer { controller.hideFloatTabs() }
 
-        // Establish the actual Web presentation first. The test host can
-        // expose the key-window fact even though it cannot reliably be the
-        // system frontmost application.
-        controller.showFloatTabs()
-        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
+        // Establish the actual Web presentation first. Accessory-app
+        // activation may complete on a later run-loop turn, so wait for the
+        // same real visibility authority used by production acknowledgement.
+        try await showAndWaitForAttentionVisible(
+            controller: controller,
+            slotID: slot.id
+        )
 
         // Seed an already-selected Ready state after presentation so the
         // notification below is the acknowledgement boundary under test.
@@ -992,7 +996,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.8 Provisional navigation completion visibility
 
-    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
+    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() async throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -1000,9 +1004,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
         let observer = try navigationObserver(of: webView)
+        defer { controller.hideFloatTabs() }
 
-        controller.showFloatTabs()
+        try await showAndWaitForAttentionVisible(
+            controller: controller,
+            slotID: slot.id
+        )
         XCTAssertTrue(controller.isVisible)
+        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
 
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
@@ -1045,6 +1054,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
         let observer = try navigationObserver(of: webView)
+        defer { controller.hideFloatTabs() }
 
         XCTAssertFalse(controller.isVisible)
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
@@ -1511,6 +1521,26 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     private func wait(milliseconds: UInt64) async throws {
         try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+    }
+
+    private func showAndWaitForAttentionVisible(
+        controller: PanelController,
+        slotID: UUID
+    ) async throws {
+        controller.showFloatTabs()
+
+        let becameVisible = try await waitUntil {
+            controller.isAttentionUserVisible(slotID: slotID)
+        }
+
+        XCTAssertTrue(
+            becameVisible,
+            "actual Web presentation never acquired active interaction"
+        )
+        _ = try XCTUnwrap(
+            becameVisible ? true : nil,
+            "actual Web presentation never acquired active interaction"
+        )
     }
 
     @discardableResult
