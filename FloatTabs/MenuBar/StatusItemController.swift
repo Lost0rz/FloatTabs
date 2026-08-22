@@ -6,6 +6,42 @@ struct MenuShortcutPresentation: Equatable {
     let modifiers: NSEvent.ModifierFlags
 }
 
+enum StatusItemAttentionBadge: Equatable {
+    case none
+    case dot
+    case count(String)
+}
+
+struct StatusItemAttentionPresentation: Equatable {
+    let readyCount: Int
+    let floatTabsVisible: Bool
+    let badge: StatusItemAttentionBadge
+
+    static func resolve(
+        readyCount: Int,
+        floatTabsVisible: Bool
+    ) -> StatusItemAttentionPresentation {
+        let normalizedCount = max(0, readyCount)
+        let badge: StatusItemAttentionBadge
+
+        if floatTabsVisible || normalizedCount == 0 {
+            badge = .none
+        } else if normalizedCount == 1 {
+            badge = .dot
+        } else if normalizedCount < 10 {
+            badge = .count(String(normalizedCount))
+        } else {
+            badge = .count("9+")
+        }
+
+        return StatusItemAttentionPresentation(
+            readyCount: normalizedCount,
+            floatTabsVisible: floatTabsVisible,
+            badge: badge
+        )
+    }
+}
+
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
@@ -27,6 +63,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let onSettings: () -> Void
     private let onQuit: () -> Void
     private var selectedFaviconOriginKey: String?
+    private var selectedFaviconImage: NSImage?
+    private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
+        readyCount: 0,
+        floatTabsVisible: false
+    )
 
     var menuShortcutPresentations: [String: MenuShortcutPresentation] {
         [
@@ -77,7 +118,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let homeURL,
               let originKey = Self.faviconOriginKey(for: homeURL) else {
             selectedFaviconOriginKey = nil
-            button.image = Self.fallbackImage()
+            selectedFaviconImage = nil
+            redrawStatusImage()
             return
         }
 
@@ -85,7 +127,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Never leave the previous site's favicon visible while a newly selected
         // origin is loading. The shared provider normally returns immediately from
         // the same cache already populated by the tab rail.
-        button.image = Self.fallbackImage()
+        selectedFaviconImage = nil
+        redrawStatusImage()
         WebsiteFaviconProvider.shared.load(for: homeURL) { [weak self] image in
             guard let self,
                   self.selectedFaviconOriginKey == originKey else { return }
@@ -93,10 +136,66 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    func setAttentionPresentation(readyCount: Int, floatTabsVisible: Bool) {
+        attentionPresentation = Self.attentionPresentation(
+            readyCount: readyCount,
+            floatTabsVisible: floatTabsVisible
+        )
+        redrawStatusImage()
+    }
+
+    static func attentionPresentation(
+        readyCount: Int,
+        floatTabsVisible: Bool
+    ) -> StatusItemAttentionPresentation {
+        StatusItemAttentionPresentation.resolve(
+            readyCount: readyCount,
+            floatTabsVisible: floatTabsVisible
+        )
+    }
+
+    static func renderStatusImage(
+        favicon: NSImage?,
+        attention: StatusItemAttentionPresentation
+    ) -> NSImage {
+        let size = NSSize(width: 16, height: 16)
+        if favicon == nil,
+           attention.badge == .none,
+           let fallback = fallbackImage() {
+            // Keep the existing template fallback behavior when there is no
+            // badge to composite. A badge requires an owned rasterized image
+            // so its semantic red remains independent of menu-bar tinting.
+            return fallback
+        }
+
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        let sourceImage = (favicon ?? fallbackImage())?.copy() as? NSImage
+        sourceImage?.size = size
+        sourceImage?.isTemplate = false
+        sourceImage?.draw(
+            in: NSRect(origin: .zero, size: size),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: false,
+            hints: nil
+        )
+
+        drawAttentionBadge(attention.badge, in: NSRect(origin: .zero, size: size))
+        image.isTemplate = false
+        return image
+    }
+
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
 
-        button.image = Self.fallbackImage()
+        button.image = Self.renderStatusImage(
+            favicon: nil,
+            attention: attentionPresentation
+        )
         button.imagePosition = .imageLeading
         button.imageScaling = .scaleProportionallyDown
         button.title = Self.displayTitle(for: nil)
@@ -106,18 +205,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func applyStatusImage(_ favicon: NSImage?) {
-        guard let button = statusItem.button,
-              let favicon else {
-            statusItem.button?.image = Self.fallbackImage()
-            return
-        }
+        selectedFaviconImage = favicon
+        redrawStatusImage()
+    }
 
-        // Do not mutate the shared cached NSImage because the rail uses the same
-        // instance. Status-bar sizing is presentation-specific.
-        let image = (favicon.copy() as? NSImage) ?? favicon
-        image.size = NSSize(width: 16, height: 16)
-        image.isTemplate = false
-        button.image = image
+    private func redrawStatusImage() {
+        statusItem.button?.image = Self.renderStatusImage(
+            favicon: selectedFaviconImage,
+            attention: attentionPresentation
+        )
     }
 
     private static func fallbackImage() -> NSImage? {
@@ -127,6 +223,58 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         )
         image?.isTemplate = true
         return image
+    }
+
+    private static func drawAttentionBadge(
+        _ badge: StatusItemAttentionBadge,
+        in bounds: NSRect
+    ) {
+        guard badge != .none else { return }
+
+        NSColor.systemRed.setFill()
+        switch badge {
+        case .none:
+            break
+
+        case .dot:
+            let diameter: CGFloat = 5
+            let dotRect = NSRect(
+                x: bounds.maxX - diameter - 0.5,
+                y: bounds.maxY - diameter - 0.5,
+                width: diameter,
+                height: diameter
+            )
+            NSBezierPath(ovalIn: dotRect).fill()
+
+        case .count(let text):
+            let font = NSFont.systemFont(ofSize: 7, weight: .bold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.white,
+            ]
+            let textSize = (text as NSString).size(withAttributes: attributes)
+            let width = max(9, textSize.width + 4)
+            let height: CGFloat = 9
+            let badgeRect = NSRect(
+                x: bounds.maxX - width - 0.5,
+                y: bounds.maxY - height - 0.5,
+                width: width,
+                height: height
+            )
+            NSBezierPath(
+                roundedRect: badgeRect,
+                xRadius: height / 2,
+                yRadius: height / 2
+            ).fill()
+
+            let textRect = NSRect(
+                x: badgeRect.midX - textSize.width / 2,
+                y: badgeRect.midY - textSize.height / 2 - 0.5,
+                width: textSize.width,
+                height: textSize.height
+            )
+            (text as NSString).draw(in: textRect, withAttributes: attributes)
+        }
     }
 
     private func configureMenu() {

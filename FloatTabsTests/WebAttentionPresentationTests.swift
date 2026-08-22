@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import FloatTabs
 
@@ -38,6 +39,41 @@ final class WebAttentionPresentationTests: XCTestCase {
         router.handle(.generationFinished, for: slotA)
 
         XCTAssertEqual(coordinator.state(for: slotA), .ready)
+    }
+
+    func testHiddenCompletionProjectsReadySlotThroughMenuPresentation() {
+        let router = makeRouter(visible: false)
+        router.handle(.generationStarted, for: slotA)
+        router.handle(.generationFinished, for: slotA)
+
+        let menu = StatusItemController.attentionPresentation(
+            readyCount: coordinator.readySlotIDs.count,
+            floatTabsVisible: false
+        )
+
+        XCTAssertEqual(coordinator.readySlotIDs, [slotA])
+        XCTAssertEqual(menu.badge, .dot)
+    }
+
+    func testVisibilityProjectionChangesWithoutChangingReadyStates() {
+        let router = makeRouter(visible: false)
+        router.handle(.generationStarted, for: slotA)
+        router.handle(.generationFinished, for: slotA)
+        router.handle(.generationStarted, for: slotB)
+        router.handle(.generationFinished, for: slotB)
+
+        let visible = StatusItemController.attentionPresentation(
+            readyCount: coordinator.readySlotIDs.count,
+            floatTabsVisible: true
+        )
+        let hidden = StatusItemController.attentionPresentation(
+            readyCount: coordinator.readySlotIDs.count,
+            floatTabsVisible: false
+        )
+
+        XCTAssertEqual(visible.badge, .none)
+        XCTAssertEqual(hidden.badge, .count("2"))
+        XCTAssertEqual(coordinator.readySlotIDs, [slotA, slotB])
     }
 
     func testGenerationFinishedWhileUserVisibleRoutesToIdle() {
@@ -250,6 +286,50 @@ final class WebAttentionPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(coordinator.state(for: slotA), .idle)
+    }
+
+    func testAcknowledgementDerivesHiddenMenuCountFromRemainingReadySlots() {
+        let router = makeRouter(visible: false)
+        router.handle(.generationStarted, for: slotA)
+        router.handle(.generationFinished, for: slotA)
+        router.handle(.generationStarted, for: slotB)
+        router.handle(.generationFinished, for: slotB)
+
+        let presentedA = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true
+        )
+        coordinator.acknowledge(
+            slotID: slotA,
+            userVisible: AttentionPresentation.isUserVisible(presentedA)
+        )
+
+        let hiddenMenu = StatusItemController.attentionPresentation(
+            readyCount: coordinator.readySlotIDs.count,
+            floatTabsVisible: false
+        )
+
+        XCTAssertEqual(coordinator.state(for: slotA), .idle)
+        XCTAssertEqual(coordinator.state(for: slotB), .ready)
+        XCTAssertEqual(hiddenMenu.badge, .dot)
+    }
+
+    func testStatusMenuPresentationDoesNotAcknowledgeReady() {
+        driveToReady()
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {}
+        )
+
+        controller.menuWillOpen(NSMenu())
+        controller.menuDidClose(NSMenu())
+
+        XCTAssertEqual(coordinator.state(for: slotA), .ready)
+        XCTAssertEqual(coordinator.readySlotIDs, [slotA])
     }
 
     // MARK: - Isolation, cleanup, persistence boundary

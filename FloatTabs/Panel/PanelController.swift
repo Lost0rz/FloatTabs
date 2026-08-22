@@ -122,7 +122,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.homeURL
     }
 
+    var attentionReadyCount: Int {
+        attentionCoordinator.readySlotIDs.count
+    }
+
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
+    var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
     init(
@@ -245,7 +250,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let presentationUptime = ProcessInfo.processInfo.systemUptime
         lastPresentationUptime = presentationUptime
         workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
-        requestedVisibility = true
+        updateRequestedVisibility(true)
         // System has no explicit override: resolve it from the current macOS
         // appearance again whenever a hidden shell is presented. Explicit
         // Light/Dark modes use this same path so newly created Tab layers
@@ -301,7 +306,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs() {
-        requestedVisibility = false
+        updateRequestedVisibility(false)
         needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -388,7 +393,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setPinned(isPinned)
         synchronizePinnedPresentation()
         if isPinned, sourceHostController.sessionState == .fullscreen {
-            requestedVisibility = true
+            updateRequestedVisibility(true)
             fullscreenVisibilityIntent.requestPresentation()
             showFullscreenCompanionIfReady()
         }
@@ -490,7 +495,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // The user has already selected another application. Unlike the explicit
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
-        requestedVisibility = false
+        updateRequestedVisibility(false)
         needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -982,8 +987,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeAttentionIndicators() {
-        rootView.externalControlZoneView.setReadySlotIDs(
-            attentionCoordinator.readySlotIDs
+        let readySlotIDs = attentionCoordinator.readySlotIDs
+        rootView.externalControlZoneView.setReadySlotIDs(readySlotIDs)
+        onAttentionPresentationChange?(readySlotIDs.count, requestedVisibility)
+    }
+
+    private func updateRequestedVisibility(_ visible: Bool) {
+        requestedVisibility = visible
+        onAttentionPresentationChange?(
+            attentionCoordinator.readySlotIDs.count,
+            requestedVisibility
         )
     }
 
@@ -1517,7 +1530,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 sourceHostController.companionContainer
             )
             rootView.removeFullscreenExitPlaceholder()
-            requestedVisibility = isPinned
+            updateRequestedVisibility(isPinned)
             return
         }
 
@@ -1530,8 +1543,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeTransientUIHost()
         synchronizePinnedPresentation()
 
-        requestedVisibility = fullscreenVisibilityIntent.consumeRestore(
-            currentVisibility: requestedVisibility
+        updateRequestedVisibility(
+            fullscreenVisibilityIntent.consumeRestore(
+                currentVisibility: requestedVisibility
+            )
         )
         let shouldKeepShellVisible = requestedVisibility
         let shouldPauseCompanion = !shouldKeepShellVisible

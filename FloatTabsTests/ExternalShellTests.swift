@@ -1055,6 +1055,131 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(StatusItemController.displayTitle(for: nil), "FloatTabs")
     }
 
+    func testStatusItemAttentionHidesAggregateWhileFloatTabsIsVisible() {
+        for readyCount in [0, 1, 5] {
+            let presentation = StatusItemController.attentionPresentation(
+                readyCount: readyCount,
+                floatTabsVisible: true
+            )
+
+            XCTAssertEqual(presentation.badge, .none)
+        }
+    }
+
+    func testStatusItemAttentionUsesDotExactCountAndCappedCountWhileHidden() {
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 0,
+                floatTabsVisible: false
+            ).badge,
+            .none
+        )
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 1,
+                floatTabsVisible: false
+            ).badge,
+            .dot
+        )
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 2,
+                floatTabsVisible: false
+            ).badge,
+            .count("2")
+        )
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 9,
+                floatTabsVisible: false
+            ).badge,
+            .count("9")
+        )
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 10,
+                floatTabsVisible: false
+            ).badge,
+            .count("9+")
+        )
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: 100,
+                floatTabsVisible: false
+            ).badge,
+            .count("9+")
+        )
+    }
+
+    func testStatusItemAttentionNormalizesNegativeCounts() {
+        let presentation = StatusItemController.attentionPresentation(
+            readyCount: -1,
+            floatTabsVisible: false
+        )
+
+        XCTAssertEqual(presentation.readyCount, 0)
+        XCTAssertEqual(presentation.badge, .none)
+    }
+
+    func testStatusItemAttentionRenderingSupportsFallbackAndCurrentBadge() {
+        let presentation = StatusItemController.attentionPresentation(
+            readyCount: 3,
+            floatTabsVisible: false
+        )
+
+        let image = StatusItemController.renderStatusImage(
+            favicon: nil,
+            attention: presentation
+        )
+
+        XCTAssertEqual(image.size, NSSize(width: 16, height: 16))
+        XCTAssertNotNil(image.tiffRepresentation)
+    }
+
+    func testStatusItemAttentionCountChangeRedrawsAgainstSameFavicon() {
+        let source = NSImage(size: NSSize(width: 16, height: 16))
+        source.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        source.unlockFocus()
+
+        let countImage = StatusItemController.renderStatusImage(
+            favicon: source,
+            attention: StatusItemController.attentionPresentation(
+                readyCount: 3,
+                floatTabsVisible: false
+            )
+        )
+        let dotImage = StatusItemController.renderStatusImage(
+            favicon: source,
+            attention: StatusItemController.attentionPresentation(
+                readyCount: 1,
+                floatTabsVisible: false
+            )
+        )
+
+        XCTAssertNotEqual(countImage.tiffRepresentation, dotImage.tiffRepresentation)
+    }
+
+    func testStatusItemAttentionRenderingDoesNotMutateSharedFavicon() {
+        let source = NSImage(size: NSSize(width: 16, height: 16))
+        source.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        source.unlockFocus()
+        let before = source.tiffRepresentation
+
+        _ = StatusItemController.renderStatusImage(
+            favicon: source,
+            attention: StatusItemController.attentionPresentation(
+                readyCount: 2,
+                floatTabsVisible: false
+            )
+        )
+
+        XCTAssertEqual(source.tiffRepresentation, before)
+    }
+
     func testStatusMenuBindsConfiguredToggleAndSettingsShortcuts() {
         let controller = StatusItemController(
             onToggle: {},

@@ -96,6 +96,16 @@ final class AppCoordinator {
         panelController.onSelectedSlotPresentationChange = { [weak self] name, homeURL in
             self?.statusItemController?.setActiveWebApp(name: name, homeURL: homeURL)
         }
+        panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
+            self?.statusItemController?.setAttentionPresentation(
+                readyCount: readyCount,
+                floatTabsVisible: floatTabsVisible
+            )
+        }
+        statusItemController?.setAttentionPresentation(
+            readyCount: panelController.attentionReadyCount,
+            floatTabsVisible: panelController.isVisible
+        )
 
         globalHotkeyController = GlobalHotkeyController(
             onToggle: { [weak self] in self?.toggleFloatTabs() }
