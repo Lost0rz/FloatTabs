@@ -44,6 +44,11 @@ struct StatusItemAttentionPresentation: Equatable {
 
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
+    typealias FaviconLoadHandler = @MainActor (
+        URL,
+        @escaping (NSImage?) -> Void
+    ) -> Void
+
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let toggleMenuItem = NSMenuItem(
@@ -63,6 +68,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let onSettings: () -> Void
     private let onQuit: () -> Void
     private let preferencesStore: AppPreferencesStore
+    private let loadFavicon: FaviconLoadHandler
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
     private var latestActiveWebAppName: String?
@@ -96,6 +102,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     var debugStatusButtonImageTIFF: Data? {
         statusItem.button?.image?.tiffRepresentation
     }
+
+    var debugSelectedFaviconOriginKey: String? {
+        selectedFaviconOriginKey
+    }
 #endif
 
     init(
@@ -104,7 +114,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void,
-        preferencesStore: AppPreferencesStore = AppPreferencesStore()
+        preferencesStore: AppPreferencesStore = AppPreferencesStore(),
+        faviconLoader: FaviconLoadHandler? = nil
     ) {
         self.onToggle = onToggle
         self.onWillShow = onWillShow
@@ -112,6 +123,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.onSettings = onSettings
         self.onQuit = onQuit
         self.preferencesStore = preferencesStore
+        self.loadFavicon = faviconLoader ?? { url, completion in
+            WebsiteFaviconProvider.shared.load(for: url, completion: completion)
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         super.init()
@@ -150,8 +164,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         displayMode == .iconOnly ? .imageOnly : .imageLeading
     }
 
-    static func faviconOriginKey(for activeWebAppURL: URL?) -> String? {
-        activeWebAppURL.flatMap(WebsiteFaviconProvider.originKey(for:))
+    static func faviconOriginKey(for faviconURL: URL?) -> String? {
+        faviconURL.flatMap(WebsiteFaviconProvider.originKey(for:))
     }
 
     static func acceptsFaviconCompletion(
@@ -161,18 +175,25 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         selectedOriginKey == completionOriginKey
     }
 
-    func setActiveWebApp(name: String?, homeURL: URL?) {
+    func setActiveWebApp(name: String?, faviconURL: URL?) {
         latestActiveWebAppName = name
         if let button = statusItem.button {
             button.toolTip = name.map { "Current Web App · \($0)" } ?? "FloatTabs"
             applyMenuBarDisplayMode(to: button)
         }
 
-        guard let homeURL,
-              let originKey = Self.faviconOriginKey(for: homeURL) else {
+        guard let faviconURL,
+              let originKey = Self.faviconOriginKey(for: faviconURL) else {
             selectedFaviconOriginKey = nil
             selectedFaviconImage = nil
             redrawStatusImage()
+            return
+        }
+
+        // The menu bar favicon is origin-scoped. A path/query commit within
+        // the same site must keep the current image and its in-flight request;
+        // only a cross-origin selection invalidates the previous projection.
+        if selectedFaviconOriginKey == originKey {
             return
         }
 
@@ -182,7 +203,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // the same cache already populated by the tab rail.
         selectedFaviconImage = nil
         redrawStatusImage()
-        WebsiteFaviconProvider.shared.load(for: homeURL) { [weak self] image in
+        loadFavicon(faviconURL) { [weak self] image in
             guard let self,
                   Self.acceptsFaviconCompletion(
                       selectedOriginKey: self.selectedFaviconOriginKey,

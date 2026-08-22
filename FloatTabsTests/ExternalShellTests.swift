@@ -1108,7 +1108,7 @@ final class ExternalShellTests: XCTestCase {
             onQuit: {},
             preferencesStore: preferencesStore
         )
-        controller.setActiveWebApp(name: "ChatGPT", homeURL: nil)
+        controller.setActiveWebApp(name: "ChatGPT", faviconURL: nil)
         controller.setAttentionPresentation(readyCount: 3, floatTabsVisible: false)
 
         XCTAssertEqual(preferencesStore.menuBarDisplayMode, .iconAndName)
@@ -1127,7 +1127,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
 
-        controller.setActiveWebApp(name: "Docs", homeURL: nil)
+        controller.setActiveWebApp(name: "Docs", faviconURL: nil)
         XCTAssertEqual(controller.debugStatusButtonTitle, "")
 
         preferencesStore.menuBarDisplayMode = .iconAndName
@@ -1136,6 +1136,104 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
         XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
+    }
+
+    func testStatusItemKeepsSameOriginFaviconAndRejectsStaleCrossOriginCompletions() {
+        var completions: [(NSImage?) -> Void] = []
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            faviconLoader: { _, completion in
+                completions.append(completion)
+            }
+        )
+        let siteA = URL(string: "https://chatgpt.com/chat-a")!
+        let siteAPathChange = URL(string: "https://chatgpt.com/chat-b")!
+        let siteB = URL(string: "https://docs.example.test/page")!
+
+        let imageA = NSImage(size: NSSize(width: 16, height: 16))
+        imageA.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        imageA.unlockFocus()
+        let imageB = NSImage(size: NSSize(width: 16, height: 16))
+        imageB.lockFocus()
+        NSColor.systemGreen.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        imageB.unlockFocus()
+
+        controller.setActiveWebApp(name: "ChatGPT", faviconURL: siteA)
+        XCTAssertEqual(completions.count, 1)
+        completions[0](imageA)
+        let imageAProjection = controller.debugStatusButtonImageTIFF
+
+        controller.setActiveWebApp(name: "ChatGPT", faviconURL: siteAPathChange)
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertEqual(
+            controller.debugSelectedFaviconOriginKey,
+            "https://chatgpt.com"
+        )
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, imageAProjection)
+
+        controller.setAttentionPresentation(readyCount: 2, floatTabsVisible: false)
+        controller.setActiveWebApp(name: "Docs", faviconURL: siteB)
+        XCTAssertEqual(completions.count, 2)
+        XCTAssertEqual(
+            controller.debugSelectedFaviconOriginKey,
+            "https://docs.example.test"
+        )
+        let crossOriginFallback = controller.debugStatusButtonImageTIFF
+
+        completions[0](imageA)
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, crossOriginFallback)
+        XCTAssertEqual(controller.attentionPresentation.badge, .count("2"))
+
+        completions[1](imageB)
+        XCTAssertNotEqual(controller.debugStatusButtonImageTIFF, crossOriginFallback)
+        XCTAssertEqual(controller.attentionPresentation.badge, .count("2"))
+    }
+
+    func testStatusItemProjectsCurrentFaviconInBothMenuBarDisplayModes() {
+        let suiteName = "FloatTabsTests.StatusItemController.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferencesStore = AppPreferencesStore(defaults: defaults)
+        var completion: ((NSImage?) -> Void)?
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            preferencesStore: preferencesStore,
+            faviconLoader: { _, handler in
+                completion = handler
+            }
+        )
+        let image = NSImage(size: NSSize(width: 16, height: 16))
+        image.lockFocus()
+        NSColor.systemOrange.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        image.unlockFocus()
+
+        controller.setActiveWebApp(
+            name: "Current Site",
+            faviconURL: URL(string: "https://current.example.test/path")!
+        )
+        completion?(image)
+        let currentImage = controller.debugStatusButtonImageTIFF
+
+        XCTAssertEqual(controller.debugStatusButtonTitle, "Current Site")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, currentImage)
+
+        preferencesStore.menuBarDisplayMode = .iconOnly
+
+        XCTAssertEqual(controller.debugStatusButtonTitle, "")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageOnly)
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, currentImage)
     }
 
     func testStatusItemRejectsStaleFaviconCompletionAfterSelectionChanges() {

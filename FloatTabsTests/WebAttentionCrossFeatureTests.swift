@@ -666,6 +666,88 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
     }
 
+    // MARK: 4.8 Current-site menu favicon projection
+
+    func testCommittedSiteFlowsThroughPanelToMenuAndSelectionUsesResidentCommit() throws {
+        let homeA = URL(string: "https://chatgpt.com/home")!
+        let committedA = URL(string: "https://chatgpt.com/chat-a")!
+        let homeB = URL(string: "https://docs.example.test/home")!
+        let committedB = URL(string: "https://docs.example.test/page-b")!
+        var committedURLs: [ObjectIdentifier: URL] = [:]
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                (name: "ChatA", url: homeA),
+                (name: "Docs", url: homeB)
+            ],
+            committedURLProvider: { webView in
+                committedURLs[ObjectIdentifier(webView)]
+            }
+        )
+        let statusItem = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            faviconLoader: { _, _ in }
+        )
+        controller.onSelectedSlotPresentationChange = { name, faviconURL in
+            statusItem.setActiveWebApp(name: name, faviconURL: faviconURL)
+        }
+        statusItem.setActiveWebApp(
+            name: controller.selectedSlotName,
+            faviconURL: controller.selectedSlotFaviconURL
+        )
+
+        let slotA = try profile(named: "ChatA", in: store)
+        XCTAssertTrue(store.select(id: slotA.id))
+        let webViewA = try XCTUnwrap(pool.existingWebView(for: slotA.id))
+        let homeAOrigin = try XCTUnwrap(StatusItemController.faviconOriginKey(for: homeA))
+        let committedAOrigin = try XCTUnwrap(StatusItemController.faviconOriginKey(for: committedA))
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeAOrigin)
+
+        // Provisional-style runtime changes do not enter the presentation route.
+        let observerA = try navigationObserver(of: webViewA)
+        observerA.webView(webViewA, didStartProvisionalNavigation: nil)
+        observerA.webView(
+            webViewA,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        )
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeAOrigin)
+
+        // A commit at the real WebKit delegate boundary drives the pool
+        // observer, PanelController's selected-only projection, and finally
+        // the real status item API. The provider supplies the committed
+        // history fact because headless loadHTMLString does not populate a
+        // WKBackForwardList item.
+        committedURLs[ObjectIdentifier(webViewA)] = committedA
+        observerA.webView(webViewA, didCommit: nil)
+        XCTAssertEqual(pool.committedURL(for: slotA.id), committedA)
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, committedAOrigin)
+        XCTAssertEqual(controller.selectedSlotFaviconURL, committedA)
+
+        store.updateCurrentURL(
+            id: slotA.id,
+            url: URL(string: "https://persisted.example.test/restore-only")!
+        )
+        XCTAssertEqual(controller.selectedSlotFaviconURL, committedA)
+
+        let slotB = try profile(named: "Docs", in: store)
+        let webViewB = try XCTUnwrap(pool.existingWebView(for: slotB.id))
+        let observerB = try navigationObserver(of: webViewB)
+        committedURLs[ObjectIdentifier(webViewB)] = committedB
+        observerB.webView(webViewB, didCommit: nil)
+        XCTAssertEqual(pool.committedURL(for: slotB.id), committedB)
+
+        // An inactive Slot's commit cannot hijack the selected menu item.
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, committedAOrigin)
+
+        XCTAssertTrue(store.select(id: slotB.id))
+        let committedBOrigin = try XCTUnwrap(StatusItemController.faviconOriginKey(for: committedB))
+        XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, committedBOrigin)
+        XCTAssertEqual(controller.selectedSlotFaviconURL, committedB)
+    }
+
     // MARK: 4.8 Provisional navigation completion visibility
 
     func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
@@ -991,10 +1073,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private func makeController(
         profiles: [(name: String, url: URL)]? = nil,
         store: TabStore? = nil,
-        attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator()
+        attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
+        committedURLProvider: WebViewPool.CommittedURLProvider? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
-        let pool = makePool()
+        let pool = makePool(committedURLProvider: committedURLProvider)
         let controller = PanelController(
             tabStore: tabStore,
             webViewPool: pool,
@@ -1019,11 +1102,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         return store
     }
 
-    private func makePool() -> WebViewPool {
+    private func makePool(
+        committedURLProvider: WebViewPool.CommittedURLProvider? = nil
+    ) -> WebViewPool {
         WebViewPool(
             onURLChange: { _, _ in },
             initialLoad: { _, _ in },
-            isSlotActive: { _ in false }
+            isSlotActive: { _ in false },
+            committedURLProvider: committedURLProvider
         )
     }
 

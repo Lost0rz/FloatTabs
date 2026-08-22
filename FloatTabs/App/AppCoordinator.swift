@@ -92,10 +92,10 @@ final class AppCoordinator {
         )
         statusItemController?.setActiveWebApp(
             name: panelController.selectedSlotName,
-            homeURL: panelController.selectedSlotHomeURL
+            faviconURL: panelController.selectedSlotFaviconURL
         )
-        panelController.onSelectedSlotPresentationChange = { [weak self] name, homeURL in
-            self?.statusItemController?.setActiveWebApp(name: name, homeURL: homeURL)
+        panelController.onSelectedSlotPresentationChange = { [weak self] name, faviconURL in
+            self?.statusItemController?.setActiveWebApp(name: name, faviconURL: faviconURL)
         }
         panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
             self?.statusItemController?.setAttentionPresentation(

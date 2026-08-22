@@ -118,8 +118,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.name
     }
 
-    var selectedSlotHomeURL: URL? {
-        tabStore.activeProfile?.homeURL
+    /// The menu bar favicon source is the selected Slot's committed site when
+    /// a resident WebView has one. Cold/no-commit Slots intentionally fall back
+    /// to their configured Home URL until WebKit reports a real commit.
+    var selectedSlotFaviconURL: URL? {
+        guard let activeProfile = tabStore.activeProfile else { return nil }
+        return faviconURL(for: activeProfile)
     }
 
     var attentionReadyCount: Int {
@@ -230,6 +234,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
             self?.handleAttentionObservation(slotID: slotID, observation: observation)
+        }
+        webViewPool.onCommittedURLChange = { [weak self] slotID, url in
+            self?.handleCommittedURLChange(slotID: slotID, url: url)
         }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
@@ -994,7 +1001,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
         synchronizeResidentIndicators()
-        onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
+        onSelectedSlotPresentationChange?(
+            activeProfile.name,
+            faviconURL(for: activeProfile)
+        )
 
         // The new WebView is now the physically current presentation; the
         // helper itself refuses to acknowledge while nothing is visible.
@@ -1004,6 +1014,19 @@ final class PanelController: NSObject, NSWindowDelegate {
            panel.isKeyWindow || sourceHostController.window.isKeyWindow {
             sourceHostController.orderFrontAndFocus(webView)
         }
+    }
+
+    private func faviconURL(for profile: WebAppProfile) -> URL? {
+        webViewPool.committedURL(for: profile.id) ?? profile.homeURL
+    }
+
+    private func handleCommittedURLChange(slotID: UUID, url: URL) {
+        guard tabStore.activeTabID == slotID,
+              let activeProfile = tabStore.activeProfile,
+              activeProfile.id == slotID else {
+            return
+        }
+        onSelectedSlotPresentationChange?(activeProfile.name, url)
     }
 
     private func synchronizeResidentIndicators() {
@@ -1750,7 +1773,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        onSelectedSlotPresentationChange?(activeProfile.name, activeProfile.homeURL)
+        onSelectedSlotPresentationChange?(
+            activeProfile.name,
+            faviconURL(for: activeProfile)
+        )
 
         // Selecting the fullscreen Slot only selects its rail identity. Its
         // WKWebView must remain exclusively owned by WebKit until restore.

@@ -32,6 +32,8 @@ final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
+    typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
@@ -47,10 +49,19 @@ final class WebViewPool {
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
 
+    /// Transient presentation seam for the selected Slot's committed
+    /// top-level URL. Persistence continues to use `onURLChange`; this route
+    /// exists only so presentation owners can project the current-site favicon.
+    var onCommittedURLChange: CommittedURLChangeHandler?
+
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
     private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
+    // Production leaves this nil and reads WKWebView history directly. The
+    // optional seam lets tests model a committed history item without network
+    // or WebKit process timing.
+    private let committedURLProvider: CommittedURLProvider?
 
     init(
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
@@ -58,12 +69,14 @@ final class WebViewPool {
             webView.load(request)
         },
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
-        downloadCoordinator: DownloadCoordinator? = nil
+        downloadCoordinator: DownloadCoordinator? = nil,
+        committedURLProvider: CommittedURLProvider? = nil
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
         self.isSlotActive = isSlotActive
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
+        self.committedURLProvider = committedURLProvider
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
@@ -113,6 +126,19 @@ final class WebViewPool {
 
     func existingWebView(for slotID: UUID) -> WKWebView? {
         webViews[slotID]
+    }
+
+    /// Returns the URL of the live WebKit history item that most recently
+    /// committed for this Slot. A persisted `currentURL` or a load request is
+    /// deliberately not considered committed presentation state.
+    func committedURL(for slotID: UUID) -> URL? {
+        guard let webView = webViews[slotID],
+              let url = committedURLProvider?(webView)
+                ?? webView.backForwardList.currentItem?.url,
+              WebAppURL.isSafe(url) else {
+            return nil
+        }
+        return url
     }
 
     /// Starts a FloatTabs-owned top-level navigation. HTTP fallback is opt-in
@@ -309,8 +335,17 @@ final class WebViewPool {
             onContentProcessTermination: { [weak self] slotID in
                 self?.handleContentProcessTermination(slotID: slotID)
             },
-            onNavigationCommit: { [weak attentionBridge] _ in
+            onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
                 attentionBridge?.handleRuntimeReplacement()
+                guard let committedURL = self.committedURL(for: slotID) else {
+                    return
+                }
+                self.onCommittedURLChange?(slotID, committedURL)
             }
         )
         let popupCoordinator = PopupCoordinator(
