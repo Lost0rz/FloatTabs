@@ -65,8 +65,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: tabs)
         window.title = "FloatTabs Settings"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 620, height: 520))
-        window.minSize = NSSize(width: 580, height: 460)
+        window.setContentSize(NSSize(width: 620, height: 580))
+        window.minSize = NSSize(width: 580, height: 500)
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -91,6 +91,12 @@ private final class AppearanceSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
     private let appearanceControl = NSSegmentedControl(
         labels: AppAppearanceMode.allCases.map(\.displayName),
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let menuBarDisplayControl = NSSegmentedControl(
+        labels: MenuBarDisplayMode.allCases.map(\.displayName),
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -131,6 +137,11 @@ private final class AppearanceSettingsViewController: NSViewController {
         appearanceControl.target = self
         appearanceControl.action = #selector(appearanceChanged(_:))
         appearanceControl.widthAnchor.constraint(equalToConstant: 250).isActive = true
+
+        menuBarDisplayControl.segmentStyle = .rounded
+        menuBarDisplayControl.target = self
+        menuBarDisplayControl.action = #selector(menuBarDisplayModeChanged(_:))
+        menuBarDisplayControl.widthAnchor.constraint(equalToConstant: 250).isActive = true
 
         let borderPalette = makeBorderPalette()
 
@@ -175,6 +186,12 @@ private final class AppearanceSettingsViewController: NSViewController {
             ),
             appearanceControl,
             Self.spacer(6),
+            Self.titleLabel("Menu Bar"),
+            Self.detailLabel(
+                "Choose whether the status item shows the current Web App name beside its favicon."
+            ),
+            menuBarDisplayControl,
+            Self.spacer(6),
             Self.titleLabel("Border Theme"),
             Self.detailLabel(
                 "Choose the outline directly. Rainbow keeps the animated outline; the final swatch is your custom color."
@@ -211,6 +228,11 @@ private final class AppearanceSettingsViewController: NSViewController {
     @objc private func appearanceChanged(_ sender: NSSegmentedControl) {
         guard AppAppearanceMode.allCases.indices.contains(sender.selectedSegment) else { return }
         preferencesStore.appearanceMode = AppAppearanceMode.allCases[sender.selectedSegment]
+    }
+
+    @objc private func menuBarDisplayModeChanged(_ sender: NSSegmentedControl) {
+        guard MenuBarDisplayMode.allCases.indices.contains(sender.selectedSegment) else { return }
+        preferencesStore.menuBarDisplayMode = MenuBarDisplayMode.allCases[sender.selectedSegment]
     }
 
     @objc private func borderThemeSwatchPressed(_ sender: BorderThemeSwatchButton) {
@@ -303,6 +325,9 @@ private final class AppearanceSettingsViewController: NSViewController {
     private func synchronizeControls() {
         appearanceControl.selectedSegment = AppAppearanceMode.allCases.firstIndex(
             of: preferencesStore.appearanceMode
+        ) ?? 0
+        menuBarDisplayControl.selectedSegment = MenuBarDisplayMode.allCases.firstIndex(
+            of: preferencesStore.menuBarDisplayMode
         ) ?? 0
         windowSizeControl.selectedSegment = PanelWindowSizeMode.allCases.firstIndex(
             of: preferencesStore.windowSizeMode

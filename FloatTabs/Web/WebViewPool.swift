@@ -18,9 +18,7 @@ enum SiteCompatibilityPolicy {
 
     private static func requiresDesktopPointerIdentity(for url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
-        return host == "chatgpt.com"
-            || host.hasSuffix(".chatgpt.com")
-            || host == "chat.openai.com"
+        return ChatGPTSitePolicy.isSupportedHost(host)
     }
 }
 
@@ -33,20 +31,37 @@ enum WebContentRecoveryDisposition: Equatable {
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
+    typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
+    typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
+    private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
 
     var onResidentSetChange: (() -> Void)?
 
+    /// Transient normalized-observation seam for later stages. The pool keeps
+    /// no attention state here and assigns no visibility meaning.
+    var onAttentionObservation: AttentionObservationHandler?
+
+    /// Transient presentation seam for the selected Slot's committed
+    /// top-level URL. Persistence continues to use `onURLChange`; this route
+    /// exists only so presentation owners can project the current-site favicon.
+    var onCommittedURLChange: CommittedURLChangeHandler?
+
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
     private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
+    // Production leaves this nil and reads WKWebView history directly. The
+    // optional seam lets tests model a committed history item without network
+    // or WebKit process timing.
+    private let committedURLProvider: CommittedURLProvider?
 
     init(
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
@@ -54,12 +69,14 @@ final class WebViewPool {
             webView.load(request)
         },
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
-        downloadCoordinator: DownloadCoordinator? = nil
+        downloadCoordinator: DownloadCoordinator? = nil,
+        committedURLProvider: CommittedURLProvider? = nil
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
         self.isSlotActive = isSlotActive
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
+        self.committedURLProvider = committedURLProvider
     }
 
     func webView(for profile: WebAppProfile) -> WKWebView {
@@ -111,6 +128,19 @@ final class WebViewPool {
         webViews[slotID]
     }
 
+    /// Returns the URL of the live WebKit history item that most recently
+    /// committed for this Slot. A persisted `currentURL` or a load request is
+    /// deliberately not considered committed presentation state.
+    func committedURL(for slotID: UUID) -> URL? {
+        guard let webView = webViews[slotID],
+              let url = committedURLProvider?(webView)
+                ?? webView.backForwardList.currentItem?.url,
+              WebAppURL.isSafe(url) else {
+            return nil
+        }
+        return url
+    }
+
     /// Starts a FloatTabs-owned top-level navigation. HTTP fallback is opt-in
     /// and must come from raw user-entry provenance; the default is deliberately
     /// false so page-derived URLs, explicit HTTPS, redirects, and ordinary
@@ -151,6 +181,9 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
+        // The bridge dies with its WKWebView: invalidate it first so no stale
+        // callback can arrive after the runtime is dropped.
+        invalidateAttentionBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -185,6 +218,12 @@ final class WebViewPool {
         webViews[slotID] != nil
     }
 
+    /// Read-only access to the Slot's live bridge. Diagnostic/test seam for
+    /// bridge lifetime ownership; no attention state lives in the pool.
+    func attentionBridge(for slotID: UUID) -> ChatGPTAttentionBridge? {
+        attentionBridges[slotID]
+    }
+
     var count: Int {
         webViews.count
     }
@@ -199,6 +238,11 @@ final class WebViewPool {
 
     func handleContentProcessTermination(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
+
+        // The terminated runtime is authoritatively replaced: reset its
+        // attention runtime before the existing recovery policy proceeds. The
+        // bridge installation itself stays usable for the recovered document.
+        attentionBridges[slotID]?.handleRuntimeReplacement()
 
         switch Self.recoveryDisposition(isActive: isSlotActive(slotID)) {
         case .reloadNow:
@@ -233,6 +277,7 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL
     ) -> WKWebView {
+        invalidateAttentionBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
@@ -264,7 +309,19 @@ final class WebViewPool {
             for: rendering,
             navigationURL: navigationURL
         )
-        let webView = WebViewFactory.makeWebView(renderingProfile: runtimeRendering)
+        // The bridge exists before its WKWebView: the Factory invokes
+        // `install(into:)` on the pre-creation user content controller so the
+        // document-start script is present for the very first load.
+        let attentionBridge = ChatGPTAttentionBridge(slotID: profile.id) { [weak self] slotID, observation in
+            self?.onAttentionObservation?(slotID, observation)
+        }
+        let webView = WebViewFactory.makeWebView(
+            renderingProfile: runtimeRendering,
+            configureUserContentController: { userContentController in
+                attentionBridge.install(into: userContentController)
+            }
+        )
+        attentionBridge.attach(to: webView)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
@@ -277,6 +334,51 @@ final class WebViewPool {
             },
             onContentProcessTermination: { [weak self] slotID in
                 self?.handleContentProcessTermination(slotID: slotID)
+            },
+            onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID, commitURL in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                let committedURL = self.committedURL(for: slotID)
+                attentionBridge?.cancelInstantBackHandoff()
+                attentionBridge?.handleRuntimeReplacement(committedURL: commitURL)
+                guard let committedURL else {
+                    return
+                }
+                self.onCommittedURLChange?(slotID, committedURL)
+            },
+            onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                attentionBridge?.beginInstantBackHandoff(targetURL: targetURL)
+            },
+            onInstantBackCancellation: { [weak self, weak attentionBridge, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                attentionBridge?.cancelInstantBackHandoff()
+            },
+            onInstantBackActivation: { [weak self, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                self.attentionBridges[slotID]?.confirmInstantBackHandoff()
+                // Confirmed Instant Back resets and resyncs through the bridge
+                // handoff, but it must not reuse ordinary didCommit projection
+                // semantics or create a duplicate replacement boundary.
+                guard let committedURL = self.committedURL(for: slotID) else {
+                    return
+                }
+                self.onCommittedURLChange?(slotID, committedURL)
             }
         )
         let popupCoordinator = PopupCoordinator(
@@ -289,6 +391,7 @@ final class WebViewPool {
         webViews[profile.id] = webView
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
+        attentionBridges[profile.id] = attentionBridge
 
         // A recreated runtime may inherit `currentURL` from arbitrary page
         // navigation. Only the configured Home URL can reuse persisted entry
@@ -344,6 +447,14 @@ final class WebViewPool {
             cachePolicy: .useProtocolCachePolicy,
             timeoutInterval: 60
         )
+    }
+
+    /// Kills a Slot's bridge before its WKWebView is dropped or replaced:
+    /// removes the handler, rejects later callbacks, forwards the reset
+    /// boundary, and clears pool ownership.
+    private func invalidateAttentionBridge(slotID: UUID) {
+        guard let bridge = attentionBridges.removeValue(forKey: slotID) else { return }
+        bridge.invalidate()
     }
 
     private func discardPopupCoordinator(slotID: UUID) {

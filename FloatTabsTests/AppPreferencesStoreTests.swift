@@ -30,6 +30,47 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(store.appearanceMode, .system)
     }
 
+    func testMenuBarDisplayModeDefaultsToIconAndName() {
+        XCTAssertEqual(
+            AppPreferencesStore(defaults: defaults).menuBarDisplayMode,
+            .iconAndName
+        )
+    }
+
+    func testMenuBarDisplayModePersistsAcrossStoreInstances() {
+        let first = AppPreferencesStore(defaults: defaults)
+        first.menuBarDisplayMode = .iconOnly
+
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(second.menuBarDisplayMode, .iconOnly)
+
+        second.menuBarDisplayMode = .iconAndName
+        XCTAssertEqual(
+            AppPreferencesStore(defaults: defaults).menuBarDisplayMode,
+            .iconAndName
+        )
+    }
+
+    func testUnknownMenuBarDisplayModeFallsBackToIconAndName() {
+        defaults.set("future-value", forKey: AppPreferencesStore.menuBarDisplayModeKey)
+
+        XCTAssertEqual(
+            AppPreferencesStore(defaults: defaults).menuBarDisplayMode,
+            .iconAndName
+        )
+    }
+
+    func testMenuBarDisplayModeDoesNotAlterUnrelatedPreferences() {
+        let store = AppPreferencesStore(defaults: defaults)
+        store.appearanceMode = .dark
+        store.isTabRailCollapsed = true
+
+        store.menuBarDisplayMode = .iconOnly
+
+        XCTAssertEqual(store.appearanceMode, .dark)
+        XCTAssertTrue(store.isTabRailCollapsed)
+    }
+
     func testTabRailCollapseDefaultsExpandedAndPersists() {
         let first = AppPreferencesStore(defaults: defaults)
         XCTAssertFalse(first.isTabRailCollapsed)

@@ -49,9 +49,14 @@ final class AppCoordinator {
                     tabStore.activeTabID == slotID
                 }
             )
+            // Exactly one runtime attention authority for the whole app,
+            // injected into the presentation owner. AppCoordinator itself
+            // never routes provider observations.
+            let attentionCoordinator = WebAttentionCoordinator()
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool,
+                attentionCoordinator: attentionCoordinator,
                 preferencesStore: resolvedPreferencesStore
             )
         }
@@ -82,15 +87,26 @@ final class AppCoordinator {
             },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onSettings: { [weak self] in self?.showGlobalSettings() },
-            onQuit: { NSApp.terminate(nil) }
+            onQuit: { NSApp.terminate(nil) },
+            preferencesStore: preferencesStore
         )
         statusItemController?.setActiveWebApp(
             name: panelController.selectedSlotName,
-            homeURL: panelController.selectedSlotHomeURL
+            faviconURL: panelController.selectedSlotFaviconURL
         )
-        panelController.onSelectedSlotPresentationChange = { [weak self] name, homeURL in
-            self?.statusItemController?.setActiveWebApp(name: name, homeURL: homeURL)
+        panelController.onSelectedSlotPresentationChange = { [weak self] name, faviconURL in
+            self?.statusItemController?.setActiveWebApp(name: name, faviconURL: faviconURL)
         }
+        panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
+            self?.statusItemController?.setAttentionPresentation(
+                readyCount: readyCount,
+                floatTabsVisible: floatTabsVisible
+            )
+        }
+        statusItemController?.setAttentionPresentation(
+            readyCount: panelController.attentionReadyCount,
+            floatTabsVisible: panelController.isVisible
+        )
 
         globalHotkeyController = GlobalHotkeyController(
             onToggle: { [weak self] in self?.toggleFloatTabs() }
@@ -334,7 +350,8 @@ final class AppCoordinator {
                 customBorderColorHex: preferencesStore.customBorderColorHex,
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
                 fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
-                isTabRailCollapsed: preferencesStore.isTabRailCollapsed
+                isTabRailCollapsed: preferencesStore.isTabRailCollapsed,
+                menuBarDisplayMode: preferencesStore.menuBarDisplayMode
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -361,6 +378,8 @@ final class AppCoordinator {
         preferencesStore.customBorderColorHex = imported.globalPreferences.customBorderColorHex
             ?? AppPreferencesStore.defaultCustomBorderColorHex
         preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
+        preferencesStore.menuBarDisplayMode =
+            imported.globalPreferences.resolvedMenuBarDisplayMode
         if let width = imported.globalPreferences.fixedViewportWidth,
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)

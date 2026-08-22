@@ -13,6 +13,11 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let fixedViewportWidth: Double?
     let fixedViewportHeight: Double?
     let isTabRailCollapsed: Bool?
+    let menuBarDisplayMode: MenuBarDisplayMode?
+
+    var resolvedMenuBarDisplayMode: MenuBarDisplayMode {
+        menuBarDisplayMode ?? .iconAndName
+    }
 
     init(
         appearanceMode: AppAppearanceMode,
@@ -21,7 +26,8 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         customBorderColorHex: String? = nil,
         fixedViewportWidth: Double? = nil,
         fixedViewportHeight: Double? = nil,
-        isTabRailCollapsed: Bool? = nil
+        isTabRailCollapsed: Bool? = nil,
+        menuBarDisplayMode: MenuBarDisplayMode? = nil
     ) {
         self.appearanceMode = appearanceMode
         self.followPreferredSize = followPreferredSize
@@ -30,6 +36,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.fixedViewportWidth = fixedViewportWidth
         self.fixedViewportHeight = fixedViewportHeight
         self.isTabRailCollapsed = isTabRailCollapsed
+        self.menuBarDisplayMode = menuBarDisplayMode
     }
 }
 
