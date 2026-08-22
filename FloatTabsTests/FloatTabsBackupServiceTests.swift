@@ -34,7 +34,8 @@ final class FloatTabsBackupServiceTests: XCTestCase {
                 followPreferredSize: false,
                 borderTheme: .green,
                 customBorderColorHex: "#123456FF",
-                isTabRailCollapsed: true
+                isTabRailCollapsed: true,
+                menuBarDisplayMode: .iconOnly
             ),
             globalShowHideShortcut: FloatTabsBackupShortcut(
                 carbonKeyCode: 50,
@@ -54,7 +55,90 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.globalPreferences.borderTheme, .green)
         XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
         XCTAssertEqual(decoded.globalPreferences.isTabRailCollapsed, true)
+        XCTAssertEqual(decoded.globalPreferences.menuBarDisplayMode, .iconOnly)
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
+    }
+
+    func testBackupDocumentRoundTripsIconAndNameMenuBarPreference() throws {
+        let document = FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: Date(timeIntervalSince1970: 300),
+            sourceAppVersion: "0.1.0",
+            sourceBuild: "1",
+            webAppState: .empty,
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: .system,
+                followPreferredSize: true,
+                menuBarDisplayMode: .iconAndName
+            ),
+            globalShowHideShortcut: nil
+        )
+
+        let service = FloatTabsBackupService()
+        let decoded = try service.decode(service.encode(document))
+
+        XCTAssertEqual(decoded.globalPreferences.menuBarDisplayMode, .iconAndName)
+        XCTAssertEqual(FloatTabsBackupDocument.currentSchemaVersion, 1)
+    }
+
+    func testOldBackupWithoutMenuBarDisplayModeDecodesAndResolvesHistoricalDefault() throws {
+        let document = FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: Date(timeIntervalSince1970: 300),
+            sourceAppVersion: "0.1.0",
+            sourceBuild: "1",
+            webAppState: .empty,
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: .system,
+                followPreferredSize: true,
+                menuBarDisplayMode: .iconOnly
+            ),
+            globalShowHideShortcut: nil
+        )
+        let service = FloatTabsBackupService()
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: service.encode(document))
+                as? [String: Any]
+        )
+        var preferences = try XCTUnwrap(object["globalPreferences"] as? [String: Any])
+        preferences.removeValue(forKey: "menuBarDisplayMode")
+        var oldObject = object
+        oldObject["globalPreferences"] = preferences
+        let oldData = try JSONSerialization.data(withJSONObject: oldObject)
+
+        let decoded = try service.decode(oldData)
+
+        XCTAssertNil(decoded.globalPreferences.menuBarDisplayMode)
+        XCTAssertEqual(
+            decoded.globalPreferences.resolvedMenuBarDisplayMode,
+            .iconAndName
+        )
+    }
+
+    func testNewIconOnlyBackupDecodesWithoutAttentionState() throws {
+        let document = FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: Date(),
+            sourceAppVersion: "0.1.0",
+            sourceBuild: "1",
+            webAppState: .empty,
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: .system,
+                followPreferredSize: true,
+                menuBarDisplayMode: .iconOnly
+            ),
+            globalShowHideShortcut: nil
+        )
+        let service = FloatTabsBackupService()
+        let data = try service.encode(document)
+        let json = String(decoding: data, as: UTF8.self)
+
+        XCTAssertEqual(
+            try service.decode(data).globalPreferences.resolvedMenuBarDisplayMode,
+            .iconOnly
+        )
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("ready"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("generating"))
     }
 
     func testUnsupportedBackupSchemaIsRejected() throws {

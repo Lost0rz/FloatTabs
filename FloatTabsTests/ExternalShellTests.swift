@@ -1055,6 +1055,82 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(StatusItemController.displayTitle(for: nil), "FloatTabs")
     }
 
+    func testStatusItemMenuBarDisplayModesSwitchTitleAndReclaimWidth() {
+        XCTAssertEqual(
+            StatusItemController.displayTitle(
+                for: "ChatGPT",
+                displayMode: .iconAndName
+            ),
+            "ChatGPT"
+        )
+        XCTAssertEqual(
+            StatusItemController.displayTitle(
+                for: "ChatGPT",
+                displayMode: .iconOnly
+            ),
+            ""
+        )
+        XCTAssertEqual(
+            StatusItemController.displayTitle(
+                for: nil,
+                displayMode: .iconAndName
+            ),
+            "FloatTabs"
+        )
+        XCTAssertEqual(
+            StatusItemController.displayTitle(
+                for: nil,
+                displayMode: .iconOnly
+            ),
+            ""
+        )
+        XCTAssertEqual(
+            StatusItemController.imagePosition(for: .iconAndName),
+            .imageLeading
+        )
+        XCTAssertEqual(
+            StatusItemController.imagePosition(for: .iconOnly),
+            .imageOnly
+        )
+    }
+
+    func testStatusItemModeSwitchPreservesFaviconAndAttentionRendering() {
+        let favicon = NSImage(size: NSSize(width: 16, height: 16))
+        favicon.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        favicon.unlockFocus()
+        let attention = StatusItemController.attentionPresentation(
+            readyCount: 3,
+            floatTabsVisible: false
+        )
+
+        XCTAssertEqual(attention.badge, .count("3"))
+        XCTAssertEqual(
+            StatusItemController.renderStatusImage(favicon: favicon, attention: attention).tiffRepresentation,
+            StatusItemController.renderStatusImage(favicon: favicon, attention: attention).tiffRepresentation
+        )
+        XCTAssertEqual(
+            StatusItemController.faviconOriginKey(for: URL(string: "https://chatgpt.com/c/1")),
+            "https://chatgpt.com"
+        )
+    }
+
+    func testStatusItemRejectsStaleFaviconCompletionAfterSelectionChanges() {
+        XCTAssertFalse(
+            StatusItemController.acceptsFaviconCompletion(
+                selectedOriginKey: "https://docs.example",
+                completionOriginKey: "https://chatgpt.com"
+            )
+        )
+        XCTAssertTrue(
+            StatusItemController.acceptsFaviconCompletion(
+                selectedOriginKey: "https://chatgpt.com",
+                completionOriginKey: "https://chatgpt.com"
+            )
+        )
+    }
+
     func testStatusItemAttentionHidesAggregateWhileFloatTabsIsVisible() {
         for readyCount in [0, 1, 5] {
             let presentation = StatusItemController.attentionPresentation(

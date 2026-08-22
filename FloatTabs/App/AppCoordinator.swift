@@ -87,7 +87,8 @@ final class AppCoordinator {
             },
             isVisible: { [weak self] in self?.panelController.isVisible ?? false },
             onSettings: { [weak self] in self?.showGlobalSettings() },
-            onQuit: { NSApp.terminate(nil) }
+            onQuit: { NSApp.terminate(nil) },
+            preferencesStore: preferencesStore
         )
         statusItemController?.setActiveWebApp(
             name: panelController.selectedSlotName,
@@ -349,7 +350,8 @@ final class AppCoordinator {
                 customBorderColorHex: preferencesStore.customBorderColorHex,
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
                 fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
-                isTabRailCollapsed: preferencesStore.isTabRailCollapsed
+                isTabRailCollapsed: preferencesStore.isTabRailCollapsed,
+                menuBarDisplayMode: preferencesStore.menuBarDisplayMode
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -376,6 +378,8 @@ final class AppCoordinator {
         preferencesStore.customBorderColorHex = imported.globalPreferences.customBorderColorHex
             ?? AppPreferencesStore.defaultCustomBorderColorHex
         preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
+        preferencesStore.menuBarDisplayMode =
+            imported.globalPreferences.resolvedMenuBarDisplayMode
         if let width = imported.globalPreferences.fixedViewportWidth,
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)

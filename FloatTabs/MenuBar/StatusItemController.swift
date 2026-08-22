@@ -62,8 +62,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
     private let onQuit: () -> Void
+    private let preferencesStore: AppPreferencesStore
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
+    private var latestActiveWebAppName: String?
     private(set) var attentionPresentation = StatusItemAttentionPresentation.resolve(
         readyCount: 0,
         floatTabsVisible: false
@@ -87,18 +89,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         onWillShow: @escaping () -> Void = {},
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
-        onQuit: @escaping () -> Void
+        onQuit: @escaping () -> Void,
+        preferencesStore: AppPreferencesStore = AppPreferencesStore()
     ) {
         self.onToggle = onToggle
         self.onWillShow = onWillShow
         self.isVisible = isVisible
         self.onSettings = onSettings
         self.onQuit = onQuit
+        self.preferencesStore = preferencesStore
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         super.init()
         configureStatusItem()
         configureMenu()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(menuBarDisplayModeDidChange(_:)),
+            name: .floatTabsMenuBarDisplayModeDidChange,
+            object: preferencesStore
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .floatTabsMenuBarDisplayModeDidChange,
+            object: preferencesStore
+        )
     }
 
     static func displayTitle(for activeWebAppName: String?) -> String {
@@ -106,14 +124,35 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return value.isEmpty ? "FloatTabs" : value
     }
 
+    static func displayTitle(
+        for activeWebAppName: String?,
+        displayMode: MenuBarDisplayMode
+    ) -> String {
+        guard displayMode == .iconAndName else { return "" }
+        return displayTitle(for: activeWebAppName)
+    }
+
+    static func imagePosition(for displayMode: MenuBarDisplayMode) -> NSControl.ImagePosition {
+        displayMode == .iconOnly ? .imageOnly : .imageLeading
+    }
+
     static func faviconOriginKey(for activeWebAppURL: URL?) -> String? {
         activeWebAppURL.flatMap(WebsiteFaviconProvider.originKey(for:))
     }
 
+    static func acceptsFaviconCompletion(
+        selectedOriginKey: String?,
+        completionOriginKey: String
+    ) -> Bool {
+        selectedOriginKey == completionOriginKey
+    }
+
     func setActiveWebApp(name: String?, homeURL: URL?) {
-        guard let button = statusItem.button else { return }
-        button.title = Self.displayTitle(for: name)
-        button.toolTip = name.map { "Current Web App · \($0)" } ?? "FloatTabs"
+        latestActiveWebAppName = name
+        if let button = statusItem.button {
+            button.toolTip = name.map { "Current Web App · \($0)" } ?? "FloatTabs"
+            applyMenuBarDisplayMode(to: button)
+        }
 
         guard let homeURL,
               let originKey = Self.faviconOriginKey(for: homeURL) else {
@@ -131,7 +170,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         redrawStatusImage()
         WebsiteFaviconProvider.shared.load(for: homeURL) { [weak self] image in
             guard let self,
-                  self.selectedFaviconOriginKey == originKey else { return }
+                  Self.acceptsFaviconCompletion(
+                      selectedOriginKey: self.selectedFaviconOriginKey,
+                      completionOriginKey: originKey
+                  ) else { return }
             self.applyStatusImage(image)
         }
     }
@@ -196,9 +238,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             favicon: nil,
             attention: attentionPresentation
         )
-        button.imagePosition = .imageLeading
+        applyMenuBarDisplayMode(to: button)
         button.imageScaling = .scaleProportionallyDown
-        button.title = Self.displayTitle(for: nil)
         button.target = self
         button.action = #selector(statusItemClicked(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -214,6 +255,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             favicon: selectedFaviconImage,
             attention: attentionPresentation
         )
+    }
+
+    private func applyMenuBarDisplayMode(to button: NSStatusBarButton) {
+        let mode = preferencesStore.menuBarDisplayMode
+        button.imagePosition = Self.imagePosition(for: mode)
+        button.title = Self.displayTitle(
+            for: latestActiveWebAppName,
+            displayMode: mode
+        )
+    }
+
+    @objc private func menuBarDisplayModeDidChange(_ notification: Notification) {
+        guard let button = statusItem.button else { return }
+        applyMenuBarDisplayMode(to: button)
     }
 
     private static func fallbackImage() -> NSImage? {

@@ -1,5 +1,17 @@
 import AppKit
 
+enum MenuBarDisplayMode: String, CaseIterable, Equatable, Codable {
+    case iconAndName
+    case iconOnly
+
+    var displayName: String {
+        switch self {
+        case .iconAndName: return "Icon + Name"
+        case .iconOnly: return "Icon Only"
+        }
+    }
+}
+
 enum AppAppearanceMode: String, CaseIterable, Equatable, Codable {
     case system
     case light
@@ -92,6 +104,9 @@ extension Notification.Name {
     static let floatTabsFixedWindowSizeDidChange = Notification.Name(
         "FloatTabs.fixedWindowSizeDidChange"
     )
+    static let floatTabsMenuBarDisplayModeDidChange = Notification.Name(
+        "FloatTabs.menuBarDisplayModeDidChange"
+    )
 }
 
 @MainActor
@@ -103,6 +118,7 @@ final class AppPreferencesStore {
     static let railCollapsedKey = "FloatTabs.railCollapsed"
     static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
     static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
+    static let menuBarDisplayModeKey = "FloatTabs.menuBarDisplayMode"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -124,6 +140,24 @@ final class AppPreferencesStore {
         set {
             defaults.set(newValue.rawValue, forKey: Self.appearanceKey)
             applyAppearance(newValue)
+        }
+    }
+
+    var menuBarDisplayMode: MenuBarDisplayMode {
+        get {
+            guard let raw = defaults.string(forKey: Self.menuBarDisplayModeKey),
+                  let mode = MenuBarDisplayMode(rawValue: raw) else {
+                return .iconAndName
+            }
+            return mode
+        }
+        set {
+            guard newValue != menuBarDisplayMode else { return }
+            defaults.set(newValue.rawValue, forKey: Self.menuBarDisplayModeKey)
+            NotificationCenter.default.post(
+                name: .floatTabsMenuBarDisplayModeDidChange,
+                object: self
+            )
         }
     }
 
