@@ -56,6 +56,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptState(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertEqual(controller.attentionReadyCount, 0)
+
+        // A later completion while still unseen must create a fresh Ready
+        // cycle rather than any historical notification count.
+        acceptState(generating: false, bridge: bridge, webView: webView)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertEqual(controller.attentionReadyCount, 1)
+        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
     }
 
     // MARK: 4.5 Selected-hidden completion
@@ -389,6 +397,108 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
         XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
+    }
+
+    func testPinnedInactiveCompletionStaysReadyUntilInteractionReturns() {
+        let coordinator = WebAttentionCoordinator()
+        let slot = UUID()
+        let pinnedInactive = AttentionPresentation.Facts(
+            slotID: slot,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: false
+        )
+        let activePresentation = AttentionPresentation.Facts(
+            slotID: slot,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
+        )
+        let router = WebAttentionObservationRouter(
+            attentionCoordinator: coordinator,
+            isUserVisible: { _ in
+                AttentionPresentation.isUserVisible(pinnedInactive)
+            }
+        )
+
+        // Physical visibility from pinning is not enough to resolve the
+        // completion to Idle; the completion-time interaction fact is false.
+        router.handle(.generationStarted, for: slot)
+        router.handle(.generationFinished, for: slot)
+        XCTAssertEqual(coordinator.state(for: slot), .ready)
+        XCTAssertTrue(coordinator.isAttentionProtected(slot))
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: coordinator.readySlotIDs.count,
+                floatTabsVisible: true
+            ).badge,
+            .none
+        )
+
+        // Returning to the same selected Web presentation acknowledges the
+        // existing Ready state without a tab switch.
+        coordinator.acknowledge(
+            slotID: slot,
+            userVisible: AttentionPresentation.isUserVisible(activePresentation)
+        )
+        XCTAssertEqual(coordinator.state(for: slot), .idle)
+        XCTAssertFalse(coordinator.isAttentionProtected(slot))
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+    }
+
+    func testMultipleReadySlotsKeepDerivedAggregateThroughIndependentAcknowledgements() {
+        let coordinator = WebAttentionCoordinator()
+        let slotIDs = [UUID(), UUID(), UUID()]
+        let hiddenRouter = WebAttentionObservationRouter(
+            attentionCoordinator: coordinator,
+            isUserVisible: { _ in false }
+        )
+
+        for slotID in slotIDs {
+            hiddenRouter.handle(.generationStarted, for: slotID)
+            hiddenRouter.handle(.generationFinished, for: slotID)
+        }
+
+        XCTAssertEqual(coordinator.readySlotIDs, Set(slotIDs))
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: coordinator.readySlotIDs.count,
+                floatTabsVisible: false
+            ).badge,
+            .count("3")
+        )
+
+        coordinator.acknowledge(slotID: slotIDs[0], userVisible: true)
+        XCTAssertEqual(coordinator.readySlotIDs, Set(slotIDs.dropFirst()))
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: coordinator.readySlotIDs.count,
+                floatTabsVisible: false
+            ).badge,
+            .count("2")
+        )
+
+        coordinator.acknowledge(slotID: slotIDs[1], userVisible: true)
+        XCTAssertEqual(coordinator.readySlotIDs, [slotIDs[2]])
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: coordinator.readySlotIDs.count,
+                floatTabsVisible: false
+            ).badge,
+            .dot
+        )
+
+        coordinator.acknowledge(slotID: slotIDs[2], userVisible: true)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertEqual(
+            StatusItemController.attentionPresentation(
+                readyCount: coordinator.readySlotIDs.count,
+                floatTabsVisible: false
+            ).badge,
+            .none
+        )
     }
 
     func testUnrelatedFloatTabsKeyWindowDoesNotAcknowledgeReady() throws {
