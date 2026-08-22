@@ -427,11 +427,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
         switch documentAdmission {
         case .unsupportedCurrentDocument, .awaitingAuthorizedResync:
-            // After confirmed history activation, only the direct result from
-            // the actual current WebView may open the fresh epoch. An
-            // unsupported current document is closed permanently until a
-            // later supported commit. Natural or stale script messages are
-            // intentionally silent in both states.
+            // After a confirmed current-document boundary, only the direct
+            // result from the actual current WebView may open the fresh epoch.
+            // Unsupported documents stay closed until a later supported commit.
+            // Natural or stale script messages are silent in both states.
             return
         case .awaitingSupportedBaseline, .activeSupportedDocument:
             break
@@ -453,10 +452,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
         switch documentAdmission {
         case .awaitingSupportedBaseline:
-            // Only a document's own baseline report may open an epoch: the
-            // document-start script's first message and a pageshow re-report
-            // both carry the baseline kind, while a late `state` message from
-            // a superseded document must never re-baseline.
+            // This path is reserved for boundaries that cannot identify a
+            // committed document (initial/test seams and runtime recovery).
+            // Ordinary supported didCommit uses authorized current-document
+            // resync instead, so a stale baseline cannot claim the new epoch.
             guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
             document = DocumentSession(token: payload.token)
             documentAdmission = .activeSupportedDocument
@@ -517,30 +516,34 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         requestCurrentDocumentResync()
     }
 
-    /// The runtime was authoritatively replaced — a new top-level document
-    /// committed or the WebContent process terminated. Forward one reset
-    /// boundary for the old runtime, clear the accepted document epoch, and
-    /// wait for the new document's baseline. The installation itself stays
-    /// usable for the recovered/replacement document.
+    /// The runtime was authoritatively replaced without a committed URL — for
+    /// example, the WebContent process terminated. Forward one reset boundary,
+    /// clear the old document epoch, and wait for the recovered document's
+    /// natural baseline. Ordinary didCommit uses the URL-aware overload below.
     func handleRuntimeReplacement() {
         resetRuntime(admission: .awaitingSupportedBaseline)
     }
 
     /// The ordinary didCommit boundary supplies the actual committed/current
     /// WebKit URL before any presentation callback or persisted URL can be
-    /// consulted. A nil URL is unknown rather than proof of an unsupported
-    /// document, preserving the bridge's initial-load test seam; an explicit
-    /// non-ChatGPT URL closes admission.
+    /// consulted. A supported commit closes natural baseline admission first,
+    /// then asks the actual current WKWebView for its token-bearing baseline;
+    /// this prevents an in-flight same-origin baseline from the replaced
+    /// document from claiming the new epoch. A nil URL remains an unknown/test
+    /// seam and therefore preserves natural-baseline recovery semantics.
     func handleRuntimeReplacement(committedURL: URL?) {
-        let admission: DocumentAdmission
-        if let committedURL {
-            admission = ChatGPTSitePolicy.isSupportedChatGPTURL(committedURL)
-                ? .awaitingSupportedBaseline
-                : .unsupportedCurrentDocument
-        } else {
-            admission = .awaitingSupportedBaseline
+        guard let committedURL else {
+            resetRuntime(admission: .awaitingSupportedBaseline)
+            return
         }
-        resetRuntime(admission: admission)
+
+        guard ChatGPTSitePolicy.isSupportedChatGPTURL(committedURL) else {
+            resetRuntime(admission: .unsupportedCurrentDocument)
+            return
+        }
+
+        resetRuntime(admission: .awaitingAuthorizedResync)
+        requestCurrentDocumentResync()
     }
 
     private func resetRuntime(admission: DocumentAdmission) {
