@@ -13,6 +13,7 @@ final class AppCoordinator {
     private let profileRepository: ProfileRepository?
     private var globalSettingsController: GlobalSettingsController?
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
+    private var lastAttentionReadyCount = 0
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -97,8 +98,17 @@ final class AppCoordinator {
         panelController.onSelectedSlotPresentationChange = { [weak self] name, faviconURL in
             self?.statusItemController?.setActiveWebApp(name: name, faviconURL: faviconURL)
         }
+        lastAttentionReadyCount = max(0, panelController.attentionReadyCount)
         panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
-            self?.statusItemController?.setAttentionPresentation(
+            guard let self else { return }
+            if Self.shouldPlayAttentionReadySound(
+                previousReadyCount: self.lastAttentionReadyCount,
+                currentReadyCount: readyCount
+            ) {
+                Self.playAttentionReadySound()
+            }
+            self.lastAttentionReadyCount = max(0, readyCount)
+            self.statusItemController?.setAttentionPresentation(
                 readyCount: readyCount,
                 floatTabsVisible: floatTabsVisible
             )
@@ -151,6 +161,13 @@ final class AppCoordinator {
         // Start Empty after a corrupt store, keep the previous automatic backup
         // until a new Web App configuration actually exists.
         writeAutomaticVersionSnapshotIfSafe()
+    }
+
+    nonisolated static func shouldPlayAttentionReadySound(
+        previousReadyCount: Int,
+        currentReadyCount: Int
+    ) -> Bool {
+        max(0, currentReadyCount) > max(0, previousReadyCount)
     }
 
 #if DEBUG
@@ -407,6 +424,14 @@ final class AppCoordinator {
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()
+        }
+    }
+
+    private static func playAttentionReadySound() {
+        if let sound = NSSound(named: NSSound.Name("Ping")) {
+            sound.play()
+        } else {
+            NSSound.beep()
         }
     }
 
