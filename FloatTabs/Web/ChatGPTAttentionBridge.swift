@@ -275,8 +275,18 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           });
 
           globalThis.__floatTabsAttentionResyncV1 = () => {
-            lastSent = null;
-            schedule();
+            const generating = isGenerating();
+            // The explicit resync returns the identity-bearing baseline to
+            // native code directly. Keep the detector coalescer aligned so a
+            // queued pageshow/mutation evaluation cannot create duplicate
+            // native traffic for this same state.
+            lastSent = generating;
+            return {
+              version: 1,
+              kind: "baseline",
+              token: TOKEN,
+              generating: generating
+            };
           };
         })();
         """
@@ -294,6 +304,14 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let shouldResyncCurrentDocument: Bool
     }
 
+    private struct PendingCurrentDocumentResync {
+        let generation: UInt64
+        let attempt: Int
+        let webViewIdentity: ObjectIdentifier
+    }
+
+    private static let resyncAttemptLimit = 2
+
     let slotID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     private weak var webView: WKWebView?
@@ -303,6 +321,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// from bridge creation, so the very first load can establish its epoch.
     private var isAwaitingNewDocumentBaseline = true
     private var pendingInstantBackHandoff: PendingInstantBackHandoff?
+    private var pendingCurrentDocumentResync: PendingCurrentDocumentResync?
+    private var nextResyncGeneration: UInt64 = 0
+    /// A confirmed supported Instant Back cannot accept arbitrary script
+    /// baselines until the actual current document authorizes its own token.
+    private var requiresAuthorizedCurrentDocumentResync = false
     private(set) var isInvalidated = false
 
     /// Whether a transient Instant Back baseline handoff is awaiting either
@@ -346,6 +369,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     func attach(to webView: WKWebView) {
         guard !isInvalidated else { return }
+        if let previousWebView = self.webView,
+           previousWebView !== webView {
+            handleRuntimeReplacement()
+        }
         self.webView = webView
     }
 
@@ -391,6 +418,14 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
+        if requiresAuthorizedCurrentDocumentResync {
+            // After confirmed history activation, only the direct result from
+            // the actual current WebView may open the fresh epoch. Natural or
+            // stale script messages are intentionally silent during this
+            // bounded authorization phase.
+            return
+        }
+
         if pendingInstantBackHandoff != nil {
             // The current accepted document remains authoritative until the
             // history item is confirmed. Its normal state stream must not be
@@ -426,8 +461,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     /// Begins the one bounded bridge handoff for a WebKit Instant Back
     /// request. The request itself is not authority: until the navigation
-    /// observer confirms the requested current history item, a new baseline is
-    /// held without mutating the Attention observation stream.
+    /// observer confirms the requested current history item, the old accepted
+    /// document remains the only Attention epoch.
     func beginInstantBackHandoff(targetURL: URL? = nil) {
         guard !isInvalidated else {
             pendingInstantBackHandoff = nil
@@ -466,6 +501,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// wait for the new document's baseline. The installation itself stays
     /// usable for the recovered/replacement document.
     func handleRuntimeReplacement() {
+        invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
         document = nil
@@ -482,6 +518,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     func invalidate() {
         guard !isInvalidated else { return }
         isInvalidated = true
+        invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
         document = nil
@@ -502,23 +539,95 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func requestCurrentDocumentResync() {
+        requiresAuthorizedCurrentDocumentResync = true
         guard !isInvalidated,
               let webView,
               self.webView === webView else {
             return
         }
 
+        nextResyncGeneration &+= 1
+        let generation = nextResyncGeneration
+        let pending = PendingCurrentDocumentResync(
+            generation: generation,
+            attempt: 1,
+            webViewIdentity: ObjectIdentifier(webView)
+        )
+        pendingCurrentDocumentResync = pending
+        evaluateCurrentDocumentResync(
+            in: webView,
+            generation: generation,
+            attempt: pending.attempt
+        )
+    }
+
+    private func evaluateCurrentDocumentResync(
+        in webView: WKWebView,
+        generation: UInt64,
+        attempt: Int
+    ) {
         webView.evaluateJavaScript(
             "globalThis.__floatTabsAttentionResyncV1?.()",
             in: nil,
             in: Self.contentWorld
-        ) { [weak self, weak webView] (_: Result<Any, Error>) in
+        ) { [weak self, weak webView] (result: Result<Any, Error>) in
             guard let self,
                   let webView,
                   !self.isInvalidated,
-                  self.webView === webView else {
+                  self.webView === webView,
+                  let pending = self.pendingCurrentDocumentResync,
+                  pending.generation == generation,
+                  pending.attempt == attempt,
+                  pending.webViewIdentity == ObjectIdentifier(webView) else {
                 return
             }
+
+            if case let .success(value) = result,
+               let body = value as? [String: Any],
+               let payload = ChatGPTBridgePayload.parse(body),
+               payload.kind == ChatGPTBridgePayload.baselineKind {
+                self.pendingCurrentDocumentResync = nil
+                self.requiresAuthorizedCurrentDocumentResync = false
+                self.acceptAuthorizedCurrentDocumentBaseline(payload)
+                return
+            }
+
+            guard attempt < Self.resyncAttemptLimit else {
+                // Keep the authorization barrier closed after bounded failure.
+                // A later ordinary runtime replacement owns recovery; no
+                // arbitrary baseline may reopen this epoch.
+                self.pendingCurrentDocumentResync = nil
+                return
+            }
+
+            let retry = PendingCurrentDocumentResync(
+                generation: generation,
+                attempt: attempt + 1,
+                webViewIdentity: ObjectIdentifier(webView)
+            )
+            self.pendingCurrentDocumentResync = retry
+            self.evaluateCurrentDocumentResync(
+                in: webView,
+                generation: generation,
+                attempt: retry.attempt
+            )
         }
+    }
+
+    private func acceptAuthorizedCurrentDocumentBaseline(
+        _ payload: ChatGPTBridgePayload
+    ) {
+        guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
+        document = DocumentSession(token: payload.token)
+        isAwaitingNewDocumentBaseline = false
+        if let observation = document?.tracker.observe(payload.generating) {
+            emit(observation)
+        }
+    }
+
+    private func invalidatePendingCurrentDocumentResync() {
+        nextResyncGeneration &+= 1
+        pendingCurrentDocumentResync = nil
+        requiresAuthorizedCurrentDocumentResync = false
     }
 }

@@ -203,6 +203,170 @@ final class ChatGPTGenerationDetectorTests: XCTestCase {
             resynced,
             "confirmed Instant Back must invoke the named-world resync entry and receive a fresh baseline from the actual current document"
         )
+
+        // A natural pageshow baseline for the same actual document may race
+        // the explicit resync. It must be harmless after the authorized epoch
+        // is established.
+        page.run("window.dispatchEvent(new Event('pageshow'))")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(
+            page.observations,
+            [.generationStarted, .runtimeReset, .generationStarted]
+        )
+    }
+
+    func testConfirmedResyncRejectsStaleBaselineBeforeActualCurrentDocument() async {
+        let page = ChatGPTDetectorPage()
+        page.load(
+            bodyHTML: "<button data-testid=\"stop-button\">Stop</button>",
+            baseURL: URL(string: "https://chatgpt.com/c/123")!
+        )
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart)
+        guard initialStart else { return }
+
+        page.bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/c/123")!
+        )
+        page.bridge.confirmInstantBackHandoff()
+
+        // This is a late IPC baseline from the old current B document. The
+        // post-confirm barrier must reject it before the actual current A
+        // document's named-world result arrives.
+        page.bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "stale-current-b-token",
+                generating: false
+            ),
+            messageWebView: page.webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let resynced = await page.waitFor {
+            page.observations == [
+                .generationStarted,
+                .runtimeReset,
+                .generationStarted,
+            ]
+        }
+        XCTAssertTrue(resynced, "stale B baseline must not open the post-confirm epoch")
+    }
+
+    func testSameURLStaleBaselineAfterConfirmCannotReplaceActualCurrentDocument() async {
+        let page = ChatGPTDetectorPage()
+        let sameURL = URL(string: "https://chatgpt.com/c/123")!
+        page.load(
+            bodyHTML: "<button data-testid=\"stop-button\">Stop</button>",
+            baseURL: sameURL
+        )
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart)
+        guard initialStart else { return }
+
+        page.bridge.beginInstantBackHandoff(targetURL: sameURL)
+        page.bridge.confirmInstantBackHandoff()
+
+        // A1 and the actual restored A2 deliberately share a URL. Token A1
+        // cannot authorize the fresh epoch while native identity is pending.
+        page.bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "historical-a1-token",
+                generating: false
+            ),
+            messageWebView: page.webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let actualCurrentAccepted = await page.waitFor {
+            page.observations == [
+                .generationStarted,
+                .runtimeReset,
+                .generationStarted,
+            ]
+        }
+        XCTAssertTrue(actualCurrentAccepted, "same-URL A1 baseline must be rejected")
+    }
+
+    func testResyncCompletionAfterReleaseCannotReopenEpoch() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button data-testid=\"stop-button\">Stop</button>")
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart)
+        guard initialStart else { return }
+
+        page.bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/")!
+        )
+        page.bridge.confirmInstantBackHandoff()
+        page.bridge.invalidate()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertEqual(page.observations, [.generationStarted, .runtimeReset])
+    }
+
+    func testResyncCompletionAfterWebViewRebuildCannotReopenOldEpoch() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button data-testid=\"stop-button\">Stop</button>")
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart)
+        guard initialStart else { return }
+
+        page.bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/")!
+        )
+        page.bridge.confirmInstantBackHandoff()
+        page.bridge.attach(to: WKWebView())
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertEqual(page.observations, [.generationStarted, .runtimeReset])
+    }
+
+    func testRapidConfirmedResyncOnlyLatestGenerationCanOpenEpoch() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button data-testid=\"stop-button\">Stop</button>")
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart)
+        guard initialStart else { return }
+
+        let targetURL = URL(string: "https://chatgpt.com/")!
+        page.bridge.beginInstantBackHandoff(targetURL: targetURL)
+        page.bridge.confirmInstantBackHandoff()
+        // Both evaluations are queued before either completion can run. The
+        // first completion must be ignored after the second confirmation.
+        page.bridge.beginInstantBackHandoff(targetURL: targetURL)
+        page.bridge.confirmInstantBackHandoff()
+
+        let latestOnly = await page.waitFor {
+            page.observations == [
+                .generationStarted,
+                .runtimeReset,
+                .generationStarted,
+            ]
+        }
+        XCTAssertTrue(latestOnly, "an older resync completion must not overwrite the newer epoch")
     }
 
     func testInjectedHostGateDerivesFromChatGPTSitePolicy() async {

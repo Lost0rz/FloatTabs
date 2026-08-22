@@ -454,8 +454,11 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         harness.bridge.confirmInstantBackHandoff()
         XCTAssertEqual(harness.observations, [.runtimeReset])
 
+        // The direct resync is unavailable on this detached harness, so the
+        // identity barrier remains closed rather than accepting A2 by token
+        // guesswork. The real named-world test covers the authorized result.
         harness.accept(true, token: "instant-back-a2")
-        XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
+        XCTAssertEqual(harness.observations, [.runtimeReset])
     }
 
     func testCancelledInstantBackCannotRebaselineOldRuntime() {

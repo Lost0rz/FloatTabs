@@ -1188,45 +1188,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
     }
 
-    func testNaturalAndResyncBaselinesDeduplicateWithoutSyntheticEvents() throws {
-        let (_, coordinator, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
-        )
-        let slot = try profile(named: "ChatA", in: store)
-        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        let bridge = try attentionBridge(pool: pool, slot: slot)
-
-        acceptBaseline(
-            generating: true,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-current-b"
-        )
-        bridge.beginInstantBackHandoff(
-            targetURL: URL(string: "https://chatgpt.com/chat-a")!
-        )
-        bridge.confirmInstantBackHandoff()
-
-        // Natural pageshow and the explicit named-world resync can both report
-        // the same current state. The tracker accepts one fresh baseline and
-        // de-duplicates the second without a synthetic finish/start.
-        acceptBaseline(
-            generating: true,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-restored-a"
-        )
-        acceptBaseline(
-            generating: true,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-restored-a"
-        )
-
-        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
-        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
-    }
-
     func testInstantBackConfirmationBeforeBaselineAcceptsFreshIdleBaseline() throws {
         let (_, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
