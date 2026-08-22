@@ -339,9 +339,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
     }
 
-    // MARK: 4.6 Acknowledgement → later normal policy
+    // MARK: 4.6 Interaction-aware acknowledgement → later normal policy
 
-    func testAcknowledgementClearsReadyAndLaterDeactivationStartsFreshColdLifecycle() throws {
+    func testNonInteractivePresentationDoesNotAcknowledgeReadyAndLaterDeactivationStartsFreshColdLifecycle() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -365,10 +365,20 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 
-        // Showing the shell presents the selected runtime and acknowledges.
+        // The test host's AppKit activation state is environment-dependent.
+        // Whatever the actual WebView window topology is, the controller's
+        // acknowledgement must agree with the same authoritative visibility
+        // decision used by the reducer.
         controller.showFloatTabs()
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        let webInteractionRegained = controller.isAttentionUserVisible(slotID: slot.id)
+        XCTAssertEqual(
+            coordinator.state(for: slot.id),
+            webInteractionRegained ? .idle : .ready
+        )
+        XCTAssertEqual(
+            controller.debugIsProjectingReadyAttention(slotID: slot.id),
+            !webInteractionRegained
+        )
         // Acknowledgement itself never evicts: the runtime is still resident
         // and no inactive plan exists while the Slot stays selected.
         XCTAssertTrue(pool.contains(slotID: slot.id))
@@ -379,6 +389,65 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
         XCTAssertNotNil(controller.debugInactivePlanToken(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
+    }
+
+    func testUnrelatedFloatTabsKeyWindowDoesNotAcknowledgeReady() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(generating: true, bridge: bridge, webView: webView)
+        controller.hideFloatTabs()
+        acceptState(generating: false, bridge: bridge, webView: webView)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+
+        // Exercise the registered NSWindow notification path with a
+        // non-Web FloatTabs surface, such as Settings. Current WebView facts
+        // must reject the event and leave the already-selected Slot Ready.
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        NotificationCenter.default.post(
+            name: NSWindow.didBecomeKeyNotification,
+            object: settingsWindow
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+    }
+
+    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+
+        // Establish the actual Web presentation first. The test host can
+        // expose the key-window fact even though it cannot reliably be the
+        // system frontmost application.
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
+
+        // Seed an already-selected Ready state after presentation so the
+        // notification below is the acknowledgement boundary under test.
+        coordinator.apply(.generationStarted, for: slot.id)
+        coordinator.apply(.generationFinished(userVisible: false), for: slot.id)
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+
+        NotificationCenter.default.post(
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
     }
 
     // MARK: 4.7 Visible / fullscreen completion decisions through the router
@@ -400,7 +469,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             slotID: slot,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
-            sourceWindowIsVisible: true
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
         )
         var router = makeRouter(visible: normalVisible)
         router.handle(.generationStarted, for: slot)
@@ -416,6 +486,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: false,
             sourceWindowIsVisible: false,
+            webPresentationOwnsActiveInteraction: true,
             fullscreenSourceSlotID: slot,
             panelIsVisible: false
         )
@@ -431,6 +502,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             slotID: slot,
             sessionIsLocked: true,
             pooledWebViewExists: true,
+            webPresentationOwnsActiveInteraction: true,
             fullscreenSourceSlotID: UUID(),
             panelIsVisible: true,
             companionSlotID: slot,
@@ -531,7 +603,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
     }
 
-    func testHiddenCompletionDuringProvisionalNavigationBecomesReadyBeforeFailureAndAcknowledges() throws {
+    func testHiddenCompletionDuringProvisionalNavigationRemainsReadyBeforeAndAfterFailure() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -552,12 +624,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
         XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 
-        // Presentation acknowledges the real Ready result before the failed
-        // provisional navigation returns; failure must not replay it.
+        // Physical presentation in this inactive test host does not own Web
+        // interaction, so it must not acknowledge Ready. The failed
+        // provisional navigation must not replay or clear that result.
         controller.showFloatTabs()
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
+        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 
         let error = NSError(
             domain: NSURLErrorDomain,
@@ -572,9 +645,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             withError: error
         )
 
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
+        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
     }
 
     // MARK: 4.8 Release / rebuild stale callbacks

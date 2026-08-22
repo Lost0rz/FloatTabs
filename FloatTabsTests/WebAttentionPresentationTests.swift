@@ -118,10 +118,22 @@ final class WebAttentionPresentationTests: XCTestCase {
             slotID: slotA,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
-            sourceWindowIsVisible: true
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
         )
 
         XCTAssertTrue(AttentionPresentation.isUserVisible(facts))
+    }
+
+    func testPinnedPhysicalVisibilityWithoutActiveInteractionIsNotVisible() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
     }
 
     func testAttachedInactiveHotWebViewIsNotVisible() {
@@ -148,7 +160,8 @@ final class WebAttentionPresentationTests: XCTestCase {
             slotID: slotB,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
-            sourceWindowIsVisible: true
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
         )
 
         XCTAssertFalse(AttentionPresentation.isUserVisible(wrongIdentity))
@@ -162,6 +175,7 @@ final class WebAttentionPresentationTests: XCTestCase {
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: false,
             sourceWindowIsVisible: false,
+            webPresentationOwnsActiveInteraction: true,
             fullscreenSourceSlotID: slotA,
             panelIsVisible: false
         )
@@ -175,11 +189,23 @@ final class WebAttentionPresentationTests: XCTestCase {
         XCTAssertFalse(AttentionPresentation.isUserVisible(otherSlotFacts))
     }
 
+    func testFullscreenSourceRequiresActiveInteraction() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            pooledWebViewExists: true,
+            fullscreenSourceSlotID: slotA
+        )
+
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
+    }
+
     func testFullscreenCompanionIsVisibleWhenPanelVisibleAndIdentityMatches() {
         let facts = AttentionPresentation.Facts(
             slotID: slotA,
             sessionIsLocked: true,
             pooledWebViewExists: true,
+            webPresentationOwnsActiveInteraction: true,
             fullscreenSourceSlotID: slotB,
             panelIsVisible: true,
             companionSlotID: slotA,
@@ -187,6 +213,19 @@ final class WebAttentionPresentationTests: XCTestCase {
         )
 
         XCTAssertTrue(AttentionPresentation.isUserVisible(facts))
+    }
+
+    func testFullscreenCompanionRequiresActiveInteraction() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            pooledWebViewExists: true,
+            panelIsVisible: true,
+            companionSlotID: slotA,
+            companionCurrentWebViewIsSlotWebView: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
     }
 
     func testFullscreenCompanionIsNotVisibleWhilePanelPhysicallyHidden() {
@@ -229,7 +268,8 @@ final class WebAttentionPresentationTests: XCTestCase {
             slotID: slotA,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
-            sourceWindowIsVisible: true
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
         )
 
         coordinator.acknowledge(
@@ -240,7 +280,7 @@ final class WebAttentionPresentationTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slotA), .idle)
     }
 
-    func testHiddenReadySlotAcknowledgesOnlyAfterPhysicalPresentation() {
+    func testHiddenReadySlotAcknowledgesOnlyAfterActiveWebPresentation() {
         driveToReady()
         let hidden = AttentionPresentation.Facts(
             slotID: slotA,
@@ -249,6 +289,13 @@ final class WebAttentionPresentationTests: XCTestCase {
             sourceWindowIsVisible: false
         )
         let presented = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
+        )
+        let physicallyPresentedButInactive = AttentionPresentation.Facts(
             slotID: slotA,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
@@ -263,9 +310,49 @@ final class WebAttentionPresentationTests: XCTestCase {
 
         coordinator.acknowledge(
             slotID: slotA,
+            userVisible: AttentionPresentation.isUserVisible(physicallyPresentedButInactive)
+        )
+        XCTAssertEqual(coordinator.state(for: slotA), .ready)
+
+        coordinator.acknowledge(
+            slotID: slotA,
             userVisible: AttentionPresentation.isUserVisible(presented)
         )
         XCTAssertEqual(coordinator.state(for: slotA), .idle)
+    }
+
+    func testAlreadySelectedReadySlotAcknowledgesWhenWebInteractionRegains() {
+        driveToReady()
+
+        let inactivePresentation = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true
+        )
+        let activePresentation = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
+        )
+
+        coordinator.acknowledge(
+            slotID: slotA,
+            userVisible: AttentionPresentation.isUserVisible(inactivePresentation)
+        )
+        XCTAssertEqual(coordinator.state(for: slotA), .ready)
+
+        // No selection change is involved: regaining Web interaction is the
+        // acknowledgement boundary.
+        coordinator.acknowledge(
+            slotID: slotA,
+            userVisible: AttentionPresentation.isUserVisible(activePresentation)
+        )
+
+        XCTAssertEqual(coordinator.state(for: slotA), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
     }
 
     func testPresentedCompanionReadySlotAcknowledgesToIdle() {
@@ -274,6 +361,7 @@ final class WebAttentionPresentationTests: XCTestCase {
             slotID: slotA,
             sessionIsLocked: true,
             pooledWebViewExists: true,
+            webPresentationOwnsActiveInteraction: true,
             fullscreenSourceSlotID: slotB,
             panelIsVisible: true,
             companionSlotID: slotA,
@@ -299,7 +387,8 @@ final class WebAttentionPresentationTests: XCTestCase {
             slotID: slotA,
             pooledWebViewExists: true,
             normalCurrentWebViewIsSlotWebView: true,
-            sourceWindowIsVisible: true
+            sourceWindowIsVisible: true,
+            webPresentationOwnsActiveInteraction: true
         )
         coordinator.acknowledge(
             slotID: slotA,

@@ -26,6 +26,12 @@ enum AttentionPresentation {
         /// The normal source window is physically visible.
         var sourceWindowIsVisible = false
 
+        /// The actual Web presentation currently owns active interaction.
+        /// Physical visibility alone is not enough: a pinned window can remain
+        /// exposed while another application or another FloatTabs window owns
+        /// the key interaction context.
+        var webPresentationOwnsActiveInteraction = false
+
         // B. Element-fullscreen source.
         /// The Slot whose WebView WebKit is presenting fullscreen.
         var fullscreenSourceSlotID: UUID?
@@ -57,6 +63,7 @@ enum AttentionPresentation {
         facts.pooledWebViewExists
             && facts.normalCurrentWebViewIsSlotWebView
             && facts.sourceWindowIsVisible
+            && facts.webPresentationOwnsActiveInteraction
     }
 
     /// B. WebKit-owned element-fullscreen source: the actual fullscreen
@@ -64,7 +71,9 @@ enum AttentionPresentation {
     /// normal shell is hidden. Shell visibility, requested visibility, and
     /// logical selection are deliberately not required here.
     static func isFullscreenSource(_ facts: Facts) -> Bool {
-        facts.sessionIsLocked && facts.fullscreenSourceSlotID == facts.slotID
+        facts.sessionIsLocked
+            && facts.fullscreenSourceSlotID == facts.slotID
+            && facts.webPresentationOwnsActiveInteraction
     }
 
     /// C. Visible fullscreen companion: only when the session is locked, the
@@ -77,5 +86,6 @@ enum AttentionPresentation {
             && facts.panelIsVisible
             && facts.companionSlotID == facts.slotID
             && facts.companionCurrentWebViewIsSlotWebView
+            && facts.webPresentationOwnsActiveInteraction
     }
 }

@@ -206,6 +206,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
         externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
@@ -235,6 +241,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         if let externalMouseMonitor {
             NSEvent.removeMonitor(externalMouseMonitor)
         }
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
     }
 
     /// macOS 14 treats activation as a contextual request. Submit it directly
@@ -470,8 +481,21 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @objc private func workspaceDidActivateApplication(_ notification: Notification) {
         guard let activatedApplication = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
-                as? NSRunningApplication,
-              !workspaceAutoHideSuppression.suppressesAutoHide(
+                as? NSRunningApplication else {
+            return
+        }
+
+        if activatedApplication.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier {
+            // Returning to FloatTabs can leave the same Slot selected, so a
+            // tab change must not be required to acknowledge Ready. The
+            // presentation fact below still rejects Settings or any other
+            // non-Web key window.
+            acknowledgeActiveAttentionIfActuallyPresented()
+            return
+        }
+
+        guard !workspaceAutoHideSuppression.suppressesAutoHide(
                   nowUptime: ProcessInfo.processInfo.systemUptime
               ),
               NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -1042,6 +1066,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 rootView.webPanelContainerView.currentWebView === webView
             } ?? false,
             sourceWindowIsVisible: sourceHostController.window.isVisible,
+            webPresentationOwnsActiveInteraction: pooledWebView.map(
+                ownsActiveInteraction(of:)
+            ) ?? false,
             fullscreenSourceSlotID: fullscreenProfile?.id,
             panelIsVisible: panel.isVisible,
             companionSlotID: companionActiveProfile?.id,
@@ -1050,6 +1077,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             } ?? false
         )
         return AttentionPresentation.isUserVisible(facts)
+    }
+
+    /// Reads the current WebView/window topology at the moment the attention
+    /// decision is requested. `WKWebView.window` is the actual interaction
+    /// surface for normal, companion, and WebKit-owned fullscreen modes; its
+    /// key-window status is stronger than process-level activity and changes
+    /// with the real AppKit focus transfer. No foreground state is stored.
+    private func ownsActiveInteraction(of webView: WKWebView) -> Bool {
+        webView.window?.isKeyWindow == true
     }
 
     /// Acknowledges a Slot's completed-but-unseen output only when that
@@ -1403,7 +1439,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func applicationDidBecomeActive(_ notification: Notification) {
-        guard needsFocusAfterApplicationActivation else { return }
+        guard needsFocusAfterApplicationActivation else {
+            // App activation is only a trigger to re-evaluate the current
+            // window facts. It is not itself proof that the Web presentation
+            // owns interaction.
+            acknowledgeActiveAttentionIfActuallyPresented()
+            return
+        }
         needsFocusAfterApplicationActivation = false
 
         // Activation can complete after the original show call. Finish through
@@ -1429,6 +1471,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             focusActiveWebViewIfAvailable()
         }
         // Completes the deferred presentation half of showFloatTabs.
+        acknowledgeActiveAttentionIfActuallyPresented()
+    }
+
+    @objc func windowDidBecomeKey(_ notification: Notification) {
+        // This intentionally handles stale/unrelated key-window events too:
+        // acknowledgement is gated by the current real WebView window facts,
+        // so a Settings window or a different FloatTabs surface cannot clear
+        // Ready merely by becoming key.
         acknowledgeActiveAttentionIfActuallyPresented()
     }
 
