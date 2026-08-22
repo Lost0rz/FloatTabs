@@ -297,11 +297,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         var tracker = ChatGPTDocumentGenerationTracker()
     }
 
-    /// A single in-flight Instant Back transition carries only whether the
-    /// confirmed target should receive a fresh current-document resync.
-    /// Attention state and document history never enter this marker.
+    private enum DocumentAdmission {
+        case awaitingSupportedBaseline
+        case activeSupportedDocument
+        case unsupportedCurrentDocument
+        case awaitingAuthorizedResync
+    }
+
+    /// A single in-flight Instant Back transition carries only the target's
+    /// support classification and whether it should receive a fresh
+    /// current-document resync. Attention state and document history never
+    /// enter this marker.
     private struct PendingInstantBackHandoff {
         let shouldResyncCurrentDocument: Bool
+        let targetIsKnownUnsupported: Bool
     }
 
     private struct PendingCurrentDocumentResync {
@@ -317,15 +326,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var document: DocumentSession?
-    /// True until a document's own `baseline` report is accepted — including
-    /// from bridge creation, so the very first load can establish its epoch.
-    private var isAwaitingNewDocumentBaseline = true
+    /// The one runtime-only admission state. The current committed document,
+    /// not a requested/provisional/persisted URL, controls whether a ChatGPT
+    /// epoch may exist.
+    private var documentAdmission = DocumentAdmission.awaitingSupportedBaseline
     private var pendingInstantBackHandoff: PendingInstantBackHandoff?
     private var pendingCurrentDocumentResync: PendingCurrentDocumentResync?
     private var nextResyncGeneration: UInt64 = 0
-    /// A confirmed supported Instant Back cannot accept arbitrary script
-    /// baselines until the actual current document authorizes its own token.
-    private var requiresAuthorizedCurrentDocumentResync = false
     private(set) var isInvalidated = false
 
     /// Whether a transient Instant Back baseline handoff is awaiting either
@@ -418,12 +425,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
-        if requiresAuthorizedCurrentDocumentResync {
+        switch documentAdmission {
+        case .unsupportedCurrentDocument, .awaitingAuthorizedResync:
             // After confirmed history activation, only the direct result from
-            // the actual current WebView may open the fresh epoch. Natural or
-            // stale script messages are intentionally silent during this
-            // bounded authorization phase.
+            // the actual current WebView may open the fresh epoch. An
+            // unsupported current document is closed permanently until a
+            // later supported commit. Natural or stale script messages are
+            // intentionally silent in both states.
             return
+        case .awaitingSupportedBaseline, .activeSupportedDocument:
+            break
         }
 
         if pendingInstantBackHandoff != nil {
@@ -440,15 +451,18 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
-        if isAwaitingNewDocumentBaseline {
+        switch documentAdmission {
+        case .awaitingSupportedBaseline:
             // Only a document's own baseline report may open an epoch: the
             // document-start script's first message and a pageshow re-report
             // both carry the baseline kind, while a late `state` message from
             // a superseded document must never re-baseline.
             guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
             document = DocumentSession(token: payload.token)
-            isAwaitingNewDocumentBaseline = false
-        } else if document?.token != payload.token {
+            documentAdmission = .activeSupportedDocument
+        case .activeSupportedDocument:
+            guard document?.token == payload.token else { return }
+        case .unsupportedCurrentDocument, .awaitingAuthorizedResync:
             return
         }
         guard let observation = document?.tracker.observe(payload.generating) else {
@@ -471,6 +485,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingInstantBackHandoff = PendingInstantBackHandoff(
             shouldResyncCurrentDocument: targetURL.map {
                 ChatGPTSitePolicy.isSupportedChatGPTURL($0)
+            } ?? false,
+            targetIsKnownUnsupported: targetURL.map {
+                !ChatGPTSitePolicy.isSupportedChatGPTURL($0)
             } ?? false
         )
     }
@@ -491,6 +508,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingInstantBackHandoff = nil
         handleRuntimeReplacement()
 
+        if handoff.targetIsKnownUnsupported {
+            documentAdmission = .unsupportedCurrentDocument
+            return
+        }
+
         guard handoff.shouldResyncCurrentDocument else { return }
         requestCurrentDocumentResync()
     }
@@ -501,11 +523,32 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// wait for the new document's baseline. The installation itself stays
     /// usable for the recovered/replacement document.
     func handleRuntimeReplacement() {
+        resetRuntime(admission: .awaitingSupportedBaseline)
+    }
+
+    /// The ordinary didCommit boundary supplies the actual committed/current
+    /// WebKit URL before any presentation callback or persisted URL can be
+    /// consulted. A nil URL is unknown rather than proof of an unsupported
+    /// document, preserving the bridge's initial-load test seam; an explicit
+    /// non-ChatGPT URL closes admission.
+    func handleRuntimeReplacement(committedURL: URL?) {
+        let admission: DocumentAdmission
+        if let committedURL {
+            admission = ChatGPTSitePolicy.isSupportedChatGPTURL(committedURL)
+                ? .awaitingSupportedBaseline
+                : .unsupportedCurrentDocument
+        } else {
+            admission = .awaitingSupportedBaseline
+        }
+        resetRuntime(admission: admission)
+    }
+
+    private func resetRuntime(admission: DocumentAdmission) {
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
         document = nil
-        isAwaitingNewDocumentBaseline = true
+        documentAdmission = admission
         if hadActiveDocument {
             emit(.runtimeReset)
         }
@@ -522,7 +565,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
         document = nil
-        isAwaitingNewDocumentBaseline = false
+        documentAdmission = .unsupportedCurrentDocument
         userContentController?.removeScriptMessageHandler(
             forName: Self.messageHandlerName,
             contentWorld: Self.contentWorld
@@ -539,7 +582,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func requestCurrentDocumentResync() {
-        requiresAuthorizedCurrentDocumentResync = true
+        documentAdmission = .awaitingAuthorizedResync
         guard !isInvalidated,
               let webView,
               self.webView === webView else {
@@ -587,7 +630,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                let payload = ChatGPTBridgePayload.parse(body),
                payload.kind == ChatGPTBridgePayload.baselineKind {
                 self.pendingCurrentDocumentResync = nil
-                self.requiresAuthorizedCurrentDocumentResync = false
                 self.acceptAuthorizedCurrentDocumentBaseline(payload)
                 return
             }
@@ -619,7 +661,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     ) {
         guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
         document = DocumentSession(token: payload.token)
-        isAwaitingNewDocumentBaseline = false
+        documentAdmission = .activeSupportedDocument
         if let observation = document?.tracker.observe(payload.generating) {
             emit(observation)
         }
@@ -628,6 +670,5 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private func invalidatePendingCurrentDocumentResync() {
         nextResyncGeneration &+= 1
         pendingCurrentDocumentResync = nil
-        requiresAuthorizedCurrentDocumentResync = false
     }
 }

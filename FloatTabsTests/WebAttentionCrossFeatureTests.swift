@@ -670,6 +670,66 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
     }
 
+    func testUnsupportedCommittedDocumentClosesAttentionUntilSupportedReentry() throws {
+        var committedURL: URL?
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            committedURLProvider: { _ in committedURL }
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let observer = try navigationObserver(of: webView)
+        let unsupportedURL = URL(string: "https://example.com/document")!
+        let supportedURL = URL(string: "https://chatgpt.com/c/reentry")!
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "old-chatgpt-document"
+        )
+        committedURL = unsupportedURL
+        observer.webView(webView, didCommit: nil)
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+
+        // Both forms of stale ChatGPT IPC are rejected while the actual
+        // committed document is unsupported, despite the persisted Slot URL
+        // still being a ChatGPT URL.
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "late-old-baseline"
+        )
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "old-chatgpt-document"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+
+        // A later supported commit reopens only a fresh baseline epoch.
+        committedURL = supportedURL
+        observer.webView(webView, didCommit: nil)
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "fresh-supported-document"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "fresh-supported-document"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+    }
+
     // MARK: 4.8 Current-site menu favicon projection
 
     func testCommittedSiteFlowsThroughPanelToMenuAndSelectionUsesResidentCommit() throws {
@@ -1370,11 +1430,21 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         bridge.confirmInstantBackHandoff()
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
+        bridge.handleRuntimeReplacement(
+            committedURL: URL(string: "https://chatgpt.com/chat-generating")!
+        )
         acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "generating-b")
         bridge.beginInstantBackHandoff(targetURL: unsupportedURL)
         bridge.confirmInstantBackHandoff()
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
+        // A late old-document state cannot revive the unsupported target.
+        acceptState(generating: false, bridge: bridge, webView: webView, token: "generating-b")
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+
+        bridge.handleRuntimeReplacement(
+            committedURL: URL(string: "https://chatgpt.com/chat-ready")!
+        )
         acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "ready-b")
         acceptState(generating: false, bridge: bridge, webView: webView, token: "ready-b")
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)

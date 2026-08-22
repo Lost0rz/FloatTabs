@@ -375,6 +375,35 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations.last, .runtimeReset)
     }
 
+    func testUnsupportedCurrentDocumentClosesAdmissionUntilSupportedReplacement() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        let unsupportedURL = URL(string: "https://example.com/document")!
+        let supportedURL = URL(string: "https://chatgpt.com/c/fresh")!
+
+        harness.accept(true, token: tokenA)
+        harness.bridge.handleRuntimeReplacement(committedURL: unsupportedURL)
+        XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
+
+        // Neither a late baseline nor a late state from the old ChatGPT
+        // runtime can reopen attention while the current document is
+        // unsupported.
+        harness.accept(false, token: tokenB)
+        harness.accept(false, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
+        XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
+
+        harness.bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        harness.accept(false, token: tokenB)
+        XCTAssertEqual(
+            harness.observations,
+            [.generationStarted, .runtimeReset]
+        )
+        harness.accept(true, token: tokenB, kind: ChatGPTBridgePayload.stateKind)
+        XCTAssertEqual(
+            harness.observations,
+            [.generationStarted, .runtimeReset, .generationStarted]
+        )
+    }
+
     func testStaleOldDocumentMessageIsRejectedAfterCommit() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
