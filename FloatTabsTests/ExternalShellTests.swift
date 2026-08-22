@@ -1094,26 +1094,48 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
-    func testStatusItemModeSwitchPreservesFaviconAndAttentionRendering() {
-        let favicon = NSImage(size: NSSize(width: 16, height: 16))
-        favicon.lockFocus()
-        NSColor.systemBlue.setFill()
-        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
-        favicon.unlockFocus()
-        let attention = StatusItemController.attentionPresentation(
-            readyCount: 3,
-            floatTabsVisible: false
-        )
+    func testStatusItemModeSwitchUsesLivePreferenceWiringAndPreservesPresentation() {
+        let suiteName = "FloatTabsTests.StatusItemController.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        XCTAssertEqual(attention.badge, .count("3"))
-        XCTAssertEqual(
-            StatusItemController.renderStatusImage(favicon: favicon, attention: attention).tiffRepresentation,
-            StatusItemController.renderStatusImage(favicon: favicon, attention: attention).tiffRepresentation
+        let preferencesStore = AppPreferencesStore(defaults: defaults)
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            preferencesStore: preferencesStore
         )
-        XCTAssertEqual(
-            StatusItemController.faviconOriginKey(for: URL(string: "https://chatgpt.com/c/1")),
-            "https://chatgpt.com"
-        )
+        controller.setActiveWebApp(name: "ChatGPT", homeURL: nil)
+        controller.setAttentionPresentation(readyCount: 3, floatTabsVisible: false)
+
+        XCTAssertEqual(preferencesStore.menuBarDisplayMode, .iconAndName)
+        XCTAssertEqual(controller.debugStatusButtonTitle, "ChatGPT")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
+        XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
+        let iconAndNameImage = controller.debugStatusButtonImageTIFF
+        XCTAssertNotNil(iconAndNameImage)
+
+        // This is the production mutation. The test deliberately does not
+        // invoke StatusItemController's notification selector directly.
+        preferencesStore.menuBarDisplayMode = .iconOnly
+
+        XCTAssertEqual(controller.debugStatusButtonTitle, "")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageOnly)
+        XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
+
+        controller.setActiveWebApp(name: "Docs", homeURL: nil)
+        XCTAssertEqual(controller.debugStatusButtonTitle, "")
+
+        preferencesStore.menuBarDisplayMode = .iconAndName
+
+        XCTAssertEqual(controller.debugStatusButtonTitle, "Docs")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
+        XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
+        XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
     }
 
     func testStatusItemRejectsStaleFaviconCompletionAfterSelectionChanges() {

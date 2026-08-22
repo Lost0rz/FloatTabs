@@ -84,6 +84,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ]
     }
 
+#if DEBUG
+    var debugStatusButtonTitle: String {
+        statusItem.button?.title ?? ""
+    }
+
+    var debugStatusButtonImagePosition: NSControl.ImagePosition? {
+        statusItem.button?.imagePosition
+    }
+
+    var debugStatusButtonImageTIFF: Data? {
+        statusItem.button?.image?.tiffRepresentation
+    }
+#endif
+
     init(
         onToggle: @escaping () -> Void,
         onWillShow: @escaping () -> Void = {},
@@ -259,11 +273,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func applyMenuBarDisplayMode(to button: NSStatusBarButton) {
         let mode = preferencesStore.menuBarDisplayMode
-        button.imagePosition = Self.imagePosition(for: mode)
         button.title = Self.displayTitle(
             for: latestActiveWebAppName,
             displayMode: mode
         )
+        button.imagePosition = Self.imagePosition(for: mode)
     }
 
     @objc private func menuBarDisplayModeDidChange(_ notification: Notification) {
