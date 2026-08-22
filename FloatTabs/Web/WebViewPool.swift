@@ -371,9 +371,9 @@ final class WebViewPool {
                     return
                 }
                 self.attentionBridges[slotID]?.confirmInstantBackHandoff()
-                // Instant Back resumes an existing document. It is a
-                // presentation-only history activation and must not reuse the
-                // didCommit callback that resets the Attention runtime.
+                // Confirmed Instant Back resets and resyncs through the bridge
+                // handoff, but it must not reuse ordinary didCommit projection
+                // semantics or create a duplicate replacement boundary.
                 guard let committedURL = self.committedURL(for: slotID) else {
                     return
                 }

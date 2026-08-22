@@ -38,16 +38,14 @@ private final class ChatGPTAttentionBridgeHarness {
         originProtocol: String = "https",
         isMainFrame: Bool = true,
         kind: String = ChatGPTBridgePayload.baselineKind,
-        messageWebView: WKWebView? = nil,
-        documentURL: URL? = nil
+        messageWebView: WKWebView? = nil
     ) {
         bridge.accept(
             payload: ChatGPTBridgePayload(
                 version: ChatGPTBridgePayload.currentVersion,
                 kind: kind,
                 token: token,
-                generating: generating,
-                documentURL: documentURL
+                generating: generating
             ),
             messageWebView: messageWebView ?? webView,
             isMainFrame: isMainFrame,
@@ -176,6 +174,18 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             ChatGPTAttentionBridge.contentWorldName
         )
         XCTAssertFalse(ChatGPTAttentionBridge.contentWorld.name?.isEmpty == true)
+    }
+
+    func testInstalledScriptExposesOnlyTheNarrowNamedWorldResyncEntry() {
+        XCTAssertTrue(
+            ChatGPTAttentionBridge.scriptSource.contains(
+                "globalThis.__floatTabsAttentionResyncV1"
+            )
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.contentWorld.name,
+            ChatGPTAttentionBridge.contentWorldName
+        )
     }
 
     func testBridgeConfiguredBeforeInitialLoad() {
@@ -397,66 +407,58 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
     }
 
-    func testInstantBackBaselineBeforeConfirmationIsHeldAndReplayedFresh() {
+    func testCurrentDocumentStateContinuesDuringPendingInstantBack() {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(true, token: tokenB)
+        harness.bridge.beginInstantBackHandoff()
+
+        // The current document remains authoritative until confirmation. Its
+        // own completion must not be frozen or buffered by the pending request.
+        harness.accept(false, token: tokenB, kind: ChatGPTBridgePayload.stateKind)
+
+        XCTAssertTrue(harness.bridge.isInstantBackHandoffPending)
+        XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
+    }
+
+    func testPreconfirmDifferentTokenBaselineIsRejectedUntilResync() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(false, token: tokenB)
         harness.bridge.beginInstantBackHandoff()
 
-        // The restored document can report before the native current-item
-        // confirmation. Its baseline is held, while a late state message from
-        // the leaving document is rejected without mutating the stream.
+        // A different-token baseline before current-history confirmation is
+        // not a candidate epoch and is never replayed by native code.
         harness.accept(true, token: tokenA)
-        harness.accept(false, token: tokenB, kind: ChatGPTBridgePayload.stateKind)
-
-        XCTAssertTrue(harness.bridge.isInstantBackHandoffPending)
         XCTAssertEqual(harness.observations, [])
 
         harness.bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(harness.observations, [.runtimeReset])
 
+        // The actual current document's natural/explicit resync baseline now
+        // opens the fresh epoch.
+        harness.accept(true, token: tokenA)
         XCTAssertEqual(
             harness.observations,
             [.runtimeReset, .generationStarted]
         )
-        XCTAssertFalse(harness.bridge.isInstantBackHandoffPending)
     }
 
-    func testInstantBackConfirmationBeforeBaselineAcceptsRestoredBaselineLater() {
+    func testSameURLStaleHistoricalBaselineIsRejectedBeforeConfirmation() {
         let harness = ChatGPTAttentionBridgeHarness()
-        harness.accept(true, token: tokenB)
-        harness.bridge.beginInstantBackHandoff()
-        harness.bridge.confirmInstantBackHandoff()
-
-        XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
-
-        // The target document's pageshow baseline arrives after confirmation
-        // and opens the fresh epoch normally.
-        harness.accept(true, token: tokenA)
-
-        XCTAssertEqual(
-            harness.observations,
-            [.generationStarted, .runtimeReset, .generationStarted]
+        // A1 and A2 intentionally share a URL; token identity must still keep
+        // the stale A1 baseline from becoming the current epoch.
+        harness.accept(false, token: "instant-back-current-b")
+        harness.bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/c/123")!
         )
-    }
-
-    func testUnrelatedHistoricalBaselineCannotStealConfirmedInstantBackHandoff() {
-        let harness = ChatGPTAttentionBridgeHarness()
-        let urlA = URL(string: "https://chatgpt.com/chat-a")!
-        let urlC = URL(string: "https://chatgpt.com/chat-c")!
-
-        harness.accept(false, token: tokenB, documentURL: URL(string: "https://chatgpt.com/chat-b")!)
-        harness.bridge.beginInstantBackHandoff(targetURL: urlA)
-
-        // A different historical document may race the request, but its
-        // baseline is not the requested history target and is discarded.
-        harness.accept(true, token: "instant-back-stale-c", documentURL: urlC)
+        harness.accept(true, token: "instant-back-a1")
         harness.bridge.confirmInstantBackHandoff()
         XCTAssertEqual(harness.observations, [.runtimeReset])
 
-        harness.accept(true, token: tokenA, documentURL: urlA)
+        harness.accept(true, token: "instant-back-a2")
         XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
     }
 
-    func testCancelledInstantBackCandidateCannotRebaselineOldRuntime() {
+    func testCancelledInstantBackCannotRebaselineOldRuntime() {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenB)
         harness.bridge.beginInstantBackHandoff()

@@ -1003,6 +1003,112 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(instantBackCancellations, cancellationsBeforeRequest + 1)
     }
 
+    func testSupersededInstantBackCurrentItemCancelsBridgeHandoff() async throws {
+        guard #available(macOS 26.0, *) else { return }
+
+        let firstURL = URL(string: "x-ft-instant://history.example.test/first")!
+        let secondURL = URL(string: "x-ft-instant://history.example.test/second")!
+        let thirdURL = URL(string: "x-ft-instant://history.example.test/third")!
+        let schemeHandler = InstantBackTestSchemeHandler()
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "x-ft-instant")
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820),
+            configuration: configuration
+        )
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 430, height: 820)
+        )
+        container.show(webView: webView)
+        retainedContainers.append(container)
+
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(slotID: UUID()) { _, observation in
+            observations.append(observation)
+        }
+        bridge.attach(to: webView)
+        defer { bridge.invalidate() }
+
+        var cancellations = 0
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onInstantBackRequest: { _, targetURL in
+                bridge.beginInstantBackHandoff(targetURL: targetURL)
+            },
+            onInstantBackCancellation: { _ in
+                cancellations += 1
+                bridge.cancelInstantBackHandoff()
+            }
+        )
+
+        webView.load(URLRequest(url: firstURL))
+        let firstReady = try await waitUntil {
+            webView.backForwardList.currentItem?.url == firstURL
+        }
+        XCTAssertTrue(firstReady)
+        webView.load(URLRequest(url: secondURL))
+        let secondReady = try await waitUntil {
+            webView.backForwardList.currentItem?.url == secondURL
+        }
+        XCTAssertTrue(secondReady)
+        webView.load(URLRequest(url: thirdURL))
+        let thirdReady = try await waitUntil {
+            webView.backForwardList.currentItem?.url == thirdURL
+        }
+        XCTAssertTrue(thirdReady)
+
+        let targetItem = try XCTUnwrap(webView.backForwardList.backItem)
+        let currentItem = try XCTUnwrap(webView.backForwardList.currentItem)
+        XCTAssertEqual(currentItem.url, thirdURL)
+
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "current-b-token",
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        observer.webView(
+            webView,
+            shouldGoTo: targetItem,
+            willUseInstantBack: true,
+            completionHandler: { _ in }
+        )
+        XCTAssertTrue(bridge.isInstantBackHandoffPending)
+
+        // The authoritative current history item is still C, not the pending
+        // target A. didFinish routes this mismatch through the cancellation
+        // callback, keeping observer and bridge state in sync.
+        observer.confirmInstantBackActivation(in: webView, observedURL: thirdURL)
+
+        XCTAssertFalse(observer.isInstantBackActivationPending)
+        XCTAssertFalse(bridge.isInstantBackHandoffPending)
+        XCTAssertEqual(cancellations, 1)
+
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.stateKind,
+                token: "current-b-token",
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        XCTAssertEqual(observations, [.generationStarted, .generationFinished])
+    }
+
     func testConfirmedInstantBackIdleBaselineClearsCurrentAttentionWithoutRestoringReady() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
@@ -1068,6 +1174,54 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         bridge.confirmInstantBackHandoff()
+
+        // Natural pageshow may have arrived before confirmation; it was
+        // rejected as a different-token baseline. The explicit resync asks
+        // the actual current document to emit this fresh baseline now.
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
+    }
+
+    func testNaturalAndResyncBaselinesDeduplicateWithoutSyntheticEvents() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/chat-a")!
+        )
+        bridge.confirmInstantBackHandoff()
+
+        // Natural pageshow and the explicit named-world resync can both report
+        // the same current state. The tracker accepts one fresh baseline and
+        // de-duplicates the second without a synthetic finish/start.
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-restored-a"
+        )
 
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
@@ -1205,6 +1359,72 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
     }
 
+    func testCurrentDocumentCompletionDuringPendingSurvivesCancellationButConfirmResetsIt() throws {
+        let (_, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        bridge.beginInstantBackHandoff()
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "instant-back-current-b"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+
+        bridge.cancelInstantBackHandoff()
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+
+        bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/chat-a")!
+        )
+        bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+    }
+
+    func testUnsupportedInstantBackTargetResetsIdleReadyAndGeneratingAttention() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let unsupportedURL = URL(string: "https://example.com/ordinary")!
+
+        // Unsupported targets still create a transient transition so the old
+        // ChatGPT runtime is always reset, but they never request ChatGPT JS
+        // resync.
+        acceptBaseline(generating: false, bridge: bridge, webView: webView, token: "idle-b")
+        bridge.beginInstantBackHandoff(targetURL: unsupportedURL)
+        bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+
+        acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "generating-b")
+        bridge.beginInstantBackHandoff(targetURL: unsupportedURL)
+        bridge.confirmInstantBackHandoff()
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+
+        acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "ready-b")
+        acceptState(generating: false, bridge: bridge, webView: webView, token: "ready-b")
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        bridge.beginInstantBackHandoff(targetURL: unsupportedURL)
+        bridge.confirmInstantBackHandoff()
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+    }
+
     func testInstantBackFallbackKeepsOrdinaryDidCommitAsTheOnlyReplacementBoundary() throws {
         let (_, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
@@ -1229,8 +1449,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertTrue(bridge.isInstantBackHandoffPending)
 
-        // A fallback provisional load cancels the candidate. Only didCommit
-        // resets the old runtime, after which a fresh baseline is accepted.
+        // A fallback provisional load cancels only the transition. Only
+        // didCommit resets the old runtime, after which a fresh baseline is
+        // accepted.
+        bridge.cancelInstantBackHandoff()
         observer.webView(webView, didStartProvisionalNavigation: nil)
         XCTAssertFalse(bridge.isInstantBackHandoffPending)
         observer.webView(webView, didCommit: nil)

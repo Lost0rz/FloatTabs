@@ -374,15 +374,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // If Instant Back falls back to normal loading, ordinary didCommit is
         // authoritative again. A new provisional navigation also invalidates
         // any older correlation marker.
-        onInstantBackCancellation(slotID)
-        pendingInstantBack = nil
+        cancelPendingInstantBack()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
-        onInstantBackCancellation(slotID)
-        pendingInstantBack = nil
+        cancelPendingInstantBack()
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
@@ -417,8 +415,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
-        onInstantBackCancellation(slotID)
-        pendingInstantBack = nil
+        cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
             ?? webView.url
@@ -449,15 +446,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         willUseInstantBack: Bool,
         completionHandler: @escaping (Bool) -> Void
     ) {
+        // A new request supersedes any older pending target before its own
+        // transient marker is installed.
+        cancelPendingInstantBack()
         if willUseInstantBack {
             pendingInstantBack = PendingInstantBack(
                 targetItem: backForwardListItem,
                 targetURL: backForwardListItem.url
             )
             onInstantBackRequest(slotID, backForwardListItem.url)
-        } else {
-            onInstantBackCancellation(slotID)
-            pendingInstantBack = nil
         }
 
         completionHandler(true)
@@ -532,7 +529,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         WebViewFactory.configureHiddenScrollers(in: webView)
     }
 
-    private func confirmInstantBackActivation(
+    // Internal visibility keeps the deterministic history-item correlation
+    // path directly testable on runners that cannot force WebKit's native
+    // Instant Back callback sequence.
+    func confirmInstantBackActivation(
         in webView: WKWebView,
         observedURL: URL
     ) {
@@ -554,12 +554,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             // for the next authoritative observation.
             if currentItem.url.absoluteString == observedURL.absoluteString,
                currentItem !== pendingInstantBack.targetItem {
-                self.pendingInstantBack = nil
+                cancelPendingInstantBack()
             }
             return
         }
 
         self.pendingInstantBack = nil
         onInstantBackActivation(slotID)
+    }
+
+    private func cancelPendingInstantBack() {
+        guard pendingInstantBack != nil else { return }
+        pendingInstantBack = nil
+        onInstantBackCancellation(slotID)
     }
 }
