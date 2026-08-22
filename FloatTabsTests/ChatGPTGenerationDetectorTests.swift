@@ -175,6 +175,36 @@ final class ChatGPTGenerationDetectorTests: XCTestCase {
         XCTAssertEqual(page.observations, [.generationStarted])
     }
 
+    func testConfirmedInstantBackResyncExecutesInNamedWorldAndReestablishesBaseline() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: """
+        <button data-testid="stop-button">Stop</button>
+        """)
+
+        let initialStart = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(initialStart, "initial detector baseline must establish Generating")
+        guard initialStart else { return }
+
+        page.bridge.beginInstantBackHandoff(
+            targetURL: URL(string: "https://chatgpt.com/")!
+        )
+        page.bridge.confirmInstantBackHandoff()
+
+        let resynced = await page.waitFor {
+            page.observations == [
+                .generationStarted,
+                .runtimeReset,
+                .generationStarted,
+            ]
+        }
+        XCTAssertTrue(
+            resynced,
+            "confirmed Instant Back must invoke the named-world resync entry and receive a fresh baseline from the actual current document"
+        )
+    }
+
     func testInjectedHostGateDerivesFromChatGPTSitePolicy() async {
         let expected = "host === \"\(ChatGPTSitePolicy.chatGPTHost)\""
             + " || host.endsWith(\".\(ChatGPTSitePolicy.chatGPTHost)\")"
