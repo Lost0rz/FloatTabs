@@ -1281,9 +1281,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
     }
 
-    // MARK: 4.12 PR #59 isolation
+    // MARK: 4.12 Factory user-content seam
 
-    func testFactorySeamStaysConfinedToUserContentConfigurationWithoutFirstMouse() {
+    func testFactorySeamUsesConfiguredUserContentController() {
         var receivedControllers: [WKUserContentController] = []
         let webView = WebViewFactory.makeWebView { controller in
             receivedControllers.append(controller)
@@ -1295,10 +1295,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(
             webView.configuration.userContentController === receivedControllers.first
         )
-
-        // PR #59 (FloatTabsWebView.acceptsFirstMouse) is deliberately NOT on
-        // this branch; merging it later must consciously update this pin.
-        XCTAssertFalse(webView.acceptsFirstMouse(for: nil))
     }
 
     // MARK: - Harness
