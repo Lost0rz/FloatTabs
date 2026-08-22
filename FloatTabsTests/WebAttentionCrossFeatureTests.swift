@@ -720,10 +720,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
 
-        // A later supported commit reopens only a fresh baseline epoch.
+        // A later supported commit reopens attention only through the
+        // authorized current-document resync. The live stop control makes the
+        // actual current document's own baseline Generating.
         committedURL = supportedURL
         webView.loadHTMLString(
-            "<html><body>supported document</body></html>",
+            "<html><body><button data-testid=\"stop-button\">Stop</button></body></html>",
             baseURL: supportedURL
         )
         let supportedCommit = try await waitForWebViewURL(
@@ -737,20 +739,36 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // ordering. SlotNavigationObserver derives the transient attention
         // fact from this same webView.url value.
         observer.webView(webView, didCommit: nil)
-        acceptBaseline(
-            generating: false,
-            bridge: bridge,
-            webView: webView,
-            token: "fresh-supported-document"
-        )
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        acceptState(
+
+        // After a supported commit, script messages cannot claim the fresh
+        // epoch: neither the replaced document's own token nor a guessed
+        // replacement token is an authorized resync result.
+        acceptBaseline(
             generating: true,
             bridge: bridge,
             webView: webView,
-            token: "fresh-supported-document"
+            token: "old-chatgpt-document"
         )
-        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "guessed-supported-token"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertFalse(coordinator.isAttentionProtected(slot.id))
+
+        // Only the token-bearing baseline the actual WKWebView returns from
+        // its own named-world resync entry may reopen attention.
+        let reopened = try await waitUntil(timeoutMilliseconds: 5000) {
+            coordinator.state(for: slot.id) == .generating
+        }
+        XCTAssertTrue(
+            reopened,
+            "authorized current-document resync must reopen attention"
+        )
+        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
     }
 
     // MARK: 4.8 Current-site menu favicon projection
@@ -1460,21 +1478,25 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         bridge.confirmInstantBackHandoff()
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
-        bridge.handleRuntimeReplacement(
-            committedURL: URL(string: "https://chatgpt.com/chat-generating")!
-        )
+        // Phase setup uses the runtime-recovery seam: after a supported
+        // commit only the actual WKWebView's resync result may open the
+        // epoch, and this stubbed runtime has no document to resync.
+        bridge.handleRuntimeReplacement()
         acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "generating-b")
+        // Precondition: the recovery seam must actually establish Generating
+        // before the unsupported Instant Back reset proves it is cleared.
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
         bridge.beginInstantBackHandoff(targetURL: unsupportedURL)
         bridge.confirmInstantBackHandoff()
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertFalse(coordinator.isAttentionProtected(slot.id))
 
         // A late old-document state cannot revive the unsupported target.
         acceptState(generating: false, bridge: bridge, webView: webView, token: "generating-b")
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
-        bridge.handleRuntimeReplacement(
-            committedURL: URL(string: "https://chatgpt.com/chat-ready")!
-        )
+        bridge.handleRuntimeReplacement()
         acceptBaseline(generating: true, bridge: bridge, webView: webView, token: "ready-b")
         acceptState(generating: false, bridge: bridge, webView: webView, token: "ready-b")
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
