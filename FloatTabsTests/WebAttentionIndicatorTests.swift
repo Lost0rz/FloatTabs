@@ -37,6 +37,60 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(tab.isShowingReadyAttention)
     }
 
+    func testReadySoundPolicyOnlyTriggersWhenReadyCountIncreases() {
+        XCTAssertTrue(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 0,
+                currentReadyCount: 1
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 1,
+                currentReadyCount: 2
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 1,
+                currentReadyCount: 1
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 2,
+                currentReadyCount: 1
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 1,
+                currentReadyCount: 0
+            )
+        )
+        XCTAssertFalse(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: 0,
+                currentReadyCount: 0
+            )
+        )
+    }
+
+    func testReadySoundPolicyNormalizesInvalidNegativeCounts() {
+        XCTAssertFalse(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: -1,
+                currentReadyCount: 0
+            )
+        )
+        XCTAssertTrue(
+            AppCoordinator.shouldPlayAttentionReadySound(
+                previousReadyCount: -1,
+                currentReadyCount: 1
+            )
+        )
+    }
+
     func testReadyAcknowledgementAndRuntimeResetClearTheDot() {
         let coordinator = WebAttentionCoordinator()
         let profile = makeProfile(name: "GPT")
