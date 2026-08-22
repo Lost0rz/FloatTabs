@@ -133,8 +133,7 @@ final class WebViewPool {
     /// deliberately not considered committed presentation state.
     func committedURL(for slotID: UUID) -> URL? {
         guard let webView = webViews[slotID],
-              let url = webView.url
-                ?? committedURLProvider?(webView)
+              let url = committedURLProvider?(webView)
                 ?? webView.backForwardList.currentItem?.url,
               WebAppURL.isSafe(url) else {
             return nil
@@ -336,7 +335,7 @@ final class WebViewPool {
             onContentProcessTermination: { [weak self] slotID in
                 self?.handleContentProcessTermination(slotID: slotID)
             },
-            onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID in
+            onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID, commitURL in
                 guard let self,
                       let webView,
                       self.existingWebView(for: slotID) === webView else {
@@ -344,7 +343,7 @@ final class WebViewPool {
                 }
                 let committedURL = self.committedURL(for: slotID)
                 attentionBridge?.cancelInstantBackHandoff()
-                attentionBridge?.handleRuntimeReplacement(committedURL: committedURL)
+                attentionBridge?.handleRuntimeReplacement(committedURL: commitURL)
                 guard let committedURL else {
                     return
                 }

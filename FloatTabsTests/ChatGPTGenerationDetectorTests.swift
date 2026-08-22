@@ -51,6 +51,23 @@ private final class ChatGPTDetectorPage {
         webView.evaluateJavaScript(javascript) { _, _ in }
     }
 
+    func namedWorldResyncFunctionType() async -> String? {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                "typeof globalThis.__floatTabsAttentionResyncV1",
+                in: nil,
+                in: ChatGPTAttentionBridge.contentWorld
+            ) { (result: Result<Any, Error>) in
+                switch result {
+                case let .success(value):
+                    continuation.resume(returning: value as? String)
+                case .failure:
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
     /// Waits until the page has parsed and the script's coalesced baseline
     /// (up to ~250 ms after load) has had room to settle.
     func settleBaseline() async {
@@ -73,6 +90,43 @@ private final class ChatGPTDetectorPage {
 
 @MainActor
 final class ChatGPTGenerationDetectorTests: XCTestCase {
+    func testImmediateAndSettledNamedWorldResyncBothEstablishBaseline() async {
+        for settled in [false, true] {
+            let page = ChatGPTDetectorPage()
+            page.load(bodyHTML: "<button data-testid=\"stop-button\">Stop</button>")
+
+            let initialStart = await page.waitFor {
+                page.observations == [.generationStarted]
+            }
+            XCTAssertTrue(initialStart)
+            guard initialStart else { continue }
+
+            let functionType = await page.namedWorldResyncFunctionType()
+            XCTAssertEqual(functionType, "function")
+            if settled {
+                let loadSettled = await page.waitFor { !page.webView.isLoading }
+                XCTAssertTrue(loadSettled)
+            }
+
+            page.bridge.beginInstantBackHandoff(
+                targetURL: URL(string: "https://chatgpt.com/")!
+            )
+            page.bridge.confirmInstantBackHandoff()
+            let resynced = await page.waitFor {
+                page.observations == [
+                    .generationStarted,
+                    .runtimeReset,
+                    .generationStarted,
+                ]
+            }
+            XCTAssertTrue(resynced)
+            XCTAssertEqual(
+                page.observations,
+                [.generationStarted, .runtimeReset, .generationStarted]
+            )
+        }
+    }
+
     func testHiddenFirstStopControlDoesNotMaskVisibleSecondControl() async {
         let page = ChatGPTDetectorPage()
 

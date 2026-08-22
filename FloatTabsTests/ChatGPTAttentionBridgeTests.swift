@@ -673,7 +673,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
-            onNavigationCommit: { _ in
+            onNavigationCommit: { _, _ in
                 events.append("commit")
             },
             loadHandler: { _, url in

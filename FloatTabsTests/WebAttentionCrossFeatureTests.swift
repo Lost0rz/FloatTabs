@@ -670,7 +670,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
     }
 
-    func testUnsupportedCommittedDocumentClosesAttentionUntilSupportedReentry() throws {
+    func testUnsupportedCommittedDocumentClosesAttentionUntilSupportedReentry() async throws {
         var committedURL: URL?
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
@@ -690,7 +690,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             token: "old-chatgpt-document"
         )
         committedURL = unsupportedURL
-        observer.webView(webView, didCommit: nil)
+        webView.loadHTMLString(
+            "<html><body>unsupported document</body></html>",
+            baseURL: unsupportedURL
+        )
+        let unsupportedCommit = try await waitForWebViewURL(
+            webView,
+            url: unsupportedURL
+        )
+        XCTAssertTrue(unsupportedCommit)
+        guard unsupportedCommit else { return }
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
         // Both forms of stale ChatGPT IPC are rejected while the actual
@@ -713,6 +722,20 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // A later supported commit reopens only a fresh baseline epoch.
         committedURL = supportedURL
+        webView.loadHTMLString(
+            "<html><body>supported document</body></html>",
+            baseURL: supportedURL
+        )
+        let supportedCommit = try await waitForWebViewURL(
+            webView,
+            url: supportedURL
+        )
+        XCTAssertTrue(supportedCommit)
+        guard supportedCommit else { return }
+        // Deliver the commit boundary after WebKit has exposed the final URL
+        // so this admission assertion cannot race loadHTMLString's callback
+        // ordering. SlotNavigationObserver derives the transient attention
+        // fact from this same webView.url value.
         observer.webView(webView, didCommit: nil)
         acceptBaseline(
             generating: false,
@@ -1019,15 +1042,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
 
         webView.load(URLRequest(url: firstURL))
-        let firstReady = try await waitUntil {
-            webView.backForwardList.currentItem?.url == firstURL
-        }
+        let firstReady = try await waitForCommittedHistoryItem(
+            webView,
+            url: firstURL
+        )
         XCTAssertTrue(firstReady)
         guard firstReady else { return }
         webView.load(URLRequest(url: secondURL))
-        let secondReady = try await waitUntil {
-            webView.backForwardList.currentItem?.url == secondURL
-        }
+        let secondReady = try await waitForCommittedHistoryItem(
+            webView,
+            url: secondURL
+        )
         XCTAssertTrue(secondReady)
         guard secondReady else { return }
 
@@ -1105,19 +1130,24 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
 
         webView.load(URLRequest(url: firstURL))
-        let firstReady = try await waitUntil {
-            webView.backForwardList.currentItem?.url == firstURL
-        }
+        let firstReady = try await waitForCommittedHistoryItem(
+            webView,
+            url: firstURL
+        )
         XCTAssertTrue(firstReady)
+        guard firstReady else { return }
         webView.load(URLRequest(url: secondURL))
-        let secondReady = try await waitUntil {
-            webView.backForwardList.currentItem?.url == secondURL
-        }
+        let secondReady = try await waitForCommittedHistoryItem(
+            webView,
+            url: secondURL
+        )
         XCTAssertTrue(secondReady)
+        guard secondReady else { return }
         webView.load(URLRequest(url: thirdURL))
-        let thirdReady = try await waitUntil {
-            webView.backForwardList.currentItem?.url == thirdURL
-        }
+        let thirdReady = try await waitForCommittedHistoryItem(
+            webView,
+            url: thirdURL
+        )
         XCTAssertTrue(thirdReady)
 
         let targetItem = try XCTUnwrap(webView.backForwardList.backItem)
@@ -2067,6 +2097,24 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 return false
             }
             try await wait(milliseconds: pollMilliseconds)
+        }
+    }
+
+    private func waitForCommittedHistoryItem(
+        _ webView: WKWebView,
+        url: URL
+    ) async throws -> Bool {
+        try await waitUntil(timeoutMilliseconds: 5000) {
+            webView.backForwardList.currentItem?.url == url
+        }
+    }
+
+    private func waitForWebViewURL(
+        _ webView: WKWebView,
+        url: URL
+    ) async throws -> Bool {
+        try await waitUntil(timeoutMilliseconds: 5000) {
+            webView.url == url && !webView.isLoading
         }
     }
 

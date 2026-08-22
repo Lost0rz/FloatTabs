@@ -221,7 +221,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
-    private let onNavigationCommit: @MainActor (UUID) -> Void
+    private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
@@ -260,7 +260,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
-        onNavigationCommit: @escaping @MainActor (UUID) -> Void = { _ in },
+        onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
@@ -384,7 +384,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
-        onNavigationCommit(slotID)
+        // At this delegate boundary WebKit's visible URL is the final
+        // committed destination for this navigation. Pass it as a narrow,
+        // transient commit fact; shared presentation lookup remains history
+        // based and must not broaden to generic `webView.url` observation.
+        onNavigationCommit(slotID, webView.url)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
