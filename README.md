@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.3"><strong>Download FloatTabs v0.1.3</strong></a>
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.4"><strong>Download FloatTabs v0.1.4</strong></a>
   · macOS 13 or later · Apple Silicon and Intel
 </p>
 
-**Current release package:** **v0.1.3 Build 5**. Build 5 supersedes the original Build 4 package while keeping the same `v0.1.3` release and download URL.
+**Current release package:** **v0.1.4 Build 6**.
 
 FloatTabs keeps a small set of long-lived Web Apps one shortcut away: AI tools, social feeds, dashboards, documentation, media players, self-hosted services, or anything else you want available without opening a full browser window.
 
@@ -31,6 +31,7 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 - 左侧 Tab rail 支持单击切换、拖动排序、右键快速设置。
 - Rail 可折叠：折叠后网页回收原先预留的大部分宽度，只保留 12 pt 左侧移动带。
 - 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold 内存策略。
+- ChatGPT 回答在后台完成时可进入 Ready 状态：Tab 显示红点、菜单栏聚合未读 Ready 数量，并可按设置播放提示音。
 - 每个 Slot 独立保存 Website Mode、Browser Identity、窗口尺寸、缩放、Residency 与 Background Media。
 
 ## Core Features
@@ -40,6 +41,9 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 | Persistent Web App Slots | Keep selected Web Apps alive across switching and relaunch. |
 | External Tab rail | Favicon-first vertical rail with hover labels and Dock-style magnification. |
 | Single-click activation | Tab / Add / Pin / Settings respond on the first click even when FloatTabs is not the active app. |
+| ChatGPT Ready attention | Tracks ChatGPT generation at runtime and marks unseen completed work with a red Tab indicator. |
+| Menu-bar attention | Shows the unseen ChatGPT Ready count while FloatTabs is hidden and follows the selected Slot’s committed-site favicon. |
+| Configurable Ready alerts | Settings → Notifications can enable/disable Ready sounds, choose an available macOS system sound, set per-alert volume, and preview changes immediately. |
 | Collapsible rail | Reclaims the 76 pt nominal rail reservation down to a 12 pt physical movement gutter without changing persisted viewport size. |
 | Drag-to-reorder | Reorder persistent Web Apps directly on the rail. |
 | Tab context menu | Home, Reload, Website Mode, Window Size, Zoom, Residency, Background Media, Edit, Remove. |
@@ -59,14 +63,14 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 
 ### Install
 
-1. Download [`FloatTabs-0.1.3.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.3/FloatTabs-0.1.3.dmg).
+1. Download [`FloatTabs-0.1.4.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.4/FloatTabs-0.1.4.dmg).
 2. Open the DMG.
 3. Drag **FloatTabs** to **Applications**.
 4. Launch FloatTabs from Applications.
 
 Replacing an older copy does not normally remove saved FloatTabs configuration or WebKit website data.
 
-FloatTabs v0.1.3 is currently unsigned and unnotarized. If macOS blocks the first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
+FloatTabs v0.1.4 is currently unsigned and unnotarized. If macOS blocks the first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
 
 ### Show / hide
 
@@ -185,27 +189,30 @@ All shortcuts are configurable in **FloatTabs Settings → Shortcuts**.
 - `.floattabsbackup` contains FloatTabs configuration, not cookies, passwords, OAuth tokens, caches or live page state.
 - Attachment downloads use a staged transfer so an existing destination is not replaced until the new download succeeds.
 
-## What's New in v0.1.3
+## What's New in v0.1.4
 
-The current v0.1.3 package is **Build 5**, an in-place refresh of the original Build 4 package. Build 5 adds exact version/build and latest-fixes information in Settings while retaining the same v0.1.3 release URL.
+v0.1.4 is the ChatGPT Attention and notification release. It builds on the v0.1.3 floating-shell baseline without changing normal Tab, fullscreen, resizing, or Hot / Warm / Cold semantics.
 
-v0.1.3 focuses on rail interaction and fullscreen restore consistency:
+- Added a Slot-scoped ChatGPT runtime attention state (`Idle → Generating → Ready`) with a red favicon indicator for unseen completed responses.
+- Added real-presentation acknowledgement so Ready clears only when the actual ChatGPT WebView becomes user-visible, including fullscreen source and visible companion presentations.
+- Protected Generating and unseen Ready runtimes from FloatTabs-initiated Warm/Cold eviction without changing the existing residency policy itself.
+- Added hidden-app menu-bar Ready aggregation and current-site favicon projection for the selected committed WebKit page.
+- Added a Ready completion sound and a dedicated **Settings → Notifications** pane.
+- Added automatic sound preview when choosing a sound or completing a volume adjustment, plus a manual **Play Preview** button.
+- Added per-alert volume control and an enable/disable switch. Defaults preserve the prior behavior: On, Ping, 100%.
+- Kept Settings previews available when automatic alerts are disabled; 0% volume is true silence and never falls back to a system beep.
+- Hardened committed ChatGPT navigation so stale old-document/natural baselines cannot reopen the attention barrier; only an authorized current-document resync can establish the new baseline after a supported commit.
+- Kept attention runtime-only: prompt/response text is not persisted into FloatTabs preferences or backups.
+- Backup/restore now carries the Ready sound preferences while remaining backward compatible with older schema-1 backups.
 
-- Fixed first-click Tab / rail control activation from a background application.
-- Folding the Tab rail now gives its unused width back to the Web page while retaining a 12 pt move gutter.
-- Unified Tab slide, alpha, fold-grip, shell-zone and source-window fold animations to one 0.22-second clock.
-- Preserved nominal / persisted viewport sizing across fold → resize → expand → relaunch flows.
-- Hardened fullscreen restore by waiting for WebKit presentation teardown before releasing source ownership.
-- Re-armed workspace auto-hide suppression when the shell returns from fullscreen.
-- Prevented rail geometry changes while fullscreen owns the Web source.
-- Explicitly removed the experimental right-edge auto-full-width / auto-slide resize behavior; FloatTabs remains a normal floating window.
+Manual QA confirmed the new Ready sound selection/volume behavior and existing first-click interaction on the release candidate. Automated coverage includes the attention state machine, navigation/document lifetime, visibility, lifecycle protection, menu-bar projection, sound policy/settings, and backup compatibility.
 
-See [`docs/release/FloatTabs_v0.1.3.md`](docs/release/FloatTabs_v0.1.3.md) for the detailed release record.
+See [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md) for the detailed release record.
 
 ## Verify the Download
 
 ```bash
-shasum -a 256 -c FloatTabs-0.1.3.dmg.sha256
+shasum -a 256 -c FloatTabs-0.1.4.dmg.sha256
 ```
 
 Only install an unsigned build when you trust this repository and the checksum matches.
@@ -250,7 +257,7 @@ Current sources of truth:
 
 - Product / usage: this README
 - Current interaction and geometry contract: [`docs/design/FloatTabs_UI_Design_System_v1.3.md`](docs/design/FloatTabs_UI_Design_System_v1.3.md)
-- Current release record: [`docs/release/FloatTabs_v0.1.3.md`](docs/release/FloatTabs_v0.1.3.md)
+- Current release record: [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md)
 - UI/UX reference-map status: [`docs/uiux/README.md`](docs/uiux/README.md)
 
 Older stage, design and release files are retained as historical records. Files explicitly marked **Historical** or **Superseded** must not override current production behavior.

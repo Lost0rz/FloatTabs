@@ -813,10 +813,10 @@ private final class ShortcutsSettingsViewController: NSViewController {
 
 enum AppReleaseInfo {
     static let latestFixes = [
-        "Tab, Add, Pin and Settings controls respond on the first click.",
-        "Collapsed Tab rail width is reclaimed for Web content while retaining the 12 pt move gutter.",
-        "Fullscreen restore waits for WebKit presentation teardown and keeps shell/source state synchronized.",
-        "Settings now shows the exact app version, build number and latest fixes.",
+        "ChatGPT completions now enter an unseen Ready state with a red Tab indicator and menu-bar attention count.",
+        "Ready alerts can use a configurable macOS system sound, per-alert volume, and instant Settings previews.",
+        "Committed ChatGPT navigation now rejects stale document observations until the current page re-establishes its authorized baseline.",
+        "The menu-bar favicon follows the selected Slot's committed site while attention remains runtime-only.",
     ]
 
     static func displayVersion(shortVersion: String?, build: String?) -> String {
