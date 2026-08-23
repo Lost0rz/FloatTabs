@@ -1572,8 +1572,8 @@ final class ExternalWebAppTabView: NSView {
             // The animated PanelInteractionBorderView owns the active outline.
             // Keep only the tab surface here so page + active tab read as one shape.
             let baseColor = NSColor.windowBackgroundColor
-            let tint = browserProfileColor.appKitColor
-                .blended(withFraction: 0.25, of: baseColor)
+            let tint = baseColor
+                .blended(withFraction: 0.25, of: browserProfileColor.appKitColor)
                 ?? baseColor
             shapeLayer.fillColor = tint.withAlphaComponent(0.98).cgColor
             shapeLayer.strokeColor = NSColor.clear.cgColor

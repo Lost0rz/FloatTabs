@@ -594,7 +594,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         var expected: NSColor?
         tab.effectiveAppearance.performAsCurrentDrawingAppearance {
             let base = NSColor.windowBackgroundColor
-            expected = (profileColor.appKitColor.blended(withFraction: 0.25, of: base) ?? base)
+            expected = (base.blended(withFraction: 0.25, of: profileColor.appKitColor) ?? base)
                 .withAlphaComponent(0.98)
                 .usingColorSpace(.deviceRGB)
         }
