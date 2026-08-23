@@ -68,6 +68,8 @@
 		A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003C /* BrowserProfileSwitchTests.swift */; };
 		A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */; };
 		A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003E /* BrowserProfileBackupTests.swift */; };
+		A0000000000000000000003F /* UnsupportedBrowserProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */; };
+		A00000000000000000000040 /* UnsupportedBrowserProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -144,6 +146,8 @@
 		B0000000000000000000003C /* BrowserProfileSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileSwitchTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileDuplicateTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003E /* BrowserProfileBackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileBackupTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsupportedBrowserProfileView.swift; sourceTree = "<group>"; };
+		B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsupportedBrowserProfileTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -277,6 +281,7 @@
 				B00000000000000000000017 /* ExternalTabRail.swift */,
 				B00000000000000000000018 /* WebAppEditorController.swift */,
 				B00000000000000000000019 /* EmptyWebAppView.swift */,
+				B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */,
 				B00000000000000000000024 /* GlobalSettingsController.swift */,
 			);
 			path = UI;
@@ -293,6 +298,7 @@
 		H00000000000000000000009 /* FloatTabsTests */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000040 /* UnsupportedBrowserProfileTests.swift */,
 				B0000000000000000000003B /* BrowserProfileAddTests.swift */,
 				B0000000000000000000003C /* BrowserProfileSwitchTests.swift */,
 				B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */,
@@ -444,6 +450,7 @@
 				A00000000000000000000002 /* AppDelegate.swift in Sources */,
 				A0000000000000000000000F /* AppCommandController.swift in Sources */,
 				A00000000000000000000018 /* EmptyWebAppView.swift in Sources */,
+				A0000000000000000000003F /* UnsupportedBrowserProfileView.swift in Sources */,
 				A00000000000000000000016 /* ExternalTabRail.swift in Sources */,
 				A00000000000000000000001 /* FloatTabsApp.swift in Sources */,
 				A00000000000000000000004 /* FloatingPanel.swift in Sources */,
@@ -501,6 +508,7 @@
 				A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */,
 				A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */,
 				A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */,
+				A00000000000000000000040 /* UnsupportedBrowserProfileTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

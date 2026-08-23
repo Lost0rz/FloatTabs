@@ -1068,6 +1068,7 @@ final class WebPanelContainerView: NSView {
     private let clipView = NSView()
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
+    private let unsupportedBrowserProfileView = UnsupportedBrowserProfileView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
     private weak var activeWebView: WKWebView?
@@ -1078,6 +1079,17 @@ final class WebPanelContainerView: NSView {
 
     var currentWebView: WKWebView? {
         activeWebView
+    }
+
+    var isShowingUnsupportedBrowserProfile: Bool {
+        currentContentView === unsupportedBrowserProfileView
+            && !unsupportedBrowserProfileView.isHidden
+    }
+
+    var displayedUnsupportedBrowserProfileName: String? {
+        isShowingUnsupportedBrowserProfile
+            ? unsupportedBrowserProfileView.displayedProfileName
+            : nil
     }
 
     override init(frame frameRect: NSRect) {
@@ -1159,9 +1171,32 @@ final class WebPanelContainerView: NSView {
     }
 
     func showEmptyState() {
-        // Presentation bookkeeping must be cleared even when emptyView is already
-        // the last transient content view. Hot presentation is independent from
-        // currentContentView, so the old early-return left an active WebView live.
+        prepareForNonWebPresentation()
+
+        if currentContentView !== emptyView || emptyView.superview !== clipView {
+            setContentView(emptyView)
+        }
+        emptyView.isHidden = false
+        bringToFront(emptyView)
+    }
+
+    func showUnsupportedBrowserProfile(profileName: String) {
+        prepareForNonWebPresentation()
+        unsupportedBrowserProfileView.show(profileName: profileName)
+
+        if currentContentView !== unsupportedBrowserProfileView
+            || unsupportedBrowserProfileView.superview !== clipView {
+            setContentView(unsupportedBrowserProfileView)
+        }
+        unsupportedBrowserProfileView.isHidden = false
+        bringToFront(unsupportedBrowserProfileView)
+    }
+
+    private func prepareForNonWebPresentation() {
+        // Presentation bookkeeping must be cleared even when the current
+        // placeholder is already the last transient content view. Hot
+        // presentation is independent from currentContentView, so cleanup must
+        // explicitly release the active WebView and hide every Hot host.
         detachHostedTransientIfOwned()
         activeWebView = nil
         activeSlotID = nil
@@ -1171,12 +1206,6 @@ final class WebPanelContainerView: NSView {
             host.autoresizingMask = []
             host.isHidden = true
         }
-
-        if currentContentView !== emptyView || emptyView.superview !== clipView {
-            setContentView(emptyView)
-        }
-        emptyView.isHidden = false
-        bringToFront(emptyView)
     }
 
     override func layout() {

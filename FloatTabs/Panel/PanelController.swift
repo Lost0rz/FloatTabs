@@ -121,6 +121,38 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.name
     }
 
+    var isShowingUnsupportedBrowserProfile: Bool {
+        if sourceHostController.isSessionLocked {
+            return sourceHostController.companionContainer.isShowingUnsupportedBrowserProfile
+        }
+        return rootView.webPanelContainerView.isShowingUnsupportedBrowserProfile
+    }
+
+    var displayedUnsupportedBrowserProfileName: String? {
+        if sourceHostController.isSessionLocked {
+            return sourceHostController.companionContainer.displayedUnsupportedBrowserProfileName
+        }
+        return rootView.webPanelContainerView.displayedUnsupportedBrowserProfileName
+    }
+
+    static func unsupportedBrowserProfileName(
+        for profile: WebAppProfile,
+        error: Error,
+        browserProfiles: [BrowserProfile]
+    ) -> String? {
+        guard profile.browserProfileID != nil,
+              let providerError = error as? BrowserProfileDataStoreProviderError,
+              providerError == .customProfilesUnsupported else {
+            return nil
+        }
+
+        guard let browserProfileID = profile.browserProfileID else {
+            return nil
+        }
+        return browserProfiles.first(where: { $0.id == browserProfileID })?.name
+            ?? "Selected Profile"
+    }
+
     /// The menu bar favicon source is the selected Slot's committed site when
     /// a resident WebView has one. Cold/no-commit Slots intentionally fall back
     /// to their configured Home URL until WebKit reports a real commit.
@@ -1266,7 +1298,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         do {
             webView = try webViewPool.webView(for: activeProfile)
         } catch {
-            rootView.webPanelContainerView.showEmptyState()
+            if let profileName = Self.unsupportedBrowserProfileName(
+                for: activeProfile,
+                error: error,
+                browserProfiles: tabStore.browserProfiles
+            ) {
+                rootView.webPanelContainerView.showUnsupportedBrowserProfile(
+                    profileName: profileName
+                )
+            } else {
+                rootView.webPanelContainerView.showEmptyState()
+            }
             synchronizeResidentIndicators()
             return
         }
@@ -2103,7 +2145,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         do {
             webView = try webViewPool.webView(for: activeProfile)
         } catch {
-            sourceHostController.companionContainer.showEmptyState()
+            if let profileName = Self.unsupportedBrowserProfileName(
+                for: activeProfile,
+                error: error,
+                browserProfiles: tabStore.browserProfiles
+            ) {
+                rootView.installFullscreenCompanionContainer(
+                    sourceHostController.companionContainer
+                )
+                sourceHostController.companionContainer.showUnsupportedBrowserProfile(
+                    profileName: profileName
+                )
+            } else {
+                sourceHostController.companionContainer.showEmptyState()
+            }
             companionActiveProfile = nil
             synchronizeResidentIndicators()
             return
