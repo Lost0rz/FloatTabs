@@ -129,7 +129,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         XCTAssertEqual(tab.displayedBrowserProfileColor, customColor)
     }
 
-    func testActiveTabUsesExactPurpleColorAndInactiveTabStaysNeutral() throws {
+    func testActiveTabUsesEightyPercentPurpleBlendAndInactiveTabStaysNeutral() throws {
         let purple = BrowserProfileColor(preset: .purple)
         let profileID = UUID()
         let tab = ExternalWebAppTabView(slotID: UUID())
@@ -698,8 +698,9 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
         var expected: NSColor?
         tab.effectiveAppearance.performAsCurrentDrawingAppearance {
-            expected = profileColor.appKitColor
-                .withAlphaComponent(1)
+            expected = ExternalWebAppTabView.activeBackgroundColor(
+                profileColor: profileColor.appKitColor
+            )
                 .usingColorSpace(.deviceRGB)
         }
         let resolvedExpected = try! XCTUnwrap(expected, file: file, line: line)

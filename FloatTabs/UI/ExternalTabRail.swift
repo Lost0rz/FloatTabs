@@ -1498,13 +1498,23 @@ final class ExternalWebAppTabView: NSView {
     private func applyResolvedAppearance() {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
+        let activeBackground = Self.activeBackgroundColor(
+            profileColor: browserProfileColor.appKitColor
+        )
         label.textColor = isActive
-            ? Self.activeForegroundColor(for: browserProfileColor.appKitColor)
+            ? Self.activeForegroundColor(for: activeBackground)
             : .secondaryLabelColor
-        applyIconAppearance()
-        updateShape()
+        applyIconAppearance(activeBackground: activeBackground)
+        updateShape(activeBackground: activeBackground)
         readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
         updateReadyAttentionGeometry()
+    }
+
+    static func activeBackgroundColor(
+        profileColor: NSColor,
+        baseColor: NSColor = .windowBackgroundColor
+    ) -> NSColor {
+        baseColor.blended(withFraction: 0.80, of: profileColor) ?? profileColor
     }
 
     private static func activeForegroundColor(for background: NSColor) -> NSColor {
@@ -1523,9 +1533,10 @@ final class ExternalWebAppTabView: NSView {
             + 0.7152 * linearized(color.greenComponent)
             + 0.0722 * linearized(color.blueComponent)
 
-        // A resolved sRGB luminance of 0.5 cleanly separates bright colors
-        // such as Yellow from dark colors such as Graphite and Purple.
-        return luminance >= 0.5 ? .black : .white
+        // The final 80% profile-color blend keeps bright Yellow readable with
+        // dark text while dark Graphite and Purple remain readable with light
+        // text.
+        return luminance >= 0.35 ? .black : .white
     }
 
     private var browserProfileDisplayName: String {
@@ -1560,10 +1571,12 @@ final class ExternalWebAppTabView: NSView {
         applyIconAppearance()
     }
 
-    private func applyIconAppearance() {
+    private func applyIconAppearance(activeBackground: NSColor? = nil) {
         let base = sourceIcon ?? Self.fallbackIcon()
+        let resolvedActiveBackground = activeBackground
+            ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
         let templateTint = isActive
-            ? Self.activeForegroundColor(for: browserProfileColor.appKitColor)
+            ? Self.activeForegroundColor(for: resolvedActiveBackground)
             : NSColor.labelColor
         if isResident {
             // Runtime truth owns color: active, Hot, Warm cache and Cold grace
@@ -1588,7 +1601,7 @@ final class ExternalWebAppTabView: NSView {
         toolTip = "\(displayedPresentationTitle) · \(state)"
     }
 
-    private func updateShape() {
+    private func updateShape(activeBackground: NSColor? = nil) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         shapeLayer.frame = bounds
         let radius: CGFloat = 8
@@ -1605,9 +1618,9 @@ final class ExternalWebAppTabView: NSView {
         if isActive {
             // The animated PanelInteractionBorderView owns the active outline.
             // Keep only the tab surface here so page + active tab read as one shape.
-            shapeLayer.fillColor = browserProfileColor.appKitColor
-                .withAlphaComponent(1)
-                .cgColor
+            let resolvedActiveBackground = activeBackground
+                ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
+            shapeLayer.fillColor = resolvedActiveBackground.cgColor
             shapeLayer.strokeColor = NSColor.clear.cgColor
             shapeLayer.lineWidth = 0
             layer?.shadowOpacity = 0
