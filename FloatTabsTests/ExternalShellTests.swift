@@ -552,7 +552,7 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
         let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
         assertShortcut(reload, matches: .reload)
@@ -580,6 +580,10 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(
             menu.item(withTitle: "Profile")?.submenu?.items.map(\.title),
             ["Default", "", "Manage Profiles…"]
+        )
+        XCTAssertEqual(
+            menu.item(withTitle: "Open in New Tab with Profile")?.submenu?.items.map(\.title),
+            ["Default"]
         )
         XCTAssertFalse(actionTitles.contains("Rename…"))
     }

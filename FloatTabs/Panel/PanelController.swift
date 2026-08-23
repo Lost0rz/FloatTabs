@@ -490,6 +490,50 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
+    static func canRequestOpenInNewTabWithBrowserProfile(
+        sourceExists: Bool,
+        targetProfileID: UUID?,
+        targetExists: Bool,
+        customProfilesSupported: Bool,
+        sessionIsLocked: Bool
+    ) -> Bool {
+        guard sourceExists,
+              targetProfileID == nil || targetExists else {
+            return false
+        }
+        guard !sessionIsLocked else { return false }
+        guard targetProfileID == nil || customProfilesSupported else { return false }
+        return true
+    }
+
+    @discardableResult
+    func requestOpenInNewTabWithBrowserProfile(
+        sourceSlotID: UUID,
+        targetProfileID: UUID?
+    ) -> WebAppProfile? {
+        let sourceExists = tabStore.profiles.contains(where: { $0.id == sourceSlotID })
+        let targetExists = targetProfileID == nil
+            || tabStore.browserProfiles.contains(where: { $0.id == targetProfileID })
+        guard Self.canRequestOpenInNewTabWithBrowserProfile(
+            sourceExists: sourceExists,
+            targetProfileID: targetProfileID,
+            targetExists: targetExists,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
+            sessionIsLocked: sourceHostController.isSessionLocked
+        ) else {
+            NSSound.beep()
+            return nil
+        }
+
+        // duplicateSlot owns the single transactional save and publishes the
+        // new active Slot through the normal TabStore.onChange path. That path
+        // creates the target runtime only after the target binding is durable.
+        return tabStore.duplicateSlot(
+            sourceID: sourceSlotID,
+            targetBrowserProfileID: targetProfileID
+        )
+    }
+
     static func defaultBrowserProfileSwitchConfirmation(
         sourceProfile: WebAppProfile,
         targetProfile: BrowserProfile?
@@ -1118,6 +1162,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 targetProfileID: profileID
             )
         }
+        rail.onOpenInNewTabWithBrowserProfile = { [weak self] id, profileID in
+            _ = self?.requestOpenInNewTabWithBrowserProfile(
+                sourceSlotID: id,
+                targetProfileID: profileID
+            )
+        }
         rail.onManageBrowserProfiles = { [weak self] in
             self?.onOpenGlobalSettings?()
         }
@@ -1274,7 +1324,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         rootView.externalControlZoneView.setBrowserProfileMenuSnapshot(
             options: options,
-            assignmentEnabled: !sourceHostController.isSessionLocked
+            assignmentEnabled: !sourceHostController.isSessionLocked,
+            duplicationEnabled: !sourceHostController.isSessionLocked
         )
     }
 
@@ -1833,6 +1884,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func handleSourceSessionLockChange(isLocked: Bool) {
         rootView.externalControlZoneView.setBrowserProfileAssignmentEnabled(!isLocked)
+        rootView.externalControlZoneView.setBrowserProfileDuplicationEnabled(!isLocked)
         if isLocked {
             fullscreenVisibilityIntent.begin(wasVisible: requestedVisibility)
             fullscreenProfile = lastSynchronizedActiveProfile ?? tabStore.activeProfile
