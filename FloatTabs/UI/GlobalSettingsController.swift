@@ -949,6 +949,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
     // they are never used as an authoritative Profile model.
     private(set) var displayedBrowserProfileNames: [String] = []
     private(set) var displayedBrowserProfileActionTitles: [[String]] = []
+    private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
     private(set) var isNewProfileEnabled = false
     private(set) var profileSupportDescription = ""
 
@@ -1087,6 +1088,9 @@ final class AccountLanguageSettingsViewController: NSViewController {
         displayedBrowserProfileActionTitles = [[]] + snapshot.customProfiles.map { _ in
             ["Rename…", "Delete…"]
         }
+        displayedBrowserProfileDeleteEnabled = [false] + snapshot.customProfiles.map {
+            !snapshot.referencedProfileIDs.contains($0.id)
+        }
         isNewProfileEnabled = snapshot.customProfilesSupported
         newProfileButton.isEnabled = snapshot.customProfilesSupported
         profileSupportDescription = snapshot.customProfilesSupported
@@ -1155,6 +1159,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
         )
         deleteButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
         deleteButton.bezelStyle = .rounded
+        deleteButton.isEnabled = !isReferenced
 
         let actions = NSStackView(views: [renameButton, deleteButton])
         actions.orientation = .horizontal
@@ -1209,6 +1214,20 @@ final class AccountLanguageSettingsViewController: NSViewController {
         }
     }
 
+    /// UI preflight only prevents an obsolete destructive confirmation. The
+    /// manager repeats the reference check authoritatively after confirmation
+    /// to protect the deletion race boundary.
+    func profileDeletionCandidate(id: UUID) throws -> BrowserProfile {
+        let snapshot = browserProfileManager.snapshot()
+        guard let profile = snapshot.customProfiles.first(where: { $0.id == id }) else {
+            throw BrowserProfileManagementError.notFound
+        }
+        guard !snapshot.referencedProfileIDs.contains(id) else {
+            throw BrowserProfileManagementError.referenced
+        }
+        return profile
+    }
+
     @objc private func renameProfile(_ sender: NSButton) {
         guard let id = profileID(from: sender),
               let currentName = browserProfileManager.snapshot().customProfiles.first(where: {
@@ -1241,11 +1260,17 @@ final class AccountLanguageSettingsViewController: NSViewController {
     }
 
     @objc private func deleteProfile(_ sender: NSButton) {
-        guard let id = profileID(from: sender),
-              let profile = browserProfileManager.snapshot().customProfiles.first(where: {
-                  $0.id == id
-              }),
-              let window = view.window else { return }
+        guard let id = profileID(from: sender) else { return }
+
+        let profile: BrowserProfile
+        do {
+            profile = try profileDeletionCandidate(id: id)
+        } catch {
+            showProfileError(error)
+            return
+        }
+
+        guard let window = view.window else { return }
 
         let alert = NSAlert()
         alert.alertStyle = .warning

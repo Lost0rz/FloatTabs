@@ -30,6 +30,60 @@ final class BrowserProfileSettingsTests: XCTestCase {
 
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default"])
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [[]])
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false])
+    }
+
+    func testReferencedProfilePreflightThrowsReferenced() {
+        let profile = makeBrowserProfile(name: "Company")
+        let controller = makeSettingsController(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [profile],
+                    referencedProfileIDs: [profile.id],
+                    customProfilesSupported: true
+                )
+            }
+        )
+
+        controller.loadView()
+
+        XCTAssertThrowsError(try controller.profileDeletionCandidate(id: profile.id)) { error in
+            XCTAssertEqual(error as? BrowserProfileManagementError, .referenced)
+        }
+    }
+
+    func testReferencedProfileDeleteActionIsDisabled() {
+        let profile = makeBrowserProfile(name: "Company")
+        let controller = makeSettingsController(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [profile],
+                    referencedProfileIDs: [profile.id],
+                    customProfilesSupported: true
+                )
+            }
+        )
+
+        controller.loadView()
+
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, false])
+    }
+
+    func testUnreferencedProfilePreflightSucceeds() throws {
+        let profile = makeBrowserProfile(name: "Company")
+        let controller = makeSettingsController(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [profile],
+                    referencedProfileIDs: [],
+                    customProfilesSupported: true
+                )
+            }
+        )
+
+        controller.loadView()
+
+        XCTAssertEqual(try controller.profileDeletionCandidate(id: profile.id), profile)
     }
 
     func testCreatePassesExactTrimmedNameToManager() {
@@ -217,6 +271,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
 
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, [])
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.dropFirst().first, ["Rename…", "Delete…"])
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
     }
 
     private func makeSettingsController(
