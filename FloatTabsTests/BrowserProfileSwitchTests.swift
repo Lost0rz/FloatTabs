@@ -167,49 +167,72 @@ final class BrowserProfileSwitchTests: XCTestCase {
     }
 
     func testActiveForegroundUsesContrastForBrightAndDarkProfileColors() throws {
-        let tab = ExternalWebAppTabView(slotID: UUID())
-        tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
-        let yellowID = UUID()
-        tab.update(
-            profile: makeWebApp(browserProfileID: yellowID, name: "Yellow"),
-            isActive: true,
-            isResident: true
-        )
-        tab.setBrowserProfileMenuSnapshot(
-            options: [
-                .defaultProfile(),
-                BrowserProfileMenuOption(
-                    id: yellowID,
-                    name: "Yellow",
-                    color: BrowserProfileColor(preset: .yellow),
-                    isEnabled: true
-                ),
-            ],
-            assignmentEnabled: true
-        )
-        assertColor(tab.displayedActiveTabForegroundColor, matches: .black)
-        assertColor(tab.displayedIconTintColor, matches: .black)
+        // Preset colors such as Graphite resolve through appearance-dynamic
+        // NSColor.systemGray, and the blend base windowBackgroundColor is also
+        // appearance-dynamic, so a preset's resolved foreground can legitimately
+        // flip between Aqua and Dark Aqua. The contrast contract is therefore
+        // asserted with fixed sRGB profile colors far from the luminance
+        // threshold, under both pinned appearances.
+        for appearanceName in [NSAppearance.Name.aqua, NSAppearance.Name.darkAqua] {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 80, height: 64),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.appearance = NSAppearance(named: appearanceName)
+            let tab = ExternalWebAppTabView(slotID: UUID())
+            tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+            window.contentView = tab
+            defer { window.contentView = nil }
 
-        let graphiteID = UUID()
-        tab.update(
-            profile: makeWebApp(browserProfileID: graphiteID, name: "Graphite"),
-            isActive: true,
-            isResident: true
-        )
-        tab.setBrowserProfileMenuSnapshot(
-            options: [
-                .defaultProfile(),
-                BrowserProfileMenuOption(
-                    id: graphiteID,
-                    name: "Graphite",
-                    color: BrowserProfileColor(preset: .graphite),
-                    isEnabled: true
-                ),
-            ],
-            assignmentEnabled: true
-        )
-        assertColor(tab.displayedActiveTabForegroundColor, matches: .white)
-        assertColor(tab.displayedIconTintColor, matches: .white)
+            XCTAssertEqual(
+                tab.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
+                appearanceName
+            )
+
+            let brightID = UUID()
+            tab.update(
+                profile: makeWebApp(browserProfileID: brightID, name: "Bright"),
+                isActive: true,
+                isResident: true
+            )
+            tab.setBrowserProfileMenuSnapshot(
+                options: [
+                    .defaultProfile(),
+                    BrowserProfileMenuOption(
+                        id: brightID,
+                        name: "Bright",
+                        color: BrowserProfileColor(preset: .custom, customSRGBHex: "#FFFF00"),
+                        isEnabled: true
+                    ),
+                ],
+                assignmentEnabled: true
+            )
+            assertColor(tab.displayedActiveTabForegroundColor, matches: .black)
+            assertColor(tab.displayedIconTintColor, matches: .black)
+
+            let darkID = UUID()
+            tab.update(
+                profile: makeWebApp(browserProfileID: darkID, name: "Dark"),
+                isActive: true,
+                isResident: true
+            )
+            tab.setBrowserProfileMenuSnapshot(
+                options: [
+                    .defaultProfile(),
+                    BrowserProfileMenuOption(
+                        id: darkID,
+                        name: "Dark",
+                        color: BrowserProfileColor(preset: .custom, customSRGBHex: "#101010"),
+                        isEnabled: true
+                    ),
+                ],
+                assignmentEnabled: true
+            )
+            assertColor(tab.displayedActiveTabForegroundColor, matches: .white)
+            assertColor(tab.displayedIconTintColor, matches: .white)
+        }
     }
 
     func testReadyDotRemainsSystemRedAndFaviconSourceIsUnchanged() throws {
