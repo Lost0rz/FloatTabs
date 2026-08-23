@@ -1,0 +1,192 @@
+name: Prepare v0.1.4 Release
+
+on:
+  push:
+    branches:
+      - release/v0.1.4
+    paths:
+      - '.github/workflows/release-v0.1.4-prep.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/v0.1.4
+          fetch-depth: 0
+
+      - name: Update release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          project = Path('FloatTabs.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          assert text.count('CURRENT_PROJECT_VERSION = 5;') == 2
+          assert text.count('MARKETING_VERSION = 0.1.3;') == 2
+          project.write_text(text.replace('CURRENT_PROJECT_VERSION = 5;', 'CURRENT_PROJECT_VERSION = 6;').replace('MARKETING_VERSION = 0.1.3;', 'MARKETING_VERSION = 0.1.4;'))
+
+          settings = Path('FloatTabs/UI/GlobalSettingsController.swift')
+          text = settings.read_text()
+          pattern = re.compile(r'enum AppReleaseInfo \{\n    static let latestFixes = \[\n.*?    \]\n\n    static func displayVersion', re.S)
+          replacement = '''enum AppReleaseInfo {
+              static let latestFixes = [
+                  "ChatGPT completions now enter an unseen Ready state with a red Tab indicator and menu-bar attention count.",
+                  "Ready alerts can use a configurable macOS system sound, per-alert volume, and instant Settings previews.",
+                  "Committed ChatGPT navigation now rejects stale document observations until the current page re-establishes its authorized baseline.",
+                  "The menu-bar favicon follows the selected Slot's committed site while attention remains runtime-only.",
+              ]
+
+              static func displayVersion'''
+          text, count = pattern.subn(replacement, text, count=1)
+          assert count == 1
+          settings.write_text(text)
+
+          readme = Path('README.md')
+          text = readme.read_text()
+          pairs = [
+              ('https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.3', 'https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.4'),
+              ('Download FloatTabs v0.1.3', 'Download FloatTabs v0.1.4'),
+              ('**Current release package:** **v0.1.3 Build 5**. Build 5 supersedes the original Build 4 package while keeping the same `v0.1.3` release and download URL.', '**Current release package:** **v0.1.4 Build 6**.'),
+              ('https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.3/FloatTabs-0.1.3.dmg', 'https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.4/FloatTabs-0.1.4.dmg'),
+              ('FloatTabs v0.1.3 is currently unsigned and unnotarized.', 'FloatTabs v0.1.4 is currently unsigned and unnotarized.'),
+              ('shasum -a 256 -c FloatTabs-0.1.3.dmg.sha256', 'shasum -a 256 -c FloatTabs-0.1.4.dmg.sha256'),
+              ('[`docs/release/FloatTabs_v0.1.3.md`](docs/release/FloatTabs_v0.1.3.md)', '[`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md)'),
+          ]
+          for old, new in pairs:
+              assert old in text, old
+              text = text.replace(old, new)
+
+          zh = '- 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold 内存策略。\n'
+          assert zh in text
+          text = text.replace(zh, zh + '- ChatGPT 回答在后台完成时可进入 Ready 状态：Tab 显示红点、菜单栏聚合未读 Ready 数量，并可按设置播放提示音。\n', 1)
+
+          core = '| Single-click activation | Tab / Add / Pin / Settings respond on the first click even when FloatTabs is not the active app. |\n'
+          assert core in text
+          text = text.replace(core, core + '| ChatGPT Ready attention | Tracks ChatGPT generation at runtime and marks unseen completed work with a red Tab indicator. |\n| Menu-bar attention | Shows the unseen ChatGPT Ready count while FloatTabs is hidden and follows the selected Slot’s committed-site favicon. |\n| Configurable Ready alerts | Settings → Notifications can enable/disable Ready sounds, choose an available macOS system sound, set per-alert volume, and preview changes immediately. |\n', 1)
+
+          whats_new = '''## What's New in v0.1.4
+
+v0.1.4 is the ChatGPT Attention and notification release. It builds on the v0.1.3 floating-shell baseline without changing normal Tab, fullscreen, resizing, or Hot / Warm / Cold semantics.
+
+- Added a Slot-scoped ChatGPT runtime attention state (`Idle → Generating → Ready`) with a red favicon indicator for unseen completed responses.
+- Added real-presentation acknowledgement so Ready clears only when the actual ChatGPT WebView becomes user-visible, including fullscreen source and visible companion presentations.
+- Protected Generating and unseen Ready runtimes from FloatTabs-initiated Warm/Cold eviction without changing the existing residency policy itself.
+- Added hidden-app menu-bar Ready aggregation and current-site favicon projection for the selected committed WebKit page.
+- Added a Ready completion sound and a dedicated **Settings → Notifications** pane.
+- Added automatic sound preview when choosing a sound or completing a volume adjustment, plus a manual **Play Preview** button.
+- Added per-alert volume control and an enable/disable switch. Defaults preserve the prior behavior: On, Ping, 100%.
+- Kept Settings previews available when automatic alerts are disabled; 0% volume is true silence and never falls back to a system beep.
+- Hardened committed ChatGPT navigation so stale old-document/natural baselines cannot reopen the attention barrier; only an authorized current-document resync can establish the new baseline after a supported commit.
+- Kept attention runtime-only: prompt/response text is not persisted into FloatTabs preferences or backups.
+- Backup/restore now carries the Ready sound preferences while remaining backward compatible with older schema-1 backups.
+
+Manual QA confirmed the new Ready sound selection/volume behavior and existing first-click interaction on the release candidate. Automated coverage includes the attention state machine, navigation/document lifetime, visibility, lifecycle protection, menu-bar projection, sound policy/settings, and backup compatibility.
+
+See [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md) for the detailed release record.
+
+'''
+          text, count = re.subn(r"## What's New in v0\.1\.3\n.*?(?=## Verify the Download\n)", whats_new, text, count=1, flags=re.S)
+          assert count == 1
+          readme.write_text(text)
+
+          Path('docs/release/FloatTabs_v0.1.4.md').write_text('''# FloatTabs v0.1.4
+
+Release date: 2026-08-23
+
+Build: **6**
+
+## Summary
+
+v0.1.4 ships ChatGPT Ready attention as a complete product feature and adds user-configurable completion sounds. Attention remains runtime-only, the existing Hot / Warm / Cold policy meanings are preserved, and committed navigation is hardened against stale document observations.
+
+## Highlights
+
+### ChatGPT Ready attention
+
+- Slot-scoped runtime state: `Idle → Generating → Ready`.
+- A completion becomes Ready only when the actual ChatGPT WebView is not user-visible.
+- Ready clears only when the WebView is genuinely presented, including normal, element-fullscreen source, and visible companion presentations.
+- Ready projects a red Tab-favicon indicator; hidden FloatTabs can aggregate the Ready count in the menu bar.
+- Generating and unseen Ready runtimes are protected from FloatTabs-initiated Warm/Cold eviction without changing residency policy semantics.
+- Prompt/response content is not intentionally persisted into FloatTabs preferences, backups, logs, or analytics.
+
+### Menu-bar attention and current-site favicon
+
+- Hidden FloatTabs projects the derived Ready count to the menu bar.
+- The selected Slot's menu favicon follows its committed/current-history WebKit site.
+- Icon + Name / Icon Only display preference remains available.
+
+### Configurable Ready sounds
+
+**Settings → Notifications** now provides:
+
+- Play sound when ChatGPT is ready — default On.
+- A curated list of loadable macOS system sounds — default Ping.
+- FloatTabs-local 0–100% volume — default 100%.
+- Play Preview.
+
+Changing the Sound previews immediately. Completing a Volume adjustment previews once at the new level; the slider is non-continuous so dragging does not create repeated sounds. Preview remains available while automatic Ready sounds are disabled. A 0% volume is true silence and never falls back to a system beep.
+
+Automatic Ready playback and Settings preview use the same `AttentionSoundPlayer`; automatic playback still happens only when the existing Ready count increases.
+
+### Navigation/document hardening
+
+Supported committed ChatGPT navigation enters an authorized-resync barrier. Natural or stale script baselines cannot establish the replacement document merely by being fresh; the current attached WKWebView with matching generation/identity must return its named-world authorized resync baseline. Unsupported and runtime-recovery boundaries retain their fail-closed behavior.
+
+### Backup compatibility
+
+Ready sound enabled/name/volume settings are stored in schema-1 backups as backward-compatible optional fields. Older schema-1 backups resolve missing fields to On, Ping, and 100%.
+
+## Validation
+
+- Focused sound/settings tests: PASS.
+- Two full local XCTest rounds: **460 tests, 0 failures** each.
+- Apple Silicon arm64 Debug / Release / XCTest: PASS in macOS CI.
+- Intel x86_64 Debug / Release / XCTest: PASS in macOS CI.
+- Universal 2 Release build and architecture verification: PASS.
+- QA DMG workflow: PASS.
+- `Package.resolved`: unchanged.
+- Manual QA: sound choice, volume, automatic preview, enable/disable, persistence, and existing attention behavior PASS.
+- Manual release-candidate check: first-click interaction is not swallowed.
+
+The release-preparation PR is additionally gated by repository CI and QA DMG. After merge, the existing **Publish Release** workflow builds and verifies the final Universal 2 artifacts before creating the GitHub Release.
+
+## Distribution
+
+FloatTabs v0.1.4 Build 6 is distributed as an unsigned, unnotarized Universal 2 DMG for Apple Silicon and Intel Macs.
+
+Expected assets:
+
+- `FloatTabs-0.1.4.dmg`
+- `FloatTabs-0.1.4.dmg.sha256`
+- `FloatTabs-0.1.4.dSYM.zip`
+- `FloatTabs-0.1.4.dSYM.zip.sha256`
+
+Verify the DMG with:
+
+```bash
+shasum -a 256 -c FloatTabs-0.1.4.dmg.sha256
+```
+''')
+          PY
+          git diff --check
+
+      - name: Commit final release files and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/release-v0.1.4-prep.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'chore: prepare FloatTabs v0.1.4'
+          git push origin HEAD:release/v0.1.4
