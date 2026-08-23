@@ -35,17 +35,20 @@ struct BrowserProfileManagementSnapshot: Equatable {
     let customProfiles: [BrowserProfile]
     let defaultProfilePresentation: DefaultBrowserProfilePresentation
     let referencedProfileIDs: Set<UUID>
+    let referencingWebAppNamesByProfileID: [UUID: [String]]
     let customProfilesSupported: Bool
 
     init(
         customProfiles: [BrowserProfile],
         defaultProfilePresentation: DefaultBrowserProfilePresentation = .default,
         referencedProfileIDs: Set<UUID>,
+        referencingWebAppNamesByProfileID: [UUID: [String]] = [:],
         customProfilesSupported: Bool
     ) {
         self.customProfiles = customProfiles
         self.defaultProfilePresentation = defaultProfilePresentation
         self.referencedProfileIDs = referencedProfileIDs
+        self.referencingWebAppNamesByProfileID = referencingWebAppNamesByProfileID
         self.customProfilesSupported = customProfilesSupported
     }
 }
@@ -957,6 +960,41 @@ enum AppReleaseInfo {
 }
 
 @MainActor
+private final class ProfileDeleteTooltipView: NSView {
+    private let button: NSButton
+
+    init(button: NSButton, toolTip: String) {
+        self.button = button
+        super.init(frame: .zero)
+        self.toolTip = toolTip
+        translatesAutoresizingMaskIntoConstraints = false
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor),
+            button.topAnchor.constraint(equalTo: topAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        button.intrinsicContentSize
+    }
+
+    // Keep the disabled button genuinely non-interactive while making the
+    // wrapper the tooltip-tracking view.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+}
+
+@MainActor
 final class AccountLanguageSettingsViewController: NSViewController {
     private let onExportBackup: GlobalSettingsController.ExportBackupHandler
     private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
@@ -972,6 +1010,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
     private(set) var displayedBrowserProfileColors: [BrowserProfileColor] = []
     private(set) var displayedBrowserProfileActionTitles: [[String]] = []
     private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
+    private(set) var displayedBrowserProfileDeleteToolTips: [String?] = []
     private(set) var isNewProfileEnabled = false
     private(set) var profileSupportDescription = ""
 
@@ -1116,6 +1155,11 @@ final class AccountLanguageSettingsViewController: NSViewController {
         displayedBrowserProfileDeleteEnabled = [false] + snapshot.customProfiles.map {
             !snapshot.referencedProfileIDs.contains($0.id)
         }
+        displayedBrowserProfileDeleteToolTips = [nil] + snapshot.customProfiles.map { profile in
+            Self.profileDeletionTooltip(
+                for: snapshot.referencingWebAppNamesByProfileID[profile.id] ?? []
+            )
+        }
         isNewProfileEnabled = snapshot.customProfilesSupported
         newProfileButton.isEnabled = snapshot.customProfilesSupported
         profileSupportDescription = snapshot.customProfilesSupported
@@ -1135,7 +1179,8 @@ final class AccountLanguageSettingsViewController: NSViewController {
             profileRowsStack.addArrangedSubview(
                 makeCustomProfileRow(
                     profile,
-                    isReferenced: snapshot.referencedProfileIDs.contains(profile.id)
+                    isReferenced: snapshot.referencedProfileIDs.contains(profile.id),
+                    referencingWebAppNames: snapshot.referencingWebAppNamesByProfileID[profile.id] ?? []
                 )
             )
         }
@@ -1180,7 +1225,8 @@ final class AccountLanguageSettingsViewController: NSViewController {
 
     private func makeCustomProfileRow(
         _ profile: BrowserProfile,
-        isReferenced: Bool
+        isReferenced: Bool,
+        referencingWebAppNames: [String]
     ) -> NSView {
         let nameLabel = NSTextField(labelWithString: profile.name)
         nameLabel.font = .systemFont(ofSize: 12)
@@ -1202,12 +1248,24 @@ final class AccountLanguageSettingsViewController: NSViewController {
         deleteButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
         deleteButton.bezelStyle = .rounded
         deleteButton.isEnabled = !isReferenced
+        let deleteToolTip = Self.profileDeletionTooltip(for: referencingWebAppNames)
+        deleteButton.toolTip = deleteToolTip
+
+        let deleteControl: NSView
+        if isReferenced, let deleteToolTip {
+            deleteControl = ProfileDeleteTooltipView(
+                button: deleteButton,
+                toolTip: deleteToolTip
+            )
+        } else {
+            deleteControl = deleteButton
+        }
 
         let colorPopup = makeProfileColorPopup(
             profileID: profile.id,
             color: profile.color
         )
-        let actions = NSStackView(views: [renameButton, colorPopup, deleteButton])
+        let actions = NSStackView(views: [renameButton, colorPopup, deleteControl])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -1218,12 +1276,20 @@ final class AccountLanguageSettingsViewController: NSViewController {
         row.spacing = 10
 
         guard isReferenced else { return row }
-        let detail = detailLabel("This Profile is used by one or more Web Apps.")
+        let detailText = referencingWebAppNames.isEmpty
+            ? "This Profile is used by one or more Web Apps."
+            : "Used by \(referencingWebAppNames.joined(separator: ", "))."
+        let detail = detailLabel(detailText)
         let wrapper = NSStackView(views: [row, detail])
         wrapper.orientation = .vertical
         wrapper.alignment = .leading
         wrapper.spacing = 3
         return wrapper
+    }
+
+    static func profileDeletionTooltip(for webAppNames: [String]) -> String? {
+        guard !webAppNames.isEmpty else { return nil }
+        return "Used by Tabs: \(webAppNames.joined(separator: ", ")). Switch them to another Profile before deleting."
     }
 
     private func makeProfileColorPopup(

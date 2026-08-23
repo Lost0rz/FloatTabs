@@ -91,6 +91,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
                 BrowserProfileManagementSnapshot(
                     customProfiles: [profile],
                     referencedProfileIDs: [profile.id],
+                    referencingWebAppNamesByProfileID: [profile.id: ["Pro", "Free"]],
                     customProfilesSupported: true
                 )
             }
@@ -99,6 +100,38 @@ final class BrowserProfileSettingsTests: XCTestCase {
         controller.loadView()
 
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, false])
+        XCTAssertEqual(
+            controller.displayedBrowserProfileDeleteToolTips,
+            [nil, "Used by Tabs: Pro, Free. Switch them to another Profile before deleting."]
+        )
+    }
+
+    func testReferencedProfileTooltipRefreshesAsSlotReferencesChange() {
+        let profile = makeBrowserProfile(name: "Company")
+        var names = ["Pro", "Free"]
+        let controller = makeSettingsController(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [profile],
+                    referencedProfileIDs: names.isEmpty ? [] : [profile.id],
+                    referencingWebAppNamesByProfileID: names.isEmpty ? [:] : [profile.id: names],
+                    customProfilesSupported: true
+                )
+            }
+        )
+
+        controller.loadView()
+        XCTAssertTrue(controller.displayedBrowserProfileDeleteToolTips[1]?.contains("Pro") == true)
+
+        names = ["Free"]
+        controller.refreshProfiles()
+        XCTAssertFalse(controller.displayedBrowserProfileDeleteToolTips[1]?.contains("Used by Tabs: Pro") == true)
+        XCTAssertTrue(controller.displayedBrowserProfileDeleteToolTips[1]?.contains("Free") == true)
+
+        names = []
+        controller.refreshProfiles()
+        XCTAssertTrue(controller.displayedBrowserProfileDeleteEnabled[1])
+        XCTAssertNil(controller.displayedBrowserProfileDeleteToolTips[1])
     }
 
     func testUnreferencedProfilePreflightSucceeds() throws {
@@ -317,6 +350,32 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, ["Rename…"])
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.dropFirst().first, ["Rename…", "Delete…"])
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
+        XCTAssertNil(controller.displayedBrowserProfileDeleteToolTips.first!)
+    }
+
+    func testManagementSnapshotDerivesReferenceNamesInSlotOrder() throws {
+        let repository = StageDProfileRepository()
+        let store = TabStore(repository: repository)
+        let browserProfile = try XCTUnwrap(store.createBrowserProfile(name: "Company"))
+        let pro = try XCTUnwrap(
+            store.add(name: "Pro", homeURL: URL(string: "https://example.com/pro")!)
+        )
+        let free = try XCTUnwrap(
+            store.add(name: "Free", homeURL: URL(string: "https://example.com/free")!)
+        )
+        XCTAssertTrue(store.setBrowserProfile(slotID: pro.id, profileID: browserProfile.id))
+        XCTAssertTrue(store.setBrowserProfile(slotID: free.id, profileID: browserProfile.id))
+
+        let controller = makePanelController(
+            store: store,
+            pool: makePool { _ in }
+        )
+        let snapshot = controller.browserProfileManagementSnapshot()
+
+        XCTAssertEqual(
+            snapshot.referencingWebAppNamesByProfileID[browserProfile.id],
+            ["Pro", "Free"]
+        )
     }
 
     private func makeSettingsController(

@@ -99,7 +99,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
 
     func testActiveTabUsesProfileColorAndSwitchRefreshesWithoutChangingInactiveVisual() throws {
         let defaultColor = BrowserProfileColor(preset: .blue)
-        let customColor = BrowserProfileColor(preset: .purple)
+        let customColor = BrowserProfileColor(preset: .custom, customSRGBHex: "#3366CC")
         let customID = UUID()
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
@@ -127,6 +127,111 @@ final class BrowserProfileSwitchTests: XCTestCase {
         tab.update(profile: custom, isActive: true, isResident: true)
         assertActiveFill(tab, matches: customColor)
         XCTAssertEqual(tab.displayedBrowserProfileColor, customColor)
+    }
+
+    func testActiveTabUsesExactPurpleColorAndInactiveTabStaysNeutral() throws {
+        let purple = BrowserProfileColor(preset: .purple)
+        let profileID = UUID()
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+        tab.update(
+            profile: makeWebApp(browserProfileID: profileID, name: "Purple"),
+            isActive: true,
+            isResident: true
+        )
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(),
+                BrowserProfileMenuOption(id: profileID, name: "Purple", color: purple, isEnabled: true),
+            ],
+            assignmentEnabled: true
+        )
+        tab.layoutSubtreeIfNeeded()
+        assertActiveFill(tab, matches: purple)
+
+        tab.update(
+            profile: makeWebApp(browserProfileID: profileID, name: "Purple"),
+            isActive: false,
+            isResident: true
+        )
+        let actual = try XCTUnwrap(
+            tab.displayedTabFillColor?.usingColorSpace(.deviceRGB)
+        )
+        let expected = try XCTUnwrap(
+            NSColor.controlBackgroundColor.withAlphaComponent(0.82).usingColorSpace(.deviceRGB)
+        )
+        XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.01)
+        XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.01)
+        XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.01)
+        XCTAssertEqual(actual.alphaComponent, expected.alphaComponent, accuracy: 0.01)
+    }
+
+    func testActiveForegroundUsesContrastForBrightAndDarkProfileColors() throws {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+        let yellowID = UUID()
+        tab.update(
+            profile: makeWebApp(browserProfileID: yellowID, name: "Yellow"),
+            isActive: true,
+            isResident: true
+        )
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(),
+                BrowserProfileMenuOption(
+                    id: yellowID,
+                    name: "Yellow",
+                    color: BrowserProfileColor(preset: .yellow),
+                    isEnabled: true
+                ),
+            ],
+            assignmentEnabled: true
+        )
+        assertColor(tab.displayedActiveTabForegroundColor, matches: .black)
+        assertColor(tab.displayedIconTintColor, matches: .black)
+
+        let graphiteID = UUID()
+        tab.update(
+            profile: makeWebApp(browserProfileID: graphiteID, name: "Graphite"),
+            isActive: true,
+            isResident: true
+        )
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(),
+                BrowserProfileMenuOption(
+                    id: graphiteID,
+                    name: "Graphite",
+                    color: BrowserProfileColor(preset: .graphite),
+                    isEnabled: true
+                ),
+            ],
+            assignmentEnabled: true
+        )
+        assertColor(tab.displayedActiveTabForegroundColor, matches: .white)
+        assertColor(tab.displayedIconTintColor, matches: .white)
+    }
+
+    func testReadyDotRemainsSystemRedAndFaviconSourceIsUnchanged() throws {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.update(
+            profile: makeWebApp(browserProfileID: nil, name: "Default"),
+            isActive: true,
+            isResident: true
+        )
+        let sourceIcon = try XCTUnwrap(tab.displayedIcon)
+        tab.setReadyAttention(true)
+        assertColor(tab.readyAttentionColor, matches: .systemRed)
+
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(color: BrowserProfileColor(preset: .yellow)),
+            ],
+            assignmentEnabled: true
+        )
+
+        XCTAssertTrue(tab.displayedIcon === sourceIcon)
+        assertColor(tab.readyAttentionColor, matches: .systemRed)
     }
 
     func testUnsupportedAndFullscreenLockedAssignmentItemsAreDisabledButManageRemainsAvailable() throws {
@@ -593,9 +698,8 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
         var expected: NSColor?
         tab.effectiveAppearance.performAsCurrentDrawingAppearance {
-            let base = NSColor.windowBackgroundColor
-            expected = (base.blended(withFraction: 0.25, of: profileColor.appKitColor) ?? base)
-                .withAlphaComponent(0.98)
+            expected = profileColor.appKitColor
+                .withAlphaComponent(1)
                 .usingColorSpace(.deviceRGB)
         }
         let resolvedExpected = try! XCTUnwrap(expected, file: file, line: line)
@@ -603,6 +707,23 @@ final class BrowserProfileSwitchTests: XCTestCase {
         XCTAssertEqual(actual.greenComponent, resolvedExpected.greenComponent, accuracy: 0.01, file: file, line: line)
         XCTAssertEqual(actual.blueComponent, resolvedExpected.blueComponent, accuracy: 0.01, file: file, line: line)
         XCTAssertEqual(actual.alphaComponent, resolvedExpected.alphaComponent, accuracy: 0.01, file: file, line: line)
+    }
+
+    private func assertColor(
+        _ actual: NSColor?,
+        matches expected: NSColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actual = try! XCTUnwrap(
+            try! XCTUnwrap(actual, file: file, line: line).usingColorSpace(.deviceRGB),
+            file: file,
+            line: line
+        )
+        let expected = try! XCTUnwrap(expected.usingColorSpace(.deviceRGB), file: file, line: line)
+        XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.01, file: file, line: line)
     }
 }
 

@@ -429,10 +429,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func browserProfileManagementSnapshot() -> BrowserProfileManagementSnapshot {
-        BrowserProfileManagementSnapshot(
+        var referencingWebAppNamesByProfileID: [UUID: [String]] = [:]
+        for profile in tabStore.profiles {
+            guard let browserProfileID = profile.browserProfileID else { continue }
+            referencingWebAppNamesByProfileID[browserProfileID, default: []].append(profile.name)
+        }
+        return BrowserProfileManagementSnapshot(
             customProfiles: tabStore.browserProfiles,
             defaultProfilePresentation: tabStore.defaultBrowserProfilePresentation,
-            referencedProfileIDs: Set(tabStore.profiles.compactMap(\.browserProfileID)),
+            referencedProfileIDs: Set(referencingWebAppNamesByProfileID.keys),
+            referencingWebAppNamesByProfileID: referencingWebAppNamesByProfileID,
             customProfilesSupported: webViewPool.customBrowserProfilesSupported
         )
     }

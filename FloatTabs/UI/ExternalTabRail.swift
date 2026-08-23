@@ -989,6 +989,14 @@ final class ExternalWebAppTabView: NSView {
         guard isActive else { return nil }
         return shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
     }
+    var displayedTabFillColor: NSColor? {
+        shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
+    var displayedActiveTabForegroundColor: NSColor? {
+        guard isActive else { return nil }
+        return label.textColor
+    }
+    var displayedIconTintColor: NSColor? { iconView.contentTintColor }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -1490,11 +1498,34 @@ final class ExternalWebAppTabView: NSView {
     private func applyResolvedAppearance() {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
-        label.textColor = isActive ? .labelColor : .secondaryLabelColor
+        label.textColor = isActive
+            ? Self.activeForegroundColor(for: browserProfileColor.appKitColor)
+            : .secondaryLabelColor
         applyIconAppearance()
         updateShape()
         readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
         updateReadyAttentionGeometry()
+    }
+
+    private static func activeForegroundColor(for background: NSColor) -> NSColor {
+        guard let color = background.usingColorSpace(.sRGB) else {
+            return .white
+        }
+
+        func linearized(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+
+        let luminance =
+            0.2126 * linearized(color.redComponent)
+            + 0.7152 * linearized(color.greenComponent)
+            + 0.0722 * linearized(color.blueComponent)
+
+        // A resolved sRGB luminance of 0.5 cleanly separates bright colors
+        // such as Yellow from dark colors such as Graphite and Purple.
+        return luminance >= 0.5 ? .black : .white
     }
 
     private var browserProfileDisplayName: String {
@@ -1531,16 +1562,19 @@ final class ExternalWebAppTabView: NSView {
 
     private func applyIconAppearance() {
         let base = sourceIcon ?? Self.fallbackIcon()
+        let templateTint = isActive
+            ? Self.activeForegroundColor(for: browserProfileColor.appKitColor)
+            : NSColor.labelColor
         if isResident {
             // Runtime truth owns color: active, Hot, Warm cache and Cold grace
             // all stay full color while a live WKWebView still exists.
             iconView.image = base
             iconView.alphaValue = 1
-            iconView.contentTintColor = base?.isTemplate == true ? .labelColor : nil
+            iconView.contentTintColor = base?.isTemplate == true ? templateTint : nil
         } else {
             if base?.isTemplate == true {
                 iconView.image = base
-                iconView.contentTintColor = .tertiaryLabelColor
+                iconView.contentTintColor = isActive ? templateTint : .tertiaryLabelColor
             } else {
                 iconView.image = grayscaleIcon ?? Self.fallbackIcon()
                 iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
@@ -1571,11 +1605,9 @@ final class ExternalWebAppTabView: NSView {
         if isActive {
             // The animated PanelInteractionBorderView owns the active outline.
             // Keep only the tab surface here so page + active tab read as one shape.
-            let baseColor = NSColor.windowBackgroundColor
-            let tint = baseColor
-                .blended(withFraction: 0.25, of: browserProfileColor.appKitColor)
-                ?? baseColor
-            shapeLayer.fillColor = tint.withAlphaComponent(0.98).cgColor
+            shapeLayer.fillColor = browserProfileColor.appKitColor
+                .withAlphaComponent(1)
+                .cgColor
             shapeLayer.strokeColor = NSColor.clear.cgColor
             shapeLayer.lineWidth = 0
             layer?.shadowOpacity = 0
