@@ -1,10 +1,10 @@
 # FloatTabs — Browser Profiles Construction Plan V1
 
-> Status: **ACTIVE FROZEN DELIVERY PLAN**
+> Status: **DELIVERED FROZEN PLAN** — all stages completed and accepted (§22).
 > Business Contract: `docs/product/FloatTabs_Browser_Profiles_Contract_V1.md` — **FROZEN**
 > Base main: `b5c8cd5a06eb966bdd2114350dfa9221eb5dcd6e` (FloatTabs v0.1.4 Build 6)
 > Revision: 2026-08-23
-> Runtime implementation: **NOT STARTED**
+> Runtime implementation: **COMPLETE — shipped as FloatTabs v0.2.0 Build 7**
 
 ## 1. Delivery objective
 
@@ -1108,3 +1108,45 @@ The following are settled for V1 and must not be reinterpreted during coding wit
 20. Apple Passwords/Passkeys are out of scope.
 
 Any local implementation assistant must treat this file plus the frozen Contract as the construction authority. If current code reality contradicts a step, stop that stage and report the conflict rather than silently changing the frozen product semantics.
+
+## 22. Delivery status — v0.2.0 final
+
+> Added 2026-08-23 at release. Sections 1–21 (including every frozen decision in §21) are the unchanged delivery-plan record; this section records the final delivery outcome.
+
+### Stages — all COMPLETED
+
+| Stage | Scope | Status |
+| --- | --- | --- |
+| A | Browser Profile model + v1→v2 persistence migration | **COMPLETED** |
+| B | Data-store provider + WebViewFactory seam | **COMPLETED** |
+| C | WebViewPool Profile runtime identity | **COMPLETED** |
+| D | Account Settings Profile CRUD | **COMPLETED** |
+| E | Add Web App Profile-before-first-load selection | **COMPLETED** |
+| F | Tab context-menu in-place Profile switching | **COMPLETED** |
+| G | Open in New Tab with Profile duplication | **COMPLETED** |
+| H | Backup/restore schema v2 + migration | **COMPLETED** |
+| I | macOS 13 fail-closed unsupported presentation | **COMPLETED** |
+| J | Cross-feature closure + regression suite | **COMPLETED** |
+| — | Final Audit Round 1 | **COMPLETED** |
+| — | Final Audit Round 2 | **COMPLETED** |
+| — | Real-Mac multi-account validation | **ACCEPTED** |
+
+### Amendments delivered after plan freeze
+
+- Default/custom Profile label colors for Tab identification (active Tab = 80% Profile color + 20% window background; luminance-selected foreground; favicon source, Ready dot and Border Theme untouched).
+- Referenced-Profile delete protection surfaced as a disabled Delete with a tooltip listing referencing Tab names.
+- `WKWebsiteDataStore.remove(forIdentifier:)` hardened to MainActor isolation; Profile deletion order fixed as release runtime → remove WebKit store → delete metadata.
+- Startup unreadable-configuration recovery hardened: a preserved recovery archive is evidence, not write authorization; ordinary saves stay blocked after recovery-preserve, and only an explicit startup recovery-replacement transaction may replace the state once. An unreadable configuration can never fall back to empty and overwrite user data.
+
+### Real-Mac QA — ACCEPTED (2026-08-23)
+
+- Browser Profile multi-account manual QA: **PASS** (real accounts, real isolated sessions).
+- Profile create / rename / color / switch / delete QA: **PASS**.
+- Startup recovery with real user data: recovery archive preserved and verified restorable; no empty-fallback overwrite.
+
+### Release record
+
+- **FloatTabs v0.2.0, Build 7 — released 2026-08-23** via `feature/browser-profiles-v1`.
+- Local validation at release prep: full XCTest **564/564 PASS**, Release build PASS, Universal 2 / QA DMG local packaging PASS, `Package.resolved` unchanged.
+- Repository gates: PR macOS CI (arm64 + x86_64 Debug/Release/XCTest, Universal 2, Package.resolved) and QA DMG workflow required before merge.
+- Final status of the shipped product: `docs/product/FloatTabs_Browser_Profiles_Contract_V1.md` §23.

@@ -931,10 +931,11 @@ private final class ShortcutsSettingsViewController: NSViewController {
 
 enum AppReleaseInfo {
     static let latestFixes = [
-        "ChatGPT completions now enter an unseen Ready state with a red Tab indicator and menu-bar attention count.",
-        "Ready alerts can use a configurable macOS system sound, per-alert volume, and instant Settings previews.",
-        "Committed ChatGPT navigation now rejects stale document observations until the current page re-establishes its authorized baseline.",
-        "The menu-bar favicon follows the selected Slot's committed site while attention remains runtime-only.",
+        "Browser Profiles: keep multiple independent logins for the same site without signing out and back in.",
+        "Each Profile is its own private login/session container; the built-in Default Profile keeps your existing sessions exactly as they are.",
+        "Create, rename, and color-code Profiles, and see the active Tab tinted with its Profile color.",
+        "Profile deletion is safer: it stays unavailable while Tabs still use the Profile, and tells you which ones.",
+        "Startup configuration recovery is hardened so an unreadable configuration can never be overwritten by an empty fallback.",
     ]
 
     static func displayVersion(shortVersion: String?, build: String?) -> String {

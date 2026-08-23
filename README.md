@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.1.4"><strong>Download FloatTabs v0.1.4</strong></a>
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.2.0"><strong>Download FloatTabs v0.2.0</strong></a>
   · macOS 13 or later · Apple Silicon and Intel
 </p>
 
-**Current release package:** **v0.1.4 Build 6**.
+**Current release package:** **v0.2.0 Build 7**.
 
 FloatTabs keeps a small set of long-lived Web Apps one shortcut away: AI tools, social feeds, dashboards, documentation, media players, self-hosted services, or anything else you want available without opening a full browser window.
 
@@ -32,6 +32,7 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 - Rail 可折叠：折叠后网页回收原先预留的大部分宽度，只保留 12 pt 左侧移动带。
 - 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold 内存策略。
 - ChatGPT 回答在后台完成时可进入 Ready 状态：Tab 显示红点、菜单栏聚合未读 Ready 数量，并可按设置播放提示音。
+- Browser Profiles：多个相互独立的登录 / 会话容器；默认 Profile 完整保留现有网站登录，自定义 Profile 可创建、重命名、配色，并绑定到任意 Web App。
 - 每个 Slot 独立保存 Website Mode、Browser Identity、窗口尺寸、缩放、Residency 与 Background Media。
 
 ## Core Features
@@ -39,6 +40,7 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 | Feature | What it does |
 | --- | --- |
 | Persistent Web App Slots | Keep selected Web Apps alive across switching and relaunch. |
+| Browser Profiles | Multiple independent login/session containers. Default preserves your existing WebKit sessions; custom Profiles are isolated from each other. |
 | External Tab rail | Favicon-first vertical rail with hover labels and Dock-style magnification. |
 | Single-click activation | Tab / Add / Pin / Settings respond on the first click even when FloatTabs is not the active app. |
 | ChatGPT Ready attention | Tracks ChatGPT generation at runtime and marks unseen completed work with a red Tab indicator. |
@@ -63,14 +65,14 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 
 ### Install
 
-1. Download [`FloatTabs-0.1.4.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.1.4/FloatTabs-0.1.4.dmg).
+1. Download [`FloatTabs-0.2.0.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.2.0/FloatTabs-0.2.0.dmg).
 2. Open the DMG.
 3. Drag **FloatTabs** to **Applications**.
 4. Launch FloatTabs from Applications.
 
 Replacing an older copy does not normally remove saved FloatTabs configuration or WebKit website data.
 
-FloatTabs v0.1.4 is currently unsigned and unnotarized. If macOS blocks the first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
+FloatTabs v0.2.0 is currently unsigned and unnotarized. If macOS blocks the first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
 
 ### Show / hide
 
@@ -107,6 +109,8 @@ Right-click a Tab for:
 - Website Mode
 - Window Size
 - Zoom
+- Profile
+- Open in New Tab with Profile
 - Residency
 - Background Media
 - Edit Web App
@@ -140,6 +144,20 @@ Use the Pin control or `⌘⇧P`.
 
 - **Pin off:** clicking outside FloatTabs hides it.
 - **Pin on:** FloatTabs stays presented above other applications.
+
+## Browser Profiles
+
+Browser Profiles give each Web App an independent, persistent login container — keep a personal and a work account on the same site without signing out and back in.
+
+- The built-in **Default** Profile preserves all of your existing WebKit website sessions. Nothing is migrated, copied, or reset when you upgrade.
+- Create, rename, and color custom Profiles in **Settings → Account & Language → Profiles**. Profile names are entirely your own; none are predefined.
+- **Add Web App** lets you pick the Profile before the first page load, so a site intended for a custom Profile never touches Default cookies.
+- Right-click a Tab → **Profile** to switch that Slot to another Profile in place. The page reloads with the chosen Profile's saved sessions; the previous Profile's logins stay intact on disk.
+- Right-click a Tab → **Open in New Tab with Profile** to run two accounts of the same site side by side in two Slots.
+- The active Tab is tinted with its Profile color so you can tell identities apart at a glance. Inactive Tabs stay neutral, and favicons are never recolored.
+- Deleting a custom Profile is blocked while any Tab still uses it; the Delete button explains which Tabs reference it. Deletion removes that Profile's website data permanently.
+- Custom Profiles require **macOS 14 or later**. On macOS 13 FloatTabs remains Default-only, and a Slot bound to a custom Profile shows an explanatory state instead of silently falling back to Default.
+- Backups include Profile definitions, colors, and Slot bindings — never cookies, passwords, OAuth tokens, or other website login/session data.
 
 ## Fullscreen
 
@@ -184,10 +202,26 @@ All shortcuts are configurable in **FloatTabs Settings → Shortcuts**.
 ## Data, Backup and Downloads
 
 - Web content is rendered by the system **WebKit** framework.
-- Website sessions use WebKit's persistent website data store.
+- Website sessions use WebKit's persistent website data store; each Browser Profile has its own isolated container.
 - FloatTabs does not implement its own password store.
-- `.floattabsbackup` contains FloatTabs configuration, not cookies, passwords, OAuth tokens, caches or live page state.
+- `.floattabsbackup` contains FloatTabs configuration — including Profile names, colors, and Slot bindings — but not cookies, passwords, OAuth tokens, caches or live page state.
 - Attachment downloads use a staged transfer so an existing destination is not replaced until the new download succeeds.
+
+## What's New in v0.2.0
+
+v0.2.0 is the Browser Profiles release. It adds persistent multi-account login containers on top of the v0.1.4 baseline without changing the Slot-based runtime model, Hot / Warm / Cold semantics, or existing website sessions.
+
+- Added **Browser Profiles**: independent persistent WebKit login/session containers, with the existing Default store fully preserved.
+- Added custom Profile creation, rename, and label colors in **Settings → Account & Language → Profiles**; the Default Profile can be renamed too.
+- Added Profile selection in **Add Web App** so a new site loads in the right container from its very first request.
+- Added in-place Profile switching and **Open in New Tab with Profile** from the Tab context menu for two accounts of the same site at once.
+- Added Profile-color identification on the active Tab; favicons, the Ready red dot, and the global border theme are unaffected.
+- Hardened Profile deletion: it is disabled while Tabs still reference the Profile (with a tooltip naming them), and removal now releases runtimes before deleting the WebKit data store.
+- Hardened startup configuration recovery so an unreadable configuration can never be replaced by an empty fallback and overwrite your data.
+- Backups gained Profile metadata and bindings (schema/state v2) while continuing to exclude all website login/session data.
+- macOS 14+ supports custom Profiles; macOS 13 stays Default-only and fails closed for custom-bound Slots.
+
+See [`docs/release/FloatTabs_v0.2.0.md`](docs/release/FloatTabs_v0.2.0.md) for the detailed release record.
 
 ## What's New in v0.1.4
 
@@ -212,7 +246,7 @@ See [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md) for t
 ## Verify the Download
 
 ```bash
-shasum -a 256 -c FloatTabs-0.1.4.dmg.sha256
+shasum -a 256 -c FloatTabs-0.2.0.dmg.sha256
 ```
 
 Only install an unsigned build when you trust this repository and the checksum matches.
@@ -257,7 +291,8 @@ Current sources of truth:
 
 - Product / usage: this README
 - Current interaction and geometry contract: [`docs/design/FloatTabs_UI_Design_System_v1.3.md`](docs/design/FloatTabs_UI_Design_System_v1.3.md)
-- Current release record: [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md)
+- Browser Profiles product contract: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md)
+- Current release record: [`docs/release/FloatTabs_v0.2.0.md`](docs/release/FloatTabs_v0.2.0.md)
 - UI/UX reference-map status: [`docs/uiux/README.md`](docs/uiux/README.md)
 
 Older stage, design and release files are retained as historical records. Files explicitly marked **Historical** or **Superseded** must not override current production behavior.

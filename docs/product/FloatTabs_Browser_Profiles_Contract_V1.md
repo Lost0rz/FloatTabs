@@ -1,6 +1,6 @@
 # FloatTabs — Browser Profiles Contract V1
 
-> Status: **FROZEN** — business-confirmed, docs-only. Runtime implementation has not started.
+> Status: **FROZEN** — business-confirmed. Implemented and accepted; shipped as FloatTabs v0.2.0 Build 7 (final status in §23).
 > Base: `main` at `b5c8cd5a06eb966bdd2114350dfa9221eb5dcd6e` (FloatTabs v0.1.4 Build 6 release commit).
 > Scope: persistent multi-account WebKit website-data isolation, per-Slot Profile selection, and explicit same-Web-App multi-Profile duplication.
 
@@ -508,3 +508,44 @@ Website credentials never enter FloatTabs configuration/backups
 ```
 
 Any implementation that keeps multiple Profile runtimes hidden behind one Slot, silently falls back from a missing custom Profile to Default, or copies website credentials into FloatTabs persistence violates this Contract.
+
+## 23. Final implementation and acceptance status — v0.2.0
+
+> Added 2026-08-23 at release. Sections 1–22 are the frozen contract text and are unchanged; this section records how the shipped product satisfies them. Delivered on `feature/browser-profiles-v1` as FloatTabs **v0.2.0 Build 7**.
+
+### Implementation status: ACCEPTED
+
+All frozen V1 requirements are implemented and accepted:
+
+- Default continues to use the real `WKWebsiteDataStore.default()`; Default identity remains `browserProfileID == nil`. No fabricated Default UUID exists.
+- Default cannot be deleted; its display name can be renamed.
+- Default and custom Profiles both support persisted label colors.
+- A custom Profile UUID is its stable persistent identity; it survives relaunch and rename.
+- Each Profile's sessions, cookies and WebKit website data are isolated in distinct data stores.
+- Add Web App can preselect the Profile before the first WKWebView is created.
+- A Slot can switch Profile in place through the Tab context menu.
+- **Open in New Tab with Profile** creates an explicit simultaneous-identity Slot.
+- Profile metadata and Slot bindings are included in backups; cookies, passwords, OAuth tokens and session/WebKit website data never enter a FloatTabs backup.
+- macOS 14+ supports custom persistent identified Profiles.
+- macOS 13 remains Default-only; a custom-bound Slot fails closed with an explanatory state and never falls back to Default.
+
+### Final UI state
+
+- The active Tab blends **80% Profile color + 20% window background**; inactive Tabs stay neutral.
+- Tab foreground (text/icon) is black or white by the blended color's luminance.
+- The favicon source is never recolored by Profile color.
+- The ChatGPT Ready dot remains `systemRed`.
+- The global Border Theme is unaffected by Profile colors.
+- A custom Profile's Delete action is disabled while any Tab still references it; its hover tooltip lists the referencing Tabs by name (for example `Pro / Free`).
+
+### Final reliability state
+
+- `WKWebsiteDataStore.remove(forIdentifier:)` deletion is guaranteed to run with MainActor isolation.
+- Profile deletion order is: release live runtimes → remove the WebKit data store → delete FloatTabs metadata; a WebKit removal failure keeps the metadata.
+- Startup with an unreadable configuration treats a preserved recovery archive as **evidence, not write authorization**: after recovery-preserve, ordinary saves stay blocked, and only an explicit startup recovery-replacement transaction may legally replace the state once. An unreadable configuration can therefore never fall back to empty and overwrite the user's original data.
+
+### Release record
+
+- FloatTabs v0.2.0, Build 7, released 2026-08-23.
+- Construction/audit history: `docs/product/FloatTabs_Browser_Profiles_Construction_Plan_V1.md` §22.
+- Release notes: `docs/release/FloatTabs_v0.2.0.md`.
