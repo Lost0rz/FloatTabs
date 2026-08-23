@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class WebAttentionIndicatorTests: XCTestCase {
+    private final class SoundPlayerSpy: AttentionSoundPlaying {
+        struct Call: Equatable {
+            let soundName: String
+            let volume: Double
+        }
+
+        private(set) var calls: [Call] = []
+
+        func play(soundName: String, volume: Double) {
+            calls.append(Call(soundName: soundName, volume: volume))
+        }
+    }
+
     func testIdleAndGeneratingSlotsHaveNoReadyDot() {
         let coordinator = WebAttentionCoordinator()
         let profile = makeProfile(name: "GPT")
@@ -89,6 +102,224 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 currentReadyCount: 1
             )
         )
+    }
+
+    func testReadySoundEnabledGateAndConfiguredValuesAreForwarded() {
+        let suiteName = "FloatTabsTests.ReadySound.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundName = "Glass"
+        preferences.attentionSoundVolume = 0.42
+        let player = SoundPlayerSpy()
+
+        XCTAssertTrue(
+            AppCoordinator.playAttentionReadySoundIfNeeded(
+                previousReadyCount: 0,
+                currentReadyCount: 1,
+                preferencesStore: preferences,
+                player: player
+            )
+        )
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Glass", volume: 0.42)]
+        )
+
+        preferences.attentionSoundEnabled = false
+        XCTAssertFalse(
+            AppCoordinator.playAttentionReadySoundIfNeeded(
+                previousReadyCount: 1,
+                currentReadyCount: 2,
+                preferencesStore: preferences,
+                player: player
+            )
+        )
+        XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testAttentionSoundPlayerNormalizesVolumeAndUsesFallbackOnlyForAudibleFailures() {
+        var systemCalls: [(String, Float)] = []
+        var beepCount = 0
+        let player = AttentionSoundPlayer(
+            playSystemSound: { name, volume in
+                systemCalls.append((name, volume))
+                return false
+            },
+            beep: { beepCount += 1 }
+        )
+
+        player.play(soundName: "Ping", volume: 0)
+        XCTAssertTrue(systemCalls.isEmpty)
+        XCTAssertEqual(beepCount, 0)
+
+        player.play(soundName: "Missing", volume: 4)
+        XCTAssertEqual(systemCalls.count, 1)
+        XCTAssertEqual(systemCalls[0].0, "Missing")
+        XCTAssertEqual(systemCalls[0].1, 1, accuracy: 0.0001)
+        XCTAssertEqual(beepCount, 1)
+    }
+
+    func testAttentionSoundCandidatesFilterUnavailableSystemSoundsInDisplayOrder() {
+        XCTAssertEqual(
+            AttentionSound.availableNames { ["Ping", "Pop"].contains($0) },
+            ["Ping", "Pop"]
+        )
+    }
+
+    func testNotificationsPreviewPlaysCurrentSoundAndVolumeWhileAutomaticAlertsAreOff() {
+        let suiteName = "FloatTabsTests.NotificationPreview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundEnabled = false
+        preferences.attentionSoundName = "Glass"
+        preferences.attentionSoundVolume = 0.42
+        let player = SoundPlayerSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping", "Glass"]
+        )
+        controller.loadViewIfNeeded()
+
+        controller.previewButton.performClick(nil)
+
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Glass", volume: 0.42)]
+        )
+        XCTAssertFalse(preferences.attentionSoundEnabled)
+        XCTAssertEqual(preferences.attentionSoundName, "Glass")
+        XCTAssertEqual(preferences.attentionSoundVolume, 0.42, accuracy: 0.0001)
+    }
+
+    /// Invokes an NSControl action exactly the way AppKit would deliver it,
+    /// so tests drive the same @objc handler the control is wired to.
+    private func performControlAction(on controller: NSObject, control: NSControl) {
+        _ = controller.perform(control.action, with: control)
+    }
+
+    func testNotificationsSoundSelectionWritesPreferenceAndPreviewsOnce() {
+        let suiteName = "FloatTabsTests.SoundSelectionPreview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundName = "Ping"
+        preferences.attentionSoundVolume = 0.5
+        let player = SoundPlayerSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping", "Glass"]
+        )
+        controller.loadViewIfNeeded()
+
+        controller.soundPopup.selectItem(withTitle: "Glass")
+        performControlAction(on: controller, control: controller.soundPopup)
+
+        XCTAssertEqual(preferences.attentionSoundName, "Glass")
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Glass", volume: 0.5)]
+        )
+    }
+
+    func testNotificationsSoundSelectionPreviewsWhileAutomaticAlertsAreOff() {
+        let suiteName = "FloatTabsTests.SoundSelectionPreviewOff.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundEnabled = false
+        preferences.attentionSoundName = "Ping"
+        preferences.attentionSoundVolume = 0.5
+        let player = SoundPlayerSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping", "Glass"]
+        )
+        controller.loadViewIfNeeded()
+
+        controller.soundPopup.selectItem(withTitle: "Glass")
+        performControlAction(on: controller, control: controller.soundPopup)
+
+        XCTAssertFalse(preferences.attentionSoundEnabled)
+        XCTAssertEqual(preferences.attentionSoundName, "Glass")
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Glass", volume: 0.5)]
+        )
+    }
+
+    func testNotificationsVolumeAdjustmentPreviewsOncePerCompletedChange() {
+        let suiteName = "FloatTabsTests.VolumePreview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundName = "Purr"
+        preferences.attentionSoundVolume = 0.8
+        let player = SoundPlayerSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Purr"]
+        )
+        controller.loadViewIfNeeded()
+
+        // Non-continuous is what guarantees one preview per completed drag
+        // instead of a burst of actions per pixel of movement.
+        XCTAssertFalse(controller.volumeSlider.isContinuous)
+
+        controller.volumeSlider.doubleValue = 35
+        performControlAction(on: controller, control: controller.volumeSlider)
+
+        XCTAssertEqual(preferences.attentionSoundVolume, 0.35, accuracy: 0.0001)
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Purr", volume: 0.35)]
+        )
+    }
+
+    func testNotificationsVolumeZeroAdjustmentStaysCompletelySilent() {
+        let suiteName = "FloatTabsTests.VolumeZeroPreview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundName = "Purr"
+        preferences.attentionSoundVolume = 0.3
+        let player = SoundPlayerSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Purr"]
+        )
+        controller.loadViewIfNeeded()
+
+        controller.volumeSlider.doubleValue = 0
+        performControlAction(on: controller, control: controller.volumeSlider)
+
+        XCTAssertEqual(preferences.attentionSoundVolume, 0, accuracy: 0.0001)
+        // The preview still routes through the shared player seam; the spy
+        // observes the request, and the production player contract below is
+        // what makes a zero volume inaudible rather than falling back.
+        XCTAssertEqual(
+            player.calls,
+            [.init(soundName: "Purr", volume: 0)]
+        )
+
+        var systemCalls: [(String, Float)] = []
+        var beepCount = 0
+        let realPlayer = AttentionSoundPlayer(
+            playSystemSound: { name, volume in
+                systemCalls.append((name, volume))
+                return false
+            },
+            beep: { beepCount += 1 }
+        )
+        realPlayer.play(soundName: "Purr", volume: preferences.attentionSoundVolume)
+        XCTAssertTrue(systemCalls.isEmpty)
+        XCTAssertEqual(beepCount, 0)
     }
 
     func testReadyAcknowledgementAndRuntimeResetClearTheDot() {

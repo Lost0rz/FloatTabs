@@ -58,6 +58,7 @@
 		A00000000000000000000032 /* WebAttentionLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000032 /* WebAttentionLifecycleTests.swift */; };
 		A00000000000000000000033 /* WebAttentionIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000033 /* WebAttentionIndicatorTests.swift */; };
 		A00000000000000000000034 /* WebAttentionCrossFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */; };
+		A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000035 /* AttentionSoundPlayer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -124,6 +125,7 @@
 		B00000000000000000000032 /* WebAttentionLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionLifecycleTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000033 /* WebAttentionIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionIndicatorTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCrossFeatureTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000035 /* AttentionSoundPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundPlayer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +179,7 @@
 				B0000000000000000000AB /* Info.plist */,
 				B00000000000000000000002 /* AppDelegate.swift */,
 				B00000000000000000000003 /* AppCoordinator.swift */,
+				B00000000000000000000035 /* AttentionSoundPlayer.swift */,
 				B00000000000000000000022 /* BenchmarkControlServer.swift */,
 			);
 			path = App;
@@ -406,6 +409,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
+				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
 				A00000000000000000000024 /* GlobalSettingsController.swift in Sources */,
 				A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */,

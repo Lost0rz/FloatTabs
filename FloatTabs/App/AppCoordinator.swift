@@ -10,6 +10,7 @@ final class AppCoordinator {
     private var appCommandController: AppCommandController?
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
+    private let attentionSoundPlayer: AttentionSoundPlaying
     private let profileRepository: ProfileRepository?
     private var globalSettingsController: GlobalSettingsController?
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
@@ -21,7 +22,8 @@ final class AppCoordinator {
     init(
         panelController: PanelController? = nil,
         preferencesStore: AppPreferencesStore? = nil,
-        backupService: FloatTabsBackupService = FloatTabsBackupService()
+        backupService: FloatTabsBackupService = FloatTabsBackupService(),
+        attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer()
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
@@ -31,6 +33,7 @@ final class AppCoordinator {
         resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
         self.backupService = backupService
+        self.attentionSoundPlayer = attentionSoundPlayer
 
         if let panelController {
             self.panelController = panelController
@@ -68,6 +71,7 @@ final class AppCoordinator {
 
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
+            attentionSoundPlayer: attentionSoundPlayer,
             onExportBackup: { [weak self] url in
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
                 try self.exportBackup(to: url)
@@ -101,12 +105,12 @@ final class AppCoordinator {
         lastAttentionReadyCount = max(0, panelController.attentionReadyCount)
         panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
             guard let self else { return }
-            if Self.shouldPlayAttentionReadySound(
+            _ = Self.playAttentionReadySoundIfNeeded(
                 previousReadyCount: self.lastAttentionReadyCount,
-                currentReadyCount: readyCount
-            ) {
-                Self.playAttentionReadySound()
-            }
+                currentReadyCount: readyCount,
+                preferencesStore: self.preferencesStore,
+                player: self.attentionSoundPlayer
+            )
             self.lastAttentionReadyCount = max(0, readyCount)
             self.statusItemController?.setAttentionPresentation(
                 readyCount: readyCount,
@@ -168,6 +172,26 @@ final class AppCoordinator {
         currentReadyCount: Int
     ) -> Bool {
         max(0, currentReadyCount) > max(0, previousReadyCount)
+    }
+
+    @discardableResult
+    static func playAttentionReadySoundIfNeeded(
+        previousReadyCount: Int,
+        currentReadyCount: Int,
+        preferencesStore: AppPreferencesStore,
+        player: AttentionSoundPlaying
+    ) -> Bool {
+        guard shouldPlayAttentionReadySound(
+            previousReadyCount: previousReadyCount,
+            currentReadyCount: currentReadyCount
+        ), preferencesStore.attentionSoundEnabled else {
+            return false
+        }
+        player.play(
+            soundName: preferencesStore.attentionSoundName,
+            volume: preferencesStore.attentionSoundVolume
+        )
+        return true
     }
 
 #if DEBUG
@@ -368,7 +392,10 @@ final class AppCoordinator {
                 fixedViewportWidth: Double(preferencesStore.fixedViewportSize.width),
                 fixedViewportHeight: Double(preferencesStore.fixedViewportSize.height),
                 isTabRailCollapsed: preferencesStore.isTabRailCollapsed,
-                menuBarDisplayMode: preferencesStore.menuBarDisplayMode
+                menuBarDisplayMode: preferencesStore.menuBarDisplayMode,
+                attentionSoundEnabled: preferencesStore.attentionSoundEnabled,
+                attentionSoundName: preferencesStore.attentionSoundName,
+                attentionSoundVolume: preferencesStore.attentionSoundVolume
             ),
             globalShowHideShortcut: shortcutBackup
         )
@@ -397,6 +424,10 @@ final class AppCoordinator {
         preferencesStore.borderTheme = imported.globalPreferences.borderTheme ?? .rainbow
         preferencesStore.menuBarDisplayMode =
             imported.globalPreferences.resolvedMenuBarDisplayMode
+        Self.restoreAttentionSoundPreferences(
+            imported.globalPreferences,
+            to: preferencesStore
+        )
         if let width = imported.globalPreferences.fixedViewportWidth,
            let height = imported.globalPreferences.fixedViewportHeight {
             preferencesStore.fixedViewportSize = CGSize(width: width, height: height)
@@ -415,6 +446,18 @@ final class AppCoordinator {
         KeyboardShortcuts.setShortcut(shortcut, for: .toggleFloatTabs)
     }
 
+    static func restoreAttentionSoundPreferences(
+        _ backupPreferences: FloatTabsBackupPreferences,
+        to preferencesStore: AppPreferencesStore
+    ) {
+        preferencesStore.attentionSoundEnabled =
+            backupPreferences.resolvedAttentionSoundEnabled
+        preferencesStore.attentionSoundName =
+            backupPreferences.resolvedAttentionSoundName
+        preferencesStore.attentionSoundVolume =
+            backupPreferences.resolvedAttentionSoundVolume
+    }
+
     private func showGlobalSettings() {
         globalSettingsController?.show()
     }
@@ -424,14 +467,6 @@ final class AppCoordinator {
             panelController.hideFloatTabs()
         } else {
             panelController.showFloatTabs()
-        }
-    }
-
-    private static func playAttentionReadySound() {
-        guard let sound = NSSound(named: NSSound.Name("Ping")),
-              sound.play() else {
-            NSSound.beep()
-            return
         }
     }
 

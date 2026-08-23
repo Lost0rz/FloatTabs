@@ -119,6 +119,9 @@ final class AppPreferencesStore {
     static let fixedViewportWidthKey = "FloatTabs.fixedViewportWidth"
     static let fixedViewportHeightKey = "FloatTabs.fixedViewportHeight"
     static let menuBarDisplayModeKey = "FloatTabs.menuBarDisplayMode"
+    static let attentionSoundEnabledKey = "FloatTabs.attentionSoundEnabled"
+    static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
+    static let attentionSoundVolumeKey = "FloatTabs.attentionSoundVolume"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -238,6 +241,63 @@ final class AppPreferencesStore {
     var isTabRailCollapsed: Bool {
         get { defaults.bool(forKey: Self.railCollapsedKey) }
         set { defaults.set(newValue, forKey: Self.railCollapsedKey) }
+    }
+
+    /// The shipped default for `attentionSoundName`. Nonisolated so backup
+    /// resolution can share the exact same constant as the live store.
+    nonisolated static var defaultAttentionSoundName: String { "Ping" }
+
+    var attentionSoundEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Self.attentionSoundEnabledKey) != nil else {
+                return true
+            }
+            return defaults.bool(forKey: Self.attentionSoundEnabledKey)
+        }
+        set { defaults.set(newValue, forKey: Self.attentionSoundEnabledKey) }
+    }
+
+    var attentionSoundName: String {
+        get {
+            let raw = defaults.string(forKey: Self.attentionSoundNameKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let raw, !raw.isEmpty else {
+                return Self.defaultAttentionSoundName
+            }
+            return raw
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            defaults.set(trimmed, forKey: Self.attentionSoundNameKey)
+        }
+    }
+
+    /// Stored and exposed as 0...1; the Settings slider maps to 0...100.
+    var attentionSoundVolume: Double {
+        get {
+            guard defaults.object(forKey: Self.attentionSoundVolumeKey) != nil else {
+                return 1
+            }
+            return Self.normalizedAttentionSoundVolume(
+                defaults.double(forKey: Self.attentionSoundVolumeKey)
+            )
+        }
+        set {
+            defaults.set(
+                Self.normalizedAttentionSoundVolume(newValue),
+                forKey: Self.attentionSoundVolumeKey
+            )
+        }
+    }
+
+    /// The canonical clamp every attention-sound volume passes through —
+    /// store access, backup restore, and playback. Out-of-range values
+    /// clamp to the nearest bound; non-finite values resolve to full
+    /// volume so a corrupt value can never poison `NSSound` with NaN.
+    nonisolated static func normalizedAttentionSoundVolume(_ raw: Double) -> Double {
+        guard raw.isFinite else { return 1 }
+        return min(max(raw, 0), 1)
     }
 
     var customBorderColorHex: String {
