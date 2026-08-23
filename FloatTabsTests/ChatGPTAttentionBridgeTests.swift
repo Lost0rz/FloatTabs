@@ -74,23 +74,23 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Shared host policy
 
-    func testChatGPTHostIsAccepted() {
+    func testChatGPTHostIsAccepted() throws {
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedHost("chatgpt.com"))
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedChatGPTURL(URL(string: "https://chatgpt.com/c/abc")!))
     }
 
-    func testChatGPTSubdomainHostsAreAccepted() {
+    func testChatGPTSubdomainHostsAreAccepted() throws {
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedHost("www.chatgpt.com"))
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedHost("new.chatgpt.com"))
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedChatGPTURL(URL(string: "https://new.chatgpt.com/")!))
     }
 
-    func testLegacyOpenAIChatHostIsAccepted() {
+    func testLegacyOpenAIChatHostIsAccepted() throws {
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedHost("chat.openai.com"))
         XCTAssertTrue(ChatGPTSitePolicy.isSupportedChatGPTURL(URL(string: "https://chat.openai.com/c/1")!))
     }
 
-    func testLookalikeAndUnrelatedHostsAreRejected() {
+    func testLookalikeAndUnrelatedHostsAreRejected() throws {
         XCTAssertFalse(ChatGPTSitePolicy.isSupportedHost("evilchatgpt.com"))
         XCTAssertFalse(ChatGPTSitePolicy.isSupportedHost("chatgpt.com.evil.example"))
         XCTAssertFalse(ChatGPTSitePolicy.isSupportedHost("notchatgpt.com"))
@@ -101,7 +101,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(ChatGPTSitePolicy.isSupportedChatGPTURL(URL(string: "about:blank")!))
     }
 
-    func testChatGPTAutomaticMobileCompatibilityIdentityIsUnchanged() {
+    func testChatGPTAutomaticMobileCompatibilityIdentityIsUnchanged() throws {
         let mobile = WebRenderingProfile.canonicalDefault.settingWebsiteMode(.mobile)
 
         XCTAssertEqual(
@@ -146,7 +146,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Installation
 
-    func testInstalledUserScriptInjectsAtDocumentStart() {
+    func testInstalledUserScriptInjectsAtDocumentStart() throws {
         let controller = WKUserContentController()
         let harness = ChatGPTAttentionBridgeHarness()
 
@@ -156,7 +156,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(controller.userScripts.first?.injectionTime, .atDocumentStart)
     }
 
-    func testInstalledUserScriptIsMainFrameOnly() {
+    func testInstalledUserScriptIsMainFrameOnly() throws {
         let controller = WKUserContentController()
         let harness = ChatGPTAttentionBridgeHarness()
 
@@ -165,7 +165,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(controller.userScripts.first?.isForMainFrameOnly, true)
     }
 
-    func testInstalledUserScriptUsesNamedContentWorld() {
+    func testInstalledUserScriptUsesNamedContentWorld() throws {
         // pageWorld/defaultClientWorld carry no name; a named client world is
         // distinct from both, and one instance is shared by script, handler,
         // and invalidation.
@@ -176,7 +176,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(ChatGPTAttentionBridge.contentWorld.name?.isEmpty == true)
     }
 
-    func testInstalledScriptExposesOnlyTheNarrowNamedWorldResyncEntry() {
+    func testInstalledScriptExposesOnlyTheNarrowNamedWorldResyncEntry() throws {
         XCTAssertTrue(
             ChatGPTAttentionBridge.scriptSource.contains(
                 "globalThis.__floatTabsAttentionResyncV1"
@@ -188,7 +188,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
-    func testBridgeConfiguredBeforeInitialLoad() {
+    func testBridgeConfiguredBeforeInitialLoad() throws {
         var hadBridgeScriptAtFirstLoad = false
         let pool = WebViewPool(
             onURLChange: { _, _ in },
@@ -198,14 +198,14 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             }
         )
 
-        _ = pool.webView(for: makeChatGPTProfile())
+        _ = try pool.webView(for: makeChatGPTProfile())
 
         // The Factory-owned hidden-scrollbar script is document-start but
         // not main-frame-only, so the flag can only be set by the bridge.
         XCTAssertTrue(hadBridgeScriptAtFirstLoad)
     }
 
-    func testInvalidationKeepsUnrelatedUserScripts() {
+    func testInvalidationKeepsUnrelatedUserScripts() throws {
         let controller = WKUserContentController()
         controller.addUserScript(
             WKUserScript(
@@ -226,7 +226,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Message validation
 
-    func testPayloadValidationRejectsMalformedBodies() {
+    func testPayloadValidationRejectsMalformedBodies() throws {
         XCTAssertNil(ChatGPTBridgePayload.parse([:]))
         XCTAssertNil(ChatGPTBridgePayload.parse([
             "version": 2, "kind": "baseline", "token": "12345678", "generating": true,
@@ -250,7 +250,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
-    func testMessageFromOtherWebViewIsRejected() {
+    func testMessageFromOtherWebViewIsRejected() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         let otherWebView = WKWebView()
 
@@ -261,7 +261,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted])
     }
 
-    func testNonMainFrameMessageIsRejected() {
+    func testNonMainFrameMessageIsRejected() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.bridge.accept(
@@ -277,7 +277,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertTrue(harness.observations.isEmpty)
     }
 
-    func testUnsupportedOriginEmitsNothing() {
+    func testUnsupportedOriginEmitsNothing() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(true, token: tokenA, host: "evilchatgpt.com")
@@ -290,7 +290,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Baseline and transition semantics
 
-    func testIdleBaselineEmitsNoFinish() {
+    func testIdleBaselineEmitsNoFinish() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(false, token: tokenA)
@@ -298,7 +298,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertTrue(harness.observations.isEmpty)
     }
 
-    func testGeneratingBaselineEmitsOneStart() {
+    func testGeneratingBaselineEmitsOneStart() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(true, token: tokenA)
@@ -306,7 +306,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted])
     }
 
-    func testDuplicateGeneratingEmitsNothing() {
+    func testDuplicateGeneratingEmitsNothing() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(true, token: tokenA)
@@ -315,7 +315,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted])
     }
 
-    func testGeneratingToIdleEmitsOneFinish() {
+    func testGeneratingToIdleEmitsOneFinish() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(true, token: tokenA)
@@ -324,7 +324,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
     }
 
-    func testDuplicateIdleEmitsNothing() {
+    func testDuplicateIdleEmitsNothing() throws {
         let harness = ChatGPTAttentionBridgeHarness()
 
         harness.accept(true, token: tokenA)
@@ -334,7 +334,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
     }
 
-    func testTrackerDirectlyMatchesBridgeSemantics() {
+    func testTrackerDirectlyMatchesBridgeSemantics() throws {
         var tracker = ChatGPTDocumentGenerationTracker()
         XCTAssertNil(tracker.observe(false))
         XCTAssertNil(tracker.observe(false))
@@ -346,7 +346,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Navigation lifecycle
 
-    func testProvisionalStartDoesNotResetCurrentDocumentObservations() {
+    func testProvisionalStartDoesNotResetCurrentDocumentObservations() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
         harness.accept(false, token: tokenA)
@@ -357,7 +357,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
-    func testProvisionalFailureRequiresNoReplayOrRuntimeReset() {
+    func testProvisionalFailureRequiresNoReplayOrRuntimeReset() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
         harness.accept(false, token: tokenA)
@@ -366,7 +366,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(harness.observations.contains(.runtimeReset))
     }
 
-    func testCommittedReplacementEmitsRuntimeResetAndClearsEpoch() {
+    func testCommittedReplacementEmitsRuntimeResetAndClearsEpoch() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
 
@@ -375,7 +375,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations.last, .runtimeReset)
     }
 
-    func testUnsupportedCurrentDocumentClosesAdmissionUntilSupportedCommitResync() {
+    func testUnsupportedCurrentDocumentClosesAdmissionUntilSupportedCommitResync() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         let unsupportedURL = URL(string: "https://example.com/document")!
         let supportedURL = URL(string: "https://chatgpt.com/c/fresh")!
@@ -402,7 +402,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .runtimeReset])
     }
 
-    func testStaleOldDocumentMessageIsRejectedAfterUnknownCommitBoundary() {
+    func testStaleOldDocumentMessageIsRejectedAfterUnknownCommitBoundary() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
         harness.bridge.handleRuntimeReplacement()
@@ -418,7 +418,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations.last, .generationStarted)
     }
 
-    func testRestoredDocumentReestablishesBaselineWithSameToken() {
+    func testRestoredDocumentReestablishesBaselineWithSameToken() throws {
         // BFCache/history restore re-reports with the original token; after a
         // committed replacement that token becomes a fresh baseline again.
         let harness = ChatGPTAttentionBridgeHarness()
@@ -434,7 +434,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.runtimeReset, .generationStarted])
     }
 
-    func testCurrentDocumentStateContinuesDuringPendingInstantBack() {
+    func testCurrentDocumentStateContinuesDuringPendingInstantBack() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenB)
         harness.bridge.beginInstantBackHandoff()
@@ -447,7 +447,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
     }
 
-    func testPreconfirmDifferentTokenBaselineIsRejectedUntilResync() {
+    func testPreconfirmDifferentTokenBaselineIsRejectedUntilResync() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(false, token: tokenB)
         harness.bridge.beginInstantBackHandoff()
@@ -469,7 +469,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
-    func testSameURLStaleHistoricalBaselineIsRejectedBeforeConfirmation() {
+    func testSameURLStaleHistoricalBaselineIsRejectedBeforeConfirmation() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         // A1 and A2 intentionally share a URL; token identity must still keep
         // the stale A1 baseline from becoming the current epoch.
@@ -488,7 +488,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.runtimeReset])
     }
 
-    func testCancelledInstantBackCannotRebaselineOldRuntime() {
+    func testCancelledInstantBackCannotRebaselineOldRuntime() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenB)
         harness.bridge.beginInstantBackHandoff()
@@ -500,7 +500,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted])
     }
 
-    func testReleaseClearsPendingInstantBackHandoff() {
+    func testReleaseClearsPendingInstantBackHandoff() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(false, token: tokenB)
         harness.bridge.beginInstantBackHandoff()
@@ -513,7 +513,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - WebContent termination
 
-    func testWebContentTerminationEmitsResetBeforeRecoveryReload() {
+    func testWebContentTerminationEmitsResetBeforeRecoveryReload() throws {
         var timeline: [String] = []
         let pool = WebViewPool(
             onURLChange: { _, _ in },
@@ -526,7 +526,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             }
         }
         let profile = makeChatGPTProfile()
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let bridge = pool.attentionBridge(for: profile.id)!
         bridge.accept(
             payload: ChatGPTBridgePayload(
@@ -546,14 +546,14 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - Release / rebuild / remove
 
-    func testReleaseInvalidatesBridgeAndForwardsResetBoundary() {
+    func testReleaseInvalidatesBridgeAndForwardsResetBoundary() throws {
         var observations: [ChatGPTAttentionObservation] = []
         let pool = WebViewPool(onURLChange: { _, _ in })
         pool.onAttentionObservation = { _, observation in
             observations.append(observation)
         }
         let profile = makeChatGPTProfile()
-        let webView = pool.webView(for: profile)
+        let webView = try pool.webView(for: profile)
         let bridge = pool.attentionBridge(for: profile.id)!
         bridge.accept(
             payload: ChatGPTBridgePayload(
@@ -572,7 +572,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(observations.last, .runtimeReset)
     }
 
-    func testStaleCallbackAfterInvalidationIsIgnored() {
+    func testStaleCallbackAfterInvalidationIsIgnored() throws {
         let harness = ChatGPTAttentionBridgeHarness()
         harness.accept(true, token: tokenA)
         harness.bridge.invalidate()
@@ -585,16 +585,16 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations.count, countAfterInvalidation)
     }
 
-    func testRenderingRebuildInvalidatesOldBridgeAndCreatesNewBridge() {
+    func testRenderingRebuildInvalidatesOldBridgeAndCreatesNewBridge() throws {
         var residentSetChangeCount = 0
         let pool = WebViewPool(onURLChange: { _, _ in })
         pool.onResidentSetChange = { residentSetChangeCount += 1 }
         var profile = makeChatGPTProfile()
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let oldBridge = pool.attentionBridge(for: profile.id)!
 
         profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let newBridge = pool.attentionBridge(for: profile.id)!
 
         XCTAssertFalse(oldBridge === newBridge)
@@ -604,7 +604,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(residentSetChangeCount, 1)
     }
 
-    func testRemovingOneSlotLeavesTheOtherBridgeIntact() {
+    func testRemovingOneSlotLeavesTheOtherBridgeIntact() throws {
         let pool = WebViewPool(onURLChange: { _, _ in })
         let chatGPTProfile = makeChatGPTProfile()
         let otherProfile = WebAppProfile(
@@ -612,8 +612,8 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             name: "Docs",
             homeURL: URL(string: "https://chatgpt.com/")!
         )
-        _ = pool.webView(for: chatGPTProfile)
-        let otherWebView = pool.webView(for: otherProfile)
+        _ = try pool.webView(for: chatGPTProfile)
+        let otherWebView = try pool.webView(for: otherProfile)
         let chatGPTBridge = pool.attentionBridge(for: chatGPTProfile.id)!
         let otherBridge = pool.attentionBridge(for: otherProfile.id)!
 
@@ -636,14 +636,14 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
-    func testPoolForwardsNormalizedObservationsThroughTransientSeam() {
+    func testPoolForwardsNormalizedObservationsThroughTransientSeam() throws {
         var received: [(UUID, ChatGPTAttentionObservation)] = []
         let pool = WebViewPool(onURLChange: { _, _ in })
         pool.onAttentionObservation = { slotID, observation in
             received.append((slotID, observation))
         }
         let profile = makeChatGPTProfile()
-        let webView = pool.webView(for: profile)
+        let webView = try pool.webView(for: profile)
 
         pool.attentionBridge(for: profile.id)?.accept(
             payload: ChatGPTBridgePayload(
@@ -662,7 +662,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
     // MARK: - SlotNavigationObserver forwarding (HTTP fallback interaction)
 
-    func testObserverKeepsHTTPFallbackIndependentOfAttentionLifecycle() {
+    func testObserverKeepsHTTPFallbackIndependentOfAttentionLifecycle() throws {
         var events: [String] = []
         let webView = WKWebView()
         let entryURL = URL(string: "https://chat.example.com:8443/")!

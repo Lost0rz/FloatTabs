@@ -27,6 +27,19 @@ enum WebContentRecoveryDisposition: Equatable {
     case deferUntilActivation
 }
 
+enum BrowserProfileIdentity: Equatable {
+    case `default`
+    case custom(UUID)
+
+    init(browserProfileID: UUID?) {
+        if let browserProfileID {
+            self = .custom(browserProfileID)
+        } else {
+            self = .default
+        }
+    }
+}
+
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
@@ -40,6 +53,7 @@ final class WebViewPool {
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
+    private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
 
@@ -58,6 +72,7 @@ final class WebViewPool {
     private let load: LoadHandler
     private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
+    private let browserProfileDataStoreProvider: BrowserProfileDataStoreProvider
     // Production leaves this nil and reads WKWebView history directly. The
     // optional seam lets tests model a committed history item without network
     // or WebKit process timing.
@@ -70,20 +85,26 @@ final class WebViewPool {
         },
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         downloadCoordinator: DownloadCoordinator? = nil,
-        committedURLProvider: CommittedURLProvider? = nil
+        committedURLProvider: CommittedURLProvider? = nil,
+        browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider()
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
         self.isSlotActive = isSlotActive
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.committedURLProvider = committedURLProvider
+        self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
     }
 
-    func webView(for profile: WebAppProfile) -> WKWebView {
+    func webView(for profile: WebAppProfile) throws -> WKWebView {
         let desiredRendering = profile.renderingProfile.normalized()
+        let desiredBrowserProfileIdentity = BrowserProfileIdentity(
+            browserProfileID: profile.browserProfileID
+        )
 
         if let existing = webViews[profile.id],
-           let appliedRendering = appliedRenderingProfiles[profile.id] {
+           let appliedRendering = appliedRenderingProfiles[profile.id],
+           let appliedBrowserProfileIdentity = appliedBrowserProfileIdentities[profile.id] {
             let compatibilityURL = Self.rebuildNavigationURL(
                 initialURL: nil,
                 visibleURL: existing.url,
@@ -95,14 +116,15 @@ final class WebViewPool {
                 navigationURL: compatibilityURL
             )
 
-            if desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
+            if appliedBrowserProfileIdentity != desiredBrowserProfileIdentity
+                || desiredRuntimeRendering.requiresWebViewRebuild(comparedTo: appliedRendering) {
                 let navigationURL = Self.rebuildNavigationURL(
                     initialURL: existing.backForwardList.currentItem?.initialURL,
                     visibleURL: existing.url,
                     storedCurrentURL: profile.currentURL,
                     homeURL: profile.homeURL
                 )
-                return rebuildWebView(
+                return try rebuildWebView(
                     for: profile,
                     navigationURL: navigationURL
                 )
@@ -117,7 +139,20 @@ final class WebViewPool {
             return existing
         }
 
-        return createWebView(
+        if let existing = webViews[profile.id] {
+            let navigationURL = Self.rebuildNavigationURL(
+                initialURL: existing.backForwardList.currentItem?.initialURL,
+                visibleURL: existing.url,
+                storedCurrentURL: profile.currentURL,
+                homeURL: profile.homeURL
+            )
+            return try rebuildWebView(
+                for: profile,
+                navigationURL: navigationURL
+            )
+        }
+
+        return try createWebView(
             for: profile,
             navigationURL: profile.currentURL ?? profile.homeURL,
             cachePolicy: .useProtocolCachePolicy
@@ -187,6 +222,7 @@ final class WebViewPool {
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
+        appliedBrowserProfileIdentities.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
         let removed = webViews.removeValue(forKey: slotID)
@@ -222,6 +258,10 @@ final class WebViewPool {
     /// bridge lifetime ownership; no attention state lives in the pool.
     func attentionBridge(for slotID: UUID) -> ChatGPTAttentionBridge? {
         attentionBridges[slotID]
+    }
+
+    func browserProfileIdentity(for slotID: UUID) -> BrowserProfileIdentity? {
+        appliedBrowserProfileIdentities[slotID]
     }
 
     var count: Int {
@@ -276,11 +316,12 @@ final class WebViewPool {
     private func rebuildWebView(
         for profile: WebAppProfile,
         navigationURL: URL
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         invalidateAttentionBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
+        appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
         deferredReloadSlotIDs.remove(profile.id)
         let replaced = webViews.removeValue(forKey: profile.id)
@@ -290,12 +331,19 @@ final class WebViewPool {
         // resident Slot. Do not emit a resident-set change merely because the
         // dictionary entry is recreated; callers observe residency identity, not
         // WKWebView object identity.
-        return createWebView(
-            for: profile,
-            navigationURL: navigationURL,
-            cachePolicy: .useProtocolCachePolicy,
-            notifyResidentSetChange: false
-        )
+        do {
+            return try createWebView(
+                for: profile,
+                navigationURL: navigationURL,
+                cachePolicy: .useProtocolCachePolicy,
+                notifyResidentSetChange: false
+            )
+        } catch {
+            if replaced != nil {
+                onResidentSetChange?()
+            }
+            throw error
+        }
     }
 
     private func createWebView(
@@ -303,11 +351,17 @@ final class WebViewPool {
         navigationURL: URL,
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true
-    ) -> WKWebView {
+    ) throws -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: rendering,
             navigationURL: navigationURL
+        )
+        let browserProfileIdentity = BrowserProfileIdentity(
+            browserProfileID: profile.browserProfileID
+        )
+        let websiteDataStore = try browserProfileDataStoreProvider.dataStore(
+            for: profile.browserProfileID
         )
         // The bridge exists before its WKWebView: the Factory invokes
         // `install(into:)` on the pre-creation user content controller so the
@@ -317,6 +371,7 @@ final class WebViewPool {
         }
         let webView = WebViewFactory.makeWebView(
             renderingProfile: runtimeRendering,
+            websiteDataStore: websiteDataStore,
             configureUserContentController: { userContentController in
                 attentionBridge.install(into: userContentController)
             }
@@ -405,6 +460,7 @@ final class WebViewPool {
 
         // Store the effective runtime profile so warm-slot reuse compares against
         // the identity actually applied to this WKWebView.
+        appliedBrowserProfileIdentities[profile.id] = browserProfileIdentity
         appliedRenderingProfiles[profile.id] = runtimeRendering
         lastKnownURLs[profile.id] = navigationURL
         deferredReloadSlotIDs.remove(profile.id)

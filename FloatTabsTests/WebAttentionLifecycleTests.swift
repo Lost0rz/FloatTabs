@@ -9,7 +9,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testInactiveColdAttentionProtectedSurvivesColdDelay() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ProtectedCold", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = true
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -27,7 +27,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testInactiveWarmAttentionProtectedSurvivesWarmTTL() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ProtectedWarm", policy: .warm)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
             warmReleaseDelay: 0.02,
@@ -43,7 +43,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testGeneratingToReadyWhileInactiveRemainsProtected() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "GeneratingReady", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -66,7 +66,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testReleaseTimerCreatedBeforeGenerationStartsCannotReleaseProtectedSlot() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "LateGeneration", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -82,12 +82,14 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: profile.id), .generating)
     }
 
-    func testAttentionProtectedWarmIsExcludedAndOldestEligibleWarmIsEvicted() {
+    func testAttentionProtectedWarmIsExcludedAndOldestEligibleWarmIsEvicted() throws {
         let pool = makePool()
         let protected = makeProfile(name: "Protected", policy: .warm)
         let eligibleB = makeProfile(name: "EligibleB", policy: .warm)
         let eligibleC = makeProfile(name: "EligibleC", policy: .warm)
-        [protected, eligibleB, eligibleC].forEach { _ = pool.webView(for: $0) }
+        for profile in [protected, eligibleB, eligibleC] {
+            _ = try pool.webView(for: profile)
+        }
         let protectedIDs: Set<UUID> = [protected.id]
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -105,12 +107,14 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: eligibleC.id))
     }
 
-    func testMemoryWarningEvictsEligibleWarmButNotAttentionProtectedWarm() {
+    func testMemoryWarningEvictsEligibleWarmButNotAttentionProtectedWarm() throws {
         let pool = makePool()
         let protected = makeProfile(name: "WarningProtected", policy: .warm)
         let eligibleB = makeProfile(name: "WarningB", policy: .warm)
         let eligibleC = makeProfile(name: "WarningC", policy: .warm)
-        [protected, eligibleB, eligibleC].forEach { _ = pool.webView(for: $0) }
+        for profile in [protected, eligibleB, eligibleC] {
+            _ = try pool.webView(for: profile)
+        }
         let lifecycle = makeLifecycle(
             pool: pool,
             warmResidentLimit: 2,
@@ -127,11 +131,13 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: eligibleC.id))
     }
 
-    func testMemoryCriticalEvictsEligibleWarmButNotAttentionProtectedWarm() {
+    func testMemoryCriticalEvictsEligibleWarmButNotAttentionProtectedWarm() throws {
         let pool = makePool()
         let protected = makeProfile(name: "CriticalProtected", policy: .warm)
         let eligible = makeProfile(name: "CriticalEligible", policy: .warm)
-        [protected, eligible].forEach { _ = pool.webView(for: $0) }
+        for profile in [protected, eligible] {
+            _ = try pool.webView(for: profile)
+        }
         let lifecycle = makeLifecycle(
             pool: pool,
             warmResidentLimit: 2,
@@ -149,7 +155,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testAttentionOnlyProtectionBlocksRelease() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "AttentionOnly", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
             coldReleaseDelay: 0.02,
@@ -167,7 +173,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "MediaOnly", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -191,7 +197,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "MediaWins", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = true
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
@@ -220,7 +226,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "AttentionWins", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = true
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
@@ -248,7 +254,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testColdRestartAfterSkippedTimerGetsFullFreshDelay() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ColdRestart", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -272,7 +278,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testWarmRestartAfterSkippedTTLGetsFullFreshTTL() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "WarmRestart", policy: .warm)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -293,12 +299,14 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmRestartRefreshesRecencyForLaterLRUEviction() {
+    func testWarmRestartRefreshesRecencyForLaterLRUEviction() throws {
         let pool = makePool()
         let first = makeProfile(name: "First", policy: .warm)
         let second = makeProfile(name: "Second", policy: .warm)
         let third = makeProfile(name: "Third", policy: .warm)
-        [first, second, third].forEach { _ = pool.webView(for: $0) }
+        for profile in [first, second, third] {
+            _ = try pool.webView(for: profile)
+        }
         var protectedIDs: Set<UUID> = [first.id]
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -321,7 +329,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testSelectedHiddenGeneratingKeepsHiddenGraceAndThenProtectsInactiveRuntime() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "HiddenGenerating", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtectionQueryCount = 0
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -359,7 +367,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testHotAttentionProtectedSlotGetsNoNewReleasePlan() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "HotGenerating", policy: .hot)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let lifecycle = makeLifecycle(
             pool: pool,
             attentionProtectionQuery: { _ in true }
@@ -373,10 +381,10 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
-    func testVisibleGeneratingFinishesIdleWithoutInactivePlan() {
+    func testVisibleGeneratingFinishesIdleWithoutInactivePlan() throws {
         let pool = makePool()
         let profile = makeProfile(name: "VisibleFinish", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let coordinator = WebAttentionCoordinator()
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -399,7 +407,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testReadyAcknowledgementWhileVisibleDoesNotCreateInactiveTimer() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ReadyAcknowledged", policy: .cold)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let coordinator = WebAttentionCoordinator()
         coordinator.apply(.generationStarted, for: profile.id)
         coordinator.apply(
@@ -428,7 +436,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         let protected = makeProfile(name: "IsolatedProtected", policy: .cold)
         let ordinary = makeProfile(name: "IsolatedOrdinary", policy: .cold)
-        [protected, ordinary].forEach { _ = pool.webView(for: $0) }
+        for profile in [protected, ordinary] {
+            _ = try pool.webView(for: profile)
+        }
         let lifecycle = makeLifecycle(
             pool: pool,
             coldReleaseDelay: 0.02,
@@ -446,7 +456,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
     func testStaleTimerCallbackCannotReleaseSlotAfterAttentionStarts() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "StaleTimer", policy: .warm)
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var attentionProtected = false
         let lifecycle = makeLifecycle(
             pool: pool,
@@ -466,7 +476,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "StaleMedia", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var pendingMediaResult: ((Bool) -> Void)?
         var attentionProtected = false
         let lifecycle = makeLifecycle(

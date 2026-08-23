@@ -989,7 +989,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
-        let webView = webViewPool.webView(for: activeProfile)
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: activeProfile)
+        } catch {
+            rootView.webPanelContainerView.showEmptyState()
+            synchronizeResidentIndicators()
+            return
+        }
         rootView.webPanelContainerView.show(
             webView: webView,
             slotID: activeProfile.id,
@@ -1797,10 +1804,18 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: activeProfile)
+        } catch {
+            sourceHostController.companionContainer.showEmptyState()
+            companionActiveProfile = nil
+            synchronizeResidentIndicators()
+            return
+        }
         rootView.installFullscreenCompanionContainer(
             sourceHostController.companionContainer
         )
-        let webView = webViewPool.webView(for: activeProfile)
         sourceHostController.companionContainer.show(
             webView: webView,
             slotID: activeProfile.id,
