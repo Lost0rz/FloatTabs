@@ -190,3 +190,5 @@ shasum -a 256 -c FloatTabs-0.1.4.dmg.sha256
           git diff --cached --check
           git commit -m 'chore: prepare FloatTabs v0.1.4'
           git push origin HEAD:release/v0.1.4
+
+# trigger
