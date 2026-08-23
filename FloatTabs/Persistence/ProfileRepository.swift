@@ -133,6 +133,8 @@ final class ProfileRepository: ProfileRepositoryProtocol {
 
     private(set) var startupRecoveryRequired = false
     private(set) var startupRecoveryArchiveURL: URL?
+    private var startupRecoveryReplacementInProgress = false
+    private var startupRecoveryReplacementDidWrite = false
 
     init(fileManager: FileManager = .default, fileURL: URL? = nil) {
         self.fileManager = fileManager
@@ -222,8 +224,43 @@ final class ProfileRepository: ProfileRepositoryProtocol {
         return archiveURL
     }
 
+    @discardableResult
+    func performStartupRecoveryReplacement<T>(
+        _ operation: () throws -> T
+    ) throws -> T {
+        guard startupRecoveryRequired,
+              !startupRecoveryReplacementInProgress,
+              let archiveURL = startupRecoveryArchiveURL,
+              fileManager.fileExists(atPath: archiveURL.path) else {
+            throw ProfileRepositoryError.startupRecoveryRequired
+        }
+
+        startupRecoveryReplacementInProgress = true
+        startupRecoveryReplacementDidWrite = false
+        defer {
+            startupRecoveryReplacementInProgress = false
+            startupRecoveryReplacementDidWrite = false
+        }
+
+        do {
+            let result = try operation()
+            guard startupRecoveryReplacementDidWrite else {
+                startupRecoveryRequired = true
+                throw ProfileRepositoryError.startupRecoveryRequired
+            }
+            return result
+        } catch {
+            startupRecoveryRequired = true
+            throw error
+        }
+    }
+
     func save(_ state: StoredWebAppState) throws {
-        if startupRecoveryRequired, startupRecoveryArchiveURL == nil {
+        if startupRecoveryReplacementInProgress,
+           startupRecoveryReplacementDidWrite {
+            throw ProfileRepositoryError.startupRecoveryRequired
+        }
+        if startupRecoveryRequired, !startupRecoveryReplacementInProgress {
             throw ProfileRepositoryError.startupRecoveryRequired
         }
 
@@ -240,6 +277,9 @@ final class ProfileRepository: ProfileRepositoryProtocol {
         let data = try encoder.encode(normalizedState)
         try data.write(to: fileURL, options: [.atomic])
 
+        if startupRecoveryReplacementInProgress {
+            startupRecoveryReplacementDidWrite = true
+        }
         // A successful atomic replacement is the only transition that clears
         // recovery mode. If the save throws, the protected copy remains and the
         // app continues to block further ordinary persistence.

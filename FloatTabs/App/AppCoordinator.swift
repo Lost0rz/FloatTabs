@@ -301,8 +301,13 @@ final class AppCoordinator {
 
     private func restoreStartupBackup(_ document: FloatTabsBackupDocument) throws {
         try prepareUnreadableProfileStoreForReplacement()
+        guard let profileRepository else {
+            throw FloatTabsBackupError.startupRecoveryFailed
+        }
         do {
-            try applyBackupDocument(document)
+            try profileRepository.performStartupRecoveryReplacement {
+                try self.applyBackupDocument(document)
+            }
         } catch let error as FloatTabsBackupError where error == .restoreFailed {
             throw FloatTabsBackupError.startupRecoveryFailed
         }
@@ -310,8 +315,13 @@ final class AppCoordinator {
 
     private func beginWithEmptyStartupConfiguration() throws {
         try prepareUnreadableProfileStoreForReplacement()
-        guard panelController.restoreStoredWebAppState(.empty) else {
+        guard let profileRepository else {
             throw FloatTabsBackupError.startupRecoveryFailed
+        }
+        try profileRepository.performStartupRecoveryReplacement {
+            guard panelController.restoreStoredWebAppState(.empty) else {
+                throw FloatTabsBackupError.startupRecoveryFailed
+            }
         }
         // The user deliberately chose an empty live configuration, but the last
         // automatic backup may still be the only known-good structured recovery
