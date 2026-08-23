@@ -470,12 +470,13 @@ enum WebViewFactory {
 
     static func makeWebView(
         renderingProfile: WebRenderingProfile = .canonicalDefault,
+        websiteDataStore: WKWebsiteDataStore = .default(),
         configureUserContentController: ((WKUserContentController) -> Void)? = nil
     ) -> WKWebView {
         let rendering = renderingProfile.normalized()
         let versions = BrowserVersionCatalog.current
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = websiteDataStore
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.applicationNameForUserAgent = UserAgentProvider.safariApplicationName(
             versions: versions
