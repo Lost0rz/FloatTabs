@@ -1027,10 +1027,10 @@ final class AccountLanguageSettingsViewController: NSViewController {
             spacer(8),
             sectionTitle("Backup & Restore"),
             detailLabel(
-                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
+                "Backups include Profile definitions and each Web App’s selected Profile, along with Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
             ),
             detailLabel(
-                "Website passwords, cookies, OAuth/login sessions, WebKit caches, and page runtime state are not exported. A new Mac may require website sign-in again."
+                "Website passwords, cookies, OAuth/login sessions, WebKit website data/caches, and page runtime state are not exported. After restoring on another Mac, you may need to sign in again for each Profile."
             ),
             actions,
             detailLabel(

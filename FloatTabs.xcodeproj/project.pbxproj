@@ -67,6 +67,7 @@
 		A0000000000000000000003B /* BrowserProfileAddTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003B /* BrowserProfileAddTests.swift */; };
 		A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003C /* BrowserProfileSwitchTests.swift */; };
 		A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */; };
+		A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003E /* BrowserProfileBackupTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +143,7 @@
 		B0000000000000000000003B /* BrowserProfileAddTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileAddTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003C /* BrowserProfileSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileSwitchTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileDuplicateTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000003E /* BrowserProfileBackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfileBackupTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -294,6 +296,7 @@
 				B0000000000000000000003B /* BrowserProfileAddTests.swift */,
 				B0000000000000000000003C /* BrowserProfileSwitchTests.swift */,
 				B0000000000000000000003D /* BrowserProfileDuplicateTests.swift */,
+				B0000000000000000000003E /* BrowserProfileBackupTests.swift */,
 				B00000000000000000000039 /* BrowserProfileDataStoreProviderTests.swift */,
 				B0000000000000000000003A /* BrowserProfileSettingsTests.swift */,
 				B00000000000000000000037 /* BrowserProfilePersistenceTests.swift */,
@@ -497,6 +500,7 @@
 				A0000000000000000000003B /* BrowserProfileAddTests.swift in Sources */,
 				A0000000000000000000003C /* BrowserProfileSwitchTests.swift in Sources */,
 				A0000000000000000000003D /* BrowserProfileDuplicateTests.swift in Sources */,
+				A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

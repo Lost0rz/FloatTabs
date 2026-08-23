@@ -66,7 +66,7 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
 }
 
 struct FloatTabsBackupDocument: Codable, Equatable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let schemaVersion: Int
     let createdAt: Date
@@ -80,6 +80,7 @@ struct FloatTabsBackupDocument: Codable, Equatable {
 enum FloatTabsBackupError: LocalizedError, Equatable {
     case unsupportedSchema(Int)
     case unsupportedWebAppStateVersion(Int)
+    case mismatchedVersions(schemaVersion: Int, webAppStateVersion: Int)
     case restoreFailed
     case startupRecoveryFailed
 
@@ -89,12 +90,42 @@ enum FloatTabsBackupError: LocalizedError, Equatable {
             return "This FloatTabs backup uses unsupported backup schema version \(version)."
         case let .unsupportedWebAppStateVersion(version):
             return "This backup contains unsupported Web App state version \(version)."
+        case let .mismatchedVersions(schemaVersion, webAppStateVersion):
+            return "This backup combines unsupported schema/state versions (\(schemaVersion)/\(webAppStateVersion))."
         case .restoreFailed:
             return "FloatTabs could not replace the current configuration. The rollback backup was kept."
         case .startupRecoveryFailed:
             return "FloatTabs could not safely preserve and replace the unreadable startup configuration. The original profile store remains protected."
         }
     }
+}
+
+private struct BackupVersionEnvelope: Decodable {
+    let schemaVersion: Int
+    let webAppState: WebAppStateVersionEnvelope
+}
+
+private struct WebAppStateVersionEnvelope: Decodable {
+    let version: Int
+}
+
+/// The v1 backup shape intentionally stays local to the backup authority.
+/// ProfileRepository has a separate on-disk state migration contract and must
+/// not be made permissive merely because backups need to read old data.
+private struct LegacyBackupDocumentV1: Decodable {
+    let schemaVersion: Int
+    let createdAt: Date
+    let sourceAppVersion: String
+    let sourceBuild: String
+    let webAppState: LegacyBackupWebAppStateV1
+    let globalPreferences: FloatTabsBackupPreferences
+    let globalShowHideShortcut: FloatTabsBackupShortcut?
+}
+
+private struct LegacyBackupWebAppStateV1: Decodable {
+    let version: Int
+    let profiles: [WebAppProfile]
+    let lastActiveTabID: UUID?
 }
 
 struct FloatTabsBackupService {
@@ -126,14 +157,61 @@ struct FloatTabsBackupService {
     }
 
     func decode(_ data: Data) throws -> FloatTabsBackupDocument {
+        let envelope = try decoder.decode(BackupVersionEnvelope.self, from: data)
+        let schemaVersion = envelope.schemaVersion
+        let webAppStateVersion = envelope.webAppState.version
+
+        guard schemaVersion == 1 || schemaVersion == FloatTabsBackupDocument.currentSchemaVersion else {
+            throw FloatTabsBackupError.unsupportedSchema(schemaVersion)
+        }
+        guard webAppStateVersion == 1 || webAppStateVersion == StoredWebAppState.currentVersion else {
+            throw FloatTabsBackupError.unsupportedWebAppStateVersion(webAppStateVersion)
+        }
+        guard schemaVersion == webAppStateVersion else {
+            throw FloatTabsBackupError.mismatchedVersions(
+                schemaVersion: schemaVersion,
+                webAppStateVersion: webAppStateVersion
+            )
+        }
+
+        if schemaVersion == 1 {
+            let legacy = try decoder.decode(LegacyBackupDocumentV1.self, from: data)
+            let migratedProfiles = legacy.webAppState.profiles.map { profile -> WebAppProfile in
+                var migrated = profile
+                // Historical backups never had Profile isolation. Even if a
+                // non-standard v1 payload smuggles in a binding field, the
+                // frozen migration semantics explicitly map it to Default.
+                migrated.browserProfileID = nil
+                return migrated
+            }
+            let migratedState = try StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                browserProfiles: [],
+                profiles: migratedProfiles,
+                lastActiveTabID: legacy.webAppState.lastActiveTabID
+            ).sanitizedForUse()
+            return FloatTabsBackupDocument(
+                schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+                createdAt: legacy.createdAt,
+                sourceAppVersion: legacy.sourceAppVersion,
+                sourceBuild: legacy.sourceBuild,
+                webAppState: migratedState,
+                globalPreferences: legacy.globalPreferences,
+                globalShowHideShortcut: legacy.globalShowHideShortcut
+            )
+        }
+
         let document = try decoder.decode(FloatTabsBackupDocument.self, from: data)
-        guard document.schemaVersion == FloatTabsBackupDocument.currentSchemaVersion else {
-            throw FloatTabsBackupError.unsupportedSchema(document.schemaVersion)
-        }
-        guard document.webAppState.version == StoredWebAppState.currentVersion else {
-            throw FloatTabsBackupError.unsupportedWebAppStateVersion(document.webAppState.version)
-        }
-        return document
+        let normalizedState = try document.webAppState.sanitizedForUse()
+        return FloatTabsBackupDocument(
+            schemaVersion: FloatTabsBackupDocument.currentSchemaVersion,
+            createdAt: document.createdAt,
+            sourceAppVersion: document.sourceAppVersion,
+            sourceBuild: document.sourceBuild,
+            webAppState: normalizedState,
+            globalPreferences: document.globalPreferences,
+            globalShowHideShortcut: document.globalShowHideShortcut
+        )
     }
 
     func load(from url: URL) throws -> FloatTabsBackupDocument {
