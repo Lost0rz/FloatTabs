@@ -1790,7 +1790,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             tainted.isEmpty,
             "persisted store leaked attention keys: \(tainted)"
         )
-        XCTAssertEqual(json.keys.sorted(), ["lastActiveTabID", "profiles", "version"])
+        XCTAssertEqual(
+            json.keys.sorted(),
+            ["browserProfiles", "lastActiveTabID", "profiles", "version"]
+        )
 
         // A relaunch rebuilds every runtime object from the persisted store:
         // the fresh coordinator starts the same Slot at Idle with no Ready

@@ -59,6 +59,8 @@
 		A00000000000000000000033 /* WebAttentionIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000033 /* WebAttentionIndicatorTests.swift */; };
 		A00000000000000000000034 /* WebAttentionCrossFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */; };
 		A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000035 /* AttentionSoundPlayer.swift */; };
+		A00000000000000000000036 /* BrowserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000036 /* BrowserProfile.swift */; };
+		A00000000000000000000037 /* BrowserProfilePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000037 /* BrowserProfilePersistenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +128,8 @@
 		B00000000000000000000033 /* WebAttentionIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionIndicatorTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAttentionCrossFeatureTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000035 /* AttentionSoundPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundPlayer.swift; sourceTree = "<group>"; };
+		B00000000000000000000036 /* BrowserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfile.swift; sourceTree = "<group>"; };
+		B00000000000000000000037 /* BrowserProfilePersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserProfilePersistenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -218,6 +222,7 @@
 		H0000000000000000000000B /* Tabs */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000036 /* BrowserProfile.swift */,
 				B00000000000000000000011 /* WebRenderingProfile.swift */,
 				B00000000000000000000012 /* WebAppProfile.swift */,
 				B00000000000000000000013 /* TabStore.swift */,
@@ -273,6 +278,7 @@
 		H00000000000000000000009 /* FloatTabsTests */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000037 /* BrowserProfilePersistenceTests.swift */,
 				B0000000000000000000000C /* ScreenPositioningTests.swift */,
 				B0000000000000000000000D /* WebViewFactoryTests.swift */,
 				B0000000000000000000AA /* WebsiteLayoutGeometryRegressionTests.swift */,
@@ -441,6 +447,7 @@
 				A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */,
 				A0000000000000000000002F /* AttentionPresentation.swift in Sources */,
 				A00000000000000000000030 /* WebAttentionRouting.swift in Sources */,
+				A00000000000000000000036 /* BrowserProfile.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -465,6 +472,7 @@
 				A00000000000000000000032 /* WebAttentionLifecycleTests.swift in Sources */,
 				A00000000000000000000033 /* WebAttentionIndicatorTests.swift in Sources */,
 				A00000000000000000000034 /* WebAttentionCrossFeatureTests.swift in Sources */,
+				A00000000000000000000037 /* BrowserProfilePersistenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

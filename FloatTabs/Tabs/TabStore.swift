@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class TabStore {
+    private(set) var browserProfiles: [BrowserProfile]
     private(set) var profiles: [WebAppProfile]
     private(set) var activeTabID: UUID?
 
@@ -30,13 +31,15 @@ final class TabStore {
         let loadedState: StoredWebAppState
         let didLoadPersistedState: Bool
         do {
-            loadedState = try repository.load()
+            let persistedState = try repository.load()
+            loadedState = try persistedState.sanitizedForUse()
             didLoadPersistedState = true
         } catch {
             loadedState = .empty
             didLoadPersistedState = false
         }
 
+        browserProfiles = loadedState.browserProfiles
         let normalized = Self.normalizedProfiles(loadedState.profiles)
         profiles = normalized
 
@@ -50,6 +53,7 @@ final class TabStore {
         if didLoadPersistedState {
             let repaired = StoredWebAppState(
                 version: StoredWebAppState.currentVersion,
+                browserProfiles: browserProfiles,
                 profiles: normalized,
                 lastActiveTabID: activeTabID
             )
@@ -132,6 +136,119 @@ final class TabStore {
             return nil
         }
         return profiles.first(where: { $0.id == profile.id })
+    }
+
+    @discardableResult
+    func createBrowserProfile(name: String, now: Date = Date()) -> BrowserProfile? {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return nil }
+
+        let browserProfile = BrowserProfile(
+            id: UUID(),
+            name: trimmedName,
+            createdAt: now
+        )
+        guard canAddBrowserProfile(browserProfile) else { return nil }
+
+        guard persistConfigurationMutation({
+            browserProfiles.append(browserProfile)
+            return true
+        }) else {
+            return nil
+        }
+        return browserProfiles.first(where: { $0.id == browserProfile.id })
+    }
+
+    @discardableResult
+    func renameBrowserProfile(id: UUID, name: String) -> Bool {
+        guard let index = browserProfiles.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+        guard browserProfiles[index].name != trimmedName else { return true }
+
+        var renamed = browserProfiles[index]
+        renamed.name = trimmedName
+        var candidateProfiles = browserProfiles
+        candidateProfiles[index] = renamed
+        guard (try? BrowserProfileValidation.validateMetadata(candidateProfiles)) != nil else {
+            return false
+        }
+
+        return persistConfigurationMutation {
+            browserProfiles[index] = renamed
+            return true
+        }
+    }
+
+    @discardableResult
+    func deleteBrowserProfileMetadata(id: UUID) -> Bool {
+        guard browserProfiles.contains(where: { $0.id == id }) else { return false }
+        guard !profiles.contains(where: { $0.browserProfileID == id }) else { return false }
+
+        return persistConfigurationMutation {
+            browserProfiles.removeAll(where: { $0.id == id })
+            return true
+        }
+    }
+
+    @discardableResult
+    func setBrowserProfile(slotID: UUID, profileID: UUID?) -> Bool {
+        guard let slotIndex = profiles.firstIndex(where: { $0.id == slotID }) else {
+            return false
+        }
+        if let profileID,
+           !browserProfiles.contains(where: { $0.id == profileID }) {
+            return false
+        }
+        guard profiles[slotIndex].browserProfileID != profileID else { return true }
+
+        return persistConfigurationMutation {
+            profiles[slotIndex].browserProfileID = profileID
+            return true
+        }
+    }
+
+    @discardableResult
+    func duplicateSlot(
+        sourceID: UUID,
+        targetBrowserProfileID: UUID?,
+        now: Date = Date()
+    ) -> WebAppProfile? {
+        guard let source = profiles.first(where: { $0.id == sourceID }),
+              WebAppURL.isSafe(source.homeURL) else {
+            return nil
+        }
+        if let targetBrowserProfileID,
+           !browserProfiles.contains(where: { $0.id == targetBrowserProfileID }) {
+            return nil
+        }
+
+        let duplicate = WebAppProfile(
+            browserProfileID: targetBrowserProfileID,
+            order: orderedProfiles.count,
+            name: source.name,
+            homeURL: source.homeURL,
+            currentURL: source.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil } ?? source.homeURL,
+            homeURLSchemeWasInferred: source.homeURLSchemeWasInferred,
+            renderingProfile: source.renderingProfile.normalized(),
+            residencyPolicy: source.residencyPolicy,
+            backgroundMediaPolicy: source.backgroundMediaPolicy,
+            createdAt: now,
+            lastUsedAt: now
+        )
+
+        guard persistConfigurationMutation({
+            profiles.append(duplicate)
+            normalizeInPlace()
+            activeTabID = duplicate.id
+            return true
+        }) else {
+            return nil
+        }
+        return profiles.first(where: { $0.id == duplicate.id })
     }
 
     @discardableResult
@@ -368,7 +485,12 @@ final class TabStore {
     ) -> Bool {
         guard state.version == StoredWebAppState.currentVersion else { return false }
 
-        let sanitized = state.sanitizedForUse()
+        let sanitized: StoredWebAppState
+        do {
+            sanitized = try state.sanitizedForUse()
+        } catch {
+            return false
+        }
         let normalized = Self.normalizedProfiles(sanitized.profiles)
         let restoredActiveID: UUID?
         if let requested = sanitized.lastActiveTabID,
@@ -380,6 +502,7 @@ final class TabStore {
 
         let replacement = StoredWebAppState(
             version: StoredWebAppState.currentVersion,
+            browserProfiles: sanitized.browserProfiles,
             profiles: normalized,
             lastActiveTabID: restoredActiveID
         )
@@ -390,6 +513,7 @@ final class TabStore {
             return false
         }
 
+        browserProfiles = sanitized.browserProfiles
         profiles = normalized
         activeTabID = restoredActiveID
         if notifyOnSuccess {
@@ -440,11 +564,23 @@ final class TabStore {
         }
     }
 
+    private func canAddBrowserProfile(_ browserProfile: BrowserProfile) -> Bool {
+        var candidateProfiles = browserProfiles
+        candidateProfiles.append(browserProfile)
+        do {
+            try BrowserProfileValidation.validateMetadata(candidateProfiles)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// User-authored configuration is transactional: the in-memory model is
     /// published only if the corresponding durable write succeeds. A failed
     /// write restores the exact previous model so the UI cannot report a change
     /// that will disappear on relaunch.
     private func persistConfigurationMutation(_ mutation: () -> Bool) -> Bool {
+        let previousBrowserProfiles = browserProfiles
         let previousProfiles = profiles
         let previousActiveTabID = activeTabID
         guard mutation() else { return false }
@@ -452,6 +588,7 @@ final class TabStore {
         do {
             try repository.save(currentState())
         } catch {
+            browserProfiles = previousBrowserProfiles
             profiles = previousProfiles
             activeTabID = previousActiveTabID
             onPersistenceFailure?()
@@ -476,6 +613,7 @@ final class TabStore {
     private func currentState() -> StoredWebAppState {
         StoredWebAppState(
             version: StoredWebAppState.currentVersion,
+            browserProfiles: browserProfiles,
             profiles: orderedProfiles,
             lastActiveTabID: activeTabID
         )
