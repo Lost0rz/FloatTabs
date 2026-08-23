@@ -1,15 +1,78 @@
 import AppKit
 
+struct WebAppEditorBrowserProfileOption: Equatable {
+    let id: UUID?
+    let name: String
+    let isEnabled: Bool
+
+    static func defaultProfile(name: String = "Default") -> WebAppEditorBrowserProfileOption {
+        WebAppEditorBrowserProfileOption(
+            id: nil,
+            name: name,
+            isEnabled: true
+        )
+    }
+}
+
 struct WebAppEditorValue {
     var name: String
     var url: URL
     var homeURLSchemeWasInferred: Bool
     var renderingProfile: WebRenderingProfile
+    var browserProfileID: UUID?
+
+    init(
+        name: String,
+        url: URL,
+        homeURLSchemeWasInferred: Bool,
+        renderingProfile: WebRenderingProfile,
+        browserProfileID: UUID? = nil
+    ) {
+        self.name = name
+        self.url = url
+        self.homeURLSchemeWasInferred = homeURLSchemeWasInferred
+        self.renderingProfile = renderingProfile
+        self.browserProfileID = browserProfileID
+    }
 }
 
 @MainActor
 enum WebAppEditorController {
+    static func browserProfileOptions(
+        browserProfiles: [BrowserProfile],
+        customProfilesSupported: Bool,
+        defaultProfileName: String = "Default"
+    ) -> [WebAppEditorBrowserProfileOption] {
+        [WebAppEditorBrowserProfileOption.defaultProfile(name: defaultProfileName)]
+            + browserProfiles.map {
+                WebAppEditorBrowserProfileOption(
+                    id: $0.id,
+                    name: $0.name,
+                    isEnabled: customProfilesSupported
+                )
+            }
+    }
+
+    static func makeValue(
+        name: String,
+        url: URL,
+        homeURLSchemeWasInferred: Bool,
+        renderingProfile: WebRenderingProfile,
+        browserProfileID: UUID?
+    ) -> WebAppEditorValue {
+        WebAppEditorValue(
+            name: name,
+            url: url,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred,
+            renderingProfile: renderingProfile,
+            browserProfileID: browserProfileID
+        )
+    }
+
     static func presentAdd(
+        browserProfiles: [BrowserProfile] = [],
+        defaultProfileName: String = "Default",
+        customProfilesSupported: Bool = true,
         allowsWindowSizeEditing: Bool = true,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
@@ -24,6 +87,12 @@ enum WebAppEditorController {
             showsPrimaryRenderingControls: true,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
             nameIsOptional: true,
+            browserProfileOptions: browserProfileOptions(
+                browserProfiles: browserProfiles,
+                customProfilesSupported: customProfilesSupported,
+                defaultProfileName: defaultProfileName
+            ),
+            initialBrowserProfileID: nil,
             attachedTo: window,
             completion: completion
         )
@@ -99,6 +168,8 @@ enum WebAppEditorController {
             showsPrimaryRenderingControls: false,
             allowsWindowSizeEditing: allowsWindowSizeEditing,
             nameIsOptional: false,
+            browserProfileOptions: nil,
+            initialBrowserProfileID: profile.browserProfileID,
             attachedTo: window,
             completion: completion
         )
@@ -131,6 +202,8 @@ enum WebAppEditorController {
         showsPrimaryRenderingControls: Bool,
         allowsWindowSizeEditing: Bool,
         nameIsOptional: Bool,
+        browserProfileOptions: [WebAppEditorBrowserProfileOption]?,
+        initialBrowserProfileID: UUID?,
         attachedTo window: NSWindow,
         completion: @escaping (WebAppEditorValue?) -> Void
     ) {
@@ -154,13 +227,45 @@ enum WebAppEditorController {
             allowsWindowSizeEditing: allowsWindowSizeEditing
         )
 
-        let stack = NSStackView(views: [
+        let profilePicker: NSPopUpButton?
+        if let browserProfileOptions {
+            let picker = NSPopUpButton()
+            let options = browserProfileOptions.isEmpty
+                ? [WebAppEditorBrowserProfileOption.defaultProfile()]
+                : browserProfileOptions
+            for option in options {
+                picker.addItem(withTitle: option.name)
+                guard let item = picker.lastItem else { continue }
+                if let id = option.id {
+                    item.representedObject = id.uuidString
+                } else {
+                    item.representedObject = NSNull()
+                }
+                item.isEnabled = option.isEnabled
+            }
+            picker.widthAnchor.constraint(equalToConstant: 400).isActive = true
+            let selectedIndex = options.firstIndex(where: {
+                $0.id == initialBrowserProfileID
+            }) ?? 0
+            picker.selectItem(at: selectedIndex)
+            profilePicker = picker
+        } else {
+            profilePicker = nil
+        }
+
+        var editorViews: [NSView] = [
             nameLabel,
             nameField,
             urlLabel,
             urlField,
-            renderingForm.view,
-        ])
+        ]
+        if let profilePicker {
+            editorViews.append(makeLabel("Profile"))
+            editorViews.append(profilePicker)
+        }
+        editorViews.append(renderingForm.view)
+
+        let stack = NSStackView(views: editorViews)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
@@ -210,15 +315,26 @@ enum WebAppEditorController {
                 schemeWasInferred = normalized.schemeWasInferred
             }
 
+            let selectedProfileID = profilePicker.map {
+                selectedBrowserProfileID(from: $0)
+            } ?? initialBrowserProfileID
             completion(
-                WebAppEditorValue(
+                makeValue(
                     name: name,
                     url: normalized.url,
                     homeURLSchemeWasInferred: schemeWasInferred,
-                    renderingProfile: rendering
+                    renderingProfile: rendering,
+                    browserProfileID: selectedProfileID
                 )
             )
         }
+    }
+
+    private static func selectedBrowserProfileID(from picker: NSPopUpButton) -> UUID? {
+        guard let rawID = picker.selectedItem?.representedObject as? String else {
+            return nil
+        }
+        return UUID(uuidString: rawID)
     }
 
     private static func makeLabel(_ text: String) -> NSTextField {

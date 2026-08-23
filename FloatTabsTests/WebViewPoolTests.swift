@@ -5,45 +5,45 @@ import XCTest
 
 @MainActor
 final class WebViewPoolTests: XCTestCase {
-    func testDifferentSlotIDsReceiveDifferentWebViews() {
+    func testDifferentSlotIDsReceiveDifferentWebViews() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")
         let second = makeProfile(name: "B")
 
-        let firstView = pool.webView(for: first)
-        let secondView = pool.webView(for: second)
+        let firstView = try pool.webView(for: first)
+        let secondView = try pool.webView(for: second)
 
         XCTAssertFalse(firstView === secondView)
         XCTAssertEqual(pool.count, 2)
     }
 
-    func testSameSlotIDReusesSameWebViewInstance() {
+    func testSameSlotIDReusesSameWebViewInstance() throws {
         let pool = makePool()
         let profile = makeProfile(name: "A")
 
-        let first = pool.webView(for: profile)
-        let second = pool.webView(for: profile)
+        let first = try pool.webView(for: profile)
+        let second = try pool.webView(for: profile)
 
         XCTAssertTrue(first === second)
         XCTAssertEqual(pool.count, 1)
     }
 
-    func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() {
+    func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() throws {
         let pool = makePool()
         var profile = makeProfile(name: "A")
-        let first = pool.webView(for: profile)
+        let first = try pool.webView(for: profile)
 
         profile.renderingProfile = profile.renderingProfile
             .settingZoom(1.25)
             .settingViewport(CGSize(width: 612, height: 777))
-        let second = pool.webView(for: profile)
+        let second = try pool.webView(for: profile)
 
         XCTAssertTrue(first === second)
         XCTAssertEqual(second.pageZoom, 1.25, accuracy: 0.001)
         XCTAssertEqual(pool.count, 1)
     }
 
-    func testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL() {
+    func testBrowserIdentityChangeRebuildsOnlyAffectedSlotAndRestoresURL() throws {
         var loadedRequests: [URLRequest] = []
         let pool = WebViewPool(
             onURLChange: { _, _ in },
@@ -53,13 +53,13 @@ final class WebViewPoolTests: XCTestCase {
         let secondProfile = makeProfile(name: "B")
         firstProfile.currentURL = URL(string: "https://example.com/current")!
 
-        let firstView = pool.webView(for: firstProfile)
-        let secondView = pool.webView(for: secondProfile)
+        let firstView = try pool.webView(for: firstProfile)
+        let secondView = try pool.webView(for: secondProfile)
 
         firstProfile.renderingProfile = firstProfile.renderingProfile
             .settingBrowserIdentity(.windowsChrome)
-        let rebuilt = pool.webView(for: firstProfile)
-        let secondAgain = pool.webView(for: secondProfile)
+        let rebuilt = try pool.webView(for: firstProfile)
+        let secondAgain = try pool.webView(for: secondProfile)
 
         XCTAssertFalse(firstView === rebuilt)
         XCTAssertTrue(secondView === secondAgain)
@@ -74,7 +74,404 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 2)
     }
 
-    func testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL() {
+    func testDefaultAndCustomBrowserProfilesResolveDistinctStoresAndRecordIdentity() throws {
+        let customID = UUID()
+        let defaultStore = WKWebsiteDataStore.nonPersistent()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var resolvedCustomIDs: [UUID] = []
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            defaultStoreResolver: { defaultStore },
+            customStoreResolver: { id in
+                resolvedCustomIDs.append(id)
+                return customStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "DefaultRuntime")
+
+        let defaultWebView = try pool.webView(for: profile)
+        XCTAssertTrue(defaultWebView.configuration.websiteDataStore === defaultStore)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .default)
+
+        profile.browserProfileID = customID
+        let customWebView = try pool.webView(for: profile)
+        XCTAssertTrue(customWebView.configuration.websiteDataStore === customStore)
+        XCTAssertEqual(
+            pool.browserProfileIdentity(for: profile.id),
+            .custom(customID)
+        )
+        XCTAssertEqual(resolvedCustomIDs, [customID])
+    }
+
+    func testSameBrowserProfileIdentityReusesRuntimeWithoutResolvingAgain() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var resolverCalls = 0
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                XCTAssertEqual(id, customID)
+                resolverCalls += 1
+                return customStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let profile = makeProfile(name: "WarmCustom", browserProfileID: customID)
+
+        let first = try pool.webView(for: profile)
+        let second = try pool.webView(for: profile)
+
+        XCTAssertTrue(first === second)
+        XCTAssertEqual(resolverCalls, 1)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+    }
+
+    func testTwoSlotsBoundToTheSameCustomProfileResolveTheExactUUIDIndependently() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var resolvedIDs: [UUID] = []
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                resolvedIDs.append(id)
+                return customStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let first = makeProfile(name: "SharedFirst", browserProfileID: customID)
+        let second = makeProfile(name: "SharedSecond", browserProfileID: customID)
+
+        let firstWebView = try pool.webView(for: first)
+        let secondWebView = try pool.webView(for: second)
+
+        XCTAssertFalse(firstWebView === secondWebView)
+        XCTAssertTrue(firstWebView.configuration.websiteDataStore === customStore)
+        XCTAssertTrue(secondWebView.configuration.websiteDataStore === customStore)
+        XCTAssertEqual(resolvedIDs, [customID, customID])
+        XCTAssertEqual(pool.browserProfileIdentity(for: first.id), .custom(customID))
+        XCTAssertEqual(pool.browserProfileIdentity(for: second.id), .custom(customID))
+    }
+
+    func testBrowserProfileIdentityChangeRebuildsRuntimeWithSuppliedStoreAndNavigation() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var loadedRequests: [URLRequest] = []
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in customStore }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "RebuildCustom")
+        profile.currentURL = URL(string: "https://example.com/live")!
+
+        let original = try pool.webView(for: profile)
+        let originalBridge = pool.attentionBridge(for: profile.id)
+        profile.browserProfileID = customID
+        let rebuilt = try pool.webView(for: profile)
+
+        XCTAssertFalse(original === rebuilt)
+        XCTAssertTrue(originalBridge?.isInvalidated == true)
+        XCTAssertFalse(pool.attentionBridge(for: profile.id) === originalBridge)
+        XCTAssertTrue(rebuilt.configuration.websiteDataStore === customStore)
+        XCTAssertEqual(loadedRequests.map(\.url), [profile.currentURL, profile.currentURL])
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+        XCTAssertEqual(pool.count, 1)
+    }
+
+    func testSuccessfulBrowserProfileRebuildDoesNotChurnResidentSet() throws {
+        let customID = UUID()
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "StableResident")
+        var snapshots: [Set<UUID>] = []
+        pool.onResidentSetChange = { snapshots.append(pool.residentSlotIDs) }
+
+        _ = try pool.webView(for: profile)
+        profile.browserProfileID = customID
+        _ = try pool.webView(for: profile)
+
+        XCTAssertEqual(snapshots, [[profile.id]])
+        XCTAssertEqual(pool.residentSlotIDs, [profile.id])
+    }
+
+    func testReleasingSlotRemovesBrowserProfileIdentityDiagnostic() throws {
+        let customID = UUID()
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let profile = makeProfile(name: "ReleaseIdentity", browserProfileID: customID)
+
+        _ = try pool.webView(for: profile)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+
+        pool.release(slotID: profile.id)
+
+        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testColdReleaseAndRecreatePreservesCustomBrowserProfileIdentity() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var resolverCalls = 0
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                XCTAssertEqual(id, customID)
+                resolverCalls += 1
+                return customStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let profile = makeProfile(name: "ColdRecreate", browserProfileID: customID)
+
+        let first = try pool.webView(for: profile)
+        pool.release(slotID: profile.id)
+        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
+
+        let recreated = try pool.webView(for: profile)
+
+        XCTAssertFalse(first === recreated)
+        XCTAssertTrue(recreated.configuration.websiteDataStore === customStore)
+        XCTAssertEqual(resolverCalls, 2)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+    }
+
+    func testContentProcessRecoveryKeepsBrowserProfileIdentityWithoutReresolving() throws {
+        let customID = UUID()
+        var resolverCalls = 0
+        var loadedRequests: [URLRequest] = []
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in
+                resolverCalls += 1
+                return WKWebsiteDataStore.nonPersistent()
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            isSlotActive: { _ in true },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "RecoveryIdentity", browserProfileID: customID)
+        profile.currentURL = URL(string: "https://example.com/recover")!
+
+        let original = try pool.webView(for: profile)
+        pool.handleContentProcessTermination(slotID: profile.id)
+        let recovered = try pool.webView(for: profile)
+
+        XCTAssertTrue(original === recovered)
+        XCTAssertEqual(resolverCalls, 1)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+        XCTAssertEqual(loadedRequests.count, 2)
+    }
+
+    func testDifferentSlotsKeepIndependentBrowserProfileRuntimeIdentities() throws {
+        let firstID = UUID()
+        let secondID = UUID()
+        let firstStore = WKWebsiteDataStore.nonPersistent()
+        let secondStore = WKWebsiteDataStore.nonPersistent()
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                id == firstID ? firstStore : secondStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let first = makeProfile(name: "FirstIdentity", browserProfileID: firstID)
+        let second = makeProfile(name: "SecondIdentity", browserProfileID: secondID)
+
+        let firstWebView = try pool.webView(for: first)
+        let secondWebView = try pool.webView(for: second)
+
+        XCTAssertTrue(firstWebView.configuration.websiteDataStore === firstStore)
+        XCTAssertTrue(secondWebView.configuration.websiteDataStore === secondStore)
+        XCTAssertEqual(pool.browserProfileIdentity(for: first.id), .custom(firstID))
+        XCTAssertEqual(pool.browserProfileIdentity(for: second.id), .custom(secondID))
+        XCTAssertTrue(try pool.webView(for: first) === firstWebView)
+        XCTAssertTrue(try pool.webView(for: second) === secondWebView)
+    }
+
+    func testRenderingRebuildReappliesTheSameBrowserProfileIdentityAndStore() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        var resolverCalls = 0
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in
+                resolverCalls += 1
+                return customStore
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "RenderingRebuild", browserProfileID: customID)
+
+        let original = try pool.webView(for: profile)
+        profile.renderingProfile = profile.renderingProfile
+            .settingBrowserIdentity(.windowsChrome)
+        let rebuilt = try pool.webView(for: profile)
+
+        XCTAssertFalse(original === rebuilt)
+        XCTAssertTrue(rebuilt.configuration.websiteDataStore === customStore)
+        XCTAssertEqual(resolverCalls, 2)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customID))
+    }
+
+    func testInitialCustomProfileResolutionFailureDoesNotCreateRuntimeOrLoad() throws {
+        let customID = UUID()
+        var defaultResolverCalls = 0
+        var customResolverCalls = 0
+        var loadCount = 0
+        var residentChangeCount = 0
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { false },
+            defaultStoreResolver: {
+                defaultResolverCalls += 1
+                return WKWebsiteDataStore.nonPersistent()
+            },
+            customStoreResolver: { _ in
+                customResolverCalls += 1
+                return WKWebsiteDataStore.nonPersistent()
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadCount += 1 },
+            browserProfileDataStoreProvider: provider
+        )
+        pool.onResidentSetChange = { residentChangeCount += 1 }
+        let profile = makeProfile(name: "UnsupportedInitial", browserProfileID: customID)
+
+        do {
+            _ = try pool.webView(for: profile)
+            XCTFail("Unsupported custom Profile resolution must fail")
+        } catch {
+            XCTAssertEqual(
+                error as? BrowserProfileDataStoreProviderError,
+                .customProfilesUnsupported
+            )
+        }
+
+        XCTAssertEqual(defaultResolverCalls, 0)
+        XCTAssertEqual(customResolverCalls, 0)
+        XCTAssertEqual(loadCount, 0)
+        XCTAssertEqual(residentChangeCount, 0)
+        XCTAssertEqual(pool.count, 0)
+        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
+    }
+
+    func testFirstLoadSeesSuppliedStoreAndRecordedBrowserProfileIdentity() throws {
+        let customID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { id in
+                XCTAssertEqual(id, customID)
+                return customStore
+            }
+        )
+        let profile = makeProfile(name: "FirstLoadOrdering", browserProfileID: customID)
+        var observedStore: WKWebsiteDataStore?
+        var observedIdentity: BrowserProfileIdentity?
+        var pool: WebViewPool!
+        pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { webView, _ in
+                observedStore = webView.configuration.websiteDataStore
+                observedIdentity = pool.browserProfileIdentity(for: profile.id)
+            },
+            browserProfileDataStoreProvider: provider
+        )
+
+        _ = try pool.webView(for: profile)
+
+        XCTAssertTrue(observedStore === customStore)
+        XCTAssertEqual(observedIdentity, .custom(customID))
+    }
+
+    func testBrowserProfileRebuildResolutionFailureRemovesOldRuntimeAndReportsResidency() throws {
+        let customID = UUID()
+        var customProfilesSupported = true
+        var loadedRequests: [URLRequest] = []
+        var snapshots: [Set<UUID>] = []
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { customProfilesSupported },
+            defaultStoreResolver: { WKWebsiteDataStore.nonPersistent() },
+            customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            browserProfileDataStoreProvider: provider
+        )
+        pool.onResidentSetChange = { snapshots.append(pool.residentSlotIDs) }
+        var profile = makeProfile(name: "UnsupportedRebuild")
+
+        _ = try pool.webView(for: profile)
+        customProfilesSupported = false
+        profile.browserProfileID = customID
+
+        do {
+            _ = try pool.webView(for: profile)
+            XCTFail("Unsupported custom Profile rebuild must fail")
+        } catch {
+            XCTAssertEqual(
+                error as? BrowserProfileDataStoreProviderError,
+                .customProfilesUnsupported
+            )
+        }
+
+        XCTAssertEqual(snapshots, [[profile.id], []])
+        XCTAssertTrue(pool.residentSlotIDs.isEmpty)
+        XCTAssertEqual(pool.count, 0)
+        XCTAssertEqual(loadedRequests.count, 1)
+        XCTAssertNil(pool.browserProfileIdentity(for: profile.id))
+    }
+
+    func testRebuildNavigationURLPrefersInitialRequestBeforeRedirectedURL() throws {
         let initialURL = URL(string: "https://www.example.com/article")!
         let redirectedURL = URL(string: "https://m.example.com/article")!
 
@@ -88,7 +485,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, initialURL)
     }
 
-    func testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking() {
+    func testAutomaticWebsiteModeCanMoveDesktopMobileAndBackWithoutSticking() throws {
         var loadedRequests: [URLRequest] = []
         let pool = WebViewPool(
             onURLChange: { _, _ in },
@@ -96,7 +493,7 @@ final class WebViewPoolTests: XCTestCase {
         )
         var profile = makeProfile(name: "A")
 
-        let desktop = pool.webView(for: profile)
+        let desktop = try pool.webView(for: profile)
         XCTAssertEqual(
             desktop.configuration.defaultWebpagePreferences.preferredContentMode,
             .desktop
@@ -109,7 +506,7 @@ final class WebViewPoolTests: XCTestCase {
         )
 
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
-        let mobile = pool.webView(for: profile)
+        let mobile = try pool.webView(for: profile)
         XCTAssertFalse(desktop === mobile)
         XCTAssertEqual(
             mobile.configuration.defaultWebpagePreferences.preferredContentMode,
@@ -119,7 +516,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(mobile.customUserAgent?.contains("Macintosh") == true)
 
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.desktop)
-        let desktopAgain = pool.webView(for: profile)
+        let desktopAgain = try pool.webView(for: profile)
         XCTAssertFalse(mobile === desktopAgain)
         XCTAssertEqual(
             desktopAgain.configuration.defaultWebpagePreferences.preferredContentMode,
@@ -138,7 +535,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
-    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() {
+    func testChatGPTMobileAutomaticUsesDesktopPointerCompatibilityIdentity() throws {
         let pool = makePool()
         var profile = makeProfile(
             name: "ChatGPT",
@@ -146,7 +543,7 @@ final class WebViewPoolTests: XCTestCase {
         )
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
 
-        let webView = pool.webView(for: profile)
+        let webView = try pool.webView(for: profile)
 
         XCTAssertEqual(
             webView.configuration.defaultWebpagePreferences.preferredContentMode,
@@ -156,7 +553,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(webView.customUserAgent?.contains("iPhone") == true)
     }
 
-    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload() {
+    func testChatGPTMobileAutomaticWarmReuseKeepsCompatibilityIdentityWithoutReload() throws {
         var loadedRequests: [URLRequest] = []
         let pool = WebViewPool(
             onURLChange: { _, _ in },
@@ -168,10 +565,10 @@ final class WebViewPoolTests: XCTestCase {
         )
         profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
 
-        let first = pool.webView(for: profile)
+        let first = try pool.webView(for: profile)
         let firstUA = first.customUserAgent
-        let second = pool.webView(for: profile)
-        let third = pool.webView(for: profile)
+        let second = try pool.webView(for: profile)
+        let third = try pool.webView(for: profile)
 
         XCTAssertTrue(first === second)
         XCTAssertTrue(second === third)
@@ -182,14 +579,14 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(third.customUserAgent?.contains("iPhone") == true)
     }
 
-    func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() {
+    func testDevicePresetChangeDoesNotRebuildOrAlterBrowserIdentity() throws {
         let pool = makePool()
         var profile = makeProfile(name: "A")
-        let first = pool.webView(for: profile)
+        let first = try pool.webView(for: profile)
         let firstUA = first.customUserAgent
 
         profile.renderingProfile = profile.renderingProfile.settingDevicePreset(id: "iphone-17-pro")
-        let second = pool.webView(for: profile)
+        let second = try pool.webView(for: profile)
 
         XCTAssertTrue(first === second)
         XCTAssertEqual(second.customUserAgent, firstUA)
@@ -197,57 +594,57 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(profile.renderingProfile.viewportSize, CGSize(width: 402, height: 874))
     }
 
-    func testPooledWebViewsUsePersistentWebsiteDataStore() {
+    func testPooledWebViewsUsePersistentWebsiteDataStore() throws {
         let pool = makePool()
-        let webView = pool.webView(for: makeProfile(name: "A"))
+        let webView = try pool.webView(for: makeProfile(name: "A"))
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
     }
 
-    func testPooledWebViewsInstallPopupCoordinator() {
+    func testPooledWebViewsInstallPopupCoordinator() throws {
         let pool = makePool()
-        let webView = pool.webView(for: makeProfile(name: "A"))
+        let webView = try pool.webView(for: makeProfile(name: "A"))
 
         XCTAssertTrue(webView.uiDelegate is PopupCoordinator)
     }
 
-    func testRemovingOneSlotDoesNotAffectOtherWebViewIdentity() {
+    func testRemovingOneSlotDoesNotAffectOtherWebViewIdentity() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")
         let second = makeProfile(name: "B")
-        _ = pool.webView(for: first)
-        let secondView = pool.webView(for: second)
+        _ = try pool.webView(for: first)
+        let secondView = try pool.webView(for: second)
 
         pool.remove(slotID: first.id)
 
         XCTAssertFalse(pool.contains(slotID: first.id))
         XCTAssertTrue(pool.contains(slotID: second.id))
-        XCTAssertTrue(pool.webView(for: second) === secondView)
+        XCTAssertTrue(try pool.webView(for: second) === secondView)
         XCTAssertEqual(pool.count, 1)
     }
 
-    func testColdReleaseDropsOnlyRequestedLiveWebView() {
+    func testColdReleaseDropsOnlyRequestedLiveWebView() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")
         let second = makeProfile(name: "B")
-        _ = pool.webView(for: first)
-        let secondView = pool.webView(for: second)
+        _ = try pool.webView(for: first)
+        let secondView = try pool.webView(for: second)
 
         pool.release(slotID: first.id)
 
         XCTAssertFalse(pool.contains(slotID: first.id))
         XCTAssertTrue(pool.contains(slotID: second.id))
-        XCTAssertTrue(pool.webView(for: second) === secondView)
+        XCTAssertTrue(try pool.webView(for: second) === secondView)
         XCTAssertEqual(pool.count, 1)
     }
 
-    func testResidentSetChangeTracksActualLiveWebViews() {
+    func testResidentSetChangeTracksActualLiveWebViews() throws {
         let pool = makePool()
         let profile = makeProfile(name: "Resident")
         var snapshots: [Set<UUID>] = []
         pool.onResidentSetChange = { snapshots.append(pool.residentSlotIDs) }
 
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         XCTAssertEqual(pool.residentSlotIDs, [profile.id])
         pool.release(slotID: profile.id)
 
@@ -260,7 +657,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "Cold")
         profile.residencyPolicy = .cold
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -282,7 +679,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "ColdCancel")
         profile.residencyPolicy = .cold
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -306,8 +703,8 @@ final class WebViewPoolTests: XCTestCase {
         source.residencyPolicy = .hot
         var companion = makeProfile(name: "Companion")
         companion.residencyPolicy = .cold
-        _ = pool.webView(for: source)
-        _ = pool.webView(for: companion)
+        _ = try pool.webView(for: source)
+        _ = try pool.webView(for: companion)
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
         )
@@ -335,7 +732,7 @@ final class WebViewPoolTests: XCTestCase {
         var source = makeProfile(name: "FullscreenSource")
         source.residencyPolicy = .cold
         source.backgroundMediaPolicy = .pauseWhenInactive
-        _ = pool.webView(for: source)
+        _ = try pool.webView(for: source)
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
         )
@@ -376,8 +773,8 @@ final class WebViewPoolTests: XCTestCase {
         source.residencyPolicy = .hot
         var companion = makeProfile(name: "Companion")
         companion.residencyPolicy = .cold
-        _ = pool.webView(for: source)
-        _ = pool.webView(for: companion)
+        _ = try pool.webView(for: source)
+        _ = try pool.webView(for: companion)
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
         )
@@ -400,7 +797,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: companion.id))
     }
 
-    func testResourceLifecycleDefaultTimingsMatchAcceptedContract() {
+    func testResourceLifecycleDefaultTimingsMatchAcceptedContract() throws {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
@@ -411,7 +808,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "Warm")
         profile.residencyPolicy = .warm
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -431,7 +828,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "WarmTTL")
         profile.residencyPolicy = .warm
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -449,7 +846,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmLRULimitKeepsOnlyTwoRecentInactiveResidents() {
+    func testWarmLRULimitKeepsOnlyTwoRecentInactiveResidents() throws {
         let pool = makePool()
         let profiles = ["A", "B", "C"].enumerated().map { index, name in
             var profile = makeProfile(name: name)
@@ -458,7 +855,7 @@ final class WebViewPoolTests: XCTestCase {
             return profile
         }
         for profile in profiles {
-            _ = pool.webView(for: profile)
+            _ = try pool.webView(for: profile)
         }
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
@@ -487,7 +884,7 @@ final class WebViewPoolTests: XCTestCase {
         var profile = makeProfile(name: "MediaCold")
         profile.residencyPolicy = .cold
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         var isPlaying = true
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
@@ -517,7 +914,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "HiddenCold")
         profile.residencyPolicy = .cold
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -538,12 +935,12 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testHiddenSelectedDefaultMediaPausesImmediatelyBeforeRetentionGrace() {
+    func testHiddenSelectedDefaultMediaPausesImmediatelyBeforeRetentionGrace() throws {
         let pool = makePool()
         var profile = makeProfile(name: "HiddenPause")
         profile.residencyPolicy = .hot
         profile.backgroundMediaPolicy = .pauseWhenInactive
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
         )
@@ -563,12 +960,12 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id), "pause does not change Hot residency")
     }
 
-    func testHiddenSelectedBackgroundAudioDoesNotPause() {
+    func testHiddenSelectedBackgroundAudioDoesNotPause() throws {
         let pool = makePool()
         var profile = makeProfile(name: "HiddenBackgroundAudio")
         profile.residencyPolicy = .hot
         profile.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
         )
@@ -591,7 +988,7 @@ final class WebViewPoolTests: XCTestCase {
         let pool = makePool()
         var profile = makeProfile(name: "HiddenCancel")
         profile.residencyPolicy = .cold
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -612,15 +1009,15 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(lifecycle.isHiddenActiveGracePending)
     }
 
-    func testCriticalMemoryPressureEvictsInactiveWarmButNeverPlayingProtectedWarm() {
+    func testCriticalMemoryPressureEvictsInactiveWarmButNeverPlayingProtectedWarm() throws {
         let pool = makePool()
         var normal = makeProfile(name: "NormalWarm")
         normal.residencyPolicy = .warm
         var playing = makeProfile(name: "PlayingWarm")
         playing.residencyPolicy = .warm
         playing.backgroundMediaPolicy = .allowBackgroundAudio
-        _ = pool.webView(for: normal)
-        _ = pool.webView(for: playing)
+        _ = try pool.webView(for: normal)
+        _ = try pool.webView(for: playing)
         let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
         let lifecycle = SlotLifecycleCoordinator(
             webViewPool: pool,
@@ -642,7 +1039,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(playing.id))
     }
 
-    func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() {
+    func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() throws {
         XCTAssertEqual(
             WebViewPool.recoveryDisposition(isActive: true),
             .reloadNow
@@ -653,7 +1050,7 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
-    func testActiveWebContentTerminationReloadsLastKnownURLImmediately() {
+    func testActiveWebContentTerminationReloadsLastKnownURLImmediately() throws {
         var loadedRequests: [URLRequest] = []
         var profile = makeProfile(name: "A")
         profile.currentURL = URL(string: "https://example.com/current")!
@@ -663,7 +1060,7 @@ final class WebViewPoolTests: XCTestCase {
             isSlotActive: { _ in true }
         )
 
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         pool.handleContentProcessTermination(slotID: profile.id)
 
         XCTAssertEqual(loadedRequests.count, 2)
@@ -671,7 +1068,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
-    func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() {
+    func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() throws {
         var loadedRequests: [URLRequest] = []
         var isActive = false
         var profile = makeProfile(name: "A")
@@ -682,12 +1079,12 @@ final class WebViewPoolTests: XCTestCase {
             isSlotActive: { _ in isActive }
         )
 
-        let original = pool.webView(for: profile)
+        let original = try pool.webView(for: profile)
         pool.handleContentProcessTermination(slotID: profile.id)
         XCTAssertEqual(loadedRequests.count, 1)
 
         isActive = true
-        let recovered = pool.webView(for: profile)
+        let recovered = try pool.webView(for: profile)
 
         XCTAssertTrue(original === recovered)
         XCTAssertEqual(loadedRequests.count, 2)
@@ -695,7 +1092,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
-    func testSlotNavigationObserverSurfacesContentProcessTermination() {
+    func testSlotNavigationObserverSurfacesContentProcessTermination() throws {
         let webView = WebViewFactory.makeWebView()
         let slotID = UUID()
         var terminatedSlotID: UUID?
@@ -712,7 +1109,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(terminatedSlotID, slotID)
     }
 
-    func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() {
+    func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() throws {
         let result = WebNavigationCoordinator.disposition(
             hasTargetFrame: false,
             sourceURL: URL(string: "https://www.bilibili.com/"),
@@ -722,7 +1119,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .loadInCurrentSlot)
     }
 
-    func testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot() {
+    func testNavigationCoordinatorKeepsCrossSiteUserBlankInCurrentSlot() throws {
         let result = WebNavigationCoordinator.disposition(
             hasTargetFrame: false,
             navigationType: .linkActivated,
@@ -733,7 +1130,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .loadInCurrentSlot)
     }
 
-    func testNavigationCoordinatorLetsScriptedBlankReachUIDelegate() {
+    func testNavigationCoordinatorLetsScriptedBlankReachUIDelegate() throws {
         let result = WebNavigationCoordinator.disposition(
             hasTargetFrame: false,
             navigationType: .other,
@@ -744,7 +1141,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .allow)
     }
 
-    func testNavigationCoordinatorAllowsNormalInFrameNavigation() {
+    func testNavigationCoordinatorAllowsNormalInFrameNavigation() throws {
         let result = WebNavigationCoordinator.disposition(
             hasTargetFrame: true,
             sourceURL: URL(string: "https://example.com"),
@@ -754,7 +1151,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .allow)
     }
 
-    func testPopupRoutingKeepsSameSiteContextInCurrentSlot() {
+    func testPopupRoutingKeepsSameSiteContextInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .linkActivated,
             sourceURL: URL(string: "https://www.bilibili.com/"),
@@ -764,7 +1161,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot() {
+    func testPopupRoutingKeepsCrossSiteUserLinkInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .linkActivated,
             sourceURL: URL(string: "https://example.com"),
@@ -774,7 +1171,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsScriptedCrossSitePopupInCurrentSlot() {
+    func testPopupRoutingKeepsScriptedCrossSitePopupInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
@@ -784,7 +1181,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsAboutBlankInCurrentSlot() {
+    func testPopupRoutingKeepsAboutBlankInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
@@ -794,7 +1191,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsMissingInitialURLInCurrentSlot() {
+    func testPopupRoutingKeepsMissingInitialURLInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://v.qq.com"),
@@ -804,7 +1201,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testWindowOpenScriptForcesWebDestinationsIntoCurrentSlot() {
+    func testWindowOpenScriptForcesWebDestinationsIntoCurrentSlot() throws {
         let script = PopupCoordinator.currentSlotWindowOpenScript()
 
         XCTAssertEqual(script.injectionTime, .atDocumentStart)
@@ -814,7 +1211,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(script.source.contains("return window"))
     }
 
-    func testPopupRoutingHandsNonWebSchemeToSystem() {
+    func testPopupRoutingHandsNonWebSchemeToSystem() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .linkActivated,
             sourceURL: URL(string: "https://example.com"),
@@ -824,7 +1221,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .externalBrowser)
     }
 
-    func testExplicitLinkContextMenuOffersUserControlledDestinations() {
+    func testExplicitLinkContextMenuOffersUserControlledDestinations() throws {
         let webView = WebViewFactory.makeWebView()
         let coordinator = LinkContextMenuCoordinator(
             webView: webView,
@@ -847,7 +1244,7 @@ final class WebViewPoolTests: XCTestCase {
         coordinator.invalidate()
     }
 
-    func testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity() {
+    func testExplicitUserFloatingWindowKeepsPersistentSessionAndSourceIdentity() throws {
         let source = WebViewFactory.makeWebView()
         source.customUserAgent = "FloatTabs-Test-UA/1.0"
         let coordinator = PopupCoordinator(parentWebView: source)
@@ -863,7 +1260,7 @@ final class WebViewPoolTests: XCTestCase {
         coordinator.closeAll()
     }
 
-    func testUploadPanelPolicyForSingleFile() {
+    func testUploadPanelPolicyForSingleFile() throws {
         let policy = UploadPanelPolicy.make(
             allowsMultipleSelection: false,
             allowsDirectories: false
@@ -874,7 +1271,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(policy.canChooseDirectories)
     }
 
-    func testUploadPanelPolicyForMultipleFiles() {
+    func testUploadPanelPolicyForMultipleFiles() throws {
         let policy = UploadPanelPolicy.make(
             allowsMultipleSelection: true,
             allowsDirectories: false
@@ -885,7 +1282,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(policy.canChooseDirectories)
     }
 
-    func testUploadPanelPolicyForDirectory() {
+    func testUploadPanelPolicyForDirectory() throws {
         let policy = UploadPanelPolicy.make(
             allowsMultipleSelection: true,
             allowsDirectories: true
@@ -896,7 +1293,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(policy.canChooseDirectories)
     }
 
-    func testExplicitDownloadActionUsesDownloadPolicy() {
+    func testExplicitDownloadActionUsesDownloadPolicy() throws {
         XCTAssertEqual(
             DownloadCoordinator.actionPolicy(shouldPerformDownload: true),
             .download
@@ -907,7 +1304,7 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
-    func testUnshowableMimeResponseUsesDownloadPolicy() {
+    func testUnshowableMimeResponseUsesDownloadPolicy() throws {
         XCTAssertEqual(
             DownloadCoordinator.responsePolicy(canShowMIMEType: false),
             .download
@@ -918,7 +1315,7 @@ final class WebViewPoolTests: XCTestCase {
         )
     }
 
-    func testDownloadSuggestedFilenameDropsPathComponents() {
+    func testDownloadSuggestedFilenameDropsPathComponents() throws {
         XCTAssertEqual(
             DownloadCoordinator.safeSuggestedFilename("nested/path/report.txt"),
             "report.txt"
@@ -931,7 +1328,7 @@ final class WebViewPoolTests: XCTestCase {
 
     // MARK: - HTTPS entry fallback to HTTP (inferred scheme, non-443 ports)
 
-    func testHostAppAllowsCleartextOnlyForWebContent() {
+    func testHostAppAllowsCleartextOnlyForWebContent() throws {
         let ats = Bundle.main.object(
             forInfoDictionaryKey: "NSAppTransportSecurity"
         ) as? [String: Any]
@@ -939,7 +1336,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertNil(ats?["NSAllowsArbitraryLoads"])
     }
 
-    func testURLNormalizationTracksInferredVersusExplicitScheme() {
+    func testURLNormalizationTracksInferredVersusExplicitScheme() throws {
         let inferred = WebAppURL.normalizedEntry(from: "nas.example.com:3010")
         XCTAssertEqual(inferred?.url, URL(string: "https://nas.example.com:3010"))
         XCTAssertEqual(inferred?.schemeWasInferred, true)
@@ -953,7 +1350,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(explicitHTTP?.schemeWasInferred, false)
     }
 
-    func testHTTPFallbackCandidateRequiresNon443HTTPSShape() {
+    func testHTTPFallbackCandidateRequiresNon443HTTPSShape() throws {
         XCTAssertEqual(
             WebAppURL.httpFallbackCandidate(for: URL(string: "https://nas.example.com:3010/")!),
             URL(string: "http://nas.example.com:3010/")
@@ -963,7 +1360,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertNil(WebAppURL.httpFallbackCandidate(for: URL(string: "http://nas.example.com:3010")!))
     }
 
-    func testHTTPFallbackDecisionRequiresConnectionFailureAndMatchingURL() {
+    func testHTTPFallbackDecisionRequiresConnectionFailureAndMatchingURL() throws {
         let pending = URL(string: "https://nas.example.com:3010")!
         let connectionFailures = [
             NSURLErrorTimedOut,
@@ -1018,7 +1415,7 @@ final class WebViewPoolTests: XCTestCase {
         ))
     }
 
-    func testObserverFallsBackToHTTPOnceOnlyWhenCallerAllowsInferredEntry() {
+    func testObserverFallsBackToHTTPOnceOnlyWhenCallerAllowsInferredEntry() throws {
         let webView = WKWebView(frame: .zero)
         var loadedURLs: [URL] = []
         let observer = SlotNavigationObserver(
@@ -1058,7 +1455,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedURLs.count, 1)
     }
 
-    func testObserverNeverArmsFallbackForExplicitHTTPSPermissionFalse() {
+    func testObserverNeverArmsFallbackForExplicitHTTPSPermissionFalse() throws {
         let observer = SlotNavigationObserver(
             slotID: UUID(),
             webView: WKWebView(frame: .zero),
@@ -1072,7 +1469,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(observer.isHTTPEntryFallbackPending)
     }
 
-    func testObserverCommitCancelsPendingEntryFallback() {
+    func testObserverCommitCancelsPendingEntryFallback() throws {
         let webView = WKWebView(frame: .zero)
         var loadedURLs: [URL] = []
         let observer = SlotNavigationObserver(
@@ -1101,10 +1498,10 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(observer.isHTTPEntryFallbackPending)
     }
 
-    func testPoolNavigationRequiresExplicitFallbackPermission() {
+    func testPoolNavigationRequiresExplicitFallbackPermission() throws {
         let pool = makePool()
         let profile = makeProfile(name: "A")
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
         let nonStandardPort = URL(string: "https://nas.example.com:3010")!
 
         pool.navigate(slotID: profile.id, to: nonStandardPort)
@@ -1121,14 +1518,14 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
     }
 
-    func testPoolInitialHomeFallbackRequiresPersistedInferredScheme() {
+    func testPoolInitialHomeFallbackRequiresPersistedInferredScheme() throws {
         let pool = makePool()
         let inferred = makeProfile(
             name: "NAS",
             homeURL: URL(string: "https://nas.example.com:3010")!,
             homeURLSchemeWasInferred: true
         )
-        _ = pool.webView(for: inferred)
+        _ = try pool.webView(for: inferred)
         XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: inferred.id))
 
         let explicit = makeProfile(
@@ -1136,11 +1533,11 @@ final class WebViewPoolTests: XCTestCase {
             homeURL: URL(string: "https://nas.example.com:3010")!,
             homeURLSchemeWasInferred: false
         )
-        _ = pool.webView(for: explicit)
+        _ = try pool.webView(for: explicit)
         XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: explicit.id))
     }
 
-    func testPageCurrentURLDoesNotRegainFallbackAfterRuntimeRecreation() {
+    func testPageCurrentURLDoesNotRegainFallbackAfterRuntimeRecreation() throws {
         let pool = makePool()
         var profile = makeProfile(
             name: "NAS",
@@ -1149,7 +1546,7 @@ final class WebViewPoolTests: XCTestCase {
         )
         profile.currentURL = URL(string: "https://nas.example.com:3010/account")!
 
-        _ = pool.webView(for: profile)
+        _ = try pool.webView(for: profile)
 
         XCTAssertFalse(pool.isHTTPEntryFallbackPending(slotID: profile.id))
     }
@@ -1174,10 +1571,12 @@ final class WebViewPoolTests: XCTestCase {
 
     private func makeProfile(
         name: String,
+        browserProfileID: UUID? = nil,
         homeURL: URL? = nil,
         homeURLSchemeWasInferred: Bool = false
     ) -> WebAppProfile {
         WebAppProfile(
+            browserProfileID: browserProfileID,
             order: 0,
             name: name,
             homeURL: homeURL ?? URL(string: "https://example.com/\(name)")!,

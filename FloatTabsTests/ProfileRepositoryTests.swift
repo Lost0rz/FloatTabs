@@ -95,7 +95,7 @@ final class ProfileRepositoryTests: XCTestCase {
         }
     }
 
-    func testUnreadableStoreBlocksWritesUntilExactRecoveryCopyExists() throws {
+    func testPreservingUnreadableStoreDoesNotAuthorizeOrdinaryEmptySave() throws {
         try withRepository { repository, fileURL in
             let original = Data("{ broken-but-important-profile-data".utf8)
             try original.write(to: fileURL, options: [.atomic])
@@ -117,11 +117,106 @@ final class ProfileRepositoryTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: archiveURL), original)
             XCTAssertEqual(repository.startupRecoveryArchiveURL, archiveURL)
 
-            try repository.save(.empty)
+            XCTAssertThrowsError(try repository.save(.empty)) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .startupRecoveryRequired)
+            }
+
+            XCTAssertTrue(repository.startupRecoveryRequired)
+            XCTAssertEqual(try Data(contentsOf: fileURL), original)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), original)
+        }
+    }
+
+    func testExplicitStartupRecoveryStartEmptyReplacementWritesOnceAndKeepsArchive() throws {
+        try withRepository { repository, fileURL in
+            let original = Data("{ broken-but-important-profile-data".utf8)
+            try original.write(to: fileURL, options: [.atomic])
+
+            XCTAssertThrowsError(try repository.load())
+            let archiveURL = try XCTUnwrap(
+                repository.preserveUnreadableStoreForRecovery(
+                    now: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            )
+
+            try repository.performStartupRecoveryReplacement {
+                try repository.save(.empty)
+            }
 
             XCTAssertFalse(repository.startupRecoveryRequired)
+            let replacement = try decodePersistedState(from: fileURL)
+            XCTAssertEqual(replacement, .empty)
             XCTAssertEqual(try Data(contentsOf: archiveURL), original)
-            XCTAssertEqual(try repository.load(), .empty)
+        }
+    }
+
+    func testExplicitStartupRecoveryRestoreReplacementPreservesOriginalBytes() throws {
+        try withRepository { repository, fileURL in
+            let original = Data("{ broken-but-important-profile-data".utf8)
+            try original.write(to: fileURL, options: [.atomic])
+
+            XCTAssertThrowsError(try repository.load())
+            let archiveURL = try XCTUnwrap(
+                repository.preserveUnreadableStoreForRecovery(
+                    now: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            )
+            let restoredProfile = WebAppProfile(
+                order: 0,
+                name: "Restored",
+                homeURL: URL(string: "https://example.com/restored")!,
+                createdAt: Date(timeIntervalSince1970: 100),
+                lastUsedAt: Date(timeIntervalSince1970: 200)
+            )
+            let restoredState = StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                profiles: [restoredProfile],
+                lastActiveTabID: restoredProfile.id
+            )
+
+            try repository.performStartupRecoveryReplacement {
+                try repository.save(restoredState)
+            }
+
+            XCTAssertFalse(repository.startupRecoveryRequired)
+            let replacement = try decodePersistedState(from: fileURL)
+            XCTAssertEqual(replacement, restoredState)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), original)
+        }
+    }
+
+    func testFailedStartupRecoveryReplacementKeepsWriteLockAndBytesRecoverable() throws {
+        try withRepository { repository, fileURL in
+            let original = Data("{ broken-but-important-profile-data".utf8)
+            try original.write(to: fileURL, options: [.atomic])
+
+            XCTAssertThrowsError(try repository.load())
+            let archiveURL = try XCTUnwrap(
+                repository.preserveUnreadableStoreForRecovery(
+                    now: Date(timeIntervalSince1970: 1_700_000_000)
+                )
+            )
+
+            XCTAssertThrowsError(
+                try repository.performStartupRecoveryReplacement {
+                    try repository.save(
+                        StoredWebAppState(
+                            version: 99,
+                            profiles: [],
+                            lastActiveTabID: nil
+                        )
+                    )
+                }
+            ) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .unsupportedVersion(99))
+            }
+
+            XCTAssertTrue(repository.startupRecoveryRequired)
+            XCTAssertThrowsError(try repository.save(.empty)) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .startupRecoveryRequired)
+            }
+            XCTAssertEqual(try Data(contentsOf: fileURL), original)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), original)
         }
     }
 
@@ -200,6 +295,15 @@ final class ProfileRepositoryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directoryURL) }
 
         try body(ProfileRepository(fileURL: fileURL), fileURL)
+    }
+
+    private func decodePersistedState(from fileURL: URL) throws -> StoredWebAppState {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(
+            StoredWebAppState.self,
+            from: Data(contentsOf: fileURL)
+        )
     }
 }
 

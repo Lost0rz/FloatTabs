@@ -1,6 +1,8 @@
 import AppKit
 import WebKit
 
+typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?, String) -> Bool
+
 struct FullscreenVisibilityIntent {
     private(set) var shouldRestoreNormalPresentation = false
 
@@ -52,6 +54,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let webViewPool: WebViewPool
     private let attentionCoordinator: WebAttentionCoordinator
     private let frameStore: PanelFrameStore
+    private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
     private var transientUIConstraints: [NSLayoutConstraint] = []
@@ -118,6 +121,38 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.activeProfile?.name
     }
 
+    var isShowingUnsupportedBrowserProfile: Bool {
+        if sourceHostController.isSessionLocked {
+            return sourceHostController.companionContainer.isShowingUnsupportedBrowserProfile
+        }
+        return rootView.webPanelContainerView.isShowingUnsupportedBrowserProfile
+    }
+
+    var displayedUnsupportedBrowserProfileName: String? {
+        if sourceHostController.isSessionLocked {
+            return sourceHostController.companionContainer.displayedUnsupportedBrowserProfileName
+        }
+        return rootView.webPanelContainerView.displayedUnsupportedBrowserProfileName
+    }
+
+    static func unsupportedBrowserProfileName(
+        for profile: WebAppProfile,
+        error: Error,
+        browserProfiles: [BrowserProfile]
+    ) -> String? {
+        guard profile.browserProfileID != nil,
+              let providerError = error as? BrowserProfileDataStoreProviderError,
+              providerError == .customProfilesUnsupported else {
+            return nil
+        }
+
+        guard let browserProfileID = profile.browserProfileID else {
+            return nil
+        }
+        return browserProfiles.first(where: { $0.id == browserProfileID })?.name
+            ?? "Selected Profile"
+    }
+
     /// The menu bar favicon source is the selected Slot's committed site when
     /// a resident WebView has one. Cold/no-commit Slots intentionally fall back
     /// to their configured Home URL until WebKit reports a real commit.
@@ -139,12 +174,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool: WebViewPool,
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         frameStore: PanelFrameStore = PanelFrameStore(),
-        preferencesStore: AppPreferencesStore? = nil
+        preferencesStore: AppPreferencesStore? = nil,
+        confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
         self.frameStore = frameStore
+        self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
         restoredFrame = frameStore.loadFrame()
 
@@ -360,6 +397,299 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func storedWebAppStateSnapshot() -> StoredWebAppState {
         tabStore.storedStateSnapshot()
+    }
+
+    func browserProfileManagementClient() -> BrowserProfileManagementClient {
+        BrowserProfileManagementClient(
+            snapshot: { [weak self] in
+                self?.browserProfileManagementSnapshot()
+                    ?? BrowserProfileManagementSnapshot(
+                        customProfiles: [],
+                        referencedProfileIDs: [],
+                        customProfilesSupported: false
+                    )
+            },
+            create: { [weak self] name in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                return try self.createBrowserProfile(name: name)
+            },
+            rename: { [weak self] id, name in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try self.renameBrowserProfile(id: id, name: name)
+            },
+            setColor: { [weak self] id, color in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try self.setBrowserProfileColor(id: id, color: color)
+            },
+            delete: { [weak self] id in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try await self.deleteBrowserProfile(id: id)
+            }
+        )
+    }
+
+    func browserProfileManagementSnapshot() -> BrowserProfileManagementSnapshot {
+        var referencingWebAppNamesByProfileID: [UUID: [String]] = [:]
+        for profile in tabStore.profiles {
+            guard let browserProfileID = profile.browserProfileID else { continue }
+            referencingWebAppNamesByProfileID[browserProfileID, default: []].append(profile.name)
+        }
+        return BrowserProfileManagementSnapshot(
+            customProfiles: tabStore.browserProfiles,
+            defaultProfilePresentation: tabStore.defaultBrowserProfilePresentation,
+            referencedProfileIDs: Set(referencingWebAppNamesByProfileID.keys),
+            referencingWebAppNamesByProfileID: referencingWebAppNamesByProfileID,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported
+        )
+    }
+
+    static func canRequestBrowserProfileSwitch(
+        currentProfileID: UUID?,
+        targetProfileID: UUID?,
+        targetExists: Bool,
+        customProfilesSupported: Bool,
+        sessionIsLocked: Bool
+    ) -> Bool {
+        guard targetProfileID == nil || targetExists else { return false }
+        guard currentProfileID != targetProfileID else { return true }
+        guard !sessionIsLocked else { return false }
+        guard targetProfileID == nil || customProfilesSupported else { return false }
+        return true
+    }
+
+    @discardableResult
+    func requestBrowserProfileSwitch(
+        slotID: UUID,
+        targetProfileID: UUID?
+    ) -> Bool {
+        guard let sourceProfile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            NSSound.beep()
+            return false
+        }
+
+        let targetProfile = targetProfileID.flatMap { targetID in
+            tabStore.browserProfiles.first(where: { $0.id == targetID })
+        }
+        let targetExists = targetProfileID == nil || targetProfile != nil
+        guard Self.canRequestBrowserProfileSwitch(
+            currentProfileID: sourceProfile.browserProfileID,
+            targetProfileID: targetProfileID,
+            targetExists: targetExists,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
+            sessionIsLocked: sourceHostController.isSessionLocked
+        ) else {
+            NSSound.beep()
+            return false
+        }
+
+        guard sourceProfile.browserProfileID != targetProfileID else {
+            return true
+        }
+
+        if attentionCoordinator.isAttentionProtected(slotID),
+           !confirmBrowserProfileSwitch(
+                sourceProfile,
+                targetProfile,
+                tabStore.defaultBrowserProfilePresentation.name
+           ) {
+            return false
+        }
+
+        // Confirmation is a re-entrancy boundary. Re-read the authoritative
+        // model and safety facts before committing the binding.
+        guard let currentProfile = tabStore.profiles.first(where: { $0.id == slotID }) else {
+            NSSound.beep()
+            return false
+        }
+        let currentTargetProfile = targetProfileID.flatMap { targetID in
+            tabStore.browserProfiles.first(where: { $0.id == targetID })
+        }
+        let currentTargetExists = targetProfileID == nil || currentTargetProfile != nil
+        guard Self.canRequestBrowserProfileSwitch(
+            currentProfileID: currentProfile.browserProfileID,
+            targetProfileID: targetProfileID,
+            targetExists: currentTargetExists,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
+            sessionIsLocked: sourceHostController.isSessionLocked
+        ) else {
+            NSSound.beep()
+            return false
+        }
+        guard currentProfile.browserProfileID != targetProfileID else {
+            return true
+        }
+
+        // The model/disk commit deliberately suppresses TabStore.onChange.
+        // Otherwise the normal synchronization callback would create the new
+        // runtime before the explicit old-runtime teardown below.
+        guard tabStore.setBrowserProfile(
+            slotID: slotID,
+            profileID: targetProfileID,
+            notifyOnSuccess: false
+        ) else {
+            return false
+        }
+
+        slotLifecycleCoordinator.remove(slotID: slotID)
+        webViewPool.release(slotID: slotID)
+        attentionCoordinator.removeSlot(slotID)
+        synchronizeSlotState()
+        return true
+    }
+
+    static func canRequestOpenInNewTabWithBrowserProfile(
+        sourceExists: Bool,
+        targetProfileID: UUID?,
+        targetExists: Bool,
+        customProfilesSupported: Bool,
+        sessionIsLocked: Bool
+    ) -> Bool {
+        guard sourceExists,
+              targetProfileID == nil || targetExists else {
+            return false
+        }
+        guard !sessionIsLocked else { return false }
+        guard targetProfileID == nil || customProfilesSupported else { return false }
+        return true
+    }
+
+    @discardableResult
+    func requestOpenInNewTabWithBrowserProfile(
+        sourceSlotID: UUID,
+        targetProfileID: UUID?
+    ) -> WebAppProfile? {
+        let sourceExists = tabStore.profiles.contains(where: { $0.id == sourceSlotID })
+        let targetExists = targetProfileID == nil
+            || tabStore.browserProfiles.contains(where: { $0.id == targetProfileID })
+        guard Self.canRequestOpenInNewTabWithBrowserProfile(
+            sourceExists: sourceExists,
+            targetProfileID: targetProfileID,
+            targetExists: targetExists,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
+            sessionIsLocked: sourceHostController.isSessionLocked
+        ) else {
+            NSSound.beep()
+            return nil
+        }
+
+        // duplicateSlot owns the single transactional save and publishes the
+        // new active Slot through the normal TabStore.onChange path. That path
+        // creates the target runtime only after the target binding is durable.
+        return tabStore.duplicateSlot(
+            sourceID: sourceSlotID,
+            targetBrowserProfileID: targetProfileID
+        )
+    }
+
+    static func defaultBrowserProfileSwitchConfirmation(
+        sourceProfile: WebAppProfile,
+        targetProfile: BrowserProfile?,
+        defaultProfileName: String
+    ) -> Bool {
+        let targetName = targetProfile?.name ?? defaultProfileName
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Switch Browser Profile?"
+        alert.informativeText = "Switching \(sourceProfile.name) to \(targetName) replaces the current page runtime. Ongoing or unseen ChatGPT work may be discarded. To keep both identities live, use “Open in New Tab with Profile” instead."
+        alert.addButton(withTitle: "Switch Profile")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    func createBrowserProfile(name: String) throws -> BrowserProfile {
+        guard webViewPool.customBrowserProfilesSupported else {
+            throw BrowserProfileManagementError.unsupported
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw BrowserProfileManagementError.invalidName
+        }
+        let allNames = [tabStore.defaultBrowserProfilePresentation.name]
+            + tabStore.browserProfiles.map(\.name)
+        guard !allNames.contains(where: { $0.caseInsensitiveCompare(trimmedName) == .orderedSame }) else {
+            throw BrowserProfileManagementError.duplicateName
+        }
+
+        guard let created = tabStore.createBrowserProfile(name: trimmedName) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+        return created
+    }
+
+    func renameBrowserProfile(id: UUID?, name: String) throws {
+        if id == nil {
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else {
+                throw BrowserProfileManagementError.invalidName
+            }
+            guard !tabStore.browserProfiles.contains(where: {
+                $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
+            }) else {
+                throw BrowserProfileManagementError.duplicateName
+            }
+            guard tabStore.renameDefaultBrowserProfile(name: trimmedName) else {
+                throw BrowserProfileManagementError.metadataPersistenceFailed
+            }
+            return
+        }
+
+        guard let id else { throw BrowserProfileManagementError.notFound }
+        guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
+            throw BrowserProfileManagementError.notFound
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw BrowserProfileManagementError.invalidName
+        }
+        guard tabStore.defaultBrowserProfilePresentation.name.caseInsensitiveCompare(trimmedName) != .orderedSame,
+              !tabStore.browserProfiles.contains(where: {
+                  $0.id != id && $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
+              }) else {
+            throw BrowserProfileManagementError.duplicateName
+        }
+
+        guard tabStore.renameBrowserProfile(id: id, name: trimmedName) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+    }
+
+    func setBrowserProfileColor(
+        id: UUID?,
+        color: BrowserProfileColor
+    ) throws {
+        guard tabStore.setBrowserProfileColor(profileID: id, color: color) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+    }
+
+    func deleteBrowserProfile(id: UUID) async throws {
+        guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
+            throw BrowserProfileManagementError.notFound
+        }
+        guard !tabStore.profiles.contains(where: { $0.browserProfileID == id }) else {
+            throw BrowserProfileManagementError.referenced
+        }
+
+        let identity = BrowserProfileIdentity.custom(id)
+        let staleSlotIDs = webViewPool.residentSlotIDs(using: identity)
+        for slotID in staleSlotIDs {
+            // This is deletion cleanup for a runtime that no longer has a
+            // corresponding persisted binding, not a residency policy change.
+            slotLifecycleCoordinator.remove(slotID: slotID)
+        }
+        webViewPool.releaseRuntimes(using: identity)
+        guard webViewPool.residentSlotIDs(using: identity).isEmpty else {
+            throw BrowserProfileManagementError.runtimeStillResident
+        }
+
+        // The metadata remains present until the provider confirms WebKit
+        // removal. TabStore owns transactional rollback if its save fails.
+        try await webViewPool.removeCustomBrowserProfileDataStore(id: id)
+        guard tabStore.deleteBrowserProfileMetadata(id: id) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
     }
 
     /// Backup import must use the same geometry-aware path as the in-app
@@ -899,6 +1229,21 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onSetBackgroundMedia = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
         }
+        rail.onSetBrowserProfile = { [weak self] id, profileID in
+            _ = self?.requestBrowserProfileSwitch(
+                slotID: id,
+                targetProfileID: profileID
+            )
+        }
+        rail.onOpenInNewTabWithBrowserProfile = { [weak self] id, profileID in
+            _ = self?.requestOpenInNewTabWithBrowserProfile(
+                sourceSlotID: id,
+                targetProfileID: profileID
+            )
+        }
+        rail.onManageBrowserProfiles = { [weak self] in
+            self?.onOpenGlobalSettings?()
+        }
         rail.onReorder = { [weak self] id, destination in
             _ = self?.tabStore.move(id: id, toIndex: destination)
         }
@@ -950,6 +1295,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
+        synchronizeBrowserProfileMenuPresentation()
         guard !sourceHostController.isSessionLocked else {
             pendingSlotSynchronization = true
             synchronizeFullscreenCompanionSlotState()
@@ -989,7 +1335,25 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
-        let webView = webViewPool.webView(for: activeProfile)
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: activeProfile)
+        } catch {
+            if let profileName = Self.unsupportedBrowserProfileName(
+                for: activeProfile,
+                error: error,
+                browserProfiles: tabStore.browserProfiles
+            ) {
+                rootView.webPanelContainerView.showUnsupportedBrowserProfile(
+                    profileName: profileName,
+                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
+                )
+            } else {
+                rootView.webPanelContainerView.showEmptyState()
+            }
+            synchronizeResidentIndicators()
+            return
+        }
         rootView.webPanelContainerView.show(
             webView: webView,
             slotID: activeProfile.id,
@@ -1031,6 +1395,26 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func synchronizeResidentIndicators() {
         rootView.externalControlZoneView.setResidentSlotIDs(webViewPool.residentSlotIDs)
+    }
+
+    private func synchronizeBrowserProfileMenuPresentation() {
+        let options = [BrowserProfileMenuOption.defaultProfile(
+            name: tabStore.defaultBrowserProfilePresentation.name,
+            color: tabStore.defaultBrowserProfilePresentation.color
+        )]
+            + tabStore.browserProfiles.map {
+                BrowserProfileMenuOption(
+                    id: $0.id,
+                    name: $0.name,
+                    color: $0.color,
+                    isEnabled: webViewPool.customBrowserProfilesSupported
+                )
+            }
+        rootView.externalControlZoneView.setBrowserProfileMenuSnapshot(
+            options: options,
+            assignmentEnabled: !sourceHostController.isSessionLocked,
+            duplicationEnabled: !sourceHostController.isSessionLocked
+        )
     }
 
     private func synchronizeAttentionIndicators() {
@@ -1186,6 +1570,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
         WebAppEditorController.presentAdd(
+            browserProfiles: tabStore.browserProfiles,
+            defaultProfileName: tabStore.defaultBrowserProfilePresentation.name,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
             attachedTo: panel
         ) { [weak self] value in
@@ -1193,11 +1580,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
                 guard let value,
+                      value.browserProfileID == nil || self.webViewPool.customBrowserProfilesSupported,
                       let added = self.tabStore.add(
                         name: value.name,
                         homeURL: value.url,
                         homeURLSchemeWasInferred: value.homeURLSchemeWasInferred,
-                        renderingProfile: value.renderingProfile
+                        renderingProfile: value.renderingProfile,
+                        browserProfileID: value.browserProfileID
                       ) else {
                     return
                 }
@@ -1583,6 +1972,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func handleSourceSessionLockChange(isLocked: Bool) {
+        rootView.externalControlZoneView.setBrowserProfileAssignmentEnabled(!isLocked)
+        rootView.externalControlZoneView.setBrowserProfileDuplicationEnabled(!isLocked)
         if isLocked {
             fullscreenVisibilityIntent.begin(wasVisible: requestedVisibility)
             fullscreenProfile = lastSynchronizedActiveProfile ?? tabStore.activeProfile
@@ -1797,10 +2188,32 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: activeProfile)
+        } catch {
+            if let profileName = Self.unsupportedBrowserProfileName(
+                for: activeProfile,
+                error: error,
+                browserProfiles: tabStore.browserProfiles
+            ) {
+                rootView.installFullscreenCompanionContainer(
+                    sourceHostController.companionContainer
+                )
+                sourceHostController.companionContainer.showUnsupportedBrowserProfile(
+                    profileName: profileName,
+                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
+                )
+            } else {
+                sourceHostController.companionContainer.showEmptyState()
+            }
+            companionActiveProfile = nil
+            synchronizeResidentIndicators()
+            return
+        }
         rootView.installFullscreenCompanionContainer(
             sourceHostController.companionContainer
         )
-        let webView = webViewPool.webView(for: activeProfile)
         sourceHostController.companionContainer.show(
             webView: webView,
             slotID: activeProfile.id,

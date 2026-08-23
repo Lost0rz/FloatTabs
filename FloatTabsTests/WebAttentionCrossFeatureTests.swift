@@ -400,7 +400,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: slot.id))
     }
 
-    func testPinnedInactiveCompletionStaysReadyUntilInteractionReturns() {
+    func testPinnedInactiveCompletionStaysReadyUntilInteractionReturns() throws {
         let coordinator = WebAttentionCoordinator()
         let slot = UUID()
         let pinnedInactive = AttentionPresentation.Facts(
@@ -449,7 +449,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
     }
 
-    func testMultipleReadySlotsKeepDerivedAggregateThroughIndependentAcknowledgements() {
+    func testMultipleReadySlotsKeepDerivedAggregateThroughIndependentAcknowledgements() throws {
         let coordinator = WebAttentionCoordinator()
         let slotIDs = [UUID(), UUID(), UUID()]
         let hiddenRouter = WebAttentionObservationRouter(
@@ -566,7 +566,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.7 Visible / fullscreen completion decisions through the router
 
-    func testCompletionVisibilityDecisionsUseRealPresentationFactsThroughRouter() {
+    func testCompletionVisibilityDecisionsUseRealPresentationFactsThroughRouter() throws {
         let coordinator = WebAttentionCoordinator()
         let slot = UUID()
 
@@ -1682,7 +1682,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // A rebuilt runtime gets a fresh bridge: pre-baseline state messages
         // are rejected and a fresh idle baseline stays Idle.
-        let rebuilt = pool.webView(for: slot)
+        let rebuilt = try pool.webView(for: slot)
         let freshBridge = try attentionBridge(pool: pool, slot: slot)
         XCTAssertFalse(freshBridge === bridge)
         acceptState(
@@ -1790,7 +1790,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             tainted.isEmpty,
             "persisted store leaked attention keys: \(tainted)"
         )
-        XCTAssertEqual(json.keys.sorted(), ["lastActiveTabID", "profiles", "version"])
+        XCTAssertEqual(
+            json.keys.sorted(),
+            [
+                "browserProfiles",
+                "defaultBrowserProfilePresentation",
+                "lastActiveTabID",
+                "profiles",
+                "version",
+            ]
+        )
 
         // A relaunch rebuilds every runtime object from the persisted store:
         // the fresh coordinator starts the same Slot at Idle with no Ready
@@ -1852,7 +1861,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.12 Factory user-content seam
 
-    func testFactorySeamUsesConfiguredUserContentController() {
+    func testFactorySeamUsesConfiguredUserContentController() throws {
         var receivedControllers: [WKUserContentController] = []
         let webView = WebViewFactory.makeWebView { controller in
             receivedControllers.append(controller)
@@ -1997,7 +2006,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         slotName: String
     ) throws -> (profile: WebAppProfile, webView: WKWebView) {
         let slot = try profile(named: slotName, in: store)
-        let webView = pool.webView(for: slot)
+        let webView = try pool.webView(for: slot)
         XCTAssertTrue(pool.contains(slotID: slot.id))
         return (slot, webView)
     }

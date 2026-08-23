@@ -39,6 +39,9 @@ enum BackgroundMediaPolicy: String, Codable, CaseIterable, Equatable {
 
 struct WebAppProfile: Codable, Identifiable, Equatable {
     let id: UUID
+    /// `nil` is the virtual Default Profile; a value must resolve to a custom
+    /// BrowserProfile in the persisted state.
+    var browserProfileID: UUID?
     var order: Int
     var name: String
     var homeURL: URL
@@ -57,6 +60,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
 
     init(
         id: UUID = UUID(),
+        browserProfileID: UUID? = nil,
         order: Int,
         name: String,
         homeURL: URL,
@@ -69,6 +73,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
         lastUsedAt: Date = Date()
     ) {
         self.id = id
+        self.browserProfileID = browserProfileID
         self.order = order
         self.name = name
         self.homeURL = homeURL
@@ -85,6 +90,7 @@ struct WebAppProfile: Codable, Identifiable, Equatable {
 extension WebAppProfile {
     private enum CodingKeys: String, CodingKey {
         case id
+        case browserProfileID
         case order
         case name
         case homeURL
@@ -100,6 +106,7 @@ extension WebAppProfile {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
+        browserProfileID = try container.decodeIfPresent(UUID.self, forKey: .browserProfileID)
         order = try container.decode(Int.self, forKey: .order)
         name = try container.decode(String.self, forKey: .name)
         homeURL = try container.decode(URL.self, forKey: .homeURL)
@@ -126,6 +133,7 @@ extension WebAppProfile {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(browserProfileID, forKey: .browserProfileID)
         try container.encode(order, forKey: .order)
         try container.encode(name, forKey: .name)
         try container.encode(homeURL, forKey: .homeURL)

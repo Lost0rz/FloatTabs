@@ -1,14 +1,51 @@
 import Foundation
 
 struct StoredWebAppState: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     var version: Int
+    var browserProfiles: [BrowserProfile]
+    var defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation
     var profiles: [WebAppProfile]
     var lastActiveTabID: UUID?
 
+    init(
+        version: Int,
+        browserProfiles: [BrowserProfile] = [],
+        defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation = .default,
+        profiles: [WebAppProfile],
+        lastActiveTabID: UUID?
+    ) {
+        self.version = version
+        self.browserProfiles = browserProfiles
+        self.defaultBrowserProfilePresentation = defaultBrowserProfilePresentation
+        self.profiles = profiles
+        self.lastActiveTabID = lastActiveTabID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        browserProfiles = try container.decode([BrowserProfile].self, forKey: .browserProfiles)
+        defaultBrowserProfilePresentation = try container.decodeIfPresent(
+            DefaultBrowserProfilePresentation.self,
+            forKey: .defaultBrowserProfilePresentation
+        ) ?? .default
+        profiles = try container.decode([WebAppProfile].self, forKey: .profiles)
+        lastActiveTabID = try container.decodeIfPresent(UUID.self, forKey: .lastActiveTabID)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case browserProfiles
+        case defaultBrowserProfilePresentation
+        case profiles
+        case lastActiveTabID
+    }
+
     static let empty = StoredWebAppState(
         version: currentVersion,
+        browserProfiles: [],
         profiles: [],
         lastActiveTabID: nil
     )
@@ -17,6 +54,70 @@ struct StoredWebAppState: Codable, Equatable {
 enum ProfileRepositoryError: Error, Equatable {
     case unsupportedVersion(Int)
     case startupRecoveryRequired
+    case duplicateBrowserProfileID(UUID)
+    case invalidBrowserProfileName(UUID)
+    case invalidDefaultBrowserProfileName
+    case reservedBrowserProfileName(UUID)
+    case duplicateBrowserProfileName(String)
+    case danglingBrowserProfileReference(UUID)
+}
+
+enum BrowserProfileValidation {
+    static func validateMetadata(
+        _ profiles: [BrowserProfile],
+        defaultDisplayName: String = DefaultBrowserProfilePresentation.default.name
+    ) throws {
+        var seenIDs = Set<UUID>()
+        var seenNames = Set<String>()
+
+        let trimmedDefaultName = defaultDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDefaultName.isEmpty, trimmedDefaultName == defaultDisplayName else {
+            throw ProfileRepositoryError.invalidDefaultBrowserProfileName
+        }
+        seenNames.insert(defaultDisplayName.lowercased())
+
+        for profile in profiles {
+            guard seenIDs.insert(profile.id).inserted else {
+                throw ProfileRepositoryError.duplicateBrowserProfileID(profile.id)
+            }
+
+            let trimmedName = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty, trimmedName == profile.name else {
+                throw ProfileRepositoryError.invalidBrowserProfileName(profile.id)
+            }
+
+            let foldedName = profile.name.lowercased()
+            guard seenNames.insert(foldedName).inserted else {
+                throw ProfileRepositoryError.duplicateBrowserProfileName(profile.name)
+            }
+        }
+    }
+
+    static func validate(
+        browserProfiles: [BrowserProfile],
+        defaultDisplayName: String = DefaultBrowserProfilePresentation.default.name,
+        slots: [WebAppProfile]
+    ) throws {
+        try validateMetadata(browserProfiles, defaultDisplayName: defaultDisplayName)
+        let browserProfileIDs = Set(browserProfiles.map(\.id))
+
+        for slot in slots {
+            if let browserProfileID = slot.browserProfileID,
+               !browserProfileIDs.contains(browserProfileID) {
+                throw ProfileRepositoryError.danglingBrowserProfileReference(browserProfileID)
+            }
+        }
+    }
+}
+
+private struct StateVersionEnvelope: Decodable {
+    let version: Int
+}
+
+private struct LegacyStoredWebAppState: Decodable {
+    let version: Int
+    let profiles: [WebAppProfile]
+    let lastActiveTabID: UUID?
 }
 
 protocol ProfileRepositoryProtocol: AnyObject {
@@ -32,6 +133,8 @@ final class ProfileRepository: ProfileRepositoryProtocol {
 
     private(set) var startupRecoveryRequired = false
     private(set) var startupRecoveryArchiveURL: URL?
+    private var startupRecoveryReplacementInProgress = false
+    private var startupRecoveryReplacementDidWrite = false
 
     init(fileManager: FileManager = .default, fileURL: URL? = nil) {
         self.fileManager = fileManager
@@ -54,14 +157,38 @@ final class ProfileRepository: ProfileRepositoryProtocol {
 
         do {
             let data = try Data(contentsOf: fileURL)
-            let decoded = try decoder.decode(StoredWebAppState.self, from: data)
-            guard decoded.version == StoredWebAppState.currentVersion else {
-                throw ProfileRepositoryError.unsupportedVersion(decoded.version)
+            let version = try decoder.decode(StateVersionEnvelope.self, from: data).version
+
+            let state: StoredWebAppState
+            switch version {
+            case 1:
+                let legacy = try decoder.decode(LegacyStoredWebAppState.self, from: data)
+                let migratedProfiles = legacy.profiles.map { profile -> WebAppProfile in
+                    var migrated = profile
+                    migrated.browserProfileID = nil
+                    return migrated
+                }
+                state = StoredWebAppState(
+                    version: StoredWebAppState.currentVersion,
+                    browserProfiles: [],
+                    defaultBrowserProfilePresentation: .default,
+                    profiles: migratedProfiles,
+                    lastActiveTabID: legacy.lastActiveTabID
+                )
+                let migratedState = try state.sanitizedForUse()
+                try save(migratedState)
+                startupRecoveryRequired = false
+                startupRecoveryArchiveURL = nil
+                return migratedState
+            case StoredWebAppState.currentVersion:
+                state = try decoder.decode(StoredWebAppState.self, from: data)
+            default:
+                throw ProfileRepositoryError.unsupportedVersion(version)
             }
 
             startupRecoveryRequired = false
             startupRecoveryArchiveURL = nil
-            return decoded.sanitizedForUse()
+            return try state.sanitizedForUse()
         } catch {
             // An unreadable on-disk profile store is never treated as permission
             // to replace it with the empty in-memory fallback. All writes remain
@@ -97,8 +224,43 @@ final class ProfileRepository: ProfileRepositoryProtocol {
         return archiveURL
     }
 
+    @discardableResult
+    func performStartupRecoveryReplacement<T>(
+        _ operation: () throws -> T
+    ) throws -> T {
+        guard startupRecoveryRequired,
+              !startupRecoveryReplacementInProgress,
+              let archiveURL = startupRecoveryArchiveURL,
+              fileManager.fileExists(atPath: archiveURL.path) else {
+            throw ProfileRepositoryError.startupRecoveryRequired
+        }
+
+        startupRecoveryReplacementInProgress = true
+        startupRecoveryReplacementDidWrite = false
+        defer {
+            startupRecoveryReplacementInProgress = false
+            startupRecoveryReplacementDidWrite = false
+        }
+
+        do {
+            let result = try operation()
+            guard startupRecoveryReplacementDidWrite else {
+                startupRecoveryRequired = true
+                throw ProfileRepositoryError.startupRecoveryRequired
+            }
+            return result
+        } catch {
+            startupRecoveryRequired = true
+            throw error
+        }
+    }
+
     func save(_ state: StoredWebAppState) throws {
-        if startupRecoveryRequired, startupRecoveryArchiveURL == nil {
+        if startupRecoveryReplacementInProgress,
+           startupRecoveryReplacementDidWrite {
+            throw ProfileRepositoryError.startupRecoveryRequired
+        }
+        if startupRecoveryRequired, !startupRecoveryReplacementInProgress {
             throw ProfileRepositoryError.startupRecoveryRequired
         }
 
@@ -108,14 +270,16 @@ final class ProfileRepository: ProfileRepositoryProtocol {
             withIntermediateDirectories: true
         )
 
-        let normalizedState = StoredWebAppState(
-            version: StoredWebAppState.currentVersion,
-            profiles: state.profiles,
-            lastActiveTabID: state.lastActiveTabID
-        )
+        guard state.version == StoredWebAppState.currentVersion else {
+            throw ProfileRepositoryError.unsupportedVersion(state.version)
+        }
+        let normalizedState = try state.sanitizedForUse()
         let data = try encoder.encode(normalizedState)
         try data.write(to: fileURL, options: [.atomic])
 
+        if startupRecoveryReplacementInProgress {
+            startupRecoveryReplacementDidWrite = true
+        }
         // A successful atomic replacement is the only transition that clears
         // recovery mode. If the save throws, the protected copy remains and the
         // app continues to block further ordinary persistence.
@@ -147,7 +311,16 @@ final class ProfileRepository: ProfileRepositoryProtocol {
 }
 
 extension StoredWebAppState {
-    func sanitizedForUse() -> StoredWebAppState {
+    func sanitizedForUse() throws -> StoredWebAppState {
+        // Validate references before URL sanitation can remove an unsafe Slot;
+        // otherwise a dangling custom Profile ID could disappear as an
+        // accidental side effect of unrelated URL repair.
+        try BrowserProfileValidation.validate(
+            browserProfiles: browserProfiles,
+            defaultDisplayName: defaultBrowserProfilePresentation.name,
+            slots: profiles
+        )
+
         let sanitizedProfiles = profiles.compactMap { profile -> WebAppProfile? in
             guard WebAppURL.isSafe(profile.homeURL) else { return nil }
             var sanitized = profile
@@ -157,10 +330,18 @@ extension StoredWebAppState {
             return sanitized
         }
 
-        return StoredWebAppState(
+        let sanitizedState = StoredWebAppState(
             version: StoredWebAppState.currentVersion,
+            browserProfiles: browserProfiles,
+            defaultBrowserProfilePresentation: defaultBrowserProfilePresentation,
             profiles: sanitizedProfiles,
             lastActiveTabID: lastActiveTabID
         )
+        try BrowserProfileValidation.validate(
+            browserProfiles: sanitizedState.browserProfiles,
+            defaultDisplayName: sanitizedState.defaultBrowserProfilePresentation.name,
+            slots: sanitizedState.profiles
+        )
+        return sanitizedState
     }
 }

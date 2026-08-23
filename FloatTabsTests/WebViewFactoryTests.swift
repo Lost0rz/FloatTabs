@@ -18,6 +18,13 @@ final class WebViewFactoryTests: XCTestCase {
         XCTAssertTrue(webView.configuration.preferences.isElementFullscreenEnabled)
     }
 
+    func testSuppliedWebsiteDataStoreIsAppliedToFactoryConfiguration() {
+        let suppliedStore = WKWebsiteDataStore.nonPersistent()
+        let webView = WebViewFactory.makeWebView(websiteDataStore: suppliedStore)
+
+        XCTAssertTrue(webView.configuration.websiteDataStore === suppliedStore)
+    }
+
     func testAutomaticMobileUsesCurrentIPhoneSafariIdentity() {
         let rendering = WebRenderingProfile.canonicalDefault
             .settingWebsiteMode(.mobile)

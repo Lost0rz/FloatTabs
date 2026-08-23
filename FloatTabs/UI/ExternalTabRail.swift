@@ -3,6 +3,37 @@ import CoreImage
 import KeyboardShortcuts
 import QuartzCore
 
+struct BrowserProfileMenuOption: Equatable {
+    let id: UUID?
+    let name: String
+    let color: BrowserProfileColor
+    let isEnabled: Bool
+
+    init(
+        id: UUID?,
+        name: String,
+        color: BrowserProfileColor = .default,
+        isEnabled: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.isEnabled = isEnabled
+    }
+
+    static func defaultProfile(
+        name: String = "Default",
+        color: BrowserProfileColor = .default
+    ) -> BrowserProfileMenuOption {
+        BrowserProfileMenuOption(
+            id: nil,
+            name: name,
+            color: color,
+            isEnabled: true
+        )
+    }
+}
+
 struct ExternalTabMetrics {
     static let tabHeight: CGFloat = 32
     static let tabRadius: CGFloat = 8
@@ -79,6 +110,9 @@ final class ExternalControlZoneView: NSView {
     var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
+    var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onManageBrowserProfiles: (() -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -97,6 +131,9 @@ final class ExternalControlZoneView: NSView {
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
     private var windowSizeEditingEnabled = true
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
+    private var browserProfileAssignmentEnabled = true
+    private var browserProfileDuplicationEnabled = true
     private var railVisibilityGeneration = 0
     private(set) var isRailCollapsed = false
 
@@ -227,6 +264,39 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
+    func setBrowserProfileMenuSnapshot(
+        options: [BrowserProfileMenuOption],
+        assignmentEnabled: Bool,
+        duplicationEnabled: Bool = true
+    ) {
+        browserProfileMenuOptions = options.isEmpty
+            ? [.defaultProfile()]
+            : options
+        browserProfileAssignmentEnabled = assignmentEnabled
+        browserProfileDuplicationEnabled = duplicationEnabled
+        for tab in tabViews.values {
+            tab.setBrowserProfileMenuSnapshot(
+                options: browserProfileMenuOptions,
+                assignmentEnabled: assignmentEnabled,
+                duplicationEnabled: duplicationEnabled
+            )
+        }
+    }
+
+    func setBrowserProfileAssignmentEnabled(_ enabled: Bool) {
+        browserProfileAssignmentEnabled = enabled
+        for tab in tabViews.values {
+            tab.setBrowserProfileAssignmentEnabled(enabled)
+        }
+    }
+
+    func setBrowserProfileDuplicationEnabled(_ enabled: Bool) {
+        browserProfileDuplicationEnabled = enabled
+        for tab in tabViews.values {
+            tab.setBrowserProfileDuplicationEnabled(enabled)
+        }
+    }
+
     func refreshAppearance() {
         for tab in tabViews.values {
             tab.refreshAppearance()
@@ -345,6 +415,11 @@ final class ExternalControlZoneView: NSView {
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
+        view.setBrowserProfileMenuSnapshot(
+            options: browserProfileMenuOptions,
+            assignmentEnabled: browserProfileAssignmentEnabled,
+            duplicationEnabled: browserProfileDuplicationEnabled
+        )
         view.alphaValue = isRailCollapsed ? 0 : 1
         view.isHidden = isRailCollapsed
         tabViews[id] = view
@@ -369,6 +444,15 @@ final class ExternalControlZoneView: NSView {
         }
         view.onSetBackgroundMedia = { [weak self] slotID, policy in
             self?.onSetBackgroundMedia?(slotID, policy)
+        }
+        view.onSetBrowserProfile = { [weak self] slotID, profileID in
+            self?.onSetBrowserProfile?(slotID, profileID)
+        }
+        view.onOpenInNewTabWithBrowserProfile = { [weak self] slotID, profileID in
+            self?.onOpenInNewTabWithBrowserProfile?(slotID, profileID)
+        }
+        view.onManageBrowserProfiles = { [weak self] in
+            self?.onManageBrowserProfiles?()
         }
         view.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
@@ -752,6 +836,20 @@ enum ExternalTabVisualPalette {
 }
 
 @MainActor
+extension BrowserProfileColor {
+    var appKitColor: NSColor {
+        switch preset {
+        case .custom:
+            return customSRGBHex
+                .flatMap(AppPreferencesStore.color(fromHex:))
+                ?? .systemBlue
+        default:
+            return PanelBorderTheme(rawValue: preset.rawValue)?.solidColor ?? .systemBlue
+        }
+    }
+}
+
+@MainActor
 final class WebsiteFaviconProvider {
     static let shared = WebsiteFaviconProvider()
 
@@ -833,6 +931,9 @@ final class ExternalWebAppTabView: NSView {
     var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
+    var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onOpenInNewTabWithBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onManageBrowserProfiles: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
@@ -852,6 +953,12 @@ final class ExternalWebAppTabView: NSView {
     private var residencyPolicy: SlotResidencyPolicy = .warm
     private var windowSizeEditingEnabled = true
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
+    private var webAppName = ""
+    private var browserProfileID: UUID?
+    private var browserProfileColor: BrowserProfileColor = .default
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
+    private var browserProfileAssignmentEnabled = true
+    private var browserProfileDuplicationEnabled = true
     private var faviconOriginKey: String?
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
@@ -867,6 +974,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     var isShowingLabel: Bool { isHovered }
+    var displayedLabelText: String { label.stringValue }
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
@@ -876,6 +984,19 @@ final class ExternalWebAppTabView: NSView {
     var readyAttentionColor: NSColor? {
         readyAttentionLayer.fillColor.flatMap(NSColor.init(cgColor:))
     }
+    var displayedBrowserProfileColor: BrowserProfileColor { browserProfileColor }
+    var displayedActiveTabFillColor: NSColor? {
+        guard isActive else { return nil }
+        return shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
+    var displayedTabFillColor: NSColor? {
+        shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
+    var displayedActiveTabForegroundColor: NSColor? {
+        guard isActive else { return nil }
+        return label.textColor
+    }
+    var displayedIconTintColor: NSColor? { iconView.contentTintColor }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -893,6 +1014,8 @@ final class ExternalWebAppTabView: NSView {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         setSourceIcon(Self.fallbackIcon())
         addSubview(iconView)
+
+        setAccessibilityRole(.button)
 
         label.translatesAutoresizingMaskIntoConstraints = false
         label.maximumNumberOfLines = 1
@@ -985,14 +1108,39 @@ final class ExternalWebAppTabView: NSView {
         windowSizeEditingEnabled = enabled
     }
 
+    func setBrowserProfileMenuSnapshot(
+        options: [BrowserProfileMenuOption],
+        assignmentEnabled: Bool,
+        duplicationEnabled: Bool = true
+    ) {
+        browserProfileMenuOptions = options.isEmpty
+            ? [.defaultProfile()]
+            : options
+        browserProfileAssignmentEnabled = assignmentEnabled
+        browserProfileDuplicationEnabled = duplicationEnabled
+        refreshProfilePresentation()
+        updateAppearance()
+        updateRuntimeToolTip()
+    }
+
+    func setBrowserProfileAssignmentEnabled(_ enabled: Bool) {
+        browserProfileAssignmentEnabled = enabled
+    }
+
+    func setBrowserProfileDuplicationEnabled(_ enabled: Bool) {
+        browserProfileDuplicationEnabled = enabled
+    }
+
     func update(profile: WebAppProfile, isActive: Bool, isResident: Bool) {
         self.isActive = isActive
         self.isResident = isResident
-        label.stringValue = profile.name
+        webAppName = profile.name
+        browserProfileID = profile.browserProfileID
         renderingProfile = profile.renderingProfile.normalized()
         residencyPolicy = profile.residencyPolicy
         backgroundMediaPolicy = profile.backgroundMediaPolicy
         loadFaviconIfNeeded(from: profile.homeURL)
+        refreshProfilePresentation()
         updateAppearance()
         updateRuntimeToolTip()
     }
@@ -1167,6 +1315,54 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(zoom)
         menu.addItem(.separator())
 
+        let profile = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
+        let profileMenu = NSMenu(title: "Profile")
+        let profileOptions = browserProfileMenuOptions.isEmpty
+            ? [.defaultProfile()]
+            : browserProfileMenuOptions
+        for option in profileOptions {
+            let item = NSMenuItem(
+                title: option.name,
+                action: #selector(setBrowserProfileFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = option.id?.uuidString ?? NSNull()
+            item.state = option.id == browserProfileID ? .on : .off
+            item.isEnabled = browserProfileAssignmentEnabled && option.isEnabled
+            profileMenu.addItem(item)
+        }
+        profileMenu.addItem(.separator())
+        let manageProfiles = NSMenuItem(
+            title: "Manage Profiles…",
+            action: #selector(manageBrowserProfilesFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        manageProfiles.target = self
+        profileMenu.addItem(manageProfiles)
+        profile.submenu = profileMenu
+        menu.addItem(profile)
+
+        let duplicateProfile = NSMenuItem(
+            title: "Open in New Tab with Profile",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let duplicateProfileMenu = NSMenu(title: "Open in New Tab with Profile")
+        for option in profileOptions {
+            let item = NSMenuItem(
+                title: option.name,
+                action: #selector(openInNewTabWithBrowserProfileFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = option.id?.uuidString ?? NSNull()
+            item.isEnabled = browserProfileDuplicationEnabled && option.isEnabled
+            duplicateProfileMenu.addItem(item)
+        }
+        duplicateProfile.submenu = duplicateProfileMenu
+        menu.addItem(duplicateProfile)
+
         let residency = NSMenuItem(title: "Residency", action: nil, keyEquivalent: "")
         let residencyMenu = NSMenu(title: "Residency")
         for policy in SlotResidencyPolicy.allCases {
@@ -1236,6 +1432,28 @@ final class ExternalWebAppTabView: NSView {
         onSetZoom?(slotID, CGFloat(number.doubleValue))
     }
 
+    @objc private func setBrowserProfileFromMenu(_ sender: NSMenuItem) {
+        guard browserProfileAssignmentEnabled,
+              let representedObject = sender.representedObject else {
+            return
+        }
+        let profileID = (representedObject as? String).flatMap(UUID.init(uuidString:))
+        onSetBrowserProfile?(slotID, profileID)
+    }
+
+    @objc private func openInNewTabWithBrowserProfileFromMenu(_ sender: NSMenuItem) {
+        guard browserProfileDuplicationEnabled,
+              let representedObject = sender.representedObject else {
+            return
+        }
+        let profileID = (representedObject as? String).flatMap(UUID.init(uuidString:))
+        onOpenInNewTabWithBrowserProfile?(slotID, profileID)
+    }
+
+    @objc private func manageBrowserProfilesFromMenu(_ sender: NSMenuItem) {
+        onManageBrowserProfiles?()
+    }
+
     @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let policy = SlotResidencyPolicy(rawValue: raw) else { return }
@@ -1280,11 +1498,67 @@ final class ExternalWebAppTabView: NSView {
     private func applyResolvedAppearance() {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
-        label.textColor = isActive ? .labelColor : .secondaryLabelColor
-        applyIconAppearance()
-        updateShape()
+        let activeBackground = Self.activeBackgroundColor(
+            profileColor: browserProfileColor.appKitColor
+        )
+        label.textColor = isActive
+            ? Self.activeForegroundColor(for: activeBackground)
+            : .secondaryLabelColor
+        applyIconAppearance(activeBackground: activeBackground)
+        updateShape(activeBackground: activeBackground)
         readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
         updateReadyAttentionGeometry()
+    }
+
+    static func activeBackgroundColor(
+        profileColor: NSColor,
+        baseColor: NSColor = .windowBackgroundColor
+    ) -> NSColor {
+        baseColor.blended(withFraction: 0.80, of: profileColor) ?? profileColor
+    }
+
+    private static func activeForegroundColor(for background: NSColor) -> NSColor {
+        guard let color = background.usingColorSpace(.sRGB) else {
+            return .white
+        }
+
+        func linearized(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+
+        let luminance =
+            0.2126 * linearized(color.redComponent)
+            + 0.7152 * linearized(color.greenComponent)
+            + 0.0722 * linearized(color.blueComponent)
+
+        // The final 80% profile-color blend keeps bright Yellow readable with
+        // dark text while dark Graphite and Purple remain readable with light
+        // text.
+        return luminance >= 0.35 ? .black : .white
+    }
+
+    private var browserProfileDisplayName: String {
+        guard let browserProfileID else {
+            return browserProfileMenuOptions.first(where: { $0.id == nil })?.name
+                ?? BrowserProfileMenuOption.defaultProfile().name
+        }
+        return browserProfileMenuOptions.first(where: { $0.id == browserProfileID })?.name
+            ?? "Unknown Profile"
+    }
+
+    private var displayedPresentationTitle: String {
+        guard !webAppName.isEmpty else { return browserProfileDisplayName }
+        return "\(webAppName) · \(browserProfileDisplayName)"
+    }
+
+    private func refreshProfilePresentation() {
+        browserProfileColor = browserProfileMenuOptions.first(where: {
+            $0.id == browserProfileID
+        })?.color ?? .default
+        label.stringValue = displayedPresentationTitle
+        setAccessibilityLabel(displayedPresentationTitle)
     }
 
     private func setSourceIcon(_ image: NSImage?) {
@@ -1297,18 +1571,23 @@ final class ExternalWebAppTabView: NSView {
         applyIconAppearance()
     }
 
-    private func applyIconAppearance() {
+    private func applyIconAppearance(activeBackground: NSColor? = nil) {
         let base = sourceIcon ?? Self.fallbackIcon()
+        let resolvedActiveBackground = activeBackground
+            ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
+        let templateTint = isActive
+            ? Self.activeForegroundColor(for: resolvedActiveBackground)
+            : NSColor.labelColor
         if isResident {
             // Runtime truth owns color: active, Hot, Warm cache and Cold grace
             // all stay full color while a live WKWebView still exists.
             iconView.image = base
             iconView.alphaValue = 1
-            iconView.contentTintColor = base?.isTemplate == true ? .labelColor : nil
+            iconView.contentTintColor = base?.isTemplate == true ? templateTint : nil
         } else {
             if base?.isTemplate == true {
                 iconView.image = base
-                iconView.contentTintColor = .tertiaryLabelColor
+                iconView.contentTintColor = isActive ? templateTint : .tertiaryLabelColor
             } else {
                 iconView.image = grayscaleIcon ?? Self.fallbackIcon()
                 iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
@@ -1319,10 +1598,10 @@ final class ExternalWebAppTabView: NSView {
 
     private func updateRuntimeToolTip() {
         let state = isResident ? "Open" : "Released"
-        toolTip = "\(label.stringValue) · \(state)"
+        toolTip = "\(displayedPresentationTitle) · \(state)"
     }
 
-    private func updateShape() {
+    private func updateShape(activeBackground: NSColor? = nil) {
         guard bounds.width > 0, bounds.height > 0 else { return }
         shapeLayer.frame = bounds
         let radius: CGFloat = 8
@@ -1339,7 +1618,9 @@ final class ExternalWebAppTabView: NSView {
         if isActive {
             // The animated PanelInteractionBorderView owns the active outline.
             // Keep only the tab surface here so page + active tab read as one shape.
-            shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
+            let resolvedActiveBackground = activeBackground
+                ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
+            shapeLayer.fillColor = resolvedActiveBackground.cgColor
             shapeLayer.strokeColor = NSColor.clear.cgColor
             shapeLayer.lineWidth = 0
             layer?.shadowOpacity = 0
