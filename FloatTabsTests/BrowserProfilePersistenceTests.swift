@@ -159,15 +159,15 @@ final class BrowserProfilePersistenceTests: XCTestCase {
                 )
             }
 
-            let reserved = BrowserProfile(id: UUID(), name: "dEfAuLt", createdAt: Date())
-            let reservedState = StoredWebAppState(
+            let defaultCollision = BrowserProfile(id: UUID(), name: "dEfAuLt", createdAt: Date())
+            let defaultCollisionState = StoredWebAppState(
                 version: StoredWebAppState.currentVersion,
-                browserProfiles: [reserved],
+                browserProfiles: [defaultCollision],
                 profiles: [],
                 lastActiveTabID: nil
             )
-            XCTAssertThrowsError(try repository.save(reservedState)) { error in
-                XCTAssertEqual(error as? ProfileRepositoryError, .reservedBrowserProfileName(reserved.id))
+            XCTAssertThrowsError(try repository.save(defaultCollisionState)) { error in
+                XCTAssertEqual(error as? ProfileRepositoryError, .duplicateBrowserProfileName("dEfAuLt"))
             }
 
             let danglingID = UUID()
@@ -211,13 +211,98 @@ final class BrowserProfilePersistenceTests: XCTestCase {
         XCTAssertTrue(store.browserProfiles.isEmpty)
     }
 
-    func testProfileNamesRejectEmptyReservedAndCaseInsensitiveDuplicates() {
+    func testProfileNamesShareCaseInsensitiveNamespaceWithRenameableDefault() {
         let store = TabStore(repository: StageAProfileRepository())
 
         XCTAssertNil(store.createBrowserProfile(name: "   "))
         XCTAssertNotNil(store.createBrowserProfile(name: "Personal"))
         XCTAssertNil(store.createBrowserProfile(name: " personal "))
         XCTAssertNil(store.createBrowserProfile(name: " DEFAULT "))
+
+        XCTAssertTrue(store.renameDefaultBrowserProfile(name: "Jack"))
+        XCTAssertNotNil(store.createBrowserProfile(name: "Default"))
+        XCTAssertNil(store.createBrowserProfile(name: " jack "))
+    }
+
+    func testDefaultPresentationRenameAndColorPersistWithoutChangingNilBinding() throws {
+        let repository = StageAProfileRepository()
+        let store = TabStore(repository: repository)
+        let slot = try XCTUnwrap(store.add(name: "Default Web App", homeURL: urlA))
+        var onChangeCalls = 0
+        store.onChange = { onChangeCalls += 1 }
+
+        XCTAssertTrue(store.renameDefaultBrowserProfile(name: "Jack"))
+        XCTAssertTrue(store.setBrowserProfileColor(
+            profileID: nil,
+            color: BrowserProfileColor(preset: .purple)
+        ))
+
+        XCTAssertEqual(store.defaultBrowserProfilePresentation.name, "Jack")
+        XCTAssertEqual(
+            store.defaultBrowserProfilePresentation.color,
+            BrowserProfileColor(preset: .purple)
+        )
+        XCTAssertNil(store.profiles.first(where: { $0.id == slot.id })?.browserProfileID)
+        XCTAssertEqual(repository.state.defaultBrowserProfilePresentation.name, "Jack")
+        XCTAssertEqual(onChangeCalls, 2)
+
+        let before = store.storedStateSnapshot()
+        repository.shouldFailSaves = true
+        XCTAssertFalse(store.renameDefaultBrowserProfile(name: "Broken"))
+        XCTAssertFalse(store.setBrowserProfileColor(
+            profileID: nil,
+            color: BrowserProfileColor(preset: .green)
+        ))
+        XCTAssertEqual(store.storedStateSnapshot(), before)
+        XCTAssertEqual(onChangeCalls, 2)
+    }
+
+    func testCustomColorPersistsWithoutChangingUUIDCreatedAtOrBinding() throws {
+        let repository = StageAProfileRepository()
+        let store = TabStore(repository: repository)
+        let custom = try XCTUnwrap(store.createBrowserProfile(name: "Company"))
+        let slot = try XCTUnwrap(store.add(
+            name: "Company Web App",
+            homeURL: urlA,
+            browserProfileID: custom.id
+        ))
+        let color = BrowserProfileColor(preset: .custom, customSRGBHex: "#123456")
+
+        XCTAssertTrue(store.setBrowserProfileColor(profileID: custom.id, color: color))
+
+        let persisted = try XCTUnwrap(store.browserProfiles.first(where: { $0.id == custom.id }))
+        XCTAssertEqual(persisted.id, custom.id)
+        XCTAssertEqual(persisted.createdAt, custom.createdAt)
+        XCTAssertEqual(persisted.color, color)
+        XCTAssertEqual(store.profiles.first(where: { $0.id == slot.id })?.browserProfileID, custom.id)
+        XCTAssertEqual(repository.state.browserProfiles.first?.color, color)
+    }
+
+    func testOldV2StateMissingPresentationFieldsLoadsDeterministicDefaults() throws {
+        try withFileRepository { repository, fileURL in
+            let custom = BrowserProfile(id: UUID(), name: "Company", createdAt: Date(timeIntervalSince1970: 10))
+            let state = StoredWebAppState(
+                version: StoredWebAppState.currentVersion,
+                browserProfiles: [custom],
+                profiles: [],
+                lastActiveTabID: nil
+            )
+            try repository.save(state)
+
+            var object = try XCTUnwrap(
+                try JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any]
+            )
+            object.removeValue(forKey: "defaultBrowserProfilePresentation")
+            var browserProfiles = try XCTUnwrap(object["browserProfiles"] as? [[String: Any]])
+            browserProfiles[0].removeValue(forKey: "color")
+            object["browserProfiles"] = browserProfiles
+            try JSONSerialization.data(withJSONObject: object).write(to: fileURL, options: [.atomic])
+
+            let loaded = try repository.load()
+
+            XCTAssertEqual(loaded.defaultBrowserProfilePresentation, .default)
+            XCTAssertEqual(loaded.browserProfiles.first?.color, .default)
+        }
     }
 
     func testProfileAndBindingMutationsRollbackTogetherOnSaveFailure() {

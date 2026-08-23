@@ -58,9 +58,9 @@ final class UnsupportedBrowserProfileView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(profileName: String) {
+    func show(profileName: String, defaultProfileName: String = "Default") {
         displayedProfileName = profileName
         let quotedName = "\u{201C}\(profileName)\u{201D}"
-        detailLabel.stringValue = "\(quotedName) is still assigned to this Web App. This Profile requires macOS 14 or later. FloatTabs did not open it with Default. To use this Web App on this Mac, choose Profile > Default to explicitly reassign this Slot."
+        detailLabel.stringValue = "\(quotedName) is still assigned to this Web App. This Profile requires macOS 14 or later. FloatTabs did not open it with \(defaultProfileName). To use this Web App on this Mac, choose Profile > \(defaultProfileName) to explicitly reassign this Slot."
     }
 }

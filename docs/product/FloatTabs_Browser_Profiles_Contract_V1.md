@@ -82,6 +82,7 @@ Rules:
 - `Default` is a system compatibility Profile, not a preset persona.
 - V1 must not create canned Profiles named `Personal`, `Work`, `School`, or similar.
 - Custom Profile names are entirely user-defined.
+- The user-facing Default label starts as `Default` and may be renamed.
 - `Default` cannot be deleted.
 - `Default` is not backed by a fabricated UUID data store; it continues to mean WebKit's real default data store.
 
@@ -96,6 +97,7 @@ Custom Profile
   id: UUID
   name: user-defined String
   createdAt: Date
+  color: optional persisted label color
 
 WKWebsiteDataStore(identifier: id)
 ```
@@ -106,11 +108,11 @@ Profile names:
 
 - are trimmed;
 - must be non-empty;
-- are unique case-insensitively among custom Profiles;
-- must not collide case-insensitively with the reserved `Default` name;
+- are unique case-insensitively across the current Default label and all custom Profiles;
 - are presentation metadata only and never part of website authentication.
+- Each Profile owns an optional persisted label color used only for Tab background presentation. It does not tint favicons or Ready indicators.
 
-V1 does not require Profile colors, avatars, icons, email-address fields, or predefined categories.
+V1 does not require avatars, icons, email-address fields, or predefined categories.
 
 ## 6. Account Settings UX
 
@@ -121,7 +123,7 @@ Required section:
 ```text
 Profiles
 
-Default
+<current Default label>   [Rename…]   Color
 Uses the existing FloatTabs website data
 
 <custom profile name>
@@ -338,7 +340,9 @@ The construction plan freezes the exact schema/version mechanics.
 
 FloatTabs backups may contain:
 
+- Default presentation metadata (display name and label color);
 - custom Profile metadata (ID/name/creation metadata);
+- custom Profile label colors;
 - each Slot's selected Profile reference;
 - all existing Web App and global configuration already covered by backup.
 
@@ -473,7 +477,7 @@ V1 does not implement:
 - a global current-Profile switch;
 - one hidden live WKWebView per Profile inside a Slot;
 - per-Profile current URL/history/scroll/media/DOM snapshots behind one Slot;
-- Profile colors/avatars/preset Personal/Work categories;
+- Profile avatars/preset Personal/Work categories;
 - Profile sync through iCloud or a FloatTabs cloud account;
 - copying website data into `.floattabsbackup`;
 - password/passkey management;

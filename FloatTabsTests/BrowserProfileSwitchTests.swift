@@ -24,7 +24,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: company.id, name: company.name, isEnabled: true),
                 BrowserProfileMenuOption(id: personal.id, name: personal.name, isEnabled: true),
             ],
@@ -43,6 +43,92 @@ final class BrowserProfileSwitchTests: XCTestCase {
         XCTAssertEqual(profileMenu.items[4].title, "Manage Profiles…")
     }
 
+    func testRenamedDefaultAppearsDynamicallyInMenusHoverAccessibilityAndTooltip() throws {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.update(
+            profile: makeWebApp(browserProfileID: nil, name: "YouTube"),
+            isActive: true,
+            isResident: true
+        )
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(name: "Jack"),
+                BrowserProfileMenuOption(id: UUID(), name: "Company", isEnabled: true),
+            ],
+            assignmentEnabled: true
+        )
+        tab.setHovered(true)
+
+        let menu = try XCTUnwrap(tab.menu(for: makeMenuEvent()))
+        let profileMenu = try XCTUnwrap(menu.item(withTitle: "Profile")?.submenu)
+        let duplicateMenu = try XCTUnwrap(
+            menu.item(withTitle: "Open in New Tab with Profile")?.submenu
+        )
+
+        XCTAssertEqual(profileMenu.items.filter { !$0.isSeparatorItem }.map(\.title), [
+            "Jack", "Company", "Manage Profiles…"
+        ])
+        XCTAssertEqual(duplicateMenu.items.map(\.title), ["Jack", "Company"])
+        XCTAssertEqual(profileMenu.items[0].state, .on)
+        XCTAssertEqual(tab.displayedLabelText, "YouTube · Jack")
+        XCTAssertEqual(tab.accessibilityLabel(), "YouTube · Jack")
+        XCTAssertEqual(tab.toolTip, "YouTube · Jack · Open")
+    }
+
+    func testDefaultRenamePreservesNilIdentityAndExistingWebView() throws {
+        let repository = StageFProfileRepository()
+        let store = TabStore(repository: repository)
+        let slot = try XCTUnwrap(store.add(name: "Default App", homeURL: homeURL))
+        var defaultResolverCalls = 0
+        let pool = makePool(defaultStoreResolver: {
+            defaultResolverCalls += 1
+            return WKWebsiteDataStore.nonPersistent()
+        })
+        let controller = makePanelController(store: store, pool: pool)
+        let oldWebView = try XCTUnwrap(pool.existingWebView(for: slot.id))
+        let callsBeforeRename = defaultResolverCalls
+
+        try controller.renameBrowserProfile(id: nil, name: "Jack")
+
+        XCTAssertEqual(store.defaultBrowserProfilePresentation.name, "Jack")
+        XCTAssertNil(store.profiles.first?.browserProfileID)
+        XCTAssertEqual(pool.browserProfileIdentity(for: slot.id), .default)
+        XCTAssertTrue(pool.existingWebView(for: slot.id) === oldWebView)
+        XCTAssertEqual(defaultResolverCalls, callsBeforeRename)
+    }
+
+    func testActiveTabUsesProfileColorAndSwitchRefreshesWithoutChangingInactiveVisual() throws {
+        let defaultColor = BrowserProfileColor(preset: .blue)
+        let customColor = BrowserProfileColor(preset: .purple)
+        let customID = UUID()
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+        tab.update(
+            profile: makeWebApp(browserProfileID: nil, name: "YouTube"),
+            isActive: true,
+            isResident: true
+        )
+        tab.setBrowserProfileMenuSnapshot(
+            options: [
+                .defaultProfile(name: "Jack", color: defaultColor),
+                BrowserProfileMenuOption(
+                    id: customID,
+                    name: "Company",
+                    color: customColor,
+                    isEnabled: true
+                ),
+            ],
+            assignmentEnabled: true
+        )
+        tab.layoutSubtreeIfNeeded()
+        assertActiveFill(tab, matches: defaultColor)
+
+        let custom = makeWebApp(browserProfileID: customID, name: "YouTube")
+        tab.update(profile: custom, isActive: true, isResident: true)
+        assertActiveFill(tab, matches: customColor)
+        XCTAssertEqual(tab.displayedBrowserProfileColor, customColor)
+    }
+
     func testUnsupportedAndFullscreenLockedAssignmentItemsAreDisabledButManageRemainsAvailable() throws {
         let slotID = UUID()
         let company = makeBrowserProfile(name: "Company")
@@ -54,7 +140,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: company.id, name: company.name, isEnabled: false),
             ],
             assignmentEnabled: true
@@ -117,7 +203,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
             store: store,
             pool: pool,
             attention: attention,
-            confirmation: { _, _ in true }
+            confirmation: { _, _, _ in true }
         )
         let oldWebView = try XCTUnwrap(pool.existingWebView(for: slot.id))
         let oldBridge = try XCTUnwrap(pool.attentionBridge(for: slot.id))
@@ -259,7 +345,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
             store: store,
             pool: pool,
             attention: attention,
-            confirmation: { _, _ in
+            confirmation: { _, _, _ in
                 confirmationCalls += 1
                 return confirmationResult
             }
@@ -310,7 +396,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
             store: store,
             pool: pool,
             attention: attention,
-            confirmation: { _, _ in
+            confirmation: { _, _, _ in
                 confirmationCalls += 1
                 return false
             }
@@ -407,7 +493,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: targetID, name: "Company", isEnabled: true),
             ],
             assignmentEnabled: false
@@ -423,7 +509,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         store: TabStore,
         pool: WebViewPool,
         attention: WebAttentionCoordinator = WebAttentionCoordinator(),
-        confirmation: @escaping BrowserProfileSwitchConfirmation = { _, _ in true }
+        confirmation: @escaping BrowserProfileSwitchConfirmation = { _, _, _ in true }
     ) -> PanelController {
         PanelController(
             tabStore: store,
@@ -492,6 +578,31 @@ final class BrowserProfileSwitchTests: XCTestCase {
             clickCount: 1,
             pressure: 1
         )!
+    }
+
+    private func assertActiveFill(
+        _ tab: ExternalWebAppTabView,
+        matches profileColor: BrowserProfileColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actual = try! XCTUnwrap(
+            tab.displayedActiveTabFillColor?.usingColorSpace(.deviceRGB),
+            file: file,
+            line: line
+        )
+        var expected: NSColor?
+        tab.effectiveAppearance.performAsCurrentDrawingAppearance {
+            let base = NSColor.windowBackgroundColor
+            expected = (profileColor.appKitColor.blended(withFraction: 0.25, of: base) ?? base)
+                .withAlphaComponent(0.98)
+                .usingColorSpace(.deviceRGB)
+        }
+        let resolvedExpected = try! XCTUnwrap(expected, file: file, line: line)
+        XCTAssertEqual(actual.redComponent, resolvedExpected.redComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, resolvedExpected.greenComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, resolvedExpected.blueComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.alphaComponent, resolvedExpected.alphaComponent, accuracy: 0.01, file: file, line: line)
     }
 }
 

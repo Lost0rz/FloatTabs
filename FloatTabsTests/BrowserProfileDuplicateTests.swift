@@ -21,7 +21,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: company.id, name: company.name, isEnabled: true),
                 BrowserProfileMenuOption(id: personal.id, name: personal.name, isEnabled: true),
             ],
@@ -67,7 +67,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: companyID, name: "Company", isEnabled: false),
             ],
             assignmentEnabled: true,
@@ -125,7 +125,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         tab.update(profile: webApp, isActive: true, isResident: true)
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: companyID, name: "Company", isEnabled: true),
             ],
             assignmentEnabled: true,
@@ -140,7 +140,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
 
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(id: companyID, name: "Renamed", isEnabled: true),
             ],
             assignmentEnabled: true,
@@ -246,7 +246,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
             store: store,
             pool: makePool(),
             attention: attention,
-            confirmation: { _, _ in
+            confirmation: { _, _, _ in
                 confirmationCalls += 1
                 return false
             }
@@ -465,7 +465,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         store: TabStore,
         pool: WebViewPool,
         attention: WebAttentionCoordinator = WebAttentionCoordinator(),
-        confirmation: @escaping BrowserProfileSwitchConfirmation = { _, _ in true }
+        confirmation: @escaping BrowserProfileSwitchConfirmation = { _, _, _ in true }
     ) -> PanelController {
         PanelController(
             tabStore: store,

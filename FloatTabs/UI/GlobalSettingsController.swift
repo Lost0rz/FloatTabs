@@ -20,7 +20,7 @@ enum BrowserProfileManagementError: LocalizedError, Equatable {
         case .referenced:
             return "This Profile is used by one or more Web Apps."
         case .invalidName:
-            return "Enter a non-empty Profile name other than Default."
+            return "Enter a non-empty Profile name."
         case .duplicateName:
             return "That Profile name is already in use."
         case .runtimeStillResident:
@@ -33,31 +33,48 @@ enum BrowserProfileManagementError: LocalizedError, Equatable {
 
 struct BrowserProfileManagementSnapshot: Equatable {
     let customProfiles: [BrowserProfile]
+    let defaultProfilePresentation: DefaultBrowserProfilePresentation
     let referencedProfileIDs: Set<UUID>
     let customProfilesSupported: Bool
+
+    init(
+        customProfiles: [BrowserProfile],
+        defaultProfilePresentation: DefaultBrowserProfilePresentation = .default,
+        referencedProfileIDs: Set<UUID>,
+        customProfilesSupported: Bool
+    ) {
+        self.customProfiles = customProfiles
+        self.defaultProfilePresentation = defaultProfilePresentation
+        self.referencedProfileIDs = referencedProfileIDs
+        self.customProfilesSupported = customProfilesSupported
+    }
 }
 
 @MainActor
 struct BrowserProfileManagementClient {
     typealias SnapshotHandler = () -> BrowserProfileManagementSnapshot
     typealias CreateHandler = (String) throws -> BrowserProfile
-    typealias RenameHandler = (UUID, String) throws -> Void
+    typealias RenameHandler = (UUID?, String) throws -> Void
+    typealias ColorHandler = (UUID?, BrowserProfileColor) throws -> Void
     typealias DeleteHandler = (UUID) async throws -> Void
 
     private let snapshotHandler: SnapshotHandler
     private let createHandler: CreateHandler
     private let renameHandler: RenameHandler
+    private let colorHandler: ColorHandler
     private let deleteHandler: DeleteHandler
 
     init(
         snapshot: @escaping SnapshotHandler,
         create: @escaping CreateHandler,
         rename: @escaping RenameHandler,
+        setColor: @escaping ColorHandler = { _, _ in },
         delete: @escaping DeleteHandler
     ) {
         snapshotHandler = snapshot
         createHandler = create
         renameHandler = rename
+        colorHandler = setColor
         deleteHandler = delete
     }
 
@@ -83,8 +100,12 @@ struct BrowserProfileManagementClient {
         try createHandler(name)
     }
 
-    func rename(id: UUID, name: String) throws {
+    func rename(id: UUID?, name: String) throws {
         try renameHandler(id, name)
+    }
+
+    func setColor(id: UUID?, color: BrowserProfileColor) throws {
+        try colorHandler(id, color)
     }
 
     func delete(id: UUID) async throws {
@@ -948,6 +969,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
     // Read-only derived seams keep UI tests focused on the injected snapshot;
     // they are never used as an authoritative Profile model.
     private(set) var displayedBrowserProfileNames: [String] = []
+    private(set) var displayedBrowserProfileColors: [BrowserProfileColor] = []
     private(set) var displayedBrowserProfileActionTitles: [[String]] = []
     private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
     private(set) var isNewProfileEnabled = false
@@ -1084,8 +1106,11 @@ final class AccountLanguageSettingsViewController: NSViewController {
     /// after a successful mutation. No Profile metadata is cached here.
     func refreshProfiles() {
         let snapshot = browserProfileManager.snapshot()
-        displayedBrowserProfileNames = ["Default"] + snapshot.customProfiles.map(\.name)
-        displayedBrowserProfileActionTitles = [[]] + snapshot.customProfiles.map { _ in
+        displayedBrowserProfileNames = [snapshot.defaultProfilePresentation.name]
+            + snapshot.customProfiles.map(\.name)
+        displayedBrowserProfileColors = [snapshot.defaultProfilePresentation.color]
+            + snapshot.customProfiles.map(\.color)
+        displayedBrowserProfileActionTitles = [["Rename…"]] + snapshot.customProfiles.map { _ in
             ["Rename…", "Delete…"]
         }
         displayedBrowserProfileDeleteEnabled = [false] + snapshot.customProfiles.map {
@@ -1103,7 +1128,9 @@ final class AccountLanguageSettingsViewController: NSViewController {
             arrangedSubview.removeFromSuperview()
         }
 
-        profileRowsStack.addArrangedSubview(makeDefaultProfileRow())
+        profileRowsStack.addArrangedSubview(
+            makeDefaultProfileRow(snapshot.defaultProfilePresentation)
+        )
         for profile in snapshot.customProfiles {
             profileRowsStack.addArrangedSubview(
                 makeCustomProfileRow(
@@ -1126,13 +1153,28 @@ final class AccountLanguageSettingsViewController: NSViewController {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func makeDefaultProfileRow() -> NSView {
-        let label = NSTextField(labelWithString: "Default")
+    private func makeDefaultProfileRow(
+        _ presentation: DefaultBrowserProfilePresentation
+    ) -> NSView {
+        let label = NSTextField(labelWithString: presentation.name)
         label.font = .systemFont(ofSize: 12)
         label.widthAnchor.constraint(equalToConstant: 230).isActive = true
-        let row = NSStackView(views: [label])
+
+        let renameButton = NSButton(
+            title: "Rename…",
+            target: self,
+            action: #selector(renameDefaultProfile)
+        )
+        renameButton.bezelStyle = .rounded
+
+        let colorPopup = makeProfileColorPopup(
+            profileID: nil,
+            color: presentation.color
+        )
+        let row = NSStackView(views: [label, renameButton, colorPopup])
         row.orientation = .horizontal
         row.alignment = .centerY
+        row.spacing = 8
         return row
     }
 
@@ -1161,7 +1203,11 @@ final class AccountLanguageSettingsViewController: NSViewController {
         deleteButton.bezelStyle = .rounded
         deleteButton.isEnabled = !isReferenced
 
-        let actions = NSStackView(views: [renameButton, deleteButton])
+        let colorPopup = makeProfileColorPopup(
+            profileID: profile.id,
+            color: profile.color
+        )
+        let actions = NSStackView(views: [renameButton, colorPopup, deleteButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -1178,6 +1224,29 @@ final class AccountLanguageSettingsViewController: NSViewController {
         wrapper.alignment = .leading
         wrapper.spacing = 3
         return wrapper
+    }
+
+    private func makeProfileColorPopup(
+        profileID: UUID?,
+        color: BrowserProfileColor
+    ) -> NSPopUpButton {
+        let popup = NSPopUpButton()
+        popup.identifier = NSUserInterfaceItemIdentifier(
+            profileID?.uuidString ?? "default"
+        )
+        popup.target = self
+        popup.action = #selector(profileColorPopupChanged(_:))
+        popup.toolTip = "Profile label color"
+        popup.addItems(withTitles: BrowserProfileColorPreset.allCases.map(\.displayName))
+        for (index, preset) in BrowserProfileColorPreset.allCases.enumerated() {
+            popup.item(at: index)?.representedObject = preset.rawValue
+        }
+        let selectedPreset = color.preset
+        if let index = BrowserProfileColorPreset.allCases.firstIndex(of: selectedPreset) {
+            popup.selectItem(at: index)
+        }
+        popup.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        return popup
     }
 
     @objc private func createProfile() {
@@ -1228,12 +1297,23 @@ final class AccountLanguageSettingsViewController: NSViewController {
         return profile
     }
 
+    @objc private func renameDefaultProfile() {
+        presentRenameProfile(
+            id: nil,
+            currentName: browserProfileManager.snapshot().defaultProfilePresentation.name
+        )
+    }
+
     @objc private func renameProfile(_ sender: NSButton) {
         guard let id = profileID(from: sender),
               let currentName = browserProfileManager.snapshot().customProfiles.first(where: {
                   $0.id == id
-              })?.name,
-              let window = view.window else { return }
+              })?.name else { return }
+        presentRenameProfile(id: id, currentName: currentName)
+    }
+
+    private func presentRenameProfile(id: UUID?, currentName: String) {
+        guard let window = view.window else { return }
 
         let field = NSTextField(string: currentName)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
@@ -1256,6 +1336,59 @@ final class AccountLanguageSettingsViewController: NSViewController {
             } catch {
                 self.showProfileError(error)
             }
+        }
+    }
+
+    @objc private func profileColorPopupChanged(_ sender: NSPopUpButton) {
+        guard let rawPreset = sender.selectedItem?.representedObject as? String,
+              let preset = BrowserProfileColorPreset(rawValue: rawPreset) else {
+            return
+        }
+        let profileIdentifier = sender.identifier?.rawValue ?? "default"
+        let profileID = UUID(uuidString: profileIdentifier)
+        if preset == .custom {
+            let currentColor = browserProfileManager.snapshot().customProfiles.first(where: {
+                $0.id == profileID
+            })?.color ?? browserProfileManager.snapshot().defaultProfilePresentation.color
+            pendingProfileColorIdentifier = profileIdentifier
+            let panel = NSColorPanel.shared
+            panel.color = currentColor.appKitColor
+            panel.isContinuous = true
+            panel.setTarget(self)
+            panel.setAction(#selector(profileColorPanelChanged(_:)))
+            panel.orderFront(nil)
+            return
+        }
+
+        submitProfileColor(
+            profileIdentifier: profileIdentifier,
+            color: BrowserProfileColor(preset: preset)
+        )
+    }
+
+    @objc private func profileColorPanelChanged(_ sender: NSColorPanel) {
+        guard let profileIdentifier = pendingProfileColorIdentifier,
+              let hex = AppPreferencesStore.hex(from: sender.color) else {
+            return
+        }
+        submitProfileColor(
+            profileIdentifier: profileIdentifier,
+            color: BrowserProfileColor(preset: .custom, customSRGBHex: hex)
+        )
+    }
+
+    private var pendingProfileColorIdentifier: String?
+
+    private func submitProfileColor(
+        profileIdentifier: String,
+        color: BrowserProfileColor
+    ) {
+        let profileID = UUID(uuidString: profileIdentifier)
+        do {
+            try browserProfileManager.setColor(id: profileID, color: color)
+            refreshProfiles()
+        } catch {
+            showProfileError(error)
         }
     }
 

@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?) -> Bool
+typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?, String) -> Bool
 
 struct FullscreenVisibilityIntent {
     private(set) var shouldRestoreNormalPresentation = false
@@ -417,6 +417,10 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try self.renameBrowserProfile(id: id, name: name)
             },
+            setColor: { [weak self] id, color in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try self.setBrowserProfileColor(id: id, color: color)
+            },
             delete: { [weak self] id in
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try await self.deleteBrowserProfile(id: id)
@@ -427,6 +431,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     func browserProfileManagementSnapshot() -> BrowserProfileManagementSnapshot {
         BrowserProfileManagementSnapshot(
             customProfiles: tabStore.browserProfiles,
+            defaultProfilePresentation: tabStore.defaultBrowserProfilePresentation,
             referencedProfileIDs: Set(tabStore.profiles.compactMap(\.browserProfileID)),
             customProfilesSupported: webViewPool.customBrowserProfilesSupported
         )
@@ -476,7 +481,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         if attentionCoordinator.isAttentionProtected(slotID),
-           !confirmBrowserProfileSwitch(sourceProfile, targetProfile) {
+           !confirmBrowserProfileSwitch(
+                sourceProfile,
+                targetProfile,
+                tabStore.defaultBrowserProfilePresentation.name
+           ) {
             return false
         }
 
@@ -568,9 +577,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     static func defaultBrowserProfileSwitchConfirmation(
         sourceProfile: WebAppProfile,
-        targetProfile: BrowserProfile?
+        targetProfile: BrowserProfile?,
+        defaultProfileName: String
     ) -> Bool {
-        let targetName = targetProfile?.name ?? "Default"
+        let targetName = targetProfile?.name ?? defaultProfileName
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Switch Browser Profile?"
@@ -586,13 +596,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              trimmedName.lowercased() != "default" else {
+        guard !trimmedName.isEmpty else {
             throw BrowserProfileManagementError.invalidName
         }
-        guard !tabStore.browserProfiles.contains(where: {
-            $0.name.lowercased() == trimmedName.lowercased()
-        }) else {
+        let allNames = [tabStore.defaultBrowserProfilePresentation.name]
+            + tabStore.browserProfiles.map(\.name)
+        guard !allNames.contains(where: { $0.caseInsensitiveCompare(trimmedName) == .orderedSame }) else {
             throw BrowserProfileManagementError.duplicateName
         }
 
@@ -602,23 +611,49 @@ final class PanelController: NSObject, NSWindowDelegate {
         return created
     }
 
-    func renameBrowserProfile(id: UUID, name: String) throws {
+    func renameBrowserProfile(id: UUID?, name: String) throws {
+        if id == nil {
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else {
+                throw BrowserProfileManagementError.invalidName
+            }
+            guard !tabStore.browserProfiles.contains(where: {
+                $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
+            }) else {
+                throw BrowserProfileManagementError.duplicateName
+            }
+            guard tabStore.renameDefaultBrowserProfile(name: trimmedName) else {
+                throw BrowserProfileManagementError.metadataPersistenceFailed
+            }
+            return
+        }
+
+        guard let id else { throw BrowserProfileManagementError.notFound }
         guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
             throw BrowserProfileManagementError.notFound
         }
 
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty,
-              trimmedName.lowercased() != "default" else {
+        guard !trimmedName.isEmpty else {
             throw BrowserProfileManagementError.invalidName
         }
-        guard !tabStore.browserProfiles.contains(where: {
-            $0.id != id && $0.name.lowercased() == trimmedName.lowercased()
-        }) else {
+        guard tabStore.defaultBrowserProfilePresentation.name.caseInsensitiveCompare(trimmedName) != .orderedSame,
+              !tabStore.browserProfiles.contains(where: {
+                  $0.id != id && $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
+              }) else {
             throw BrowserProfileManagementError.duplicateName
         }
 
         guard tabStore.renameBrowserProfile(id: id, name: trimmedName) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+    }
+
+    func setBrowserProfileColor(
+        id: UUID?,
+        color: BrowserProfileColor
+    ) throws {
+        guard tabStore.setBrowserProfileColor(profileID: id, color: color) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
     }
@@ -1304,7 +1339,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 browserProfiles: tabStore.browserProfiles
             ) {
                 rootView.webPanelContainerView.showUnsupportedBrowserProfile(
-                    profileName: profileName
+                    profileName: profileName,
+                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
                 )
             } else {
                 rootView.webPanelContainerView.showEmptyState()
@@ -1356,11 +1392,15 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeBrowserProfileMenuPresentation() {
-        let options = [BrowserProfileMenuOption.defaultProfile]
+        let options = [BrowserProfileMenuOption.defaultProfile(
+            name: tabStore.defaultBrowserProfilePresentation.name,
+            color: tabStore.defaultBrowserProfilePresentation.color
+        )]
             + tabStore.browserProfiles.map {
                 BrowserProfileMenuOption(
                     id: $0.id,
                     name: $0.name,
+                    color: $0.color,
                     isEnabled: webViewPool.customBrowserProfilesSupported
                 )
             }
@@ -1525,6 +1565,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         WebAppEditorController.presentAdd(
             browserProfiles: tabStore.browserProfiles,
+            defaultProfileName: tabStore.defaultBrowserProfilePresentation.name,
             customProfilesSupported: webViewPool.customBrowserProfilesSupported,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
             attachedTo: panel
@@ -2154,7 +2195,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                     sourceHostController.companionContainer
                 )
                 sourceHostController.companionContainer.showUnsupportedBrowserProfile(
-                    profileName: profileName
+                    profileName: profileName,
+                    defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
                 )
             } else {
                 sourceHostController.companionContainer.showEmptyState()

@@ -147,7 +147,7 @@ final class UnsupportedBrowserProfileTests: XCTestCase {
         )
         tab.setBrowserProfileMenuSnapshot(
             options: [
-                .defaultProfile,
+                .defaultProfile(),
                 BrowserProfileMenuOption(
                     id: company.id,
                     name: company.name,
@@ -288,7 +288,7 @@ final class UnsupportedBrowserProfileTests: XCTestCase {
             attentionCoordinator: WebAttentionCoordinator(),
             frameStore: PanelFrameStore(),
             preferencesStore: AppPreferencesStore(),
-            confirmBrowserProfileSwitch: { _, _ in true }
+            confirmBrowserProfileSwitch: { _, _, _ in true }
         )
     }
 

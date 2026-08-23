@@ -5,11 +5,13 @@ struct WebAppEditorBrowserProfileOption: Equatable {
     let name: String
     let isEnabled: Bool
 
-    static let defaultProfile = WebAppEditorBrowserProfileOption(
-        id: nil,
-        name: "Default",
-        isEnabled: true
-    )
+    static func defaultProfile(name: String = "Default") -> WebAppEditorBrowserProfileOption {
+        WebAppEditorBrowserProfileOption(
+            id: nil,
+            name: name,
+            isEnabled: true
+        )
+    }
 }
 
 struct WebAppEditorValue {
@@ -38,9 +40,10 @@ struct WebAppEditorValue {
 enum WebAppEditorController {
     static func browserProfileOptions(
         browserProfiles: [BrowserProfile],
-        customProfilesSupported: Bool
+        customProfilesSupported: Bool,
+        defaultProfileName: String = "Default"
     ) -> [WebAppEditorBrowserProfileOption] {
-        [WebAppEditorBrowserProfileOption.defaultProfile]
+        [WebAppEditorBrowserProfileOption.defaultProfile(name: defaultProfileName)]
             + browserProfiles.map {
                 WebAppEditorBrowserProfileOption(
                     id: $0.id,
@@ -68,6 +71,7 @@ enum WebAppEditorController {
 
     static func presentAdd(
         browserProfiles: [BrowserProfile] = [],
+        defaultProfileName: String = "Default",
         customProfilesSupported: Bool = true,
         allowsWindowSizeEditing: Bool = true,
         attachedTo window: NSWindow,
@@ -85,7 +89,8 @@ enum WebAppEditorController {
             nameIsOptional: true,
             browserProfileOptions: browserProfileOptions(
                 browserProfiles: browserProfiles,
-                customProfilesSupported: customProfilesSupported
+                customProfilesSupported: customProfilesSupported,
+                defaultProfileName: defaultProfileName
             ),
             initialBrowserProfileID: nil,
             attachedTo: window,
@@ -226,7 +231,7 @@ enum WebAppEditorController {
         if let browserProfileOptions {
             let picker = NSPopUpButton()
             let options = browserProfileOptions.isEmpty
-                ? [WebAppEditorBrowserProfileOption.defaultProfile]
+                ? [WebAppEditorBrowserProfileOption.defaultProfile()]
                 : browserProfileOptions
             for option in options {
                 picker.addItem(withTitle: option.name)

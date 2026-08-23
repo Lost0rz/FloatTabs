@@ -1792,7 +1792,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertEqual(
             json.keys.sorted(),
-            ["browserProfiles", "lastActiveTabID", "profiles", "version"]
+            [
+                "browserProfiles",
+                "defaultBrowserProfilePresentation",
+                "lastActiveTabID",
+                "profiles",
+                "version",
+            ]
         )
 
         // A relaunch rebuilds every runtime object from the persisted store:

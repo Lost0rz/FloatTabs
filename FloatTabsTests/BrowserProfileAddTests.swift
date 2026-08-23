@@ -100,6 +100,27 @@ final class BrowserProfileAddTests: XCTestCase {
         XCTAssertEqual(value.browserProfileID, company.id)
     }
 
+    func testAddOptionsUseRenamedDefaultLabelButKeepNilIdentity() throws {
+        let options = WebAppEditorController.browserProfileOptions(
+            browserProfiles: [],
+            customProfilesSupported: true,
+            defaultProfileName: "Jack"
+        )
+
+        let defaultOption = try XCTUnwrap(options.first)
+        XCTAssertEqual(defaultOption.name, "Jack")
+        XCTAssertNil(defaultOption.id)
+
+        let value = WebAppEditorController.makeValue(
+            name: "Default App",
+            url: homeURL,
+            homeURLSchemeWasInferred: false,
+            renderingProfile: .canonicalDefault,
+            browserProfileID: defaultOption.id
+        )
+        XCTAssertNil(value.browserProfileID)
+    }
+
     func testUnsupportedCustomOptionsCannotBeSelectedAsEnabledAdd() throws {
         let company = makeBrowserProfile(name: "Company")
         let options = WebAppEditorController.browserProfileOptions(

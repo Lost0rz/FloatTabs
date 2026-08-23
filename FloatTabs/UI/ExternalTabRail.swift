@@ -6,13 +6,32 @@ import QuartzCore
 struct BrowserProfileMenuOption: Equatable {
     let id: UUID?
     let name: String
+    let color: BrowserProfileColor
     let isEnabled: Bool
 
-    static let defaultProfile = BrowserProfileMenuOption(
-        id: nil,
-        name: "Default",
-        isEnabled: true
-    )
+    init(
+        id: UUID?,
+        name: String,
+        color: BrowserProfileColor = .default,
+        isEnabled: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.isEnabled = isEnabled
+    }
+
+    static func defaultProfile(
+        name: String = "Default",
+        color: BrowserProfileColor = .default
+    ) -> BrowserProfileMenuOption {
+        BrowserProfileMenuOption(
+            id: nil,
+            name: name,
+            color: color,
+            isEnabled: true
+        )
+    }
 }
 
 struct ExternalTabMetrics {
@@ -112,7 +131,7 @@ final class ExternalControlZoneView: NSView {
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
     private var windowSizeEditingEnabled = true
-    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile]
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
     private var railVisibilityGeneration = 0
@@ -251,7 +270,7 @@ final class ExternalControlZoneView: NSView {
         duplicationEnabled: Bool = true
     ) {
         browserProfileMenuOptions = options.isEmpty
-            ? [.defaultProfile]
+            ? [.defaultProfile()]
             : options
         browserProfileAssignmentEnabled = assignmentEnabled
         browserProfileDuplicationEnabled = duplicationEnabled
@@ -817,6 +836,20 @@ enum ExternalTabVisualPalette {
 }
 
 @MainActor
+extension BrowserProfileColor {
+    var appKitColor: NSColor {
+        switch preset {
+        case .custom:
+            return customSRGBHex
+                .flatMap(AppPreferencesStore.color(fromHex:))
+                ?? .systemBlue
+        default:
+            return PanelBorderTheme(rawValue: preset.rawValue)?.solidColor ?? .systemBlue
+        }
+    }
+}
+
+@MainActor
 final class WebsiteFaviconProvider {
     static let shared = WebsiteFaviconProvider()
 
@@ -922,7 +955,8 @@ final class ExternalWebAppTabView: NSView {
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var webAppName = ""
     private var browserProfileID: UUID?
-    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile]
+    private var browserProfileColor: BrowserProfileColor = .default
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
     private var faviconOriginKey: String?
@@ -949,6 +983,11 @@ final class ExternalWebAppTabView: NSView {
     var iconFrame: NSRect { iconView.frame }
     var readyAttentionColor: NSColor? {
         readyAttentionLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
+    var displayedBrowserProfileColor: BrowserProfileColor { browserProfileColor }
+    var displayedActiveTabFillColor: NSColor? {
+        guard isActive else { return nil }
+        return shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
     }
 
     init(slotID: UUID) {
@@ -1067,11 +1106,12 @@ final class ExternalWebAppTabView: NSView {
         duplicationEnabled: Bool = true
     ) {
         browserProfileMenuOptions = options.isEmpty
-            ? [.defaultProfile]
+            ? [.defaultProfile()]
             : options
         browserProfileAssignmentEnabled = assignmentEnabled
         browserProfileDuplicationEnabled = duplicationEnabled
         refreshProfilePresentation()
+        updateAppearance()
         updateRuntimeToolTip()
     }
 
@@ -1270,7 +1310,7 @@ final class ExternalWebAppTabView: NSView {
         let profile = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
         let profileMenu = NSMenu(title: "Profile")
         let profileOptions = browserProfileMenuOptions.isEmpty
-            ? [.defaultProfile]
+            ? [.defaultProfile()]
             : browserProfileMenuOptions
         for option in profileOptions {
             let item = NSMenuItem(
@@ -1458,7 +1498,10 @@ final class ExternalWebAppTabView: NSView {
     }
 
     private var browserProfileDisplayName: String {
-        guard let browserProfileID else { return "Default" }
+        guard let browserProfileID else {
+            return browserProfileMenuOptions.first(where: { $0.id == nil })?.name
+                ?? BrowserProfileMenuOption.defaultProfile().name
+        }
         return browserProfileMenuOptions.first(where: { $0.id == browserProfileID })?.name
             ?? "Unknown Profile"
     }
@@ -1469,6 +1512,9 @@ final class ExternalWebAppTabView: NSView {
     }
 
     private func refreshProfilePresentation() {
+        browserProfileColor = browserProfileMenuOptions.first(where: {
+            $0.id == browserProfileID
+        })?.color ?? .default
         label.stringValue = displayedPresentationTitle
         setAccessibilityLabel(displayedPresentationTitle)
     }
@@ -1525,7 +1571,11 @@ final class ExternalWebAppTabView: NSView {
         if isActive {
             // The animated PanelInteractionBorderView owns the active outline.
             // Keep only the tab surface here so page + active tab read as one shape.
-            shapeLayer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
+            let baseColor = NSColor.windowBackgroundColor
+            let tint = browserProfileColor.appKitColor
+                .blended(withFraction: 0.25, of: baseColor)
+                ?? baseColor
+            shapeLayer.fillColor = tint.withAlphaComponent(0.98).cgColor
             shapeLayer.strokeColor = NSColor.clear.cgColor
             shapeLayer.lineWidth = 0
             layer?.shadowOpacity = 0

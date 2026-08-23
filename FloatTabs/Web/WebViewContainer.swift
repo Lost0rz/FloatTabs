@@ -1180,9 +1180,15 @@ final class WebPanelContainerView: NSView {
         bringToFront(emptyView)
     }
 
-    func showUnsupportedBrowserProfile(profileName: String) {
+    func showUnsupportedBrowserProfile(
+        profileName: String,
+        defaultProfileName: String = "Default"
+    ) {
         prepareForNonWebPresentation()
-        unsupportedBrowserProfileView.show(profileName: profileName)
+        unsupportedBrowserProfileView.show(
+            profileName: profileName,
+            defaultProfileName: defaultProfileName
+        )
 
         if currentContentView !== unsupportedBrowserProfileView
             || unsupportedBrowserProfileView.superview !== clipView {

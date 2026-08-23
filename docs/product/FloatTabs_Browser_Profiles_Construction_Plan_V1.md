@@ -70,7 +70,7 @@ It has no website-data/Profile identity today.
 Current state:
 
 ```text
-StoredWebAppState.currentVersion = 1
+StoredWebAppState.currentVersion = 2
 WebAppProfiles.json
 ```
 
@@ -228,6 +228,7 @@ StoredWebAppState.currentVersion: 1 -> 2
 New state conceptually includes:
 
 ```swift
+var defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation
 var browserProfiles: [BrowserProfile]
 var profiles: [WebAppProfile]
 var lastActiveTabID: UUID?
@@ -262,9 +263,9 @@ No WebKit data migration is performed; existing Default store remains exactly wh
 Before use/save, validate:
 
 - custom Profile UUIDs are unique;
-- names are trimmed/non-empty;
-- names are unique case-insensitively;
-- custom name `Default` is reserved/rejected case-insensitively;
+- the Default display name and custom names are trimmed/non-empty;
+- the Default display name and custom names are unique case-insensitively;
+- Profile label colors are valid normalized presentation metadata;
 - every non-nil Slot `browserProfileID` resolves to an existing custom Profile;
 - existing URL/safety validation continues unchanged.
 
@@ -289,6 +290,8 @@ Keep `TabStore` as configuration authority. Add focused operations:
 ```text
 createBrowserProfile(name:)
 renameBrowserProfile(id:name:)
+renameDefaultBrowserProfile(name:)
+setBrowserProfileColor(profileID:color:)
 deleteBrowserProfileMetadata(id:)   // only after deletion preconditions
 setBrowserProfile(slotID:profileID:)
 duplicateSlot(sourceID:targetBrowserProfileID:)
@@ -325,11 +328,13 @@ Add focused persistence/model tests:
 4. dangling Profile reference is rejected/fails closed.
 5. duplicate Profile IDs rejected.
 6. duplicate case-insensitive names rejected.
-7. `Default` custom name rejected.
-8. rename preserves UUID.
-9. delete referenced Profile rejected.
-10. Slot Profile mutation rollback on repository save failure.
-11. duplicate Slot preserves Home/rendering/resource settings and target Profile.
+7. Default rename and custom-name uniqueness share one namespace.
+8. renamed Default permits a custom name `Default` when unique.
+9. rename preserves UUID and color.
+10. Default/custom color persistence and rollback.
+11. delete referenced Profile rejected.
+12. Slot Profile mutation rollback on repository save failure.
+13. duplicate Slot preserves Home/rendering/resource settings and target Profile.
 
 Stage A must contain no WKWebView/UI behavior.
 
@@ -459,6 +464,8 @@ BrowserProfileManaging
   snapshot
   create
   rename
+  renameDefault
+  setColor
   delete
 ```
 
@@ -473,7 +480,7 @@ Account
 <existing local-only explanation>
 
 Profiles
-Default
+<current Default label>   [Rename…]   Color
 <custom rows>
 [ + New Profile ]
 
@@ -487,14 +494,18 @@ Do not change Settings toolbar order.
 
 - available only when custom Profiles are platform-supported;
 - prompt for one name;
-- validate unique/reserved rules;
+- validate the unified case-insensitive name namespace;
 - create metadata with a UUID;
 - resolving the data store may be lazy until first use, but creation must prove OS support first.
 
 ### Rename
 
-- custom Profiles only;
+- Default and custom Profiles use the same trim/non-empty/unique validation;
+- Default rename changes only its presentation label;
 - keep UUID/data store unchanged.
+
+Renaming or changing a Profile color uses the existing TabStore transaction and
+must not rebuild or release a live runtime.
 
 ### Delete
 
@@ -511,7 +522,8 @@ request delete
 
 If WebKit removal fails, keep metadata and report failure.
 
-Default cannot be deleted/renamed in V1.
+Default cannot be deleted in V1. Its virtual/nil identity remains unchanged, but
+its user-facing label and label color are editable.
 
 ### macOS 13 UI
 
@@ -539,7 +551,7 @@ The Add UI includes:
 
 ```text
 Profile
-[ Default ▼ ]
+[ <current Default label> ▼ ]
 ```
 
 with existing custom Profiles.
@@ -682,7 +694,10 @@ Required:
 
 ### Display distinction
 
-Do not add Profile color overlays to the favicon in V1. Existing Ready red-dot geometry remains untouched.
+Each logical Profile may provide a persisted label color for the active Tab
+background only. Do not add Profile color overlays to the favicon in V1.
+Existing Ready red-dot geometry and global border-theme ownership remain
+untouched.
 
 For hover/expanded/accessibility presentation, derive:
 
@@ -735,6 +750,8 @@ Backup includes only:
 
 ```text
 BrowserProfile UUID/name/createdAt
+BrowserProfile label color
+Default display name/color
 Slot -> browserProfileID
 existing FloatTabs configuration
 ```
@@ -907,7 +924,7 @@ Tests must never use actual ChatGPT/Google credentials or inspect user cookies. 
 
 - custom create/rename/delete;
 - no preset persona Profiles;
-- reserved/duplicate names rejected;
+- current Default/custom duplicate names rejected case-insensitively;
 - referenced delete blocked;
 - data-store deletion failure keeps metadata.
 
@@ -1081,7 +1098,7 @@ The following are settled for V1 and must not be reinterpreted during coding wit
 10. Add Web App selects Profile before first navigation.
 11. Right-click Tab is the fast-switch surface; Account & Language is the Profile-management surface.
 12. Hotkeys remain Slot-based.
-13. No Profile color/favicon overlay in V1; preserve ChatGPT Ready dot semantics.
+13. Profile color is limited to active Tab background presentation; no favicon overlay; preserve ChatGPT Ready dot semantics.
 14. Profile switch is an attention/runtime replacement boundary.
 15. No Profile rebuild during locked element fullscreen.
 16. Custom Profile persistence is macOS 14+; macOS 13 remains Default-only and fail-closed for custom bindings.

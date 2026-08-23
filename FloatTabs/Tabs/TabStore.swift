@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class TabStore {
     private(set) var browserProfiles: [BrowserProfile]
+    private(set) var defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation
     private(set) var profiles: [WebAppProfile]
     private(set) var activeTabID: UUID?
 
@@ -40,6 +41,7 @@ final class TabStore {
         }
 
         browserProfiles = loadedState.browserProfiles
+        defaultBrowserProfilePresentation = loadedState.defaultBrowserProfilePresentation
         let normalized = Self.normalizedProfiles(loadedState.profiles)
         profiles = normalized
 
@@ -54,6 +56,7 @@ final class TabStore {
             let repaired = StoredWebAppState(
                 version: StoredWebAppState.currentVersion,
                 browserProfiles: browserProfiles,
+                defaultBrowserProfilePresentation: defaultBrowserProfilePresentation,
                 profiles: normalized,
                 lastActiveTabID: activeTabID
             )
@@ -179,12 +182,56 @@ final class TabStore {
         renamed.name = trimmedName
         var candidateProfiles = browserProfiles
         candidateProfiles[index] = renamed
-        guard (try? BrowserProfileValidation.validateMetadata(candidateProfiles)) != nil else {
+        guard (try? BrowserProfileValidation.validateMetadata(
+            candidateProfiles,
+            defaultDisplayName: defaultBrowserProfilePresentation.name
+        )) != nil else {
             return false
         }
 
         return persistConfigurationMutation {
             browserProfiles[index] = renamed
+            return true
+        }
+    }
+
+    @discardableResult
+    func renameDefaultBrowserProfile(name: String) -> Bool {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              (try? BrowserProfileValidation.validateMetadata(
+                browserProfiles,
+                defaultDisplayName: trimmedName
+              )) != nil else {
+            return false
+        }
+        guard defaultBrowserProfilePresentation.name != trimmedName else { return true }
+
+        return persistConfigurationMutation {
+            defaultBrowserProfilePresentation.name = trimmedName
+            return true
+        }
+    }
+
+    @discardableResult
+    func setBrowserProfileColor(
+        profileID: UUID?,
+        color: BrowserProfileColor
+    ) -> Bool {
+        if let profileID {
+            guard let index = browserProfiles.firstIndex(where: { $0.id == profileID }) else {
+                return false
+            }
+            guard browserProfiles[index].color != color else { return true }
+            return persistConfigurationMutation {
+                browserProfiles[index].color = color
+                return true
+            }
+        }
+
+        guard defaultBrowserProfilePresentation.color != color else { return true }
+        return persistConfigurationMutation {
+            defaultBrowserProfilePresentation.color = color
             return true
         }
     }
@@ -513,6 +560,7 @@ final class TabStore {
         let replacement = StoredWebAppState(
             version: StoredWebAppState.currentVersion,
             browserProfiles: sanitized.browserProfiles,
+            defaultBrowserProfilePresentation: sanitized.defaultBrowserProfilePresentation,
             profiles: normalized,
             lastActiveTabID: restoredActiveID
         )
@@ -524,6 +572,7 @@ final class TabStore {
         }
 
         browserProfiles = sanitized.browserProfiles
+        defaultBrowserProfilePresentation = sanitized.defaultBrowserProfilePresentation
         profiles = normalized
         activeTabID = restoredActiveID
         if notifyOnSuccess {
@@ -578,7 +627,10 @@ final class TabStore {
         var candidateProfiles = browserProfiles
         candidateProfiles.append(browserProfile)
         do {
-            try BrowserProfileValidation.validateMetadata(candidateProfiles)
+            try BrowserProfileValidation.validateMetadata(
+                candidateProfiles,
+                defaultDisplayName: defaultBrowserProfilePresentation.name
+            )
             return true
         } catch {
             return false
@@ -594,6 +646,7 @@ final class TabStore {
         _ mutation: () -> Bool
     ) -> Bool {
         let previousBrowserProfiles = browserProfiles
+        let previousDefaultBrowserProfilePresentation = defaultBrowserProfilePresentation
         let previousProfiles = profiles
         let previousActiveTabID = activeTabID
         guard mutation() else { return false }
@@ -602,6 +655,7 @@ final class TabStore {
             try repository.save(currentState())
         } catch {
             browserProfiles = previousBrowserProfiles
+            defaultBrowserProfilePresentation = previousDefaultBrowserProfilePresentation
             profiles = previousProfiles
             activeTabID = previousActiveTabID
             onPersistenceFailure?()
@@ -629,6 +683,7 @@ final class TabStore {
         StoredWebAppState(
             version: StoredWebAppState.currentVersion,
             browserProfiles: browserProfiles,
+            defaultBrowserProfilePresentation: defaultBrowserProfilePresentation,
             profiles: orderedProfiles,
             lastActiveTabID: activeTabID
         )

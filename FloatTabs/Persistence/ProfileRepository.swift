@@ -5,19 +5,42 @@ struct StoredWebAppState: Codable, Equatable {
 
     var version: Int
     var browserProfiles: [BrowserProfile]
+    var defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation
     var profiles: [WebAppProfile]
     var lastActiveTabID: UUID?
 
     init(
         version: Int,
         browserProfiles: [BrowserProfile] = [],
+        defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation = .default,
         profiles: [WebAppProfile],
         lastActiveTabID: UUID?
     ) {
         self.version = version
         self.browserProfiles = browserProfiles
+        self.defaultBrowserProfilePresentation = defaultBrowserProfilePresentation
         self.profiles = profiles
         self.lastActiveTabID = lastActiveTabID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        browserProfiles = try container.decode([BrowserProfile].self, forKey: .browserProfiles)
+        defaultBrowserProfilePresentation = try container.decodeIfPresent(
+            DefaultBrowserProfilePresentation.self,
+            forKey: .defaultBrowserProfilePresentation
+        ) ?? .default
+        profiles = try container.decode([WebAppProfile].self, forKey: .profiles)
+        lastActiveTabID = try container.decodeIfPresent(UUID.self, forKey: .lastActiveTabID)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case browserProfiles
+        case defaultBrowserProfilePresentation
+        case profiles
+        case lastActiveTabID
     }
 
     static let empty = StoredWebAppState(
@@ -33,15 +56,25 @@ enum ProfileRepositoryError: Error, Equatable {
     case startupRecoveryRequired
     case duplicateBrowserProfileID(UUID)
     case invalidBrowserProfileName(UUID)
+    case invalidDefaultBrowserProfileName
     case reservedBrowserProfileName(UUID)
     case duplicateBrowserProfileName(String)
     case danglingBrowserProfileReference(UUID)
 }
 
 enum BrowserProfileValidation {
-    static func validateMetadata(_ profiles: [BrowserProfile]) throws {
+    static func validateMetadata(
+        _ profiles: [BrowserProfile],
+        defaultDisplayName: String = DefaultBrowserProfilePresentation.default.name
+    ) throws {
         var seenIDs = Set<UUID>()
         var seenNames = Set<String>()
+
+        let trimmedDefaultName = defaultDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDefaultName.isEmpty, trimmedDefaultName == defaultDisplayName else {
+            throw ProfileRepositoryError.invalidDefaultBrowserProfileName
+        }
+        seenNames.insert(defaultDisplayName.lowercased())
 
         for profile in profiles {
             guard seenIDs.insert(profile.id).inserted else {
@@ -54,10 +87,6 @@ enum BrowserProfileValidation {
             }
 
             let foldedName = profile.name.lowercased()
-            guard foldedName != "default" else {
-                throw ProfileRepositoryError.reservedBrowserProfileName(profile.id)
-            }
-
             guard seenNames.insert(foldedName).inserted else {
                 throw ProfileRepositoryError.duplicateBrowserProfileName(profile.name)
             }
@@ -66,9 +95,10 @@ enum BrowserProfileValidation {
 
     static func validate(
         browserProfiles: [BrowserProfile],
+        defaultDisplayName: String = DefaultBrowserProfilePresentation.default.name,
         slots: [WebAppProfile]
     ) throws {
-        try validateMetadata(browserProfiles)
+        try validateMetadata(browserProfiles, defaultDisplayName: defaultDisplayName)
         let browserProfileIDs = Set(browserProfiles.map(\.id))
 
         for slot in slots {
@@ -139,6 +169,7 @@ final class ProfileRepository: ProfileRepositoryProtocol {
                 state = StoredWebAppState(
                     version: StoredWebAppState.currentVersion,
                     browserProfiles: [],
+                    defaultBrowserProfilePresentation: .default,
                     profiles: migratedProfiles,
                     lastActiveTabID: legacy.lastActiveTabID
                 )
@@ -246,6 +277,7 @@ extension StoredWebAppState {
         // accidental side effect of unrelated URL repair.
         try BrowserProfileValidation.validate(
             browserProfiles: browserProfiles,
+            defaultDisplayName: defaultBrowserProfilePresentation.name,
             slots: profiles
         )
 
@@ -261,11 +293,13 @@ extension StoredWebAppState {
         let sanitizedState = StoredWebAppState(
             version: StoredWebAppState.currentVersion,
             browserProfiles: browserProfiles,
+            defaultBrowserProfilePresentation: defaultBrowserProfilePresentation,
             profiles: sanitizedProfiles,
             lastActiveTabID: lastActiveTabID
         )
         try BrowserProfileValidation.validate(
             browserProfiles: sanitizedState.browserProfiles,
+            defaultDisplayName: sanitizedState.defaultBrowserProfilePresentation.name,
             slots: sanitizedState.profiles
         )
         return sanitizedState

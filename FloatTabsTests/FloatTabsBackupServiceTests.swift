@@ -7,7 +7,8 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         let browserProfile = BrowserProfile(
             id: UUID(),
             name: "Company",
-            createdAt: Date(timeIntervalSince1970: 50)
+            createdAt: Date(timeIntervalSince1970: 50),
+            color: BrowserProfileColor(preset: .purple)
         )
         let profile = WebAppProfile(
             browserProfileID: browserProfile.id,
@@ -33,6 +34,10 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             webAppState: StoredWebAppState(
                 version: StoredWebAppState.currentVersion,
                 browserProfiles: [browserProfile],
+                defaultBrowserProfilePresentation: DefaultBrowserProfilePresentation(
+                    name: "Jack",
+                    color: BrowserProfileColor(preset: .orange)
+                ),
                 profiles: [profile],
                 lastActiveTabID: profile.id
             ),
@@ -61,6 +66,13 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.webAppState.profiles.first?.residencyPolicy, .hot)
         XCTAssertEqual(decoded.webAppState.profiles.first?.backgroundMediaPolicy, .allowBackgroundAudio)
         XCTAssertEqual(decoded.webAppState.browserProfiles, [browserProfile])
+        XCTAssertEqual(
+            decoded.webAppState.defaultBrowserProfilePresentation,
+            DefaultBrowserProfilePresentation(
+                name: "Jack",
+                color: BrowserProfileColor(preset: .orange)
+            )
+        )
         XCTAssertEqual(decoded.webAppState.profiles.first?.browserProfileID, browserProfile.id)
         XCTAssertEqual(decoded.globalPreferences.appearanceMode, .dark)
         XCTAssertFalse(decoded.globalPreferences.followPreferredSize)
@@ -72,6 +84,32 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.globalPreferences.attentionSoundName, "Glass")
         XCTAssertEqual(decoded.globalPreferences.attentionSoundVolume, 0.35)
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
+    }
+
+    func testOldSchemaTwoBackupMissingProfilePresentationFieldsUsesDefaults() throws {
+        let browserProfile = BrowserProfile(
+            id: UUID(),
+            name: "Company",
+            createdAt: Date(timeIntervalSince1970: 50),
+            color: BrowserProfileColor(preset: .purple)
+        )
+        let document = makeDocument(browserProfiles: [browserProfile])
+        let service = FloatTabsBackupService()
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: service.encode(document)) as? [String: Any]
+        )
+        var state = try XCTUnwrap(object["webAppState"] as? [String: Any])
+        state.removeValue(forKey: "defaultBrowserProfilePresentation")
+        var profiles = try XCTUnwrap(state["browserProfiles"] as? [[String: Any]])
+        profiles[0].removeValue(forKey: "color")
+        state["browserProfiles"] = profiles
+        object["webAppState"] = state
+
+        let decoded = try service.decode(JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertEqual(decoded.webAppState.defaultBrowserProfilePresentation, .default)
+        XCTAssertEqual(decoded.webAppState.browserProfiles.first?.color, .default)
+        XCTAssertEqual(decoded.webAppState.browserProfiles.first?.id, browserProfile.id)
     }
 
     func testBackupDocumentRoundTripsIconAndNameMenuBarPreference() throws {
@@ -184,6 +222,7 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.schemaVersion, 2)
         XCTAssertEqual(decoded.webAppState.version, 2)
         XCTAssertEqual(decoded.webAppState.browserProfiles, [])
+        XCTAssertEqual(decoded.webAppState.defaultBrowserProfilePresentation, .default)
         XCTAssertEqual(decoded.webAppState.profiles.map { $0.browserProfileID }, [nil])
         XCTAssertEqual(decoded.webAppState.lastActiveTabID, profile.id)
         XCTAssertEqual(decoded.webAppState.profiles.first?.currentURL, profile.currentURL)

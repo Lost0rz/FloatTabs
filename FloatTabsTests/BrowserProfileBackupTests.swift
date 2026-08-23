@@ -77,7 +77,7 @@ final class BrowserProfileBackupTests: XCTestCase {
             attentionCoordinator: WebAttentionCoordinator(),
             frameStore: PanelFrameStore(),
             preferencesStore: AppPreferencesStore(),
-            confirmBrowserProfileSwitch: { _, _ in true }
+            confirmBrowserProfileSwitch: { _, _, _ in true }
         )
     }
 

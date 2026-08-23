@@ -23,13 +23,45 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default", "Company", "Personal"])
     }
 
+    func testRenamedDefaultAndProfileColorsComeFromFreshSnapshot() {
+        let company = BrowserProfile(
+            id: UUID(),
+            name: "Company",
+            createdAt: Date(timeIntervalSince1970: 1),
+            color: BrowserProfileColor(preset: .purple)
+        )
+        let controller = makeSettingsController(
+            snapshot: {
+                BrowserProfileManagementSnapshot(
+                    customProfiles: [company],
+                    defaultProfilePresentation: DefaultBrowserProfilePresentation(
+                        name: "Jack",
+                        color: BrowserProfileColor(preset: .blue)
+                    ),
+                    referencedProfileIDs: [],
+                    customProfilesSupported: true
+                )
+            }
+        )
+
+        controller.loadView()
+
+        XCTAssertEqual(controller.displayedBrowserProfileNames, ["Jack", "Company"])
+        XCTAssertEqual(
+            controller.displayedBrowserProfileColors,
+            [BrowserProfileColor(preset: .blue), BrowserProfileColor(preset: .purple)]
+        )
+        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…"], ["Rename…", "Delete…"]])
+        XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
+    }
+
     func testEmptySnapshotHasDefaultOnlyAndNoPresets() {
         let controller = makeSettingsController()
 
         controller.loadView()
 
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default"])
-        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [[]])
+        XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…"]])
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false])
     }
 
@@ -256,7 +288,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
     }
 
-    func testDefaultRowHasNoRenameOrDeleteActions() {
+    func testDefaultRowAllowsRenameButNotDelete() {
         let profile = makeBrowserProfile(name: "Company")
         let controller = makeSettingsController(
             snapshot: {
@@ -269,7 +301,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
         )
         controller.loadView()
 
-        XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, [])
+        XCTAssertEqual(controller.displayedBrowserProfileActionTitles.first, ["Rename…"])
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles.dropFirst().first, ["Rename…", "Delete…"])
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
     }
