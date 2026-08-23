@@ -69,15 +69,21 @@ final class TabStore {
         homeURL: URL,
         homeURLSchemeWasInferred: Bool = false,
         renderingProfile: WebRenderingProfile = .canonicalDefault,
+        browserProfileID: UUID? = nil,
         now: Date = Date()
     ) -> WebAppProfile? {
         guard WebAppURL.isSafe(homeURL) else { return nil }
+        if let browserProfileID,
+           !browserProfiles.contains(where: { $0.id == browserProfileID }) {
+            return nil
+        }
         let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let resolvedName = trimmedName.isEmpty
             ? WebAppURL.defaultDisplayName(for: homeURL)
             : trimmedName
 
         let profile = WebAppProfile(
+            browserProfileID: browserProfileID,
             order: orderedProfiles.count,
             name: resolvedName,
             homeURL: homeURL,

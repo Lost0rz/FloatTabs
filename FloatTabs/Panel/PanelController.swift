@@ -1297,6 +1297,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
         WebAppEditorController.presentAdd(
+            browserProfiles: tabStore.browserProfiles,
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
             attachedTo: panel
         ) { [weak self] value in
@@ -1304,11 +1306,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
                 guard let value,
+                      value.browserProfileID == nil || self.webViewPool.customBrowserProfilesSupported,
                       let added = self.tabStore.add(
                         name: value.name,
                         homeURL: value.url,
                         homeURLSchemeWasInferred: value.homeURLSchemeWasInferred,
-                        renderingProfile: value.renderingProfile
+                        renderingProfile: value.renderingProfile,
+                        browserProfileID: value.browserProfileID
                       ) else {
                     return
                 }
