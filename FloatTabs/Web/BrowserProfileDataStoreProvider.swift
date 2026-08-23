@@ -1,8 +1,15 @@
 import Foundation
 import WebKit
 
-enum BrowserProfileDataStoreProviderError: Error, Equatable {
+enum BrowserProfileDataStoreProviderError: Error, Equatable, LocalizedError {
     case customProfilesUnsupported
+
+    var errorDescription: String? {
+        switch self {
+        case .customProfilesUnsupported:
+            return "Additional Browser Profiles require macOS 14 or later."
+        }
+    }
 }
 
 /// Resolves the WebKit website-data store for a persisted Browser Profile.
@@ -48,6 +55,12 @@ struct BrowserProfileDataStoreProvider {
         self.defaultStoreResolver = defaultStoreResolver
         self.customStoreResolver = customStoreResolver
         self.customStoreRemover = customStoreRemover
+    }
+
+    /// The capability seam is deliberately backed only by the injected OS
+    /// availability resolver. It never probes WebKit by creating a store.
+    var customProfilesSupported: Bool {
+        isCustomProfileSupported()
     }
 
     func dataStore(for browserProfileID: UUID?) throws -> WKWebsiteDataStore {

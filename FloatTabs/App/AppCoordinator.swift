@@ -79,7 +79,8 @@ final class AppCoordinator {
             onRestoreBackup: { [weak self] url in
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
                 return try self.restoreBackup(from: url)
-            }
+            },
+            browserProfileManager: panelController.browserProfileManagementClient()
         )
         panelController.onOpenGlobalSettings = { [weak self] in
             self?.showGlobalSettings()

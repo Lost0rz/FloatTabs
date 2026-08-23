@@ -2,6 +2,96 @@ import AppKit
 import KeyboardShortcuts
 import UniformTypeIdentifiers
 
+enum BrowserProfileManagementError: LocalizedError, Equatable {
+    case unsupported
+    case notFound
+    case referenced
+    case invalidName
+    case duplicateName
+    case runtimeStillResident
+    case metadataPersistenceFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported:
+            return "Additional Browser Profiles require macOS 14 or later."
+        case .notFound:
+            return "That Browser Profile no longer exists."
+        case .referenced:
+            return "This Profile is used by one or more Web Apps."
+        case .invalidName:
+            return "Enter a non-empty Profile name other than Default."
+        case .duplicateName:
+            return "That Profile name is already in use."
+        case .runtimeStillResident:
+            return "The Profile is still in use by a live runtime. Try again."
+        case .metadataPersistenceFailed:
+            return "FloatTabs could not save the Profile metadata. Your previous settings were kept."
+        }
+    }
+}
+
+struct BrowserProfileManagementSnapshot: Equatable {
+    let customProfiles: [BrowserProfile]
+    let referencedProfileIDs: Set<UUID>
+    let customProfilesSupported: Bool
+}
+
+@MainActor
+struct BrowserProfileManagementClient {
+    typealias SnapshotHandler = () -> BrowserProfileManagementSnapshot
+    typealias CreateHandler = (String) throws -> BrowserProfile
+    typealias RenameHandler = (UUID, String) throws -> Void
+    typealias DeleteHandler = (UUID) async throws -> Void
+
+    private let snapshotHandler: SnapshotHandler
+    private let createHandler: CreateHandler
+    private let renameHandler: RenameHandler
+    private let deleteHandler: DeleteHandler
+
+    init(
+        snapshot: @escaping SnapshotHandler,
+        create: @escaping CreateHandler,
+        rename: @escaping RenameHandler,
+        delete: @escaping DeleteHandler
+    ) {
+        snapshotHandler = snapshot
+        createHandler = create
+        renameHandler = rename
+        deleteHandler = delete
+    }
+
+    static let unavailable = BrowserProfileManagementClient(
+        snapshot: {
+            BrowserProfileManagementSnapshot(
+                customProfiles: [],
+                referencedProfileIDs: [],
+                customProfilesSupported: false
+            )
+        },
+        create: { _ in throw BrowserProfileManagementError.unsupported },
+        rename: { _, _ in throw BrowserProfileManagementError.unsupported },
+        delete: { _ in throw BrowserProfileManagementError.unsupported }
+    )
+
+    func snapshot() -> BrowserProfileManagementSnapshot {
+        snapshotHandler()
+    }
+
+    @discardableResult
+    func create(name: String) throws -> BrowserProfile {
+        try createHandler(name)
+    }
+
+    func rename(id: UUID, name: String) throws {
+        try renameHandler(id, name)
+    }
+
+    func delete(id: UUID) async throws {
+        try await deleteHandler(id)
+    }
+}
+
 @MainActor
 final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias ExportBackupHandler = (URL) throws -> Void
@@ -11,18 +101,21 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
+    private let browserProfileManager: BrowserProfileManagementClient
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
         preferencesStore: AppPreferencesStore,
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
-        onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed }
+        onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
+        browserProfileManager: BrowserProfileManagementClient = .unavailable
     ) {
         self.preferencesStore = preferencesStore
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
+        self.browserProfileManager = browserProfileManager
         super.init()
     }
 
@@ -69,7 +162,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             symbol: "person.crop.circle",
             controller: AccountLanguageSettingsViewController(
                 onExportBackup: onExportBackup,
-                onRestoreBackup: onRestoreBackup
+                onRestoreBackup: onRestoreBackup,
+                browserProfileManager: browserProfileManager
             ),
             to: tabs
         )
@@ -842,16 +936,30 @@ enum AppReleaseInfo {
 }
 
 @MainActor
-private final class AccountLanguageSettingsViewController: NSViewController {
+final class AccountLanguageSettingsViewController: NSViewController {
     private let onExportBackup: GlobalSettingsController.ExportBackupHandler
     private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
+    private let browserProfileManager: BrowserProfileManagementClient
+
+    private let profileRowsStack = NSStackView()
+    private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
+    private let profileSupportLabel = NSTextField(wrappingLabelWithString: "")
+
+    // Read-only derived seams keep UI tests focused on the injected snapshot;
+    // they are never used as an authoritative Profile model.
+    private(set) var displayedBrowserProfileNames: [String] = []
+    private(set) var displayedBrowserProfileActionTitles: [[String]] = []
+    private(set) var isNewProfileEnabled = false
+    private(set) var profileSupportDescription = ""
 
     init(
         onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
-        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler
+        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
+        browserProfileManager: BrowserProfileManagementClient = .unavailable
     ) {
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
+        self.browserProfileManager = browserProfileManager
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -888,6 +996,19 @@ private final class AccountLanguageSettingsViewController: NSViewController {
         actions.alignment = .centerY
         actions.spacing = 10
 
+        profileRowsStack.orientation = .vertical
+        profileRowsStack.alignment = .leading
+        profileRowsStack.spacing = 6
+
+        profileSupportLabel.font = .systemFont(ofSize: 12)
+        profileSupportLabel.textColor = .secondaryLabelColor
+        profileSupportLabel.maximumNumberOfLines = 0
+        profileSupportLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
+
+        newProfileButton.target = self
+        newProfileButton.action = #selector(createProfile)
+        newProfileButton.bezelStyle = .rounded
+
         let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
         versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         versionLabel.textColor = .labelColor
@@ -897,6 +1018,11 @@ private final class AccountLanguageSettingsViewController: NSViewController {
             detailLabel(
                 "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
             ),
+            spacer(8),
+            sectionTitle("Profiles"),
+            profileRowsStack,
+            profileSupportLabel,
+            newProfileButton,
             spacer(8),
             sectionTitle("Backup & Restore"),
             detailLabel(
@@ -945,6 +1071,205 @@ private final class AccountLanguageSettingsViewController: NSViewController {
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
         view = root
+        refreshProfiles()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        refreshProfiles()
+    }
+
+    /// Refreshes from the injected authority every time Settings appears and
+    /// after a successful mutation. No Profile metadata is cached here.
+    func refreshProfiles() {
+        let snapshot = browserProfileManager.snapshot()
+        displayedBrowserProfileNames = ["Default"] + snapshot.customProfiles.map(\.name)
+        displayedBrowserProfileActionTitles = [[]] + snapshot.customProfiles.map { _ in
+            ["Rename…", "Delete…"]
+        }
+        isNewProfileEnabled = snapshot.customProfilesSupported
+        newProfileButton.isEnabled = snapshot.customProfilesSupported
+        profileSupportDescription = snapshot.customProfilesSupported
+            ? "Each Profile uses its own FloatTabs website data."
+            : "Additional Profiles require macOS 14 or later."
+        profileSupportLabel.stringValue = profileSupportDescription
+
+        for arrangedSubview in profileRowsStack.arrangedSubviews {
+            profileRowsStack.removeArrangedSubview(arrangedSubview)
+            arrangedSubview.removeFromSuperview()
+        }
+
+        profileRowsStack.addArrangedSubview(makeDefaultProfileRow())
+        for profile in snapshot.customProfiles {
+            profileRowsStack.addArrangedSubview(
+                makeCustomProfileRow(
+                    profile,
+                    isReferenced: snapshot.referencedProfileIDs.contains(profile.id)
+                )
+            )
+        }
+    }
+
+    /// Internal action seam used by focused tests to exercise the same trim
+    /// and manager handoff used by the New Profile alert.
+    func submitNewProfileNameForTesting(_ rawName: String) {
+        guard browserProfileManager.snapshot().customProfilesSupported else { return }
+        submitNewProfileName(rawName)
+    }
+
+    static func trimmedProfileName(_ rawName: String) -> String? {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func makeDefaultProfileRow() -> NSView {
+        let label = NSTextField(labelWithString: "Default")
+        label.font = .systemFont(ofSize: 12)
+        label.widthAnchor.constraint(equalToConstant: 230).isActive = true
+        let row = NSStackView(views: [label])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        return row
+    }
+
+    private func makeCustomProfileRow(
+        _ profile: BrowserProfile,
+        isReferenced: Bool
+    ) -> NSView {
+        let nameLabel = NSTextField(labelWithString: profile.name)
+        nameLabel.font = .systemFont(ofSize: 12)
+        nameLabel.widthAnchor.constraint(equalToConstant: 230).isActive = true
+
+        let renameButton = NSButton(
+            title: "Rename…",
+            target: self,
+            action: #selector(renameProfile(_:))
+        )
+        renameButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
+        renameButton.bezelStyle = .rounded
+
+        let deleteButton = NSButton(
+            title: "Delete…",
+            target: self,
+            action: #selector(deleteProfile(_:))
+        )
+        deleteButton.identifier = NSUserInterfaceItemIdentifier(profile.id.uuidString)
+        deleteButton.bezelStyle = .rounded
+
+        let actions = NSStackView(views: [renameButton, deleteButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 8
+
+        let row = NSStackView(views: [nameLabel, actions])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+
+        guard isReferenced else { return row }
+        let detail = detailLabel("This Profile is used by one or more Web Apps.")
+        let wrapper = NSStackView(views: [row, detail])
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        wrapper.spacing = 3
+        return wrapper
+    }
+
+    @objc private func createProfile() {
+        guard browserProfileManager.snapshot().customProfilesSupported,
+              let window = view.window else { return }
+
+        let field = NSTextField(string: "")
+        field.placeholderString = "Profile name"
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "New Browser Profile"
+        alert.informativeText = "Choose a name for this Profile. It will use separate FloatTabs website data."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            self.submitNewProfileName(field.stringValue)
+        }
+    }
+
+    private func submitNewProfileName(_ rawName: String) {
+        guard let trimmedName = Self.trimmedProfileName(rawName) else {
+            showProfileError(BrowserProfileManagementError.invalidName)
+            return
+        }
+
+        do {
+            _ = try browserProfileManager.create(name: trimmedName)
+            refreshProfiles()
+        } catch {
+            showProfileError(error)
+        }
+    }
+
+    @objc private func renameProfile(_ sender: NSButton) {
+        guard let id = profileID(from: sender),
+              let currentName = browserProfileManager.snapshot().customProfiles.first(where: {
+                  $0.id == id
+              })?.name,
+              let window = view.window else { return }
+
+        let field = NSTextField(string: currentName)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "Rename Browser Profile"
+        alert.informativeText = "Choose a new name for this Profile. Its website data and identity will remain unchanged."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            guard let trimmedName = Self.trimmedProfileName(field.stringValue) else {
+                self.showProfileError(BrowserProfileManagementError.invalidName)
+                return
+            }
+            do {
+                try self.browserProfileManager.rename(id: id, name: trimmedName)
+                self.refreshProfiles()
+            } catch {
+                self.showProfileError(error)
+            }
+        }
+    }
+
+    @objc private func deleteProfile(_ sender: NSButton) {
+        guard let id = profileID(from: sender),
+              let profile = browserProfileManager.snapshot().customProfiles.first(where: {
+                  $0.id == id
+              }),
+              let window = view.window else { return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete Browser Profile \"\(profile.name)\"?"
+        alert.informativeText = "Deleting this Profile removes its FloatTabs website data, including its saved website sessions for this Profile. This cannot be undone. Apple Passwords and Keychain data are not affected."
+        alert.addButton(withTitle: "Delete Profile")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.browserProfileManager.delete(id: id)
+                    self.refreshProfiles()
+                } catch {
+                    self.showProfileError(error)
+                }
+            }
+        }
+    }
+
+    private func profileID(from sender: NSButton) -> UUID? {
+        guard let rawValue = sender.identifier?.rawValue else { return nil }
+        return UUID(uuidString: rawValue)
     }
 
     @objc private func exportBackup() {
@@ -1018,6 +1343,10 @@ private final class AccountLanguageSettingsViewController: NSViewController {
 
     private func showError(_ error: Error) {
         showMessage(title: "Backup Operation Failed", detail: error.localizedDescription)
+    }
+
+    private func showProfileError(_ error: Error) {
+        showMessage(title: "Profile Operation Failed", detail: error.localizedDescription)
     }
 
     private func sectionTitle(_ text: String) -> NSTextField {

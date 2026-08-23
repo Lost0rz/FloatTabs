@@ -362,6 +362,110 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.storedStateSnapshot()
     }
 
+    func browserProfileManagementClient() -> BrowserProfileManagementClient {
+        BrowserProfileManagementClient(
+            snapshot: { [weak self] in
+                self?.browserProfileManagementSnapshot()
+                    ?? BrowserProfileManagementSnapshot(
+                        customProfiles: [],
+                        referencedProfileIDs: [],
+                        customProfilesSupported: false
+                    )
+            },
+            create: { [weak self] name in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                return try self.createBrowserProfile(name: name)
+            },
+            rename: { [weak self] id, name in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try self.renameBrowserProfile(id: id, name: name)
+            },
+            delete: { [weak self] id in
+                guard let self else { throw BrowserProfileManagementError.notFound }
+                try await self.deleteBrowserProfile(id: id)
+            }
+        )
+    }
+
+    func browserProfileManagementSnapshot() -> BrowserProfileManagementSnapshot {
+        BrowserProfileManagementSnapshot(
+            customProfiles: tabStore.browserProfiles,
+            referencedProfileIDs: Set(tabStore.profiles.compactMap(\.browserProfileID)),
+            customProfilesSupported: webViewPool.customBrowserProfilesSupported
+        )
+    }
+
+    func createBrowserProfile(name: String) throws -> BrowserProfile {
+        guard webViewPool.customBrowserProfilesSupported else {
+            throw BrowserProfileManagementError.unsupported
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              trimmedName.lowercased() != "default" else {
+            throw BrowserProfileManagementError.invalidName
+        }
+        guard !tabStore.browserProfiles.contains(where: {
+            $0.name.lowercased() == trimmedName.lowercased()
+        }) else {
+            throw BrowserProfileManagementError.duplicateName
+        }
+
+        guard let created = tabStore.createBrowserProfile(name: trimmedName) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+        return created
+    }
+
+    func renameBrowserProfile(id: UUID, name: String) throws {
+        guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
+            throw BrowserProfileManagementError.notFound
+        }
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              trimmedName.lowercased() != "default" else {
+            throw BrowserProfileManagementError.invalidName
+        }
+        guard !tabStore.browserProfiles.contains(where: {
+            $0.id != id && $0.name.lowercased() == trimmedName.lowercased()
+        }) else {
+            throw BrowserProfileManagementError.duplicateName
+        }
+
+        guard tabStore.renameBrowserProfile(id: id, name: trimmedName) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+    }
+
+    func deleteBrowserProfile(id: UUID) async throws {
+        guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
+            throw BrowserProfileManagementError.notFound
+        }
+        guard !tabStore.profiles.contains(where: { $0.browserProfileID == id }) else {
+            throw BrowserProfileManagementError.referenced
+        }
+
+        let identity = BrowserProfileIdentity.custom(id)
+        let staleSlotIDs = webViewPool.residentSlotIDs(using: identity)
+        for slotID in staleSlotIDs {
+            // This is deletion cleanup for a runtime that no longer has a
+            // corresponding persisted binding, not a residency policy change.
+            slotLifecycleCoordinator.remove(slotID: slotID)
+        }
+        webViewPool.releaseRuntimes(using: identity)
+        guard webViewPool.residentSlotIDs(using: identity).isEmpty else {
+            throw BrowserProfileManagementError.runtimeStillResident
+        }
+
+        // The metadata remains present until the provider confirms WebKit
+        // removal. TabStore owns transactional rollback if its save fails.
+        try await webViewPool.removeCustomBrowserProfileDataStore(id: id)
+        guard tabStore.deleteBrowserProfileMetadata(id: id) else {
+            throw BrowserProfileManagementError.metadataPersistenceFailed
+        }
+    }
+
     /// Backup import must use the same geometry-aware path as the in-app
     /// toggle: the shell constraint and the separately hosted source window
     /// cannot be left at the previous leading inset until the next launch.

@@ -264,6 +264,36 @@ final class WebViewPool {
         appliedBrowserProfileIdentities[slotID]
     }
 
+    /// The capability is owned by the provider; the pool only exposes the
+    /// narrow runtime-facing seam needed by Settings orchestration.
+    var customBrowserProfilesSupported: Bool {
+        browserProfileDataStoreProvider.customProfilesSupported
+    }
+
+    /// Returns the actual live runtimes to which an identity was applied. This
+    /// intentionally does not infer identity from persisted Slot bindings.
+    func residentSlotIDs(using identity: BrowserProfileIdentity) -> Set<UUID> {
+        Set(
+            appliedBrowserProfileIdentities.compactMap { slotID, appliedIdentity in
+                appliedIdentity == identity ? slotID : nil
+            }
+        )
+    }
+
+    /// Narrow cleanup seam for deleting a Profile whose stale live runtimes
+    /// still carry its identity. Hot/Warm/Cold policy timing remains owned by
+    /// SlotLifecycleCoordinator.
+    func releaseRuntimes(using identity: BrowserProfileIdentity) {
+        for slotID in residentSlotIDs(using: identity) {
+            release(slotID: slotID)
+        }
+    }
+
+    /// WebKit data-store deletion remains exclusively owned by the provider.
+    func removeCustomBrowserProfileDataStore(id: UUID) async throws {
+        try await browserProfileDataStoreProvider.removeCustomDataStore(id: id)
+    }
+
     var count: Int {
         webViews.count
     }
