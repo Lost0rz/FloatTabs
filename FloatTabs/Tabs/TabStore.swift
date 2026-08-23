@@ -201,7 +201,11 @@ final class TabStore {
     }
 
     @discardableResult
-    func setBrowserProfile(slotID: UUID, profileID: UUID?) -> Bool {
+    func setBrowserProfile(
+        slotID: UUID,
+        profileID: UUID?,
+        notifyOnSuccess: Bool = true
+    ) -> Bool {
         guard let slotIndex = profiles.firstIndex(where: { $0.id == slotID }) else {
             return false
         }
@@ -211,7 +215,7 @@ final class TabStore {
         }
         guard profiles[slotIndex].browserProfileID != profileID else { return true }
 
-        return persistConfigurationMutation {
+        return persistConfigurationMutation(notifyOnSuccess: notifyOnSuccess) {
             profiles[slotIndex].browserProfileID = profileID
             return true
         }
@@ -585,7 +589,10 @@ final class TabStore {
     /// published only if the corresponding durable write succeeds. A failed
     /// write restores the exact previous model so the UI cannot report a change
     /// that will disappear on relaunch.
-    private func persistConfigurationMutation(_ mutation: () -> Bool) -> Bool {
+    private func persistConfigurationMutation(
+        notifyOnSuccess: Bool = true,
+        _ mutation: () -> Bool
+    ) -> Bool {
         let previousBrowserProfiles = browserProfiles
         let previousProfiles = profiles
         let previousActiveTabID = activeTabID
@@ -601,7 +608,9 @@ final class TabStore {
             return false
         }
 
-        onChange?()
+        if notifyOnSuccess {
+            onChange?()
+        }
         return true
     }
 

@@ -3,6 +3,18 @@ import CoreImage
 import KeyboardShortcuts
 import QuartzCore
 
+struct BrowserProfileMenuOption: Equatable {
+    let id: UUID?
+    let name: String
+    let isEnabled: Bool
+
+    static let defaultProfile = BrowserProfileMenuOption(
+        id: nil,
+        name: "Default",
+        isEnabled: true
+    )
+}
+
 struct ExternalTabMetrics {
     static let tabHeight: CGFloat = 32
     static let tabRadius: CGFloat = 8
@@ -79,6 +91,8 @@ final class ExternalControlZoneView: NSView {
     var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
+    var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onManageBrowserProfiles: (() -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -97,6 +111,8 @@ final class ExternalControlZoneView: NSView {
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
     private var windowSizeEditingEnabled = true
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile]
+    private var browserProfileAssignmentEnabled = true
     private var railVisibilityGeneration = 0
     private(set) var isRailCollapsed = false
 
@@ -227,6 +243,29 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
+    func setBrowserProfileMenuSnapshot(
+        options: [BrowserProfileMenuOption],
+        assignmentEnabled: Bool
+    ) {
+        browserProfileMenuOptions = options.isEmpty
+            ? [.defaultProfile]
+            : options
+        browserProfileAssignmentEnabled = assignmentEnabled
+        for tab in tabViews.values {
+            tab.setBrowserProfileMenuSnapshot(
+                options: browserProfileMenuOptions,
+                assignmentEnabled: assignmentEnabled
+            )
+        }
+    }
+
+    func setBrowserProfileAssignmentEnabled(_ enabled: Bool) {
+        browserProfileAssignmentEnabled = enabled
+        for tab in tabViews.values {
+            tab.setBrowserProfileAssignmentEnabled(enabled)
+        }
+    }
+
     func refreshAppearance() {
         for tab in tabViews.values {
             tab.refreshAppearance()
@@ -345,6 +384,10 @@ final class ExternalControlZoneView: NSView {
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
+        view.setBrowserProfileMenuSnapshot(
+            options: browserProfileMenuOptions,
+            assignmentEnabled: browserProfileAssignmentEnabled
+        )
         view.alphaValue = isRailCollapsed ? 0 : 1
         view.isHidden = isRailCollapsed
         tabViews[id] = view
@@ -369,6 +412,12 @@ final class ExternalControlZoneView: NSView {
         }
         view.onSetBackgroundMedia = { [weak self] slotID, policy in
             self?.onSetBackgroundMedia?(slotID, policy)
+        }
+        view.onSetBrowserProfile = { [weak self] slotID, profileID in
+            self?.onSetBrowserProfile?(slotID, profileID)
+        }
+        view.onManageBrowserProfiles = { [weak self] in
+            self?.onManageBrowserProfiles?()
         }
         view.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
@@ -833,6 +882,8 @@ final class ExternalWebAppTabView: NSView {
     var onSetZoom: ((UUID, CGFloat) -> Void)?
     var onSetResidency: ((UUID, SlotResidencyPolicy) -> Void)?
     var onSetBackgroundMedia: ((UUID, BackgroundMediaPolicy) -> Void)?
+    var onSetBrowserProfile: ((UUID, UUID?) -> Void)?
+    var onManageBrowserProfiles: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
@@ -852,6 +903,9 @@ final class ExternalWebAppTabView: NSView {
     private var residencyPolicy: SlotResidencyPolicy = .warm
     private var windowSizeEditingEnabled = true
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
+    private var browserProfileID: UUID?
+    private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile]
+    private var browserProfileAssignmentEnabled = true
     private var faviconOriginKey: String?
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
@@ -985,10 +1039,25 @@ final class ExternalWebAppTabView: NSView {
         windowSizeEditingEnabled = enabled
     }
 
+    func setBrowserProfileMenuSnapshot(
+        options: [BrowserProfileMenuOption],
+        assignmentEnabled: Bool
+    ) {
+        browserProfileMenuOptions = options.isEmpty
+            ? [.defaultProfile]
+            : options
+        browserProfileAssignmentEnabled = assignmentEnabled
+    }
+
+    func setBrowserProfileAssignmentEnabled(_ enabled: Bool) {
+        browserProfileAssignmentEnabled = enabled
+    }
+
     func update(profile: WebAppProfile, isActive: Bool, isResident: Bool) {
         self.isActive = isActive
         self.isResident = isResident
         label.stringValue = profile.name
+        browserProfileID = profile.browserProfileID
         renderingProfile = profile.renderingProfile.normalized()
         residencyPolicy = profile.residencyPolicy
         backgroundMediaPolicy = profile.backgroundMediaPolicy
@@ -1167,6 +1236,34 @@ final class ExternalWebAppTabView: NSView {
         menu.addItem(zoom)
         menu.addItem(.separator())
 
+        let profile = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
+        let profileMenu = NSMenu(title: "Profile")
+        let profileOptions = browserProfileMenuOptions.isEmpty
+            ? [.defaultProfile]
+            : browserProfileMenuOptions
+        for option in profileOptions {
+            let item = NSMenuItem(
+                title: option.name,
+                action: #selector(setBrowserProfileFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = option.id?.uuidString ?? NSNull()
+            item.state = option.id == browserProfileID ? .on : .off
+            item.isEnabled = browserProfileAssignmentEnabled && option.isEnabled
+            profileMenu.addItem(item)
+        }
+        profileMenu.addItem(.separator())
+        let manageProfiles = NSMenuItem(
+            title: "Manage Profiles…",
+            action: #selector(manageBrowserProfilesFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        manageProfiles.target = self
+        profileMenu.addItem(manageProfiles)
+        profile.submenu = profileMenu
+        menu.addItem(profile)
+
         let residency = NSMenuItem(title: "Residency", action: nil, keyEquivalent: "")
         let residencyMenu = NSMenu(title: "Residency")
         for policy in SlotResidencyPolicy.allCases {
@@ -1234,6 +1331,19 @@ final class ExternalWebAppTabView: NSView {
     @objc private func setZoomFromMenu(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? NSNumber else { return }
         onSetZoom?(slotID, CGFloat(number.doubleValue))
+    }
+
+    @objc private func setBrowserProfileFromMenu(_ sender: NSMenuItem) {
+        guard browserProfileAssignmentEnabled,
+              let representedObject = sender.representedObject else {
+            return
+        }
+        let profileID = (representedObject as? String).flatMap(UUID.init(uuidString:))
+        onSetBrowserProfile?(slotID, profileID)
+    }
+
+    @objc private func manageBrowserProfilesFromMenu(_ sender: NSMenuItem) {
+        onManageBrowserProfiles?()
     }
 
     @objc private func setResidencyFromMenu(_ sender: NSMenuItem) {
