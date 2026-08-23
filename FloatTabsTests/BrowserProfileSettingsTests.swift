@@ -191,7 +191,16 @@ final class BrowserProfileSettingsTests: XCTestCase {
         let store = TabStore(repository: repository)
         let browserProfile = try XCTUnwrap(store.createBrowserProfile(name: "Company"))
         repository.events.removeAll()
-        let pool = makePool { _ in throw StageDError.removalFailed }
+        var removerCallCount = 0
+        var receivedID: UUID?
+        let pool = makePool { id in
+            MainActor.assertIsolated()
+            removerCallCount += 1
+            receivedID = id
+            throw StageDError.removalFailed
+        }
+        XCTAssertTrue(pool.residentSlotIDs(using: .default).isEmpty)
+        XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
         let controller = makePanelController(store: store, pool: pool)
 
         do {
@@ -201,6 +210,10 @@ final class BrowserProfileSettingsTests: XCTestCase {
             XCTAssertEqual(error, .removalFailed)
         }
 
+        XCTAssertEqual(removerCallCount, 1)
+        XCTAssertEqual(receivedID, browserProfile.id)
+        XCTAssertTrue(pool.residentSlotIDs(using: .default).isEmpty)
+        XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
         XCTAssertTrue(store.browserProfiles.contains(where: { $0.id == browserProfile.id }))
         XCTAssertTrue(repository.events.isEmpty)
     }
@@ -346,7 +359,7 @@ final class BrowserProfileSettingsTests: XCTestCase {
     }
 
     private func makePool(
-        _ remover: @escaping (UUID) async throws -> Void
+        _ remover: @escaping @MainActor (UUID) async throws -> Void
     ) -> WebViewPool {
         let store = WKWebsiteDataStore.nonPersistent()
         let provider = BrowserProfileDataStoreProvider(

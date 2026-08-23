@@ -21,10 +21,10 @@ enum BrowserProfileDataStoreProviderError: Error, Equatable, LocalizedError {
 /// outside this provider.
 @MainActor
 struct BrowserProfileDataStoreProvider {
-    typealias AvailabilityResolver = () -> Bool
-    typealias DefaultStoreResolver = () -> WKWebsiteDataStore
-    typealias CustomStoreResolver = (UUID) -> WKWebsiteDataStore
-    typealias CustomStoreRemover = (UUID) async throws -> Void
+    typealias AvailabilityResolver = @MainActor () -> Bool
+    typealias DefaultStoreResolver = @MainActor () -> WKWebsiteDataStore
+    typealias CustomStoreResolver = @MainActor (UUID) -> WKWebsiteDataStore
+    typealias CustomStoreRemover = @MainActor (UUID) async throws -> Void
 
     private let isCustomProfileSupported: AvailabilityResolver
     private let defaultStoreResolver: DefaultStoreResolver

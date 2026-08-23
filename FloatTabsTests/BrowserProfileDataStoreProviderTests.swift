@@ -72,16 +72,20 @@ final class BrowserProfileDataStoreProviderTests: XCTestCase {
     func testSupportedRemovalReceivesExactUUID() async throws {
         let expectedID = UUID()
         var receivedID: UUID?
+        var removerCallCount = 0
         let provider = BrowserProfileDataStoreProvider(
             isCustomProfileSupported: { true },
             customStoreRemover: { id in
+                MainActor.assertIsolated()
                 receivedID = id
+                removerCallCount += 1
             }
         )
 
         try await provider.removeCustomDataStore(id: expectedID)
 
         XCTAssertEqual(receivedID, expectedID)
+        XCTAssertEqual(removerCallCount, 1)
     }
 
     func testUnsupportedRemovalFailsClosedWithoutCallingRemover() async {
