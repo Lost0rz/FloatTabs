@@ -14,9 +14,28 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
     let fixedViewportHeight: Double?
     let isTabRailCollapsed: Bool?
     let menuBarDisplayMode: MenuBarDisplayMode?
+    let attentionSoundEnabled: Bool?
+    let attentionSoundName: String?
+    let attentionSoundVolume: Double?
 
     var resolvedMenuBarDisplayMode: MenuBarDisplayMode {
         menuBarDisplayMode ?? .iconAndName
+    }
+
+    var resolvedAttentionSoundEnabled: Bool {
+        attentionSoundEnabled ?? true
+    }
+
+    var resolvedAttentionSoundName: String {
+        let trimmed = attentionSoundName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else {
+            return AppPreferencesStore.defaultAttentionSoundName
+        }
+        return trimmed
+    }
+
+    var resolvedAttentionSoundVolume: Double {
+        AppPreferencesStore.normalizedAttentionSoundVolume(attentionSoundVolume ?? 1)
     }
 
     init(
@@ -27,7 +46,10 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         fixedViewportWidth: Double? = nil,
         fixedViewportHeight: Double? = nil,
         isTabRailCollapsed: Bool? = nil,
-        menuBarDisplayMode: MenuBarDisplayMode? = nil
+        menuBarDisplayMode: MenuBarDisplayMode? = nil,
+        attentionSoundEnabled: Bool? = nil,
+        attentionSoundName: String? = nil,
+        attentionSoundVolume: Double? = nil
     ) {
         self.appearanceMode = appearanceMode
         self.followPreferredSize = followPreferredSize
@@ -37,6 +59,9 @@ struct FloatTabsBackupPreferences: Codable, Equatable {
         self.fixedViewportHeight = fixedViewportHeight
         self.isTabRailCollapsed = isTabRailCollapsed
         self.menuBarDisplayMode = menuBarDisplayMode
+        self.attentionSoundEnabled = attentionSoundEnabled
+        self.attentionSoundName = attentionSoundName
+        self.attentionSoundVolume = attentionSoundVolume
     }
 }
 

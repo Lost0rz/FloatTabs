@@ -35,7 +35,10 @@ final class FloatTabsBackupServiceTests: XCTestCase {
                 borderTheme: .green,
                 customBorderColorHex: "#123456FF",
                 isTabRailCollapsed: true,
-                menuBarDisplayMode: .iconOnly
+                menuBarDisplayMode: .iconOnly,
+                attentionSoundEnabled: false,
+                attentionSoundName: "Glass",
+                attentionSoundVolume: 0.35
             ),
             globalShowHideShortcut: FloatTabsBackupShortcut(
                 carbonKeyCode: 50,
@@ -56,6 +59,9 @@ final class FloatTabsBackupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.globalPreferences.customBorderColorHex, "#123456FF")
         XCTAssertEqual(decoded.globalPreferences.isTabRailCollapsed, true)
         XCTAssertEqual(decoded.globalPreferences.menuBarDisplayMode, .iconOnly)
+        XCTAssertEqual(decoded.globalPreferences.attentionSoundEnabled, false)
+        XCTAssertEqual(decoded.globalPreferences.attentionSoundName, "Glass")
+        XCTAssertEqual(decoded.globalPreferences.attentionSoundVolume, 0.35)
         XCTAssertEqual(decoded.globalShowHideShortcut?.carbonKeyCode, 50)
     }
 
@@ -113,6 +119,67 @@ final class FloatTabsBackupServiceTests: XCTestCase {
             decoded.globalPreferences.resolvedMenuBarDisplayMode,
             .iconAndName
         )
+    }
+
+    func testOldSchemaOneBackupWithoutAttentionSoundFieldsUsesNewDefaults() throws {
+        let document = FloatTabsBackupDocument(
+            schemaVersion: 1,
+            createdAt: Date(timeIntervalSince1970: 300),
+            sourceAppVersion: "0.1.0",
+            sourceBuild: "1",
+            webAppState: .empty,
+            globalPreferences: FloatTabsBackupPreferences(
+                appearanceMode: .system,
+                followPreferredSize: true,
+                attentionSoundEnabled: false,
+                attentionSoundName: "Glass",
+                attentionSoundVolume: 0.35
+            ),
+            globalShowHideShortcut: nil
+        )
+        let service = FloatTabsBackupService()
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: service.encode(document))
+                as? [String: Any]
+        )
+        var preferences = try XCTUnwrap(object["globalPreferences"] as? [String: Any])
+        preferences.removeValue(forKey: "attentionSoundEnabled")
+        preferences.removeValue(forKey: "attentionSoundName")
+        preferences.removeValue(forKey: "attentionSoundVolume")
+        var oldObject = object
+        oldObject["globalPreferences"] = preferences
+        let oldData = try JSONSerialization.data(withJSONObject: oldObject)
+
+        let decoded = try service.decode(oldData)
+
+        XCTAssertEqual(FloatTabsBackupDocument.currentSchemaVersion, 1)
+        XCTAssertNil(decoded.globalPreferences.attentionSoundEnabled)
+        XCTAssertNil(decoded.globalPreferences.attentionSoundName)
+        XCTAssertNil(decoded.globalPreferences.attentionSoundVolume)
+        XCTAssertTrue(decoded.globalPreferences.resolvedAttentionSoundEnabled)
+        XCTAssertEqual(decoded.globalPreferences.resolvedAttentionSoundName, "Ping")
+        XCTAssertEqual(decoded.globalPreferences.resolvedAttentionSoundVolume, 1)
+    }
+
+    @MainActor
+    func testRestoreAppliesAndNormalizesAttentionSoundPreferences() {
+        let suiteName = "FloatTabsTests.BackupRestoreSound.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = AppPreferencesStore(defaults: defaults)
+        let backup = FloatTabsBackupPreferences(
+            appearanceMode: .system,
+            followPreferredSize: true,
+            attentionSoundEnabled: false,
+            attentionSoundName: "Purr",
+            attentionSoundVolume: 4
+        )
+
+        AppCoordinator.restoreAttentionSoundPreferences(backup, to: store)
+
+        XCTAssertFalse(store.attentionSoundEnabled)
+        XCTAssertEqual(store.attentionSoundName, "Purr")
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
     }
 
     func testNewIconOnlyBackupDecodesWithoutAttentionState() throws {

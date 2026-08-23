@@ -81,6 +81,48 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(second.isTabRailCollapsed)
     }
 
+    func testAttentionSoundPreferencesUseShippedDefaults() {
+        let store = AppPreferencesStore(defaults: defaults)
+
+        XCTAssertTrue(store.attentionSoundEnabled)
+        XCTAssertEqual(store.attentionSoundName, "Ping")
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
+    }
+
+    func testAttentionSoundPreferencesPersistAcrossStoreInstances() {
+        let first = AppPreferencesStore(defaults: defaults)
+        first.attentionSoundEnabled = false
+        first.attentionSoundName = "Glass"
+        first.attentionSoundVolume = 0.35
+
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertFalse(second.attentionSoundEnabled)
+        XCTAssertEqual(second.attentionSoundName, "Glass")
+        XCTAssertEqual(second.attentionSoundVolume, 0.35, accuracy: 0.0001)
+    }
+
+    func testAttentionSoundVolumeNormalizesInvalidValuesOnWriteAndRead() {
+        let store = AppPreferencesStore(defaults: defaults)
+
+        store.attentionSoundVolume = -0.2
+        XCTAssertEqual(store.attentionSoundVolume, 0, accuracy: 0.0001)
+
+        store.attentionSoundVolume = 1.4
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
+
+        store.attentionSoundVolume = .nan
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
+
+        store.attentionSoundVolume = .infinity
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
+
+        defaults.set(-4.0, forKey: AppPreferencesStore.attentionSoundVolumeKey)
+        XCTAssertEqual(store.attentionSoundVolume, 0, accuracy: 0.0001)
+
+        defaults.set(Double.nan, forKey: AppPreferencesStore.attentionSoundVolumeKey)
+        XCTAssertEqual(store.attentionSoundVolume, 1, accuracy: 0.0001)
+    }
+
     func testAppearancePersistsAcrossStoreInstances() {
         let first = AppPreferencesStore(defaults: defaults)
         first.appearanceMode = .dark

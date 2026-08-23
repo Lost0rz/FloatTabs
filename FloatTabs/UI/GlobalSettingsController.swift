@@ -8,16 +8,19 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias RestoreBackupHandler = (URL) throws -> URL
 
     private let preferencesStore: AppPreferencesStore
+    private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
         preferencesStore: AppPreferencesStore,
+        attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed }
     ) {
         self.preferencesStore = preferencesStore
+        self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
         super.init()
@@ -44,6 +47,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             title: "Appearance",
             symbol: "circle.lefthalf.filled",
             controller: AppearanceSettingsViewController(preferencesStore: preferencesStore),
+            to: tabs
+        )
+        addTab(
+            title: "Notifications",
+            symbol: "bell.badge",
+            controller: NotificationsSettingsViewController(
+                preferencesStore: preferencesStore,
+                attentionSoundPlayer: attentionSoundPlayer
+            ),
             to: tabs
         )
         addTab(
@@ -83,6 +95,202 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         item.label = title
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         tabs.addTabViewItem(item)
+    }
+}
+
+@MainActor
+final class NotificationsSettingsViewController: NSViewController {
+    private let preferencesStore: AppPreferencesStore
+    private let attentionSoundPlayer: AttentionSoundPlaying
+    private let availableSoundNames: [String]
+
+    private let enabledSwitch = NSSwitch()
+    let soundPopup = NSPopUpButton()
+    let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
+    private let volumeValueLabel = NSTextField(labelWithString: "100%")
+    let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
+
+    init(
+        preferencesStore: AppPreferencesStore,
+        attentionSoundPlayer: AttentionSoundPlaying,
+        availableSoundNames: [String]? = nil
+    ) {
+        self.preferencesStore = preferencesStore
+        self.attentionSoundPlayer = attentionSoundPlayer
+        self.availableSoundNames = availableSoundNames ?? AttentionSound.availableNames()
+        super.init(nibName: nil, bundle: nil)
+        title = "Notifications"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let root = NSView()
+
+        enabledSwitch.target = self
+        enabledSwitch.action = #selector(enabledChanged(_:))
+
+        soundPopup.addItems(withTitles: availableSoundNames)
+        soundPopup.target = self
+        soundPopup.action = #selector(soundChanged(_:))
+        soundPopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
+
+        volumeSlider.target = self
+        volumeSlider.action = #selector(volumeChanged(_:))
+        // Non-continuous on purpose: the action fires once when the user
+        // finishes a drag (or taps a position) instead of per-pixel, so the
+        // automatic preview below plays exactly once per completed adjustment.
+        volumeSlider.isContinuous = false
+        volumeSlider.numberOfTickMarks = 11
+        volumeSlider.allowsTickMarkValuesOnly = false
+        volumeSlider.widthAnchor.constraint(equalToConstant: 280).isActive = true
+
+        volumeValueLabel.alignment = .right
+        volumeValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        volumeValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        previewButton.target = self
+        previewButton.action = #selector(playPreview(_:))
+        previewButton.bezelStyle = .rounded
+
+        let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
+        let soundRow = makeRow(label: "Sound", control: soundPopup)
+        let volumeControls = NSStackView(views: [volumeSlider, volumeValueLabel])
+        volumeControls.orientation = .horizontal
+        volumeControls.alignment = .centerY
+        volumeControls.spacing = 10
+        let volumeRow = makeRow(label: "Volume", control: volumeControls)
+
+        let stack = NSStackView(views: [
+            Self.titleLabel("ChatGPT Ready Alerts"),
+            Self.detailLabel(
+                "Plays when a new ChatGPT completion enters Ready attention.\nNo sound is played when the completion is already being viewed."
+            ),
+            Self.spacer(8),
+            enabledRow,
+            soundRow,
+            volumeRow,
+            Self.spacer(4),
+            previewButton,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+        ])
+
+        view = root
+        synchronizeControls()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        synchronizeControls()
+    }
+
+    @objc private func enabledChanged(_ sender: NSSwitch) {
+        preferencesStore.attentionSoundEnabled = sender.state == .on
+    }
+
+    @objc private func soundChanged(_ sender: NSPopUpButton) {
+        guard let name = sender.selectedItem?.title else { return }
+        preferencesStore.attentionSoundName = name
+        previewCurrentSound()
+    }
+
+    @objc private func volumeChanged(_ sender: NSSlider) {
+        preferencesStore.attentionSoundVolume = sender.doubleValue / 100
+        updateVolumeLabel(sender.doubleValue)
+        previewCurrentSound()
+    }
+
+    @objc private func playPreview(_ sender: NSButton) {
+        previewCurrentSound()
+    }
+
+    /// The single preview path shared by the sound popup, the volume slider,
+    /// and the Play Preview button. It always previews the persisted UI
+    /// values through the production player, so a zero volume stays a valid
+    /// silent configuration and it works even while the automatic Ready
+    /// alert switch is off — that switch only gates the real Ready event.
+    private func previewCurrentSound() {
+        attentionSoundPlayer.play(
+            soundName: preferencesStore.attentionSoundName,
+            volume: preferencesStore.attentionSoundVolume
+        )
+    }
+
+    private func synchronizeControls() {
+        guard isViewLoaded else { return }
+        enabledSwitch.state = preferencesStore.attentionSoundEnabled ? .on : .off
+
+        let preferredName = preferencesStore.attentionSoundName
+        let selectedName: String?
+        if availableSoundNames.contains(preferredName) {
+            selectedName = preferredName
+        } else if availableSoundNames.contains(AppPreferencesStore.defaultAttentionSoundName) {
+            selectedName = AppPreferencesStore.defaultAttentionSoundName
+        } else {
+            selectedName = availableSoundNames.first
+        }
+        if let selectedName {
+            soundPopup.selectItem(withTitle: selectedName)
+            if selectedName != preferredName {
+                preferencesStore.attentionSoundName = selectedName
+            }
+        }
+        soundPopup.isEnabled = selectedName != nil
+        previewButton.isEnabled = selectedName != nil
+
+        let volumePercent = preferencesStore.attentionSoundVolume * 100
+        volumeSlider.doubleValue = volumePercent
+        updateVolumeLabel(volumePercent)
+    }
+
+    private func makeRow(label text: String, control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.widthAnchor.constraint(equalToConstant: 230).isActive = true
+
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 16
+        return row
+    }
+
+    private func updateVolumeLabel(_ value: Double) {
+        volumeValueLabel.stringValue = "\(Int(value.rounded()))%"
+    }
+
+    private static func titleLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        return label
+    }
+
+    private static func detailLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 0
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+        return label
+    }
+
+    private static func spacer(_ height: CGFloat) -> NSView {
+        let view = NSView()
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
     }
 }
 
@@ -692,7 +900,7 @@ private final class AccountLanguageSettingsViewController: NSViewController {
             spacer(8),
             sectionTitle("Backup & Restore"),
             detailLabel(
-                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
+                "Backups include Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
             ),
             detailLabel(
                 "Website passwords, cookies, OAuth/login sessions, WebKit caches, and page runtime state are not exported. A new Mac may require website sign-in again."
