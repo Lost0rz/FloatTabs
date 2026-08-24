@@ -91,6 +91,52 @@ enum PanelWindowSizeMode: String, CaseIterable, Equatable, Codable {
     }
 }
 
+enum WarmWebViewRetentionOption: Int, CaseIterable, Equatable {
+    case twoMinutes = 120
+    case fiveMinutes = 300
+    case tenMinutes = 600
+    case thirtyMinutes = 1_800
+
+    var seconds: TimeInterval { TimeInterval(rawValue) }
+
+    var displayName: String {
+        switch self {
+        case .twoMinutes: return "2 minutes"
+        case .fiveMinutes: return "5 minutes"
+        case .tenMinutes: return "10 minutes"
+        case .thirtyMinutes: return "30 minutes"
+        }
+    }
+
+    init(seconds: TimeInterval) {
+        self = Self.allCases.min {
+            abs($0.seconds - seconds) < abs($1.seconds - seconds)
+        } ?? .twoMinutes
+    }
+}
+
+enum ColdWebViewReleaseOption: Int, CaseIterable, Equatable {
+    case thirtySeconds = 30
+    case oneMinute = 60
+    case twoMinutes = 120
+
+    var seconds: TimeInterval { TimeInterval(rawValue) }
+
+    var displayName: String {
+        switch self {
+        case .thirtySeconds: return "30 seconds"
+        case .oneMinute: return "1 minute"
+        case .twoMinutes: return "2 minutes"
+        }
+    }
+
+    init(seconds: TimeInterval) {
+        self = Self.allCases.min {
+            abs($0.seconds - seconds) < abs($1.seconds - seconds)
+        } ?? .thirtySeconds
+    }
+}
+
 extension Notification.Name {
     static let floatTabsAppearanceDidChange = Notification.Name(
         "FloatTabs.appearanceDidChange"
@@ -106,6 +152,9 @@ extension Notification.Name {
     )
     static let floatTabsMenuBarDisplayModeDidChange = Notification.Name(
         "FloatTabs.menuBarDisplayModeDidChange"
+    )
+    static let floatTabsSlotRetentionDidChange = Notification.Name(
+        "FloatTabs.slotRetentionDidChange"
     )
 }
 
@@ -133,6 +182,10 @@ final class AppPreferencesStore {
         "FloatTabs.websiteCache.minimumCleanupInterval"
     static let websiteCacheRecentUseProtectionKey =
         "FloatTabs.websiteCache.recentUseProtection"
+    static let warmWebViewRetentionDelayKey =
+        "FloatTabs.performance.warmWebViewRetentionDelay"
+    static let coldWebViewReleaseDelayKey =
+        "FloatTabs.performance.coldWebViewReleaseDelay"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -379,6 +432,44 @@ final class AppPreferencesStore {
             defaults.set(
                 policy.recentUseProtection,
                 forKey: Self.websiteCacheRecentUseProtectionKey
+            )
+        }
+    }
+
+    var warmWebViewRetentionDelay: TimeInterval {
+        get {
+            let raw = normalizedNonNegativeDouble(
+                forKey: Self.warmWebViewRetentionDelayKey,
+                fallback: SlotLifecycleCoordinator.defaultWarmReleaseDelay
+            )
+            return WarmWebViewRetentionOption(seconds: raw).seconds
+        }
+        set {
+            let normalized = WarmWebViewRetentionOption(seconds: newValue).seconds
+            guard normalized != warmWebViewRetentionDelay else { return }
+            defaults.set(normalized, forKey: Self.warmWebViewRetentionDelayKey)
+            NotificationCenter.default.post(
+                name: .floatTabsSlotRetentionDidChange,
+                object: self
+            )
+        }
+    }
+
+    var coldWebViewReleaseDelay: TimeInterval {
+        get {
+            let raw = normalizedNonNegativeDouble(
+                forKey: Self.coldWebViewReleaseDelayKey,
+                fallback: SlotLifecycleCoordinator.defaultColdReleaseDelay
+            )
+            return ColdWebViewReleaseOption(seconds: raw).seconds
+        }
+        set {
+            let normalized = ColdWebViewReleaseOption(seconds: newValue).seconds
+            guard normalized != coldWebViewReleaseDelay else { return }
+            defaults.set(normalized, forKey: Self.coldWebViewReleaseDelayKey)
+            NotificationCenter.default.post(
+                name: .floatTabsSlotRetentionDidChange,
+                object: self
             )
         }
     }

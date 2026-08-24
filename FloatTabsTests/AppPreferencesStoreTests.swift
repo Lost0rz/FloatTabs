@@ -256,4 +256,34 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(visibleSize.width, 640, accuracy: 0.001)
         XCTAssertEqual(visibleSize.height, 720, accuracy: 0.001)
     }
+
+    func testPerformanceRetentionDefaultsPersistAndNormalizeInvalidValues() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.warmWebViewRetentionDelay, 120, accuracy: 0.001)
+        XCTAssertEqual(first.coldWebViewReleaseDelay, 30, accuracy: 0.001)
+
+        first.warmWebViewRetentionDelay = 600
+        first.coldWebViewReleaseDelay = 120
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(second.warmWebViewRetentionDelay, 600, accuracy: 0.001)
+        XCTAssertEqual(second.coldWebViewReleaseDelay, 120, accuracy: 0.001)
+
+        defaults.set(Double.nan, forKey: AppPreferencesStore.warmWebViewRetentionDelayKey)
+        defaults.set(9_999, forKey: AppPreferencesStore.coldWebViewReleaseDelayKey)
+        XCTAssertEqual(second.warmWebViewRetentionDelay, 120, accuracy: 0.001)
+        XCTAssertEqual(second.coldWebViewReleaseDelay, 120, accuracy: 0.001)
+    }
+
+    func testPerformanceRetentionOptionsExposeOnlySupportedDurations() {
+        XCTAssertEqual(
+            WarmWebViewRetentionOption.allCases.map(\.seconds),
+            [120, 300, 600, 1_800]
+        )
+        XCTAssertEqual(
+            ColdWebViewReleaseOption.allCases.map(\.seconds),
+            [30, 60, 120]
+        )
+        XCTAssertEqual(WarmWebViewRetentionOption(seconds: 301), .fiveMinutes)
+        XCTAssertEqual(ColdWebViewReleaseOption(seconds: 2), .thirtySeconds)
+    }
 }

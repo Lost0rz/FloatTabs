@@ -6,6 +6,24 @@ struct WebsiteCacheProfileSnapshot: Equatable {
     let lastUsedAt: Date
     let useCount: Int
     let isActive: Bool
+    /// The most protective residency level among Tabs using this Browser
+    /// Profile. A Browser Profile is the WebKit cache boundary, so one Hot Tab
+    /// must protect the shared cache from automatic eviction.
+    let residencyPolicy: SlotResidencyPolicy
+
+    init(
+        identity: BrowserProfileIdentity,
+        lastUsedAt: Date,
+        useCount: Int,
+        isActive: Bool,
+        residencyPolicy: SlotResidencyPolicy = .warm
+    ) {
+        self.identity = identity
+        self.lastUsedAt = lastUsedAt
+        self.useCount = useCount
+        self.isActive = isActive
+        self.residencyPolicy = residencyPolicy
+    }
 }
 
 struct WebsiteCacheCleanupResult: Equatable {
@@ -236,6 +254,8 @@ final class WebsiteCacheCleanupCoordinator {
     var onPolicyChanged: (() -> Void)?
     private var isTerminating = false
     private var measurementGeneration: UInt = 0
+    private var pendingColdCleanupIdentities = Set<BrowserProfileIdentity>()
+    private var coldCleanupTask: Task<Void, Never>?
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -298,6 +318,9 @@ final class WebsiteCacheCleanupCoordinator {
     func stop() {
         isTerminating = true
         measurementGeneration &+= 1
+        pendingColdCleanupIdentities.removeAll()
+        coldCleanupTask?.cancel()
+        coldCleanupTask = nil
     }
 
     var automaticCleanupEnabled: Bool {
@@ -386,9 +409,27 @@ final class WebsiteCacheCleanupCoordinator {
         )
     }
 
+    /// Requests the fast cache release associated with a Cold Tab after its
+    /// WebView runtime has actually been detached. The request is coalesced by
+    /// Browser Profile identity because one store can be shared by multiple
+    /// Tabs. If another cleanup is active, the request remains pending and is
+    /// drained after that operation finishes instead of spinning on MainActor.
+    func requestColdCleanup(for identity: BrowserProfileIdentity) {
+        // Cold is an explicit per-Tab residency choice: once its runtime is
+        // detached, its re-downloadable cache is released as part of turning
+        // the Tab back into a bookmark. The global automatic-management switch
+        // controls periodic TTL/capacity work, not this explicit Cold policy.
+        guard !isTerminating else {
+            return
+        }
+        pendingColdCleanupIdentities.insert(identity)
+        drainPendingColdCleanupIfPossible()
+    }
+
     private enum RunMode: Equatable {
         case automatic
         case manual
+        case cold(BrowserProfileIdentity)
     }
 
     private func run(
@@ -400,7 +441,10 @@ final class WebsiteCacheCleanupCoordinator {
             throw WebsiteCacheManagementError.operationAlreadyRunning
         }
         isOperationInProgress = true
-        defer { isOperationInProgress = false }
+        defer {
+            isOperationInProgress = false
+            drainPendingColdCleanupIfPossible()
+        }
 
         let policy = rawPolicy.normalized()
         let before = (await refreshMeasurement()).estimatedBytes
@@ -411,7 +455,8 @@ final class WebsiteCacheCleanupCoordinator {
                 identity: profile.identity,
                 lastUsedAt: profile.lastUsedAt,
                 useCount: profile.useCount,
-                isActive: profile.isActive || profile.identity == activeIdentity
+                isActive: profile.isActive || profile.identity == activeIdentity,
+                residencyPolicy: profile.residencyPolicy
             )
         }
         let candidates = sortedCandidates(
@@ -431,7 +476,7 @@ final class WebsiteCacheCleanupCoordinator {
 
         do {
             for candidate in candidates {
-                if mode == .automatic,
+                if (mode == .automatic || isColdRun(mode)),
                    candidate.isActive,
                    panelVisibilityProvider() {
                     skippedActive += 1
@@ -442,7 +487,7 @@ final class WebsiteCacheCleanupCoordinator {
                     try prepareRuntime(candidate.identity, mode == .manual)
                     releasedActiveRuntime = releasedActiveRuntime || candidate.isActive
                 } catch let error as WebsiteCacheManagementError {
-                    if mode == .automatic,
+                    if (mode == .automatic || isColdRun(mode)),
                        candidate.isActive,
                        (error == .activeProfileProtected || error == .runtimeStillInUse) {
                         skippedActive += 1
@@ -450,7 +495,7 @@ final class WebsiteCacheCleanupCoordinator {
                     }
                     throw error
                 } catch {
-                    if mode == .automatic { continue }
+                    if mode == .automatic || isColdRun(mode) { continue }
                     throw WebsiteCacheManagementError.runtimeStillInUse
                 }
 
@@ -466,11 +511,14 @@ final class WebsiteCacheCleanupCoordinator {
                 }
             }
         } catch {
-            if releasedActiveRuntime { restoreRuntime() }
+            if releasedActiveRuntime && !isColdRun(mode) { restoreRuntime() }
             throw error
         }
 
-        if releasedActiveRuntime { restoreRuntime() }
+        // A lifecycle-triggered Cold release starts after the runtime has
+        // already been detached. Recreating the selected hidden Tab here
+        // would immediately repopulate the cache we just released.
+        if releasedActiveRuntime && !isColdRun(mode) { restoreRuntime() }
         let completedAt = now
         if cleanedProfiles > 0 || mode == .manual {
             // Persist success markers only after the whole run succeeds. If a
@@ -500,7 +548,17 @@ final class WebsiteCacheCleanupCoordinator {
     ) -> [WebsiteCacheProfileSnapshot] {
         profiles
             .filter { candidate in
-                guard mode == .manual else {
+                switch mode {
+                case .manual:
+                    return true
+                case let .cold(identity):
+                    return candidate.identity == identity
+                        && candidate.residencyPolicy == .cold
+                case .automatic:
+                    // Hot is an explicit user statement that this Tab's
+                    // shared Browser Profile should stay warm. Manual Release
+                    // remains the opt-in escape hatch.
+                    guard candidate.residencyPolicy != .hot else { return false }
                     let expired = policy.isPastRetention(
                         lastUsedAt: candidate.lastUsedAt,
                         now: now
@@ -510,12 +568,20 @@ final class WebsiteCacheCleanupCoordinator {
                             lastUsedAt: candidate.lastUsedAt,
                             now: now
                         )
+                    // Cold is eligible as soon as its runtime is no longer
+                    // resident. The lifecycle callback handles the prompt
+                    // path; this also makes the next normal automatic pass
+                    // converge if the callback was unavailable.
+                    if candidate.residencyPolicy == .cold { return true }
                     return expired || capacityEligible
                 }
-                return true
             }
             .sorted { lhs, rhs in
                 if lhs.isActive != rhs.isActive { return !lhs.isActive }
+                if lhs.residencyPolicy != rhs.residencyPolicy {
+                    return lhs.residencyPolicy.cacheProtectionRank
+                        < rhs.residencyPolicy.cacheProtectionRank
+                }
                 let lhsExpired = policy.isPastRetention(
                     lastUsedAt: lhs.lastUsedAt,
                     now: now
@@ -543,5 +609,49 @@ final class WebsiteCacheCleanupCoordinator {
                 }
                 return lhs.identity.storageKey < rhs.identity.storageKey
             }
+    }
+
+    private func isColdRun(_ mode: RunMode) -> Bool {
+        if case .cold = mode { return true }
+        return false
+    }
+
+    private func drainPendingColdCleanupIfPossible() {
+        guard !isTerminating,
+              coldCleanupTask == nil,
+              !isOperationInProgress,
+              !pendingColdCleanupIdentities.isEmpty else {
+            return
+        }
+
+        coldCleanupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.coldCleanupTask = nil }
+
+            while !Task.isCancelled,
+                  !self.isTerminating,
+                  !self.pendingColdCleanupIdentities.isEmpty {
+                guard !self.isOperationInProgress,
+                      let identity = self.pendingColdCleanupIdentities.popFirst()
+                else { return }
+
+                do {
+                    _ = try await self.run(
+                        policy: self.preferencesStore.websiteCachePolicy,
+                        now: Date(),
+                        mode: .cold(identity)
+                    )
+                } catch WebsiteCacheManagementError.operationAlreadyRunning {
+                    // The active operation will call this drain method from
+                    // its defer after releasing the serialization gate.
+                    self.pendingColdCleanupIdentities.insert(identity)
+                    return
+                } catch {
+                    // A Cold request is best effort. The next lifecycle
+                    // release or automatic pass can retry it; failures must
+                    // never be represented as a successful cleanup.
+                }
+            }
+        }
     }
 }

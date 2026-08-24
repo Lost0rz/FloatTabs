@@ -675,6 +675,33 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(lifecycle.pendingColdReleaseCount, 0)
     }
 
+    func testColdLifecycleNotifiesOnlyAfterWebViewRuntimeIsReleased() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "ColdCacheRelease")
+        profile.residencyPolicy = .cold
+        _ = try pool.webView(for: profile)
+        let container = WebPanelContainerView(frame: NSRect(x: 0, y: 0, width: 430, height: 820))
+        var notifiedProfile: WebAppProfile?
+        var poolWasStillResidentAtNotification = true
+        let lifecycle = SlotLifecycleCoordinator(
+            webViewPool: pool,
+            container: container,
+            coldReleaseDelay: 0.01,
+            onRuntimeReleased: { releasedProfile in
+                notifiedProfile = releasedProfile
+                poolWasStillResidentAtNotification = pool.contains(slotID: releasedProfile.id)
+            },
+            installsMemoryPressureSource: false
+        )
+
+        lifecycle.activate(profile: profile)
+        lifecycle.deactivate(profile: profile)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(notifiedProfile?.id, profile.id)
+        XCTAssertFalse(poolWasStillResidentAtNotification)
+    }
+
     func testColdLifecycleActivationCancelsPendingRelease() async throws {
         let pool = makePool()
         var profile = makeProfile(name: "ColdCancel")
@@ -1171,17 +1198,27 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsScriptedCrossSitePopupInCurrentSlot() throws {
+    func testPopupRoutingPreservesScriptedCrossSitePopupContext() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
             targetURL: URL(string: "https://accounts.example-idp.com/oauth")
         )
 
+        XCTAssertEqual(result, .popup)
+    }
+
+    func testPopupRoutingKeepsScriptedVideoPageInCurrentSlot() throws {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://v.qq.com/"),
+            targetURL: URL(string: "https://v.qq.com/x/cover/abc/video.html")
+        )
+
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsAboutBlankInCurrentSlot() throws {
+    func testPopupRoutingKeepsOrdinaryScriptedAboutBlankInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://example.com"),
@@ -1191,7 +1228,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testPopupRoutingKeepsMissingInitialURLInCurrentSlot() throws {
+    func testPopupRoutingKeepsScriptedMissingInitialURLInCurrentSlot() throws {
         let result = PopupCoordinator.disposition(
             navigationType: .other,
             sourceURL: URL(string: "https://v.qq.com"),
@@ -1201,14 +1238,37 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(result, .currentSlot)
     }
 
-    func testWindowOpenScriptForcesWebDestinationsIntoCurrentSlot() throws {
-        let script = PopupCoordinator.currentSlotWindowOpenScript()
+    func testPopupRoutingPreservesGoogleAuthenticationPopup() throws {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://gemini.google.com/"),
+            targetURL: URL(string: "https://accounts.google.com/o/oauth2/v2/auth")
+        )
 
-        XCTAssertEqual(script.injectionTime, .atDocumentStart)
-        XCTAssertFalse(script.isForMainFrameOnly)
-        XCTAssertTrue(script.source.contains("window.location.assign"))
-        XCTAssertTrue(script.source.contains("about:blank"))
-        XCTAssertTrue(script.source.contains("return window"))
+        XCTAssertEqual(result, .popup)
+    }
+
+    func testPopupRoutingPreservesBlankAuthenticationChildPopup() throws {
+        let result = PopupCoordinator.disposition(
+            navigationType: .other,
+            sourceURL: URL(string: "https://example-idp.com/login"),
+            targetURL: URL(string: "about:blank")
+        )
+
+        XCTAssertEqual(result, .popup)
+    }
+
+    func testAuthenticationURLClassifierDoesNotTreatTencentVideoAsLogin() throws {
+        XCTAssertFalse(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://v.qq.com/x/cover/abc/video.html")
+            )
+        )
+        XCTAssertTrue(
+            PopupCoordinator.isAuthenticationURL(
+                URL(string: "https://v.qq.com/login")
+            )
+        )
     }
 
     func testPopupRoutingHandsNonWebSchemeToSystem() throws {

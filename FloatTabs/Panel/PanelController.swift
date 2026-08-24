@@ -56,12 +56,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
+    private weak var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
     private var transientUIConstraints: [NSLayoutConstraint] = []
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
         container: rootView.webPanelContainerView,
+        coldReleaseDelay: preferencesStore.coldWebViewReleaseDelay,
+        warmReleaseDelay: preferencesStore.warmWebViewRetentionDelay,
+        onRuntimeReleased: { [weak self] profile in
+            self?.handleRuntimeReleased(profile)
+        },
         attentionProtectionQuery: { [weak self] slotID in
             self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
         }
@@ -97,6 +103,32 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var isVisible: Bool {
         requestedVisibility
+    }
+
+    /// The status item and global shortcut normally toggle the requested
+    /// visibility. During a WebKit fullscreen exit, however, requested state
+    /// can briefly be true while the shell is physically ordered out. Treat
+    /// that transition as hidden so the next shortcut re-presents the shell
+    /// instead of hiding an already invisible window.
+    var isPresentationActuallyVisible: Bool {
+        panel.isVisible
+    }
+
+    static func shouldPresentAfterToggle(shellIsVisible: Bool) -> Bool {
+        !shellIsVisible
+    }
+
+    func toggleFloatTabs() {
+        fullscreenExperimentLog(
+            "TOGGLE_REQUEST requested=\(requestedVisibility) "
+                + "actual=\(panel.isVisible) "
+                + "session=\(sourceHostController.sessionState.rawValue)"
+        )
+        if Self.shouldPresentAfterToggle(shellIsVisible: panel.isVisible) {
+            showFloatTabs()
+        } else {
+            hideFloatTabs()
+        }
     }
 
     /// AppCoordinator uses this edge-triggered callback to wake the persisted
@@ -309,6 +341,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func showFloatTabs() {
         let presentationUptime = ProcessInfo.processInfo.systemUptime
+        fullscreenExperimentLog(
+            "SHOW_REQUEST requestedBefore=\(requestedVisibility) "
+                + "session=\(sourceHostController.sessionState.rawValue) "
+                + "panelVisible=\(panel.isVisible)"
+        )
         lastPresentationUptime = presentationUptime
         workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
         updateRequestedVisibility(true)
@@ -346,7 +383,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // ordering the cross-Space shell left that context on the previously
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
-        focusActiveWebViewIfAvailable()
+        focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
         if NSApp.isActive {
             needsFocusAfterApplicationActivation = false
         }
@@ -368,6 +405,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func hideFloatTabs() {
         let wasVisible = requestedVisibility
+        fullscreenExperimentLog(
+            "HIDE_REQUEST requestedBefore=\(wasVisible) "
+                + "session=\(sourceHostController.sessionState.rawValue) "
+                + "panelVisible=\(panel.isVisible)"
+        )
         updateRequestedVisibility(false)
         if wasVisible { onPanelBecameHidden?() }
         needsFocusAfterApplicationActivation = false
@@ -437,7 +479,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         )
 
-        return WebsiteCacheCleanupCoordinator(
+        let coordinator = WebsiteCacheCleanupCoordinator(
             preferencesStore: preferencesStore,
             usageStore: usageStore,
             service: service,
@@ -463,6 +505,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 self?.restoreAfterWebsiteCacheCleanup()
             }
         )
+        websiteCacheCleanupCoordinator = coordinator
+        return coordinator
     }
 
     func websiteDataStore(for identity: BrowserProfileIdentity) throws -> WKWebsiteDataStore {
@@ -473,6 +517,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         usageStore: WebsiteCacheUsageStore?
     ) -> [WebsiteCacheProfileSnapshot] {
         var lastUsedByIdentity: [BrowserProfileIdentity: Date] = [:]
+        var residencyByIdentity: [BrowserProfileIdentity: SlotResidencyPolicy] = [:]
         var identities = Set<BrowserProfileIdentity>([.default])
 
         for profile in tabStore.profiles {
@@ -481,6 +526,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             lastUsedByIdentity[identity] = max(
                 lastUsedByIdentity[identity] ?? .distantPast,
                 profile.lastUsedAt
+            )
+            let existingResidency = residencyByIdentity[identity] ?? .cold
+            residencyByIdentity[identity] = SlotResidencyPolicy.mostProtective(
+                existingResidency,
+                profile.residencyPolicy
             )
         }
         for browserProfile in tabStore.browserProfiles {
@@ -502,9 +552,20 @@ final class PanelController: NSObject, NSWindowDelegate {
                     ?? entry.lastUsedAt
                     ?? .distantPast,
                 useCount: entry.useCount30Days,
-                isActive: identity == activeIdentity
+                isActive: identity == activeIdentity,
+                residencyPolicy: residencyByIdentity[identity] ?? .warm
             )
         }
+    }
+
+    private func handleRuntimeReleased(_ profile: WebAppProfile) {
+        guard profile.residencyPolicy == .cold else { return }
+        let identity = BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
+
+        // Cache is shared at Browser Profile scope. Do not clear it while a
+        // sibling Tab using the same store still has a live WebView runtime.
+        guard webViewPool.residentSlotIDs(using: identity).isEmpty else { return }
+        websiteCacheCleanupCoordinator?.requestColdCleanup(for: identity)
     }
 
     private func prepareForWebsiteCacheCleanup(
@@ -1045,6 +1106,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         var snapshot: [String: Any] = [
             "visible": isVisible,
+            "shell_visible": panel.isVisible,
+            "shell_screen": fullscreenExperimentScreenID(panel.screen),
+            "source_visible": sourceHostController.window.isVisible,
+            "source_screen": fullscreenExperimentScreenID(sourceHostController.window.screen),
+            "source_parented_to_shell": sourceHostController.window.parent === panel,
+            "source_key": sourceHostController.window.isKeyWindow,
             "pinned": isPinned,
             "profiles": profiles,
             "resident_slot_count": webViewPool.count,
@@ -1262,6 +1329,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: .floatTabsFixedWindowSizeDidChange,
             object: preferencesStore
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(slotRetentionPreferenceDidChange(_:)),
+            name: .floatTabsSlotRetentionDidChange,
+            object: preferencesStore
+        )
     }
 
     @objc private func appearancePreferenceDidChange(_ notification: Notification) {
@@ -1302,6 +1375,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     @objc private func fixedWindowSizeDidChange(_ notification: Notification) {
         guard preferencesStore.windowSizeMode == .fixed else { return }
         applySharedFixedViewport(preferencesStore.fixedViewportSize, animated: panel.isVisible)
+    }
+
+    @objc private func slotRetentionPreferenceDidChange(_ notification: Notification) {
+        slotLifecycleCoordinator.updateReleaseDelays(
+            coldReleaseDelay: preferencesStore.coldWebViewReleaseDelay,
+            warmReleaseDelay: preferencesStore.warmWebViewRetentionDelay
+        )
     }
 
     private func synchronizePreferencePresentation() {
@@ -1377,7 +1457,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
         }
         rail.onSetResidency = { [weak self] id, policy in
-            _ = self?.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy)
+            guard let self,
+                  self.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
+                  let updatedProfile = self.tabStore.profiles.first(where: { $0.id == id }) else {
+                return
+            }
+            // If a Slot was already cold/detached when its label changes to
+            // Cold, there will be no later lifecycle release callback. Apply
+            // the same safe fast-path immediately; the coordinator still
+            // revalidates the current aggregate residency for the shared
+            // Browser Profile.
+            self.handleRuntimeReleased(updatedProfile)
         }
         rail.onSetBackgroundMedia = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
@@ -1665,7 +1755,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         acknowledgeAttentionIfActuallyVisible(slotID: activeSlotID)
     }
 
-    private func focusActiveWebViewIfAvailable() {
+    private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
         guard !addressOverlayView.isPresented else { return }
         if sourceHostController.isSessionLocked {
             if let webView = sourceHostController.companionContainer.currentWebView {
@@ -1674,7 +1764,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         sourceHostController.orderFrontAndFocus(
-            rootView.webPanelContainerView.currentWebView
+            rootView.webPanelContainerView.currentWebView,
+            makeSourceWindowMain: makeSourceWindowMain
         )
     }
 
@@ -2033,7 +2124,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         } else {
             panel.orderFrontRegardless()
-            focusActiveWebViewIfAvailable()
+            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
         }
         // Completes the deferred presentation half of showFloatTabs.
         acknowledgeActiveAttentionIfActuallyPresented()

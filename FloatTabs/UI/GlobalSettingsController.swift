@@ -170,6 +170,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             to: tabs
         )
         addTab(
+            title: "Performance",
+            symbol: "gauge.with.dots.needle.67percent",
+            controller: PerformanceSettingsViewController(
+                preferencesStore: preferencesStore,
+                websiteCacheManager: websiteCacheManager
+            ),
+            to: tabs
+        )
+        addTab(
             title: "Notifications",
             symbol: "bell.badge",
             controller: NotificationsSettingsViewController(
@@ -190,8 +199,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             controller: AccountLanguageSettingsViewController(
                 onExportBackup: onExportBackup,
                 onRestoreBackup: onRestoreBackup,
-                browserProfileManager: browserProfileManager,
-                websiteCacheManager: websiteCacheManager
+                browserProfileManager: browserProfileManager
             ),
             to: tabs
         )
@@ -935,6 +943,10 @@ private final class ShortcutsSettingsViewController: NSViewController {
 
 enum AppReleaseInfo {
     static let latestFixes = [
+        "Fullscreen presentation now follows the display where FloatTabs is explicitly summoned, without changing the stable restore path.",
+        "Authentication-only popups preserve Google/OAuth login flows; ordinary pages and video links stay in the current Tab.",
+        "Hot, Warm, and Cold Tab residency controls are configurable, and Cold Tabs release their WebView and safe cache like bookmarks.",
+        "Website Storage moved to Performance settings with persisted Warm/Cold retention controls.",
         "Browser Profiles: keep multiple independent logins for the same site without signing out and back in.",
         "Each Profile is its own private login/session container; the built-in Default Profile keeps your existing sessions exactly as they are.",
         "Create, rename, and color-code Profiles, and see the active Tab tinted with its Profile color.",
@@ -1000,15 +1012,12 @@ private final class ProfileDeleteTooltipView: NSView {
 }
 
 @MainActor
-final class AccountLanguageSettingsViewController: NSViewController {
-    private let onExportBackup: GlobalSettingsController.ExportBackupHandler
-    private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
-    private let browserProfileManager: BrowserProfileManagementClient
+final class PerformanceSettingsViewController: NSViewController {
+    private let preferencesStore: AppPreferencesStore
     private let websiteCacheManager: WebsiteCacheManagementClient
 
-    private let profileRowsStack = NSStackView()
-    private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
-    private let profileSupportLabel = NSTextField(wrappingLabelWithString: "")
+    private let warmRetentionPopup = NSPopUpButton()
+    private let coldReleasePopup = NSPopUpButton()
     private let websiteCacheUsageLabel = NSTextField(labelWithString: "Unavailable")
     private let websiteCacheLastCleanupLabel = NSTextField(labelWithString: "Never")
     private let websiteCacheAutomaticSwitch = NSSwitch()
@@ -1021,29 +1030,18 @@ final class AccountLanguageSettingsViewController: NSViewController {
     private var isWebsiteCacheMeasurementInFlight = false
     private var websiteCacheMeasurementSequence = 0
 
-    // Read-only derived seams keep UI tests focused on the injected snapshot;
-    // they are never used as an authoritative Profile model.
-    private(set) var displayedBrowserProfileNames: [String] = []
-    private(set) var displayedBrowserProfileColors: [BrowserProfileColor] = []
-    private(set) var displayedBrowserProfileActionTitles: [[String]] = []
-    private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
-    private(set) var displayedBrowserProfileDeleteToolTips: [String?] = []
-    private(set) var isNewProfileEnabled = false
-    private(set) var profileSupportDescription = ""
     private(set) var displayedWebsiteCacheUsage = "Unavailable"
     private(set) var displayedWebsiteCacheLastCleanup = "Never"
     private(set) var isReleaseCacheEnabled = false
     private(set) var websiteCacheResultMessage = ""
+    private(set) var displayedWarmRetention = WarmWebViewRetentionOption.twoMinutes.displayName
+    private(set) var displayedColdRelease = ColdWebViewReleaseOption.thirtySeconds.displayName
 
     init(
-        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
-        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
-        browserProfileManager: BrowserProfileManagementClient = .unavailable,
+        preferencesStore: AppPreferencesStore,
         websiteCacheManager: WebsiteCacheManagementClient = .unavailable
     ) {
-        self.onExportBackup = onExportBackup
-        self.onRestoreBackup = onRestoreBackup
-        self.browserProfileManager = browserProfileManager
+        self.preferencesStore = preferencesStore
         self.websiteCacheManager = websiteCacheManager
         super.init(nibName: nil, bundle: nil)
     }
@@ -1070,33 +1068,21 @@ final class AccountLanguageSettingsViewController: NSViewController {
         document.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = document
 
-        let exportButton = NSButton(
-            title: "Export Backup…",
-            target: self,
-            action: #selector(exportBackup)
-        )
-        let restoreButton = NSButton(
-            title: "Restore Backup…",
-            target: self,
-            action: #selector(restoreBackup)
-        )
-        let actions = NSStackView(views: [exportButton, restoreButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 10
+        warmRetentionPopup.addItems(withTitles: WarmWebViewRetentionOption.allCases.map(\.displayName))
+        for (index, option) in WarmWebViewRetentionOption.allCases.enumerated() {
+            warmRetentionPopup.item(at: index)?.representedObject = option.rawValue
+        }
+        warmRetentionPopup.target = self
+        warmRetentionPopup.action = #selector(warmRetentionChanged(_:))
+        warmRetentionPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
-        profileRowsStack.orientation = .vertical
-        profileRowsStack.alignment = .leading
-        profileRowsStack.spacing = 6
-
-        profileSupportLabel.font = .systemFont(ofSize: 12)
-        profileSupportLabel.textColor = .secondaryLabelColor
-        profileSupportLabel.maximumNumberOfLines = 0
-        profileSupportLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
-
-        newProfileButton.target = self
-        newProfileButton.action = #selector(createProfile)
-        newProfileButton.bezelStyle = .rounded
+        coldReleasePopup.addItems(withTitles: ColdWebViewReleaseOption.allCases.map(\.displayName))
+        for (index, option) in ColdWebViewReleaseOption.allCases.enumerated() {
+            coldReleasePopup.item(at: index)?.representedObject = option.rawValue
+        }
+        coldReleasePopup.target = self
+        coldReleasePopup.action = #selector(coldReleaseChanged(_:))
+        coldReleasePopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
 
         websiteCacheAutomaticSwitch.target = self
         websiteCacheAutomaticSwitch.action = #selector(websiteCacheAutomaticChanged(_:))
@@ -1133,21 +1119,17 @@ final class AccountLanguageSettingsViewController: NSViewController {
         websiteCacheResultLabel.maximumNumberOfLines = 0
         websiteCacheResultLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
 
-        let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
-        versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        versionLabel.textColor = .labelColor
-
         let stack = NSStackView(views: [
-            sectionTitle("Account"),
+            sectionTitle("Tab Residency"),
             detailLabel(
-                "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
+                "Residency controls how much runtime state a Tab keeps. Hot stays attached, Warm keeps its WebView for a configurable idle period, and Cold behaves like a bookmark: it releases the WebView and rebuilds the page when opened again."
             ),
-            spacer(8),
-            sectionTitle("Profiles"),
-            profileRowsStack,
-            profileSupportLabel,
-            newProfileButton,
-            spacer(8),
+            websiteCacheSettingRow("Warm WebView retention", control: warmRetentionPopup),
+            websiteCacheSettingRow("Cold release delay", control: coldReleasePopup),
+            detailLabel(
+                "Choose Hot, Warm, or Cold for each Tab from its Tab menu. A Browser Profile shared by multiple Tabs uses the most protective setting for cache decisions."
+            ),
+            spacer(10),
             sectionTitle("Website Storage"),
             detailLabel(
                 "FloatTabs only releases re-downloadable webpage caches. Cookies, login state, Local Storage, IndexedDB and other persistent website data are kept."
@@ -1160,28 +1142,9 @@ final class AccountLanguageSettingsViewController: NSViewController {
             releaseWebsiteCacheButton,
             websiteCacheResultLabel,
             spacer(8),
-            sectionTitle("Backup & Restore"),
             detailLabel(
-                "Backups include Profile definitions and each Web App’s selected Profile, along with Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
+                "Cache size is an estimate of FloatTabs-owned WebKit cache directories. If the layout is unavailable or unsafe to identify, FloatTabs continues time-based cleanup and reports the size as Unavailable."
             ),
-            detailLabel(
-                "Website passwords, cookies, OAuth/login sessions, WebKit website data/caches, and page runtime state are not exported. After restoring on another Mac, you may need to sign in again for each Profile."
-            ),
-            actions,
-            detailLabel(
-                "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
-            ),
-            spacer(10),
-            sectionTitle("Language"),
-            detailLabel(
-                "A per-app language override is not exposed in V1. No non-functional language selector is shown."
-            ),
-            spacer(14),
-            sectionTitle("About FloatTabs"),
-            versionLabel,
-            detailLabel("Latest fixes in this build:"),
-            detailLabel(AppReleaseInfo.latestFixesDisplay),
-            spacer(8),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -1207,14 +1170,14 @@ final class AccountLanguageSettingsViewController: NSViewController {
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
         view = root
-        refreshProfiles()
+        refreshPerformanceSettings()
         refreshWebsiteCache()
         startWebsiteCacheMeasurement()
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        refreshProfiles()
+        refreshPerformanceSettings()
         refreshWebsiteCache()
         startWebsiteCacheMeasurement()
     }
@@ -1225,6 +1188,16 @@ final class AccountLanguageSettingsViewController: NSViewController {
         isWebsiteCacheMeasurementInFlight = false
         websiteCacheMeasurementSequence += 1
         super.viewWillDisappear()
+    }
+
+    func refreshPerformanceSettings() {
+        guard isViewLoaded else { return }
+        let warm = WarmWebViewRetentionOption(seconds: preferencesStore.warmWebViewRetentionDelay)
+        let cold = ColdWebViewReleaseOption(seconds: preferencesStore.coldWebViewReleaseDelay)
+        displayedWarmRetention = warm.displayName
+        displayedColdRelease = cold.displayName
+        warmRetentionPopup.selectItem(withTitle: warm.displayName)
+        coldReleasePopup.selectItem(withTitle: cold.displayName)
     }
 
     func refreshWebsiteCache() {
@@ -1261,11 +1234,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
     }
 
     private func startWebsiteCacheMeasurement() {
-        guard websiteCacheManager.isAvailable else { return }
-        // loadView and viewWillAppear both run for one presentation; a
-        // single measurement per presentation keeps one detached directory
-        // scan in flight instead of leaving cancelled walks behind.
-        guard !isWebsiteCacheMeasurementInFlight else { return }
+        guard websiteCacheManager.isAvailable, !isWebsiteCacheMeasurementInFlight else { return }
         isWebsiteCacheMeasurementInFlight = true
         websiteCacheMeasurementSequence += 1
         let sequence = websiteCacheMeasurementSequence
@@ -1281,11 +1250,24 @@ final class AccountLanguageSettingsViewController: NSViewController {
     }
 
     private func endWebsiteCacheMeasurement(sequence: Int) {
-        // A straggler from a previous presentation (or an already-cancelled
-        // walk draining after viewWillDisappear) must not clear the flag of
-        // the measurement that replaced it.
         guard websiteCacheMeasurementSequence == sequence else { return }
         isWebsiteCacheMeasurementInFlight = false
+    }
+
+    @objc private func warmRetentionChanged(_ sender: NSPopUpButton) {
+        guard let raw = (sender.selectedItem?.representedObject as? NSNumber)?.intValue
+                ?? (sender.selectedItem?.representedObject as? Int),
+              let option = WarmWebViewRetentionOption(rawValue: raw) else { return }
+        preferencesStore.warmWebViewRetentionDelay = option.seconds
+        refreshPerformanceSettings()
+    }
+
+    @objc private func coldReleaseChanged(_ sender: NSPopUpButton) {
+        guard let raw = (sender.selectedItem?.representedObject as? NSNumber)?.intValue
+                ?? (sender.selectedItem?.representedObject as? Int),
+              let option = ColdWebViewReleaseOption(rawValue: raw) else { return }
+        preferencesStore.coldWebViewReleaseDelay = option.seconds
+        refreshPerformanceSettings()
     }
 
     @objc private func websiteCacheAutomaticChanged(_ sender: NSSwitch) {
@@ -1309,9 +1291,7 @@ final class AccountLanguageSettingsViewController: NSViewController {
               let option = WebsiteCacheLimitOption(rawValue: raw) else { return }
         var policy = websiteCacheManager.snapshot().policy
         policy.maximumEstimatedBytes = option.bytes
-        policy.targetEstimatedBytes = WebsiteCachePolicy.targetEstimatedBytes(
-            forMaximum: option.bytes
-        )
+        policy.targetEstimatedBytes = WebsiteCachePolicy.targetEstimatedBytes(forMaximum: option.bytes)
         websiteCacheManager.updatePolicy(policy)
         refreshWebsiteCache()
     }
@@ -1369,6 +1349,186 @@ final class AccountLanguageSettingsViewController: NSViewController {
             return "Cache released from \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s). Size unavailable."
         }
         return "Estimated usage: \(formatByteCount(result.estimatedBytesBefore)) → \(formatByteCount(result.estimatedBytesAfter)). Released \(released) across \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s)."
+    }
+
+    private func sectionTitle(_ text: String) -> NSTextField {
+        let value = NSTextField(labelWithString: text)
+        value.font = .systemFont(ofSize: 13, weight: .semibold)
+        return value
+    }
+
+    private func detailLabel(_ text: String) -> NSTextField {
+        let value = NSTextField(wrappingLabelWithString: text)
+        value.font = .systemFont(ofSize: 12)
+        value.textColor = .secondaryLabelColor
+        value.maximumNumberOfLines = 0
+        value.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
+        return value
+    }
+
+    private func websiteCacheSettingRow(_ text: String, control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 16
+        return row
+    }
+
+    private func spacer(_ height: CGFloat) -> NSView {
+        let view = NSView()
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
+    }
+}
+
+@MainActor
+final class AccountLanguageSettingsViewController: NSViewController {
+    private let onExportBackup: GlobalSettingsController.ExportBackupHandler
+    private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
+    private let browserProfileManager: BrowserProfileManagementClient
+
+    private let profileRowsStack = NSStackView()
+    private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
+    private let profileSupportLabel = NSTextField(wrappingLabelWithString: "")
+
+    // Read-only derived seams keep UI tests focused on the injected snapshot;
+    // they are never used as an authoritative Profile model.
+    private(set) var displayedBrowserProfileNames: [String] = []
+    private(set) var displayedBrowserProfileColors: [BrowserProfileColor] = []
+    private(set) var displayedBrowserProfileActionTitles: [[String]] = []
+    private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
+    private(set) var displayedBrowserProfileDeleteToolTips: [String?] = []
+    private(set) var isNewProfileEnabled = false
+    private(set) var profileSupportDescription = ""
+
+    init(
+        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
+        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
+        browserProfileManager: BrowserProfileManagementClient = .unavailable
+    ) {
+        self.onExportBackup = onExportBackup
+        self.onRestoreBackup = onRestoreBackup
+        self.browserProfileManager = browserProfileManager
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let root = NSView()
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
+
+        let exportButton = NSButton(
+            title: "Export Backup…",
+            target: self,
+            action: #selector(exportBackup)
+        )
+        let restoreButton = NSButton(
+            title: "Restore Backup…",
+            target: self,
+            action: #selector(restoreBackup)
+        )
+        let actions = NSStackView(views: [exportButton, restoreButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 10
+
+        profileRowsStack.orientation = .vertical
+        profileRowsStack.alignment = .leading
+        profileRowsStack.spacing = 6
+
+        profileSupportLabel.font = .systemFont(ofSize: 12)
+        profileSupportLabel.textColor = .secondaryLabelColor
+        profileSupportLabel.maximumNumberOfLines = 0
+        profileSupportLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
+
+        newProfileButton.target = self
+        newProfileButton.action = #selector(createProfile)
+        newProfileButton.bezelStyle = .rounded
+
+        let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
+        versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        versionLabel.textColor = .labelColor
+
+        let stack = NSStackView(views: [
+            sectionTitle("Account"),
+            detailLabel(
+                "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
+            ),
+            spacer(8),
+            sectionTitle("Profiles"),
+            profileRowsStack,
+            profileSupportLabel,
+            newProfileButton,
+            spacer(8),
+            sectionTitle("Backup & Restore"),
+            detailLabel(
+                "Backups include Profile definitions and each Web App’s selected Profile, along with Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
+            ),
+            detailLabel(
+                "Website passwords, cookies, OAuth/login sessions, WebKit website data/caches, and page runtime state are not exported. After restoring on another Mac, you may need to sign in again for each Profile."
+            ),
+            actions,
+            detailLabel(
+                "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
+            ),
+            spacer(10),
+            sectionTitle("Language"),
+            detailLabel(
+                "A per-app language override is not exposed in V1. No non-functional language selector is shown."
+            ),
+            spacer(14),
+            sectionTitle("About FloatTabs"),
+            versionLabel,
+            detailLabel("Latest fixes in this build:"),
+            detailLabel(AppReleaseInfo.latestFixesDisplay),
+            spacer(8),
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        root.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
+        ])
+        view = root
+        refreshProfiles()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        refreshProfiles()
     }
 
     /// Refreshes from the injected authority every time Settings appears and
@@ -1816,17 +1976,6 @@ final class AccountLanguageSettingsViewController: NSViewController {
         value.maximumNumberOfLines = 0
         value.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
         return value
-    }
-
-    private func websiteCacheSettingRow(_ text: String, control: NSView) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12)
-        label.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        let row = NSStackView(views: [label, control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 16
-        return row
     }
 
     private func spacer(_ height: CGFloat) -> NSView {

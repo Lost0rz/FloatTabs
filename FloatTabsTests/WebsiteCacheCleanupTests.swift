@@ -114,6 +114,158 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(cleaned.values, [oldID])
     }
 
+    func testAutomaticCleanupSkipsHotResidencyButCleansWarmResidency() async throws {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.websiteCachePolicy = WebsiteCachePolicy(
+            retentionDays: 30,
+            maximumEstimatedBytes: nil,
+            targetEstimatedBytes: 0
+        )
+        let usage = WebsiteCacheUsageStore(defaults: defaults)
+        let hot = BrowserProfileIdentity.custom(UUID())
+        let warm = BrowserProfileIdentity.custom(UUID())
+        let now = Date(timeIntervalSince1970: 11_000_000)
+        let cleaned = IdentityBox()
+        let coordinator = makeCoordinator(
+            preferences: preferences,
+            usage: usage,
+            service: makeService(cleaned: cleaned),
+            profiles: {
+                [
+                    WebsiteCacheProfileSnapshot(
+                        identity: hot,
+                        lastUsedAt: now.addingTimeInterval(-90 * 86_400),
+                        useCount: 1,
+                        isActive: false,
+                        residencyPolicy: .hot
+                    ),
+                    WebsiteCacheProfileSnapshot(
+                        identity: warm,
+                        lastUsedAt: now.addingTimeInterval(-90 * 86_400),
+                        useCount: 1,
+                        isActive: false,
+                        residencyPolicy: .warm
+                    )
+                ]
+            }
+        )
+
+        let result = try await coordinator.runAutomaticIfNeeded(now: now)
+
+        XCTAssertEqual(result?.cleanedProfileCount, 1)
+        XCTAssertEqual(cleaned.values, [warm])
+    }
+
+    func testManualReleaseCanExplicitlyClearHotResidency() async throws {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.websiteCachePolicy = WebsiteCachePolicy(
+            retentionDays: nil,
+            maximumEstimatedBytes: nil
+        )
+        let usage = WebsiteCacheUsageStore(defaults: defaults)
+        let hot = BrowserProfileIdentity.custom(UUID())
+        let cleaned = IdentityBox()
+        let coordinator = makeCoordinator(
+            preferences: preferences,
+            usage: usage,
+            service: makeService(cleaned: cleaned),
+            profiles: {
+                [WebsiteCacheProfileSnapshot(
+                    identity: hot,
+                    lastUsedAt: Date(),
+                    useCount: 10,
+                    isActive: false,
+                    residencyPolicy: .hot
+                )]
+            }
+        )
+
+        _ = try await coordinator.runManualRelease()
+
+        XCTAssertEqual(cleaned.values, [hot])
+    }
+
+    func testColdCleanupRequestRunsAfterRuntimeReleaseWithoutWaitingForTTL() async throws {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.websiteCachePolicy = WebsiteCachePolicy(
+            retentionDays: 90,
+            maximumEstimatedBytes: nil
+        )
+        let usage = WebsiteCacheUsageStore(defaults: defaults)
+        let cold = BrowserProfileIdentity.custom(UUID())
+        let cleaned = IdentityBox()
+        let coordinator = makeCoordinator(
+            preferences: preferences,
+            usage: usage,
+            service: makeService(cleaned: cleaned),
+            profiles: {
+                [WebsiteCacheProfileSnapshot(
+                    identity: cold,
+                    lastUsedAt: Date(),
+                    useCount: 100,
+                    isActive: false,
+                    residencyPolicy: .cold
+                )]
+            }
+        )
+        defer { coordinator.stop() }
+
+        coordinator.requestColdCleanup(for: cold)
+        for _ in 0..<10_000 where cleaned.values.isEmpty {
+            await Task.yield()
+        }
+        for _ in 0..<10_000 where coordinator.isOperationInProgress {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(cleaned.values, [cold])
+        XCTAssertNotNil(usage.lastSuccessfulCleanupAt)
+    }
+
+    func testColdCleanupRemainsCompleteWhenPeriodicAutomaticManagementIsDisabled() async throws {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.websiteCachePolicy = WebsiteCachePolicy(
+            automaticCleanupEnabled: false,
+            retentionDays: 90,
+            maximumEstimatedBytes: nil
+        )
+        let usage = WebsiteCacheUsageStore(defaults: defaults)
+        let cold = BrowserProfileIdentity.custom(UUID())
+        let cleaned = IdentityBox()
+        let coordinator = makeCoordinator(
+            preferences: preferences,
+            usage: usage,
+            service: makeService(cleaned: cleaned),
+            profiles: {
+                [WebsiteCacheProfileSnapshot(
+                    identity: cold,
+                    lastUsedAt: Date(),
+                    useCount: 1,
+                    isActive: false,
+                    residencyPolicy: .cold
+                )]
+            }
+        )
+        defer { coordinator.stop() }
+
+        coordinator.requestColdCleanup(for: cold)
+        for _ in 0..<10_000 where cleaned.values.isEmpty {
+            await Task.yield()
+        }
+        for _ in 0..<10_000 where coordinator.isOperationInProgress {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(cleaned.values, [cold])
+        XCTAssertNotNil(usage.lastSuccessfulCleanupAt)
+    }
+
+    func testSharedProfileUsesMostProtectiveResidencyLevel() {
+        XCTAssertEqual(SlotResidencyPolicy.mostProtective(.cold, .warm), .warm)
+        XCTAssertEqual(SlotResidencyPolicy.mostProtective(.warm, .hot), .hot)
+        XCTAssertEqual(SlotResidencyPolicy.mostProtective(.hot, .cold), .hot)
+    }
+
     func testAutomaticChecksAreThrottledForTwentyFourHours() async throws {
         let preferences = AppPreferencesStore(defaults: defaults)
         preferences.websiteCachePolicy = WebsiteCachePolicy(
@@ -438,9 +590,8 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
                 )
             }
         )
-        let controller = AccountLanguageSettingsViewController(
-            onExportBackup: { _ in },
-            onRestoreBackup: { _ in URL(fileURLWithPath: "/tmp/rollback.json") },
+        let controller = PerformanceSettingsViewController(
+            preferencesStore: AppPreferencesStore(defaults: defaults),
             websiteCacheManager: manager
         )
 
@@ -459,7 +610,7 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
         manager.updatePolicy(changedPolicy)
         XCTAssertEqual(policy.retentionDays, 90)
 
-        let message = AccountLanguageSettingsViewController.cleanupResultText(
+        let message = PerformanceSettingsViewController.cleanupResultText(
             WebsiteCacheCleanupResult(
                 estimatedBytesBefore: 2_000,
                 estimatedBytesAfter: 1_000,
@@ -510,6 +661,18 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
                 automaticCleanupEnabled: false
             )
         )
+    }
+
+    func testPerformanceSettingsShowsResidencyDefaultsAndStoredChoices() {
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.warmWebViewRetentionDelay = 600
+        preferences.coldWebViewReleaseDelay = 120
+
+        let controller = PerformanceSettingsViewController(preferencesStore: preferences)
+        controller.loadView()
+
+        XCTAssertEqual(controller.displayedWarmRetention, "10 minutes")
+        XCTAssertEqual(controller.displayedColdRelease, "2 minutes")
     }
 
     func testAutomaticCollisionUsesPositiveRetryWithoutUpdatingSuccessTime() {
@@ -1452,9 +1615,8 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
             },
             releaseCache: { throw WebsiteCacheManagementError.unavailable }
         )
-        let controller = AccountLanguageSettingsViewController(
-            onExportBackup: { _ in },
-            onRestoreBackup: { _ in throw TestError.injected },
+        let controller = PerformanceSettingsViewController(
+            preferencesStore: AppPreferencesStore(defaults: defaults),
             websiteCacheManager: manager
         )
         controller.loadView()
@@ -1963,9 +2125,8 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
             },
             releaseCache: { throw WebsiteCacheManagementError.unavailable }
         )
-        let controller = AccountLanguageSettingsViewController(
-            onExportBackup: { _ in },
-            onRestoreBackup: { _ in throw TestError.injected },
+        let controller = PerformanceSettingsViewController(
+            preferencesStore: AppPreferencesStore(defaults: defaults),
             websiteCacheManager: manager
         )
 
@@ -1999,9 +2160,8 @@ final class WebsiteCacheCleanupTests: XCTestCase, @unchecked Sendable {
             },
             releaseCache: { throw WebsiteCacheManagementError.unavailable }
         )
-        let controller = AccountLanguageSettingsViewController(
-            onExportBackup: { _ in },
-            onRestoreBackup: { _ in throw TestError.injected },
+        let controller = PerformanceSettingsViewController(
+            preferencesStore: AppPreferencesStore(defaults: defaults),
             websiteCacheManager: manager
         )
 

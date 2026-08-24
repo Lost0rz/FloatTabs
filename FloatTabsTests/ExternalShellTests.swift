@@ -139,6 +139,23 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(panel.canBecomeKey)
     }
 
+    func testFullscreenCompanionMovesWithTheActiveFullscreenSpace() {
+        let panel = FloatingPanel(
+            contentRect: NSRect(x: 20, y: 20, width: 688, height: 844)
+        )
+
+        panel.setFullscreenCompanionPresentation(true)
+
+        XCTAssertTrue(panel.collectionBehavior.contains(.moveToActiveSpace))
+        XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(panel.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
+    func testToggleUsesPhysicalShellVisibilityDuringTransitions() {
+        XCTAssertTrue(PanelController.shouldPresentAfterToggle(shellIsVisible: false))
+        XCTAssertFalse(PanelController.shouldPresentAfterToggle(shellIsVisible: true))
+    }
+
     func testFullscreenSourceIsGroupedWithShellOutsideFullscreen() {
         let shell = FloatingPanel(contentRect: NSRect(x: 20, y: 20, width: 688, height: 844))
         let host = FullscreenSourceHostController(
@@ -150,6 +167,9 @@ final class ExternalShellTests: XCTestCase {
 
         XCTAssertTrue(host.window.parent === shell)
         XCTAssertTrue(shell.childWindows?.contains(where: { $0 === host.window }) == true)
+
+        host.window.parent?.removeChildWindow(host.window)
+        XCTAssertNil(host.window.parent)
     }
 
     func testWebFocusPreservesWebKitsExistingInternalResponder() {
@@ -235,6 +255,23 @@ final class ExternalShellTests: XCTestCase {
         state = .next(from: state, webKitState: .notInFullscreen)
         XCTAssertEqual(state, .restoring)
         XCTAssertTrue(state.locksSourceHost)
+    }
+
+    func testFullscreenSourceSessionCanStartASecondEntryAfterAnIncompleteRestore() {
+        XCTAssertEqual(
+            FullscreenSourceSessionState.next(
+                from: .restoring,
+                webKitState: .enteringFullscreen
+            ),
+            .entering
+        )
+        XCTAssertEqual(
+            FullscreenSourceSessionState.next(
+                from: .restoring,
+                webKitState: .inFullscreen
+            ),
+            .fullscreen
+        )
     }
 
     func testSourceHostFrameMatchesOnlyTheWebViewport() {

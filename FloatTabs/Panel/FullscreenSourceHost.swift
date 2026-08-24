@@ -361,7 +361,10 @@ final class FullscreenSourceHostController {
         }
     }
 
-    func orderFrontAndFocus(_ webView: WKWebView?) {
+    func orderFrontAndFocus(
+        _ webView: WKWebView?,
+        makeSourceWindowMain: Bool = false
+    ) {
         guard !isSessionLocked else { return }
         attachSourceWindowToShell()
         window.alphaValue = 1
@@ -374,6 +377,15 @@ final class FullscreenSourceHostController {
         if let webView {
             observeFullscreenState(of: webView)
             window.makeKeyAndOrderFront(nil)
+            if makeSourceWindowMain {
+                // WebKit chooses the element-fullscreen display from the
+                // source window's AppKit main/key context. The source frame
+                // has already been positioned by PanelController on the
+                // user's invocation display. Limit makeMain to explicit user
+                // presentation; restore callbacks must not change AppKit's
+                // main-window transaction while WebKit tears down its Space.
+                window.makeMain()
+            }
             WebViewFocus.focus(webView, in: window)
         }
     }

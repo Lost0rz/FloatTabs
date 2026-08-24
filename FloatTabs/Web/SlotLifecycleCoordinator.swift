@@ -17,23 +17,26 @@ final class SlotLifecycleCoordinator {
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
+    typealias RuntimeReleasedHandler = @MainActor (WebAppProfile) -> Void
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
 
     private struct InactivePlan {
         let token: UUID
+        let profile: WebAppProfile
         let residencyPolicy: SlotResidencyPolicy
         let backgroundMediaPolicy: BackgroundMediaPolicy
     }
 
     private let webViewPool: WebViewPool
     private unowned let container: WebPanelContainerView
-    private let coldReleaseDelay: TimeInterval
-    private let warmReleaseDelay: TimeInterval
+    private var coldReleaseDelay: TimeInterval
+    private var warmReleaseDelay: TimeInterval
     private let hiddenActiveGraceDelay: TimeInterval
     private let mediaProtectionPollDelay: TimeInterval
     private let warmResidentLimit: Int
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
+    private let onRuntimeReleased: RuntimeReleasedHandler
     private let attentionProtectionQuery: AttentionProtectionQuery
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
@@ -57,6 +60,7 @@ final class SlotLifecycleCoordinator {
         warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
+        onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
         attentionProtectionQuery: @escaping AttentionProtectionQuery = { _ in false },
         installsMemoryPressureSource: Bool = true
     ) {
@@ -77,10 +81,44 @@ final class SlotLifecycleCoordinator {
         self.mediaPauseAction = mediaPauseAction ?? { [weak webViewPool] slotID in
             webViewPool?.pauseMediaPlayback(slotID: slotID)
         }
+        self.onRuntimeReleased = onRuntimeReleased
         self.attentionProtectionQuery = attentionProtectionQuery
 
         if installsMemoryPressureSource {
             configureMemoryPressureSource()
+        }
+    }
+
+    func updateReleaseDelays(
+        coldReleaseDelay: TimeInterval,
+        warmReleaseDelay: TimeInterval
+    ) {
+        let normalizedColdDelay = max(coldReleaseDelay, 0)
+        let normalizedWarmDelay = max(warmReleaseDelay, 0)
+        guard normalizedColdDelay != self.coldReleaseDelay
+                || normalizedWarmDelay != self.warmReleaseDelay else {
+            return
+        }
+
+        self.coldReleaseDelay = normalizedColdDelay
+        self.warmReleaseDelay = normalizedWarmDelay
+
+        // Existing dispatch work cannot be cancelled independently. Recreate
+        // only inactive Warm/Cold plans so a preference change takes effect
+        // immediately and old deadlines cannot release a Slot early.
+        let profiles = inactivePlans.values.map(\.profile)
+        for profile in profiles {
+            guard profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
+                  webViewPool.contains(slotID: profile.id),
+                  !isVisibleSlot(profile.id) else {
+                continue
+            }
+            let preserveMediaProtection = mediaProtectedSlotIDs.contains(profile.id)
+            cancelInactivePlan(
+                slotID: profile.id,
+                preservingMediaProtection: preserveMediaProtection
+            )
+            createInactivePlan(for: profile, resetWarmRecency: false)
         }
     }
 
@@ -335,7 +373,8 @@ final class SlotLifecycleCoordinator {
     ) {
         if let existing = inactivePlans[profile.id],
            existing.residencyPolicy == profile.residencyPolicy,
-           existing.backgroundMediaPolicy == profile.backgroundMediaPolicy {
+           existing.backgroundMediaPolicy == profile.backgroundMediaPolicy,
+           existing.profile.browserProfileID == profile.browserProfileID {
             return
         }
 
@@ -349,6 +388,7 @@ final class SlotLifecycleCoordinator {
     ) {
         let plan = InactivePlan(
             token: UUID(),
+            profile: profile,
             residencyPolicy: profile.residencyPolicy,
             backgroundMediaPolicy: profile.backgroundMediaPolicy
         )
@@ -551,6 +591,7 @@ final class SlotLifecycleCoordinator {
         container.removeSlot(slotID)
         webViewPool.release(slotID: slotID)
         cancelInactivePlan(slotID: slotID)
+        onRuntimeReleased(currentPlan.profile)
     }
 
     private func cancelInactivePlan(

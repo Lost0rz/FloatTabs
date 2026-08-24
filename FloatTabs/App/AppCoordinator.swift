@@ -133,7 +133,9 @@ final class AppCoordinator {
             onWillShow: { [weak self] in
                 self?.panelController.prepareForStatusItemPresentation()
             },
-            isVisible: { [weak self] in self?.panelController.isVisible ?? false },
+            isVisible: { [weak self] in
+                self?.panelController.isPresentationActuallyVisible ?? false
+            },
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) },
             preferencesStore: preferencesStore
@@ -577,11 +579,7 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs() {
-        if panelController.isVisible {
-            panelController.hideFloatTabs()
-        } else {
-            panelController.showFloatTabs()
-        }
+        panelController.toggleFloatTabs()
     }
 
     private static func presentConfigurationSaveFailure() {

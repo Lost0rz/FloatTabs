@@ -90,6 +90,18 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxY, visible.maxY)
     }
 
+    func testClampingToPreferredDisplayMovesFrameOffThePreviousDisplay() {
+        let displayA = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let displayB = NSRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let frameOnB = NSRect(x: 1700, y: 100, width: 688, height: 844)
+
+        let moved = ScreenPositioning.clampedFrame(frameOnB, to: displayA)
+
+        XCTAssertGreaterThanOrEqual(moved.minX, displayA.minX)
+        XCTAssertLessThanOrEqual(moved.maxX, displayA.maxX)
+        XCTAssertFalse(moved.intersects(displayB))
+    }
+
     func testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible() {
         let visible = NSRect(x: 0, y: 0, width: 1600, height: 1200)
         let current = NSRect(x: 200, y: 220, width: 518, height: 844)

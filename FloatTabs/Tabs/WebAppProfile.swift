@@ -16,12 +16,29 @@ enum SlotResidencyPolicy: String, Codable, CaseIterable, Equatable {
     var detailText: String {
         switch self {
         case .hot:
-            return "Keep the live WebView attached. FloatTabs does not proactively evict it."
+            return "Keep the live WebView attached. Cache is not automatically released; manual Release Cache remains available."
         case .warm:
-            return "Cache recent inactive WebViews; release after 2 minutes, beyond the two-Slot Warm cache, or under memory pressure."
+            return "Keep recent inactive WebViews; runtime release follows the Warm limit, and cache follows the Website Storage retention setting."
         case .cold:
-            return "Release 30 seconds after leaving the Slot; a selected hidden Slot gets a short recent-active grace first."
+            return "Release 30 seconds after leaving the Slot; once detached, its safe website cache is released promptly."
         }
+    }
+
+    /// A Browser Profile can be shared by multiple Tabs. The most protective
+    /// Tab wins so a Hot Tab cannot be evicted indirectly by a Cold sibling.
+    var cacheProtectionRank: Int {
+        switch self {
+        case .cold: return 0
+        case .warm: return 1
+        case .hot: return 2
+        }
+    }
+
+    static func mostProtective(
+        _ lhs: SlotResidencyPolicy,
+        _ rhs: SlotResidencyPolicy
+    ) -> SlotResidencyPolicy {
+        lhs.cacheProtectionRank >= rhs.cacheProtectionRank ? lhs : rhs
     }
 }
 

@@ -4,6 +4,7 @@ import WebKit
 
 enum NewBrowsingContextDisposition: Equatable {
     case currentSlot
+    case popup
     case externalBrowser
 }
 
@@ -222,10 +223,15 @@ final class LinkContextMenuCoordinator: NSObject, WKScriptMessageHandler {
 ///
 /// Navigation Intent rules:
 ///
-/// - every automatic HTTP(S) or about:blank context stays in the current Slot;
+/// - user-activated HTTP(S) links stay in the current Slot;
+/// - only script-created authentication/authorization contexts get a real
+///   popup so OAuth flows retain their opener and never replace the parent page;
+/// - ordinary script-created pages, video pages, and about:blank contexts stay
+///   in the current Slot;
 /// - non-web schemes are handed to the system;
 /// - the default browser is used for web links only through the explicit context-menu action;
-/// - only the explicit context-menu action may create a floating Web window.
+/// - only explicit context-menu actions may create a FloatTabs-owned popup for
+///   non-authentication pages.
 @MainActor
 final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
     typealias ExternalOpenHandler = (URL) -> Void
@@ -250,7 +256,6 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         self.uploadCoordinator = uploadCoordinator ?? UploadCoordinator()
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         super.init()
-        installCurrentSlotWindowOpenPolicy(on: parentWebView)
         installExplicitLinkContextMenu(on: parentWebView)
     }
 
@@ -259,64 +264,73 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         sourceURL: URL?,
         targetURL: URL?
     ) -> NewBrowsingContextDisposition {
-        guard let targetURL else { return .currentSlot }
+        _ = navigationType
+
+        guard let targetURL else {
+            return isAuthenticationURL(sourceURL) ? .popup : .currentSlot
+        }
 
         let scheme = targetURL.scheme?.lowercased()
         if scheme == "about" {
-            return .currentSlot
+            // OAuth providers often create an about:blank child first and
+            // navigate it immediately afterwards. Keep that child floating
+            // only when its opener is itself an authentication flow.
+            return isAuthenticationURL(sourceURL) ? .popup : .currentSlot
         }
 
         guard WebNavigationCoordinator.isWebURL(targetURL) else {
             return .externalBrowser
         }
 
-        _ = navigationType
-        _ = sourceURL
-        return .currentSlot
+        return isAuthenticationURL(targetURL) ? .popup : .currentSlot
     }
 
-    /// Makes the JavaScript form of `window.open` obey the same current-Slot
-    /// contract as WKUIDelegate. Returning the current Window also covers the
-    /// common `const child = open('about:blank'); child.location = url` pattern.
-    static func currentSlotWindowOpenScript() -> WKUserScript {
-        WKUserScript(
-            source: """
-            (() => {
-              if (window.__floatTabsCurrentSlotOpenInstalled) return;
-              window.__floatTabsCurrentSlotOpenInstalled = true;
+    /// Identifies a login/OAuth handoff without treating every new browsing
+    /// context as a separate window. This is deliberately URL-based and
+    /// conservative: ordinary video/detail/share URLs remain in the current
+    /// Tab, while common IdP hosts and explicit auth path components retain a
+    /// real opener window.
+    static func isAuthenticationURL(_ url: URL?) -> Bool {
+        guard let url,
+              WebNavigationCoordinator.isWebURL(url) else {
+            return false
+        }
 
-              const nativeOpen = window.open.bind(window);
-              const openInCurrentSlot = function(url, target, features) {
-                const raw = url == null ? '' : String(url);
-                if (!raw || raw.toLowerCase() === 'about:blank') {
-                  return window;
-                }
+        let host = url.host?.lowercased() ?? ""
+        let knownAuthenticationHosts = [
+            "accounts.google.com",
+            "appleid.apple.com",
+            "auth.openai.com",
+            "github.com",
+            "login.microsoftonline.com",
+            "login.live.com",
+        ]
+        if knownAuthenticationHosts.contains(host)
+            || host.hasPrefix("auth.")
+            || host.hasPrefix("login.")
+            || host.hasPrefix("signin.")
+            || host.hasPrefix("sso.") {
+            return true
+        }
 
-                try {
-                  const destination = new URL(raw, document.baseURI);
-                  if (destination.protocol === 'http:' || destination.protocol === 'https:') {
-                    window.location.assign(destination.href);
-                    return window;
-                  }
-                } catch (_) {}
-
-                return nativeOpen(url, target, features);
-              };
-
-              try {
-                Object.defineProperty(window, 'open', {
-                  configurable: true,
-                  writable: true,
-                  value: openInCurrentSlot
-                });
-              } catch (_) {
-                window.open = openInCurrentSlot;
-              }
-            })();
-            """,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        )
+        let authenticationPathComponents: Set<String> = [
+            "auth",
+            "authenticate",
+            "authentication",
+            "authorize",
+            "authorization",
+            "login",
+            "oauth",
+            "oauth2",
+            "saml",
+            "sign-in",
+            "signin",
+            "sso",
+        ]
+        return url.path
+            .split(separator: "/")
+            .map { $0.lowercased() }
+            .contains(where: authenticationPathComponents.contains)
     }
 
     /// Returns the user-visible FloatTabs viewport for a source WebView.
@@ -359,6 +373,14 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
                 webView.load(navigationAction.request)
             }
             return nil
+
+        case .popup:
+            return makePopupWebView(
+                configuration: configuration,
+                sourceWebView: webView,
+                targetURL: targetURL,
+                windowFeatures: windowFeatures
+            )
 
         case .externalBrowser:
             if let targetURL {
@@ -438,6 +460,11 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
             return
         }
 
+        // A popup can own a WebKit media presentation independently of its
+        // AppKit panel. End that presentation before dropping our last native
+        // reference, otherwise audio can continue after the close button has
+        // removed the visible window.
+        webView.closeAllMediaPresentations(completionHandler: nil)
         let id = ObjectIdentifier(webView)
         userFloatingPanels.removeValue(forKey: id)
         linkContextCoordinators.removeValue(forKey: id)?.invalidate()
@@ -482,7 +509,6 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         floatingWebView.allowsBackForwardNavigationGestures = true
         floatingWebView.uiDelegate = self
         floatingWebView.navigationDelegate = self
-        installCurrentSlotWindowOpenPolicy(on: floatingWebView)
         installExplicitLinkContextMenu(on: floatingWebView)
 
         let sourceSize = Self.visibleSourceSize(for: sourceWebView)
@@ -534,13 +560,67 @@ final class PopupCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, NSWi
         linkContextCoordinators[id] = coordinator
     }
 
-    private func installCurrentSlotWindowOpenPolicy(on webView: WKWebView) {
-        webView.configuration.userContentController.addUserScript(
-            Self.currentSlotWindowOpenScript()
+    private func makePopupWebView(
+        configuration: WKWebViewConfiguration,
+        sourceWebView: WKWebView,
+        targetURL: URL?,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView {
+        // WebKit supplies this configuration for the new browsing context. It
+        // carries the opener's process pool and website data store, which is
+        // essential for Google OAuth to complete in the same Browser Profile.
+        let popupWebView = FloatTabsWebView(frame: .zero, configuration: configuration)
+        popupWebView.customUserAgent = sourceWebView.customUserAgent
+        popupWebView.allowsBackForwardNavigationGestures = true
+        popupWebView.uiDelegate = self
+        popupWebView.navigationDelegate = self
+        if let source = sourceWebView as? FloatTabsWebView {
+            popupWebView.setRendering(
+                websiteMode: source.websiteMode,
+                userPageZoom: source.userPageZoom
+            )
+        }
+        // WebKit's configuration for a newly-created browsing context carries
+        // the opener's userContentController. The parent already registered
+        // `floatTabsLinkContext` on that controller, so registering the same
+        // handler again raises an Objective-C exception and aborts the app
+        // (this is especially easy to hit when Google/X OAuth opens a popup).
+        // The inherited script and handler continue to deliver messages with
+        // `message.webView` set to this popup, so no second coordinator is
+        // needed here.
+
+        let sourceSize = Self.visibleSourceSize(for: sourceWebView)
+        let width = max(windowFeatures.width?.doubleValue ?? sourceSize.width, 430)
+        let height = max(windowFeatures.height?.doubleValue ?? sourceSize.height, 560)
+        let panel = NSPanel(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: width,
+                height: height
+            ),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
         )
+        panel.title = targetURL?.host ?? "Sign In"
+        panel.contentView = popupWebView
+        panel.isReleasedWhenClosed = false
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.level = sourceWebView.window?.level ?? .floating
+        panel.collectionBehavior = sourceWebView.window?.collectionBehavior
+            ?? [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.delegate = self
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+
+        userFloatingPanels[ObjectIdentifier(popupWebView)] = panel
+        return popupWebView
     }
 
     private func close(webView: WKWebView, restoreFocus: Bool) {
+        webView.closeAllMediaPresentations(completionHandler: nil)
         let id = ObjectIdentifier(webView)
         let userPanel = userFloatingPanels.removeValue(forKey: id)
         linkContextCoordinators.removeValue(forKey: id)?.invalidate()
