@@ -2,7 +2,7 @@
 
 Release date: 2026-08-24
 
-Build: **8**
+Build: **9**
 
 ## Summary
 
@@ -36,10 +36,16 @@ v0.2.1 completes the WebKit cache governance feature and makes cache usage measu
 - Permission, unsafe-path, unsupported-layout, and unknown IO failures remain unavailable and are logged by category without website paths or origins.
 - Settings measurement is deduplicated per presentation and remains cancellable off the MainActor.
 
+### Website icon discovery
+
+- Favicon loading now reads standard HTML `link rel="icon"` declarations, including relative, absolute, CDN-hosted, SVG, PNG, and Apple touch icons.
+- The conventional `/favicon.ico` endpoint remains the fast path, with safe fallback paths for sites that omit an HTML declaration.
+
 ## Validation
 
 - Website cache tests: **55/55**, 0 failures, repeated three times.
-- Full local XCTest: **619/619**, 0 failures.
+- External shell/favicon tests: **78/78**, 0 failures.
+- Full local XCTest: **621/621**, 0 failures.
 - Release configuration and Universal 2 DMG verification: PASS.
 
 ## Distribution

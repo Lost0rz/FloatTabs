@@ -1445,6 +1445,93 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testFaviconProviderDiscoversRelativeAbsoluteAndAppleTouchIcons() {
+        let baseURL = URL(string: "https://gemini.google.com/app")!
+        let html = """
+        <!doctype html>
+        <head>
+          <base href="https://gemini.google.com/">
+          <link rel="preconnect" href="https://www.gstatic.com">
+          <link rel="icon" type="image/svg+xml" href="icons/gemini.svg">
+          <link rel="icon" type="image/png" href="https://www.gstatic.com/gemini.png">
+          <link rel="apple-touch-icon" href="/touch-icon.png">
+          <link rel="icon" href="javascript:alert(1)">
+        </head>
+        """
+
+        XCTAssertEqual(
+            WebsiteFaviconProvider.discoveredFaviconURLs(
+                in: html,
+                baseURL: baseURL
+            ).map(\.absoluteString),
+            [
+                "https://gemini.google.com/icons/gemini.svg",
+                "https://www.gstatic.com/gemini.png",
+                "https://gemini.google.com/touch-icon.png",
+            ]
+        )
+    }
+
+    func testFaviconProviderFallsBackToHeadLinksWhenFaviconEndpointIsNotAnImage() async {
+        let pageURL = URL(string: "https://gemini.google.com/app")!
+        let svgURL = URL(string: "https://www.gstatic.com/gemini.svg")!
+        let pngURL = URL(string: "https://www.gstatic.com/gemini.png")!
+        let html = """
+        <link rel="icon" type="image/svg+xml" href="\(svgURL.absoluteString)">
+        <link rel="icon" type="image/png" href="\(pngURL.absoluteString)">
+        """
+        let image = NSImage(size: NSSize(width: 16, height: 16))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 16, height: 16).fill()
+        image.unlockFocus()
+        let imageData = try! XCTUnwrap(image.tiffRepresentation)
+        var requestedURLs: [URL] = []
+
+        let provider = WebsiteFaviconProvider(dataLoader: { request in
+            let requestURL = try XCTUnwrap(request.url)
+            requestedURLs.append(requestURL)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: requestURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )
+            )
+            if requestURL.path == "/favicon.ico"
+                || requestURL.path == "/favicon.png"
+                || requestURL.path == "/favicon.svg"
+                || requestURL.path == "/apple-touch-icon.png"
+                || requestURL.path == "/apple-touch-icon-precomposed.png" {
+                return (Data(), response)
+            }
+            if requestURL == pageURL {
+                return (Data(html.utf8), response)
+            }
+            if requestURL == svgURL {
+                return (Data("not an image".utf8), response)
+            }
+            if requestURL == pngURL {
+                return (imageData, response)
+            }
+            throw URLError(.fileDoesNotExist)
+        })
+
+        let loaded = expectation(description: "favicon loaded")
+        var loadedImage: NSImage?
+        provider.load(for: pageURL) { image in
+            loadedImage = image
+            loaded.fulfill()
+        }
+
+        await fulfillment(of: [loaded], timeout: 2)
+        XCTAssertNotNil(loadedImage)
+        XCTAssertEqual(requestedURLs.last, pngURL)
+        XCTAssertTrue(requestedURLs.contains(pageURL))
+        XCTAssertTrue(requestedURLs.contains(svgURL))
+    }
+
     func testMoveCursorRectsUseSameGeometryAsWindowDrag() {
         let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         let topPoint = NSPoint(

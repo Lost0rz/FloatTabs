@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import Foundation
 import KeyboardShortcuts
 import QuartzCore
 
@@ -851,10 +852,23 @@ extension BrowserProfileColor {
 
 @MainActor
 final class WebsiteFaviconProvider {
+    typealias DataLoader = @MainActor @Sendable (
+        URLRequest
+    ) async throws -> (Data, URLResponse)
+
     static let shared = WebsiteFaviconProvider()
 
+    private let dataLoader: DataLoader
     private var cache: [String: NSImage] = [:]
     private var failedOrigins = Set<String>()
+
+    init(
+        dataLoader: @escaping DataLoader = { request in
+            try await URLSession.shared.data(for: request)
+        }
+    ) {
+        self.dataLoader = dataLoader
+    }
 
     static func originKey(for url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
@@ -864,18 +878,72 @@ final class WebsiteFaviconProvider {
     }
 
     static func faviconURL(for url: URL) -> URL? {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme != nil,
-              components.host != nil else { return nil }
-        components.path = "/favicon.ico"
-        components.query = nil
-        components.fragment = nil
-        return components.url
+        iconURL(path: "/favicon.ico", for: url)
+    }
+
+    static func fallbackFaviconURLs(for url: URL) -> [URL] {
+        [
+            "/favicon.ico",
+            "/favicon.png",
+            "/favicon.svg",
+            "/apple-touch-icon.png",
+            "/apple-touch-icon-precomposed.png",
+        ].compactMap { iconURL(path: $0, for: url) }
+    }
+
+    /// Extracts the normal HTML favicon declarations without requiring a
+    /// third-party favicon service. The parser is intentionally limited to
+    /// link elements and http(s) URLs; it never executes page content.
+    static func discoveredFaviconURLs(
+        in html: String,
+        baseURL: URL
+    ) -> [URL] {
+        let linkPattern = #"(?is)<link\b[^>]*>"#
+        let attributePattern = #"(?i)([A-Za-z][A-Za-z0-9:_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#
+        guard let linkRegex = try? NSRegularExpression(pattern: linkPattern),
+              let attributeRegex = try? NSRegularExpression(pattern: attributePattern) else {
+            return []
+        }
+
+        let baseHref = linkAttribute(
+            named: "href",
+            in: firstTag(matching: #"(?is)<base\b[^>]*>"#, html: html),
+            using: attributeRegex
+        )
+        let documentBaseURL = baseHref
+            .flatMap { URL(string: $0, relativeTo: baseURL)?.absoluteURL }
+            ?? baseURL
+
+        var result: [URL] = []
+        var seen = Set<String>()
+        let htmlRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        for match in linkRegex.matches(in: html, range: htmlRange) {
+            guard let tagRange = Range(match.range, in: html) else { continue }
+            let tag = String(html[tagRange])
+            let attributes = linkAttributes(in: tag, using: attributeRegex)
+            let relTokens = (attributes["rel"] ?? "")
+                .lowercased()
+                .split { $0.isWhitespace }
+                .map(String.init)
+            let isIcon = relTokens.contains("icon")
+                || relTokens.contains("apple-touch-icon")
+                || relTokens.contains("apple-touch-icon-precomposed")
+                || relTokens.contains("mask-icon")
+            guard isIcon,
+                  let href = attributes["href"],
+                  let candidate = URL(string: href, relativeTo: documentBaseURL)?.absoluteURL,
+                  isHTTPURL(candidate) else {
+                continue
+            }
+            let key = candidate.absoluteString
+            guard seen.insert(key).inserted else { continue }
+            result.append(candidate)
+        }
+        return result
     }
 
     func load(for url: URL, completion: @escaping (NSImage?) -> Void) {
-        guard let key = Self.originKey(for: url),
-              let faviconURL = Self.faviconURL(for: url) else {
+        guard let key = Self.originKey(for: url) else {
             completion(nil)
             return
         }
@@ -890,29 +958,172 @@ final class WebsiteFaviconProvider {
 
         Task { [weak self] in
             guard let self else { return }
-            do {
-                var request = URLRequest(url: faviconURL)
-                request.cachePolicy = .returnCacheDataElseLoad
-                request.timeoutInterval = 8
-                let (data, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse,
-                   !(200..<300).contains(http.statusCode) {
-                    failedOrigins.insert(key)
-                    completion(nil)
-                    return
-                }
-                guard let image = NSImage(data: data) else {
-                    failedOrigins.insert(key)
-                    completion(nil)
-                    return
-                }
-                image.size = NSSize(width: 16, height: 16)
-                cache[key] = image
+
+            // Keep the inexpensive and conventional endpoint first. Some
+            // modern sites, including Gemini, return an empty HTML response
+            // from /favicon.ico even though their real icon is declared in
+            // the document head.
+            if let faviconURL = Self.faviconURL(for: url),
+               let image = await self.fetchImage(from: faviconURL) {
+                self.cache[key] = image
                 completion(image)
-            } catch {
-                failedOrigins.insert(key)
-                completion(nil)
+                return
             }
+
+            // Read only the page markup and inspect <link rel="icon">. This
+            // supports absolute/relative, PNG/SVG and cross-origin CDN icons
+            // without executing JavaScript or sharing website cookies.
+            if let (html, response) = await self.fetchPageHTML(for: url) {
+                let pageURL = response.url ?? url
+                let htmlCandidates = Self.discoveredFaviconURLs(
+                    in: html,
+                    baseURL: pageURL
+                )
+                for candidate in htmlCandidates {
+                    if let image = await self.fetchImage(from: candidate) {
+                        self.cache[key] = image
+                        completion(image)
+                        return
+                    }
+                }
+            }
+
+            // A few older sites omit HTML declarations but expose one of
+            // these conventional names. Keep these after HTML discovery so a
+            // slow or unreachable fallback endpoint cannot delay normal pages.
+            for candidate in Self.fallbackFaviconURLs(for: url).dropFirst() {
+                if let image = await self.fetchImage(from: candidate) {
+                    self.cache[key] = image
+                    completion(image)
+                    return
+                }
+            }
+
+            failedOrigins.insert(key)
+            completion(nil)
+        }
+    }
+
+    private static func iconURL(path: String, for url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme != nil,
+              components.host != nil else { return nil }
+        components.path = path
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    private static func isHTTPURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              url.host != nil else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    private static func firstTag(matching pattern: String, html: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: html,
+                range: NSRange(html.startIndex..<html.endIndex, in: html)
+              ),
+              let range = Range(match.range, in: html) else {
+            return nil
+        }
+        return String(html[range])
+    }
+
+    private static func linkAttribute(
+        named name: String,
+        in tag: String?,
+        using regex: NSRegularExpression
+    ) -> String? {
+        guard let tag else { return nil }
+        return linkAttributes(in: tag, using: regex)[name.lowercased()]
+    }
+
+    private static func linkAttributes(
+        in tag: String,
+        using regex: NSRegularExpression
+    ) -> [String: String] {
+        let range = NSRange(tag.startIndex..<tag.endIndex, in: tag)
+        var attributes: [String: String] = [:]
+        for match in regex.matches(in: tag, range: range) {
+            guard let nameRange = Range(match.range(at: 1), in: tag),
+                  let value = attributeValue(from: match, in: tag) else {
+                continue
+            }
+            attributes[String(tag[nameRange]).lowercased()] = value
+        }
+        return attributes
+    }
+
+    private static func attributeValue(
+        from match: NSTextCheckingResult,
+        in tag: String
+    ) -> String? {
+        for index in 2...4 {
+            let range = match.range(at: index)
+            guard range.location != NSNotFound,
+                  let valueRange = Range(range, in: tag) else { continue }
+            return String(tag[valueRange])
+        }
+        return nil
+    }
+
+    private func fetchImage(from url: URL) async -> NSImage? {
+        guard Self.isHTTPURL(url) else { return nil }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .returnCacheDataElseLoad
+        request.timeoutInterval = 8
+        request.setValue(
+            "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            forHTTPHeaderField: "Accept"
+        )
+        do {
+            let (data, response) = try await dataLoader(request)
+            if let http = response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode) {
+                return nil
+            }
+            guard let image = NSImage(data: data) else { return nil }
+            image.size = NSSize(width: 16, height: 16)
+            return image
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetchPageHTML(for url: URL) async -> (String, URLResponse)? {
+        guard Self.isHTTPURL(url) else { return nil }
+        guard var components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        ) else {
+            return nil
+        }
+        // Favicon discovery does not need query tokens or fragments. Avoid
+        // replaying page-specific tracking/session parameters through the
+        // auxiliary URLSession request.
+        components.query = nil
+        components.fragment = nil
+        guard let pageURL = components.url else { return nil }
+        var request = URLRequest(url: pageURL)
+        request.cachePolicy = .returnCacheDataElseLoad
+        request.timeoutInterval = 8
+        request.setValue(
+            "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+            forHTTPHeaderField: "Accept"
+        )
+        do {
+            let (data, response) = try await dataLoader(request)
+            if let http = response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode) {
+                return nil
+            }
+            guard let html = String(data: data, encoding: .utf8) else { return nil }
+            return (html, response)
+        } catch {
+            return nil
         }
     }
 }
