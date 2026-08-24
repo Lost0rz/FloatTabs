@@ -126,6 +126,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
     private let browserProfileManager: BrowserProfileManagementClient
+    private let websiteCacheManager: WebsiteCacheManagementClient
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
@@ -133,13 +134,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
-        browserProfileManager: BrowserProfileManagementClient = .unavailable
+        browserProfileManager: BrowserProfileManagementClient = .unavailable,
+        websiteCacheManager: WebsiteCacheManagementClient = .unavailable
     ) {
         self.preferencesStore = preferencesStore
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
         self.browserProfileManager = browserProfileManager
+        self.websiteCacheManager = websiteCacheManager
         super.init()
     }
 
@@ -187,7 +190,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             controller: AccountLanguageSettingsViewController(
                 onExportBackup: onExportBackup,
                 onRestoreBackup: onRestoreBackup,
-                browserProfileManager: browserProfileManager
+                browserProfileManager: browserProfileManager,
+                websiteCacheManager: websiteCacheManager
             ),
             to: tabs
         )
@@ -1000,10 +1004,22 @@ final class AccountLanguageSettingsViewController: NSViewController {
     private let onExportBackup: GlobalSettingsController.ExportBackupHandler
     private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
     private let browserProfileManager: BrowserProfileManagementClient
+    private let websiteCacheManager: WebsiteCacheManagementClient
 
     private let profileRowsStack = NSStackView()
     private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
     private let profileSupportLabel = NSTextField(wrappingLabelWithString: "")
+    private let websiteCacheUsageLabel = NSTextField(labelWithString: "Unavailable")
+    private let websiteCacheLastCleanupLabel = NSTextField(labelWithString: "Never")
+    private let websiteCacheAutomaticSwitch = NSSwitch()
+    private let websiteCacheRetentionPopup = NSPopUpButton()
+    private let websiteCacheMaximumPopup = NSPopUpButton()
+    private let releaseWebsiteCacheButton = NSButton(title: "Release Cache…", target: nil, action: nil)
+    private let websiteCacheResultLabel = NSTextField(wrappingLabelWithString: "")
+    private var isWebsiteCacheReleaseInProgress = false
+    private var websiteCacheMeasurementTask: Task<Void, Never>?
+    private var isWebsiteCacheMeasurementInFlight = false
+    private var websiteCacheMeasurementSequence = 0
 
     // Read-only derived seams keep UI tests focused on the injected snapshot;
     // they are never used as an authoritative Profile model.
@@ -1014,21 +1030,31 @@ final class AccountLanguageSettingsViewController: NSViewController {
     private(set) var displayedBrowserProfileDeleteToolTips: [String?] = []
     private(set) var isNewProfileEnabled = false
     private(set) var profileSupportDescription = ""
+    private(set) var displayedWebsiteCacheUsage = "Unavailable"
+    private(set) var displayedWebsiteCacheLastCleanup = "Never"
+    private(set) var isReleaseCacheEnabled = false
+    private(set) var websiteCacheResultMessage = ""
 
     init(
         onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
         onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
-        browserProfileManager: BrowserProfileManagementClient = .unavailable
+        browserProfileManager: BrowserProfileManagementClient = .unavailable,
+        websiteCacheManager: WebsiteCacheManagementClient = .unavailable
     ) {
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
         self.browserProfileManager = browserProfileManager
+        self.websiteCacheManager = websiteCacheManager
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        websiteCacheMeasurementTask?.cancel()
     }
 
     override func loadView() {
@@ -1072,6 +1098,41 @@ final class AccountLanguageSettingsViewController: NSViewController {
         newProfileButton.action = #selector(createProfile)
         newProfileButton.bezelStyle = .rounded
 
+        websiteCacheAutomaticSwitch.target = self
+        websiteCacheAutomaticSwitch.action = #selector(websiteCacheAutomaticChanged(_:))
+
+        websiteCacheRetentionPopup.addItems(
+            withTitles: WebsiteCacheRetentionOption.allCases.map(\.displayName)
+        )
+        for (index, option) in WebsiteCacheRetentionOption.allCases.enumerated() {
+            websiteCacheRetentionPopup.item(at: index)?.representedObject = option.rawValue
+        }
+        websiteCacheRetentionPopup.target = self
+        websiteCacheRetentionPopup.action = #selector(websiteCacheRetentionChanged(_:))
+        websiteCacheRetentionPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        websiteCacheMaximumPopup.addItems(
+            withTitles: WebsiteCacheLimitOption.allCases.map(\.displayName)
+        )
+        for (index, option) in WebsiteCacheLimitOption.allCases.enumerated() {
+            websiteCacheMaximumPopup.item(at: index)?.representedObject = option.rawValue
+        }
+        websiteCacheMaximumPopup.target = self
+        websiteCacheMaximumPopup.action = #selector(websiteCacheMaximumChanged(_:))
+        websiteCacheMaximumPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        websiteCacheUsageLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        websiteCacheLastCleanupLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        websiteCacheUsageLabel.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        websiteCacheLastCleanupLabel.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        releaseWebsiteCacheButton.bezelStyle = .rounded
+        releaseWebsiteCacheButton.target = self
+        releaseWebsiteCacheButton.action = #selector(releaseWebsiteCache(_:))
+        websiteCacheResultLabel.font = .systemFont(ofSize: 12)
+        websiteCacheResultLabel.textColor = .secondaryLabelColor
+        websiteCacheResultLabel.maximumNumberOfLines = 0
+        websiteCacheResultLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
+
         let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
         versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         versionLabel.textColor = .labelColor
@@ -1086,6 +1147,18 @@ final class AccountLanguageSettingsViewController: NSViewController {
             profileRowsStack,
             profileSupportLabel,
             newProfileButton,
+            spacer(8),
+            sectionTitle("Website Storage"),
+            detailLabel(
+                "FloatTabs only releases re-downloadable webpage caches. Cookies, login state, Local Storage, IndexedDB and other persistent website data are kept."
+            ),
+            websiteCacheSettingRow("Estimated cache usage", control: websiteCacheUsageLabel),
+            websiteCacheSettingRow("Last cleanup", control: websiteCacheLastCleanupLabel),
+            websiteCacheSettingRow("Automatically manage cache", control: websiteCacheAutomaticSwitch),
+            websiteCacheSettingRow("Remove cache unused for", control: websiteCacheRetentionPopup),
+            websiteCacheSettingRow("Maximum cache usage", control: websiteCacheMaximumPopup),
+            releaseWebsiteCacheButton,
+            websiteCacheResultLabel,
             spacer(8),
             sectionTitle("Backup & Restore"),
             detailLabel(
@@ -1135,11 +1208,167 @@ final class AccountLanguageSettingsViewController: NSViewController {
         ])
         view = root
         refreshProfiles()
+        refreshWebsiteCache()
+        startWebsiteCacheMeasurement()
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
         refreshProfiles()
+        refreshWebsiteCache()
+        startWebsiteCacheMeasurement()
+    }
+
+    override func viewWillDisappear() {
+        websiteCacheMeasurementTask?.cancel()
+        websiteCacheMeasurementTask = nil
+        isWebsiteCacheMeasurementInFlight = false
+        websiteCacheMeasurementSequence += 1
+        super.viewWillDisappear()
+    }
+
+    func refreshWebsiteCache() {
+        guard isViewLoaded else { return }
+        let snapshot = websiteCacheManager.snapshot()
+        switch snapshot.measurementState {
+        case .calculating:
+            displayedWebsiteCacheUsage = "Calculating…"
+        case .available:
+            displayedWebsiteCacheUsage = Self.formatByteCount(snapshot.estimatedBytes)
+        case .unavailable:
+            displayedWebsiteCacheUsage = "Unavailable"
+        }
+        displayedWebsiteCacheLastCleanup = Self.formatDate(snapshot.lastSuccessfulCleanupAt)
+        websiteCacheUsageLabel.stringValue = displayedWebsiteCacheUsage
+        websiteCacheLastCleanupLabel.stringValue = displayedWebsiteCacheLastCleanup
+
+        let retention = WebsiteCacheRetentionOption(days: snapshot.policy.retentionDays)
+        websiteCacheRetentionPopup.selectItem(withTitle: retention.displayName)
+        websiteCacheMaximumPopup.selectItem(
+            withTitle: WebsiteCacheLimitOption(bytes: snapshot.policy.maximumEstimatedBytes).displayName
+        )
+        websiteCacheAutomaticSwitch.state = snapshot.policy.automaticCleanupEnabled ? .on : .off
+
+        let enabled = websiteCacheManager.isAvailable
+            && !snapshot.isOperationInProgress
+            && !isWebsiteCacheReleaseInProgress
+        websiteCacheAutomaticSwitch.isEnabled = websiteCacheManager.isAvailable
+        websiteCacheRetentionPopup.isEnabled = websiteCacheManager.isAvailable
+        websiteCacheMaximumPopup.isEnabled = websiteCacheManager.isAvailable
+        releaseWebsiteCacheButton.isEnabled = enabled
+        isReleaseCacheEnabled = enabled
+        websiteCacheResultLabel.stringValue = websiteCacheResultMessage
+    }
+
+    private func startWebsiteCacheMeasurement() {
+        guard websiteCacheManager.isAvailable else { return }
+        // loadView and viewWillAppear both run for one presentation; a
+        // single measurement per presentation keeps one detached directory
+        // scan in flight instead of leaving cancelled walks behind.
+        guard !isWebsiteCacheMeasurementInFlight else { return }
+        isWebsiteCacheMeasurementInFlight = true
+        websiteCacheMeasurementSequence += 1
+        let sequence = websiteCacheMeasurementSequence
+        websiteCacheManager.beginMeasurement()
+        refreshWebsiteCache()
+        websiteCacheMeasurementTask = Task { @MainActor [weak self] in
+            defer { self?.endWebsiteCacheMeasurement(sequence: sequence) }
+            guard let self else { return }
+            await self.websiteCacheManager.refreshMeasurement()
+            guard !Task.isCancelled else { return }
+            self.refreshWebsiteCache()
+        }
+    }
+
+    private func endWebsiteCacheMeasurement(sequence: Int) {
+        // A straggler from a previous presentation (or an already-cancelled
+        // walk draining after viewWillDisappear) must not clear the flag of
+        // the measurement that replaced it.
+        guard websiteCacheMeasurementSequence == sequence else { return }
+        isWebsiteCacheMeasurementInFlight = false
+    }
+
+    @objc private func websiteCacheAutomaticChanged(_ sender: NSSwitch) {
+        var policy = websiteCacheManager.snapshot().policy
+        policy.automaticCleanupEnabled = sender.state == .on
+        websiteCacheManager.updatePolicy(policy)
+        refreshWebsiteCache()
+    }
+
+    @objc private func websiteCacheRetentionChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let option = WebsiteCacheRetentionOption(rawValue: raw) else { return }
+        var policy = websiteCacheManager.snapshot().policy
+        policy.retentionDays = option.days
+        websiteCacheManager.updatePolicy(policy)
+        refreshWebsiteCache()
+    }
+
+    @objc private func websiteCacheMaximumChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let option = WebsiteCacheLimitOption(rawValue: raw) else { return }
+        var policy = websiteCacheManager.snapshot().policy
+        policy.maximumEstimatedBytes = option.bytes
+        policy.targetEstimatedBytes = WebsiteCachePolicy.targetEstimatedBytes(
+            forMaximum: option.bytes
+        )
+        websiteCacheManager.updatePolicy(policy)
+        refreshWebsiteCache()
+    }
+
+    @objc private func releaseWebsiteCache(_ sender: NSButton) {
+        guard websiteCacheManager.isAvailable,
+              !websiteCacheManager.snapshot().isOperationInProgress,
+              !isWebsiteCacheReleaseInProgress,
+              let window = view.window else { return }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Release Website Cache?"
+        alert.informativeText = "This clears only re-downloadable webpage caches. Cookies, login state and persistent website data are not cleared. Currently open pages may reload."
+        alert.addButton(withTitle: "Release Cache")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            self.isWebsiteCacheReleaseInProgress = true
+            self.websiteCacheResultMessage = "Releasing cache…"
+            self.refreshWebsiteCache()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let result = try await self.websiteCacheManager.releaseCache()
+                    self.websiteCacheResultMessage = Self.cleanupResultText(result)
+                } catch {
+                    self.websiteCacheResultMessage = "Cache release failed: \(error.localizedDescription)"
+                }
+                self.isWebsiteCacheReleaseInProgress = false
+                self.refreshWebsiteCache()
+            }
+        }
+    }
+
+    static func formatByteCount(_ bytes: Int64?) -> String {
+        guard let bytes else { return "Unavailable" }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    static func formatDate(_ date: Date?) -> String {
+        guard let date else { return "Never" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    static func cleanupResultText(_ result: WebsiteCacheCleanupResult) -> String {
+        let released = formatByteCount(result.releasedBytes)
+        if result.estimatedBytesBefore == nil || result.estimatedBytesAfter == nil {
+            return "Cache released from \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s). Size unavailable."
+        }
+        return "Estimated usage: \(formatByteCount(result.estimatedBytesBefore)) → \(formatByteCount(result.estimatedBytesAfter)). Released \(released) across \(result.cleanedProfileCount) Profile(s), \(result.cleanedRecordCount) record(s)."
     }
 
     /// Refreshes from the injected authority every time Settings appears and
@@ -1587,6 +1816,17 @@ final class AccountLanguageSettingsViewController: NSViewController {
         value.maximumNumberOfLines = 0
         value.widthAnchor.constraint(lessThanOrEqualToConstant: 510).isActive = true
         return value
+    }
+
+    private func websiteCacheSettingRow(_ text: String, control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 16
+        return row
     }
 
     private func spacer(_ height: CGFloat) -> NSView {

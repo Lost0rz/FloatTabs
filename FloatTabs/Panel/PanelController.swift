@@ -55,6 +55,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let attentionCoordinator: WebAttentionCoordinator
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
+    private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
     private let addressOverlayView = AddressOverlayView()
     private let zoomHUDView = ZoomHUDView()
     private var transientUIConstraints: [NSLayoutConstraint] = []
@@ -97,6 +98,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     var isVisible: Bool {
         requestedVisibility
     }
+
+    /// AppCoordinator uses this edge-triggered callback to wake the persisted
+    /// automatic cache scheduler. The callback never performs WebKit work on
+    /// the panel's visibility path.
+    var onPanelBecameHidden: (() -> Void)?
 
     /// Local event monitors only receive this process's events, so AppKit's
     /// application-wide active flag is not an additional safety boundary here.
@@ -361,7 +367,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs() {
+        let wasVisible = requestedVisibility
         updateRequestedVisibility(false)
+        if wasVisible { onPanelBecameHidden?() }
         needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -399,7 +407,145 @@ final class PanelController: NSObject, NSWindowDelegate {
         tabStore.storedStateSnapshot()
     }
 
-    func browserProfileManagementClient() -> BrowserProfileManagementClient {
+    /// Builds the cache-management coordinator from the same WebViewPool and
+    /// lifecycle authorities that own normal runtime creation and release.
+    func websiteCacheCleanupCoordinator(
+        preferencesStore: AppPreferencesStore,
+        usageStore: WebsiteCacheUsageStore,
+        sizeMeasurer: WebsiteCacheSizeMeasurer? = nil
+    ) -> WebsiteCacheCleanupCoordinator {
+        websiteCacheUsageStore = usageStore
+        tabStore.onUserProfileUse = { [weak usageStore] browserProfileID, date in
+            usageStore?.recordUse(
+                of: BrowserProfileIdentity(browserProfileID: browserProfileID),
+                at: date
+            )
+        }
+
+        let service = WebsiteCacheCleanupService(
+            dataStoreResolver: { [weak self] identity in
+                guard let self else {
+                    throw WebsiteCacheCleanupServiceError.dataStoreUnavailable
+                }
+                return try self.webViewPool.websiteDataStore(for: identity)
+            }
+        )
+
+        let resolvedSizeMeasurer = sizeMeasurer ?? WebsiteCacheSizeMeasurer(
+            profileIdentifiersProvider: { [weak self] in
+                Set(self?.tabStore.browserProfiles.map(\.id) ?? [])
+            }
+        )
+
+        return WebsiteCacheCleanupCoordinator(
+            preferencesStore: preferencesStore,
+            usageStore: usageStore,
+            service: service,
+            sizeMeasurer: resolvedSizeMeasurer,
+            profilesProvider: { [weak self, weak usageStore] in
+                self?.websiteCacheProfileSnapshots(usageStore: usageStore) ?? []
+            },
+            activeIdentityProvider: { [weak self] in
+                guard let activeProfile = self?.tabStore.activeProfile else { return nil }
+                return BrowserProfileIdentity(browserProfileID: activeProfile.browserProfileID)
+            },
+            panelVisibilityProvider: { [weak self] in self?.isVisible ?? false },
+            prepareRuntime: { [weak self] identity, allowActive in
+                guard let self else {
+                    throw WebsiteCacheManagementError.runtimeStillInUse
+                }
+                try self.prepareForWebsiteCacheCleanup(
+                    identity: identity,
+                    allowActive: allowActive
+                )
+            },
+            restoreRuntime: { [weak self] in
+                self?.restoreAfterWebsiteCacheCleanup()
+            }
+        )
+    }
+
+    func websiteDataStore(for identity: BrowserProfileIdentity) throws -> WKWebsiteDataStore {
+        try webViewPool.websiteDataStore(for: identity)
+    }
+
+    private func websiteCacheProfileSnapshots(
+        usageStore: WebsiteCacheUsageStore?
+    ) -> [WebsiteCacheProfileSnapshot] {
+        var lastUsedByIdentity: [BrowserProfileIdentity: Date] = [:]
+        var identities = Set<BrowserProfileIdentity>([.default])
+
+        for profile in tabStore.profiles {
+            let identity = BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
+            identities.insert(identity)
+            lastUsedByIdentity[identity] = max(
+                lastUsedByIdentity[identity] ?? .distantPast,
+                profile.lastUsedAt
+            )
+        }
+        for browserProfile in tabStore.browserProfiles {
+            identities.insert(.custom(browserProfile.id))
+        }
+        // Usage history is advisory metadata, not an authority for which
+        // Browser Profiles exist. Prune stale UUIDs and never resolve a store
+        // for one of them.
+        usageStore?.prune(keeping: identities)
+
+        let activeIdentity = tabStore.activeProfile.map {
+            BrowserProfileIdentity(browserProfileID: $0.browserProfileID)
+        }
+        return identities.map { identity in
+            let entry = usageStore?.entry(for: identity) ?? .empty
+            return WebsiteCacheProfileSnapshot(
+                identity: identity,
+                lastUsedAt: lastUsedByIdentity[identity]
+                    ?? entry.lastUsedAt
+                    ?? .distantPast,
+                useCount: entry.useCount30Days,
+                isActive: identity == activeIdentity
+            )
+        }
+    }
+
+    private func prepareForWebsiteCacheCleanup(
+        identity: BrowserProfileIdentity,
+        allowActive: Bool
+    ) throws {
+        guard !sourceHostController.isSessionLocked else {
+            throw WebsiteCacheManagementError.runtimeStillInUse
+        }
+
+        let activeIdentity = tabStore.activeProfile.map {
+            BrowserProfileIdentity(browserProfileID: $0.browserProfileID)
+        }
+        if activeIdentity == identity,
+           isVisible,
+           !allowActive {
+            throw WebsiteCacheManagementError.activeProfileProtected
+        }
+
+        for slotID in webViewPool.residentSlotIDs(using: identity) {
+            // The lifecycle coordinator removes the view from its container
+            // before WebViewPool drops the WKWebView and its runtime callbacks.
+            slotLifecycleCoordinator.remove(slotID: slotID)
+            webViewPool.release(slotID: slotID)
+        }
+        guard webViewPool.residentSlotIDs(using: identity).isEmpty else {
+            throw WebsiteCacheManagementError.runtimeStillInUse
+        }
+    }
+
+    private func restoreAfterWebsiteCacheCleanup() {
+        guard !sourceHostController.isSessionLocked else { return }
+        // currentURL was persisted by TabStore before runtime release. The
+        // normal synchronization path therefore restores a safe currentURL or
+        // homeURL without inventing a page-derived URL.
+        synchronizeSlotState()
+    }
+
+    func browserProfileManagementClient(
+        usageStore: WebsiteCacheUsageStore? = nil
+    ) -> BrowserProfileManagementClient {
         BrowserProfileManagementClient(
             snapshot: { [weak self] in
                 self?.browserProfileManagementSnapshot()
@@ -423,7 +569,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             },
             delete: { [weak self] id in
                 guard let self else { throw BrowserProfileManagementError.notFound }
-                try await self.deleteBrowserProfile(id: id)
+                try await self.deleteBrowserProfile(id: id, usageStore: usageStore)
             }
         )
     }
@@ -664,7 +810,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    func deleteBrowserProfile(id: UUID) async throws {
+    func deleteBrowserProfile(
+        id: UUID,
+        usageStore: WebsiteCacheUsageStore? = nil
+    ) async throws {
         guard tabStore.browserProfiles.contains(where: { $0.id == id }) else {
             throw BrowserProfileManagementError.notFound
         }
@@ -690,6 +839,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard tabStore.deleteBrowserProfileMetadata(id: id) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
+        // A profile's operational history is removed only after both WebKit's
+        // public profile-store deletion and metadata persistence succeed. A
+        // failed deletion therefore remains diagnosable and retryable.
+        (usageStore ?? websiteCacheUsageStore)?.removeEntry(for: identity)
     }
 
     /// Backup import must use the same geometry-aware path as the in-app

@@ -27,7 +27,7 @@ enum WebContentRecoveryDisposition: Equatable {
     case deferUntilActivation
 }
 
-enum BrowserProfileIdentity: Equatable {
+enum BrowserProfileIdentity: Equatable, Hashable {
     case `default`
     case custom(UUID)
 
@@ -262,6 +262,12 @@ final class WebViewPool {
 
     func browserProfileIdentity(for slotID: UUID) -> BrowserProfileIdentity? {
         appliedBrowserProfileIdentities[slotID]
+    }
+
+    /// Resolves the same Store used by WebView creation. Cache cleanup must not
+    /// manufacture a second provider or accidentally fall back to Default.
+    func websiteDataStore(for identity: BrowserProfileIdentity) throws -> WKWebsiteDataStore {
+        try browserProfileDataStoreProvider.dataStore(for: identity.browserProfileID)
     }
 
     /// The capability is owned by the provider; the pool only exposes the

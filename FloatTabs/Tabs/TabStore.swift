@@ -9,6 +9,7 @@ final class TabStore {
 
     var onChange: (() -> Void)?
     var onPersistenceFailure: (() -> Void)?
+    var onUserProfileUse: ((UUID?, Date) -> Void)?
 
     private let repository: any ProfileRepositoryProtocol
 
@@ -463,9 +464,13 @@ final class TabStore {
     @discardableResult
     func select(id: UUID, now: Date = Date()) -> Bool {
         guard profiles.contains(where: { $0.id == id }) else { return false }
+        let didChangeActiveTab = activeTabID != id
         activeTabID = id
         touchLastUsed(id: id, now: now)
         persistRuntimeAndNotify()
+        if didChangeActiveTab {
+            onUserProfileUse?(profiles.first(where: { $0.id == id })?.browserProfileID, now)
+        }
         return true
     }
 

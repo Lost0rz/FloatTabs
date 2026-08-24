@@ -234,7 +234,11 @@ final class BrowserProfileSettingsTests: XCTestCase {
         }
         XCTAssertTrue(pool.residentSlotIDs(using: .default).isEmpty)
         XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
-        let controller = makePanelController(store: store, pool: pool)
+        let usageSuite = "FloatTabsTests.ProfileDeletionFailure.\(UUID().uuidString)"
+        let usageDefaults = UserDefaults(suiteName: usageSuite)!
+        let usage = WebsiteCacheUsageStore(defaults: usageDefaults)
+        usage.recordUse(of: .custom(browserProfile.id), at: Date())
+        let controller = makePanelController(store: store, pool: pool, usageStore: usage)
 
         do {
             try await controller.deleteBrowserProfile(id: browserProfile.id)
@@ -249,6 +253,8 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
         XCTAssertTrue(store.browserProfiles.contains(where: { $0.id == browserProfile.id }))
         XCTAssertTrue(repository.events.isEmpty)
+        XCTAssertGreaterThan(usage.entry(for: .custom(browserProfile.id)).useCount30Days, 0)
+        usageDefaults.removePersistentDomain(forName: usageSuite)
     }
 
     func testUnsupportedOSShowsDefaultExplanationAndNeverCallsCreate() {
@@ -297,7 +303,11 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(pool.residentSlotIDs(using: .custom(browserProfile.id)), [slot.id])
 
-        let controller = makePanelController(store: store, pool: pool)
+        let usageSuite = "FloatTabsTests.ProfileDeletionSuccess.\(UUID().uuidString)"
+        let usageDefaults = UserDefaults(suiteName: usageSuite)!
+        let usage = WebsiteCacheUsageStore(defaults: usageDefaults)
+        usage.recordUse(of: .custom(browserProfile.id), at: Date())
+        let controller = makePanelController(store: store, pool: pool, usageStore: usage)
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(pool.residentSlotIDs(using: .custom(browserProfile.id)), [slot.id])
         pool.onResidentSetChange = { events.append("release-runtime") }
@@ -309,6 +319,8 @@ final class BrowserProfileSettingsTests: XCTestCase {
         )
         XCTAssertTrue(pool.residentSlotIDs(using: .custom(browserProfile.id)).isEmpty)
         XCTAssertFalse(store.browserProfiles.contains(where: { $0.id == browserProfile.id }))
+        XCTAssertEqual(usage.entry(for: .custom(browserProfile.id)), .empty)
+        usageDefaults.removePersistentDomain(forName: usageSuite)
     }
 
     func testStaleRuntimeIsReleasedBeforeCustomStoreRemoval() async throws {
@@ -407,13 +419,24 @@ final class BrowserProfileSettingsTests: XCTestCase {
         BrowserProfile(id: UUID(), name: name, createdAt: Date(timeIntervalSince1970: 1))
     }
 
-    private func makePanelController(store: TabStore, pool: WebViewPool) -> PanelController {
+    private func makePanelController(
+        store: TabStore,
+        pool: WebViewPool,
+        usageStore: WebsiteCacheUsageStore? = nil
+    ) -> PanelController {
         let controller = PanelController(
             tabStore: store,
             webViewPool: pool,
             frameStore: PanelFrameStore(),
             preferencesStore: AppPreferencesStore()
         )
+        if let usageStore {
+            _ = controller.websiteCacheCleanupCoordinator(
+                preferencesStore: AppPreferencesStore(),
+                usageStore: usageStore,
+                sizeMeasurer: WebsiteCacheSizeMeasurer(estimate: { nil })
+            )
+        }
         return controller
     }
 

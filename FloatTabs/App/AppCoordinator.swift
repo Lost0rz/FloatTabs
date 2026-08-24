@@ -1,9 +1,17 @@
 import AppKit
 import KeyboardShortcuts
+import OSLog
 import UniformTypeIdentifiers
 
 @MainActor
 final class AppCoordinator {
+    typealias WebsiteCacheClock = @MainActor () -> Date
+    typealias WebsiteCacheSleeper = @MainActor (TimeInterval) async throws -> Void
+
+    private static let websiteCacheLogger = Logger(
+        subsystem: "com.lost0rz.FloatTabs",
+        category: "WebsiteCache"
+    )
     private let panelController: PanelController
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
@@ -11,8 +19,14 @@ final class AppCoordinator {
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
     private let attentionSoundPlayer: AttentionSoundPlaying
+    private let websiteCacheUsageStore: WebsiteCacheUsageStore
+    private let websiteCacheClock: WebsiteCacheClock
+    private let websiteCacheSleeper: WebsiteCacheSleeper
     private let profileRepository: ProfileRepository?
     private var globalSettingsController: GlobalSettingsController?
+    private var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
+    private var websiteCacheAutomaticTask: Task<Void, Never>?
+    private var isTerminating = false
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
     private var lastAttentionReadyCount = 0
 #if DEBUG
@@ -23,7 +37,17 @@ final class AppCoordinator {
         panelController: PanelController? = nil,
         preferencesStore: AppPreferencesStore? = nil,
         backupService: FloatTabsBackupService = FloatTabsBackupService(),
-        attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer()
+        attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
+        websiteCacheClock: @escaping WebsiteCacheClock = Date.init,
+        websiteCacheSleeper: @escaping WebsiteCacheSleeper = { delay in
+            let nanoseconds = UInt64(
+                min(
+                    max(0, delay),
+                    Double(UInt64.max) / 1_000_000_000
+                ) * 1_000_000_000
+            )
+            try await Task.sleep(nanoseconds: nanoseconds)
+        }
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
@@ -34,6 +58,9 @@ final class AppCoordinator {
         self.preferencesStore = resolvedPreferencesStore
         self.backupService = backupService
         self.attentionSoundPlayer = attentionSoundPlayer
+        self.websiteCacheUsageStore = WebsiteCacheUsageStore()
+        self.websiteCacheClock = websiteCacheClock
+        self.websiteCacheSleeper = websiteCacheSleeper
 
         if let panelController {
             self.panelController = panelController
@@ -69,6 +96,12 @@ final class AppCoordinator {
     func start() {
         resolveStartupConfigurationRecoveryIfNeeded()
 
+        let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
+            preferencesStore: preferencesStore,
+            usageStore: websiteCacheUsageStore
+        )
+        websiteCacheCleanupCoordinator = websiteCacheCoordinator
+
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
             attentionSoundPlayer: attentionSoundPlayer,
@@ -80,8 +113,17 @@ final class AppCoordinator {
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
                 return try self.restoreBackup(from: url)
             },
-            browserProfileManager: panelController.browserProfileManagementClient()
+            browserProfileManager: panelController.browserProfileManagementClient(
+                usageStore: websiteCacheUsageStore
+            ),
+            websiteCacheManager: websiteCacheCoordinator.client
         )
+        websiteCacheCoordinator.onPolicyChanged = { [weak self] in
+            self?.restartWebsiteCacheAutomaticSchedule()
+        }
+        panelController.onPanelBecameHidden = { [weak self] in
+            self?.triggerWebsiteCacheAutomaticCheck()
+        }
         panelController.onOpenGlobalSettings = { [weak self] in
             self?.showGlobalSettings()
         }
@@ -155,9 +197,18 @@ final class AppCoordinator {
         self.benchmarkControlServer = benchmarkControlServer
         _ = try? benchmarkControlServer.start()
 #endif
+
+        // Startup remains responsive. The scheduler persists its last check,
+        // waits 45 seconds on a first run, and then sleeps until the next
+        // eligible interval instead of using a high-frequency timer.
+        startWebsiteCacheAutomaticSchedule(initialDelay: WebsiteCacheAutomaticSchedulePolicy.initialDelay)
     }
 
     func prepareForTermination() {
+        isTerminating = true
+        websiteCacheAutomaticTask?.cancel()
+        websiteCacheAutomaticTask = nil
+        websiteCacheCleanupCoordinator?.stop()
 #if DEBUG
         benchmarkControlServer?.stop()
 #endif
@@ -166,6 +217,58 @@ final class AppCoordinator {
         // Start Empty after a corrupt store, keep the previous automatic backup
         // until a new Web App configuration actually exists.
         writeAutomaticVersionSnapshotIfSafe()
+    }
+
+    private func startWebsiteCacheAutomaticSchedule(initialDelay: TimeInterval? = nil) {
+        websiteCacheAutomaticTask?.cancel()
+        websiteCacheAutomaticTask = nil
+        guard !isTerminating,
+              let coordinator = websiteCacheCleanupCoordinator,
+              coordinator.automaticCleanupEnabled else { return }
+
+        websiteCacheAutomaticTask = Task { @MainActor [weak self, weak coordinator] in
+            guard let self, let coordinator else { return }
+            let scheduler = WebsiteCacheAutomaticScheduler(
+                snapshotProvider: { [weak self, weak coordinator] in
+                    guard let self,
+                          let coordinator,
+                          !self.isTerminating else { return nil }
+                    return WebsiteCacheAutomaticScheduleSnapshot(
+                        now: self.websiteCacheClock(),
+                        lastAutomaticCheckAt: coordinator.lastAutomaticCheckAt,
+                        lastAutomaticFailureAt: coordinator.lastAutomaticFailureAt,
+                        minimumCleanupInterval: coordinator.minimumCleanupInterval,
+                        automaticCleanupEnabled: coordinator.automaticCleanupEnabled
+                    )
+                },
+                sleeper: self.websiteCacheSleeper,
+                cleanup: { [weak self, weak coordinator] in
+                    guard let self, let coordinator, !self.isTerminating else {
+                        throw WebsiteCacheManagementError.applicationTerminating
+                    }
+                    _ = try await coordinator.runAutomaticIfNeeded(
+                        now: self.websiteCacheClock()
+                    )
+                },
+                failureHandler: { error in
+                    Self.websiteCacheLogger.error(
+                        "Automatic website cache cleanup failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            )
+            await scheduler.run(initialDelay: initialDelay)
+        }
+    }
+
+    private func restartWebsiteCacheAutomaticSchedule() {
+        startWebsiteCacheAutomaticSchedule(initialDelay: 0)
+    }
+
+    private func triggerWebsiteCacheAutomaticCheck() {
+        guard let coordinator = websiteCacheCleanupCoordinator,
+              coordinator.automaticCleanupEnabled,
+              !coordinator.isOperationInProgress else { return }
+        startWebsiteCacheAutomaticSchedule(initialDelay: 0)
     }
 
     nonisolated static func shouldPlayAttentionReadySound(

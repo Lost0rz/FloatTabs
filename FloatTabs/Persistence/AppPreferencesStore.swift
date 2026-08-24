@@ -122,6 +122,17 @@ final class AppPreferencesStore {
     static let attentionSoundEnabledKey = "FloatTabs.attentionSoundEnabled"
     static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
     static let attentionSoundVolumeKey = "FloatTabs.attentionSoundVolume"
+    static let websiteCacheAutomaticCleanupEnabledKey =
+        "FloatTabs.websiteCache.automaticCleanupEnabled"
+    static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
+    static let websiteCacheMaximumEstimatedBytesKey =
+        "FloatTabs.websiteCache.maximumEstimatedBytes"
+    static let websiteCacheTargetEstimatedBytesKey =
+        "FloatTabs.websiteCache.targetEstimatedBytes"
+    static let websiteCacheMinimumCleanupIntervalKey =
+        "FloatTabs.websiteCache.minimumCleanupInterval"
+    static let websiteCacheRecentUseProtectionKey =
+        "FloatTabs.websiteCache.recentUseProtection"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -291,6 +302,87 @@ final class AppPreferencesStore {
         }
     }
 
+    /// Cache policy is persisted as operational app preferences, separate from
+    /// FloatTabsBackupPreferences so website-data metadata never enters a user
+    /// backup. Every value is normalized on read and write.
+    var websiteCachePolicy: WebsiteCachePolicy {
+        get {
+            let enabled: Bool
+            if defaults.object(forKey: Self.websiteCacheAutomaticCleanupEnabledKey) == nil {
+                enabled = WebsiteCachePolicy.default.automaticCleanupEnabled
+            } else {
+                enabled = defaults.bool(forKey: Self.websiteCacheAutomaticCleanupEnabledKey)
+            }
+
+            let retention: Int?
+            if defaults.object(forKey: Self.websiteCacheRetentionDaysKey) == nil {
+                retention = WebsiteCachePolicy.default.retentionDays
+            } else {
+                let raw = defaults.integer(forKey: Self.websiteCacheRetentionDaysKey)
+                retention = raw == -1 ? nil : raw
+            }
+
+            let maximum: Int64?
+            if defaults.object(forKey: Self.websiteCacheMaximumEstimatedBytesKey) == nil {
+                maximum = WebsiteCachePolicy.default.maximumEstimatedBytes
+            } else {
+                let raw = defaults.integer(forKey: Self.websiteCacheMaximumEstimatedBytesKey)
+                maximum = raw == -1
+                    ? nil
+                    : (raw > 0 ? Int64(raw) : WebsiteCachePolicy.defaultMaximumEstimatedBytes)
+            }
+
+            let target = normalizedPositiveInteger(
+                forKey: Self.websiteCacheTargetEstimatedBytesKey,
+                fallback: WebsiteCachePolicy.defaultTargetEstimatedBytes
+            )
+            let interval = normalizedNonNegativeDouble(
+                forKey: Self.websiteCacheMinimumCleanupIntervalKey,
+                fallback: WebsiteCachePolicy.defaultMinimumCleanupInterval
+            )
+            let recentProtection = normalizedNonNegativeDouble(
+                forKey: Self.websiteCacheRecentUseProtectionKey,
+                fallback: WebsiteCachePolicy.defaultRecentUseProtection
+            )
+
+            return WebsiteCachePolicy(
+                automaticCleanupEnabled: enabled,
+                retentionDays: retention,
+                maximumEstimatedBytes: maximum,
+                targetEstimatedBytes: target,
+                minimumCleanupInterval: interval,
+                recentUseProtection: recentProtection
+            ).normalized()
+        }
+        set {
+            let policy = newValue.normalized()
+            defaults.set(
+                policy.automaticCleanupEnabled,
+                forKey: Self.websiteCacheAutomaticCleanupEnabledKey
+            )
+            defaults.set(
+                policy.retentionDays ?? -1,
+                forKey: Self.websiteCacheRetentionDaysKey
+            )
+            defaults.set(
+                policy.maximumEstimatedBytes ?? -1,
+                forKey: Self.websiteCacheMaximumEstimatedBytesKey
+            )
+            defaults.set(
+                policy.targetEstimatedBytes,
+                forKey: Self.websiteCacheTargetEstimatedBytesKey
+            )
+            defaults.set(
+                policy.minimumCleanupInterval,
+                forKey: Self.websiteCacheMinimumCleanupIntervalKey
+            )
+            defaults.set(
+                policy.recentUseProtection,
+                forKey: Self.websiteCacheRecentUseProtectionKey
+            )
+        }
+    }
+
     /// The canonical clamp every attention-sound volume passes through —
     /// store access, backup restore, and playback. Out-of-range values
     /// clamp to the nearest bound; non-finite values resolve to full
@@ -298,6 +390,19 @@ final class AppPreferencesStore {
     nonisolated static func normalizedAttentionSoundVolume(_ raw: Double) -> Double {
         guard raw.isFinite else { return 1 }
         return min(max(raw, 0), 1)
+    }
+
+    private func normalizedPositiveInteger(forKey key: String, fallback: Int64) -> Int64 {
+        guard defaults.object(forKey: key) != nil else { return fallback }
+        let value = defaults.integer(forKey: key)
+        return value > 0 ? Int64(value) : fallback
+    }
+
+    private func normalizedNonNegativeDouble(forKey key: String, fallback: Double) -> Double {
+        guard let value = defaults.object(forKey: key) as? NSNumber else { return fallback }
+        let doubleValue = value.doubleValue
+        guard doubleValue.isFinite, doubleValue >= 0 else { return fallback }
+        return doubleValue
     }
 
     var customBorderColorHex: String {
