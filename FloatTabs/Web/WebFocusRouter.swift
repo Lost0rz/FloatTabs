@@ -57,6 +57,26 @@ final class WebFocusRouter: ObservableObject {
         }
     }
 
+    /// Initialize the website's primary input focus after FloatTabs is
+    /// presented from another application. Native NSWindow focus alone is not
+    /// enough for WebKit: keyboard navigation can remain associated with the
+    /// previously active application until the page has a DOM input focus.
+    @discardableResult
+    func focusInputForPresentation() async -> Bool {
+        guard let webView = currentWebView else { return false }
+
+        let adapter = await registry.adapter(for: webView.url, webView: webView)
+        currentAdapter = adapter
+        currentWebsiteIdentifier = adapter.identifier
+        do {
+            try await adapter.focusInput(in: webView)
+            currentTarget = .input
+            return true
+        } catch {
+            return false
+        }
+    }
+
     @discardableResult
     func togglePrimaryFocus() async -> WebFocusTransition {
         guard let webView = currentWebView else {

@@ -456,15 +456,46 @@ final class ExternalShellTests: XCTestCase {
         suppression.arm(atUptime: 100)
 
         XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 100.1))
-        XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 100.249))
-        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 100.25))
-        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 101))
+        XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 101))
+        XCTAssertTrue(suppression.suppressesAutoHide(nowUptime: 101.499))
+        XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 101.5))
     }
 
     func testWorkspaceAutoHideSuppressionStartsDisarmed() {
         let suppression = WorkspaceAutoHideSuppression()
 
         XCTAssertFalse(suppression.suppressesAutoHide(nowUptime: 0))
+    }
+
+    func testGlobalShortcutHidesOnlyWhenFloatTabsOwnsFocus() {
+        XCTAssertTrue(
+            PanelController.shouldHideForGlobalShortcut(
+                shellIsVisible: true,
+                shellIsKey: true,
+                sourceIsKey: false
+            )
+        )
+        XCTAssertTrue(
+            PanelController.shouldHideForGlobalShortcut(
+                shellIsVisible: true,
+                shellIsKey: false,
+                sourceIsKey: true
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldHideForGlobalShortcut(
+                shellIsVisible: true,
+                shellIsKey: false,
+                sourceIsKey: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.shouldHideForGlobalShortcut(
+                shellIsVisible: false,
+                shellIsKey: true,
+                sourceIsKey: true
+            )
+        )
     }
 
     func testExternalMouseAutoHideDoesNotRequireFrontmostApplicationChange() {

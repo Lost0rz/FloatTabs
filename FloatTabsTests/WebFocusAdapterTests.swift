@@ -57,6 +57,11 @@ final class WebFocusAdapterTests: XCTestCase {
             in: webView
         )
         XCTAssertTrue(["main", "body"].contains(pageTag))
+        let pageStillOwnsComposerFocus = await boolValue(
+            "document.activeElement.matches('textarea, [contenteditable=\"true\"], [role=\"textbox\"]')",
+            in: webView
+        )
+        XCTAssertFalse(pageStillOwnsComposerFocus)
 
         let inputTarget = try await adapter.togglePrimaryFocus(in: webView)
         XCTAssertEqual(inputTarget, .input)
@@ -156,6 +161,32 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertNotNil(transition.failureReason)
     }
 
+    func testRouterCanInitializeInputFocusForPresentation() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">existing text</textarea>
+                <article style="height: 800px;">Conversation</article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        let focused = await router.focusInputForPresentation()
+        let focusedLabel = await stringValue(
+            "document.activeElement.getAttribute('aria-label')",
+            in: webView
+        )
+
+        XCTAssertTrue(focused)
+        XCTAssertEqual(router.currentTarget, .input)
+        XCTAssertEqual(focusedLabel, "Message ChatGPT")
+    }
+
     func testRegistryUsesChatGPTBeforeGenericFallback() async {
         let webView = makeWebView()
         let registry = WebSiteAdapterRegistry()
@@ -227,6 +258,14 @@ final class WebFocusAdapterTests: XCTestCase {
         await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(script) { value, _ in
                 continuation.resume(returning: (value as? NSNumber)?.intValue)
+            }
+        }
+    }
+
+    private func boolValue(_ script: String, in webView: WKWebView) async -> Bool {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { value, _ in
+                continuation.resume(returning: (value as? NSNumber)?.boolValue ?? false)
             }
         }
     }

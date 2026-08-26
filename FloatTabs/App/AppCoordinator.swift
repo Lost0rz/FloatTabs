@@ -168,7 +168,13 @@ final class AppCoordinator {
         )
 
         globalHotkeyController = GlobalHotkeyController(
-            onToggle: { [weak self] in self?.toggleFloatTabs() }
+            onToggle: { [weak self] in self?.toggleOrPresentFloatTabs() },
+            isPrimaryFocusEnabled: { [weak self] in
+                self?.panelController.acceptsAppCommands ?? false
+            },
+            onPrimaryFocus: { [weak self] in
+                self?.panelController.handle(.togglePrimaryFocus)
+            }
         )
 
         appCommandController = AppCommandController(
@@ -580,6 +586,14 @@ final class AppCoordinator {
 
     private func toggleFloatTabs() {
         panelController.toggleFloatTabs()
+    }
+
+    private func presentFloatTabs() {
+        panelController.presentFloatTabs()
+    }
+
+    private func toggleOrPresentFloatTabs() {
+        panelController.toggleOrPresentFloatTabs()
     }
 
     private static func presentConfigurationSaveFailure() {

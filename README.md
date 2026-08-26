@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.2.0"><strong>Download FloatTabs v0.2.0</strong></a>
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.2.3"><strong>Download FloatTabs v0.2.3</strong></a>
   · macOS 13 or later · Apple Silicon and Intel
 </p>
 
-**Current release package:** **v0.2.0 Build 7**.
+**Current release package:** **v0.2.3 Build 11**.
 
 FloatTabs keeps a small set of long-lived Web Apps one shortcut away: AI tools, social feeds, dashboards, documentation, media players, self-hosted services, or anything else you want available without opening a full browser window.
 
@@ -65,7 +65,7 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 
 ### Install
 
-1. Download [`FloatTabs-0.2.0.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.2.0/FloatTabs-0.2.0.dmg).
+1. Download [`FloatTabs-0.2.3.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.2.3/FloatTabs-0.2.3.dmg).
 2. Open the DMG.
 3. Drag **FloatTabs** to **Applications**.
 4. Launch FloatTabs from Applications.
@@ -206,6 +206,16 @@ All shortcuts are configurable in **FloatTabs Settings → Shortcuts**.
 - FloatTabs does not implement its own password store.
 - `.floattabsbackup` contains FloatTabs configuration — including Profile names, colors, and Slot bindings — but not cookies, passwords, OAuth tokens, caches or live page state.
 - Attachment downloads use a staged transfer so an existing destination is not replaced until the new download succeeds.
+
+## What's New in v0.2.3
+
+v0.2.3 establishes the current FloatTabs interaction baseline for global presentation and website focus.
+
+- Global summon now presents and activates FloatTabs when another app currently owns focus, while preserving the normal hide behavior when FloatTabs already owns focus.
+- Presentation retries the native key-window handoff briefly so an accessory app cannot remain visible while keyboard input is still owned by the previous app.
+- Presentation initializes the active website adapter's primary input focus after WebView content becomes available, so keyboard scrolling and voice input work immediately after summoning.
+- The manual primary-focus shortcut remains available and takes precedence over the automatic presentation focus.
+- Added regression coverage for global summon visibility, website input focus initialization, and the presentation auto-hide grace period.
 
 ## What's New in v0.2.0
 

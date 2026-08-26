@@ -32,7 +32,10 @@ struct FullscreenVisibilityIntent {
 /// application rather than a fresh user choice, so a just-restored shell
 /// needs the same short auto-hide grace that showFloatTabs arms.
 struct WorkspaceAutoHideSuppression: Equatable {
-    static let graceInterval: TimeInterval = 0.25
+    // A global hotkey can produce the application-activation notification
+    // after several run-loop turns. Keep the stale notification from hiding
+    // the presentation while its key-window handoff is still settling.
+    static let graceInterval: TimeInterval = 1.5
 
     private(set) var deadline: TimeInterval = -.infinity
 
@@ -101,6 +104,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
     private var shouldClampAfterFullscreen = false
     private var needsFocusAfterApplicationActivation = false
+    private var presentationFocusTask: Task<Void, Never>?
+    private var presentationWebFocusTask: Task<Void, Never>?
 
     var isVisible: Bool {
         requestedVisibility
@@ -130,6 +135,50 @@ final class PanelController: NSObject, NSWindowDelegate {
         } else {
             hideFloatTabs()
         }
+    }
+
+    /// Present the shell and make its Web surface interactive. This is the
+    /// global-hotkey path: invoking a summon shortcut while the shell is
+    /// already visible must restore focus, not interpret the shortcut as a
+    /// request to hide the shell.
+    func presentFloatTabs() {
+        if panel.isVisible {
+            let presentationUptime = ProcessInfo.processInfo.systemUptime
+            lastPresentationUptime = presentationUptime
+            workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
+            activateFloatTabs()
+            panel.orderFrontRegardless()
+            panel.makeKeyAndOrderFront(nil)
+            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+            schedulePresentationFocusRetry()
+            schedulePresentationWebInputFocus()
+            return
+        }
+
+        showFloatTabs()
+    }
+
+    /// The global summon shortcut is both a summon and a dismiss gesture. If
+    /// FloatTabs currently owns a key window, dismiss it; if the shell is only
+    /// visible while another app owns focus, restore FloatTabs focus instead.
+    func toggleOrPresentFloatTabs() {
+        if Self.shouldHideForGlobalShortcut(
+            shellIsVisible: panel.isVisible,
+            shellIsKey: panel.isKeyWindow,
+            sourceIsKey: sourceHostController.window.isKeyWindow
+        ) {
+            hideFloatTabs()
+        } else {
+            presentFloatTabs()
+        }
+    }
+
+    static func shouldHideForGlobalShortcut(
+        shellIsVisible: Bool,
+        shellIsKey: Bool,
+        sourceIsKey: Bool
+    ) -> Bool {
+        shellIsVisible && (shellIsKey || sourceIsKey)
     }
 
     /// AppCoordinator uses this edge-triggered callback to wake the persisted
@@ -329,6 +378,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     deinit {
+        presentationFocusTask?.cancel()
+        presentationWebFocusTask?.cancel()
         if let externalMouseMonitor {
             NSEvent.removeMonitor(externalMouseMonitor)
         }
@@ -413,6 +464,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
         focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+        schedulePresentationFocusRetry()
+        schedulePresentationWebInputFocus()
         if NSApp.isActive {
             needsFocusAfterApplicationActivation = false
         }
@@ -441,6 +494,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         updateRequestedVisibility(false)
         if wasVisible { onPanelBecameHidden?() }
+        presentationFocusTask?.cancel()
+        presentationFocusTask = nil
+        presentationWebFocusTask?.cancel()
+        presentationWebFocusTask = nil
         needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -1078,6 +1135,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard !workspaceAutoHideSuppression.suppressesAutoHide(
                   nowUptime: ProcessInfo.processInfo.systemUptime
               ),
+              // The notification may describe the application that was
+              // frontmost immediately before the summon shortcut. Let the
+              // explicit focus handoff finish before treating it as a real
+              // user switch away from FloatTabs.
+              presentationFocusTask == nil,
               NSWorkspace.shared.frontmostApplication?.processIdentifier
                 == activatedApplication.processIdentifier,
               Self.shouldAutoHideForActivatedApplication(
@@ -1834,6 +1896,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func togglePrimaryWebFocus() {
+        // A manual focus toggle takes ownership of the DOM-focus decision and
+        // must not be overwritten by the presentation initializer still
+        // waiting for a WebView to finish loading.
+        presentationWebFocusTask?.cancel()
+        presentationWebFocusTask = nil
+
+        // A focus toggle is also an explicit request to interact with
+        // FloatTabs. Re-activate the accessory app before moving the source
+        // window's key focus, otherwise the web view can remain active-looking
+        // while the actual key window belongs to the previous app.
+        activateFloatTabs()
+
         guard let webView = selectedPresentationWebView() else {
             Task { @MainActor [weak self] in
                 _ = await self?.webFocusRouter.togglePrimaryFocus()
@@ -2177,8 +2251,64 @@ final class PanelController: NSObject, NSWindowDelegate {
         // This path only runs for an explicit user presentation. Current macOS
         // treats activation as contextual, while older releases require the
         // explicit override for an LSUIElement accessory application.
-        _ = NSRunningApplication.current.activate(options: [.activateAllWindows])
+        _ = NSRunningApplication.current.activate(
+            options: [.activateAllWindows, .activateIgnoringOtherApps]
+        )
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func schedulePresentationFocusRetry() {
+        presentationFocusTask?.cancel()
+        presentationFocusTask = Task { @MainActor [weak self] in
+            // Accessory-app activation can complete asynchronously after the
+            // global shortcut callback returns. Reassert the key-window chain
+            // briefly so a shown shell cannot remain merely visible while the
+            // previously active application still owns keyboard input.
+            for _ in 0..<30 {
+                guard let self,
+                      self.requestedVisibility,
+                      !Task.isCancelled else { return }
+
+                self.activateFloatTabs()
+                self.panel.orderFrontRegardless()
+                self.panel.makeKeyAndOrderFront(nil)
+                self.focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+
+                if NSApp.isActive,
+                   self.panel.isKeyWindow || self.sourceHostController.window.isKeyWindow {
+                    self.presentationFocusTask = nil
+                    return
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            self?.presentationFocusTask = nil
+        }
+    }
+
+    private func schedulePresentationWebInputFocus() {
+        presentationWebFocusTask?.cancel()
+        presentationWebFocusTask = Task { @MainActor [weak self] in
+            // WebKit may expose the window before the page's composer exists.
+            // Retry briefly so external-app presentation has the same DOM
+            // focus result as pressing the manual focus shortcut once.
+            for _ in 0..<20 {
+                guard let self,
+                      self.requestedVisibility,
+                      !Task.isCancelled else { return }
+
+                if let webView = self.selectedPresentationWebView() {
+                    self.webFocusRouter.setCurrentWebView(webView)
+                    if await self.webFocusRouter.focusInputForPresentation() {
+                        self.presentationWebFocusTask = nil
+                        return
+                    }
+                }
+
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            self?.presentationWebFocusTask = nil
+        }
     }
 
     @objc private func applicationDidBecomeActive(_ notification: Notification) {

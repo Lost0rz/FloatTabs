@@ -202,11 +202,27 @@ enum WebFocusDOM {
     function focusPageElement(element) {
         if (!element) return false;
         cleanupTemporaryPageTabIndex();
+
+        // A page candidate such as <main> can contain the composer. Blur the
+        // current editor first so a failed/partial focus request cannot leave
+        // the caret in the input while reporting a successful page switch.
+        const active = document.activeElement;
+        if (isInputElement(active)) {
+            active.blur();
+        }
+        const selection = window.getSelection();
+        if (selection) selection.removeAllRanges();
+
         if (!element.hasAttribute('tabindex')) {
             element.setAttribute('tabindex', '-1');
             element.setAttribute(temporaryPageTabIndex, 'true');
         }
-        return focusWithoutScroll(element);
+        if (!focusWithoutScroll(element)) return false;
+
+        // Do not accept a descendant input as proof that the page received
+        // focus. This exact check is important for containers such as <main>.
+        return document.activeElement === element
+            && !isInputElement(document.activeElement);
     }
 
     function currentTarget() {

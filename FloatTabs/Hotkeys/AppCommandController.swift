@@ -194,6 +194,13 @@ final class AppCommandController {
                 return event
             }
 
+            // This shortcut is registered with KeyboardShortcuts as a global
+            // key-up action. Do not also handle the local key-down event or a
+            // single press would toggle twice when FloatTabs is frontmost.
+            if command == .togglePrimaryFocus {
+                return event
+            }
+
             // Global Settings is application-level chrome. Allow its configured
             // app-local shortcut while FloatTabs is active even when the panel
             // itself is hidden.
