@@ -62,6 +62,10 @@ final class AppCommandControllerTests: XCTestCase {
             defaultCommand(keyCode: 35, modifiers: [.command, .shift]),
             .togglePin
         )
+        XCTAssertEqual(
+            defaultCommand(keyCode: UInt16(KeyboardShortcuts.Key.f.rawValue), modifiers: [.control, .option]),
+            .togglePrimaryFocus
+        )
 
         XCTAssertNil(defaultCommand(keyCode: 0, modifiers: [.command]))
         XCTAssertNil(defaultCommand(keyCode: 8, modifiers: [.command]))
@@ -70,11 +74,11 @@ final class AppCommandControllerTests: XCTestCase {
 
     func testEveryPreviouslyFixedShortcutHasAnIndividualBinding() {
         XCTAssertEqual(AppShortcutCatalog.slotBindings.count, 9)
-        XCTAssertEqual(AppShortcutCatalog.navigationBindings.count, 6)
+        XCTAssertEqual(AppShortcutCatalog.navigationBindings.count, 7)
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 20)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 20)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 21)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 21)
     }
 
     func testConfiguredAddressShortcutReplacesDefaultCommandL() {

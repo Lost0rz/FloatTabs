@@ -77,6 +77,12 @@
 		A00000000000000000000045 /* WebsiteCacheCleanupCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000045 /* WebsiteCacheCleanupCoordinator.swift */; };
 		A00000000000000000000047 /* WebsiteCacheAutomaticScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000047 /* WebsiteCacheAutomaticScheduler.swift */; };
 		A00000000000000000000046 /* WebsiteCacheCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000046 /* WebsiteCacheCleanupTests.swift */; };
+		A00000000000000000000048 /* WebSiteAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000048 /* WebSiteAdapter.swift */; };
+		A00000000000000000000049 /* GenericWebAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000049 /* GenericWebAdapter.swift */; };
+		A0000000000000000000004A /* ChatGPTAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000004A /* ChatGPTAdapter.swift */; };
+		A0000000000000000000004B /* WebSiteAdapterRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000004B /* WebSiteAdapterRegistry.swift */; };
+		A0000000000000000000004C /* WebFocusRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000004C /* WebFocusRouter.swift */; };
+		A0000000000000000000004D /* WebFocusAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000004D /* WebFocusAdapterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -162,6 +168,12 @@
 		B00000000000000000000045 /* WebsiteCacheCleanupCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCacheCleanupCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000047 /* WebsiteCacheAutomaticScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCacheAutomaticScheduler.swift; sourceTree = "<group>"; };
 		B00000000000000000000046 /* WebsiteCacheCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteCacheCleanupTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000048 /* WebSiteAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSiteAdapter.swift; sourceTree = "<group>"; };
+		B00000000000000000000049 /* GenericWebAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericWebAdapter.swift; sourceTree = "<group>"; };
+		B0000000000000000000004A /* ChatGPTAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAdapter.swift; sourceTree = "<group>"; };
+		B0000000000000000000004B /* WebSiteAdapterRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSiteAdapterRegistry.swift; sourceTree = "<group>"; };
+		B0000000000000000000004C /* WebFocusRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFocusRouter.swift; sourceTree = "<group>"; };
+		B0000000000000000000004D /* WebFocusAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFocusAdapterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -299,6 +311,11 @@
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
 				B0000000000000000000002A /* WebAttentionCoordinator.swift */,
 				B0000000000000000000002C /* ChatGPTAttentionBridge.swift */,
+				B00000000000000000000048 /* WebSiteAdapter.swift */,
+				B00000000000000000000049 /* GenericWebAdapter.swift */,
+				B0000000000000000000004A /* ChatGPTAdapter.swift */,
+				B0000000000000000000004B /* WebSiteAdapterRegistry.swift */,
+				B0000000000000000000004C /* WebFocusRouter.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -352,6 +369,7 @@
 				B00000000000000000000032 /* WebAttentionLifecycleTests.swift */,
 				B00000000000000000000033 /* WebAttentionIndicatorTests.swift */,
 				B00000000000000000000034 /* WebAttentionCrossFeatureTests.swift */,
+				B0000000000000000000004D /* WebFocusAdapterTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -512,6 +530,11 @@
 				A00000000000000000000044 /* WebsiteCacheCleanupService.swift in Sources */,
 				A00000000000000000000045 /* WebsiteCacheCleanupCoordinator.swift in Sources */,
 				A00000000000000000000047 /* WebsiteCacheAutomaticScheduler.swift in Sources */,
+				A00000000000000000000048 /* WebSiteAdapter.swift in Sources */,
+				A00000000000000000000049 /* GenericWebAdapter.swift in Sources */,
+				A0000000000000000000004A /* ChatGPTAdapter.swift in Sources */,
+				A0000000000000000000004B /* WebSiteAdapterRegistry.swift in Sources */,
+				A0000000000000000000004C /* WebFocusRouter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -545,6 +568,7 @@
 				A0000000000000000000003E /* BrowserProfileBackupTests.swift in Sources */,
 				A00000000000000000000040 /* UnsupportedBrowserProfileTests.swift in Sources */,
 				A00000000000000000000046 /* WebsiteCacheCleanupTests.swift in Sources */,
+				A0000000000000000000004D /* WebFocusAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

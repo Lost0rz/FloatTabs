@@ -53,6 +53,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
     private let attentionCoordinator: WebAttentionCoordinator
+    private let webFocusRouter: WebFocusRouter
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
@@ -213,11 +214,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         frameStore: PanelFrameStore = PanelFrameStore(),
         preferencesStore: AppPreferencesStore? = nil,
+        webFocusRouter: WebFocusRouter? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
+        self.webFocusRouter = webFocusRouter ?? WebFocusRouter()
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
@@ -273,6 +276,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidChangeActiveSpace(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersDidChange(_:)),
@@ -326,6 +335,26 @@ final class PanelController: NSObject, NSWindowDelegate {
         NotificationCenter.default.removeObserver(
             self,
             name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
     }
@@ -1066,6 +1095,29 @@ final class PanelController: NSObject, NSWindowDelegate {
         autoHideAfterApplicationDeactivation()
     }
 
+    @objc private func workspaceDidChangeActiveSpace(_ notification: Notification) {
+        guard requestedVisibility,
+              !sourceHostController.isSessionLocked else {
+            return
+        }
+
+        // The notification can arrive before WindowServer has finished
+        // materializing the host application's fullscreen Space. Reconcile on
+        // two subsequent run-loop turns so both the immediate Space switch and
+        // the delayed fullscreen transition get the actual WKWebView window.
+        let delays: [TimeInterval] = [0, 0.2]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.requestedVisibility,
+                      !self.sourceHostController.isSessionLocked else {
+                    return
+                }
+                self.sourceHostController.reconcileVisiblePresentationAfterSpaceChange()
+            }
+        }
+    }
+
     private func autoHideAfterApplicationDeactivation() {
         // The user has already selected another application. Unlike the explicit
         // global-toggle hide path, do not reactivate `previousApplication` here:
@@ -1219,6 +1271,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .reload:
             reloadActiveSlot()
+
+        case .togglePrimaryFocus:
+            togglePrimaryWebFocus()
 
         case .settings:
             onOpenGlobalSettings?()
@@ -1561,6 +1616,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
             lastSynchronizedActiveID = nil
             lastSynchronizedActiveProfile = nil
+            webFocusRouter.setCurrentWebView(nil)
             rootView.webPanelContainerView.showEmptyState()
             synchronizeResidentIndicators()
             onSelectedSlotPresentationChange?(nil, nil)
@@ -1582,6 +1638,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         do {
             webView = try webViewPool.webView(for: activeProfile)
         } catch {
+            webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(
                 for: activeProfile,
                 error: error,
@@ -1602,6 +1659,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        webFocusRouter.setCurrentWebView(webView)
         slotLifecycleCoordinator.activate(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         sourceHostController.observeFullscreenState(of: webView)
@@ -1634,6 +1692,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         onSelectedSlotPresentationChange?(activeProfile.name, url)
+        if let webView = selectedPresentationWebView() {
+            Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                await self.webFocusRouter.refreshRecognition(for: webView)
+            }
+        }
     }
 
     private func synchronizeResidentIndicators() {
@@ -1767,6 +1831,29 @@ final class PanelController: NSObject, NSWindowDelegate {
             rootView.webPanelContainerView.currentWebView,
             makeSourceWindowMain: makeSourceWindowMain
         )
+    }
+
+    private func togglePrimaryWebFocus() {
+        guard let webView = selectedPresentationWebView() else {
+            Task { @MainActor [weak self] in
+                _ = await self?.webFocusRouter.togglePrimaryFocus()
+            }
+            return
+        }
+
+        webFocusRouter.setCurrentWebView(webView)
+        if sourceHostController.isSessionLocked {
+            panel.makeKeyAndOrderFront(nil)
+            WebViewFocus.focus(webView, in: panel)
+        } else {
+            sourceHostController.orderFrontAndFocus(webView)
+        }
+
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let webView,
+                  self.webFocusRouter.currentWebView === webView else { return }
+            _ = await self.webFocusRouter.togglePrimaryFocus()
+        }
     }
 
     private func returnActiveSlotHome() {
@@ -2399,6 +2486,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         guard let activeProfile = tabStore.activeProfile else {
             deactivateCompanionProfile(pauseInactiveMedia: true)
+            webFocusRouter.setCurrentWebView(nil)
             sourceHostController.companionContainer.showEmptyState()
             rootView.removeFullscreenCompanionContainer(
                 sourceHostController.companionContainer
@@ -2417,6 +2505,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // WKWebView must remain exclusively owned by WebKit until restore.
         guard activeProfile.id != fullscreenProfile?.id else {
             deactivateCompanionProfile(pauseInactiveMedia: true)
+            webFocusRouter.setCurrentWebView(nil)
             sourceHostController.companionContainer.showEmptyState()
             rootView.removeFullscreenCompanionContainer(
                 sourceHostController.companionContainer
@@ -2436,6 +2525,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         do {
             webView = try webViewPool.webView(for: activeProfile)
         } catch {
+            webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(
                 for: activeProfile,
                 error: error,
@@ -2463,6 +2553,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: activeProfile.id,
             residencyPolicy: activeProfile.residencyPolicy
         )
+        webFocusRouter.setCurrentWebView(webView)
         slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         companionActiveProfile = activeProfile

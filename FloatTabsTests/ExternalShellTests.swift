@@ -118,15 +118,21 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
-    func testFullscreenSourceHostUsesOrdinaryWindowSemantics() {
+    func testFullscreenSourceHostFollowsShellIntoHostApplicationFullscreenSpaces() {
         let behavior = FullscreenSourceHostController.sourceWindowCollectionBehavior
 
         XCTAssertTrue(behavior.contains(.managed))
-        XCTAssertTrue(behavior.contains(.fullScreenNone))
-        XCTAssertFalse(behavior.contains(.canJoinAllSpaces))
-        XCTAssertFalse(behavior.contains(.canJoinAllApplications))
+        XCTAssertTrue(behavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(behavior.contains(.canJoinAllApplications))
+        XCTAssertFalse(behavior.contains(.fullScreenNone))
         XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
         XCTAssertFalse(behavior.contains(.fullScreenPrimary))
+
+        let webKitFullscreenBehavior =
+            FullscreenSourceHostController.webKitFullscreenSourceWindowCollectionBehavior
+        XCTAssertTrue(webKitFullscreenBehavior.contains(.managed))
+        XCTAssertTrue(webKitFullscreenBehavior.contains(.fullScreenNone))
+        XCTAssertFalse(webKitFullscreenBehavior.contains(.canJoinAllApplications))
     }
 
     func testFloatingPanelUsesActivatingShellSemantics() {
@@ -1139,6 +1145,30 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+#if DEBUG
+    func testDebugStatusItemShowsTestMarkerAfterIcon() {
+        let suiteName = "FloatTabsTests.StatusItemController.TestMarker.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferencesStore = AppPreferencesStore(defaults: defaults)
+        preferencesStore.menuBarDisplayMode = .iconOnly
+        let controller = StatusItemController(
+            onToggle: {},
+            isVisible: { false },
+            onSettings: {},
+            onQuit: {},
+            preferencesStore: preferencesStore
+        )
+        controller.setActiveWebApp(name: "ChatGPT", faviconURL: nil)
+
+        XCTAssertEqual(StatusItemController.buildMarker, "Test")
+        XCTAssertEqual(controller.debugStatusButtonTitle, "Test")
+        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
+    }
+#endif
+
     func testStatusItemModeSwitchUsesLivePreferenceWiringAndPreservesPresentation() {
         let suiteName = "FloatTabsTests.StatusItemController.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1157,7 +1187,10 @@ final class ExternalShellTests: XCTestCase {
         controller.setAttentionPresentation(readyCount: 3, floatTabsVisible: false)
 
         XCTAssertEqual(preferencesStore.menuBarDisplayMode, .iconAndName)
-        XCTAssertEqual(controller.debugStatusButtonTitle, "ChatGPT")
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? "ChatGPT"
+        )
         XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
         XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
         let iconAndNameImage = controller.debugStatusButtonImageTIFF
@@ -1167,17 +1200,29 @@ final class ExternalShellTests: XCTestCase {
         // invoke StatusItemController's notification selector directly.
         preferencesStore.menuBarDisplayMode = .iconOnly
 
-        XCTAssertEqual(controller.debugStatusButtonTitle, "")
-        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageOnly)
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? ""
+        )
+        XCTAssertEqual(
+            controller.debugStatusButtonImagePosition,
+            StatusItemController.buildMarker == nil ? .imageOnly : .imageLeading
+        )
         XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
 
         controller.setActiveWebApp(name: "Docs", faviconURL: nil)
-        XCTAssertEqual(controller.debugStatusButtonTitle, "")
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? ""
+        )
 
         preferencesStore.menuBarDisplayMode = .iconAndName
 
-        XCTAssertEqual(controller.debugStatusButtonTitle, "Docs")
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? "Docs"
+        )
         XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
         XCTAssertEqual(controller.attentionPresentation.badge, .count("3"))
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, iconAndNameImage)
@@ -1270,14 +1315,23 @@ final class ExternalShellTests: XCTestCase {
         completion?(image)
         let currentImage = controller.debugStatusButtonImageTIFF
 
-        XCTAssertEqual(controller.debugStatusButtonTitle, "Current Site")
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? "Current Site"
+        )
         XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageLeading)
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, currentImage)
 
         preferencesStore.menuBarDisplayMode = .iconOnly
 
-        XCTAssertEqual(controller.debugStatusButtonTitle, "")
-        XCTAssertEqual(controller.debugStatusButtonImagePosition, .imageOnly)
+        XCTAssertEqual(
+            controller.debugStatusButtonTitle,
+            StatusItemController.buildMarker ?? ""
+        )
+        XCTAssertEqual(
+            controller.debugStatusButtonImagePosition,
+            StatusItemController.buildMarker == nil ? .imageOnly : .imageLeading
+        )
         XCTAssertEqual(controller.debugStatusButtonImageTIFF, currentImage)
     }
 

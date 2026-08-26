@@ -164,6 +164,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         displayMode == .iconOnly ? .imageOnly : .imageLeading
     }
 
+    static var buildMarker: String? {
+#if DEBUG
+        return "Test"
+#else
+        return nil
+#endif
+    }
+
     static func faviconOriginKey(for faviconURL: URL?) -> String? {
         faviconURL.flatMap(WebsiteFaviconProvider.originKey(for:))
     }
@@ -293,6 +301,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func applyMenuBarDisplayMode(to button: NSStatusBarButton) {
+        if let buildMarker = Self.buildMarker {
+            // Keep the marker visible even when the user selected icon-only
+            // mode: it is the safety label that distinguishes the test app from
+            // the installed Release build.
+            button.title = buildMarker
+            button.imagePosition = .imageLeading
+            return
+        }
+
         let mode = preferencesStore.menuBarDisplayMode
         button.title = Self.displayTitle(
             for: latestActiveWebAppName,

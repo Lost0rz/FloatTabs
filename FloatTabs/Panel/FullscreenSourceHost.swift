@@ -280,6 +280,21 @@ struct FullscreenRestoreWatchdog {
 final class FullscreenSourceHostController {
     static let sourceWindowCollectionBehavior: NSWindow.CollectionBehavior = [
         .managed,
+        // The source window carries the actual WKWebView. It must join the
+        // shell when the host application enters a new full-screen Space after
+        // FloatTabs is already visible; otherwise only the shell frame/rail is
+        // composited in that Space while the page remains behind in the old one.
+        .canJoinAllSpaces,
+        .canJoinAllApplications,
+    ]
+
+    /// During WebKit element fullscreen the source window is hidden and kept
+    /// only as WebKit's restore owner. Do not use this behavior for ordinary
+    /// presentation: `fullScreenNone` describes a window that does not support
+    /// fullscreen participation, while the normal source must join another
+    /// application's fullscreen Space.
+    static let webKitFullscreenSourceWindowCollectionBehavior: NSWindow.CollectionBehavior = [
+        .managed,
         .fullScreenNone,
     ]
 
@@ -366,6 +381,7 @@ final class FullscreenSourceHostController {
         makeSourceWindowMain: Bool = false
     ) {
         guard !isSessionLocked else { return }
+        window.collectionBehavior = Self.sourceWindowCollectionBehavior
         attachSourceWindowToShell()
         window.alphaValue = 1
         window.ignoresMouseEvents = false
@@ -388,6 +404,36 @@ final class FullscreenSourceHostController {
             }
             WebViewFocus.focus(webView, in: window)
         }
+    }
+
+    /// Reassert the source window after Mission Control creates or activates
+    /// another application's fullscreen Space. AppKit normally applies the
+    /// collection flags lazily, but a child window that was already ordered can
+    /// remain tied to the previous Space. Reordering the actual WKWebView host
+    /// (without activating FloatTabs) repairs that stale window membership.
+    func reconcileVisiblePresentationAfterSpaceChange() {
+        guard !isSessionLocked,
+              window.isVisible,
+              let shellWindow,
+              shellWindow.isVisible else {
+            return
+        }
+
+        let wasAttachedToShell = window.parent === shellWindow
+        if wasAttachedToShell {
+            shellWindow.removeChildWindow(window)
+        }
+        window.collectionBehavior = Self.sourceWindowCollectionBehavior
+        window.orderFrontRegardless()
+        if wasAttachedToShell {
+            shellWindow.addChildWindow(window, ordered: .above)
+        }
+
+        fullscreenExperimentLog(
+            "SPACE_RECONCILE shell=\(shellWindow.windowNumber) "
+                + "source=\(window.windowNumber) "
+                + "sourceScreen=\(fullscreenExperimentScreenID(window.screen))"
+        )
     }
 
     /// Keep the separately hosted Web surface at the same application-level
@@ -513,7 +559,7 @@ final class FullscreenSourceHostController {
             // window group. Detach before hiding the shell: WebKit must keep
             // its source window independently ordered throughout fullscreen.
             detachSourceWindowFromShell()
-            window.collectionBehavior = Self.sourceWindowCollectionBehavior
+            window.collectionBehavior = Self.webKitFullscreenSourceWindowCollectionBehavior
             // Preserve the ordered source and hierarchy WebKit needs for
             // restoration without exposing its tab-less placeholder window.
             window.alphaValue = 0
@@ -604,6 +650,7 @@ final class FullscreenSourceHostController {
         sessionState = .idle
         restoreStartedAtUptime = nil
         fullscreenPresentationWindow = nil
+        window.collectionBehavior = Self.sourceWindowCollectionBehavior
         window.alphaValue = 1
         window.ignoresMouseEvents = false
         if rebuildSource {

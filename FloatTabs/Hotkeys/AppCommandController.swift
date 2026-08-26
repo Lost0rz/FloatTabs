@@ -12,6 +12,7 @@ enum AppCommand: Equatable {
     case addressBar
     case returnHome
     case reload
+    case togglePrimaryFocus
     case settings
     case togglePin
 }
@@ -32,6 +33,10 @@ extension KeyboardShortcuts.Name {
     static let addressBar = Self("addressBar", initial: .init(.l, modifiers: [.command]))
     static let returnHome = Self("returnHome", initial: .init(.h, modifiers: [.command, .shift]))
     static let reload = Self("reload", initial: .init(.r, modifiers: [.command]))
+    static let togglePrimaryFocus = Self(
+        "togglePrimaryFocus",
+        initial: .init(.f, modifiers: [.control, .option])
+    )
     static let zoomIn = Self("zoomIn", initial: .init(.equal, modifiers: [.command, .shift]))
     static let zoomOut = Self("zoomOut", initial: .init(.minus, modifiers: [.command]))
     static let resetZoom = Self("resetZoom", initial: .init(.zero, modifiers: [.command]))
@@ -65,6 +70,11 @@ enum AppShortcutCatalog {
         .init(title: "Address Bar", command: .addressBar, name: .addressBar),
         .init(title: "Return Home", command: .returnHome, name: .returnHome),
         .init(title: "Reload", command: .reload, name: .reload),
+        .init(
+            title: "Toggle Conversation / Web Focus",
+            command: .togglePrimaryFocus,
+            name: .togglePrimaryFocus
+        ),
     ]
 
     static let viewBindings: [AppShortcutBinding] = [
