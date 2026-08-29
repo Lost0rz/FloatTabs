@@ -106,6 +106,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var needsFocusAfterApplicationActivation = false
     private var presentationFocusTask: Task<Void, Never>?
     private var presentationWebFocusTask: Task<Void, Never>?
+    private var voiceInputFocusTask: Task<Void, Never>?
+    private var voiceInputFocusGeneration = 0
+    private var pendingScrollEvaluations = 0
 
     var isVisible: Bool {
         requestedVisibility
@@ -498,6 +501,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationFocusTask = nil
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
+        voiceInputFocusTask?.cancel()
+        voiceInputFocusTask = nil
+        voiceInputFocusGeneration &+= 1
         needsFocusAfterApplicationActivation = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -1926,8 +1932,177 @@ final class PanelController: NSObject, NSWindowDelegate {
         Task { @MainActor [weak self, weak webView] in
             guard let self, let webView,
                   self.webFocusRouter.currentWebView === webView else { return }
-            _ = await self.webFocusRouter.togglePrimaryFocus()
+            let transition = await self.webFocusRouter.togglePrimaryFocus()
+            guard transition.succeeded else { return }
+            // The adapter changes DOM focus asynchronously. Reassert only once
+            // after the explicit toggle, never on every page scroll step.
+            self.reassertNativePresentationFocus(for: webView)
         }
+    }
+
+    /// Recover the complete native + DOM input chain immediately before a
+    /// remote voice gesture. This is intentionally separate from the normal
+    /// focus toggle: voice input always needs the composer, while the user's
+    /// page/composer toggle must remain untouched.
+    ///
+    /// The bridge can ask for this focus in the same run-loop turn in which it
+    /// presents FloatTabs. At that point the shell may be visible but neither
+    /// the source window nor the WebKit composer is ready yet. Keep the request
+    /// alive briefly and retry the native + DOM handoff instead of dropping it
+    /// at the old key-window guard. A generation prevents a cancelled request
+    /// from clearing or reviving a newer voice request.
+    func ensureInputFocusForVoice(requestID: String? = nil) {
+        guard requestedVisibility else {
+            fullscreenExperimentLog(
+                "VOICE_FOCUS skipped requested=\(requestedVisibility)"
+            )
+            postVoiceFocusReady(requestID: requestID, ready: false)
+            return
+        }
+
+        // A presentation retry may still be reasserting the shell/source
+        // window while this explicit voice request arrives. It must not race
+        // the DOM focus transaction below and steal the responder afterward.
+        presentationFocusTask?.cancel()
+        presentationFocusTask = nil
+        presentationWebFocusTask?.cancel()
+        presentationWebFocusTask = nil
+
+        voiceInputFocusTask?.cancel()
+        voiceInputFocusGeneration &+= 1
+        let generation = voiceInputFocusGeneration
+
+        // Repair the native responder immediately on the main actor, before
+        // the asynchronous DOM focus task starts. This is important after a
+        // run of WebKit scroll evaluations: the page can still display a DOM
+        // caret while AppKit's actual text client belongs to the old target.
+        let nativeResponderPrepared: Bool
+        if let webView = selectedPresentationWebView() {
+            prepareNativePresentationFocus(for: webView)
+            webFocusRouter.setCurrentWebView(webView)
+            nativeResponderPrepared = true
+        } else {
+            nativeResponderPrepared = false
+        }
+
+        voiceInputFocusTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var didResetNativeResponder = nativeResponderPrepared
+
+            for attempt in 0..<15 {
+                guard self.requestedVisibility,
+                      self.voiceInputFocusGeneration == generation,
+                      !Task.isCancelled else {
+                    return
+                }
+
+                guard let webView = self.selectedPresentationWebView() else {
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    continue
+                }
+
+                // Do not let focusInputForPresentation race the last scroll
+                // command. WebKit invokes JavaScript asynchronously even when
+                // the command itself is tiny; waiting for this small counter
+                // to drain keeps the responder handoff deterministic without
+                // reordering the source window after every scroll step.
+                if self.pendingScrollEvaluations > 0 {
+                    try? await Task.sleep(nanoseconds: 40_000_000)
+                    continue
+                }
+
+                // The normal presentation has two separate windows. The
+                // shell being key is not enough: keyboard input belongs to
+                // the source window that contains this WKWebView. Treat the
+                // companion shell as the target only during fullscreen.
+                let targetWindowIsKey = self.sourceHostController.isSessionLocked
+                    ? self.panel.isKeyWindow
+                    : self.sourceHostController.window.isKeyWindow
+                let ownsKeyboard = NSApp.isActive && targetWindowIsKey
+                if !ownsKeyboard {
+                    self.activateFloatTabs()
+                    self.panel.orderFrontRegardless()
+                    self.panel.makeKeyAndOrderFront(nil)
+                    self.focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+                }
+
+                if !didResetNativeResponder {
+                    didResetNativeResponder = true
+                    self.prepareNativePresentationFocus(for: webView)
+                }
+                self.webFocusRouter.setCurrentWebView(webView)
+
+                if await self.webFocusRouter.focusInputForPresentation() {
+                    // A successful JavaScript focus is not sufficient: the
+                    // visible caret can survive while another NSWindow owns
+                    // the real NSTextInput receiver. Only acknowledge ready
+                    // after the native window/responder chain is also back on
+                    // this WebView.
+                    guard self.reassertNativePresentationFocus(for: webView) else {
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        continue
+                    }
+                    fullscreenExperimentLog(
+                        "VOICE_FOCUS ready attempt=\(attempt + 1) "
+                            + "sourceKey=\(self.sourceHostController.window.isKeyWindow) "
+                            + "panelKey=\(self.panel.isKeyWindow)"
+                    )
+                    self.postVoiceFocusReady(requestID: requestID, ready: true)
+                    self.voiceInputFocusTask = nil
+                    return
+                }
+
+                try? await Task.sleep(nanoseconds: 80_000_000)
+            }
+
+            fullscreenExperimentLog("VOICE_FOCUS timeout attempts=15")
+            self.postVoiceFocusReady(requestID: requestID, ready: false)
+            self.voiceInputFocusTask = nil
+        }
+    }
+
+    enum PageScrollDirection {
+        case up
+        case down
+    }
+
+    /// Scroll the active WebView's actual page container. The website adapter
+    /// caches the nested DOM scroll owner, so this does one small WebKit call
+    /// per button step without scanning the page or retaining a scroll queue.
+    func scrollActiveWebView(direction: PageScrollDirection, lines: Int) {
+        guard let webView = selectedPresentationWebView() else { return }
+        let clampedLines = min(max(lines, 1), 40)
+        // DOM scrollTop grows downward, unlike CGEvent's wheel sign.
+        let directionValue = direction == .up ? -1 : 1
+        let script = WebFocusDOM.pageScrollScript(
+            lines: clampedLines,
+            direction: directionValue
+        )
+        // Keep scrolling DOM-only. Reordering the source window after every
+        // scroll step churns AppKit's NSTextInputContext and can leave a
+        // visible caret with an input-method badge but no usable text client.
+        pendingScrollEvaluations += 1
+        webView.evaluateJavaScript(script) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.pendingScrollEvaluations = max(
+                    self.pendingScrollEvaluations - 1,
+                    0
+                )
+            }
+        }
+    }
+
+    private func postVoiceFocusReady(requestID: String?, ready: Bool) {
+        guard let requestID else { return }
+        DistributedNotificationCenter.default().post(
+            name: FloatTabsExternalCommand.focusReadyNotificationName,
+            object: nil,
+            userInfo: [
+                "requestID": requestID,
+                "ready": NSNumber(value: ready)
+            ]
+        )
     }
 
     private func returnActiveSlotHome() {
@@ -2292,14 +2467,29 @@ final class PanelController: NSObject, NSWindowDelegate {
             // WebKit may expose the window before the page's composer exists.
             // Retry briefly so external-app presentation has the same DOM
             // focus result as pressing the manual focus shortcut once.
+            var didResetNativeResponder = false
             for _ in 0..<20 {
                 guard let self,
                       self.requestedVisibility,
                       !Task.isCancelled else { return }
 
                 if let webView = self.selectedPresentationWebView() {
+                    if !didResetNativeResponder {
+                        didResetNativeResponder = true
+                        self.prepareNativePresentationFocus(for: webView)
+                    }
                     self.webFocusRouter.setCurrentWebView(webView)
                     if await self.webFocusRouter.focusInputForPresentation() {
+                        // The JavaScript focus call is asynchronous relative
+                        // to AppKit. Reassert the native chain after it
+                        // succeeds so a visible caret also has a live
+                        // NSTextInput/keyboard recipient.
+                        guard self.reassertNativePresentationFocus(for: webView) else {
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                            continue
+                        }
+                        self.presentationFocusTask?.cancel()
+                        self.presentationFocusTask = nil
                         self.presentationWebFocusTask = nil
                         return
                     }
@@ -2308,6 +2498,39 @@ final class PanelController: NSObject, NSWindowDelegate {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             self?.presentationWebFocusTask = nil
+        }
+    }
+
+    private func prepareNativePresentationFocus(for webView: WKWebView) {
+        activateFloatTabs()
+        if sourceHostController.isSessionLocked {
+            panel.makeKeyAndOrderFront(nil)
+            _ = panel.makeFirstResponder(webView)
+        } else {
+            sourceHostController.orderFrontAndFocus(
+                webView,
+                makeSourceWindowMain: true
+            )
+            _ = sourceHostController.resetWebViewResponderForPresentation(webView)
+        }
+    }
+
+    /// Restore only AppKit/WebKit's native interaction chain. This deliberately
+    /// does not run a DOM focus script, so scrolling remains in the page when
+    /// the user has intentionally switched away from the composer.
+    @discardableResult
+    private func reassertNativePresentationFocus(for webView: WKWebView) -> Bool {
+        if sourceHostController.isSessionLocked {
+            guard panel.isKeyWindow else { return false }
+            return WebViewFocus.focus(webView, in: panel)
+        } else {
+            guard sourceHostController.window.isKeyWindow else { return false }
+            sourceHostController.orderFrontAndFocus(webView)
+            return WebViewFocus.responderBelongsToWebView(
+                sourceHostController.window.firstResponder,
+                webView: webView,
+                window: sourceHostController.window
+            )
         }
     }
 

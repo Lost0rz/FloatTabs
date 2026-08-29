@@ -16,6 +16,7 @@ final class AppCoordinator {
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
+    private var externalCommandReceiver: FloatTabsExternalCommandReceiver?
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
     private let attentionSoundPlayer: AttentionSoundPlaying
@@ -190,6 +191,18 @@ final class AppCoordinator {
                 }
             }
         )
+
+        // MiRemoteBridge sends semantic FloatTabs commands through the local
+        // user-session notification center. This receiver stays alive while
+        // the menu-bar app is hidden, so a global remote button can present the
+        // panel again without relying on FloatTabs' current shortcut.
+        externalCommandReceiver = FloatTabsExternalCommandReceiver { [weak self] command, scrollLines, requestID in
+            self?.handleExternalCommand(
+                command,
+                scrollLines: scrollLines,
+                requestID: requestID
+            )
+        }
 
         // Keep one local snapshot per app version/build. It is overwritten by
         // the same version on clean starts/exits, while older-version snapshots
@@ -594,6 +607,33 @@ final class AppCoordinator {
 
     private func toggleOrPresentFloatTabs() {
         panelController.toggleOrPresentFloatTabs()
+    }
+
+    private func handleExternalCommand(
+        _ command: FloatTabsExternalCommand,
+        scrollLines: Int = 6,
+        requestID: String? = nil
+    ) {
+        switch command {
+        case .show:
+            presentFloatTabs()
+        case .toggleVisibility:
+            toggleFloatTabs()
+        case .nextSlot:
+            panelController.handle(.nextSlot)
+        case .previousSlot:
+            panelController.handle(.previousSlot)
+        case .togglePrimaryFocus:
+            panelController.handle(.togglePrimaryFocus)
+        case .scrollUp:
+            panelController.scrollActiveWebView(direction: .up, lines: scrollLines)
+        case .scrollDown:
+            panelController.scrollActiveWebView(direction: .down, lines: scrollLines)
+        case .focusInputForVoice:
+            panelController.ensureInputFocusForVoice(requestID: requestID)
+        case .settings:
+            showGlobalSettings()
+        }
     }
 
     private static func presentConfigurationSaveFailure() {

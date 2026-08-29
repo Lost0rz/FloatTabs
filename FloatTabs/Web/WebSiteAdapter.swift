@@ -73,6 +73,7 @@ extension WebSiteAdapter {
 enum WebFocusDOM {
     static let commonFunctions = #"""
     const temporaryPageTabIndex = 'data-floattabs-focus-tabindex';
+    const scrollTargetKey = '__floattabsScrollTarget';
 
     function isVisible(element) {
         if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
@@ -109,11 +110,58 @@ enum WebFocusDOM {
         return !element.readOnly;
     }
 
+    function isScrollablePageElement(element) {
+        if (!isVisible(element)) return false;
+        const style = window.getComputedStyle(element);
+        const overflowY = style.overflowY || style.overflow;
+        return /(auto|scroll|overlay)/.test(overflowY)
+            && element.scrollHeight > element.clientHeight + 2;
+    }
+
+    function pageElementScore(element) {
+        const semanticBoost = element.matches('main, [role="main"], article') ? 100000 : 0;
+        return semanticBoost + Math.max(0, element.scrollHeight - element.clientHeight);
+    }
+
     function pageCandidate() {
-        const candidates = Array.from(document.querySelectorAll(
+        const cached = window[scrollTargetKey];
+        if (isPageScrollTarget(cached)) return cached;
+
+        // Sites such as ChatGPT usually put the conversation in a nested
+        // overflow container. Focusing only <main> leaves PageUp/PageDown
+        // without a scroll owner, even though the input focus path appears to
+        // work. Prefer the largest visible scrollable page container first.
+        const scrollableCandidates = Array.from(document.querySelectorAll(
+            'main, [role="main"], article, section, div, body, html'
+        )).filter(isScrollablePageElement);
+        if (scrollableCandidates.length > 0) {
+            const selected = scrollableCandidates.sort(
+                (left, right) => pageElementScore(right) - pageElementScore(left)
+            )[0];
+            window[scrollTargetKey] = selected;
+            return selected;
+        }
+
+        const semanticCandidates = Array.from(document.querySelectorAll(
             'main, [role="main"], article, body'
         ));
-        return candidates.find(isVisible) || document.body || document.documentElement;
+        const selected = semanticCandidates.find(isVisible)
+            || document.scrollingElement
+            || document.body
+            || document.documentElement;
+        window[scrollTargetKey] = selected || null;
+        return selected;
+    }
+
+    function isPageScrollTarget(element) {
+        if (!element || !element.isConnected) return false;
+        if (element === document.body
+            || element === document.documentElement
+            || element === document.scrollingElement) {
+            return element.scrollHeight > element.clientHeight + 2
+                || document.documentElement.scrollHeight > window.innerHeight + 2;
+        }
+        return isScrollablePageElement(element);
     }
 
     function isInMainRegion(element) {
@@ -258,6 +306,41 @@ enum WebFocusDOM {
             if (!page) return result(false, 'unavailable', 'page_unavailable');
             const success = focusPageElement(page);
             return result(success, success ? 'page' : 'unavailable', success ? null : 'focus_failed');
+        })()
+        """
+    }
+
+    /// Scroll only the cached page container. The first call may discover the
+    /// container; later calls return through `scrollTargetKey` immediately and
+    /// never rescan the DOM. Keeping this script synchronous and behavior
+    /// `auto` avoids smooth-scroll animation queues inside WebKit.
+    static func pageScrollScript(lines: Int, direction: Int) -> String {
+        let clampedLines = min(max(lines, 1), 40)
+        let clampedDirection = direction < 0 ? -1 : 1
+        let delta = clampedLines * 40 * clampedDirection
+        return """
+        (() => {
+            \(commonFunctions)
+            const page = pageCandidate();
+            if (!page) return result(false, 'unavailable', 'page_unavailable');
+
+            const owner = page === document.body
+                || page === document.documentElement
+                || page === document.scrollingElement
+                ? (document.scrollingElement || page)
+                : page;
+            const before = owner.scrollTop;
+            // Keep adjacent views overlapping. A large user-selected speed
+            // must not turn a wheel step into a page jump that hides the
+            // boundary content between two reading positions.
+            const viewportHeight = owner.clientHeight;
+            const maxContinuousStep = viewportHeight > 0
+                ? viewportHeight * 0.55
+                : Math.abs(\(delta));
+            const step = Math.min(Math.abs(\(delta)), maxContinuousStep);
+            owner.scrollTop = before + (\(delta) < 0 ? -step : step);
+            const after = owner.scrollTop;
+            return result(after !== before, 'page', after === before ? 'not_scrollable' : null);
         })()
         """
     }

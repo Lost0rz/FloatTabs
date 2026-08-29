@@ -406,6 +406,25 @@ final class FullscreenSourceHostController {
         }
     }
 
+    /// Rebuild the native WebKit responder before a presentation focus is
+    /// initialized. A DOM editor can still display its caret after the source
+    /// window was shown from another application while WebKit's native text
+    /// input context remains attached to the previous responder. Reassigning
+    /// the outer WKWebView here is intentional: the caller immediately
+    /// focuses the website's editor again, so this is a presentation-only
+    /// repair and never runs during ordinary page navigation.
+    @discardableResult
+    func resetWebViewResponderForPresentation(_ webView: WKWebView) -> Bool {
+        guard !isSessionLocked,
+              window.isVisible,
+              webView.window === window else {
+            return false
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        return window.makeFirstResponder(webView)
+    }
+
     /// Reassert the source window after Mission Control creates or activates
     /// another application's fullscreen Space. AppKit normally applies the
     /// collection flags lazily, but a child window that was already ordered can

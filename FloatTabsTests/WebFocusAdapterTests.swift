@@ -106,6 +106,70 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(selectionLabel, "Ask ChatGPT")
     }
 
+    func testPageFocusTargetsNestedScrollableConversationContainer() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="height: 500px;">
+                <textarea aria-label="Message ChatGPT">existing text</textarea>
+                <div id="conversation-scroll" style="height: 160px; overflow-y: auto;">
+                    <article style="height: 1200px;">Conversation</article>
+                </div>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let adapter = ChatGPTAdapter()
+        try await adapter.focusInput(in: webView)
+        let pageTarget = try await adapter.togglePrimaryFocus(in: webView)
+
+        XCTAssertEqual(pageTarget, .page)
+        let focusedID = await stringValue(
+            "document.activeElement.id",
+            in: webView
+        )
+        XCTAssertEqual(focusedID, "conversation-scroll")
+    }
+
+    func testPageScrollMovesCachedNestedConversationContainer() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="height: 500px;">
+                <textarea aria-label="Message ChatGPT">existing text</textarea>
+                <div id="conversation-scroll" style="height: 160px; overflow-y: auto;">
+                    <article style="height: 1200px;">Conversation</article>
+                </div>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        _ = try await WebFocusDOM.evaluate(
+            WebFocusDOM.pageScrollScript(lines: 40, direction: 1),
+            in: webView
+        )
+        let firstScrollTop = await numberValue(
+            "document.getElementById('conversation-scroll').scrollTop",
+            in: webView
+        )
+        _ = try await WebFocusDOM.evaluate(
+            WebFocusDOM.pageScrollScript(lines: 40, direction: 1),
+            in: webView
+        )
+        let secondScrollTop = await numberValue(
+            "document.getElementById('conversation-scroll').scrollTop",
+            in: webView
+        )
+
+        XCTAssertGreaterThan(firstScrollTop ?? 0, 0)
+        XCTAssertLessThanOrEqual(firstScrollTop ?? Int.max, 88)
+        XCTAssertGreaterThan(secondScrollTop ?? 0, firstScrollTop ?? 0)
+    }
+
     func testGenericAdapterTogglesOnOrdinaryWebsite() async throws {
         let webView = makeWebView()
         load(
