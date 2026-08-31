@@ -89,6 +89,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private var previousApplication: NSRunningApplication?
     private var restoredFrame: NSRect?
+    private var preferredPanelSize: NSSize?
     private var hasPositionedPanel = false
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
@@ -273,7 +274,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
-        restoredFrame = frameStore.loadFrame()
+        let savedFrame = frameStore.loadFrame()
+        restoredFrame = savedFrame
+        preferredPanelSize = savedFrame?.size
 
         let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
@@ -2178,7 +2181,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func handleManualResizeEnded() {
-        clampPanelToConnectedScreens()
+        // A live resize is a user intent, so this path is allowed to enforce
+        // the current display's visible bounds. Screen reconfiguration uses a
+        // separate size-preserving path below.
+        clampPanelToConnectedScreens(preservingPreferredSize: false)
         let viewport = PanelMetrics.viewportSize(forPanelSize: panel.frame.size)
 
         switch preferencesStore.windowSizeMode {
@@ -2201,6 +2207,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             // App keeps its own hidden preferred size for Per Web App mode.
             preferencesStore.fixedViewportSize = viewport
         }
+        preferredPanelSize = panel.frame.size
         persistPanelFrame()
     }
 
@@ -2217,6 +2224,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func applyViewportSize(_ viewportSize: CGSize, animated: Bool) {
+        preferredPanelSize = PanelMetrics.clampedPanelSize(
+            PanelMetrics.panelSize(forViewport: NSSize(
+                width: viewportSize.width,
+                height: viewportSize.height
+            ))
+        )
         let visibleFrame = panel.screen?.visibleFrame
             ?? ScreenPositioning.targetScreen()?.visibleFrame
         guard let visibleFrame else { return }
@@ -2230,9 +2243,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             followPreferredSize: true,
             visibleFrame: visibleFrame
         )
-        guard target != panel.frame else { return }
-        panel.setFrame(target, display: true, animate: animated)
-        synchronizeSourceHostFrame(display: true)
+        if target != panel.frame {
+            panel.setFrame(target, display: true, animate: animated)
+            synchronizeSourceHostFrame(display: true)
+        }
         persistPanelFrame()
     }
 
@@ -2365,16 +2379,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         let screens = NSScreen.screens
         guard let targetScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
 
+        refreshPreferredPanelSizeFromModel()
+
         let targetFrame: NSRect
 
         if hasPositionedPanel {
-            targetFrame = ScreenPositioning.clampedFrame(
-                panel.frame,
-                to: targetScreen.visibleFrame
+            targetFrame = ScreenPositioning.relocatedFrame(
+                frameWithPreferredSize(panel.frame),
+                visibleFrames: [targetScreen.visibleFrame],
+                fallbackVisibleFrame: targetScreen.visibleFrame
             )
         } else if let restoredFrame {
-            targetFrame = ScreenPositioning.restoredFrame(
-                restoredFrame,
+            targetFrame = ScreenPositioning.relocatedFrame(
+                frameWithPreferredSize(restoredFrame),
                 visibleFrames: screens.map(\.visibleFrame),
                 fallbackVisibleFrame: targetScreen.visibleFrame
             )
@@ -2391,15 +2408,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         hasPositionedPanel = true
     }
 
-    private func clampPanelToConnectedScreens() {
+    private func clampPanelToConnectedScreens(preservingPreferredSize: Bool = true) {
         let screens = NSScreen.screens
         guard let fallbackScreen = ScreenPositioning.targetScreen(screens: screens) else { return }
 
-        let clamped = ScreenPositioning.restoredFrame(
-            panel.frame,
-            visibleFrames: screens.map(\.visibleFrame),
-            fallbackVisibleFrame: fallbackScreen.visibleFrame
-        )
+        refreshPreferredPanelSizeFromModel()
+        let clamped: NSRect
+        if preservingPreferredSize {
+            clamped = ScreenPositioning.relocatedFrame(
+                frameWithPreferredSize(panel.frame),
+                visibleFrames: screens.map(\.visibleFrame),
+                fallbackVisibleFrame: fallbackScreen.visibleFrame
+            )
+        } else {
+            clamped = ScreenPositioning.restoredFrame(
+                panel.frame,
+                visibleFrames: screens.map(\.visibleFrame),
+                fallbackVisibleFrame: fallbackScreen.visibleFrame
+            )
+        }
 
         if clamped != panel.frame {
             panel.setFrame(clamped, display: true)
@@ -2417,7 +2444,35 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func persistPanelFrame() {
         guard hasPositionedPanel else { return }
-        frameStore.saveFrame(panel.frame)
+        frameStore.saveFrame(frameWithPreferredSize(panel.frame))
+    }
+
+    private func frameWithPreferredSize(_ frame: NSRect) -> NSRect {
+        guard let preferredPanelSize else { return frame }
+        var result = frame
+        result.size = PanelMetrics.clampedPanelSize(preferredPanelSize)
+        return result
+    }
+
+    private func refreshPreferredPanelSizeFromModel() {
+        switch preferencesStore.windowSizeMode {
+        case .fixed:
+            guard preferencesStore.hasStoredFixedViewportSize else { return }
+            preferredPanelSize = PanelMetrics.panelSize(
+                forViewport: NSSize(
+                    width: preferencesStore.fixedViewportSize.width,
+                    height: preferencesStore.fixedViewportSize.height
+                )
+            )
+        case .perWebApp:
+            guard let activeProfile = tabStore.activeProfile else { return }
+            preferredPanelSize = PanelMetrics.panelSize(
+                forViewport: NSSize(
+                    width: activeProfile.renderingProfile.viewportSize.width,
+                    height: activeProfile.renderingProfile.viewportSize.height
+                )
+            )
+        }
     }
 
     func windowDidMove(_ notification: Notification) {

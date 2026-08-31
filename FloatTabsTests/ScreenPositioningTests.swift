@@ -102,6 +102,35 @@ final class ScreenPositioningTests: XCTestCase {
         XCTAssertFalse(moved.intersects(displayB))
     }
 
+    func testRelocationPreservesSizeWhenVisibleDisplayGetsSmaller() {
+        let saved = NSRect(x: 1700, y: 100, width: 1080, height: 1424)
+        let smallerDisplay = NSRect(x: 0, y: 0, width: 900, height: 700)
+
+        let relocated = ScreenPositioning.relocatedFrame(
+            saved,
+            visibleFrames: [smallerDisplay],
+            fallbackVisibleFrame: smallerDisplay
+        )
+
+        XCTAssertEqual(relocated.size, saved.size)
+        XCTAssertEqual(relocated.origin, smallerDisplay.origin)
+    }
+
+    func testRelocationMovesOnlyOriginWhenSavedSizeStillFits() {
+        let saved = NSRect(x: 1700, y: 100, width: 688, height: 844)
+        let display = NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        let relocated = ScreenPositioning.relocatedFrame(
+            saved,
+            visibleFrames: [display],
+            fallbackVisibleFrame: display
+        )
+
+        XCTAssertEqual(relocated.size, saved.size)
+        XCTAssertEqual(relocated.maxX, display.maxX)
+        XCTAssertEqual(relocated.maxY, display.maxY)
+    }
+
     func testFollowPreferredViewportResizesPanelAndPreservesTopEdgeWhenPossible() {
         let visible = NSRect(x: 0, y: 0, width: 1600, height: 1200)
         let current = NSRect(x: 200, y: 220, width: 518, height: 844)
