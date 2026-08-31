@@ -65,6 +65,13 @@ final class WebFocusRouter: ObservableObject {
     func focusInputForPresentation() async -> Bool {
         guard let webView = currentWebView else { return false }
 
+        // An existing non-utility input may be a ChatGPT message editor. It
+        // is already the user's deliberate voice destination, so preserve it
+        // instead of replacing it with the page's default composer.
+        if await isInputFocusReady() {
+            return true
+        }
+
         let adapter = await registry.adapter(for: webView.url, webView: webView)
         currentAdapter = adapter
         currentWebsiteIdentifier = adapter.identifier
@@ -73,6 +80,24 @@ final class WebFocusRouter: ObservableObject {
             currentTarget = .input
             return true
         } catch {
+            return false
+        }
+    }
+
+    /// Verifies the current DOM target without moving focus again. Callers
+    /// combine this with native key-window/first-responder checks before they
+    /// acknowledge an external voice request.
+    func isInputFocusReady() async -> Bool {
+        guard let webView = currentWebView else { return false }
+        let adapter = await registry.adapter(for: webView.url, webView: webView)
+        currentAdapter = adapter
+        currentWebsiteIdentifier = adapter.identifier
+        do {
+            let target = try await adapter.currentFocus(in: webView)
+            currentTarget = target
+            return target == .input
+        } catch {
+            currentTarget = .unavailable
             return false
         }
     }

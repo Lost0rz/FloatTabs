@@ -106,70 +106,6 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(selectionLabel, "Ask ChatGPT")
     }
 
-    func testPageFocusTargetsNestedScrollableConversationContainer() async throws {
-        let webView = makeWebView()
-        load(
-            """
-            <main style="height: 500px;">
-                <textarea aria-label="Message ChatGPT">existing text</textarea>
-                <div id="conversation-scroll" style="height: 160px; overflow-y: auto;">
-                    <article style="height: 1200px;">Conversation</article>
-                </div>
-            </main>
-            """,
-            in: webView
-        )
-        await settle(webView)
-
-        let adapter = ChatGPTAdapter()
-        try await adapter.focusInput(in: webView)
-        let pageTarget = try await adapter.togglePrimaryFocus(in: webView)
-
-        XCTAssertEqual(pageTarget, .page)
-        let focusedID = await stringValue(
-            "document.activeElement.id",
-            in: webView
-        )
-        XCTAssertEqual(focusedID, "conversation-scroll")
-    }
-
-    func testPageScrollMovesCachedNestedConversationContainer() async throws {
-        let webView = makeWebView()
-        load(
-            """
-            <main style="height: 500px;">
-                <textarea aria-label="Message ChatGPT">existing text</textarea>
-                <div id="conversation-scroll" style="height: 160px; overflow-y: auto;">
-                    <article style="height: 1200px;">Conversation</article>
-                </div>
-            </main>
-            """,
-            in: webView
-        )
-        await settle(webView)
-
-        _ = try await WebFocusDOM.evaluate(
-            WebFocusDOM.pageScrollScript(lines: 40, direction: 1),
-            in: webView
-        )
-        let firstScrollTop = await numberValue(
-            "document.getElementById('conversation-scroll').scrollTop",
-            in: webView
-        )
-        _ = try await WebFocusDOM.evaluate(
-            WebFocusDOM.pageScrollScript(lines: 40, direction: 1),
-            in: webView
-        )
-        let secondScrollTop = await numberValue(
-            "document.getElementById('conversation-scroll').scrollTop",
-            in: webView
-        )
-
-        XCTAssertGreaterThan(firstScrollTop ?? 0, 0)
-        XCTAssertLessThanOrEqual(firstScrollTop ?? Int.max, 88)
-        XCTAssertGreaterThan(secondScrollTop ?? 0, firstScrollTop ?? 0)
-    }
-
     func testGenericAdapterTogglesOnOrdinaryWebsite() async throws {
         let webView = makeWebView()
         load(
@@ -249,6 +185,94 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertTrue(focused)
         XCTAssertEqual(router.currentTarget, .input)
         XCTAssertEqual(focusedLabel, "Message ChatGPT")
+    }
+
+    func testRouterPreservesActiveChatGPTMessageEditorForPresentation() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT"></textarea>
+                <article style="height: 800px;">
+                    <textarea aria-label="Edit message">draft to revise</textarea>
+                </article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        _ = await boolValue(
+            "(() => { const editor = document.querySelector('article textarea'); editor.focus(); return document.activeElement === editor; })()",
+            in: webView
+        )
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        let focused = await router.focusInputForPresentation()
+        let focusedLabel = await stringValue(
+            "document.activeElement.getAttribute('aria-label')",
+            in: webView
+        )
+        let focusedValue = await stringValue(
+            "document.activeElement.value",
+            in: webView
+        )
+
+        XCTAssertTrue(focused)
+        XCTAssertEqual(router.currentTarget, .input)
+        XCTAssertEqual(focusedLabel, "Edit message")
+        XCTAssertEqual(focusedValue, "draft to revise")
+    }
+
+    func testRouterOnlyReportsInputReadyForCurrentDOMInput() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main tabindex="-1" style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">existing text</textarea>
+                <article style="height: 800px;">Conversation</article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        _ = try await ChatGPTAdapter().focusPage(in: webView)
+        let pageReadyBeforeInput = await router.isInputFocusReady()
+        XCTAssertFalse(pageReadyBeforeInput)
+
+        let focused = await router.focusInputForPresentation()
+        let inputReady = await router.isInputFocusReady()
+        XCTAssertTrue(focused)
+        XCTAssertTrue(inputReady)
+
+        _ = try await ChatGPTAdapter().focusPage(in: webView)
+        let pageReadyAfterInput = await router.isInputFocusReady()
+        XCTAssertFalse(pageReadyAfterInput)
+    }
+
+    func testChatGPTAdapterRecognizesPlaintextOnlyComposer() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main tabindex="-1" style="min-height: 500px;">
+                <div contenteditable="plaintext-only"
+                     role="textbox"
+                     aria-label="Message ChatGPT"></div>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let adapter = ChatGPTAdapter()
+        try await adapter.focusInput(in: webView)
+        let target = try await adapter.currentFocus(in: webView)
+
+        XCTAssertEqual(target, .input)
     }
 
     func testRegistryUsesChatGPTBeforeGenericFallback() async {

@@ -16,7 +16,9 @@ final class AppCoordinator {
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
-    private var externalCommandReceiver: FloatTabsExternalCommandReceiver?
+    private var externalCommandController: FloatTabsExternalCommandController?
+    private var externalVoiceFocusTask: Task<Void, Never>?
+    private var externalVoiceFocusRequestID: String?
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
     private let attentionSoundPlayer: AttentionSoundPlaying
@@ -192,17 +194,15 @@ final class AppCoordinator {
             }
         )
 
-        // MiRemoteBridge sends semantic FloatTabs commands through the local
-        // user-session notification center. This receiver stays alive while
-        // the menu-bar app is hidden, so a global remote button can present the
-        // panel again without relying on FloatTabs' current shortcut.
-        externalCommandReceiver = FloatTabsExternalCommandReceiver { [weak self] command, scrollLines, requestID in
-            self?.handleExternalCommand(
-                command,
-                scrollLines: scrollLines,
-                requestID: requestID
-            )
-        }
+        // RemoteOrbit uses semantic commands instead of replaying FloatTabs'
+        // configurable keyboard shortcuts. Keep this listener alive even when
+        // the panel is hidden so voice focus and tab/scroll actions have one
+        // stable application entry point.
+        externalCommandController = FloatTabsExternalCommandController(
+            onCommand: { [weak self] command, userInfo in
+                self?.handleExternalCommand(command, userInfo: userInfo)
+            }
+        )
 
         // Keep one local snapshot per app version/build. It is overwritten by
         // the same version on clean starts/exits, while older-version snapshots
@@ -227,6 +227,9 @@ final class AppCoordinator {
 
     func prepareForTermination() {
         isTerminating = true
+        externalVoiceFocusTask?.cancel()
+        externalVoiceFocusTask = nil
+        externalVoiceFocusRequestID = nil
         websiteCacheAutomaticTask?.cancel()
         websiteCacheAutomaticTask = nil
         websiteCacheCleanupCoordinator?.stop()
@@ -611,29 +614,87 @@ final class AppCoordinator {
 
     private func handleExternalCommand(
         _ command: FloatTabsExternalCommand,
-        scrollLines: Int = 6,
-        requestID: String? = nil
+        userInfo: [AnyHashable: Any]?
     ) {
         switch command {
         case .show:
-            presentFloatTabs()
+            panelController.showFloatTabs()
+
         case .toggleVisibility:
-            toggleFloatTabs()
+            panelController.toggleFloatTabs()
+
         case .nextSlot:
             panelController.handle(.nextSlot)
+
         case .previousSlot:
             panelController.handle(.previousSlot)
+
         case .togglePrimaryFocus:
             panelController.handle(.togglePrimaryFocus)
+
         case .scrollUp:
-            panelController.scrollActiveWebView(direction: .up, lines: scrollLines)
+            let lines = (userInfo?["scrollLines"] as? NSNumber)?.intValue ?? 6
+            _ = panelController.scrollWebView(lines: max(1, lines))
+
         case .scrollDown:
-            panelController.scrollActiveWebView(direction: .down, lines: scrollLines)
-        case .focusInputForVoice:
-            panelController.ensureInputFocusForVoice(requestID: requestID)
+            let lines = (userInfo?["scrollLines"] as? NSNumber)?.intValue ?? 6
+            _ = panelController.scrollWebView(lines: -max(1, lines))
+
+        case .reload:
+            panelController.handle(.reload)
+
+        case .cancelScroll:
+            panelController.cancelExternalScrollCommands()
+
         case .settings:
             showGlobalSettings()
+
+        case .focusInputForVoice:
+            guard let requestID = userInfo?["requestID"] as? String else { return }
+            let protocolVersion = (userInfo?["protocolVersion"] as? NSNumber)?.intValue
+                ?? 1
+            guard protocolVersion == FloatTabsExternalCommand.protocolVersion else {
+                postExternalVoiceFocusResult(
+                    requestID: requestID,
+                    result: .failed("protocol-mismatch-\(protocolVersion)")
+                )
+                return
+            }
+
+            externalVoiceFocusTask?.cancel()
+            externalVoiceFocusRequestID = requestID
+            externalVoiceFocusTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let result = await self.panelController
+                    .prepareInputFocusForExternalVoice()
+                self.postExternalVoiceFocusResult(
+                    requestID: requestID,
+                    result: result
+                )
+                if self.externalVoiceFocusRequestID == requestID {
+                    self.externalVoiceFocusRequestID = nil
+                    self.externalVoiceFocusTask = nil
+                }
+            }
         }
+    }
+
+    private func postExternalVoiceFocusResult(
+        requestID: String,
+        result: ExternalVoiceFocusResult
+    ) {
+        DistributedNotificationCenter.default().post(
+            name: FloatTabsExternalCommand.focusReadyNotificationName,
+            object: nil,
+            userInfo: [
+                "requestID": requestID,
+                "protocolVersion": NSNumber(
+                    value: FloatTabsExternalCommand.protocolVersion
+                ),
+                "ready": NSNumber(value: result.ready),
+                "reason": result.reason,
+            ]
+        )
     }
 
     private static func presentConfigurationSaveFailure() {

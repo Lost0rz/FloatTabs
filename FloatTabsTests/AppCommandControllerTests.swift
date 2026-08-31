@@ -205,6 +205,46 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(committed, "example.com/project")
     }
 
+    func testExternalScrollAccumulatorMergesSameDirectionAndConsumesOnce() {
+        var accumulator = ExternalScrollAccumulator()
+
+        accumulator.append(6)
+        accumulator.append(6)
+
+        XCTAssertEqual(accumulator.pendingLines, 12)
+        XCTAssertEqual(accumulator.take(), 12)
+        XCTAssertEqual(accumulator.pendingLines, 0)
+    }
+
+    func testExternalScrollAccumulatorCancelsOppositePendingMovement() {
+        var accumulator = ExternalScrollAccumulator()
+
+        accumulator.append(18)
+        accumulator.append(-18)
+
+        XCTAssertEqual(accumulator.pendingLines, 0)
+    }
+
+    func testExternalScrollAccumulatorCapsBurstToSafeBound() {
+        var accumulator = ExternalScrollAccumulator()
+
+        for _ in 0..<100 {
+            accumulator.append(40)
+        }
+
+        XCTAssertEqual(
+            accumulator.pendingLines,
+            ExternalScrollAccumulator.maxPendingLines
+        )
+    }
+
+    func testCancelScrollIsPartOfExternalCommandProtocol() {
+        XCTAssertEqual(
+            FloatTabsExternalCommand(rawValue: "cancelScroll"),
+            .cancelScroll
+        )
+    }
+
     private func defaultCommand(
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags
