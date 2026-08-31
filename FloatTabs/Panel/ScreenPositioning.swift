@@ -231,6 +231,49 @@ enum ScreenPositioning {
         return result
     }
 
+    /// Repositions a frame after the connected display topology changes while
+    /// preserving its requested size. A display change is not a user resize;
+    /// if the current visible area is temporarily smaller, the window may be
+    /// partially off-screen until a larger display is available again.
+    static func relocatedFrame(
+        _ frame: NSRect,
+        visibleFrames: [NSRect],
+        fallbackVisibleFrame: NSRect,
+        minimumSize: NSSize = PanelMetrics.minimumPanelSize
+    ) -> NSRect {
+        let destination = bestVisibleFrame(for: frame, visibleFrames: visibleFrames)
+            ?? fallbackVisibleFrame
+
+        var result = frame
+        result.size = NSSize(
+            width: max(frame.width, minimumSize.width),
+            height: max(frame.height, minimumSize.height)
+        )
+
+        // A frame larger than the available display cannot be fully clamped
+        // without changing the user's requested size. Keep its top-left
+        // corner visible and preserve the dimensions for later restoration.
+        if result.width <= destination.width {
+            result.origin.x = min(
+                max(result.origin.x, destination.minX),
+                destination.maxX - result.width
+            )
+        } else {
+            result.origin.x = destination.minX
+        }
+
+        if result.height <= destination.height {
+            result.origin.y = min(
+                max(result.origin.y, destination.minY),
+                destination.maxY - result.height
+            )
+        } else {
+            result.origin.y = destination.minY
+        }
+
+        return result
+    }
+
     /// When follow-preferred-size is enabled, Slot switching changes only the
     /// panel size while preserving its top edge and left edge as much as the
     /// active display allows. Disabled mode leaves the current frame untouched.
