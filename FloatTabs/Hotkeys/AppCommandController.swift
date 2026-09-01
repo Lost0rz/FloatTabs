@@ -25,8 +25,15 @@ enum AppCommand: Equatable {
 enum FloatTabsExternalCommand: String {
     case show
     case toggleVisibility
+    case selectSlot
     case nextSlot
     case previousSlot
+    case addWebApp
+    case zoomIn
+    case zoomOut
+    case resetZoom
+    case addressBar
+    case returnHome
     case togglePrimaryFocus
     case scrollUp
     case scrollDown
@@ -34,6 +41,8 @@ enum FloatTabsExternalCommand: String {
     case cancelScroll
     case focusInputForVoice
     case settings
+    case togglePin
+    case setResidency
 
     static let notificationName = Notification.Name(
         "com.lost0rz.FloatTabs.external-command.v1"
@@ -42,7 +51,7 @@ enum FloatTabsExternalCommand: String {
         "com.lost0rz.FloatTabs.focus-ready.v1"
     )
 
-    static let protocolVersion = 2
+    static let protocolVersion = 3
 }
 
 struct ExternalVoiceFocusResult: Equatable {

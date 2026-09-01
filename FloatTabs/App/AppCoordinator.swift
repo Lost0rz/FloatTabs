@@ -649,11 +649,34 @@ final class AppCoordinator {
         case .toggleVisibility:
             panelController.toggleFloatTabs()
 
+        case .selectSlot:
+            guard let index = (userInfo?["slotIndex"] as? NSNumber)?.intValue,
+                  (1...9).contains(index) else { return }
+            panelController.handle(.selectSlot(index))
+
         case .nextSlot:
             enqueueExternalSlotSwitch(delta: 1)
 
         case .previousSlot:
             enqueueExternalSlotSwitch(delta: -1)
+
+        case .addWebApp:
+            panelController.handle(.addWebApp)
+
+        case .zoomIn:
+            panelController.handle(.zoomIn)
+
+        case .zoomOut:
+            panelController.handle(.zoomOut)
+
+        case .resetZoom:
+            panelController.handle(.resetZoom)
+
+        case .addressBar:
+            panelController.handle(.addressBar)
+
+        case .returnHome:
+            panelController.handle(.returnHome)
 
         case .togglePrimaryFocus:
             panelController.handle(.togglePrimaryFocus)
@@ -674,6 +697,14 @@ final class AppCoordinator {
 
         case .settings:
             showGlobalSettings()
+
+        case .togglePin:
+            panelController.handle(.togglePin)
+
+        case .setResidency:
+            guard let rawValue = userInfo?["residencyPolicy"] as? String,
+                  let policy = SlotResidencyPolicy(rawValue: rawValue) else { return }
+            panelController.handle(.setResidency(policy))
 
         case .focusInputForVoice:
             guard let requestID = userInfo?["requestID"] as? String else { return }

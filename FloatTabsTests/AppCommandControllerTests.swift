@@ -5,6 +5,42 @@ import XCTest
 
 @MainActor
 final class AppCommandControllerTests: XCTestCase {
+    func testRemoteOrbitExternalCommandProtocolCoversFullCatalog() {
+        XCTAssertEqual(FloatTabsExternalCommand.protocolVersion, 3)
+        XCTAssertEqual(FloatTabsExternalCommand.selectSlot.rawValue, "selectSlot")
+        XCTAssertEqual(FloatTabsExternalCommand.addWebApp.rawValue, "addWebApp")
+        XCTAssertEqual(FloatTabsExternalCommand.zoomIn.rawValue, "zoomIn")
+        XCTAssertEqual(FloatTabsExternalCommand.zoomOut.rawValue, "zoomOut")
+        XCTAssertEqual(FloatTabsExternalCommand.resetZoom.rawValue, "resetZoom")
+        XCTAssertEqual(FloatTabsExternalCommand.addressBar.rawValue, "addressBar")
+        XCTAssertEqual(FloatTabsExternalCommand.returnHome.rawValue, "returnHome")
+        XCTAssertEqual(FloatTabsExternalCommand.togglePin.rawValue, "togglePin")
+        XCTAssertEqual(FloatTabsExternalCommand.setResidency.rawValue, "setResidency")
+    }
+
+    func testEveryLocalCommandHasAStableRemoteOrbitSurface() {
+        let remoteCommands: [FloatTabsExternalCommand] = [
+            .selectSlot,
+            .nextSlot,
+            .previousSlot,
+            .addWebApp,
+            .zoomIn,
+            .zoomOut,
+            .resetZoom,
+            .addressBar,
+            .returnHome,
+            .reload,
+            .togglePrimaryFocus,
+            .settings,
+            .togglePin,
+            .setResidency,
+        ]
+
+        XCTAssertTrue(remoteCommands.contains(.selectSlot))
+        XCTAssertTrue(remoteCommands.contains(.setResidency))
+        XCTAssertEqual(Set(remoteCommands.map(\.rawValue)).count, 14)
+    }
+
     func testOnlyExplicitFloatTabsShortcutsAreMatched() {
         XCTAssertEqual(
             defaultCommand(keyCode: 18, modifiers: [.command]),
