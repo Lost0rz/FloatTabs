@@ -72,7 +72,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
     private weak var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private let addressOverlayView = AddressOverlayView()
-    private let zoomHUDView = ZoomHUDView()
+    private let statusHUDView = StatusHUDView()
     private var transientUIConstraints: [NSLayoutConstraint] = []
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
@@ -1476,12 +1476,15 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .togglePin:
             togglePinnedState()
+
+        case let .setResidency(policy):
+            _ = setActiveResidency(policy)
         }
     }
 
     private func configureTransientUI() {
         addressOverlayView.translatesAutoresizingMaskIntoConstraints = false
-        zoomHUDView.translatesAutoresizingMaskIntoConstraints = false
+        statusHUDView.translatesAutoresizingMaskIntoConstraints = false
         installTransientUI(
             in: sourceHostController.transientUIContainerView,
             viewport: sourceHostController.transientUIContainerView
@@ -1502,16 +1505,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func installTransientUI(in host: NSView, viewport: NSView) {
-        guard addressOverlayView.superview !== host || zoomHUDView.superview !== host else {
+        guard addressOverlayView.superview !== host || statusHUDView.superview !== host else {
             return
         }
 
         NSLayoutConstraint.deactivate(transientUIConstraints)
         transientUIConstraints.removeAll()
         addressOverlayView.removeFromSuperview()
-        zoomHUDView.removeFromSuperview()
+        statusHUDView.removeFromSuperview()
         host.addSubview(addressOverlayView)
-        host.addSubview(zoomHUDView)
+        host.addSubview(statusHUDView)
 
         transientUIConstraints = [
             addressOverlayView.leadingAnchor.constraint(
@@ -1528,15 +1531,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             ),
             addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
 
-            zoomHUDView.centerXAnchor.constraint(
+            statusHUDView.centerXAnchor.constraint(
                 equalTo: viewport.centerXAnchor
             ),
-            zoomHUDView.bottomAnchor.constraint(
+            statusHUDView.bottomAnchor.constraint(
                 equalTo: viewport.bottomAnchor,
                 constant: -28
             ),
-            zoomHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
-            zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
+            statusHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            statusHUDView.heightAnchor.constraint(equalToConstant: 34),
         ]
         NSLayoutConstraint.activate(transientUIConstraints)
     }
@@ -1708,17 +1711,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
         }
         rail.onSetResidency = { [weak self] id, policy in
-            guard let self,
-                  self.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
-                  let updatedProfile = self.tabStore.profiles.first(where: { $0.id == id }) else {
-                return
-            }
-            // If a Slot was already cold/detached when its label changes to
-            // Cold, there will be no later lifecycle release callback. Apply
-            // the same safe fast-path immediately; the coordinator still
-            // revalidates the current aggregate residency for the shared
-            // Browser Profile.
-            self.handleRuntimeReleased(updatedProfile)
+            _ = self?.setResidency(policy, for: id)
         }
         rail.onSetBackgroundMedia = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
@@ -2222,7 +2215,33 @@ final class PanelController: NSObject, NSWindowDelegate {
         let normalized = ZoomSteps.nearest(to: zoom)
         guard tabStore.updateZoom(id: id, zoom: normalized) else { return }
         synchronizeTransientUIHost()
-        zoomHUDView.show(zoom: normalized)
+        statusHUDView.show(zoom: normalized)
+    }
+
+    @discardableResult
+    func setResidency(_ policy: SlotResidencyPolicy, for id: UUID) -> Bool {
+        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
+              let updatedProfile = tabStore.profiles.first(where: { $0.id == id }) else {
+            return false
+        }
+
+        // If a Slot was already cold/detached when its label changes to Cold,
+        // there will be no later lifecycle release callback. Apply the same
+        // safe fast-path immediately; the coordinator still revalidates the
+        // current aggregate residency for the shared Browser Profile.
+        handleRuntimeReleased(updatedProfile)
+
+        if tabStore.activeTabID == id {
+            synchronizeTransientUIHost()
+            statusHUDView.show(residency: policy)
+        }
+        return true
+    }
+
+    @discardableResult
+    func setActiveResidency(_ policy: SlotResidencyPolicy) -> Bool {
+        guard let id = tabStore.activeTabID else { return false }
+        return setResidency(policy, for: id)
     }
 
     private func presentAddressBar() {
@@ -3102,9 +3121,11 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 }
 
 @MainActor
-final class ZoomHUDView: NSView {
+final class StatusHUDView: NSView {
     private let label = NSTextField(labelWithString: "100%")
     private var hideWorkItem: DispatchWorkItem?
+
+    var displayedText: String { label.stringValue }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -3137,8 +3158,16 @@ final class ZoomHUDView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func show(zoom: CGFloat) {
+        show(message: ZoomSteps.percentageText(for: zoom))
+    }
+
+    func show(residency: SlotResidencyPolicy) {
+        show(message: "Mode: \(residency.displayName)")
+    }
+
+    func show(message: String) {
         hideWorkItem?.cancel()
-        label.stringValue = ZoomSteps.percentageText(for: zoom)
+        label.stringValue = message
         isHidden = false
 
         let item = DispatchWorkItem { [weak self] in

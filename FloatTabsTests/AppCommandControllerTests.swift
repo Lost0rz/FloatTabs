@@ -76,9 +76,43 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(AppShortcutCatalog.slotBindings.count, 9)
         XCTAssertEqual(AppShortcutCatalog.navigationBindings.count, 7)
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
+        XCTAssertEqual(AppShortcutCatalog.residencyBindings.count, 3)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 21)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 21)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 24)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 24)
+    }
+
+    func testResidencyShortcutsSelectHotWarmAndCold() {
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.h.rawValue),
+                modifiers: [.control, .option]
+            ),
+            .setResidency(.hot)
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.w.rawValue),
+                modifiers: [.control, .option]
+            ),
+            .setResidency(.warm)
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.c.rawValue),
+                modifiers: [.control, .option]
+            ),
+            .setResidency(.cold)
+        )
+    }
+
+    func testStatusHUDDisplaysSelectedResidencyMode() {
+        let hud = StatusHUDView()
+
+        hud.show(residency: .warm)
+
+        XCTAssertFalse(hud.isHidden)
+        XCTAssertEqual(hud.displayedText, "Mode: Warm")
     }
 
     func testConfiguredAddressShortcutReplacesDefaultCommandL() {
