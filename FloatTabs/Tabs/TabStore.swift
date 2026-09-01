@@ -476,41 +476,44 @@ final class TabStore {
 
     @discardableResult
     func selectNext(now: Date = Date()) -> WebAppProfile? {
-        let ordered = orderedProfiles
-        guard !ordered.isEmpty else {
-            activeTabID = nil
-            return nil
-        }
-
-        let nextIndex: Int
-        if let activeTabID,
-           let currentIndex = ordered.firstIndex(where: { $0.id == activeTabID }) {
-            nextIndex = (currentIndex + 1) % ordered.count
-        } else {
-            nextIndex = 0
-        }
-
-        _ = select(id: ordered[nextIndex].id, now: now)
-        return activeProfile
+        selectRelative(by: 1, now: now)
     }
 
     @discardableResult
     func selectPrevious(now: Date = Date()) -> WebAppProfile? {
+        selectRelative(by: -1, now: now)
+    }
+
+    /// Select a slot relative to the current one in one model transaction.
+    /// External command bursts use this instead of stepping through every
+    /// intermediate WebView, so a rapid remote sequence only performs one
+    /// persistence and presentation update for the final destination.
+    @discardableResult
+    func selectRelative(by offset: Int, now: Date = Date()) -> WebAppProfile? {
         let ordered = orderedProfiles
         guard !ordered.isEmpty else {
             activeTabID = nil
             return nil
         }
 
-        let previousIndex: Int
+        let baseIndex: Int
         if let activeTabID,
            let currentIndex = ordered.firstIndex(where: { $0.id == activeTabID }) {
-            previousIndex = (currentIndex - 1 + ordered.count) % ordered.count
+            baseIndex = currentIndex
+        } else if offset < 0 {
+            // Preserve selectPrevious's old behavior when no active slot is
+            // available: a backward step starts at the last slot.
+            baseIndex = 0
         } else {
-            previousIndex = ordered.count - 1
+            // Preserve selectNext's old behavior when no active slot is
+            // available: a forward step starts at the first slot.
+            baseIndex = ordered.count - 1
         }
 
-        _ = select(id: ordered[previousIndex].id, now: now)
+        let count = ordered.count
+        let normalizedOffset = offset % count
+        let targetIndex = (baseIndex + normalizedOffset + count) % count
+        _ = select(id: ordered[targetIndex].id, now: now)
         return activeProfile
     }
 

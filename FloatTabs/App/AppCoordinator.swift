@@ -29,6 +29,8 @@ final class AppCoordinator {
     private var globalSettingsController: GlobalSettingsController?
     private var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private var websiteCacheAutomaticTask: Task<Void, Never>?
+    private var pendingExternalSlotDelta = 0
+    private var externalSlotFlushScheduled = false
     private var isTerminating = false
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
     private var lastAttentionReadyCount = 0
@@ -612,6 +614,30 @@ final class AppCoordinator {
         panelController.toggleOrPresentFloatTabs()
     }
 
+    /// Apply the first external tab command immediately, then fold commands
+    /// that arrive in the same main-queue turn into one relative selection.
+    /// This preserves the feel of a single click while preventing a burst of
+    /// remote volume reports from synchronously activating and persisting every
+    /// intermediate WebView.
+    private func enqueueExternalSlotSwitch(delta: Int) {
+        guard delta != 0 else { return }
+        if externalSlotFlushScheduled {
+            pendingExternalSlotDelta += delta
+            return
+        }
+
+        externalSlotFlushScheduled = true
+        _ = panelController.selectSlot(relativeOffset: delta)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let pendingDelta = self.pendingExternalSlotDelta
+            self.pendingExternalSlotDelta = 0
+            self.externalSlotFlushScheduled = false
+            guard pendingDelta != 0 else { return }
+            self.enqueueExternalSlotSwitch(delta: pendingDelta)
+        }
+    }
+
     private func handleExternalCommand(
         _ command: FloatTabsExternalCommand,
         userInfo: [AnyHashable: Any]?
@@ -624,10 +650,10 @@ final class AppCoordinator {
             panelController.toggleFloatTabs()
 
         case .nextSlot:
-            panelController.handle(.nextSlot)
+            enqueueExternalSlotSwitch(delta: 1)
 
         case .previousSlot:
-            panelController.handle(.previousSlot)
+            enqueueExternalSlotSwitch(delta: -1)
 
         case .togglePrimaryFocus:
             panelController.handle(.togglePrimaryFocus)

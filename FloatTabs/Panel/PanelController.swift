@@ -1430,6 +1430,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 #endif
 
+    @discardableResult
+    func selectSlot(relativeOffset: Int) -> Bool {
+        tabStore.selectRelative(by: relativeOffset) != nil
+    }
+
     func handle(_ command: AppCommand) {
         switch command {
         case let .selectSlot(index):
@@ -1437,10 +1442,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = tabStore.select(id: slot.id)
 
         case .nextSlot:
-            _ = tabStore.selectNext()
+            _ = selectSlot(relativeOffset: 1)
 
         case .previousSlot:
-            _ = tabStore.selectPrevious()
+            _ = selectSlot(relativeOffset: -1)
 
         case .addWebApp:
             presentAddWebAppEditor()

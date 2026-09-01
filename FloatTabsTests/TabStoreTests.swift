@@ -289,6 +289,18 @@ final class TabStoreTests: XCTestCase {
         XCTAssertEqual(store.selectPrevious()?.id, third.id)
     }
 
+    func testRelativeSelectionAppliesOneNetOffsetAndWraps() {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let first = store.add(name: "A", homeURL: urlA)!
+        let second = store.add(name: "B", homeURL: urlB)!
+        let third = store.add(name: "C", homeURL: urlC)!
+
+        _ = store.select(id: first.id)
+        XCTAssertEqual(store.selectRelative(by: 2)?.id, third.id)
+        XCTAssertEqual(store.selectRelative(by: 4)?.id, first.id)
+        XCTAssertEqual(store.selectRelative(by: -4)?.id, third.id)
+    }
+
     func testPersistedDuplicateAndInvalidOrdersAreNormalizedContinuously() {
         let early = WebAppProfile(
             order: -4,
