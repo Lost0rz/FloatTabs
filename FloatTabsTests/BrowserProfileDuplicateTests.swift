@@ -270,7 +270,7 @@ final class BrowserProfileDuplicateTests: XCTestCase {
             .settingWebsiteMode(.mobile)
             .settingBrowserIdentity(.macosChrome)
             .settingSimplePreset(.wide)
-            .settingZoom(1.25)
+            .settingZoom(1.50)
         var source = try XCTUnwrap(
             store.add(
                 name: "Configured App",

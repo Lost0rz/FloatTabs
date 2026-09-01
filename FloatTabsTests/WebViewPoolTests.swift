@@ -34,12 +34,12 @@ final class WebViewPoolTests: XCTestCase {
         let first = try pool.webView(for: profile)
 
         profile.renderingProfile = profile.renderingProfile
-            .settingZoom(1.25)
+            .settingZoom(1.50)
             .settingViewport(CGSize(width: 612, height: 777))
         let second = try pool.webView(for: profile)
 
         XCTAssertTrue(first === second)
-        XCTAssertEqual(second.pageZoom, 1.25, accuracy: 0.001)
+        XCTAssertEqual(second.pageZoom, 1.50, accuracy: 0.001)
         XCTAssertEqual(pool.count, 1)
     }
 
