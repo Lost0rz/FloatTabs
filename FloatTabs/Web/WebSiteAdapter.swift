@@ -95,7 +95,8 @@ enum WebFocusDOM {
         const tag = element.tagName.toLowerCase();
         return tag === 'textarea'
             || element.isContentEditable === true
-            || element.getAttribute('contenteditable') === 'true'
+            || (element.hasAttribute('contenteditable')
+                && element.getAttribute('contenteditable') !== 'false')
             || element.getAttribute('role') === 'textbox';
     }
 
@@ -139,9 +140,24 @@ enum WebFocusDOM {
             || /search|address|url|setting|find in page|navigate/.test(context);
     }
 
+    function activeInputElement() {
+        const active = document.activeElement;
+        if (!active) return null;
+        if (isInputElement(active)) return active;
+        return active.closest?.(
+            'textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'
+        ) || null;
+    }
+
+    function isCurrentInput(element) {
+        const activeInput = activeInputElement();
+        return !!activeInput
+            && (activeInput === element || element.contains(activeInput));
+    }
+
     function findInput(scoreInput) {
         const candidates = Array.from(document.querySelectorAll(
-            'textarea, [contenteditable="true"], [role="textbox"]'
+            'textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'
         ));
         let best = null;
         let bestScore = -Infinity;
@@ -175,7 +191,9 @@ enum WebFocusDOM {
             try { element.setSelectionRange(end, end); } catch (_) {}
             return;
         }
-        if (element.isContentEditable || element.getAttribute('contenteditable') === 'true') {
+        if (element.isContentEditable
+            || (element.hasAttribute('contenteditable')
+                && element.getAttribute('contenteditable') !== 'false')) {
             const selection = window.getSelection();
             const range = document.createRange();
             range.selectNodeContents(element);
@@ -226,8 +244,8 @@ enum WebFocusDOM {
     }
 
     function currentTarget() {
-        const active = document.activeElement;
-        if (isInputElement(active) || active?.closest?.('textarea, [contenteditable="true"], [role="textbox"]')) {
+        const activeInput = activeInputElement();
+        if (isUsableInput(activeInput) && !isUtilityInput(activeInput)) {
             return 'input';
         }
         return pageCandidate() ? 'page' : 'unavailable';

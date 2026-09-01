@@ -23,6 +23,10 @@ final class ChatGPTAdapter: WebSiteAdapter {
             if (/search|address|url|setting|find in page|navigate/.test(context)) score -= 1000;
             if (element.getAttribute('type') === 'search') score -= 1000;
             if (element.closest('header, nav, aside, [role="navigation"], [role="dialog"]')) score -= 160;
+            // When ChatGPT is editing an existing message, the active editor
+            // is the voice destination. Keep it ahead of the bottom composer
+            // instead of stealing focus back to the default input.
+            if (isCurrentInput(element) && !isUtilityInput(element)) score += 1000;
             return score;
         })()
         """
@@ -43,7 +47,7 @@ final class ChatGPTAdapter: WebSiteAdapter {
                 || host === 'www.chatgpt.com'
                 || host === 'chat.openai.com';
             const composer = Array.from(document.querySelectorAll(
-                'textarea, [contenteditable="true"], [role="textbox"]'
+                'textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'
             )).some((element) => {
                 const text = [
                     element.getAttribute('aria-label') || '',

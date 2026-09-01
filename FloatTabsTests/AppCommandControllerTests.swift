@@ -205,6 +205,26 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(committed, "example.com/project")
     }
 
+    func testExternalCommandProtocolContainsDirectPresentationActions() {
+        XCTAssertEqual(FloatTabsExternalCommand(rawValue: "show"), .show)
+        XCTAssertEqual(
+            FloatTabsExternalCommand(rawValue: "toggleVisibility"),
+            .toggleVisibility
+        )
+        XCTAssertEqual(
+            FloatTabsExternalCommand(rawValue: "scrollUp"),
+            .scrollUp
+        )
+        XCTAssertEqual(
+            FloatTabsExternalCommand(rawValue: "scrollDown"),
+            .scrollDown
+        )
+        XCTAssertEqual(
+            FloatTabsExternalCommand(rawValue: "cancelScroll"),
+            .cancelScroll
+        )
+    }
+
     private func defaultCommand(
         keyCode: UInt16,
         modifiers: NSEvent.ModifierFlags
