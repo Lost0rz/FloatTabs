@@ -583,7 +583,8 @@ final class WebRenderingProfileTests: XCTestCase {
     func testZoomStepTraversalAndResetHelpers() {
         XCTAssertEqual(ZoomSteps.nextLarger(after: 1.0), 1.10, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.nextSmaller(before: 1.0), 0.90, accuracy: 0.001)
-        XCTAssertEqual(ZoomSteps.nextLarger(after: 2.0), 2.0, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 2.0), 2.25, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 3.0), 3.0, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.nextSmaller(before: 0.5), 0.5, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.nearest(to: 1.49), 1.50, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.percentageText(for: 1.33), "133%")
