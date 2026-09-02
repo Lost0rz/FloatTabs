@@ -260,6 +260,18 @@ enum WebFocusDOM {
         """
         (() => {
             \(commonFunctions)
+
+            // The active composer is the common fast path for voice input,
+            // including ChatGPT's message editor. Reusing it avoids a second
+            // WebKit round trip just to ask where focus currently is, and it
+            // prevents a focused edit box from being replaced by the bottom
+            // composer while the user is dictating an existing message.
+            const active = activeInputElement();
+            if (isUsableInput(active) && !isUtilityInput(active)) {
+                const activeSuccess = focusInputElement(active);
+                if (activeSuccess) return result(true, 'input', null);
+            }
+
             const input = findInput((element) => \(scoring));
             if (!input) return result(false, 'unavailable', 'input_unavailable');
             const success = focusInputElement(input);

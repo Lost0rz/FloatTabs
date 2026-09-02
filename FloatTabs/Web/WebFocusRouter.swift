@@ -65,13 +65,10 @@ final class WebFocusRouter: ObservableObject {
     func focusInputForPresentation() async -> Bool {
         guard let webView = currentWebView else { return false }
 
-        // An existing non-utility input may be a ChatGPT message editor. It
-        // is already the user's deliberate voice destination, so preserve it
-        // instead of replacing it with the page's default composer.
-        if await isInputFocusReady() {
-            return true
-        }
-
+        // inputFocusScript checks and reuses the active non-utility editor in
+        // the same WebKit evaluation. Avoid the former currentFocus + focus
+        // pair: the extra IPC round trip was visible on the first voice press
+        // after a page scroll or a long idle period.
         let adapter = await registry.adapter(for: webView.url, webView: webView)
         currentAdapter = adapter
         currentWebsiteIdentifier = adapter.identifier
