@@ -1,5 +1,6 @@
 import AppKit
 import KeyboardShortcuts
+import OSLog
 
 enum AppCommand: Equatable {
     case selectSlot(Int)
@@ -15,6 +16,100 @@ enum AppCommand: Equatable {
     case togglePrimaryFocus
     case settings
     case togglePin
+    case setResidency(SlotResidencyPolicy)
+}
+
+/// Commands sent by RemoteOrbit's semantic adapter. This IPC surface stays
+/// separate from user-configurable KeyboardShortcuts so changing a FloatTabs
+/// shortcut cannot break the remote's preset actions.
+enum FloatTabsExternalCommand: String {
+    case show
+    case toggleVisibility
+    case selectSlot
+    case nextSlot
+    case previousSlot
+    case addWebApp
+    case zoomIn
+    case zoomOut
+    case resetZoom
+    case addressBar
+    case returnHome
+    case togglePrimaryFocus
+    case scrollUp
+    case scrollDown
+    case reload
+    case cancelScroll
+    case focusInputForVoice
+    case settings
+    case togglePin
+    case setResidency
+
+    static let notificationName = Notification.Name(
+        "com.lost0rz.FloatTabs.external-command.v1"
+    )
+    static let focusReadyNotificationName = Notification.Name(
+        "com.lost0rz.FloatTabs.focus-ready.v1"
+    )
+
+    static let protocolVersion = 3
+}
+
+struct ExternalVoiceFocusResult: Equatable {
+    let ready: Bool
+    let reason: String
+
+    static let ready = ExternalVoiceFocusResult(
+        ready: true,
+        reason: "verified-ready"
+    )
+
+    static func failed(_ reason: String) -> ExternalVoiceFocusResult {
+        ExternalVoiceFocusResult(ready: false, reason: reason)
+    }
+}
+
+/// Receives RemoteOrbit commands while FloatTabs is hidden or visible.
+@MainActor
+final class FloatTabsExternalCommandController {
+    private var observer: NSObjectProtocol?
+    private let onCommand: (FloatTabsExternalCommand, [AnyHashable: Any]?) -> Void
+    private let logger = Logger(
+        subsystem: "com.lost0rz.FloatTabs",
+        category: "ExternalCommand"
+    )
+
+    init(
+        onCommand: @escaping (FloatTabsExternalCommand, [AnyHashable: Any]?) -> Void
+    ) {
+        self.onCommand = onCommand
+        observer = DistributedNotificationCenter.default().addObserver(
+            forName: FloatTabsExternalCommand.notificationName,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let commandValue = notification.userInfo?["command"] as? String,
+                  let command = FloatTabsExternalCommand(rawValue: commandValue),
+                  let self else { return }
+            let protocolVersion = (notification.userInfo?["protocolVersion"] as? NSNumber)?.intValue
+                ?? 1
+            guard protocolVersion == FloatTabsExternalCommand.protocolVersion else {
+                self.logger.error(
+                    "ignored command=\(commandValue, privacy: .public) protocol=\(protocolVersion, privacy: .public)"
+                )
+                return
+            }
+            self.logger.info(
+                "received command=\(commandValue, privacy: .public) protocol=\(protocolVersion, privacy: .public)"
+            )
+            self.onCommand(command, notification.userInfo)
+        }
+    }
+
+    deinit {
+        if let observer {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+    }
 }
 
 extension KeyboardShortcuts.Name {
@@ -41,6 +136,18 @@ extension KeyboardShortcuts.Name {
     static let zoomOut = Self("zoomOut", initial: .init(.minus, modifiers: [.command]))
     static let resetZoom = Self("resetZoom", initial: .init(.zero, modifiers: [.command]))
     static let togglePin = Self("togglePin", initial: .init(.p, modifiers: [.command, .shift]))
+    static let setHotResidency = Self(
+        "setHotResidency",
+        initial: .init(.h, modifiers: [.control, .option])
+    )
+    static let setWarmResidency = Self(
+        "setWarmResidency",
+        initial: .init(.w, modifiers: [.control, .option])
+    )
+    static let setColdResidency = Self(
+        "setColdResidency",
+        initial: .init(.c, modifiers: [.control, .option])
+    )
     static let floatTabsSettings = Self("floatTabsSettings", initial: .init(.comma, modifiers: [.command]))
 }
 
@@ -84,12 +191,18 @@ enum AppShortcutCatalog {
         .init(title: "Pin / Auto-hide", command: .togglePin, name: .togglePin),
     ]
 
+    static let residencyBindings: [AppShortcutBinding] = [
+        .init(title: "Set Hot Mode", command: .setResidency(.hot), name: .setHotResidency),
+        .init(title: "Set Warm Mode", command: .setResidency(.warm), name: .setWarmResidency),
+        .init(title: "Set Cold Mode", command: .setResidency(.cold), name: .setColdResidency),
+    ]
+
     static let applicationBindings: [AppShortcutBinding] = [
         .init(title: "Global Settings", command: .settings, name: .floatTabsSettings),
     ]
 
     static var allBindings: [AppShortcutBinding] {
-        slotBindings + navigationBindings + viewBindings + applicationBindings
+        slotBindings + navigationBindings + viewBindings + residencyBindings + applicationBindings
     }
 
     static var allNames: [KeyboardShortcuts.Name] {

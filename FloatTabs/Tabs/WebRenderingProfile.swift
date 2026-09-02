@@ -226,8 +226,7 @@ enum DevicePresetCatalog {
 
 enum ZoomSteps {
     static let values: [CGFloat] = [
-        0.50, 0.60, 0.67, 0.75, 0.80, 0.90, 1.00,
-        1.10, 1.25, 1.33, 1.50, 1.75, 2.00,
+        0.50, 1.00, 1.50, 2.00, 2.50, 3.00,
     ]
 
     static func nearest(to proposed: CGFloat) -> CGFloat {
