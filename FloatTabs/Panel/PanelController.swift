@@ -178,6 +178,15 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// protocol and returns promptly if the page is still loading.
     @discardableResult
     func prepareInputFocusForExternalVoice() async -> ExternalVoiceFocusResult {
+        // Capture the exact DOM input before activating FloatTabs. AppKit and
+        // WebKit may restore a different editor while the window becomes key;
+        // the voice path must not mistake that restored element for the user's
+        // original caret destination.
+        if let prePresentationWebView = selectedPresentationWebView() {
+            webFocusRouter.setCurrentWebView(prePresentationWebView)
+            _ = await webFocusRouter.captureInputTargetForExternalVoice()
+        }
+
         presentFloatTabs()
 
         guard requestedVisibility else {
@@ -214,7 +223,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             return .failed("webview-loading")
         }
 
-        let focused = await webFocusRouter.focusInputForPresentation()
+        // Always use the voice-specific restore path. If no input was focused
+        // before presentation, it deliberately falls back to the adapter's
+        // normal candidate scoring while ignoring WebKit's post-activation
+        // activeElement history.
+        let focused = await webFocusRouter.focusInputForPresentation(
+            preservingCapturedTarget: true
+        )
         return focused ? .ready : .failed("dom-input-unavailable")
     }
 

@@ -51,6 +51,8 @@ protocol WebSiteAdapter: AnyObject {
     func matches(url: URL?, webView: WKWebView) async -> Bool
     func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget
     func focusInput(in webView: WKWebView) async throws
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool
+    func focusInputForVoice(in webView: WKWebView) async throws
     func focusPage(in webView: WKWebView) async throws
     func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget
     func focusNext(in webView: WKWebView) async throws
@@ -58,6 +60,14 @@ protocol WebSiteAdapter: AnyObject {
 }
 
 extension WebSiteAdapter {
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
+        false
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws {
+        try await focusInput(in: webView)
+    }
+
     func focusNext(in webView: WKWebView) async throws {
         throw WebFocusAdapterError.unsupportedAction("nextItem")
     }
@@ -73,6 +83,8 @@ extension WebSiteAdapter {
 enum WebFocusDOM {
     static let commonFunctions = #"""
     const temporaryPageTabIndex = 'data-floattabs-focus-tabindex';
+    const voiceInputTargetAttribute = 'data-floattabs-voice-target';
+    const voiceInputSelectionProperty = '__floatTabsVoiceSelection';
 
     function isVisible(element) {
         if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
@@ -155,6 +167,114 @@ enum WebFocusDOM {
             && (activeInput === element || element.contains(activeInput));
     }
 
+    function clearCapturedVoiceInput() {
+        document.querySelectorAll('[' + voiceInputTargetAttribute + ']').forEach((element) => {
+            element.removeAttribute(voiceInputTargetAttribute);
+            try { delete element[voiceInputSelectionProperty]; } catch (_) {}
+        });
+    }
+
+    function captureInputSelection(element) {
+        if (!element) return null;
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'textarea' || tag === 'input') {
+            return {
+                kind: 'text',
+                start: typeof element.selectionStart === 'number'
+                    ? element.selectionStart
+                    : null,
+                end: typeof element.selectionEnd === 'number'
+                    ? element.selectionEnd
+                    : null,
+                direction: element.selectionDirection || 'none'
+            };
+        }
+
+        if (element.isContentEditable
+            || (element.hasAttribute('contenteditable')
+                && element.getAttribute('contenteditable') !== 'false')) {
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0) return null;
+            const range = selection.getRangeAt(0);
+            if (!element.contains(range.startContainer)
+                || !element.contains(range.endContainer)) {
+                return null;
+            }
+            try {
+                const startRange = document.createRange();
+                startRange.selectNodeContents(element);
+                startRange.setEnd(range.startContainer, range.startOffset);
+
+                const endRange = document.createRange();
+                endRange.selectNodeContents(element);
+                endRange.setEnd(range.endContainer, range.endOffset);
+                return {
+                    kind: 'contenteditable',
+                    start: startRange.toString().length,
+                    end: endRange.toString().length
+                };
+            } catch (_) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    function textPointAtOffset(root, rawOffset) {
+        const offset = Math.max(0, Number(rawOffset) || 0);
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let remaining = offset;
+        let node = walker.nextNode();
+        while (node) {
+            const length = node.nodeValue ? node.nodeValue.length : 0;
+            if (remaining <= length) {
+                return { container: node, offset: remaining };
+            }
+            remaining -= length;
+            node = walker.nextNode();
+        }
+        return { container: root, offset: root.childNodes.length };
+    }
+
+    function restoreInputSelection(element) {
+        const snapshot = element?.[voiceInputSelectionProperty];
+        if (!snapshot) {
+            moveCaretToEnd(element);
+            return;
+        }
+
+        const tag = element.tagName.toLowerCase();
+        if ((tag === 'textarea' || tag === 'input')
+            && typeof snapshot.start === 'number'
+            && typeof snapshot.end === 'number') {
+            try {
+                element.setSelectionRange(
+                    snapshot.start,
+                    snapshot.end,
+                    snapshot.direction || 'none'
+                );
+                return;
+            } catch (_) {}
+        }
+
+        if (element.isContentEditable
+            || (element.hasAttribute('contenteditable')
+                && element.getAttribute('contenteditable') !== 'false')) {
+            try {
+                const start = textPointAtOffset(element, snapshot.start);
+                const end = textPointAtOffset(element, snapshot.end);
+                const range = document.createRange();
+                range.setStart(start.container, start.offset);
+                range.setEnd(end.container, end.offset);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return;
+            } catch (_) {}
+        }
+        moveCaretToEnd(element);
+    }
+
     function findInput(scoreInput) {
         const candidates = Array.from(document.querySelectorAll(
             'textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'
@@ -210,10 +330,14 @@ enum WebFocusDOM {
         });
     }
 
-    function focusInputElement(element) {
+    function focusInputElement(element, preserveCaret = false) {
         cleanupTemporaryPageTabIndex();
         if (!focusWithoutScroll(element)) return false;
-        moveCaretToEnd(element);
+        if (preserveCaret) {
+            restoreInputSelection(element);
+        } else {
+            moveCaretToEnd(element);
+        }
         return true;
     }
 
@@ -257,9 +381,32 @@ enum WebFocusDOM {
     """#
 
     static func inputFocusScript(scoring: String) -> String {
+        inputFocusScript(scoring: scoring, preservingCapturedTarget: false)
+    }
+
+    static func inputFocusScript(
+        scoring: String,
+        preservingCapturedTarget: Bool
+    ) -> String {
         """
         (() => {
             \(commonFunctions)
+
+            const preserveCapturedTarget = \(preservingCapturedTarget ? "true" : "false");
+            if (preserveCapturedTarget) {
+                // The marker was placed before AppKit/WebKit activation. Do
+                // not trust the post-activation document.activeElement: WebKit
+                // can restore a different editor from its own history.
+                const captured = document.querySelector(
+                    '[' + voiceInputTargetAttribute + '="true"]'
+                );
+                if (isUsableInput(captured) && !isUtilityInput(captured)) {
+                    const capturedSuccess = focusInputElement(captured, true);
+                    clearCapturedVoiceInput();
+                    if (capturedSuccess) return result(true, 'input', null);
+                }
+                clearCapturedVoiceInput();
+            }
 
             // The active composer is the common fast path for voice input,
             // including ChatGPT's message editor. Reusing it avoids a second
@@ -276,6 +423,24 @@ enum WebFocusDOM {
             if (!input) return result(false, 'unavailable', 'input_unavailable');
             const success = focusInputElement(input);
             return result(success, success ? 'input' : 'unavailable', success ? null : 'focus_failed');
+        })()
+        """
+    }
+
+    static func captureInputTargetForVoiceScript() -> String {
+        """
+        (() => {
+            \(commonFunctions)
+            clearCapturedVoiceInput();
+            const active = activeInputElement();
+            if (!isUsableInput(active) || isUtilityInput(active)) {
+                return { captured: false };
+            }
+            active.setAttribute(voiceInputTargetAttribute, 'true');
+            try {
+                active[voiceInputSelectionProperty] = captureInputSelection(active);
+            } catch (_) {}
+            return { captured: true };
         })()
         """
     }

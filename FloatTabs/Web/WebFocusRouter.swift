@@ -62,7 +62,28 @@ final class WebFocusRouter: ObservableObject {
     /// enough for WebKit: keyboard navigation can remain associated with the
     /// previously active application until the page has a DOM input focus.
     @discardableResult
-    func focusInputForPresentation() async -> Bool {
+    func captureInputTargetForExternalVoice() async -> Bool {
+        guard let webView = currentWebView else { return false }
+        let adapter = await registry.adapter(for: webView.url, webView: webView)
+        currentAdapter = adapter
+        currentWebsiteIdentifier = adapter.identifier
+        do {
+            let captured = try await adapter.captureInputTargetForVoice(in: webView)
+            logger.debug(
+                "voice focus target captured=\(captured, privacy: .public) site=\(adapter.identifier, privacy: .public)"
+            )
+            return captured
+        } catch {
+            logger.error(
+                "voice focus target capture failed site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+    }
+
+    func focusInputForPresentation(
+        preservingCapturedTarget: Bool = false
+    ) async -> Bool {
         guard let webView = currentWebView else { return false }
 
         // inputFocusScript checks and reuses the active non-utility editor in
@@ -73,10 +94,20 @@ final class WebFocusRouter: ObservableObject {
         currentAdapter = adapter
         currentWebsiteIdentifier = adapter.identifier
         do {
-            try await adapter.focusInput(in: webView)
+            if preservingCapturedTarget {
+                try await adapter.focusInputForVoice(in: webView)
+            } else {
+                try await adapter.focusInput(in: webView)
+            }
             currentTarget = .input
+            logger.debug(
+                "voice focus restored captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public)"
+            )
             return true
         } catch {
+            logger.error(
+                "voice focus restore failed captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+            )
             return false
         }
     }
