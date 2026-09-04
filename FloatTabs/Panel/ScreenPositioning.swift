@@ -19,7 +19,8 @@ struct PanelMetrics {
     /// — and every persisted/nominal size formula — stays untouched. Only the
     /// symmetric movement gutter remains on the left edge so the panel keeps
     /// its move affordance on every side.
-    static let collapsedRailLeadingInset: CGFloat = outerInteractionGutter
+    static let leadingMovementGutter: CGFloat = outerInteractionGutter
+    static let collapsedRailLeadingInset: CGFloat = leadingMovementGutter
 
     /// The visible frame is deliberately much thinner than its hit target.
     /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt

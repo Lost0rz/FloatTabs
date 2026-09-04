@@ -91,7 +91,7 @@ Movement hit regions follow the **physical Web frame**.
 
 Expanded:
 
-- the left control zone may participate in shell movement only where no visible control owns the hit;
+- only the narrow leading movement gutter may participate in shell movement outside the Web edge;
 - visible rail controls own their own cursor and click behavior.
 
 Collapsed:
