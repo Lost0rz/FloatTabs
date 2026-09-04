@@ -724,12 +724,18 @@ final class PanelPerimeterDragView: NSView {
             clippingBounds: bounds
         )
         let outer = max(PanelMetrics.outerInteractionGutter, 0)
-        // While collapsed this shrinks to the same 12 pt strip the left edge
-        // band already covers; the source window owns everything right of it.
+        // Keep only a narrow outer gutter in the expanded rail. The previous
+        // full-width blank rail turned the whole empty Tab column into a drag
+        // target and made clicks in that transparent area move the panel.
+        // While collapsed this remains the same 12 pt leading strip; the
+        // source window owns everything right of it.
         let blankRail = NSRect(
             x: bounds.minX,
             y: bounds.minY + outer,
-            width: min(leadingInset, bounds.width),
+            width: min(
+                min(leadingInset, bounds.width),
+                PanelMetrics.leadingMovementGutter
+            ),
             height: max(bounds.height - 2 * outer, 0)
         )
         return edgeBands + (blankRail.isEmpty ? [] : [blankRail])

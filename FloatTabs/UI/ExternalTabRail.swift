@@ -1287,8 +1287,9 @@ final class ExternalWebAppTabView: NSView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        // The whole rail column doubles as the shell's blank movement zone. A
-        // tab's own cursor rect must win so tab hits never advertise dragging.
+        // A tab's own cursor rect must win so tab hits never advertise window
+        // dragging. Only the narrow outer rail gutter is a shell movement
+        // target when the pointer is not over a visible control.
         addCursorRect(bounds, cursor: .arrow)
     }
 
