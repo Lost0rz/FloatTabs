@@ -1,13 +1,13 @@
 # FloatTabs v0.2.4
 
-Release date: 2026-09-01
+Release date: 2026-09-04
 
-Build: **12**
+Build: **13**
 
 ## Summary
 
-v0.2.4 preserves the user's FloatTabs window size when connected displays or
-display resolutions change.
+v0.2.4 preserves the user's FloatTabs window size across display changes and
+keeps the left Tab-side movement hit area close to the actual panel edge.
 
 ## Highlights
 
@@ -21,6 +21,14 @@ display resolutions change.
 - Manual resizing still clamps to the active visible display and updates the
   selected size preference.
 
+### Precise movement hit area
+
+- The expanded left side keeps only the 12 pt leading movement gutter.
+- The rest of the reserved Tab column is no longer a blank drag target.
+- Collapsed-rail movement behavior remains unchanged.
+- Regression coverage verifies both the leading gutter and the reclaimed blank
+  rail area.
+
 ## Validation
 
 - Full local XCTest: **647 tests, 0 failures**.
@@ -32,5 +40,5 @@ display resolutions change.
 
 ## Distribution
 
-FloatTabs v0.2.4 Build 12 is distributed as an unsigned, unnotarized Universal
+FloatTabs v0.2.4 Build 13 is distributed as an unsigned, unnotarized Universal
 2 DMG.
