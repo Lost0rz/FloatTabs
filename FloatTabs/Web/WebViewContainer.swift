@@ -181,6 +181,8 @@ final class PanelRootView: NSView {
     private func synchronizeInteractionBorderGeometry() {
         interactionBorderView.targetWebFrame = webViewportLayoutView.frame
         interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)
+        perimeterDragView.movementExclusionRects = externalControlZoneView
+            .movementExclusionRects(in: perimeterDragView)
     }
 
     /// Collapsing the rail is a physical-only change: the zone column narrows
@@ -611,6 +613,17 @@ final class PanelPerimeterDragView: NSView {
     /// movement band a real composited surface and therefore a reliable hit.
     static let acquisitionSurfaceAlpha: CGFloat = 0.003
 
+    /// Visible Tab/rail controls own their complete animated rectangles. The
+    /// movement bands may still occupy uncovered rail gaps, but must never
+    /// overlap a control as Dock magnification grows it leftward.
+    var movementExclusionRects: [NSRect] = [] {
+        didSet {
+            guard movementExclusionRects != oldValue else { return }
+            window?.invalidateCursorRects(for: self)
+            needsDisplay = true
+        }
+    }
+
     /// The shell's bands are glued to the *physical* Web frame, whose leading
     /// edge shifts when the rail folds away. Cursor rects, the acquisition
     /// surface and hit testing keep sharing this one value.
@@ -646,7 +659,11 @@ final class PanelPerimeterDragView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard frame.contains(point) else { return nil }
         let localPoint = convert(point, from: superview)
-        return Self.dragRects(in: bounds, leadingInset: railLeadingInset)
+        return Self.dragRects(
+            in: bounds,
+            leadingInset: railLeadingInset,
+            excluding: movementExclusionRects
+        )
             .contains(where: { $0.contains(localPoint) }) ? self : nil
     }
 
@@ -678,7 +695,11 @@ final class PanelPerimeterDragView: NSView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for rect in Self.dragRects(in: bounds, leadingInset: railLeadingInset) {
+        for rect in Self.dragRects(
+            in: bounds,
+            leadingInset: railLeadingInset,
+            excluding: movementExclusionRects
+        ) {
             addCursorRect(rect, cursor: PanelMoveCursor.cursor)
         }
     }
@@ -696,7 +717,11 @@ final class PanelPerimeterDragView: NSView {
         // `self` from hitTest receive the acquisition surface. Cursor feedback,
         // pixel ownership and drag handling consequently share one geometry.
         NSColor.black.withAlphaComponent(Self.acquisitionSurfaceAlpha).setFill()
-        for rect in Self.dragRects(in: bounds, leadingInset: railLeadingInset)
+        for rect in Self.dragRects(
+            in: bounds,
+            leadingInset: railLeadingInset,
+            excluding: movementExclusionRects
+        )
         where rect.intersects(dirtyRect) {
             rect.fill(using: .sourceOver)
         }
@@ -715,7 +740,8 @@ final class PanelPerimeterDragView: NSView {
 
     static func dragRects(
         in bounds: NSRect,
-        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
+        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth,
+        excluding exclusionRects: [NSRect] = []
     ) -> [NSRect] {
         let edgeBands = PanelMovementGeometry.edgeBands(
             around: PanelMovementGeometry.webFrame(in: bounds, leadingInset: leadingInset),
@@ -738,7 +764,64 @@ final class PanelPerimeterDragView: NSView {
             ),
             height: max(bounds.height - 2 * outer, 0)
         )
-        return edgeBands + (blankRail.isEmpty ? [] : [blankRail])
+        let candidates = edgeBands + (blankRail.isEmpty ? [] : [blankRail])
+        return exclusionRects
+            .map { $0.intersection(bounds) }
+            .filter { !$0.isNull && !$0.isEmpty }
+            .reduce(candidates) { remaining, exclusion in
+                remaining.flatMap { subtracting($0, by: exclusion) }
+            }
+    }
+
+    private static func subtracting(_ rect: NSRect, by exclusion: NSRect) -> [NSRect] {
+        let overlap = rect.intersection(exclusion)
+        guard !overlap.isNull, !overlap.isEmpty else { return [rect] }
+
+        var pieces: [NSRect] = []
+        if overlap.minY > rect.minY {
+            pieces.append(
+                NSRect(
+                    x: rect.minX,
+                    y: rect.minY,
+                    width: rect.width,
+                    height: overlap.minY - rect.minY
+                )
+            )
+        }
+        if overlap.maxY < rect.maxY {
+            pieces.append(
+                NSRect(
+                    x: rect.minX,
+                    y: overlap.maxY,
+                    width: rect.width,
+                    height: rect.maxY - overlap.maxY
+                )
+            )
+        }
+
+        let middleHeight = overlap.height
+        if overlap.minX > rect.minX, middleHeight > 0 {
+            pieces.append(
+                NSRect(
+                    x: rect.minX,
+                    y: overlap.minY,
+                    width: overlap.minX - rect.minX,
+                    height: middleHeight
+                )
+            )
+        }
+        if overlap.maxX < rect.maxX, middleHeight > 0 {
+            pieces.append(
+                NSRect(
+                    x: overlap.maxX,
+                    y: overlap.minY,
+                    width: rect.maxX - overlap.maxX,
+                    height: middleHeight
+                )
+            )
+        }
+
+        return pieces.filter { !$0.isEmpty }
     }
 }
 
