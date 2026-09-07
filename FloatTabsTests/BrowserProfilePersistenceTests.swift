@@ -332,7 +332,7 @@ final class BrowserProfilePersistenceTests: XCTestCase {
             name: "Source",
             homeURL: urlA,
             homeURLSchemeWasInferred: true,
-            renderingProfile: .canonicalDefault.settingZoom(1.25),
+            renderingProfile: .canonicalDefault.settingZoom(1.50),
             now: Date(timeIntervalSince1970: 10)
         )!
         store.updateCurrentURL(id: source.id, url: urlB)

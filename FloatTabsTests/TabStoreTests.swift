@@ -53,7 +53,7 @@ final class TabStoreTests: XCTestCase {
             orientation: .portrait,
             viewportWidth: 390,
             viewportHeight: 780,
-            zoom: 1.25
+            zoom: 1.50
         )
         let profile = store.add(
             name: "A",
@@ -126,7 +126,7 @@ final class TabStoreTests: XCTestCase {
             orientation: .landscape,
             viewportWidth: 780,
             viewportHeight: 390,
-            zoom: 1.25
+            zoom: 1.50
         )
         let source = store.add(
             name: "Source",
@@ -287,6 +287,18 @@ final class TabStoreTests: XCTestCase {
         _ = store.select(id: third.id)
         XCTAssertEqual(store.selectNext()?.id, first.id)
         XCTAssertEqual(store.selectPrevious()?.id, third.id)
+    }
+
+    func testRelativeSelectionAppliesOneNetOffsetAndWraps() {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let first = store.add(name: "A", homeURL: urlA)!
+        let second = store.add(name: "B", homeURL: urlB)!
+        let third = store.add(name: "C", homeURL: urlC)!
+
+        _ = store.select(id: first.id)
+        XCTAssertEqual(store.selectRelative(by: 2)?.id, third.id)
+        XCTAssertEqual(store.selectRelative(by: 4)?.id, first.id)
+        XCTAssertEqual(store.selectRelative(by: -4)?.id, third.id)
     }
 
     func testPersistedDuplicateAndInvalidOrdersAreNormalizedContinuously() {
@@ -565,16 +577,17 @@ final class WebRenderingProfileTests: XCTestCase {
         XCTAssertEqual(migrated.browserIdentity, .iphoneChrome)
         XCTAssertEqual(migrated.sizePreset, .custom)
         XCTAssertEqual(migrated.viewportSize, CGSize(width: 390, height: 780))
-        XCTAssertEqual(migrated.zoom, 1.25, accuracy: 0.001)
+        XCTAssertEqual(migrated.zoom, 1.0, accuracy: 0.001)
     }
 
     func testZoomStepTraversalAndResetHelpers() {
-        XCTAssertEqual(ZoomSteps.nextLarger(after: 1.0), 1.10, accuracy: 0.001)
-        XCTAssertEqual(ZoomSteps.nextSmaller(before: 1.0), 0.90, accuracy: 0.001)
-        XCTAssertEqual(ZoomSteps.nextLarger(after: 2.0), 2.0, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 1.0), 1.50, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextSmaller(before: 1.0), 0.50, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 2.0), 2.50, accuracy: 0.001)
+        XCTAssertEqual(ZoomSteps.nextLarger(after: 3.0), 3.0, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.nextSmaller(before: 0.5), 0.5, accuracy: 0.001)
         XCTAssertEqual(ZoomSteps.nearest(to: 1.49), 1.50, accuracy: 0.001)
-        XCTAssertEqual(ZoomSteps.percentageText(for: 1.33), "133%")
+        XCTAssertEqual(ZoomSteps.percentageText(for: 1.50), "150%")
     }
 
     func testOnlyBrowserIdentityOrWebsiteModeRequiresWebViewRebuild() {

@@ -825,6 +825,8 @@ private final class ShortcutsSettingsViewController: NSViewController {
         views.append(contentsOf: AppShortcutCatalog.navigationBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("View")])
         views.append(contentsOf: AppShortcutCatalog.viewBindings.map(shortcutRecorderRow(for:)))
+        views.append(contentsOf: [spacer(10), sectionTitle("Mode")])
+        views.append(contentsOf: AppShortcutCatalog.residencyBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("Application")])
         views.append(contentsOf: AppShortcutCatalog.applicationBindings.map(shortcutRecorderRow(for:)))
 

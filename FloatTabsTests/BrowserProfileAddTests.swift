@@ -37,7 +37,7 @@ final class BrowserProfileAddTests: XCTestCase {
             orientation: .portrait,
             viewportWidth: 390,
             viewportHeight: 780,
-            zoom: 1.25
+            zoom: 1.50
         )
 
         let added = try XCTUnwrap(

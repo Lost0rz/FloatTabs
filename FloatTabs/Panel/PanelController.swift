@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import WebKit
 
 typealias BrowserProfileSwitchConfirmation = @MainActor (WebAppProfile, BrowserProfile?, String) -> Bool
@@ -48,8 +49,17 @@ struct WorkspaceAutoHideSuppression: Equatable {
     }
 }
 
+/// The RemoteOrbit bridge sends one semantic scroll command per physical edge.
+/// Keep delivery direct and bounded: if the WebView is not present yet, the
+/// command is reported as unavailable instead of starting a retry stream that
+/// can outlive the user's button press.
+
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
+    private let externalCommandLogger = Logger(
+        subsystem: "com.lost0rz.FloatTabs",
+        category: "ExternalCommand"
+    )
     private let panel: FloatingPanel
     private let rootView: PanelRootView
     private let sourceHostController: FullscreenSourceHostController
@@ -62,7 +72,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
     private weak var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private let addressOverlayView = AddressOverlayView()
-    private let zoomHUDView = ZoomHUDView()
+    private let statusHUDView = StatusHUDView()
     private var transientUIConstraints: [NSLayoutConstraint] = []
     private lazy var slotLifecycleCoordinator = SlotLifecycleCoordinator(
         webViewPool: webViewPool,
@@ -104,9 +114,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
     private var shouldClampAfterFullscreen = false
-    private var needsFocusAfterApplicationActivation = false
-    private var presentationFocusTask: Task<Void, Never>?
     private var presentationWebFocusTask: Task<Void, Never>?
+    private var presentationFocusTask: Task<Void, Never>?
+    /// Presentation focus is an event-driven handshake. A new request makes
+    /// every older async callback stale, so a slow WebKit response cannot
+    /// refocus a page that is no longer the selected presentation.
+    private var presentationFocusGeneration: UInt64 = 0
+    private var presentationNativeFocusPending = false
+    private var presentationWebFocusPending = false
 
     var isVisible: Bool {
         requestedVisibility
@@ -150,13 +165,142 @@ final class PanelController: NSObject, NSWindowDelegate {
             activateFloatTabs()
             panel.orderFrontRegardless()
             panel.makeKeyAndOrderFront(nil)
-            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
-            schedulePresentationFocusRetry()
-            schedulePresentationWebInputFocus()
+            beginPresentationFocusHandshake()
             return
         }
 
         showFloatTabs()
+    }
+
+    /// Completes the remote voice handoff without making audio wait on WebKit.
+    /// Presentation already starts the normal event-driven focus handshake;
+    /// this method makes one immediate adapter attempt for the request/response
+    /// protocol and returns promptly if the page is still loading.
+    @discardableResult
+    func prepareInputFocusForExternalVoice() async -> ExternalVoiceFocusResult {
+        // Capture the exact DOM input before activating FloatTabs. AppKit and
+        // WebKit may restore a different editor while the window becomes key;
+        // the voice path must not mistake that restored element for the user's
+        // original caret destination.
+        if let prePresentationWebView = selectedPresentationWebView() {
+            webFocusRouter.setCurrentWebView(prePresentationWebView)
+            _ = await webFocusRouter.captureInputTargetForExternalVoice()
+        }
+
+        presentFloatTabs()
+
+        guard requestedVisibility else {
+            return .failed("panel-hidden")
+        }
+        guard let targetTabID = tabStore.activeTabID else {
+            return .failed("no-active-tab")
+        }
+        guard let webView = selectedPresentationWebView() else {
+            return .failed("no-active-webview")
+        }
+
+        webFocusRouter.setCurrentWebView(webView)
+        activateFloatTabs()
+        panel.orderFrontRegardless()
+        if sourceHostController.isSessionLocked {
+            panel.makeKeyAndOrderFront(nil)
+            WebViewFocus.focus(webView, in: panel)
+        } else {
+            sourceHostController.orderFrontAndFocus(
+                webView,
+                makeSourceWindowMain: true
+            )
+        }
+
+        await Task.yield()
+        guard !Task.isCancelled,
+              requestedVisibility,
+              tabStore.activeTabID == targetTabID,
+              selectedPresentationWebView() === webView else {
+            return .failed("presentation-changed")
+        }
+        guard !webView.isLoading else {
+            return .failed("webview-loading")
+        }
+
+        // Always use the voice-specific restore path. If no input was focused
+        // before presentation, it deliberately falls back to the adapter's
+        // normal candidate scoring while ignoring WebKit's post-activation
+        // activeElement history.
+        let focused = await webFocusRouter.focusInputForPresentation(
+            preservingCapturedTarget: true
+        )
+        return focused ? .ready : .failed("dom-input-unavailable")
+    }
+
+    /// Dispatch one native WebKit wheel event to the selected page. This is
+    /// intentionally not retried or queued: an unavailable presentation must
+    /// not create a background scroll loop or retain stale movement.
+    @discardableResult
+    func scrollWebView(lines: Int) -> Bool {
+        let clampedLines = min(max(lines, -40), 40)
+        guard clampedLines != 0,
+              let webView = selectedPresentationWebView(),
+              let window = webView.window,
+              window.isVisible,
+              let event = makeExternalScrollEvent(lines: clampedLines, in: webView) else {
+            externalCommandLogger.debug(
+                "scroll unavailable lines=\(lines, privacy: .public)"
+            )
+            return false
+        }
+
+        webView.scrollWheel(with: event)
+        externalCommandLogger.debug(
+            "scroll dispatched lines=\(clampedLines, privacy: .public) key=\(window.isKeyWindow, privacy: .public)"
+        )
+        return true
+    }
+
+    /// Kept as a protocol endpoint for RemoteOrbit. Direct delivery has no
+    /// deferred backlog, so cancellation is intentionally just diagnostic.
+    func cancelExternalScrollCommands() {
+        externalCommandLogger.debug("scroll cancel received")
+    }
+
+    private func makeExternalScrollEvent(lines: Int, in webView: WKWebView) -> NSEvent? {
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .line,
+            wheelCount: 1,
+            wheel1: Int32(-lines),
+            wheel2: 0,
+            wheel3: 0
+        ) else {
+            return nil
+        }
+
+        let pagePoint = webView.convert(
+            NSPoint(x: webView.bounds.midX, y: webView.bounds.midY),
+            to: nil
+        )
+        event.location = quartzLocation(for: pagePoint)
+        return NSEvent(cgEvent: event)
+    }
+
+    private func quartzLocation(for appKitPoint: NSPoint) -> CGPoint {
+        guard let screen = NSScreen.screens.first(where: {
+            $0.frame.contains(appKitPoint)
+        }) ?? NSScreen.main else {
+            return CGPoint(x: appKitPoint.x, y: appKitPoint.y)
+        }
+
+        let localX = appKitPoint.x - screen.frame.minX
+        let localY = appKitPoint.y - screen.frame.minY
+        let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+            as? CGDirectDisplayID
+        let displayBounds = displayID.map(CGDisplayBounds)
+        return CGPoint(
+            x: (displayBounds?.minX ?? screen.frame.minX) + localX,
+            y: (displayBounds?.minY ?? screen.frame.minY)
+                + screen.frame.height
+                - localY
+        )
     }
 
     /// The global summon shortcut is both a summon and a dismiss gesture. If
@@ -452,8 +596,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSourceHostFrame(display: false)
         slotLifecycleCoordinator.setPanelVisible(true, activeProfile: tabStore.activeProfile)
         synchronizeSlotState()
-        needsFocusAfterApplicationActivation = !NSApp.isActive
-
         // Activation requests for an accessory app can be rejected while the
         // app has no ordered windows. Establish this user-requested window group
         // in WindowServer first, then transfer application/key focus below.
@@ -466,12 +608,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // ordering the cross-Space shell left that context on the previously
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
-        focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
-        schedulePresentationFocusRetry()
-        schedulePresentationWebInputFocus()
-        if NSApp.isActive {
-            needsFocusAfterApplicationActivation = false
-        }
+        beginPresentationFocusHandshake()
         // The source host has now actually been ordered/presented/focused,
         // so a previously hidden selected Ready Slot can be acknowledged.
         acknowledgeActiveAttentionIfActuallyPresented()
@@ -501,7 +638,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationFocusTask = nil
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
-        needsFocusAfterApplicationActivation = false
+        presentationNativeFocusPending = false
+        presentationWebFocusPending = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -1188,7 +1326,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         // global-toggle hide path, do not reactivate `previousApplication` here:
         // doing so would steal focus from the application the user just chose.
         updateRequestedVisibility(false)
-        needsFocusAfterApplicationActivation = false
+        presentationFocusTask?.cancel()
+        presentationFocusTask = nil
+        presentationNativeFocusPending = false
+        presentationWebFocusPending = false
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -1304,6 +1445,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 #endif
 
+    @discardableResult
+    func selectSlot(relativeOffset: Int) -> Bool {
+        tabStore.selectRelative(by: relativeOffset) != nil
+    }
+
     func handle(_ command: AppCommand) {
         switch command {
         case let .selectSlot(index):
@@ -1311,10 +1457,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = tabStore.select(id: slot.id)
 
         case .nextSlot:
-            _ = tabStore.selectNext()
+            _ = selectSlot(relativeOffset: 1)
 
         case .previousSlot:
-            _ = tabStore.selectPrevious()
+            _ = selectSlot(relativeOffset: -1)
 
         case .addWebApp:
             presentAddWebAppEditor()
@@ -1345,12 +1491,15 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case .togglePin:
             togglePinnedState()
+
+        case let .setResidency(policy):
+            _ = setActiveResidency(policy)
         }
     }
 
     private func configureTransientUI() {
         addressOverlayView.translatesAutoresizingMaskIntoConstraints = false
-        zoomHUDView.translatesAutoresizingMaskIntoConstraints = false
+        statusHUDView.translatesAutoresizingMaskIntoConstraints = false
         installTransientUI(
             in: sourceHostController.transientUIContainerView,
             viewport: sourceHostController.transientUIContainerView
@@ -1371,16 +1520,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func installTransientUI(in host: NSView, viewport: NSView) {
-        guard addressOverlayView.superview !== host || zoomHUDView.superview !== host else {
+        guard addressOverlayView.superview !== host || statusHUDView.superview !== host else {
             return
         }
 
         NSLayoutConstraint.deactivate(transientUIConstraints)
         transientUIConstraints.removeAll()
         addressOverlayView.removeFromSuperview()
-        zoomHUDView.removeFromSuperview()
+        statusHUDView.removeFromSuperview()
         host.addSubview(addressOverlayView)
-        host.addSubview(zoomHUDView)
+        host.addSubview(statusHUDView)
 
         transientUIConstraints = [
             addressOverlayView.leadingAnchor.constraint(
@@ -1397,15 +1546,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             ),
             addressOverlayView.heightAnchor.constraint(equalToConstant: 52),
 
-            zoomHUDView.centerXAnchor.constraint(
+            statusHUDView.centerXAnchor.constraint(
                 equalTo: viewport.centerXAnchor
             ),
-            zoomHUDView.bottomAnchor.constraint(
+            statusHUDView.bottomAnchor.constraint(
                 equalTo: viewport.bottomAnchor,
                 constant: -28
             ),
-            zoomHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
-            zoomHUDView.heightAnchor.constraint(equalToConstant: 34),
+            statusHUDView.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            statusHUDView.heightAnchor.constraint(equalToConstant: 34),
         ]
         NSLayoutConstraint.activate(transientUIConstraints)
     }
@@ -1577,17 +1726,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = self?.tabStore.updateZoom(id: id, zoom: zoom)
         }
         rail.onSetResidency = { [weak self] id, policy in
-            guard let self,
-                  self.tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
-                  let updatedProfile = self.tabStore.profiles.first(where: { $0.id == id }) else {
-                return
-            }
-            // If a Slot was already cold/detached when its label changes to
-            // Cold, there will be no later lifecycle release callback. Apply
-            // the same safe fast-path immediately; the coordinator still
-            // revalidates the current aggregate residency for the shared
-            // Browser Profile.
-            self.handleRuntimeReleased(updatedProfile)
+            _ = self?.setResidency(policy, for: id)
         }
         rail.onSetBackgroundMedia = { [weak self] id, policy in
             _ = self?.tabStore.updateResourcePolicy(id: id, backgroundMediaPolicy: policy)
@@ -1761,6 +1900,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
                 await self.webFocusRouter.refreshRecognition(for: webView)
+            }
+            // A committed navigation is the page-readiness signal needed by
+            // presentation focus. This is one deferred attempt, not polling;
+            // the current presentation generation still owns it.
+            if requestedVisibility, presentationWebFocusPending {
+                schedulePresentationWebInputFocus(afterNanoseconds: 200_000_000)
             }
         }
     }
@@ -2085,7 +2230,33 @@ final class PanelController: NSObject, NSWindowDelegate {
         let normalized = ZoomSteps.nearest(to: zoom)
         guard tabStore.updateZoom(id: id, zoom: normalized) else { return }
         synchronizeTransientUIHost()
-        zoomHUDView.show(zoom: normalized)
+        statusHUDView.show(zoom: normalized)
+    }
+
+    @discardableResult
+    func setResidency(_ policy: SlotResidencyPolicy, for id: UUID) -> Bool {
+        guard tabStore.updateResourcePolicy(id: id, residencyPolicy: policy),
+              let updatedProfile = tabStore.profiles.first(where: { $0.id == id }) else {
+            return false
+        }
+
+        // If a Slot was already cold/detached when its label changes to Cold,
+        // there will be no later lifecycle release callback. Apply the same
+        // safe fast-path immediately; the coordinator still revalidates the
+        // current aggregate residency for the shared Browser Profile.
+        handleRuntimeReleased(updatedProfile)
+
+        if tabStore.activeTabID == id {
+            synchronizeTransientUIHost()
+            statusHUDView.show(residency: policy)
+        }
+        return true
+    }
+
+    @discardableResult
+    func setActiveResidency(_ policy: SlotResidencyPolicy) -> Bool {
+        guard let id = tabStore.activeTabID else { return false }
+        return setResidency(policy, for: id)
     }
 
     private func presentAddressBar() {
@@ -2271,73 +2442,110 @@ final class PanelController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func schedulePresentationFocusRetry() {
+    private func beginPresentationFocusHandshake() {
+        presentationFocusGeneration &+= 1
+        presentationNativeFocusPending = true
+        presentationWebFocusPending = true
+
         presentationFocusTask?.cancel()
+        presentationFocusTask = nil
+        presentationWebFocusTask?.cancel()
+        presentationWebFocusTask = nil
+
+        // If activation/key-window delivery is already complete, finish in
+        // this run-loop turn. Otherwise the existing AppKit notifications call
+        // the same method when the handoff becomes observable.
+        completePresentationFocusIfReady()
+    }
+
+    private func isCurrentPresentationFocusRequest(_ generation: UInt64) -> Bool {
+        requestedVisibility && generation == presentationFocusGeneration
+    }
+
+    private func completePresentationFocusIfReady() {
+        guard requestedVisibility, NSApp.isActive else { return }
+        guard panel.isKeyWindow || sourceHostController.window.isKeyWindow else {
+            return
+        }
+
+        if presentationNativeFocusPending {
+            // Mark consumed before handing control to AppKit/WebKit. A nested
+            // window notification must not enter the focus path twice.
+            presentationNativeFocusPending = false
+            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+            schedulePresentationFocusSettle()
+        }
+
+        if presentationWebFocusPending, presentationWebFocusTask == nil {
+            schedulePresentationWebInputFocus()
+        }
+        acknowledgeActiveAttentionIfActuallyPresented()
+    }
+
+    private func schedulePresentationFocusSettle() {
+        guard presentationFocusTask == nil else { return }
         presentationFocusTask = Task { @MainActor [weak self] in
-            // Accessory-app activation can complete asynchronously after the
-            // global shortcut callback returns. Reassert the key-window chain
-            // briefly so a shown shell cannot remain merely visible while the
-            // previously active application still owns keyboard input.
-            for _ in 0..<30 {
-                guard let self,
-                      self.requestedVisibility,
-                      !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard let self, !Task.isCancelled else { return }
+            defer { self.presentationFocusTask = nil }
+            guard self.requestedVisibility, NSApp.isActive else { return }
 
-                self.activateFloatTabs()
-                self.panel.orderFrontRegardless()
-                self.panel.makeKeyAndOrderFront(nil)
+            // WindowServer may finish the source-window handoff one event-loop
+            // turn after the shell becomes key. Allow exactly one settle pass;
+            // unlike the former 30-iteration retry loop, this has a fixed and
+            // very small cost and cannot keep WebKit focus churn alive.
+            if !self.sourceHostController.window.isKeyWindow {
                 self.focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
-
-                if NSApp.isActive,
-                   self.panel.isKeyWindow || self.sourceHostController.window.isKeyWindow {
-                    self.presentationFocusTask = nil
-                    return
-                }
-
-                try? await Task.sleep(nanoseconds: 50_000_000)
             }
-            self?.presentationFocusTask = nil
+            self.completePresentationFocusIfReady()
         }
     }
 
-    private func schedulePresentationWebInputFocus() {
+    private func schedulePresentationWebInputFocus(
+        afterNanoseconds delay: UInt64 = 0
+    ) {
+        guard requestedVisibility, presentationWebFocusPending else { return }
         presentationWebFocusTask?.cancel()
+        let generation = presentationFocusGeneration
         presentationWebFocusTask = Task { @MainActor [weak self] in
-            // WebKit may expose the window before the page's composer exists.
-            // Retry briefly so external-app presentation has the same DOM
-            // focus result as pressing the manual focus shortcut once.
-            for _ in 0..<20 {
-                guard let self,
-                      self.requestedVisibility,
-                      !Task.isCancelled else { return }
-
-                if let webView = self.selectedPresentationWebView() {
-                    self.webFocusRouter.setCurrentWebView(webView)
-                    if await self.webFocusRouter.focusInputForPresentation() {
-                        self.presentationWebFocusTask = nil
-                        return
-                    }
+            guard let self else { return }
+            defer {
+                if self.presentationFocusGeneration == generation {
+                    self.presentationWebFocusTask = nil
                 }
-
-                try? await Task.sleep(nanoseconds: 100_000_000)
             }
-            self?.presentationWebFocusTask = nil
+
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+            }
+            guard self.isCurrentPresentationFocusRequest(generation),
+                  let webView = self.selectedPresentationWebView(),
+                  !webView.isLoading else {
+                return
+            }
+
+            // synchronizeSlotState normally establishes this reference. Keep
+            // the fallback for a presentation that races a slot rebuild, but
+            // avoid resetting recognition on every event when it is unchanged.
+            if self.webFocusRouter.currentWebView !== webView {
+                self.webFocusRouter.setCurrentWebView(webView)
+            }
+            let focused = await self.webFocusRouter.focusInputForPresentation()
+            guard self.isCurrentPresentationFocusRequest(generation) else {
+                return
+            }
+            if focused {
+                self.presentationWebFocusPending = false
+            }
         }
     }
 
     @objc private func applicationDidBecomeActive(_ notification: Notification) {
-        guard needsFocusAfterApplicationActivation else {
-            // App activation is only a trigger to re-evaluate the current
-            // window facts. It is not itself proof that the Web presentation
-            // owns interaction.
-            acknowledgeActiveAttentionIfActuallyPresented()
-            return
-        }
-        needsFocusAfterApplicationActivation = false
-
+        guard requestedVisibility else { return }
         // Activation can complete after the original show call. Finish through
         // the same window-owning controller instead of searching NSApp.windows
-        // from a separate retry state machine.
+        // from a timer-driven retry state machine.
         RunLoop.main.perform(inModes: [.default]) { [weak self] in
             Task { @MainActor [weak self] in
                 self?.finishFocusAfterApplicationActivation()
@@ -2346,26 +2554,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func finishFocusAfterApplicationActivation() {
-        guard requestedVisibility, NSApp.isActive else { return }
-        if sourceHostController.isSessionLocked {
-            guard panel.isVisible else { return }
-            panel.makeKeyAndOrderFront(nil)
-            if let webView = sourceHostController.companionContainer.currentWebView {
-                WebViewFocus.focus(webView, in: panel)
-            }
-        } else {
-            panel.orderFrontRegardless()
-            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
-        }
-        // Completes the deferred presentation half of showFloatTabs.
-        acknowledgeActiveAttentionIfActuallyPresented()
+        completePresentationFocusIfReady()
     }
 
     @objc func windowDidBecomeKey(_ notification: Notification) {
-        // This intentionally handles stale/unrelated key-window events too:
-        // acknowledgement is gated by the current real WebView window facts,
-        // so a Settings window or a different FloatTabs surface cannot clear
-        // Ready merely by becoming key.
+        if let window = notification.object as? NSWindow,
+           window === panel || window === sourceHostController.window {
+            completePresentationFocusIfReady()
+        }
+        // Ready acknowledgement intentionally keeps the previous broad
+        // notification semantics. Only the focus handshake is restricted to
+        // FloatTabs' own windows; test and system notifications without an
+        // object must still be able to acknowledge an actually presented Slot.
         acknowledgeActiveAttentionIfActuallyPresented()
     }
 
@@ -2642,16 +2842,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.setFullscreenCompanionPresentation(true)
         rootView.companionRailFoldControlView.isHidden = false
         synchronizeFullscreenCompanionSlotState()
-        needsFocusAfterApplicationActivation = !NSApp.isActive
         panel.orderFrontRegardless()
         activateFloatTabs()
         panel.makeKeyAndOrderFront(nil)
 
         if let webView = sourceHostController.companionContainer.currentWebView {
             WebViewFocus.focus(webView, in: panel)
-        }
-        if NSApp.isActive {
-            needsFocusAfterApplicationActivation = false
         }
         // The companion shell has actually been ordered visible, so the
         // presented companion Slot's Ready output can be acknowledged.
@@ -2940,9 +3136,11 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 }
 
 @MainActor
-final class ZoomHUDView: NSView {
+final class StatusHUDView: NSView {
     private let label = NSTextField(labelWithString: "100%")
     private var hideWorkItem: DispatchWorkItem?
+
+    var displayedText: String { label.stringValue }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2975,8 +3173,16 @@ final class ZoomHUDView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func show(zoom: CGFloat) {
+        show(message: ZoomSteps.percentageText(for: zoom))
+    }
+
+    func show(residency: SlotResidencyPolicy) {
+        show(message: "Mode: \(residency.displayName)")
+    }
+
+    func show(message: String) {
         hideWorkItem?.cancel()
-        label.stringValue = ZoomSteps.percentageText(for: zoom)
+        label.stringValue = message
         isHidden = false
 
         let item = DispatchWorkItem { [weak self] in
