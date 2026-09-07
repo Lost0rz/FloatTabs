@@ -1670,6 +1670,56 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
     }
 
+    func testExpandedTabFramesAreExcludedFromMovementGeometry() {
+        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        let expandedTab = NSRect(
+            x: 0,
+            y: ExternalTabMetrics.topOffset,
+            width: ExternalTabMetrics.hoverWidth,
+            height: ExternalTabMetrics.tabHeight
+        )
+        let dragRects = PanelPerimeterDragView.dragRects(
+            in: bounds,
+            excluding: [expandedTab]
+        )
+
+        XCTAssertFalse(
+            dragRects.contains(where: { $0.intersects(expandedTab) }),
+            "An expanded Tab must own its complete width, including the old Web edge band"
+        )
+        XCTAssertTrue(
+            dragRects.contains(where: {
+                $0.contains(NSPoint(x: bounds.maxX - PanelMetrics.outerInteractionGutter / 2, y: 100))
+            }),
+            "An uncovered rail gap should remain eligible for movement"
+        )
+    }
+
+    func testPanelRootSynchronizesExpandedTabExclusionIntoMovementHitTesting() {
+        let profile = makeProfile(order: 0, name: "expanded-tab")
+        let root = PanelRootView(webView: WKWebView(frame: .zero))
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.externalControlZoneView.apply(
+            profiles: [profile],
+            activeTabID: profile.id
+        )
+        root.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(root.externalControlZoneView.tabView(for: profile.id))
+        tab.setHovered(true)
+        root.externalControlZoneView.layoutSubtreeIfNeeded()
+        root.layoutSubtreeIfNeeded()
+
+        let tabFrame = tab.convert(tab.bounds, to: root.perimeterDragView)
+        XCTAssertEqual(tabFrame.width, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
+        XCTAssertNil(
+            root.perimeterDragView.hitTest(
+                NSPoint(x: tabFrame.midX, y: tabFrame.midY)
+            ),
+            "Movement hit testing must yield to a magnified Tab's complete frame"
+        )
+    }
+
     func testCollapsedMoveCursorRectsCoverLeadingGutterOnly() {
         let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         let collapsedInset = PanelMetrics.collapsedRailLeadingInset

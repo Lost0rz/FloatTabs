@@ -345,7 +345,7 @@ final class PanelRootViewLayoutTests: XCTestCase {
 
 @MainActor
 final class PanelPerimeterDragHitTestingTests: XCTestCase {
-    func testTopBottomAndBlankExternalZoneMoveWindow() {
+    func testTopBottomAndLeadingRailGutterMoveWindow() {
         let webView = WKWebView(frame: .zero)
         let root = PanelRootView(webView: webView)
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
@@ -353,7 +353,7 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
 
         let halfGutter = PanelMetrics.outerInteractionGutter / 2
         let points = [
-            NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: root.bounds.midY),
+            NSPoint(x: PanelMetrics.leadingMovementGutter / 2, y: root.bounds.midY),
             NSPoint(x: root.webViewportLayoutView.frame.midX, y: root.bounds.maxY - halfGutter),
             NSPoint(x: root.webViewportLayoutView.frame.midX, y: root.bounds.minY + halfGutter),
         ]
@@ -364,6 +364,13 @@ final class PanelPerimeterDragHitTestingTests: XCTestCase {
                 "Expected external movement target at \(point)"
             )
         }
+
+        let blankRailPoint = NSPoint(
+            x: PanelMetrics.leadingMovementGutter
+                + (PanelMetrics.externalControlZoneWidth - PanelMetrics.leadingMovementGutter) / 2,
+            y: root.bounds.midY
+        )
+        XCTAssertFalse(root.hitTest(blankRailPoint) is PanelPerimeterDragView)
     }
 
     func testCollapsedLeftGutterRemainsMovementTarget() {
