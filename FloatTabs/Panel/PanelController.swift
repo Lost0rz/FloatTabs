@@ -67,6 +67,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let webViewPool: WebViewPool
     private let attentionCoordinator: WebAttentionCoordinator
     private let webFocusRouter: WebFocusRouter
+    private let speechSettings: SpeechSettings
+    private let speechService: SpeechSynthesizing
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
@@ -94,6 +96,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator: attentionCoordinator,
         isUserVisible: { [weak self] slotID in
             self?.isAttentionUserVisible(slotID: slotID) ?? false
+        }
+    )
+
+    private lazy var assistantSpeechCoordinator = AssistantSpeechCoordinator(
+        settings: speechSettings,
+        speechService: speechService,
+        webViewProvider: { [weak self] slotID in
+            self?.webViewPool.existingWebView(for: slotID)
+        },
+        responseBridgeProvider: { [weak self] slotID in
+            self?.webViewPool.responseBridge(for: slotID)
         }
     )
 
@@ -398,6 +411,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator.readySlotIDs.count
     }
 
+    var speechSettingsForApp: SpeechSettings {
+        speechSettings
+    }
+
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
@@ -409,12 +426,16 @@ final class PanelController: NSObject, NSWindowDelegate {
         frameStore: PanelFrameStore = PanelFrameStore(),
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
+        speechSettings: SpeechSettings? = nil,
+        speechService: SpeechSynthesizing? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter()
+        self.speechSettings = speechSettings ?? SpeechSettings()
+        self.speechService = speechService ?? SpeechService()
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
@@ -514,6 +535,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
             self?.handleAttentionObservation(slotID: slotID, observation: observation)
+        }
+        webViewPool.onResponseRuntimeReset = { [weak self] slotID in
+            self?.assistantSpeechCoordinator.reset(slotID: slotID)
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -669,7 +693,17 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func prepareForTermination() {
+        assistantSpeechCoordinator.stop()
         persistPanelFrame()
+    }
+
+    func readLatestChatGPTResponse() {
+        guard let slotID = tabStore.activeTabID else { return }
+        assistantSpeechCoordinator.readLatestResponse(for: slotID)
+    }
+
+    func stopSpeaking() {
+        assistantSpeechCoordinator.stop()
     }
 
     func storedWebAppStateSnapshot() -> StoredWebAppState {
@@ -1960,6 +1994,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
+        assistantSpeechCoordinator.handle(observation, for: slotID)
         attentionRouter.handle(observation, for: slotID)
         synchronizeAttentionIndicators()
 

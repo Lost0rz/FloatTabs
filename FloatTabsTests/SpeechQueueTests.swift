@@ -1,0 +1,48 @@
+import XCTest
+@testable import FloatTabs
+
+final class SpeechQueueTests: XCTestCase {
+    private let responseA = SpeechResponseIdentity(
+        slotID: UUID(),
+        documentToken: "document-a",
+        responseID: "document-a:response-a"
+    )
+    private let responseB = SpeechResponseIdentity(
+        slotID: UUID(),
+        documentToken: "document-b",
+        responseID: "document-b:response-b"
+    )
+
+    func testQueueCarriesIdentityAndSequence() {
+        var queue = SpeechQueue(maximumPendingSegments: 4)
+        queue.enqueue(
+            responseID: responseA,
+            segments: ["One", "Two"],
+            startingSequence: 10
+        )
+
+        XCTAssertEqual(queue.dequeue(), SpeechQueueItem(responseID: responseA, sequence: 10, text: "One"))
+        XCTAssertEqual(queue.dequeue(), SpeechQueueItem(responseID: responseA, sequence: 11, text: "Two"))
+        XCTAssertTrue(queue.isEmpty)
+    }
+
+    func testNewResponseDropsOlderPendingSegments() {
+        var queue = SpeechQueue(maximumPendingSegments: 4)
+        queue.enqueue(responseID: responseA, segments: ["old 1", "old 2"], startingSequence: 0)
+        queue.enqueue(responseID: responseB, segments: ["new"], startingSequence: 2)
+
+        XCTAssertEqual(queue.items.map(\.responseID), [responseB])
+        XCTAssertEqual(queue.dequeue()?.text, "new")
+    }
+
+    func testQueueIsBounded() {
+        var queue = SpeechQueue(maximumPendingSegments: 2)
+        queue.enqueue(
+            responseID: responseA,
+            segments: ["one", "two", "three"],
+            startingSequence: 0
+        )
+
+        XCTAssertEqual(queue.items.count, 2)
+    }
+}

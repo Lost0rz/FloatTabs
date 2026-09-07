@@ -120,11 +120,15 @@ struct BrowserProfileManagementClient {
 final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias ExportBackupHandler = (URL) throws -> Void
     typealias RestoreBackupHandler = (URL) throws -> URL
+    typealias SpeechActionHandler = @MainActor () -> Void
 
     private let preferencesStore: AppPreferencesStore
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
+    private let speechSettings: SpeechSettings
+    private let onReadLatestResponse: SpeechActionHandler
+    private let onStopSpeaking: SpeechActionHandler
     private let browserProfileManager: BrowserProfileManagementClient
     private let websiteCacheManager: WebsiteCacheManagementClient
     private lazy var settingsWindow: NSWindow = makeWindow()
@@ -134,6 +138,9 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
+        speechSettings: SpeechSettings = SpeechSettings(),
+        onReadLatestResponse: @escaping SpeechActionHandler = {},
+        onStopSpeaking: @escaping SpeechActionHandler = {},
         browserProfileManager: BrowserProfileManagementClient = .unavailable,
         websiteCacheManager: WebsiteCacheManagementClient = .unavailable
     ) {
@@ -141,6 +148,9 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
+        self.speechSettings = speechSettings
+        self.onReadLatestResponse = onReadLatestResponse
+        self.onStopSpeaking = onStopSpeaking
         self.browserProfileManager = browserProfileManager
         self.websiteCacheManager = websiteCacheManager
         super.init()
@@ -183,7 +193,10 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             symbol: "bell.badge",
             controller: NotificationsSettingsViewController(
                 preferencesStore: preferencesStore,
-                attentionSoundPlayer: attentionSoundPlayer
+                attentionSoundPlayer: attentionSoundPlayer,
+                speechSettings: speechSettings,
+                onReadLatestResponse: onReadLatestResponse,
+                onStopSpeaking: onStopSpeaking
             ),
             to: tabs
         )
@@ -232,6 +245,9 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
 final class NotificationsSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
     private let attentionSoundPlayer: AttentionSoundPlaying
+    private let speechSettings: SpeechSettings
+    private let onReadLatestResponse: GlobalSettingsController.SpeechActionHandler
+    private let onStopSpeaking: GlobalSettingsController.SpeechActionHandler
     private let availableSoundNames: [String]
 
     private let enabledSwitch = NSSwitch()
@@ -239,14 +255,23 @@ final class NotificationsSettingsViewController: NSViewController {
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
+    let speechModePopup = NSPopUpButton()
+    let readLatestResponseButton = NSButton(title: "Read Latest Response", target: nil, action: nil)
+    let stopSpeakingButton = NSButton(title: "Stop Speaking", target: nil, action: nil)
 
     init(
         preferencesStore: AppPreferencesStore,
         attentionSoundPlayer: AttentionSoundPlaying,
+        speechSettings: SpeechSettings = SpeechSettings(),
+        onReadLatestResponse: @escaping GlobalSettingsController.SpeechActionHandler = {},
+        onStopSpeaking: @escaping GlobalSettingsController.SpeechActionHandler = {},
         availableSoundNames: [String]? = nil
     ) {
         self.preferencesStore = preferencesStore
         self.attentionSoundPlayer = attentionSoundPlayer
+        self.speechSettings = speechSettings
+        self.onReadLatestResponse = onReadLatestResponse
+        self.onStopSpeaking = onStopSpeaking
         self.availableSoundNames = availableSoundNames ?? AttentionSound.availableNames()
         super.init(nibName: nil, bundle: nil)
         title = "Notifications"
@@ -286,6 +311,21 @@ final class NotificationsSettingsViewController: NSViewController {
         previewButton.action = #selector(playPreview(_:))
         previewButton.bezelStyle = .rounded
 
+        speechModePopup.addItems(withTitles: ChatGPTSpeechMode.allCases.map(\.displayName))
+        for (index, mode) in ChatGPTSpeechMode.allCases.enumerated() {
+            speechModePopup.item(at: index)?.representedObject = mode.rawValue
+        }
+        speechModePopup.target = self
+        speechModePopup.action = #selector(speechModeChanged(_:))
+        speechModePopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
+
+        readLatestResponseButton.target = self
+        readLatestResponseButton.action = #selector(readLatestResponse(_:))
+        readLatestResponseButton.bezelStyle = .rounded
+        stopSpeakingButton.target = self
+        stopSpeakingButton.action = #selector(stopSpeaking(_:))
+        stopSpeakingButton.bezelStyle = .rounded
+
         let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
         let soundRow = makeRow(label: "Sound", control: soundPopup)
         let volumeControls = NSStackView(views: [volumeSlider, volumeValueLabel])
@@ -305,6 +345,14 @@ final class NotificationsSettingsViewController: NSViewController {
             volumeRow,
             Self.spacer(4),
             previewButton,
+            Self.spacer(14),
+            Self.titleLabel("ChatGPT Speech"),
+            Self.detailLabel(
+                "Speech is off by default. Automatic speech reads a completed ChatGPT assistant response only; it never reads live tokens or user messages."
+            ),
+            makeRow(label: "Mode", control: speechModePopup),
+            readLatestResponseButton,
+            stopSpeakingButton,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -347,6 +395,21 @@ final class NotificationsSettingsViewController: NSViewController {
         previewCurrentSound()
     }
 
+    @objc private func speechModeChanged(_ sender: NSPopUpButton) {
+        guard let rawValue = sender.selectedItem?.representedObject as? String,
+              let mode = ChatGPTSpeechMode(rawValue: rawValue) else { return }
+        speechSettings.mode = mode
+        synchronizeControls()
+    }
+
+    @objc private func readLatestResponse(_ sender: NSButton) {
+        onReadLatestResponse()
+    }
+
+    @objc private func stopSpeaking(_ sender: NSButton) {
+        onStopSpeaking()
+    }
+
     /// The single preview path shared by the sound popup, the volume slider,
     /// and the Play Preview button. It always previews the persisted UI
     /// values through the production player, so a zero volume stays a valid
@@ -384,6 +447,9 @@ final class NotificationsSettingsViewController: NSViewController {
         let volumePercent = preferencesStore.attentionSoundVolume * 100
         volumeSlider.doubleValue = volumePercent
         updateVolumeLabel(volumePercent)
+        speechModePopup.selectItem(withTitle: speechSettings.mode.displayName)
+        readLatestResponseButton.isEnabled = true
+        stopSpeakingButton.isEnabled = true
     }
 
     private func makeRow(label text: String, control: NSView) -> NSView {

@@ -45,6 +45,7 @@ final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
@@ -52,6 +53,7 @@ final class WebViewPool {
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
+    private var responseBridges: [UUID: ChatGPTResponseBridge] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
     private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
@@ -62,6 +64,10 @@ final class WebViewPool {
     /// Transient normalized-observation seam for later stages. The pool keeps
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
+
+    /// Response extraction has its own lifecycle channel. It is intentionally
+    /// separate from the metadata-only attention observation route.
+    var onResponseRuntimeReset: ResponseRuntimeResetHandler?
 
     /// Transient presentation seam for the selected Slot's committed
     /// top-level URL. Persistence continues to use `onURLChange`; this route
@@ -219,6 +225,7 @@ final class WebViewPool {
         // The bridge dies with its WKWebView: invalidate it first so no stale
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
+        invalidateResponseBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -258,6 +265,12 @@ final class WebViewPool {
     /// bridge lifetime ownership; no attention state lives in the pool.
     func attentionBridge(for slotID: UUID) -> ChatGPTAttentionBridge? {
         attentionBridges[slotID]
+    }
+
+    /// Read-only access to the Slot's independent response bridge. Response
+    /// content is never stored in the pool.
+    func responseBridge(for slotID: UUID) -> ChatGPTResponseBridge? {
+        responseBridges[slotID]
     }
 
     func browserProfileIdentity(for slotID: UUID) -> BrowserProfileIdentity? {
@@ -319,6 +332,7 @@ final class WebViewPool {
         // attention runtime before the existing recovery policy proceeds. The
         // bridge installation itself stays usable for the recovered document.
         attentionBridges[slotID]?.handleRuntimeReplacement()
+        responseBridges[slotID]?.handleRuntimeReplacement()
 
         switch Self.recoveryDisposition(isActive: isSlotActive(slotID)) {
         case .reloadNow:
@@ -354,6 +368,7 @@ final class WebViewPool {
         navigationURL: URL
     ) throws -> WKWebView {
         invalidateAttentionBridge(slotID: profile.id)
+        invalidateResponseBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
@@ -405,14 +420,19 @@ final class WebViewPool {
         let attentionBridge = ChatGPTAttentionBridge(slotID: profile.id) { [weak self] slotID, observation in
             self?.onAttentionObservation?(slotID, observation)
         }
+        let responseBridge = ChatGPTResponseBridge(slotID: profile.id) { [weak self] slotID in
+            self?.onResponseRuntimeReset?(slotID)
+        }
         let webView = WebViewFactory.makeWebView(
             renderingProfile: runtimeRendering,
             websiteDataStore: websiteDataStore,
             configureUserContentController: { userContentController in
                 attentionBridge.install(into: userContentController)
+                responseBridge.install(into: userContentController)
             }
         )
         attentionBridge.attach(to: webView)
+        responseBridge.attach(to: webView)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
@@ -435,6 +455,7 @@ final class WebViewPool {
                 let committedURL = self.committedURL(for: slotID)
                 attentionBridge?.cancelInstantBackHandoff()
                 attentionBridge?.handleRuntimeReplacement(committedURL: commitURL)
+                responseBridge.handleRuntimeReplacement()
                 guard let committedURL else {
                     return
                 }
@@ -463,6 +484,7 @@ final class WebViewPool {
                     return
                 }
                 self.attentionBridges[slotID]?.confirmInstantBackHandoff()
+                self.responseBridges[slotID]?.handleRuntimeReplacement()
                 // Confirmed Instant Back resets and resyncs through the bridge
                 // handoff, but it must not reuse ordinary didCommit projection
                 // semantics or create a duplicate replacement boundary.
@@ -483,6 +505,7 @@ final class WebViewPool {
         navigationObservers[profile.id] = observer
         popupCoordinators[profile.id] = popupCoordinator
         attentionBridges[profile.id] = attentionBridge
+        responseBridges[profile.id] = responseBridge
 
         // A recreated runtime may inherit `currentURL` from arbitrary page
         // navigation. Only the configured Home URL can reuse persisted entry
@@ -546,6 +569,11 @@ final class WebViewPool {
     /// boundary, and clears pool ownership.
     private func invalidateAttentionBridge(slotID: UUID) {
         guard let bridge = attentionBridges.removeValue(forKey: slotID) else { return }
+        bridge.invalidate()
+    }
+
+    private func invalidateResponseBridge(slotID: UUID) {
+        guard let bridge = responseBridges.removeValue(forKey: slotID) else { return }
         bridge.invalidate()
     }
 

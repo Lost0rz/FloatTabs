@@ -118,6 +118,13 @@ final class AppCoordinator {
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
                 return try self.restoreBackup(from: url)
             },
+            speechSettings: panelController.speechSettingsForApp,
+            onReadLatestResponse: { [weak self] in
+                self?.panelController.readLatestChatGPTResponse()
+            },
+            onStopSpeaking: { [weak self] in
+                self?.panelController.stopSpeaking()
+            },
             browserProfileManager: panelController.browserProfileManagementClient(
                 usageStore: websiteCacheUsageStore
             ),
