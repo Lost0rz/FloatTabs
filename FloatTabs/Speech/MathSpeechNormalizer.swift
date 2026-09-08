@@ -173,14 +173,13 @@ enum MathSpeechNormalizer {
     private static func renderEnglish(_ source: String) -> String? {
         guard let expression = expandStructuredTokens(source) else { return nil }
         if let division = expression.range(of: " / "),
-           expression[..<division.lowerBound].contains("("),
-           expression[division.upperBound...].first?.isNumber == true {
+           expression[..<division.lowerBound].contains("(") {
             let numerator = String(expression[..<division.lowerBound])
                 .trimmingCharacters(in: .whitespaces)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "()"))
             let denominator = String(expression[division.upperBound...])
             guard let renderedNumerator = renderEnglishAtoms(numerator) else { return nil }
-            return "\(renderedNumerator) divided by \(denominator)"
+            return "\(renderedNumerator) over \(denominator)"
         }
         return renderEnglishAtoms(expression)
     }

@@ -36,8 +36,9 @@ final class MathSpeechNormalizerTests: XCTestCase {
         XCTAssertTrue(
             MathSpeechNormalizer.normalize("\\sqrt{x+1}", languageRole: .chinese).text.contains("根号")
         )
-        XCTAssertTrue(
-            MathSpeechNormalizer.normalize("\\frac{a}{b}", languageRole: .english).text.contains("divided by")
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("\\frac{a}{b}", languageRole: .english).text,
+            "a over b"
         )
     }
 
