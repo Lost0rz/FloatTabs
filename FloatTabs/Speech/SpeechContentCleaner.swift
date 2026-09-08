@@ -5,6 +5,9 @@ enum SpeechContentBlockKind: String, Equatable, Sendable {
     case heading
     case listItem
     case quote
+    case richText
+    case mathInline
+    case mathBlock
     case code
     case table
     case link
@@ -28,15 +31,23 @@ enum SpeechSpeakabilityFilter {
 
 enum SpeechContentCleaner {
     static func clean(_ blocks: [SpeechContentBlock]) -> String {
-        blocks.compactMap(clean)
+        cleanBlocks(blocks)
+            .map(\.text)
             .joined(separator: "\n\n")
+    }
+
+    static func cleanBlocks(_ blocks: [SpeechContentBlock]) -> [SpeechContentBlock] {
+        blocks.compactMap { block in
+            guard let text = clean(block) else { return nil }
+            return SpeechContentBlock(kind: block.kind, text: text, level: block.level)
+        }
     }
 
     static func clean(_ block: SpeechContentBlock) -> String? {
         switch block.kind {
         case .code, .table:
             return nil
-        case .paragraph, .heading, .listItem, .quote, .link:
+        case .paragraph, .heading, .listItem, .quote, .richText, .mathInline, .mathBlock, .link:
             break
         }
 
@@ -46,6 +57,10 @@ enum SpeechContentCleaner {
         }
 
         if isRawMachineContent(text) { return nil }
+
+        guard block.kind != .mathInline, block.kind != .mathBlock else {
+            return cleanMathSource(text)
+        }
 
         text = replaceMarkdownLinks(in: text)
         text = text
@@ -90,6 +105,21 @@ enum SpeechContentCleaner {
             return nil
         }
         return text
+    }
+
+    private static func cleanMathSource(_ text: String) -> String? {
+        let source = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty,
+              source.count <= MathSpeechNormalizer.maximumSourceLength,
+              SpeechSpeakabilityFilter.containsSpeakableContent(source) else {
+            return nil
+        }
+        return source
     }
 
     private static func isRawMachineContent(_ text: String) -> Bool {

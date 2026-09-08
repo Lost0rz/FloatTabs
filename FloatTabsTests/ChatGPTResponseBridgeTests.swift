@@ -6,7 +6,7 @@ import XCTest
 final class ChatGPTResponseBridgeTests: XCTestCase {
     func testPayloadParsingAcceptsStructuredResponseOnly() {
         let payload = ChatGPTResponsePayload.parse([
-            "version": 1,
+            "version": 2,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -25,7 +25,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
     func testPayloadParsingRejectsMalformedOrContentlessResponses() {
         XCTAssertNil(ChatGPTResponsePayload.parse([:]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 2,
+            "version": 3,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -33,7 +33,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             "blocks": [["kind": "paragraph", "text": "Hello"]],
         ]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 1,
+            "version": 2,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -41,7 +41,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             "blocks": [],
         ]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 1,
+            "version": 2,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -52,7 +52,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
 
     func testEmptyPayloadIsValidWithoutResponseBody() {
         let payload = ChatGPTResponsePayload.parse([
-            "version": 1,
+            "version": 2,
             "kind": "empty",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -72,7 +72,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         )
         XCTAssertTrue(
             ChatGPTResponseExtraction.scriptSource.contains(
-                "__floatTabsChatGPTResponseRequestLatestV1"
+                "__floatTabsChatGPTResponseRequestLatestV2"
             )
         )
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MutationObserver"))
@@ -93,7 +93,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         bridge.attach(to: webView)
 
         var callbackResult: ChatGPTResponsePayload? = ChatGPTResponsePayload(
-            version: 1,
+            version: 2,
             kind: .empty,
             requestID: "request-12345678",
             documentToken: "document-12345678",

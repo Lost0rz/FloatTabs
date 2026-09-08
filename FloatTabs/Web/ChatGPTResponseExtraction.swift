@@ -9,7 +9,7 @@ enum ChatGPTResponseMessageKind: String, Equatable, Sendable {
 }
 
 struct ChatGPTResponsePayload: Equatable, Sendable {
-    static let currentVersion = 1
+    static let currentVersion = 2
     static let responseKind = ChatGPTResponseMessageKind.response.rawValue
     static let emptyKind = ChatGPTResponseMessageKind.empty.rawValue
 
@@ -166,50 +166,172 @@ enum ChatGPTResponseExtraction {
             });
           };
 
-          const structuredBlocks = (root) => {
-            const selectors = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table';
-            const nodes = [];
-            if (root.matches && root.matches(selectors)) nodes.push(root);
-            nodes.push(...root.querySelectorAll(selectors));
-            const blocks = [];
-            nodes.forEach((element) => {
-              if (blocks.length >= MAX_BLOCKS) return;
-              if (element.closest('script,style,noscript,button,svg,[aria-hidden="true"]')) return;
-              const nestedBlock = element.parentElement?.closest(selectors);
-              if (nestedBlock && nestedBlock !== element) return;
-              const text = normalizedText(element);
-              if (!text) return;
-              const tag = element.tagName.toLowerCase();
-              let kind = 'paragraph';
-              let level = null;
-              if (/^h[1-6]$/.test(tag)) {
-                kind = 'heading';
-                level = Number(tag.slice(1));
-              } else if (tag === 'li') {
-                kind = 'listItem';
-              } else if (tag === 'blockquote') {
-                kind = 'quote';
-              } else if (tag === 'pre') {
-                kind = 'code';
-              } else if (tag === 'table') {
-                kind = 'table';
-              }
-              blocks.push({ kind: kind, text: text, level: level });
-            });
+          const semanticSelector = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table';
+          const mathSelector = 'math,.katex-display,.katex,mjx-container';
+          const excludedSelector =
+            'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
 
-            if (blocks.length) return blocks;
-            const fallback = normalizedText(root);
+          const isExcluded = (element) =>
+            Boolean(element.closest && element.closest(excludedSelector));
+
+          const textWithoutControls = (element) => {
+            const clone = element.cloneNode(true);
+            clone.querySelectorAll(excludedSelector).forEach((node) => node.remove());
+            return (clone.textContent || '').replace(/\\s+/g, ' ').trim();
+          };
+
+          const isCanonicalMathRoot = (element) => {
+            if (!element.matches || !element.matches(mathSelector)) return false;
+            if (!isRendered(element)) return false;
+            if (element.matches('.katex-display')) return true;
+            if (element.matches('.katex') && element.closest('.katex-display')) return false;
+            if (element.matches('.katex-mathml,.katex-html')) return false;
+            if (element.matches('math') && element.closest('math') !== element) return false;
+            if (element.matches('mjx-container') && element.closest('mjx-container') !== element) {
+              return false;
+            }
+            return true;
+          };
+
+          const mathSource = (element) => {
+            const annotation = element.querySelector(
+              'annotation[encoding="application/x-tex"],' +
+              'annotation[encoding="application/tex"],' +
+              'annotation[encoding="application/x-latex"]'
+            );
+            const dataSource = element.getAttribute('data-latex')
+              || element.getAttribute('data-tex')
+              || element.querySelector('[data-latex]')?.getAttribute('data-latex')
+              || element.querySelector('[data-tex]')?.getAttribute('data-tex');
+            const ariaSource = element.getAttribute('aria-label')
+              || element.getAttribute('alttext')
+              || element.querySelector('[aria-label]')?.getAttribute('aria-label');
+            const candidate = annotation?.textContent
+              || dataSource
+              || ariaSource
+              || textWithoutControls(element);
+            return (candidate || '').replace(/\\s+/g, ' ').trim().slice(0, MAX_BLOCK_TEXT);
+          };
+
+          const appendTextPart = (parts, kind, text, level) => {
+            const value = (text || '').replace(/\\s+/g, ' ').trim();
+            if (!value) return;
+            const previous = parts[parts.length - 1];
+            if (previous && previous.kind === kind && previous.level === level) {
+              previous.text = (previous.text + ' ' + value).trim().slice(0, MAX_BLOCK_TEXT);
+            } else {
+              parts.push({ kind: kind, text: value.slice(0, MAX_BLOCK_TEXT), level: level });
+            }
+          };
+
+          const appendInlineParts = (element, kind, level, parts) => {
+            element.childNodes.forEach((node) => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                appendTextPart(parts, kind, node.nodeValue || '', level);
+                return;
+              }
+              if (node.nodeType !== Node.ELEMENT_NODE) return;
+              if (isExcluded(node)) return;
+              if (isCanonicalMathRoot(node)) {
+                const source = mathSource(node);
+                if (source) {
+                  parts.push({
+                    kind: node.matches('.katex-display') ? 'mathBlock' : 'mathInline',
+                    text: source,
+                    level: null
+                  });
+                }
+                return;
+              }
+              appendInlineParts(node, kind, level, parts);
+            });
+          };
+
+          const appendSemanticBlock = (element, blocks) => {
+            const tag = element.tagName.toLowerCase();
+            if (tag === 'pre' || tag === 'table') {
+              const text = textWithoutControls(element).slice(0, MAX_BLOCK_TEXT);
+              if (text) blocks.push({
+                kind: tag === 'pre' ? 'code' : 'table',
+                text: text,
+                level: null
+              });
+              return;
+            }
+            let kind = 'paragraph';
+            let level = null;
+            if (/^h[1-6]$/.test(tag)) {
+              kind = 'heading';
+              level = Number(tag.slice(1));
+            } else if (tag === 'li') {
+              kind = 'listItem';
+            } else if (tag === 'blockquote') {
+              kind = 'quote';
+            }
+            const parts = [];
+            appendInlineParts(element, kind, level, parts);
+            if (parts.length) blocks.push(...parts);
+          };
+
+          const hasDirectText = (element) =>
+            Array.from(element.childNodes || []).some(
+              (node) => node.nodeType === Node.TEXT_NODE
+                && (node.nodeValue || '').trim().length > 0
+            );
+
+          const hasSemanticDescendant = (element) =>
+            Boolean(element.querySelector && element.querySelector(semanticSelector));
+
+          const appendRichText = (element, blocks) => {
+            const parts = [];
+            appendInlineParts(element, 'richText', null, parts);
+            if (parts.length) blocks.push(...parts);
+          };
+
+          const structuredBlocks = (root) => {
+            const blocks = [];
+            const visit = (element) => {
+              if (blocks.length >= MAX_BLOCKS || isExcluded(element)) return;
+              if (isCanonicalMathRoot(element)) {
+                const source = mathSource(element);
+                if (source) {
+                  blocks.push({
+                    kind: element.matches('.katex-display') ? 'mathBlock' : 'mathInline',
+                    text: source,
+                    level: null
+                  });
+                }
+                return;
+              }
+              if (element.matches && element.matches(semanticSelector)) {
+                appendSemanticBlock(element, blocks);
+                return;
+              }
+              if (element !== root
+                  && hasDirectText(element)
+                  && !hasSemanticDescendant(element)) {
+                appendRichText(element, blocks);
+                return;
+              }
+              element.childNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) visit(node);
+              });
+            };
+            visit(root);
+            if (blocks.length) return blocks.slice(0, MAX_BLOCKS);
+            const fallback = textWithoutControls(root);
             return fallback ? [{ kind: 'paragraph', text: fallback, level: null }] : [];
           };
 
-          globalThis.__floatTabsChatGPTResponseRequestLatestV1 = (requestID) => {
+          globalThis.__floatTabsChatGPTResponseRequestLatestV2 = (requestID) => {
             const target = handler();
             if (!target || typeof requestID !== 'string') return false;
             const roots = assistantRoots();
             const root = roots[roots.length - 1];
             if (!root) {
               target.postMessage({
-                version: 1,
+                version: 2,
                 kind: "empty",
                 requestID: requestID,
                 documentToken: documentToken,
@@ -221,7 +343,7 @@ enum ChatGPTResponseExtraction {
             const blocks = structuredBlocks(root);
             if (!blocks.length) {
               target.postMessage({
-                version: 1,
+                version: 2,
                 kind: "empty",
                 requestID: requestID,
                 documentToken: documentToken,
@@ -231,7 +353,7 @@ enum ChatGPTResponseExtraction {
               return true;
             }
             target.postMessage({
-              version: 1,
+              version: 2,
               kind: "response",
               requestID: requestID,
               documentToken: documentToken,

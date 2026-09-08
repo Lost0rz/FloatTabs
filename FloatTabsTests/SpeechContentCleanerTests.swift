@@ -122,4 +122,25 @@ final class SpeechContentCleanerTests: XCTestCase {
             "版本是 0.2.6。\n\n成功率 95%。\n\n模型是 GPT-5.6。"
         )
     }
+
+    func testKeepsRichTextAndMathBlocksForSemanticNormalization() {
+        let blocks = [
+            SpeechContentBlock(
+                kind: .richText,
+                text: "小底平方 — 两翼都是两底乘积 — 大底平方",
+                level: nil
+            ),
+            SpeechContentBlock(
+                kind: .mathBlock,
+                text: "m^2 : mn : n^2 : mn",
+                level: nil
+            ),
+        ]
+
+        XCTAssertEqual(
+            SpeechContentCleaner.cleanBlocks(blocks).map(\.kind),
+            [.richText, .mathBlock]
+        )
+        XCTAssertNotNil(SpeechContentCleaner.clean(blocks[1]))
+    }
 }

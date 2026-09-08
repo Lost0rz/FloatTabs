@@ -123,6 +123,152 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         )
     }
 
+    func testDisplayKatexWithMathMLAndVisualTreeEmitsOneMathBlock() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-math-display">
+          <p>所以直接套：</p>
+          <div class="katex-display" style="display:block">
+            <span class="katex">
+              <span class="katex-mathml" style="display:none">
+                <math><semantics>
+                  <annotation encoding="application/x-tex">m^2 : mn : n^2 : mn</annotation>
+                </semantics></math>
+              </span>
+              <span class="katex-html" aria-hidden="true">visual m 2 mn</span>
+            </span>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.paragraph, .mathBlock])
+        XCTAssertEqual(payload?.blocks.last?.text, "m^2 : mn : n^2 : mn")
+    }
+
+    func testInlineKatexPreservesParagraphMathParagraphOrder() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-math-inline">
+          <p>由 <span class="katex" style="display:inline-block">
+            <span class="katex-mathml" style="display:none"><math><semantics>
+              <annotation encoding="application/x-tex">x^2+y^2=25</annotation>
+            </semantics></math></span>
+            <span class="katex-html" aria-hidden="true">visual</span>
+          </span> 可知半径为 5。</p>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.paragraph, .mathInline, .paragraph])
+        XCTAssertEqual(payload?.blocks.map(\.text), ["由", "x^2+y^2=25", "可知半径为 5。"])
+    }
+
+    func testMathMLAnnotationIsTheCanonicalSource() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-mathml">
+          <math style="display:inline-block"><semantics>
+            <annotation encoding="application/x-tex">CE : AD = 2 : 3</annotation>
+            <mrow><mi>visual</mi></mrow>
+          </semantics></math>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.mathInline])
+        XCTAssertEqual(payload?.blocks.first?.text, "CE : AD = 2 : 3")
+    }
+
+    func testHiddenMathMLAccessibilityChildDoesNotHideRenderedFormula() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-hidden-mathml">
+          <span class="katex" style="display:inline-block">
+            <span class="katex-mathml" style="display:none"><math><semantics>
+              <annotation encoding="application/x-tex">4 : 6 : 6 : 9</annotation>
+            </semantics></math></span>
+            <span class="katex-html" aria-hidden="true">4 6 6 9</span>
+          </span>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.mathInline])
+        XCTAssertEqual(payload?.blocks.first?.text, "4 : 6 : 6 : 9")
+    }
+
+    func testStandaloneBorderedRichTextIsExtractedOnce() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-callout">
+          <div class="callout" style="display:block">
+            小底平方 — 两翼都是两底乘积 — 大底平方
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.richText])
+        XCTAssertEqual(payload?.blocks.first?.text, "小底平方 — 两翼都是两底乘积 — 大底平方")
+    }
+
+    func testRichTextWrapperAroundParagraphDoesNotDuplicateParagraph() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-wrapper">
+          <div class="callout" style="display:block"><p>Only one paragraph.</p></div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.paragraph])
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Only one paragraph."])
+    }
+
+    func testChatGPTCopyAndActionBarControlsAreExcluded() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-controls">
+          <p>Readable answer.</p>
+          <div role="toolbar" data-testid="conversation-turn-action-bar">
+            <button>Copy</button><span>Regenerate</span><span>Good response</span>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.paragraph])
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Readable answer."])
+    }
+
+    func testMultipleInlineMathBlocksRemainInDocumentOrder() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-order">
+          <p>A <span class="katex" style="display:inline-block"><math><semantics>
+            <annotation encoding="application/x-tex">x</annotation>
+          </semantics></math></span> B <span class="katex" style="display:inline-block"><math><semantics>
+            <annotation encoding="application/x-tex">y</annotation>
+          </semantics></math></span> C</p>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [
+            .paragraph, .mathInline, .paragraph, .mathInline, .paragraph
+        ])
+        XCTAssertEqual(payload?.blocks.map(\.text), ["A", "x", "B", "y", "C"])
+    }
+
     func testNoAssistantMessageProducesEmptyExtraction() async {
         let page = ChatGPTResponsePageHarness()
         page.load("<div data-message-author-role=\"user\"><p>User text</p></div>")

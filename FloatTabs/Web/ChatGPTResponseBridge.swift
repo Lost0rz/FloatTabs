@@ -147,6 +147,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         } else {
             encoded = "\"\""
         }
-        return "globalThis.__floatTabsChatGPTResponseRequestLatestV1?.(\(encoded)) === true"
+        return "globalThis.__floatTabsChatGPTResponseRequestLatestV2?.(\(encoded)) === true"
     }
 }

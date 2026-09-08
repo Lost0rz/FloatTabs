@@ -73,6 +73,72 @@ enum SpeechLanguageRouter {
             }
     }
 
+    static func utteranceRequests(
+        for blocks: [SpeechContentBlock]
+    ) -> [SpeechUtteranceRequest] {
+        let cleanedBlocks = SpeechContentCleaner.cleanBlocks(blocks)
+        let surroundingText = cleanedBlocks
+            .filter { $0.kind != .mathInline && $0.kind != .mathBlock }
+            .map(\.text)
+            .joined(separator: " ")
+        let fallbackRole = role(for: surroundingText)
+
+        var requests: [SpeechUtteranceRequest] = []
+        for (index, block) in cleanedBlocks.enumerated() {
+            let isMath = block.kind == .mathInline || block.kind == .mathBlock
+            let languageRole: SpeechLanguageRole
+            let text: String
+            if isMath {
+                let nearestContext = nearestTextContext(
+                    around: index,
+                    in: cleanedBlocks
+                )
+                let contextualRole = nearestContext.map(role(for:)) ?? .automatic
+                languageRole = contextualRole == .automatic ? fallbackRole : contextualRole
+                text = MathSpeechNormalizer.normalize(
+                    block.text,
+                    languageRole: languageRole
+                ).text
+            } else {
+                languageRole = role(for: block.text)
+                text = block.text
+            }
+
+            requests.append(contentsOf: SpeechSegmenter.segment(text)
+                .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
+                .map { segment in
+                    SpeechUtteranceRequest(
+                        text: segment,
+                        languageRole: languageRole == .automatic
+                            ? role(for: segment)
+                            : languageRole
+                    )
+                })
+        }
+        return requests
+    }
+
+    private static func nearestTextContext(
+        around index: Int,
+        in blocks: [SpeechContentBlock]
+    ) -> String? {
+        for distance in 1...max(blocks.count, 1) {
+            let left = index - distance
+            if blocks.indices.contains(left), !isMath(blocks[left]) {
+                return blocks[left].text
+            }
+            let right = index + distance
+            if blocks.indices.contains(right), !isMath(blocks[right]) {
+                return blocks[right].text
+            }
+        }
+        return nil
+    }
+
+    private static func isMath(_ block: SpeechContentBlock) -> Bool {
+        block.kind == .mathInline || block.kind == .mathBlock
+    }
+
     private static func containsEnglishLetters(in text: String) -> Bool {
         text.contains { $0.isASCII && $0.isLetter }
     }

@@ -429,9 +429,8 @@ final class AssistantSpeechCoordinator {
             return
         }
 
-        let cleaned = SpeechContentCleaner.clean(payload.blocks)
         let requests = SpeechLanguageRouter.utteranceRequests(
-            for: cleaned
+            for: payload.blocks
         )
 
         switch request.origin {

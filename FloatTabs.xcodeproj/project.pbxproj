@@ -97,6 +97,8 @@
 		A0000000000000000000005B /* SpeechSegmenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005B /* SpeechSegmenterTests.swift */; };
 		A0000000000000000000005C /* SpeechQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005C /* SpeechQueueTests.swift */; };
 		A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */; };
+		A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005E /* MathSpeechNormalizer.swift */; };
+		A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005F /* MathSpeechNormalizerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -202,6 +204,8 @@
 		B0000000000000000000005B /* SpeechSegmenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSegmenterTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005C /* SpeechQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechQueueTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinatorTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000005E /* MathSpeechNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizer.swift; sourceTree = "<group>"; };
+		B0000000000000000000005F /* MathSpeechNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -370,6 +374,7 @@
 				B00000000000000000000053 /* SpeechService.swift */,
 				B00000000000000000000054 /* SpeechQueue.swift */,
 				B00000000000000000000055 /* SpeechContentCleaner.swift */,
+				B0000000000000000000005E /* MathSpeechNormalizer.swift */,
 				B00000000000000000000056 /* SpeechSegmenter.swift */,
 				B00000000000000000000057 /* AssistantSpeechCoordinator.swift */,
 			);
@@ -420,6 +425,7 @@
 				B0000000000000000000005B /* SpeechSegmenterTests.swift */,
 				B0000000000000000000005C /* SpeechQueueTests.swift */,
 				B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */,
+				B0000000000000000000005F /* MathSpeechNormalizerTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -591,6 +597,7 @@
 				A00000000000000000000053 /* SpeechService.swift in Sources */,
 				A00000000000000000000054 /* SpeechQueue.swift in Sources */,
 				A00000000000000000000055 /* SpeechContentCleaner.swift in Sources */,
+				A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */,
 				A00000000000000000000056 /* SpeechSegmenter.swift in Sources */,
 				A00000000000000000000057 /* AssistantSpeechCoordinator.swift in Sources */,
 			);
@@ -633,6 +640,7 @@
 				A0000000000000000000005B /* SpeechSegmenterTests.swift in Sources */,
 				A0000000000000000000005C /* SpeechQueueTests.swift in Sources */,
 				A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */,
+				A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
