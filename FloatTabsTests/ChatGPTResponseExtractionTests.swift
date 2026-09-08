@@ -59,6 +59,32 @@ private final class ChatGPTResponsePageHarness {
         }
     }
 
+    func appendAssistantNode(id: String, bodyHTML: String) async -> Bool {
+        guard let idData = try? JSONEncoder().encode(id),
+              let idJSON = String(data: idData, encoding: .utf8),
+              let bodyData = try? JSONEncoder().encode(bodyHTML),
+              let bodyJSON = String(data: bodyData, encoding: .utf8) else {
+            return false
+        }
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                """
+                (() => {
+                  const node = document.createElement('div');
+                  node.setAttribute('data-message-author-role', 'assistant');
+                  node.setAttribute('data-message-id', \(idJSON));
+                  node.innerHTML = \(bodyJSON);
+                  document.body.appendChild(node);
+                  return true;
+                })()
+                """,
+                completionHandler: { result, _ in
+                    continuation.resume(returning: result as? Bool ?? false)
+                }
+            )
+        }
+    }
+
     func scroll(_ locator: SpeechSourceLocator) async -> Bool {
         await withCheckedContinuation { continuation in
             bridge.scrollToSpeechBlock(locator) { result in
@@ -195,6 +221,102 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertTrue(replaced)
         let disconnectedScroll = await page.scroll(validLocator)
         XCTAssertFalse(disconnectedScroll)
+    }
+
+    func testOlderResponseLocatorSurvivesLaterResponseExtraction() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-one">
+          <p>R1 paragraph one.</p>
+          <p>R1 paragraph two.</p>
+        </div>
+        """)
+        await page.settle()
+
+        let first = await page.extract()
+        guard let firstBlocks = first?.blocks,
+              let firstBlockOne = firstBlocks.first?.sourceLocator,
+              let firstBlockTwo = firstBlocks.dropFirst().first?.sourceLocator else {
+            return XCTFail("Expected two R1 locators")
+        }
+        let firstScroll = await page.scroll(firstBlockOne)
+        XCTAssertTrue(firstScroll)
+        let appended = await page.appendAssistantNode(
+            id: "reply-two",
+            bodyHTML: "<p>R2 paragraph one.</p><p>R2 paragraph two.</p>"
+        )
+        XCTAssertTrue(appended)
+
+        let second = await page.extract()
+        guard let secondBlockOne = second?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected an R2 locator")
+        }
+        let oldResponseScroll = await page.scroll(firstBlockTwo)
+        let newResponseScroll = await page.scroll(secondBlockOne)
+        XCTAssertTrue(oldResponseScroll)
+        XCTAssertTrue(newResponseScroll)
+    }
+
+    func testSameResponseRefreshReplacesOnlyItsLocators() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-one">
+          <p>R1 remains available.</p>
+        </div>
+        """)
+        await page.settle()
+
+        let first = await page.extract()
+        guard let firstLocator = first?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected R1 locator")
+        }
+        let appended = await page.appendAssistantNode(
+            id: "reply-two",
+            bodyHTML: "<p>R2 before rerender.</p>"
+        )
+        XCTAssertTrue(appended)
+        let second = await page.extract()
+        guard let oldSecondLocator = second?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected initial R2 locator")
+        }
+        let replaced = await page.replaceLatestAssistantNode(id: "reply-two")
+        XCTAssertTrue(replaced)
+        let refreshed = await page.extract()
+        guard let refreshedLocator = refreshed?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected refreshed R2 locator")
+        }
+
+        XCTAssertEqual(oldSecondLocator.blockID, refreshedLocator.blockID)
+        let firstResponseScroll = await page.scroll(firstLocator)
+        let refreshedOldLocatorScroll = await page.scroll(oldSecondLocator)
+        let refreshedScroll = await page.scroll(refreshedLocator)
+        XCTAssertTrue(firstResponseScroll)
+        XCTAssertTrue(refreshedOldLocatorScroll)
+        XCTAssertTrue(refreshedScroll)
+    }
+
+    func testEmptyExtractionDoesNotClearActiveResponseLocators() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-one">
+          <p>Active R1 remains.</p>
+        </div>
+        """)
+        await page.settle()
+
+        let first = await page.extract()
+        guard let firstLocator = first?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected active R1 locator")
+        }
+        let appended = await page.appendAssistantNode(
+            id: "reply-empty",
+            bodyHTML: "<span style='display:block;min-height:1px'></span>"
+        )
+        XCTAssertTrue(appended)
+        let emptyPayload = await page.extract()
+        XCTAssertNil(emptyPayload)
+        let activeResponseScroll = await page.scroll(firstLocator)
+        XCTAssertTrue(activeResponseScroll)
     }
 
     func testStructuredCodeAndTableBlocksAreMarkedForCleaner() async {

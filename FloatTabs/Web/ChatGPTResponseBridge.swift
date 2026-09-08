@@ -34,7 +34,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     private weak var userContentController: WKUserContentController?
     private var pendingRequests: [String: PendingRequest] = [:]
     private var currentDocumentToken: String?
-    private var currentResponseID: String?
     private(set) var isInvalidated = false
 
     init(
@@ -78,7 +77,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         guard !isInvalidated,
               locator.slotID == slotID,
               locator.documentToken == currentDocumentToken,
-              locator.responseID == currentResponseID,
               let webView else {
             completion(false)
             return
@@ -131,7 +129,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 
     func handleRuntimeReplacement() {
         currentDocumentToken = nil
-        currentResponseID = nil
         finishPendingRequests()
         onRuntimeReset(slotID)
     }
@@ -141,7 +138,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         isInvalidated = true
         finishPendingRequests()
         currentDocumentToken = nil
-        currentResponseID = nil
         userContentController?.removeScriptMessageHandler(
             forName: ChatGPTResponseExtraction.messageHandlerName,
             contentWorld: ChatGPTResponseExtraction.contentWorld
@@ -183,7 +179,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             return
         }
         currentDocumentToken = payload.documentToken
-        currentResponseID = payload.responseID
         pending.completion(
             payload.kind == .response ? payload.assigning(slotID: slotID) : nil
         )

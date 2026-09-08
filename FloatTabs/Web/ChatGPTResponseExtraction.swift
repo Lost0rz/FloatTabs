@@ -161,9 +161,15 @@ enum ChatGPTResponseExtraction {
               Math.random().toString(36).slice(2, 14);
           const responseKeys = new WeakMap();
           const locatorRegistry = new Map();
+          const responseLocatorKeys = new Map();
           let nextOpaqueKey = 0;
           let programmaticScrollGuardUntil = 0;
           const MAX_BLOCKS = 256;
+          // The speech queue holds at most 64 pending segments. Keeping a
+          // larger bounded response-group window leaves room for the current
+          // response plus ordinary queued responses without making the
+          // document-lifetime registry unbounded.
+          const MAX_RESPONSE_GROUPS = 128;
           const MAX_BLOCK_TEXT = 4000;
 
           const normalizedText = (element) => (element.textContent || '')
@@ -387,7 +393,6 @@ enum ChatGPTResponseExtraction {
           };
 
           const postEmpty = (target, requestID) => {
-            locatorRegistry.clear();
             target.postMessage({
               version: 3,
               kind: "empty",
@@ -416,11 +421,32 @@ enum ChatGPTResponseExtraction {
               || event.key === ' '
               || event.code === 'Space';
 
+          const isEditableTarget = (eventTarget) => {
+            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+              ? eventTarget
+              : eventTarget?.parentElement;
+            while (element) {
+              if (element.matches('input,textarea,select')) return true;
+              if (element.hasAttribute('contenteditable')) {
+                const state = (element.getAttribute('contenteditable') || '')
+                  .toLowerCase();
+                if (state === 'false') return false;
+                return state === '' || state === 'true' || state === 'plaintext-only';
+              }
+              element = element.parentElement;
+            }
+            return false;
+          };
+
           document.addEventListener('wheel', (event) => {
             if (event.isTrusted) postManualScroll();
           }, true);
           document.addEventListener('keydown', (event) => {
-            if (event.isTrusted && isScrollKey(event)) postManualScroll();
+            if (event.isTrusted
+                && isScrollKey(event)
+                && !isEditableTarget(event.target)) {
+              postManualScroll();
+            }
           }, true);
           document.addEventListener('pointerdown', (event) => {
             if (!event.isTrusted) return;
@@ -480,9 +506,15 @@ enum ChatGPTResponseExtraction {
               return true;
             }
             const responseID = responseIDFor(root);
-            locatorRegistry.clear();
+            const previousBlockIDs = responseLocatorKeys.get(responseID);
+            if (previousBlockIDs) {
+              previousBlockIDs.forEach((blockID) => locatorRegistry.delete(blockID));
+              responseLocatorKeys.delete(responseID);
+            }
+            const currentBlockIDs = new Set();
             const wireBlocks = blocks.map((block, index) => {
               const blockID = responseID + ':block-' + index;
+              currentBlockIDs.add(blockID);
               locatorRegistry.set(blockID, {
                 documentToken: documentToken,
                 responseID: responseID,
@@ -499,6 +531,14 @@ enum ChatGPTResponseExtraction {
                 }
               };
             });
+            responseLocatorKeys.set(responseID, currentBlockIDs);
+            while (responseLocatorKeys.size > MAX_RESPONSE_GROUPS) {
+              const oldestResponseID = responseLocatorKeys.keys().next().value;
+              if (!oldestResponseID) break;
+              const oldestBlockIDs = responseLocatorKeys.get(oldestResponseID);
+              oldestBlockIDs?.forEach((blockID) => locatorRegistry.delete(blockID));
+              responseLocatorKeys.delete(oldestResponseID);
+            }
             target.postMessage({
               version: 3,
               kind: "response",

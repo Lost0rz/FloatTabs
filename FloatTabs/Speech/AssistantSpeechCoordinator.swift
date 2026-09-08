@@ -775,6 +775,7 @@ final class AssistantSpeechCoordinator {
               currentItem.sequence == token else {
             return
         }
+        let finishedSlotID = currentItem.responseID?.slotID
         self.currentItem = nil
         pauseRequested = false
         resumeRequested = false
@@ -784,6 +785,14 @@ final class AssistantSpeechCoordinator {
         }
         drainAutomaticReservations()
         speakNext()
+        if let finishedSlotID,
+           currentSpeakingSlotID != finishedSlotID {
+            // Manual scroll suspension belongs to the continuous speech
+            // session, not to a permanently remembered Slot. Keep it while
+            // the same Slot has another queued item, but release it when the
+            // stream ends or moves to another Slot.
+            followSuspendedSlotIDs.remove(finishedSlotID)
+        }
     }
 
     private func handleUtterancePaused(token: UInt64) {

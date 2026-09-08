@@ -1744,4 +1744,163 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         ])
         XCTAssertFalse(coordinator.isFollowSuspendedForCurrentSpeech)
     }
+
+    func testFollowLocatorSurvivesNewerResponseInSameSlotFIFO() {
+        let service = TestSpeechService()
+        let responseBridge = TestResponseBridge()
+        let followBridge = TestFollowBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: responseBridge,
+            webView: WKWebView(),
+            followBridge: followBridge,
+            activeSlotIDProvider: { slotID }
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-one",
+            blocks: [
+                SpeechContentBlock(kind: .paragraph, text: "R1 first.", level: nil),
+                SpeechContentBlock(kind: .paragraph, text: "R1 second.", level: nil),
+            ]
+        ))
+        let firstToken = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-two",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "R2 first.", level: nil)]
+        ))
+
+        XCTAssertEqual(followBridge.locators.map(\.responseID), [
+            "document-a-follow:response-one",
+        ])
+        service.finish(token: firstToken)
+        XCTAssertEqual(service.spoken, ["R1 first.", "R1 second."])
+        service.finish(token: service.spokenTokens[1])
+        XCTAssertEqual(service.spoken, ["R1 first.", "R1 second.", "R2 first."])
+        XCTAssertEqual(followBridge.locators.map(\.responseID), [
+            "document-a-follow:response-one",
+            "document-a-follow:response-one",
+            "document-a-follow:response-two",
+        ])
+    }
+
+    func testNaturalEndResetsSuspensionForLaterResponseInSameSlot() {
+        let service = TestSpeechService()
+        let responseBridge = TestResponseBridge()
+        let followBridge = TestFollowBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: responseBridge,
+            webView: WKWebView(),
+            followBridge: followBridge,
+            activeSlotIDProvider: { slotID }
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-one",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "R1.", level: nil)]
+        ))
+        coordinator.handleManualScroll(for: slotID, documentToken: "document-a-follow")
+        service.finish(token: service.spokenTokens[0])
+        XCTAssertFalse(coordinator.isFollowSuspendedForCurrentSpeech)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-two",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "R2.", level: nil)]
+        ))
+        XCTAssertEqual(followBridge.locators.map(\.responseID), [
+            "document-a-follow:response-one",
+            "document-a-follow:response-two",
+        ])
+    }
+
+    func testContinuousSameSlotQueuePreservesSuspensionUntilStreamEnds() {
+        let service = TestSpeechService()
+        let responseBridge = TestResponseBridge()
+        let followBridge = TestFollowBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: responseBridge,
+            webView: WKWebView(),
+            followBridge: followBridge,
+            activeSlotIDProvider: { slotID }
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-one",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "R1.", level: nil)]
+        ))
+        coordinator.handle(.generationFinished, for: slotID)
+        responseBridge.resolve(makeFollowPayload(
+            responseID: "document-a-follow:response-two",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "R2.", level: nil)]
+        ))
+        coordinator.handleManualScroll(for: slotID, documentToken: "document-a-follow")
+
+        service.finish(token: service.spokenTokens[0])
+        XCTAssertEqual(service.spoken, ["R1.", "R2."])
+        XCTAssertTrue(coordinator.isFollowSuspendedForCurrentSpeech)
+        XCTAssertEqual(followBridge.locators.count, 1)
+
+        service.finish(token: service.spokenTokens[1])
+        XCTAssertFalse(coordinator.isFollowSuspendedForCurrentSpeech)
+    }
+
+    func testCrossSlotTransitionReleasesOldSlotSuspension() {
+        let service = TestSpeechService()
+        let responseBridge = TestResponseBridge()
+        let followBridge = TestFollowBridge()
+        let slotA = UUID()
+        let slotB = UUID()
+        var activeSlotID: UUID? = slotA
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: responseBridge,
+            webView: WKWebView(),
+            followBridge: followBridge,
+            activeSlotIDProvider: { activeSlotID }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        responseBridge.resolve(makeFollowPayload(
+            documentToken: "document-a",
+            responseID: "document-a:response-a",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "A1.", level: nil)]
+        ))
+        coordinator.handleManualScroll(for: slotA, documentToken: "document-a")
+
+        coordinator.handle(.generationFinished, for: slotB)
+        responseBridge.resolve(makeFollowPayload(
+            documentToken: "document-b",
+            responseID: "document-b:response-b",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "B1.", level: nil)]
+        ))
+        activeSlotID = slotB
+        service.finish(token: service.spokenTokens[0])
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotB)
+
+        service.finish(token: service.spokenTokens[1])
+        activeSlotID = slotA
+        coordinator.handle(.generationFinished, for: slotA)
+        responseBridge.resolve(makeFollowPayload(
+            documentToken: "document-a",
+            responseID: "document-a:response-a-two",
+            blocks: [SpeechContentBlock(kind: .paragraph, text: "A2.", level: nil)]
+        ))
+
+        XCTAssertEqual(followBridge.locators.last?.responseID, "document-a:response-a-two")
+    }
 }

@@ -148,6 +148,13 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
                 "__floatTabsScrollToSpeechBlockV3"
             )
         )
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("responseLocatorKeys"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("MAX_RESPONSE_GROUPS"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("locatorRegistry.clear()"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("isEditableTarget"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("plaintext-only"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'Home'"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'End'"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MutationObserver"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("characterData"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("document.body.innerText"))
