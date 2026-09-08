@@ -99,6 +99,219 @@ struct ExternalTabMetrics {
 }
 
 @MainActor
+final class SpeechRailControl: NSView {
+    enum Kind: Equatable {
+        case autoSpeak
+        case readLatest
+    }
+
+    let kind: Kind
+    var onActivate: (() -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    private let imageView = NSImageView()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private var dockInfluence: CGFloat = 0
+    private var isEnabledForPresentation = false
+    private var isAutoSpeakEnabled = false
+    private var isCurrentlySpeaking = false
+    private var activeTabName: String?
+
+    var preferredWidth: CGFloat {
+        ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
+    }
+
+    var isCurrentlySpeakingForAction: Bool {
+        isCurrentlySpeaking
+    }
+
+    var isEnabledForSpeechPresentationState: Bool {
+        isEnabledForPresentation
+    }
+
+    var isAutoSpeakEnabledForPresentation: Bool {
+        isAutoSpeakEnabled
+    }
+
+    var displayedActiveTabName: String? {
+        activeTabName
+    }
+
+    init(kind: Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 13),
+            imageView.heightAnchor.constraint(equalToConstant: 13),
+        ])
+        setAccessibilityRole(.button)
+        updatePresentation()
+    }
+
+    convenience init() {
+        self.init(kind: .readLatest)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    func setDockInfluence(_ influence: CGFloat) {
+        dockInfluence = min(max(influence, 0), 1)
+    }
+
+    func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updatePresentation()
+    }
+
+    func setSpeechState(
+        isEnabled: Bool,
+        isAutoSpeakEnabled: Bool,
+        isCurrentlySpeaking: Bool,
+        activeTabName: String?
+    ) {
+        self.isEnabledForPresentation = isEnabled
+        self.isAutoSpeakEnabled = isAutoSpeakEnabled
+        self.isCurrentlySpeaking = isCurrentlySpeaking
+        self.activeTabName = activeTabName
+        updatePresentation()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+        onPointerMoved?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isEnabledForPresentation else {
+            NSSound.beep()
+            return
+        }
+        onActivate?()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        updatePresentation()
+    }
+
+    private func updatePresentation() {
+        let target = activeTabName ?? "Current Tab"
+        let symbol: String
+        let label: String
+        let tooltip: String
+
+        switch kind {
+        case .autoSpeak:
+            symbol = isAutoSpeakEnabled ? "speaker.wave.2.fill" : "speaker"
+            label = isAutoSpeakEnabled
+                ? "Auto Speak enabled for \(target)"
+                : "Auto Speak for \(target)"
+            tooltip = isEnabledForPresentation
+                ? (isAutoSpeakEnabled
+                    ? "Stop Auto Speaking This Tab · \(target)"
+                    : "Auto Speak This Tab · \(target)")
+                : "Speech is currently available for ChatGPT tabs."
+        case .readLatest:
+            symbol = isCurrentlySpeaking ? "stop.fill" : "play.fill"
+            label = isCurrentlySpeaking
+                ? "Stop speaking \(target)"
+                : "Read latest response from \(target)"
+            tooltip = isEnabledForPresentation
+                ? (isCurrentlySpeaking
+                    ? "Stop Speaking · \(target)"
+                    : "Read Latest Response From Current Active Tab · \(target)")
+                : "Speech is currently available for ChatGPT tabs."
+        }
+
+        imageView.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )
+        imageView.contentTintColor = isEnabledForPresentation
+            ? (isCurrentlySpeaking ? .systemRed : .labelColor)
+            : .tertiaryLabelColor
+        imageView.alphaValue = isEnabledForPresentation ? 1 : 0.45
+        toolTip = tooltip
+        setAccessibilityLabel(label)
+
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let fraction: CGFloat
+            if !isEnabledForPresentation {
+                fraction = isHovered ? 0.06 : 0.01
+            } else if isCurrentlySpeaking || isAutoSpeakEnabled {
+                fraction = isHovered ? 0.16 : 0.08
+            } else {
+                fraction = isHovered ? 0.10 : 0.02
+            }
+            layer?.backgroundColor = NSColor.controlBackgroundColor
+                .blended(withFraction: fraction, of: .labelColor)?
+                .withAlphaComponent(0.94)
+                .cgColor
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
+            layer?.borderWidth = 1
+        }
+    }
+}
+
+@MainActor
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
@@ -116,6 +329,9 @@ final class ExternalControlZoneView: NSView {
     var onManageBrowserProfiles: (() -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
+    var onReadLatestResponse: (() -> Void)?
+    var onToggleAutoSpeak: (() -> Void)?
+    var onStopSpeech: (() -> Void)?
     var onTogglePin: (() -> Void)?
     var onActiveTabGeometryChange: (() -> Void)?
 
@@ -126,6 +342,8 @@ final class ExternalControlZoneView: NSView {
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
+    private let autoSpeakControl = SpeechRailControl(kind: .autoSpeak)
+    private let readLatestControl = SpeechRailControl(kind: .readLatest)
     private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
     private var trackingAreaReference: NSTrackingArea?
@@ -148,12 +366,29 @@ final class ExternalControlZoneView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(addControl)
+        addSubview(autoSpeakControl)
+        addSubview(readLatestControl)
         addSubview(settingsControl)
         addSubview(pinControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
+        autoSpeakControl.onActivate = { [weak self] in self?.onToggleAutoSpeak?() }
+        readLatestControl.onActivate = { [weak self] in
+            guard let self else { return }
+            if self.readLatestControl.isCurrentlySpeakingForAction {
+                self.onStopSpeech?()
+            } else {
+                self.onReadLatestResponse?()
+            }
+        }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
         addControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        autoSpeakControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        readLatestControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         settingsControl.onPointerMoved = { [weak self] event in
@@ -303,6 +538,8 @@ final class ExternalControlZoneView: NSView {
             tab.refreshAppearance()
         }
         addControl.refreshAppearance()
+        autoSpeakControl.refreshAppearance()
+        readLatestControl.refreshAppearance()
         settingsControl.refreshAppearance()
         pinControl.refreshAppearance()
     }
@@ -369,6 +606,36 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
+    func setSpeechPresentation(
+        _ presentation: SpeechRailPresentation,
+        activeTabName: String? = nil
+    ) {
+        let currentActive = presentation.activeSlotID
+        let isAutoSpeakEnabled = currentActive != nil
+            && currentActive == presentation.autoSpeakSlotID
+        let isCurrentlySpeaking = currentActive != nil
+            && currentActive == presentation.currentSpeakingSlotID
+        let targetName = activeTabName ?? currentActive.map { $0.uuidString }
+        autoSpeakControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            isCurrentlySpeaking: isCurrentlySpeaking,
+            activeTabName: targetName
+        )
+        readLatestControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            isCurrentlySpeaking: isCurrentlySpeaking,
+            activeTabName: targetName
+        )
+        for tab in tabViews.values {
+            tab.setSpeechState(
+                isAutoSpeakSource: tab.slotID == presentation.autoSpeakSlotID,
+                isCurrentlySpeaking: tab.slotID == presentation.currentSpeakingSlotID
+            )
+        }
+    }
+
     override func layout() {
         super.layout()
         layoutControls(animated: false, duration: 0)
@@ -413,7 +680,8 @@ final class ExternalControlZoneView: NSView {
     }
 
     private var railContentViews: [NSView] {
-        Array(tabViews.values) + [addControl, settingsControl, pinControl]
+        Array(tabViews.values)
+            + [addControl, autoSpeakControl, readLatestControl, settingsControl, pinControl]
     }
 
     private func finishRailVisibility(generation: Int, collapsed: Bool) {
@@ -494,6 +762,12 @@ final class ExternalControlZoneView: NSView {
             tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
         }
         addControl.setHovered(location.map { addControl.frame.contains($0) } ?? false)
+        autoSpeakControl.setHovered(
+            location.map { autoSpeakControl.frame.contains($0) } ?? false
+        )
+        readLatestControl.setHovered(
+            location.map { readLatestControl.frame.contains($0) } ?? false
+        )
         settingsControl.setHovered(
             location.map { settingsControl.frame.contains($0) } ?? false
         )
@@ -558,23 +832,59 @@ final class ExternalControlZoneView: NSView {
             )
             self.setFrame(pinFrame, for: self.pinControl, animated: animated)
 
-            let systemY = max(
+            let settingsY = max(
                 pinY
                     - ExternalTabMetrics.systemControlGap
                     - ExternalTabMetrics.systemControlHeight,
                 0
             )
-            let systemCenterY = systemY + ExternalTabMetrics.systemControlHeight / 2
+            let settingsCenterY = settingsY + ExternalTabMetrics.systemControlHeight / 2
             let systemInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - systemCenterY)
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - settingsCenterY)
             } ?? 0
             self.settingsControl.setDockInfluence(systemInfluence)
             let systemFrame = self.attachedFrame(
                 preferredWidth: self.settingsControl.preferredWidth,
-                y: systemY,
+                y: settingsY,
                 height: ExternalTabMetrics.systemControlHeight
             )
             self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
+
+            let readLatestY = max(
+                settingsY
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+            let readLatestCenterY = readLatestY + ExternalTabMetrics.systemControlHeight / 2
+            let readLatestInfluence = self.pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - readLatestCenterY)
+            } ?? 0
+            self.readLatestControl.setDockInfluence(readLatestInfluence)
+            let readLatestFrame = self.attachedFrame(
+                preferredWidth: self.readLatestControl.preferredWidth,
+                y: readLatestY,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            self.setFrame(readLatestFrame, for: self.readLatestControl, animated: animated)
+
+            let autoSpeakY = max(
+                readLatestY
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+            let autoSpeakCenterY = autoSpeakY + ExternalTabMetrics.systemControlHeight / 2
+            let autoSpeakInfluence = self.pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - autoSpeakCenterY)
+            } ?? 0
+            self.autoSpeakControl.setDockInfluence(autoSpeakInfluence)
+            let autoSpeakFrame = self.attachedFrame(
+                preferredWidth: self.autoSpeakControl.preferredWidth,
+                y: autoSpeakY,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            self.setFrame(autoSpeakFrame, for: self.autoSpeakControl, animated: animated)
 
         }
 
@@ -1163,6 +1473,7 @@ final class ExternalWebAppTabView: NSView {
 
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let speechBadgeView = NSImageView()
     private let shapeLayer = CAShapeLayer()
     private let readyAttentionLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
@@ -1185,6 +1496,8 @@ final class ExternalWebAppTabView: NSView {
     private var faviconOriginKey: String?
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
+    private var isAutoSpeakSource = false
+    private var isCurrentlySpeaking = false
 
     private static let grayscaleContext = CIContext(options: nil)
     private static let readyAttentionDiameter: CGFloat = 6
@@ -1220,6 +1533,8 @@ final class ExternalWebAppTabView: NSView {
         return label.textColor
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
+    var isShowingAutoSpeakBadge: Bool { isAutoSpeakSource }
+    var isShowingSpeakingBadge: Bool { isCurrentlySpeaking }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -1248,6 +1563,13 @@ final class ExternalWebAppTabView: NSView {
         label.isHidden = true
         addSubview(label)
 
+        speechBadgeView.imageScaling = .scaleProportionallyUpOrDown
+        speechBadgeView.isHidden = true
+        speechBadgeView.setContentHuggingPriority(.required, for: .horizontal)
+        speechBadgeView.setContentHuggingPriority(.required, for: .vertical)
+        speechBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(speechBadgeView)
+
         let labelTrailingConstraint = label.trailingAnchor.constraint(
             equalTo: trailingAnchor,
             constant: -8
@@ -1266,6 +1588,10 @@ final class ExternalWebAppTabView: NSView {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             labelTrailingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            speechBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            speechBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            speechBadgeView.widthAnchor.constraint(equalToConstant: 10),
+            speechBadgeView.heightAnchor.constraint(equalToConstant: 10),
         ])
 
         updateAppearance()
@@ -1327,6 +1653,17 @@ final class ExternalWebAppTabView: NSView {
     func setReadyAttention(_ ready: Bool) {
         guard isShowingReadyAttention != ready else { return }
         readyAttentionLayer.isHidden = !ready
+    }
+
+    func setSpeechState(isAutoSpeakSource: Bool, isCurrentlySpeaking: Bool) {
+        guard self.isAutoSpeakSource != isAutoSpeakSource
+            || self.isCurrentlySpeaking != isCurrentlySpeaking else {
+            return
+        }
+        self.isAutoSpeakSource = isAutoSpeakSource
+        self.isCurrentlySpeaking = isCurrentlySpeaking
+        updateSpeechBadge()
+        updateAccessibilityLabel()
     }
 
     func setWindowSizeEditingEnabled(_ enabled: Bool) {
@@ -1783,7 +2120,35 @@ final class ExternalWebAppTabView: NSView {
             $0.id == browserProfileID
         })?.color ?? .default
         label.stringValue = displayedPresentationTitle
-        setAccessibilityLabel(displayedPresentationTitle)
+        updateAccessibilityLabel()
+    }
+
+    private func updateAccessibilityLabel() {
+        var parts = [displayedPresentationTitle]
+        if isAutoSpeakSource {
+            parts.append("Auto Speak enabled")
+        }
+        if isCurrentlySpeaking {
+            parts.append("Currently speaking")
+        }
+        setAccessibilityLabel(parts.joined(separator: " · "))
+    }
+
+    private func updateSpeechBadge() {
+        let visible = isAutoSpeakSource || isCurrentlySpeaking
+        speechBadgeView.isHidden = !visible
+        guard visible else { return }
+
+        let symbol = isCurrentlySpeaking ? "speaker.wave.2.fill" : "speaker.wave.2"
+        speechBadgeView.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: isCurrentlySpeaking
+                ? "Currently speaking"
+                : "Auto Speak enabled"
+        )
+        speechBadgeView.contentTintColor = isCurrentlySpeaking
+            ? .systemRed
+            : .controlAccentColor
     }
 
     private func setSourceIcon(_ image: NSImage?) {

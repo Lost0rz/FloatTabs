@@ -1859,6 +1859,36 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
     }
 
+    func testPanelSpeechAutoSpeakActionTracksActiveSlotAndFailsClosed() throws {
+        var committedURL: URL?
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+            ],
+            committedURLProvider: { _ in committedURL }
+        )
+        let chatURL = URL(string: "https://chatgpt.com/chat-a")!
+        let unsupportedURL = URL(string: "https://example.com/plain")!
+        let first = try profile(named: "ChatA", in: store)
+        let second = try profile(named: "ChatB", in: store)
+
+        XCTAssertTrue(store.select(id: first.id))
+        committedURL = chatURL
+        pool.onCommittedURLChange?(first.id, chatURL)
+        controller.toggleAutoSpeakForActiveTab()
+        XCTAssertEqual(controller.debugAutoSpeakSlotID, first.id)
+
+        XCTAssertTrue(store.select(id: second.id))
+        controller.toggleAutoSpeakForActiveTab()
+        XCTAssertEqual(controller.debugAutoSpeakSlotID, second.id)
+
+        committedURL = unsupportedURL
+        pool.onCommittedURLChange?(second.id, unsupportedURL)
+        controller.toggleAutoSpeakForActiveTab()
+        XCTAssertEqual(controller.debugAutoSpeakSlotID, second.id)
+    }
+
     // MARK: 4.12 Factory user-content seam
 
     func testFactorySeamUsesConfiguredUserContentController() throws {
