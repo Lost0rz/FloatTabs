@@ -19,11 +19,31 @@ struct SpeechRailPresentation: Equatable, Sendable {
 @MainActor
 final class AssistantSpeechCoordinator {
     private struct ExtractionRequest {
+        let requestID: UUID
+        let slotID: UUID
         let generation: UInt64
         let stopEpoch: UInt64
         let playbackIntentEpoch: UInt64
         let webView: WKWebView
         let origin: SpeechRequestOrigin
+        let automaticOrder: UInt64?
+        let manualIntent: UInt64?
+    }
+
+    private enum AutomaticReservationState {
+        case pending
+        case staged(
+            identity: SpeechResponseIdentity,
+            requests: [SpeechUtteranceRequest]
+        )
+        case released
+    }
+
+    private struct AutomaticReservation {
+        let order: UInt64
+        let slotID: UUID
+        let requestID: UUID
+        var state: AutomaticReservationState
     }
 
     private let speechService: SpeechSynthesizing
@@ -34,11 +54,15 @@ final class AssistantSpeechCoordinator {
     private var stopEpoch: UInt64 = 0
     private var playbackIntentEpoch: UInt64 = 0
     private var nextSequence: UInt64 = 0
+    private var nextAutomaticOrder: UInt64 = 0
+    private var nextManualIntent: UInt64 = 0
     private var spokenResponses: [UUID: Set<SpeechResponseIdentity>] = [:]
     private var suppressedResponses: [UUID: Set<SpeechResponseIdentity>] = [:]
     private var latestResponse: [UUID: SpeechResponseIdentity] = [:]
     private var currentItem: SpeechQueueItem?
     private var speechQueue = SpeechQueue()
+    private var automaticReservations: [AutomaticReservation] = []
+    private var manualPlaybackBarrier: UInt64?
 
     private(set) var autoSpeakSlotIDs = Set<UUID>()
     private(set) var currentSpeakingSlotID: UUID?
@@ -62,6 +86,7 @@ final class AssistantSpeechCoordinator {
             if self.speechQueue.isEmpty {
                 self.setCurrentSpeakingSlot(nil)
             }
+            self.drainAutomaticReservations()
             self.speakNext()
         }
     }
@@ -74,6 +99,10 @@ final class AssistantSpeechCoordinator {
         currentItem?.responseID
     }
 
+    var isManualPlaybackBarrierActive: Bool {
+        manualPlaybackBarrier != nil
+    }
+
     func handle(
         _ observation: ChatGPTAttentionObservation,
         for slotID: UUID
@@ -83,7 +112,31 @@ final class AssistantSpeechCoordinator {
             break
         case .generationFinished:
             guard autoSpeakSlotIDs.contains(slotID) else { return }
-            requestLatestResponse(for: slotID, origin: .automatic)
+            // A newer completion from the same Tab supersedes only an older
+            // pending or staged extraction. Already speaking or queued items
+            // remain valid and are never interrupted here.
+            invalidatePendingAutomaticExtraction(for: slotID)
+            let order = nextAutomaticOrder
+            nextAutomaticOrder &+= 1
+            let requestID = UUID()
+            automaticReservations.append(
+                AutomaticReservation(
+                    order: order,
+                    slotID: slotID,
+                    requestID: requestID,
+                    state: .pending
+                )
+            )
+            guard requestLatestResponse(
+                for: slotID,
+                origin: .automatic,
+                requestID: requestID,
+                automaticOrder: order,
+                manualIntent: nil
+            ) else {
+                releaseAutomaticReservation(requestID: requestID)
+                return
+            }
         case .runtimeReset:
             resetRuntime(slotID: slotID)
         }
@@ -92,6 +145,19 @@ final class AssistantSpeechCoordinator {
     func toggleAutoSpeak(for slotID: UUID) {
         if autoSpeakSlotIDs.contains(slotID) {
             autoSpeakSlotIDs.remove(slotID)
+            invalidateAutomaticPlayback(for: slotID)
+            let preservedResponseID: SpeechResponseIdentity? = {
+                guard currentItem?.origin == .automatic,
+                      currentItem?.responseID?.slotID == slotID else {
+                    return nil
+                }
+                return currentItem?.responseID
+            }()
+            speechQueue.removeAutomaticItems(
+                forSlotID: slotID,
+                preservingResponseID: preservedResponseID
+            )
+            drainAutomaticReservations()
         } else {
             autoSpeakSlotIDs.insert(slotID)
         }
@@ -99,22 +165,62 @@ final class AssistantSpeechCoordinator {
     }
 
     /// Manual reading is an explicit user action and therefore works even
-    /// without an armed automatic source. It is also an explicit replay
-    /// command, so the automatic dedupe/suppression sets do not block it.
+    /// without an armed automatic source. It establishes a barrier before
+    /// extraction so an automatic result that resolves first can only stage.
     func readLatestResponse(for slotID: UUID) {
         playbackIntentEpoch &+= 1
+        invalidateAllAutomaticPlayback()
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
         currentItem = nil
         speechService.stop()
         setCurrentSpeakingSlot(nil)
-        requestLatestResponse(for: slotID, origin: .manual)
+
+        nextManualIntent &+= 1
+        let manualIntent = nextManualIntent
+        manualPlaybackBarrier = manualIntent
+        let requestID = UUID()
+        guard requestLatestResponse(
+            for: slotID,
+            origin: .manual,
+            requestID: requestID,
+            automaticOrder: nil,
+            manualIntent: manualIntent
+        ) else {
+            releaseManualBarrier(intent: manualIntent)
+            return
+        }
+    }
+
+    /// Preview is a user-priority playback intent. It shares this coordinator
+    /// and therefore the same SpeechService and AVSpeechSynthesizer stream.
+    /// Preview items carry no response identity and never mutate Tab state.
+    func playPreview(_ requests: [SpeechUtteranceRequest]) {
+        guard !requests.isEmpty else { return }
+        playbackIntentEpoch &+= 1
+        stopEpoch &+= 1
+        invalidateAllAutomaticPlayback()
+        extractionRequests.removeAll()
+        manualPlaybackBarrier = nil
+        suppressCurrentAndPendingSpeech()
+        speechQueue.clear()
+        currentItem = nil
+        speechService.stop()
+        setCurrentSpeakingSlot(nil)
+        speechQueue.replacePreview(requests: requests)
+        if let highestToken = requests.map(\.token).max() {
+            nextSequence = max(nextSequence, highestToken &+ 1)
+        }
+        speakNext()
     }
 
     /// Stop is local to speech. It never sends a cancellation to ChatGPT.
     func stop() {
         stopEpoch &+= 1
         playbackIntentEpoch &+= 1
+        invalidateAllAutomaticPlayback()
+        extractionRequests.removeAll()
+        manualPlaybackBarrier = nil
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
         currentItem = nil
@@ -123,13 +229,12 @@ final class AssistantSpeechCoordinator {
     }
 
     private func suppressCurrentAndPendingSpeech() {
-        if let currentItem {
-            suppressedResponses[currentItem.responseID.slotID, default: []].insert(
-                currentItem.responseID
-            )
+        if let responseID = currentItem?.responseID {
+            suppressedResponses[responseID.slotID, default: []].insert(responseID)
         }
         for item in speechQueue.items {
-            suppressedResponses[item.responseID.slotID, default: []].insert(item.responseID)
+            guard let responseID = item.responseID else { continue }
+            suppressedResponses[responseID.slotID, default: []].insert(responseID)
         }
     }
 
@@ -150,9 +255,15 @@ final class AssistantSpeechCoordinator {
 
     private func resetRuntimeState(slotID: UUID) {
         nextGeneration &+= 1
-        extractionRequests.removeValue(forKey: slotID)
+        let affectedRequests = extractionRequests.filter { $0.value.slotID == slotID }
+        for (requestID, request) in affectedRequests {
+            extractionRequests.removeValue(forKey: requestID)
+            releaseExtraction(request)
+        }
+        releaseAutomaticReservations(for: slotID)
+        let currentWasRemoved = currentItem?.responseID?.slotID == slotID
         speechQueue.removeItems(forSlotID: slotID)
-        if currentItem?.responseID.slotID == slotID {
+        if currentWasRemoved {
             currentItem = nil
             speechService.stop()
             setCurrentSpeakingSlot(nil)
@@ -161,96 +272,260 @@ final class AssistantSpeechCoordinator {
         spokenResponses.removeValue(forKey: slotID)
         suppressedResponses.removeValue(forKey: slotID)
         latestResponse.removeValue(forKey: slotID)
+        drainAutomaticReservations()
     }
 
     private func requestLatestResponse(
         for slotID: UUID,
-        origin: SpeechRequestOrigin
-    ) {
+        origin: SpeechRequestOrigin,
+        requestID: UUID,
+        automaticOrder: UInt64?,
+        manualIntent: UInt64?
+    ) -> Bool {
         guard let webView = webViewProvider(slotID),
               let bridge = responseBridgeProvider(slotID) else {
-            return
+            return false
         }
 
         nextGeneration &+= 1
         let request = ExtractionRequest(
+            requestID: requestID,
+            slotID: slotID,
             generation: nextGeneration,
             stopEpoch: stopEpoch,
             playbackIntentEpoch: playbackIntentEpoch,
             webView: webView,
-            origin: origin
+            origin: origin,
+            automaticOrder: automaticOrder,
+            manualIntent: manualIntent
         )
-        extractionRequests[slotID] = request
+        extractionRequests[requestID] = request
 
-        let requestGeneration = request.generation
         let expectedWebView = webView
         bridge.extractLatest { [weak self, weak expectedWebView] payload in
-            guard let self,
-                  let expectedWebView,
-                  let request = self.extractionRequests[slotID],
-                  request.generation == requestGeneration,
-                  request.webView === expectedWebView,
-                  self.webViewProvider(slotID) === expectedWebView else {
-                return
-            }
-            self.extractionRequests.removeValue(forKey: slotID)
-            guard request.playbackIntentEpoch == self.playbackIntentEpoch else {
-                return
-            }
-            guard let payload,
-                  let responseID = payload.responseID else {
-                return
-            }
-
-            let identity = SpeechResponseIdentity(
-                slotID: slotID,
-                documentToken: payload.documentToken,
-                responseID: responseID
-            )
-            self.latestResponse[slotID] = identity
-            guard request.stopEpoch == self.stopEpoch else {
-                self.suppressedResponses[slotID, default: []].insert(identity)
-                return
-            }
-            self.enqueue(
-                payload.blocks,
-                identity: identity,
-                origin: request.origin
+            guard let self else { return }
+            self.completeExtraction(
+                requestID: requestID,
+                expectedWebView: expectedWebView,
+                payload: payload
             )
         }
+        return true
     }
 
-    private func enqueue(
-        _ blocks: [SpeechContentBlock],
-        identity: SpeechResponseIdentity,
-        origin: SpeechRequestOrigin
+    private func completeExtraction(
+        requestID: UUID,
+        expectedWebView: WKWebView?,
+        payload: ChatGPTResponsePayload?
     ) {
-        if origin == .automatic {
-            guard !suppressedResponses[identity.slotID, default: []].contains(identity),
-                  !spokenResponses[identity.slotID, default: []].contains(identity) else {
-                return
-            }
+        guard let request = extractionRequests.removeValue(forKey: requestID) else {
+            return
         }
 
-        let cleaned = SpeechContentCleaner.clean(blocks)
+        guard let expectedWebView,
+              request.webView === expectedWebView,
+              webViewProvider(request.slotID) === expectedWebView else {
+            releaseExtraction(request)
+            return
+        }
+        guard request.playbackIntentEpoch == playbackIntentEpoch else {
+            releaseExtraction(request)
+            return
+        }
+        guard let payload,
+              let responseID = payload.responseID else {
+            releaseExtraction(request)
+            return
+        }
+
+        let identity = SpeechResponseIdentity(
+            slotID: request.slotID,
+            documentToken: payload.documentToken,
+            responseID: responseID
+        )
+        latestResponse[request.slotID] = identity
+        guard request.stopEpoch == stopEpoch else {
+            suppressedResponses[request.slotID, default: []].insert(identity)
+            releaseExtraction(request)
+            return
+        }
+
+        let cleaned = SpeechContentCleaner.clean(payload.blocks)
         let requests = SpeechLanguageRouter.utteranceRequests(
             for: cleaned,
             startingToken: nextSequence
         )
-        guard !requests.isEmpty else { return }
 
-        if origin == .automatic {
-            let appended = speechQueue.append(
-                responseID: identity,
-                requests: requests
+        switch request.origin {
+        case .automatic:
+            stageAutomatic(
+                identity: identity,
+                requests: requests,
+                request: request
             )
-            guard appended > 0 else { return }
-            spokenResponses[identity.slotID, default: []].insert(identity)
-        } else {
-            speechQueue.replace(responseID: identity, requests: requests)
+        case .manual:
+            finishManualExtraction(
+                identity: identity,
+                requests: requests,
+                request: request
+            )
         }
+    }
+
+    private func releaseExtraction(_ request: ExtractionRequest) {
+        switch request.origin {
+        case .automatic:
+            releaseAutomaticReservation(requestID: request.requestID)
+        case .manual:
+            if let manualIntent = request.manualIntent {
+                releaseManualBarrier(intent: manualIntent)
+            }
+        }
+    }
+
+    private func stageAutomatic(
+        identity: SpeechResponseIdentity,
+        requests: [SpeechUtteranceRequest],
+        request: ExtractionRequest
+    ) {
+        guard let automaticOrder = request.automaticOrder,
+              let index = automaticReservations.firstIndex(where: {
+                  $0.order == automaticOrder
+              }) else {
+            return
+        }
+        guard autoSpeakSlotIDs.contains(request.slotID),
+              !requests.isEmpty,
+              !suppressedResponses[identity.slotID, default: []].contains(identity),
+              !spokenResponses[identity.slotID, default: []].contains(identity) else {
+            automaticReservations[index].state = .released
+            drainAutomaticReservations()
+            return
+        }
+
+        automaticReservations[index].state = .staged(
+            identity: identity,
+            requests: requests
+        )
+        drainAutomaticReservations()
+    }
+
+    private func finishManualExtraction(
+        identity: SpeechResponseIdentity,
+        requests: [SpeechUtteranceRequest],
+        request: ExtractionRequest
+    ) {
+        guard let manualIntent = request.manualIntent,
+              manualPlaybackBarrier == manualIntent else {
+            return
+        }
+
+        // This is intentionally defensive: the barrier normally prevents an
+        // automatic item from becoming current, but a valid manual result is
+        // still required to preempt one if a future state-machine change ever
+        // lets that narrow race through.
+        let hasSpeechToPreempt = currentItem != nil || !speechQueue.isEmpty
+        suppressCurrentAndPendingSpeech()
+        speechQueue.clear()
+        currentItem = nil
+        if hasSpeechToPreempt {
+            speechService.stop()
+        }
+        setCurrentSpeakingSlot(nil)
+
+        guard !requests.isEmpty else {
+            releaseManualBarrier(intent: manualIntent)
+            return
+        }
+
+        latestResponse[request.slotID] = identity
+        speechQueue.replace(responseID: identity, requests: requests)
         nextSequence &+= UInt64(requests.count)
         speakNext()
+        releaseManualBarrier(intent: manualIntent)
+    }
+
+    private func releaseManualBarrier(intent: UInt64) {
+        guard manualPlaybackBarrier == intent else { return }
+        manualPlaybackBarrier = nil
+        drainAutomaticReservations()
+    }
+
+    private func invalidateAllAutomaticPlayback() {
+        let automaticRequestIDs = extractionRequests.compactMap { requestID, request in
+            request.origin == .automatic ? requestID : nil
+        }
+        for requestID in automaticRequestIDs {
+            extractionRequests.removeValue(forKey: requestID)
+        }
+        automaticReservations.removeAll()
+    }
+
+    private func invalidateAutomaticPlayback(for slotID: UUID) {
+        let automaticRequestIDs = extractionRequests.compactMap { requestID, request in
+            request.origin == .automatic && request.slotID == slotID ? requestID : nil
+        }
+        for requestID in automaticRequestIDs {
+            extractionRequests.removeValue(forKey: requestID)
+        }
+        automaticReservations.removeAll { reservation in
+            reservation.slotID == slotID
+        }
+    }
+
+    private func invalidatePendingAutomaticExtraction(for slotID: UUID) {
+        let automaticRequestIDs = extractionRequests.compactMap { requestID, request in
+            request.origin == .automatic && request.slotID == slotID ? requestID : nil
+        }
+        for requestID in automaticRequestIDs {
+            extractionRequests.removeValue(forKey: requestID)
+        }
+        automaticReservations.removeAll { reservation in
+            reservation.slotID == slotID
+        }
+    }
+
+    private func releaseAutomaticReservations(for slotID: UUID) {
+        automaticReservations.removeAll { $0.slotID == slotID }
+    }
+
+    private func releaseAutomaticReservation(requestID: UUID) {
+        automaticReservations.removeAll { $0.requestID == requestID }
+        drainAutomaticReservations()
+    }
+
+    private func drainAutomaticReservations() {
+        guard manualPlaybackBarrier == nil else { return }
+
+        while let first = automaticReservations.first {
+            switch first.state {
+            case .pending:
+                return
+            case .released:
+                automaticReservations.removeFirst()
+            case let .staged(identity, requests):
+                guard !suppressedResponses[identity.slotID, default: []].contains(identity) else {
+                    automaticReservations.removeFirst()
+                    continue
+                }
+                let sequencedRequests = requests.enumerated().map { offset, request in
+                    SpeechUtteranceRequest(
+                        text: request.text,
+                        token: nextSequence &+ UInt64(offset),
+                        languageRole: request.languageRole
+                    )
+                }
+                let appended = speechQueue.append(
+                    responseID: identity,
+                    requests: sequencedRequests
+                )
+                guard appended > 0 else { return }
+                automaticReservations.removeFirst()
+                spokenResponses[identity.slotID, default: []].insert(identity)
+                nextSequence &+= UInt64(appended)
+                speakNext()
+            }
+        }
     }
 
     private func speakNext() {
@@ -259,7 +534,7 @@ final class AssistantSpeechCoordinator {
             return
         }
         currentItem = item
-        setCurrentSpeakingSlot(item.responseID.slotID)
+        setCurrentSpeakingSlot(item.responseID?.slotID)
         speechService.speak(
             SpeechUtteranceRequest(
                 text: item.text,

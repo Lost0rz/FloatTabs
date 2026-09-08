@@ -116,6 +116,8 @@ struct BrowserProfileManagementClient {
     }
 }
 
+typealias SpeechPreviewHandler = @MainActor ([SpeechUtteranceRequest]) -> Void
+
 @MainActor
 final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias ExportBackupHandler = (URL) throws -> Void
@@ -124,6 +126,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let preferencesStore: AppPreferencesStore
     private let speechPreferencesStore: SpeechPreferencesStore
     private let speechVoiceCatalog: SpeechVoiceCatalogProviding
+    private let speechPreviewHandler: SpeechPreviewHandler?
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
@@ -135,6 +138,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         preferencesStore: AppPreferencesStore,
         speechPreferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
         speechVoiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
+        speechPreviewHandler: SpeechPreviewHandler? = nil,
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
@@ -144,6 +148,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         self.preferencesStore = preferencesStore
         self.speechPreferencesStore = speechPreferencesStore
         self.speechVoiceCatalog = speechVoiceCatalog
+        self.speechPreviewHandler = speechPreviewHandler
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
@@ -198,7 +203,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             symbol: "speaker.wave.2",
             controller: SpeechSettingsViewController(
                 preferencesStore: speechPreferencesStore,
-                voiceCatalog: speechVoiceCatalog
+                voiceCatalog: speechVoiceCatalog,
+                previewHandler: speechPreviewHandler
             ),
             to: tabs
         )
@@ -247,7 +253,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
 final class SpeechSettingsViewController: NSViewController {
     private let preferencesStore: SpeechPreferencesStore
     private let voiceCatalog: SpeechVoiceCatalogProviding
-    private let previewService: SpeechSynthesizing
+    private let previewHandler: SpeechPreviewHandler?
     private let systemSettingsOpener: (URL) -> Bool
 
     let chineseVoicePopup = NSPopUpButton()
@@ -276,14 +282,27 @@ final class SpeechSettingsViewController: NSViewController {
         preferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
         voiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
         previewService: SpeechSynthesizing? = nil,
+        previewHandler: SpeechPreviewHandler? = nil,
         systemSettingsOpener: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
     ) {
         self.preferencesStore = preferencesStore
         self.voiceCatalog = voiceCatalog
-        self.previewService = previewService ?? SpeechService(
-            preferences: preferencesStore,
-            voiceCatalog: voiceCatalog
-        )
+        if let previewHandler {
+            self.previewHandler = previewHandler
+        } else if let previewService {
+            // XCTest and isolated UI tests may inject a fake service. The
+            // production app passes the shared AssistantSpeechCoordinator
+            // handler instead, so this controller never creates a second
+            // SpeechService or AVSpeechSynthesizer.
+            self.previewHandler = { requests in
+                previewService.stop()
+                for request in requests {
+                    previewService.speak(request)
+                }
+            }
+        } else {
+            self.previewHandler = nil
+        }
         self.systemSettingsOpener = systemSettingsOpener
         super.init(nibName: nil, bundle: nil)
         title = "Speech"
@@ -437,15 +456,13 @@ final class SpeechSettingsViewController: NSViewController {
     }
 
     private func playPreview(_ text: String) {
+        guard let previewHandler else { return }
         previewToken &+= 1
-        previewService.stop()
         let requests = SpeechLanguageRouter.utteranceRequests(
             for: text,
             startingToken: previewToken << 8
         )
-        for request in requests {
-            previewService.speak(request)
-        }
+        previewHandler(requests)
     }
 
     private func configureVoicePopup(
@@ -478,9 +495,10 @@ final class SpeechSettingsViewController: NSViewController {
         updateSpeechRateLabel()
         // System Automatic remains a valid route even when the catalog is
         // temporarily empty while macOS refreshes its downloadable voices.
-        chinesePreviewButton.isEnabled = true
-        englishPreviewButton.isEnabled = true
-        mixedPreviewButton.isEnabled = true
+        let hasPreviewHandler = previewHandler != nil
+        chinesePreviewButton.isEnabled = hasPreviewHandler
+        englishPreviewButton.isEnabled = hasPreviewHandler
+        mixedPreviewButton.isEnabled = hasPreviewHandler
     }
 
     private func selectVoice(

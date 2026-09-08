@@ -246,4 +246,24 @@ final class SpeechSettingsTests: XCTestCase {
         controller.manageHighQualityVoices(controller.manageHighQualityVoicesButton)
         XCTAssertEqual(opened, [SpeechSystemSettings.spokenContentURL])
     }
+
+    func testSpeechSettingsPreviewCanUseTheSharedPlaybackHandler() {
+        let defaults = makeDefaults()
+        let preferences = SpeechPreferencesStore(defaults: defaults)
+        let catalog = TestSpeechVoiceCatalog(voices: sampleVoices)
+        var previewRequests: [SpeechUtteranceRequest] = []
+        let controller = SpeechSettingsViewController(
+            preferencesStore: preferences,
+            voiceCatalog: catalog,
+            previewHandler: { requests in
+                previewRequests = requests
+            }
+        )
+        controller.loadViewIfNeeded()
+
+        controller.englishPreview(controller.englishPreviewButton)
+
+        XCTAssertEqual(previewRequests.map(\.text), ["This is a FloatTabs English voice test."])
+        XCTAssertEqual(previewRequests.map(\.languageRole), [.english])
+    }
 }

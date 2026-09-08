@@ -730,6 +730,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         assistantSpeechCoordinator.stop()
     }
 
+    func playSpeechPreview(_ requests: [SpeechUtteranceRequest]) {
+        assistantSpeechCoordinator.playPreview(requests)
+    }
+
     func stopSpeaking() {
         stopSpeech()
     }

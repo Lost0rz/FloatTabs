@@ -80,4 +80,41 @@ final class SpeechQueueTests: XCTestCase {
 
         XCTAssertEqual(queue.items.count, 2)
     }
+
+    func testAutomaticRemovalPreservesManualItems() {
+        var queue = SpeechQueue(maximumPendingSegments: 4)
+        queue.append(
+            responseID: responseA,
+            requests: [
+                SpeechUtteranceRequest(text: "Automatic", token: 0, languageRole: .english),
+            ]
+        )
+        queue.replace(
+            responseID: responseB,
+            requests: [
+                SpeechUtteranceRequest(text: "Manual", token: 1, languageRole: .chinese),
+            ]
+        )
+        queue.append(
+            responseID: responseA,
+            requests: [
+                SpeechUtteranceRequest(text: "Automatic again", token: 2, languageRole: .english),
+            ]
+        )
+
+        queue.removeAutomaticItems(forSlotID: responseA.slotID)
+
+        XCTAssertEqual(queue.items.map(\.text), ["Manual"])
+        XCTAssertEqual(queue.items.first?.origin, .manual)
+    }
+
+    func testPreviewItemsHaveNoResponseIdentityOrTabOrigin() {
+        var queue = SpeechQueue(maximumPendingSegments: 4)
+        queue.replacePreview(requests: [
+            SpeechUtteranceRequest(text: "Preview", token: 8, languageRole: .english),
+        ])
+
+        XCTAssertNil(queue.items.first?.responseID)
+        XCTAssertEqual(queue.items.first?.origin, .preview)
+    }
 }

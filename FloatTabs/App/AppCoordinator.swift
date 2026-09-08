@@ -95,11 +95,16 @@ final class AppCoordinator {
             // injected into the presentation owner. AppCoordinator itself
             // never routes provider observations.
             let attentionCoordinator = WebAttentionCoordinator()
+            let speechService = SpeechService(
+                preferences: resolvedSpeechPreferencesStore,
+                voiceCatalog: resolvedSpeechVoiceCatalog
+            )
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool,
                 attentionCoordinator: attentionCoordinator,
                 preferencesStore: resolvedPreferencesStore,
+                speechService: speechService,
                 speechPreferencesStore: resolvedSpeechPreferencesStore,
                 speechVoiceCatalog: resolvedSpeechVoiceCatalog
             )
@@ -119,6 +124,9 @@ final class AppCoordinator {
             preferencesStore: preferencesStore,
             speechPreferencesStore: speechPreferencesStore,
             speechVoiceCatalog: speechVoiceCatalog,
+            speechPreviewHandler: { [weak self] requests in
+                self?.panelController.playSpeechPreview(requests)
+            },
             attentionSoundPlayer: attentionSoundPlayer,
             onExportBackup: { [weak self] url in
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
