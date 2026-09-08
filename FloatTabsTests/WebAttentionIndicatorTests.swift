@@ -580,6 +580,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 autoSpeakSlotIDs: [first.id],
                 activeSlotAutoSpeakEnabled: true,
                 currentSpeakingSlotID: second.id,
+                playbackState: .speaking,
                 activeSlotSupportsSpeech: true
             ),
             activeTabName: first.name
@@ -608,6 +609,104 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(
             tabs[1].accessibilityLabel()?.contains("Currently speaking") == true
         )
+    }
+
+    func testSpeechRailProjectsPauseResumeAndVisibleStopWithoutAddingARow() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let read = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .readLatest })
+        )
+        XCTAssertEqual(read.displayedPlaybackState, .speaking)
+        XCTAssertTrue(read.isCurrentlySpeakingForAction)
+        XCTAssertTrue(read.isStopActionVisible)
+        XCTAssertTrue(read.toolTip?.contains("Pause Speech") == true)
+
+        let readFrame = read.frame
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(read.displayedPlaybackState, .paused)
+        XCTAssertTrue(read.isCurrentlyPausedForAction)
+        XCTAssertTrue(read.isStopActionVisible)
+        XCTAssertTrue(read.toolTip?.contains("Resume Speech") == true)
+        XCTAssertEqual(read.frame.height, readFrame.height)
+
+        let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
+        XCTAssertTrue(tab.isShowingPausedSpeechBadge)
+        XCTAssertFalse(tab.isShowingSpeakingBadge)
+        XCTAssertTrue(tab.accessibilityLabel()?.contains("Speech paused") == true)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: nil,
+                playbackState: .idle,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        XCTAssertFalse(read.isStopActionVisible)
+        XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
+    }
+
+    func testPausedBackgroundTabBadgeDoesNotExposeStopForAnotherActiveTab() {
+        let first = makeProfile(name: "ChatGPT A")
+        let second = makeProfile(name: "ChatGPT B")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [first, second], activeTabID: second.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: second.id,
+                autoSpeakSlotIDs: [first.id],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: first.id,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: second.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let firstTab = try! XCTUnwrap(zone.tabView(for: first.id))
+        XCTAssertTrue(firstTab.isShowingPausedSpeechBadge)
+        XCTAssertFalse(firstTab.isShowingSpeakingBadge)
+
+        let read = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .readLatest })
+        )
+        XCTAssertFalse(read.isStopActionVisible)
+        XCTAssertFalse(read.isCurrentlyPausedForAction)
+        XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
     }
 
     func testSpeechBadgeDoesNotChangeTabHitGeometry() {

@@ -4,8 +4,14 @@ import Foundation
 @MainActor
 protocol SpeechSynthesizing: AnyObject {
     var onUtteranceFinished: ((UInt64) -> Void)? { get set }
+    var onUtterancePaused: ((UInt64) -> Void)? { get set }
+    var onUtteranceContinued: ((UInt64) -> Void)? { get set }
 
     func speak(_ request: SpeechPlaybackRequest)
+    @discardableResult
+    func pause() -> Bool
+    @discardableResult
+    func resume() -> Bool
     func stop()
 }
 
@@ -13,12 +19,20 @@ protocol SpeechSynthesizing: AnyObject {
 /// in AssistantSpeechCoordinator so AVFoundation remains a replaceable seam.
 @MainActor
 final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDelegate {
+    private enum DelegateEvent: Sendable {
+        case paused
+        case continued
+        case finished
+    }
+
     private let synthesizer = AVSpeechSynthesizer()
     private let preferences: SpeechPreferencesStore
     private let voiceCatalog: SpeechVoiceCatalogProviding
     private var playbackTokens: [ObjectIdentifier: UInt64] = [:]
 
     var onUtteranceFinished: ((UInt64) -> Void)?
+    var onUtterancePaused: ((UInt64) -> Void)?
+    var onUtteranceContinued: ((UInt64) -> Void)?
 
     init(
         preferences: SpeechPreferencesStore = SpeechPreferencesStore(),
@@ -44,22 +58,39 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         synthesizer.speak(utterance)
     }
 
+    @discardableResult
+    func pause() -> Bool {
+        synthesizer.pauseSpeaking(at: .word)
+    }
+
+    @discardableResult
+    func resume() -> Bool {
+        synthesizer.continueSpeaking()
+    }
+
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
     }
 
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer,
+        didPause utterance: AVSpeechUtterance
+    ) {
+        notify(tokenFor: utterance, event: .paused)
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didContinue utterance: AVSpeechUtterance
+    ) {
+        notify(tokenFor: utterance, event: .continued)
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
         didFinish utterance: AVSpeechUtterance
     ) {
-        let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
-            guard let self,
-                  let token = self.playbackTokens.removeValue(forKey: utteranceID) else {
-                return
-            }
-            self.onUtteranceFinished?(token)
-        }
+        notify(tokenFor: utterance, removing: true, event: .finished)
     }
 
     nonisolated func speechSynthesizer(
@@ -72,5 +103,31 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         }
         // Cancellation is intentionally not an advance event. The
         // coordinator clears its current item before calling stop().
+    }
+
+    private nonisolated func notify(
+        tokenFor utterance: AVSpeechUtterance,
+        removing: Bool = false,
+        event: DelegateEvent
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let token: UInt64?
+            if removing {
+                token = self.playbackTokens.removeValue(forKey: utteranceID)
+            } else {
+                token = self.playbackTokens[utteranceID]
+            }
+            guard let token else { return }
+            switch event {
+            case .paused:
+                self.onUtterancePaused?(token)
+            case .continued:
+                self.onUtteranceContinued?(token)
+            case .finished:
+                self.onUtteranceFinished?(token)
+            }
+        }
     }
 }

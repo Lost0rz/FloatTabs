@@ -107,15 +107,18 @@ final class SpeechRailControl: NSView {
 
     let kind: Kind
     var onActivate: (() -> Void)?
+    var onStop: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
+    private let stopButton = NSButton()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
     private var dockInfluence: CGFloat = 0
     private var isEnabledForPresentation = false
     private var isAutoSpeakEnabled = false
-    private var isCurrentlySpeaking = false
+    private var isCurrentActivePlayback = false
+    private var playbackState: SpeechPlaybackState = .idle
     private var activeTabName: String?
 
     var preferredWidth: CGFloat {
@@ -123,7 +126,19 @@ final class SpeechRailControl: NSView {
     }
 
     var isCurrentlySpeakingForAction: Bool {
-        isCurrentlySpeaking
+        isCurrentActivePlayback && playbackState == .speaking
+    }
+
+    var isCurrentlyPausedForAction: Bool {
+        isCurrentActivePlayback && playbackState == .paused
+    }
+
+    var isStopActionVisible: Bool {
+        !stopButton.isHidden
+    }
+
+    var displayedPlaybackState: SpeechPlaybackState {
+        playbackState
     }
 
     var isEnabledForSpeechPresentationState: Bool {
@@ -148,11 +163,31 @@ final class SpeechRailControl: NSView {
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
         NSLayoutConstraint.activate([
-            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: 13),
             imageView.heightAnchor.constraint(equalToConstant: 13),
         ])
+        if kind == .readLatest {
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8).isActive = true
+            stopButton.translatesAutoresizingMaskIntoConstraints = false
+            stopButton.isBordered = false
+            stopButton.bezelStyle = .inline
+            stopButton.setButtonType(.momentaryPushIn)
+            stopButton.imagePosition = .imageOnly
+            stopButton.imageScaling = .scaleProportionallyUpOrDown
+            stopButton.target = self
+            stopButton.action = #selector(stopActivated)
+            stopButton.setAccessibilityRole(.button)
+            addSubview(stopButton)
+            NSLayoutConstraint.activate([
+                stopButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
+                stopButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+                stopButton.widthAnchor.constraint(equalToConstant: 13),
+                stopButton.heightAnchor.constraint(equalToConstant: 13),
+            ])
+        } else {
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+        }
         setAccessibilityRole(.button)
         updatePresentation()
     }
@@ -170,7 +205,12 @@ final class SpeechRailControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        if kind == .readLatest,
+           !stopButton.isHidden,
+           stopButton.frame.contains(point) {
+            return stopButton
+        }
+        return frame.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -196,14 +236,21 @@ final class SpeechRailControl: NSView {
     func setSpeechState(
         isEnabled: Bool,
         isAutoSpeakEnabled: Bool,
-        isCurrentlySpeaking: Bool,
+        playbackState: SpeechPlaybackState,
+        isCurrentActivePlayback: Bool,
         activeTabName: String?
     ) {
         self.isEnabledForPresentation = isEnabled
         self.isAutoSpeakEnabled = isAutoSpeakEnabled
-        self.isCurrentlySpeaking = isCurrentlySpeaking
+        self.playbackState = playbackState
+        self.isCurrentActivePlayback = isCurrentActivePlayback
         self.activeTabName = activeTabName
         updatePresentation()
+    }
+
+    @objc private func stopActivated() {
+        guard !stopButton.isHidden else { return }
+        onStop?()
     }
 
     override func updateTrackingAreas() {
@@ -270,15 +317,41 @@ final class SpeechRailControl: NSView {
                     : "Auto Speak This Tab — speaks new responses after they finish · \(target)")
                 : "Speech is currently available for ChatGPT tabs."
         case .readLatest:
-            symbol = isCurrentlySpeaking ? "stop.fill" : "play.fill"
-            label = isCurrentlySpeaking
-                ? "Stop speaking \(target)"
-                : "Read latest response from \(target)"
-            tooltip = isEnabledForPresentation
-                ? (isCurrentlySpeaking
-                    ? "Stop Speaking · \(target)"
-                    : "Read Latest Response From Current Active Tab · \(target)")
-                : "Speech is currently available for ChatGPT tabs."
+            switch (isCurrentActivePlayback, playbackState) {
+            case (true, .speaking):
+                symbol = "pause.fill"
+                label = "Pause speech for \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Pause Speech · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            case (true, .paused):
+                symbol = "play.fill"
+                label = "Resume speech for \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Resume Speech · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            default:
+                symbol = "play.fill"
+                label = "Read latest response from \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Read Latest Response From Current Active Tab · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            }
+        }
+
+        let hasActivePlayback = isCurrentActivePlayback
+            && (playbackState == .speaking || playbackState == .paused)
+        let stopVisible = kind == .readLatest && hasActivePlayback
+        stopButton.isHidden = !stopVisible
+        if stopVisible {
+            let stopLabel = "Stop speech for \(target)"
+            stopButton.image = NSImage(
+                systemSymbolName: "stop.fill",
+                accessibilityDescription: stopLabel
+            )
+            stopButton.contentTintColor = .systemRed
+            stopButton.toolTip = "Stop Speech · \(target)"
+            stopButton.setAccessibilityLabel(stopLabel)
         }
 
         imageView.image = NSImage(
@@ -286,7 +359,9 @@ final class SpeechRailControl: NSView {
             accessibilityDescription: label
         )
         imageView.contentTintColor = isEnabledForPresentation
-            ? (isCurrentlySpeaking ? .systemRed : .labelColor)
+            ? (hasActivePlayback
+                ? (playbackState == .paused ? .systemOrange : .systemRed)
+                : .labelColor)
             : .tertiaryLabelColor
         imageView.alphaValue = isEnabledForPresentation ? 1 : 0.45
         toolTip = tooltip
@@ -296,7 +371,7 @@ final class SpeechRailControl: NSView {
             let fraction: CGFloat
             if !isEnabledForPresentation {
                 fraction = isHovered ? 0.06 : 0.01
-            } else if isCurrentlySpeaking || isAutoSpeakEnabled {
+            } else if hasActivePlayback || isAutoSpeakEnabled {
                 fraction = isHovered ? 0.16 : 0.08
             } else {
                 fraction = isHovered ? 0.10 : 0.02
@@ -372,14 +447,8 @@ final class ExternalControlZoneView: NSView {
         addSubview(pinControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
         autoSpeakControl.onActivate = { [weak self] in self?.onToggleAutoSpeak?() }
-        readLatestControl.onActivate = { [weak self] in
-            guard let self else { return }
-            if self.readLatestControl.isCurrentlySpeakingForAction {
-                self.onStopSpeech?()
-            } else {
-                self.onReadLatestResponse?()
-            }
-        }
+        readLatestControl.onActivate = { [weak self] in self?.onReadLatestResponse?() }
+        readLatestControl.onStop = { [weak self] in self?.onStopSpeech?() }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
         addControl.onPointerMoved = { [weak self] event in
@@ -612,25 +681,29 @@ final class ExternalControlZoneView: NSView {
     ) {
         let currentActive = presentation.activeSlotID
         let isAutoSpeakEnabled = presentation.activeSlotAutoSpeakEnabled
-        let isCurrentlySpeaking = currentActive != nil
+        let isCurrentActivePlayback = currentActive != nil
             && currentActive == presentation.currentSpeakingSlotID
         let targetName = activeTabName ?? currentActive.map { $0.uuidString }
         autoSpeakControl.setSpeechState(
             isEnabled: presentation.activeSlotSupportsSpeech || isAutoSpeakEnabled,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
-            isCurrentlySpeaking: isCurrentlySpeaking,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
             activeTabName: targetName
         )
         readLatestControl.setSpeechState(
-            isEnabled: presentation.activeSlotSupportsSpeech,
+            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
-            isCurrentlySpeaking: isCurrentlySpeaking,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
             activeTabName: targetName
         )
         for tab in tabViews.values {
             tab.setSpeechState(
                 isAutoSpeakSource: presentation.autoSpeakSlotIDs.contains(tab.slotID),
-                isCurrentlySpeaking: tab.slotID == presentation.currentSpeakingSlotID
+                playbackState: tab.slotID == presentation.currentSpeakingSlotID
+                    ? presentation.playbackState
+                    : .idle
             )
         }
     }
@@ -1496,7 +1569,7 @@ final class ExternalWebAppTabView: NSView {
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
     private var isAutoSpeakSource = false
-    private var isCurrentlySpeaking = false
+    private var speechPlaybackState: SpeechPlaybackState = .idle
 
     private static let grayscaleContext = CIContext(options: nil)
     private static let readyAttentionDiameter: CGFloat = 6
@@ -1533,7 +1606,8 @@ final class ExternalWebAppTabView: NSView {
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
     var isShowingAutoSpeakBadge: Bool { isAutoSpeakSource }
-    var isShowingSpeakingBadge: Bool { isCurrentlySpeaking }
+    var isShowingSpeakingBadge: Bool { speechPlaybackState == .speaking }
+    var isShowingPausedSpeechBadge: Bool { speechPlaybackState == .paused }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -1654,15 +1728,25 @@ final class ExternalWebAppTabView: NSView {
         readyAttentionLayer.isHidden = !ready
     }
 
-    func setSpeechState(isAutoSpeakSource: Bool, isCurrentlySpeaking: Bool) {
+    func setSpeechState(
+        isAutoSpeakSource: Bool,
+        playbackState: SpeechPlaybackState
+    ) {
         guard self.isAutoSpeakSource != isAutoSpeakSource
-            || self.isCurrentlySpeaking != isCurrentlySpeaking else {
+            || self.speechPlaybackState != playbackState else {
             return
         }
         self.isAutoSpeakSource = isAutoSpeakSource
-        self.isCurrentlySpeaking = isCurrentlySpeaking
+        self.speechPlaybackState = playbackState
         updateSpeechBadge()
         updateAccessibilityLabel()
+    }
+
+    func setSpeechState(isAutoSpeakSource: Bool, isCurrentlySpeaking: Bool) {
+        setSpeechState(
+            isAutoSpeakSource: isAutoSpeakSource,
+            playbackState: isCurrentlySpeaking ? .speaking : .idle
+        )
     }
 
     func setWindowSizeEditingEnabled(_ enabled: Bool) {
@@ -2127,27 +2211,44 @@ final class ExternalWebAppTabView: NSView {
         if isAutoSpeakSource {
             parts.append("Auto Speak enabled")
         }
-        if isCurrentlySpeaking {
+        switch speechPlaybackState {
+        case .speaking:
             parts.append("Currently speaking")
+        case .paused:
+            parts.append("Speech paused")
+        case .idle:
+            break
         }
         setAccessibilityLabel(parts.joined(separator: " · "))
     }
 
     private func updateSpeechBadge() {
-        let visible = isAutoSpeakSource || isCurrentlySpeaking
+        let visible = isAutoSpeakSource || speechPlaybackState != .idle
         speechBadgeView.isHidden = !visible
         guard visible else { return }
 
-        let symbol = isCurrentlySpeaking ? "speaker.wave.2.fill" : "speaker.wave.2"
+        let symbol: String
+        let description: String
+        let tint: NSColor
+        switch speechPlaybackState {
+        case .speaking:
+            symbol = "speaker.wave.2.fill"
+            description = "Currently speaking"
+            tint = .systemRed
+        case .paused:
+            symbol = "pause.fill"
+            description = "Speech paused"
+            tint = .systemOrange
+        case .idle:
+            symbol = "speaker.wave.2"
+            description = "Auto Speak enabled"
+            tint = .controlAccentColor
+        }
         speechBadgeView.image = NSImage(
             systemSymbolName: symbol,
-            accessibilityDescription: isCurrentlySpeaking
-                ? "Currently speaking"
-                : "Auto Speak enabled"
+            accessibilityDescription: description
         )
-        speechBadgeView.contentTintColor = isCurrentlySpeaking
-            ? .systemRed
-            : .controlAccentColor
+        speechBadgeView.contentTintColor = tint
     }
 
     private func setSourceIcon(_ image: NSImage?) {

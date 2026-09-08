@@ -1876,16 +1876,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(store.select(id: first.id))
         committedURL = chatURL
         pool.onCommittedURLChange?(first.id, chatURL)
-        controller.handle(.toggleAutoSpeak)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
 
         XCTAssertTrue(store.select(id: second.id))
-        controller.handle(.toggleAutoSpeak)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id, second.id]))
 
         committedURL = unsupportedURL
         pool.onCommittedURLChange?(second.id, unsupportedURL)
-        controller.handle(.toggleAutoSpeak)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
     }
 
@@ -1904,7 +1904,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(store.select(id: chat.id))
         committedURL = URL(string: "https://chatgpt.com/chat-a")
         pool.onCommittedURLChange?(chat.id, committedURL!)
-        controller.handle(.toggleAutoSpeak)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
 
         XCTAssertTrue(store.select(id: plain.id))
@@ -1913,12 +1913,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // The read/stop command must consult the active Tab only. An
         // unsupported active page cannot fall back to ChatA's response.
-        controller.handle(.readLatestOrStopSpeech)
+        controller.handle(.readPauseResumeSpeechForActiveTab)
         XCTAssertEqual(controller.debugCurrentSpeakingSlotID, nil)
 
         // Unsupported Auto Speak remains fail-closed, while ChatA's armed
         // membership is preserved across the active-Tab switch.
-        controller.handle(.toggleAutoSpeak)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
     }
 

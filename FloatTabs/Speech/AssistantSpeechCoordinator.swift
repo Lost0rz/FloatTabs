@@ -6,12 +6,35 @@ enum SpeechRequestOrigin: Equatable, Sendable {
     case manual
 }
 
+enum SpeechPlaybackState: Equatable, Sendable {
+    case idle
+    case speaking
+    case paused
+}
+
 struct SpeechRailPresentation: Equatable, Sendable {
     let activeSlotID: UUID?
     let autoSpeakSlotIDs: Set<UUID>
     let activeSlotAutoSpeakEnabled: Bool
     let currentSpeakingSlotID: UUID?
+    let playbackState: SpeechPlaybackState
     let activeSlotSupportsSpeech: Bool
+
+    init(
+        activeSlotID: UUID?,
+        autoSpeakSlotIDs: Set<UUID>,
+        activeSlotAutoSpeakEnabled: Bool,
+        currentSpeakingSlotID: UUID?,
+        playbackState: SpeechPlaybackState = .idle,
+        activeSlotSupportsSpeech: Bool
+    ) {
+        self.activeSlotID = activeSlotID
+        self.autoSpeakSlotIDs = autoSpeakSlotIDs
+        self.activeSlotAutoSpeakEnabled = activeSlotAutoSpeakEnabled
+        self.currentSpeakingSlotID = currentSpeakingSlotID
+        self.playbackState = playbackState
+        self.activeSlotSupportsSpeech = activeSlotSupportsSpeech
+    }
 }
 
 /// Coordinates response extraction, privacy-safe cleaning, bounded speech
@@ -63,9 +86,12 @@ final class AssistantSpeechCoordinator {
     private var speechQueue = SpeechQueue()
     private var automaticReservations: [AutomaticReservation] = []
     private var manualPlaybackBarrier: UInt64?
+    private var pauseRequested = false
+    private var resumeRequested = false
 
     private(set) var autoSpeakSlotIDs = Set<UUID>()
     private(set) var currentSpeakingSlotID: UUID?
+    private(set) var playbackState: SpeechPlaybackState = .idle
     var onSpeechPresentationChange: (() -> Void)?
 
     init(
@@ -77,17 +103,13 @@ final class AssistantSpeechCoordinator {
         self.webViewProvider = webViewProvider
         self.responseBridgeProvider = responseBridgeProvider
         speechService.onUtteranceFinished = { [weak self] token in
-            guard let self,
-                  let currentItem = self.currentItem,
-                  currentItem.sequence == token else {
-                return
-            }
-            self.currentItem = nil
-            if self.speechQueue.isEmpty {
-                self.setCurrentSpeakingSlot(nil)
-            }
-            self.drainAutomaticReservations()
-            self.speakNext()
+            self?.handleUtteranceFinished(token: token)
+        }
+        speechService.onUtterancePaused = { [weak self] token in
+            self?.handleUtterancePaused(token: token)
+        }
+        speechService.onUtteranceContinued = { [weak self] token in
+            self?.handleUtteranceContinued(token: token)
         }
     }
 
@@ -97,6 +119,48 @@ final class AssistantSpeechCoordinator {
 
     var currentResponseIdentity: SpeechResponseIdentity? {
         currentItem?.responseID
+    }
+
+    @discardableResult
+    func pauseCurrentSpeech(for slotID: UUID) -> Bool {
+        guard currentSpeakingSlotID == slotID,
+              currentItem != nil,
+              playbackState == .speaking,
+              !pauseRequested else {
+            return false
+        }
+
+        resumeRequested = false
+        pauseRequested = true
+        let accepted = speechService.pause()
+        if !accepted {
+            pauseRequested = false
+        }
+        return accepted
+    }
+
+    @discardableResult
+    func resumeCurrentSpeech(for slotID: UUID) -> Bool {
+        guard currentSpeakingSlotID == slotID,
+              currentItem != nil,
+              playbackState == .paused,
+              !resumeRequested else {
+            return false
+        }
+
+        pauseRequested = false
+        resumeRequested = true
+        let accepted = speechService.resume()
+        if !accepted {
+            resumeRequested = false
+            return false
+        }
+
+        // continueSpeaking() is the successful user intent. The delegate
+        // callback remains token-guarded confirmation and cannot resurrect a
+        // stopped or superseded item.
+        setPlaybackState(.speaking)
+        return true
     }
 
     var isManualPlaybackBarrierActive: Bool {
@@ -173,7 +237,10 @@ final class AssistantSpeechCoordinator {
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
         currentItem = nil
+        pauseRequested = false
+        resumeRequested = false
         speechService.stop()
+        setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)
 
         nextManualIntent &+= 1
@@ -205,7 +272,10 @@ final class AssistantSpeechCoordinator {
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
         currentItem = nil
+        pauseRequested = false
+        resumeRequested = false
         speechService.stop()
+        setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)
         let previewItems = makeQueueItems(
             responseID: nil,
@@ -227,7 +297,10 @@ final class AssistantSpeechCoordinator {
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
         currentItem = nil
+        pauseRequested = false
+        resumeRequested = false
         speechService.stop()
+        setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)
     }
 
@@ -268,7 +341,10 @@ final class AssistantSpeechCoordinator {
         speechQueue.removeItems(forSlotID: slotID)
         if currentWasRemoved {
             currentItem = nil
+            pauseRequested = false
+            resumeRequested = false
             speechService.stop()
+            setPlaybackState(.idle)
             setCurrentSpeakingSlot(nil)
             speakNext()
         }
@@ -560,12 +636,15 @@ final class AssistantSpeechCoordinator {
     }
 
     private func speakNext() {
-        guard currentItem == nil,
+        guard playbackState != .paused,
+              !pauseRequested,
+              currentItem == nil,
               let item = speechQueue.dequeue() else {
             return
         }
         currentItem = item
         setCurrentSpeakingSlot(item.responseID?.slotID)
+        setPlaybackState(.speaking)
         speechService.speak(
             SpeechPlaybackRequest(
                 text: item.text,
@@ -579,5 +658,50 @@ final class AssistantSpeechCoordinator {
         guard currentSpeakingSlotID != slotID else { return }
         currentSpeakingSlotID = slotID
         onSpeechPresentationChange?()
+    }
+
+    private func setPlaybackState(_ state: SpeechPlaybackState) {
+        guard playbackState != state else { return }
+        playbackState = state
+        onSpeechPresentationChange?()
+    }
+
+    private func handleUtteranceFinished(token: UInt64) {
+        guard let currentItem,
+              currentItem.sequence == token else {
+            return
+        }
+        self.currentItem = nil
+        pauseRequested = false
+        resumeRequested = false
+        setPlaybackState(.idle)
+        if speechQueue.isEmpty {
+            setCurrentSpeakingSlot(nil)
+        }
+        drainAutomaticReservations()
+        speakNext()
+    }
+
+    private func handleUtterancePaused(token: UInt64) {
+        guard let currentItem,
+              currentItem.sequence == token,
+              playbackState == .speaking,
+              pauseRequested else {
+            return
+        }
+        pauseRequested = false
+        resumeRequested = false
+        setPlaybackState(.paused)
+    }
+
+    private func handleUtteranceContinued(token: UInt64) {
+        guard let currentItem,
+              currentItem.sequence == token,
+              playbackState == .paused || resumeRequested else {
+            return
+        }
+        pauseRequested = false
+        resumeRequested = false
+        setPlaybackState(.speaking)
     }
 }

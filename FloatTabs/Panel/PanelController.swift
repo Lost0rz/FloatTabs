@@ -710,17 +710,42 @@ final class PanelController: NSObject, NSWindowDelegate {
         assistantSpeechCoordinator.readLatestResponse(for: slotID)
     }
 
-    func readLatestOrStopSpeechForActiveTab() {
+    func readPauseResumeSpeechForActiveTab() {
         guard let activeSlotID = tabStore.activeTabID else {
             NSSound.beep()
             synchronizeSpeechPresentation()
             return
         }
-        if assistantSpeechCoordinator.currentSpeakingSlotID == activeSlotID {
-            stopSpeech()
-        } else {
-            readLatestResponseForActiveTab()
+        guard assistantSpeechCoordinator.currentSpeakingSlotID != activeSlotID else {
+            switch assistantSpeechCoordinator.playbackState {
+            case .idle:
+                readLatestResponseForActiveTab()
+            case .speaking:
+                _ = assistantSpeechCoordinator.pauseCurrentSpeech(for: activeSlotID)
+            case .paused:
+                _ = assistantSpeechCoordinator.resumeCurrentSpeech(for: activeSlotID)
+            }
+            return
         }
+        readLatestResponseForActiveTab()
+    }
+
+    func stopSpeechForActiveTab() {
+        guard let activeSlotID = tabStore.activeTabID,
+              assistantSpeechCoordinator.currentSpeakingSlotID == activeSlotID else {
+            return
+        }
+        guard assistantSpeechCoordinator.playbackState == .speaking
+                || assistantSpeechCoordinator.playbackState == .paused else {
+            return
+        }
+        assistantSpeechCoordinator.stop()
+    }
+
+    func readLatestOrStopSpeechForActiveTab() {
+        // Keep this source-compatible alias for callers from the S1 baseline;
+        // the semantic command now routes through Pause / Resume.
+        readPauseResumeSpeechForActiveTab()
     }
 
     func toggleAutoSpeakForActiveTab() {
@@ -1483,6 +1508,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         assistantSpeechCoordinator.currentSpeakingSlotID
     }
 
+    var debugSpeechPlaybackState: SpeechPlaybackState {
+        assistantSpeechCoordinator.playbackState
+    }
+
     var debugPendingColdReleaseCount: Int {
         slotLifecycleCoordinator.pendingColdReleaseCount
     }
@@ -1583,10 +1612,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         case let .setResidency(policy):
             _ = setActiveResidency(policy)
 
-        case .readLatestOrStopSpeech:
-            readLatestOrStopSpeechForActiveTab()
+        case .readPauseResumeSpeechForActiveTab:
+            readPauseResumeSpeechForActiveTab()
 
-        case .toggleAutoSpeak:
+        case .stopSpeechForActiveTab:
+            stopSpeechForActiveTab()
+
+        case .toggleAutoSpeakForActiveTab:
             toggleAutoSpeakForActiveTab()
         }
     }
@@ -1847,13 +1879,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.onOpenGlobalSettings?()
         }
         rail.onReadLatestResponse = { [weak self] in
-            self?.readLatestResponseForActiveTab()
+            self?.readPauseResumeSpeechForActiveTab()
         }
         rail.onToggleAutoSpeak = { [weak self] in
             self?.toggleAutoSpeakForActiveTab()
         }
         rail.onStopSpeech = { [weak self] in
-            self?.stopSpeech()
+            self?.stopSpeechForActiveTab()
         }
         rail.onTogglePin = { [weak self] in
             self?.togglePinnedState()
@@ -2014,6 +2046,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     assistantSpeechCoordinator.autoSpeakSlotIDs.contains($0)
                 } ?? false,
                 currentSpeakingSlotID: assistantSpeechCoordinator.currentSpeakingSlotID,
+                playbackState: assistantSpeechCoordinator.playbackState,
                 activeSlotSupportsSpeech: activeSlotID.map {
                     activeSlotSupportsSpeech(slotID: $0)
                 } ?? false

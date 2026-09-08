@@ -17,8 +17,9 @@ enum AppCommand: Equatable {
     case settings
     case togglePin
     case setResidency(SlotResidencyPolicy)
-    case readLatestOrStopSpeech
-    case toggleAutoSpeak
+    case readPauseResumeSpeechForActiveTab
+    case stopSpeechForActiveTab
+    case toggleAutoSpeakForActiveTab
 }
 
 /// Commands sent by RemoteOrbit's semantic adapter. This IPC surface stays
@@ -155,6 +156,10 @@ extension KeyboardShortcuts.Name {
         "readLatestOrStopSpeech",
         initial: .init(.r, modifiers: [.control, .shift])
     )
+    static let stopSpeechForActiveTab = Self(
+        "stopSpeechForActiveTab",
+        initial: .init(.s, modifiers: [.control, .shift])
+    )
     static let toggleAutoSpeak = Self(
         "toggleAutoSpeak",
         initial: .init(.a, modifiers: [.control, .shift])
@@ -213,13 +218,18 @@ enum AppShortcutCatalog {
 
     static let speechBindings: [AppShortcutBinding] = [
         .init(
-            title: "Read Latest / Stop Speech",
-            command: .readLatestOrStopSpeech,
+            title: "Read / Pause / Resume Speech",
+            command: .readPauseResumeSpeechForActiveTab,
             name: .readLatestOrStopSpeech
         ),
         .init(
+            title: "Stop Speech",
+            command: .stopSpeechForActiveTab,
+            name: .stopSpeechForActiveTab
+        ),
+        .init(
             title: "Toggle Auto Speak This Tab",
-            command: .toggleAutoSpeak,
+            command: .toggleAutoSpeakForActiveTab,
             name: .toggleAutoSpeak
         ),
     ]
