@@ -35,8 +35,14 @@ final class AssistantSpeechCoordinator {
         self.speechService = speechService
         self.webViewProvider = webViewProvider
         self.responseBridgeProvider = responseBridgeProvider
-        speechService.onUtteranceFinished = { [weak self] in
-            self?.speakNext()
+        speechService.onUtteranceFinished = { [weak self] token in
+            guard let self,
+                  let currentItem = self.currentItem,
+                  currentItem.sequence == token else {
+                return
+            }
+            self.currentItem = nil
+            self.speakNext()
         }
     }
 
@@ -112,12 +118,15 @@ final class AssistantSpeechCoordinator {
         )
         extractionRequests[slotID] = request
 
-        bridge.extractLatest { [weak self, weak webView] payload in
+        let requestGeneration = request.generation
+        let expectedWebView = webView
+        bridge.extractLatest { [weak self, weak expectedWebView] payload in
             guard let self,
-                  let webView,
+                  let expectedWebView,
                   let request = self.extractionRequests[slotID],
-                  request.webView === webView,
-                  self.webViewProvider(slotID) === webView else {
+                  request.generation == requestGeneration,
+                  request.webView === expectedWebView,
+                  self.webViewProvider(slotID) === expectedWebView else {
                 return
             }
             self.extractionRequests.removeValue(forKey: slotID)
@@ -173,6 +182,6 @@ final class AssistantSpeechCoordinator {
             return
         }
         currentItem = item
-        speechService.speak(item.text)
+        speechService.speak(item.text, token: item.sequence)
     }
 }

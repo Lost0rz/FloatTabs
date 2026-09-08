@@ -39,6 +39,25 @@ private final class ChatGPTResponsePageHarness {
             }
         }
     }
+
+    func replaceLatestAssistantNode() async -> Bool {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                """
+                (() => {
+                  const original = document.querySelector('[data-message-id="reply-latest"]');
+                  if (!original) return false;
+                  const replacement = original.cloneNode(true);
+                  original.replaceWith(replacement);
+                  return original !== replacement;
+                })()
+                """,
+                completionHandler: { result, _ in
+                    continuation.resume(returning: result as? Bool ?? false)
+                }
+            )
+        }
+    }
 }
 
 @MainActor
@@ -76,8 +95,10 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         await page.settle()
 
         let first = await page.extract()
+        let replaced = await page.replaceLatestAssistantNode()
         let second = await page.extract()
 
+        XCTAssertTrue(replaced)
         XCTAssertEqual(first?.responseID, second?.responseID)
         XCTAssertEqual(first?.blocks.map(\.text), ["Latest response."])
         XCTAssertEqual(second?.blocks.map(\.text), ["Latest response."])

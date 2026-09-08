@@ -16,6 +16,27 @@ final class SpeechSegmenterTests: XCTestCase {
         )
     }
 
+    func testDoesNotSplitDecimalPeriods() {
+        XCTAssertEqual(
+            SpeechSegmenter.segment("The value is 3.14. Next sentence."),
+            ["The value is 3.14.", "Next sentence."]
+        )
+    }
+
+    func testDoesNotSplitCommonAbbreviations() {
+        XCTAssertEqual(
+            SpeechSegmenter.segment("For example, e.g. this case works. Next sentence."),
+            ["For example, e.g. this case works.", "Next sentence."]
+        )
+    }
+
+    func testMixedChineseEnglishWithDecimalBoundary() {
+        XCTAssertEqual(
+            SpeechSegmenter.segment("例如版本是 3.14。Next sentence."),
+            ["例如版本是 3.14。", "Next sentence."]
+        )
+    }
+
     func testBoundsLongAnswerWithoutTinyTokenSegments() {
         let text = Array(repeating: "This is a useful sentence.", count: 40).joined(separator: " ")
         let segments = SpeechSegmenter.segment(text, maximumLength: 80)

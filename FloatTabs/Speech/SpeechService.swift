@@ -3,9 +3,9 @@ import Foundation
 
 @MainActor
 protocol SpeechSynthesizing: AnyObject {
-    var onUtteranceFinished: (() -> Void)? { get set }
+    var onUtteranceFinished: ((UInt64) -> Void)? { get set }
 
-    func speak(_ text: String)
+    func speak(_ text: String, token: UInt64)
     func stop()
 }
 
@@ -14,19 +14,22 @@ protocol SpeechSynthesizing: AnyObject {
 @MainActor
 final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
+    private var playbackTokens: [ObjectIdentifier: UInt64] = [:]
 
-    var onUtteranceFinished: (() -> Void)?
+    var onUtteranceFinished: ((UInt64) -> Void)?
 
     override init() {
         super.init()
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String) {
+    func speak(_ text: String, token: UInt64) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        synthesizer.speak(AVSpeechUtterance(string: text))
+        let utterance = AVSpeechUtterance(string: text)
+        playbackTokens[ObjectIdentifier(utterance)] = token
+        synthesizer.speak(utterance)
     }
 
     func stop() {
@@ -37,8 +40,13 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         _ synthesizer: AVSpeechSynthesizer,
         didFinish utterance: AVSpeechUtterance
     ) {
+        let utteranceID = ObjectIdentifier(utterance)
         Task { @MainActor [weak self] in
-            self?.onUtteranceFinished?()
+            guard let self,
+                  let token = self.playbackTokens.removeValue(forKey: utteranceID) else {
+                return
+            }
+            self.onUtteranceFinished?(token)
         }
     }
 
@@ -46,6 +54,10 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         _ synthesizer: AVSpeechSynthesizer,
         didCancel utterance: AVSpeechUtterance
     ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.playbackTokens.removeValue(forKey: utteranceID)
+        }
         // Cancellation is intentionally not an advance event. The
         // coordinator clears its current item before calling stop().
     }

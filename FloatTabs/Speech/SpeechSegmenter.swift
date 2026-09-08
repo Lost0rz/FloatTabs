@@ -2,6 +2,14 @@ import Foundation
 
 enum SpeechSegmenter {
     static let defaultMaximumSegmentLength = 220
+    private static let protectedAbbreviations = [
+        "e.g.",
+        "i.e.",
+        "mr.",
+        "mrs.",
+        "dr.",
+        "vs."
+    ]
 
     static func segment(
         _ text: String,
@@ -32,17 +40,51 @@ enum SpeechSegmenter {
         let terminators: Set<Character> = [".", "!", "?", "。", "！", "？", "；", ";"]
         var pieces: [String] = []
         var current = ""
+        let characters = Array(paragraph)
 
-        for character in paragraph {
+        for (index, character) in characters.enumerated() {
             current.append(character)
-            if terminators.contains(character) {
-                pieces.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
-                current.removeAll(keepingCapacity: true)
+            guard terminators.contains(character) else { continue }
+            if character == "." && (
+                isDecimalPeriod(in: characters, at: index) ||
+                isAbbreviationPeriod(in: characters, through: index)
+            ) {
+                continue
             }
+            pieces.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+            current.removeAll(keepingCapacity: true)
         }
         let remainder = current.trimmingCharacters(in: .whitespacesAndNewlines)
         if !remainder.isEmpty { pieces.append(remainder) }
         return pieces.filter { !$0.isEmpty }
+    }
+
+    private static func isDecimalPeriod(
+        in characters: [Character],
+        at index: Int
+    ) -> Bool {
+        guard index > 0, index + 1 < characters.count else { return false }
+        return characters[index - 1].isNumber && characters[index + 1].isNumber
+    }
+
+    private static func isAbbreviationPeriod(
+        in characters: [Character],
+        through index: Int
+    ) -> Bool {
+        let token = String(characters[...index])
+            .split(whereSeparator: { $0.isWhitespace })
+            .last
+            .map(String.init)
+            .map { $0.lowercased() }
+        guard let token else { return false }
+
+        return protectedAbbreviations.contains { abbreviation in
+            let abbreviationCharacters = Array(abbreviation)
+            return abbreviationCharacters.indices.contains { abbreviationIndex in
+                abbreviationCharacters[abbreviationIndex] == "." &&
+                    token == String(abbreviationCharacters[...abbreviationIndex])
+            }
+        }
     }
 
     private static func boundedPieces(_ text: String, maximumLength: Int) -> [String] {
