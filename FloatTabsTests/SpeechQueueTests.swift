@@ -15,11 +15,10 @@ final class SpeechQueueTests: XCTestCase {
 
     func testQueueCarriesIdentityAndSequence() {
         var queue = SpeechQueue(maximumPendingSegments: 4)
-        queue.enqueue(
-            responseID: responseA,
-            segments: ["One", "Two"],
-            startingSequence: 10
-        )
+        queue.replace(items: [
+            SpeechQueueItem(responseID: responseA, sequence: 10, text: "One"),
+            SpeechQueueItem(responseID: responseA, sequence: 11, text: "Two"),
+        ])
 
         XCTAssertEqual(queue.dequeue(), SpeechQueueItem(responseID: responseA, sequence: 10, text: "One"))
         XCTAssertEqual(queue.dequeue(), SpeechQueueItem(responseID: responseA, sequence: 11, text: "Two"))
@@ -28,8 +27,13 @@ final class SpeechQueueTests: XCTestCase {
 
     func testNewResponseDropsOlderPendingSegments() {
         var queue = SpeechQueue(maximumPendingSegments: 4)
-        queue.enqueue(responseID: responseA, segments: ["old 1", "old 2"], startingSequence: 0)
-        queue.enqueue(responseID: responseB, segments: ["new"], startingSequence: 2)
+        queue.replace(items: [
+            SpeechQueueItem(responseID: responseA, sequence: 0, text: "old 1"),
+            SpeechQueueItem(responseID: responseA, sequence: 1, text: "old 2"),
+        ])
+        queue.replace(items: [
+            SpeechQueueItem(responseID: responseB, sequence: 2, text: "new"),
+        ])
 
         XCTAssertEqual(queue.items.map(\.responseID), [responseB])
         XCTAssertEqual(queue.dequeue()?.text, "new")
@@ -37,19 +41,28 @@ final class SpeechQueueTests: XCTestCase {
 
     func testAppendPreservesExistingPendingSegmentsAcrossResponses() {
         var queue = SpeechQueue(maximumPendingSegments: 4)
-        queue.append(
-            responseID: responseA,
-            requests: [
-                SpeechUtteranceRequest(text: "A one", token: 0, languageRole: .english),
-                SpeechUtteranceRequest(text: "A two", token: 1, languageRole: .english),
-            ]
-        )
-        queue.append(
-            responseID: responseB,
-            requests: [
-                SpeechUtteranceRequest(text: "B one", token: 2, languageRole: .chinese),
-            ]
-        )
+        queue.append(items: [
+            SpeechQueueItem(
+                responseID: responseA,
+                sequence: 0,
+                text: "A one",
+                languageRole: .english
+            ),
+            SpeechQueueItem(
+                responseID: responseA,
+                sequence: 1,
+                text: "A two",
+                languageRole: .english
+            ),
+        ])
+        queue.append(items: [
+            SpeechQueueItem(
+                responseID: responseB,
+                sequence: 2,
+                text: "B one",
+                languageRole: .chinese
+            ),
+        ])
 
         XCTAssertEqual(queue.items.map(\.text), ["A one", "A two", "B one"])
         XCTAssertEqual(queue.items.map(\.languageRole), [.english, .english, .chinese])
@@ -57,14 +70,11 @@ final class SpeechQueueTests: XCTestCase {
 
     func testAppendIsBoundedByPendingSegmentCapacity() {
         var queue = SpeechQueue(maximumPendingSegments: 2)
-        let appended = queue.append(
-            responseID: responseA,
-            requests: [
-                SpeechUtteranceRequest(text: "one", token: 0, languageRole: .english),
-                SpeechUtteranceRequest(text: "two", token: 1, languageRole: .english),
-                SpeechUtteranceRequest(text: "three", token: 2, languageRole: .english),
-            ]
-        )
+        let appended = queue.append(items: [
+            SpeechQueueItem(responseID: responseA, sequence: 0, text: "one", languageRole: .english),
+            SpeechQueueItem(responseID: responseA, sequence: 1, text: "two", languageRole: .english),
+            SpeechQueueItem(responseID: responseA, sequence: 2, text: "three", languageRole: .english),
+        ])
 
         XCTAssertEqual(appended, 2)
         XCTAssertEqual(queue.items.count, 2)
@@ -72,35 +82,42 @@ final class SpeechQueueTests: XCTestCase {
 
     func testQueueIsBounded() {
         var queue = SpeechQueue(maximumPendingSegments: 2)
-        queue.enqueue(
-            responseID: responseA,
-            segments: ["one", "two", "three"],
-            startingSequence: 0
-        )
+        queue.replace(items: [
+            SpeechQueueItem(responseID: responseA, sequence: 0, text: "one"),
+            SpeechQueueItem(responseID: responseA, sequence: 1, text: "two"),
+            SpeechQueueItem(responseID: responseA, sequence: 2, text: "three"),
+        ])
 
         XCTAssertEqual(queue.items.count, 2)
     }
 
     func testAutomaticRemovalPreservesManualItems() {
         var queue = SpeechQueue(maximumPendingSegments: 4)
-        queue.append(
-            responseID: responseA,
-            requests: [
-                SpeechUtteranceRequest(text: "Automatic", token: 0, languageRole: .english),
-            ]
-        )
-        queue.replace(
-            responseID: responseB,
-            requests: [
-                SpeechUtteranceRequest(text: "Manual", token: 1, languageRole: .chinese),
-            ]
-        )
-        queue.append(
-            responseID: responseA,
-            requests: [
-                SpeechUtteranceRequest(text: "Automatic again", token: 2, languageRole: .english),
-            ]
-        )
+        queue.append(items: [
+            SpeechQueueItem(
+                responseID: responseA,
+                sequence: 0,
+                text: "Automatic",
+                languageRole: .english
+            ),
+        ])
+        queue.replace(items: [
+            SpeechQueueItem(
+                responseID: responseB,
+                sequence: 1,
+                text: "Manual",
+                languageRole: .chinese,
+                origin: .manual
+            ),
+        ])
+        queue.append(items: [
+            SpeechQueueItem(
+                responseID: responseA,
+                sequence: 2,
+                text: "Automatic again",
+                languageRole: .english
+            ),
+        ])
 
         queue.removeAutomaticItems(forSlotID: responseA.slotID)
 
@@ -110,8 +127,14 @@ final class SpeechQueueTests: XCTestCase {
 
     func testPreviewItemsHaveNoResponseIdentityOrTabOrigin() {
         var queue = SpeechQueue(maximumPendingSegments: 4)
-        queue.replacePreview(requests: [
-            SpeechUtteranceRequest(text: "Preview", token: 8, languageRole: .english),
+        queue.replacePreview(items: [
+            SpeechQueueItem(
+                responseID: nil,
+                sequence: 8,
+                text: "Preview",
+                languageRole: .english,
+                origin: .preview
+            ),
         ])
 
         XCTAssertNil(queue.items.first?.responseID)

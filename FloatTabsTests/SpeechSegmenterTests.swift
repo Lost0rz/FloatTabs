@@ -120,21 +120,6 @@ private final class TestSpeechVoiceCatalog: SpeechVoiceCatalogProviding {
 }
 
 @MainActor
-private final class TestSpeechPreviewService: SpeechSynthesizing {
-    private(set) var requests: [SpeechUtteranceRequest] = []
-    private(set) var stopCount = 0
-    var onUtteranceFinished: ((UInt64) -> Void)?
-
-    func speak(_ request: SpeechUtteranceRequest) {
-        requests.append(request)
-    }
-
-    func stop() {
-        stopCount += 1
-    }
-}
-
-@MainActor
 final class SpeechSettingsTests: XCTestCase {
     private func makeDefaults() -> UserDefaults {
         let suiteName = "FloatTabsTests.SpeechSettings.\(UUID().uuidString)"
@@ -210,12 +195,14 @@ final class SpeechSettingsTests: XCTestCase {
         let defaults = makeDefaults()
         let preferences = SpeechPreferencesStore(defaults: defaults)
         let catalog = TestSpeechVoiceCatalog(voices: sampleVoices)
-        let preview = TestSpeechPreviewService()
+        var previewRequests: [SpeechUtteranceRequest] = []
         var opened: [URL] = []
         let controller = SpeechSettingsViewController(
             preferencesStore: preferences,
             voiceCatalog: catalog,
-            previewService: preview,
+            previewHandler: { requests in
+                previewRequests = requests
+            },
             systemSettingsOpener: { url in
                 opened.append(url)
                 return true
@@ -237,8 +224,7 @@ final class SpeechSettingsTests: XCTestCase {
         XCTAssertEqual(preferences.speechRate, 0.60, accuracy: 0.001)
 
         controller.mixedPreview(controller.mixedPreviewButton)
-        XCTAssertEqual(preview.requests.map(\.languageRole), [.chinese, .english, .chinese])
-        XCTAssertEqual(preview.stopCount, 1)
+        XCTAssertEqual(previewRequests.map(\.languageRole), [.chinese, .english, .chinese])
 
         catalog.refreshCount = 0
         controller.refreshVoices(controller.refreshVoicesButton)

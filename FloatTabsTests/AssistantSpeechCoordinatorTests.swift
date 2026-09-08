@@ -4,17 +4,17 @@ import XCTest
 
 @MainActor
 private final class TestSpeechService: SpeechSynthesizing {
-    private(set) var spokenRequests: [SpeechUtteranceRequest] = []
+    private(set) var spokenRequests: [SpeechPlaybackRequest] = []
     private(set) var stopCount = 0
     var onUtteranceFinished: ((UInt64) -> Void)?
 
     var spoken: [String] { spokenRequests.map(\.text) }
-    var spokenTokens: [UInt64] { spokenRequests.map(\.token) }
+    var spokenTokens: [UInt64] { spokenRequests.map(\.transportToken) }
     var spokenLanguageRoles: [SpeechLanguageRole] {
         spokenRequests.map(\.languageRole)
     }
 
-    func speak(_ request: SpeechUtteranceRequest) {
+    func speak(_ request: SpeechPlaybackRequest) {
         spokenRequests.append(request)
     }
 
@@ -938,8 +938,9 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         let automaticToken = service.spokenTokens[0]
 
         coordinator.playPreview([
-            SpeechUtteranceRequest(text: "Preview.", token: 100, languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
         ])
+        let previewToken = service.spokenTokens[1]
 
         XCTAssertEqual(service.spoken, ["Automatic.", "Preview."])
         XCTAssertNil(coordinator.currentResponseIdentity)
@@ -948,11 +949,128 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         service.finish(token: automaticToken)
         XCTAssertEqual(service.spoken, ["Automatic.", "Preview."])
-        service.finish(token: 100)
+        service.finish(token: previewToken)
         XCTAssertNil(coordinator.currentResponseIdentity)
 
         coordinator.handle(.generationFinished, for: slotID)
         bridge.resolve(makePayload(responseID: "document-a:after-preview", text: "After preview."))
         XCTAssertEqual(service.spoken, ["Automatic.", "Preview.", "After preview."])
+    }
+
+    func testPreviewTransportTokenCannotCollideWithSupersededAutomaticToken() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:auto", text: "Automatic."))
+        let automaticToken = service.spokenTokens[0]
+
+        coordinator.playPreview(SpeechLanguageRouter.utteranceRequests(for: "Preview."))
+        let previewToken = service.spokenTokens[1]
+
+        XCTAssertNotEqual(previewToken, automaticToken)
+        service.finish(token: automaticToken)
+        XCTAssertEqual(service.spoken, ["Automatic.", "Preview."])
+
+        service.finish(token: previewToken)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+    }
+
+    func testPreviewToPreviewUsesUniqueTokensAndIgnoresFirstLateFinish() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.playPreview(SpeechLanguageRouter.utteranceRequests(for: "Preview one."))
+        let previewOneToken = service.spokenTokens[0]
+
+        coordinator.playPreview(
+            SpeechLanguageRouter.utteranceRequests(for: "Preview two. Second segment.")
+        )
+        let previewTwoToken = service.spokenTokens[1]
+        XCTAssertNotEqual(previewOneToken, previewTwoToken)
+
+        service.finish(token: previewOneToken)
+        XCTAssertEqual(service.spoken, ["Preview one.", "Preview two."])
+
+        service.finish(token: previewTwoToken)
+        XCTAssertEqual(service.spoken, ["Preview one.", "Preview two.", "Second segment."])
+        service.finish(token: service.spokenTokens[2])
+        XCTAssertNil(coordinator.currentResponseIdentity)
+    }
+
+    func testMultiSegmentPreviewUsesUniqueCoordinatorTokensAndIgnoresDuplicateFinish() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+        let requests = SpeechLanguageRouter.utteranceRequests(
+            for: "第一句。This is the second sentence.第三句。"
+        )
+
+        coordinator.playPreview(requests)
+        let firstToken = service.spokenTokens[0]
+        XCTAssertEqual(service.spokenLanguageRoles, [.chinese])
+
+        service.finish(token: firstToken)
+        let secondToken = service.spokenTokens[1]
+        service.finish(token: firstToken)
+        XCTAssertEqual(service.spoken, ["第一句。", "This is the second sentence."])
+
+        service.finish(token: secondToken)
+        let thirdToken = service.spokenTokens[2]
+        XCTAssertEqual(Set([firstToken, secondToken, thirdToken]).count, 3)
+        XCTAssertEqual(service.spokenLanguageRoles, [.chinese, .english, .chinese])
+
+        service.finish(token: thirdToken)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+    }
+
+    func testAutomaticManualPreviewAndAutomaticTokensShareOneNamespace() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:auto-1", text: "Automatic one."))
+        let automaticOneToken = service.spokenTokens[0]
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:manual", text: "Manual."))
+        let manualToken = service.spokenTokens[1]
+
+        coordinator.playPreview(SpeechLanguageRouter.utteranceRequests(for: "Preview."))
+        let previewToken = service.spokenTokens[2]
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:auto-2", text: "Automatic two."))
+        service.finish(token: previewToken)
+        let automaticTwoToken = service.spokenTokens[3]
+
+        XCTAssertEqual(
+            service.spokenTokens,
+            [automaticOneToken, manualToken, previewToken, automaticTwoToken]
+        )
+        XCTAssertEqual(Set(service.spokenTokens).count, service.spokenTokens.count)
     }
 }

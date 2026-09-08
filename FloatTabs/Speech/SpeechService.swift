@@ -5,7 +5,7 @@ import Foundation
 protocol SpeechSynthesizing: AnyObject {
     var onUtteranceFinished: ((UInt64) -> Void)? { get set }
 
-    func speak(_ request: SpeechUtteranceRequest)
+    func speak(_ request: SpeechPlaybackRequest)
     func stop()
 }
 
@@ -30,7 +30,7 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         synthesizer.delegate = self
     }
 
-    func speak(_ request: SpeechUtteranceRequest) {
+    func speak(_ request: SpeechPlaybackRequest) {
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
@@ -40,7 +40,7 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
             preferences: preferences
         )
         utterance.rate = preferences.speechRate
-        playbackTokens[ObjectIdentifier(utterance)] = request.token
+        playbackTokens[ObjectIdentifier(utterance)] = request.transportToken
         synthesizer.speak(utterance)
     }
 

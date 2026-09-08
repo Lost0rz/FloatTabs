@@ -207,10 +207,13 @@ final class AssistantSpeechCoordinator {
         currentItem = nil
         speechService.stop()
         setCurrentSpeakingSlot(nil)
-        speechQueue.replacePreview(requests: requests)
-        if let highestToken = requests.map(\.token).max() {
-            nextSequence = max(nextSequence, highestToken &+ 1)
-        }
+        let previewItems = makeQueueItems(
+            responseID: nil,
+            requests: requests,
+            origin: .preview,
+            limit: speechQueue.maximumPendingSegments
+        )
+        speechQueue.replacePreview(items: previewItems)
         speakNext()
     }
 
@@ -352,8 +355,7 @@ final class AssistantSpeechCoordinator {
 
         let cleaned = SpeechContentCleaner.clean(payload.blocks)
         let requests = SpeechLanguageRouter.utteranceRequests(
-            for: cleaned,
-            startingToken: nextSequence
+            for: cleaned
         )
 
         switch request.origin {
@@ -439,8 +441,13 @@ final class AssistantSpeechCoordinator {
         }
 
         latestResponse[request.slotID] = identity
-        speechQueue.replace(responseID: identity, requests: requests)
-        nextSequence &+= UInt64(requests.count)
+        let manualItems = makeQueueItems(
+            responseID: identity,
+            requests: requests,
+            origin: .manual,
+            limit: speechQueue.maximumPendingSegments
+        )
+        speechQueue.replace(items: manualItems)
         speakNext()
         releaseManualBarrier(intent: manualIntent)
     }
@@ -508,24 +515,47 @@ final class AssistantSpeechCoordinator {
                     automaticReservations.removeFirst()
                     continue
                 }
-                let sequencedRequests = requests.enumerated().map { offset, request in
-                    SpeechUtteranceRequest(
-                        text: request.text,
-                        token: nextSequence &+ UInt64(offset),
-                        languageRole: request.languageRole
-                    )
-                }
-                let appended = speechQueue.append(
+                let automaticItems = makeQueueItems(
                     responseID: identity,
-                    requests: sequencedRequests
+                    requests: requests,
+                    origin: .automatic,
+                    limit: speechQueue.availableCapacity
                 )
+                guard !automaticItems.isEmpty else { return }
+                let appended = speechQueue.append(items: automaticItems)
                 guard appended > 0 else { return }
                 automaticReservations.removeFirst()
                 spokenResponses[identity.slotID, default: []].insert(identity)
-                nextSequence &+= UInt64(appended)
                 speakNext()
             }
         }
+    }
+
+    private func makeQueueItems(
+        responseID: SpeechResponseIdentity?,
+        requests: [SpeechUtteranceRequest],
+        origin: SpeechPlaybackOrigin,
+        limit: Int
+    ) -> [SpeechQueueItem] {
+        guard limit > 0 else { return [] }
+        var items: [SpeechQueueItem] = []
+        for request in requests where items.count < limit {
+            guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
+            let sequence = nextSequence
+            nextSequence &+= 1
+            items.append(
+                SpeechQueueItem(
+                    responseID: responseID,
+                    sequence: sequence,
+                    text: request.text,
+                    languageRole: request.languageRole,
+                    origin: origin
+                )
+            )
+        }
+        return items
     }
 
     private func speakNext() {
@@ -536,9 +566,9 @@ final class AssistantSpeechCoordinator {
         currentItem = item
         setCurrentSpeakingSlot(item.responseID?.slotID)
         speechService.speak(
-            SpeechUtteranceRequest(
+            SpeechPlaybackRequest(
                 text: item.text,
-                token: item.sequence,
+                transportToken: item.sequence,
                 languageRole: item.languageRole
             )
         )

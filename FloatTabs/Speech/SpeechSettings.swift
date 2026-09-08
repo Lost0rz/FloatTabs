@@ -10,7 +10,12 @@ enum SpeechLanguageRole: String, CaseIterable, Equatable, Sendable {
 
 struct SpeechUtteranceRequest: Equatable, Sendable {
     let text: String
-    let token: UInt64
+    let languageRole: SpeechLanguageRole
+}
+
+struct SpeechPlaybackRequest: Equatable, Sendable {
+    let text: String
+    let transportToken: UInt64
     let languageRole: SpeechLanguageRole
 }
 
@@ -56,13 +61,11 @@ enum SpeechLanguageRouter {
     }
 
     static func utteranceRequests(
-        for text: String,
-        startingToken: UInt64 = 0
+        for text: String
     ) -> [SpeechUtteranceRequest] {
-        SpeechSegmenter.segment(text).enumerated().map { offset, segment in
+        SpeechSegmenter.segment(text).map { segment in
             SpeechUtteranceRequest(
                 text: segment,
-                token: startingToken + UInt64(offset),
                 languageRole: role(for: segment)
             )
         }

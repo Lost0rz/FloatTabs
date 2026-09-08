@@ -275,34 +275,17 @@ final class SpeechSettingsViewController: NSViewController {
         action: nil
     )
     private let speechRateValueLabel = NSTextField(labelWithString: "0.50")
-    private var previewToken: UInt64 = 0
     private(set) var lastSystemSettingsOpenResult = false
 
     init(
         preferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
         voiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
-        previewService: SpeechSynthesizing? = nil,
         previewHandler: SpeechPreviewHandler? = nil,
         systemSettingsOpener: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
     ) {
         self.preferencesStore = preferencesStore
         self.voiceCatalog = voiceCatalog
-        if let previewHandler {
-            self.previewHandler = previewHandler
-        } else if let previewService {
-            // XCTest and isolated UI tests may inject a fake service. The
-            // production app passes the shared AssistantSpeechCoordinator
-            // handler instead, so this controller never creates a second
-            // SpeechService or AVSpeechSynthesizer.
-            self.previewHandler = { requests in
-                previewService.stop()
-                for request in requests {
-                    previewService.speak(request)
-                }
-            }
-        } else {
-            self.previewHandler = nil
-        }
+        self.previewHandler = previewHandler
         self.systemSettingsOpener = systemSettingsOpener
         super.init(nibName: nil, bundle: nil)
         title = "Speech"
@@ -457,11 +440,7 @@ final class SpeechSettingsViewController: NSViewController {
 
     private func playPreview(_ text: String) {
         guard let previewHandler else { return }
-        previewToken &+= 1
-        let requests = SpeechLanguageRouter.utteranceRequests(
-            for: text,
-            startingToken: previewToken << 8
-        )
+        let requests = SpeechLanguageRouter.utteranceRequests(for: text)
         previewHandler(requests)
     }
 
