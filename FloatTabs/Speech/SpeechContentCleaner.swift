@@ -16,6 +16,16 @@ struct SpeechContentBlock: Equatable, Sendable {
     let level: Int?
 }
 
+enum SpeechSpeakabilityFilter {
+    /// A segment may retain punctuation for sentence boundaries, but it must
+    /// contain at least one letter or digit before it reaches Apple TTS.
+    static func containsSpeakableContent(_ text: String) -> Bool {
+        text.contains { character in
+            character.isLetter || character.isNumber
+        }
+    }
+}
+
 enum SpeechContentCleaner {
     static func clean(_ blocks: [SpeechContentBlock]) -> String {
         blocks.compactMap(clean)
@@ -57,7 +67,7 @@ enum SpeechContentCleaner {
         )
         if block.kind == .listItem {
             text = text.replacingOccurrences(
-                of: #"^\s{0,3}(?:[-+*]|\d+[.)])\s+"#,
+                of: #"^\s{0,3}(?:[-+*•‣◦]|\d+[.)、．])(?:\s+|$)"#,
                 with: "",
                 options: .regularExpression
             )
@@ -75,7 +85,11 @@ enum SpeechContentCleaner {
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return text.isEmpty ? nil : text
+        guard !text.isEmpty,
+              SpeechSpeakabilityFilter.containsSpeakableContent(text) else {
+            return nil
+        }
+        return text
     }
 
     private static func isRawMachineContent(_ text: String) -> Bool {

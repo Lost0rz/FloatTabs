@@ -66,4 +66,60 @@ final class SpeechContentCleanerTests: XCTestCase {
         XCTAssertFalse(cleaned.contains("example.com"))
         XCTAssertFalse(cleaned.contains("/Users/"))
     }
+
+    func testDropsPurePunctuationAndSymbolBlocks() {
+        for text in ["......", "…………", "••••••", "***", "---"] {
+            XCTAssertNil(
+                SpeechContentCleaner.clean(
+                    SpeechContentBlock(kind: .paragraph, text: text, level: nil)
+                ),
+                "Expected \(text) to be filtered"
+            )
+        }
+    }
+
+    func testRemovesListBulletsAndOrdinalPrefixes() {
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .listItem, text: "• 第一项", level: nil)
+            ),
+            "第一项"
+        )
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .listItem, text: "1. 第一种方案", level: nil)
+            ),
+            "第一种方案"
+        )
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .listItem, text: "2) Second option", level: nil)
+            ),
+            "Second option"
+        )
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .listItem, text: "10、 第十项", level: nil)
+            ),
+            "第十项"
+        )
+        XCTAssertNil(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .listItem, text: "1.", level: nil)
+            )
+        )
+    }
+
+    func testPreservesMeaningfulNumbersAndTechnicalIdentifiers() {
+        let blocks = [
+            SpeechContentBlock(kind: .paragraph, text: "版本是 0.2.6。", level: nil),
+            SpeechContentBlock(kind: .paragraph, text: "成功率 95%。", level: nil),
+            SpeechContentBlock(kind: .paragraph, text: "模型是 GPT-5.6。", level: nil),
+        ]
+
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(blocks),
+            "版本是 0.2.6。\n\n成功率 95%。\n\n模型是 GPT-5.6。"
+        )
+    }
 }

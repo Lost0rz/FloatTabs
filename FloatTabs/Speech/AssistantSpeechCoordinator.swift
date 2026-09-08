@@ -540,7 +540,8 @@ final class AssistantSpeechCoordinator {
         guard limit > 0 else { return [] }
         var items: [SpeechQueueItem] = []
         for request in requests where items.count < limit {
-            guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  SpeechSpeakabilityFilter.containsSpeakableContent(request.text) else {
                 continue
             }
             let sequence = nextSequence

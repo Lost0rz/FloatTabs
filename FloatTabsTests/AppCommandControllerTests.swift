@@ -114,8 +114,50 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
         XCTAssertEqual(AppShortcutCatalog.residencyBindings.count, 3)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 24)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 24)
+        XCTAssertEqual(AppShortcutCatalog.speechBindings.count, 2)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 26)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 26)
+    }
+
+    func testSpeechShortcutsRouteDefaultsAndRemainConfigurable() {
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.r.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .readLatestOrStopSpeech
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.a.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .toggleAutoSpeak
+        )
+        XCTAssertEqual(
+            AppShortcutCatalog.speechBindings.map(\.title),
+            ["Read Latest / Stop Speech", "Toggle Auto Speak This Tab"]
+        )
+
+        let custom = KeyboardShortcuts.Shortcut(.x, modifiers: [.control, .option])
+        let shortcutFor: (KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut? = { name in
+            name == .readLatestOrStopSpeech ? custom : name.initialShortcut
+        }
+        XCTAssertEqual(
+            AppShortcutCatalog.command(
+                keyCode: UInt16(KeyboardShortcuts.Key.x.rawValue),
+                modifiers: [.control, .option],
+                shortcutFor: shortcutFor
+            ),
+            .readLatestOrStopSpeech
+        )
+        XCTAssertNil(
+            AppShortcutCatalog.command(
+                keyCode: UInt16(KeyboardShortcuts.Key.r.rawValue),
+                modifiers: [.control, .shift],
+                shortcutFor: shortcutFor
+            )
+        )
     }
 
     func testResidencyShortcutsSelectHotWarmAndCold() {

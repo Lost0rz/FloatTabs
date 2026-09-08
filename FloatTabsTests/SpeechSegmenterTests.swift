@@ -76,6 +76,37 @@ final class SpeechSegmenterTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
         XCTAssertTrue(requests.allSatisfy { $0.languageRole == .chinese })
     }
+
+    func testLanguageRouterDropsPunctuationOnlySegments() {
+        for text in ["......", "…………", "••••••", "***", "---"] {
+            XCTAssertTrue(
+                SpeechLanguageRouter.utteranceRequests(for: text).isEmpty,
+                "Expected \(text) to produce no speech requests"
+            )
+        }
+    }
+
+    func testRepeatedPunctuationRemainsASeparatorButNeverAnUtterance() {
+        let requests = SpeechLanguageRouter.utteranceRequests(
+            for: "这是第一句......这是第二句。"
+        )
+
+        XCTAssertEqual(requests.map(\.text), ["这是第一句.", "这是第二句。"])
+        XCTAssertTrue(
+            requests.allSatisfy {
+                SpeechSpeakabilityFilter.containsSpeakableContent($0.text)
+            }
+        )
+    }
+
+    func testLeadingDecorativeSeparatorIsNotReadInMixedText() {
+        XCTAssertEqual(
+            SpeechLanguageRouter.utteranceRequests(
+                for: "第一项。--- Second item."
+            ).map(\.text),
+            ["第一项。", "Second item."]
+        )
+    }
 }
 
 @MainActor

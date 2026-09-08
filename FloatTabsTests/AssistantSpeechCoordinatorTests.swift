@@ -957,6 +957,22 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(service.spoken, ["Automatic.", "Preview.", "After preview."])
     }
 
+    func testCoordinatorDropsPureSymbolPreviewRequestsAtQueueBoundary() {
+        let service = TestSpeechService()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: TestResponseBridge(),
+            webView: WKWebView()
+        )
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "......", languageRole: .english),
+            SpeechUtteranceRequest(text: "Readable preview.", languageRole: .english),
+        ])
+
+        XCTAssertEqual(service.spoken, ["Readable preview."])
+    }
+
     func testPreviewTransportTokenCannotCollideWithSupersededAutomaticToken() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()

@@ -63,12 +63,14 @@ enum SpeechLanguageRouter {
     static func utteranceRequests(
         for text: String
     ) -> [SpeechUtteranceRequest] {
-        SpeechSegmenter.segment(text).map { segment in
-            SpeechUtteranceRequest(
-                text: segment,
-                languageRole: role(for: segment)
-            )
-        }
+        SpeechSegmenter.segment(text)
+            .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
+            .map { segment in
+                SpeechUtteranceRequest(
+                    text: segment,
+                    languageRole: role(for: segment)
+                )
+            }
     }
 
     private static func containsEnglishLetters(in text: String) -> Bool {

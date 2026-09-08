@@ -51,12 +51,27 @@ enum SpeechSegmenter {
             ) {
                 continue
             }
-            pieces.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+            let piece = stripLeadingDecorativeMarkers(
+                from: current.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            if !piece.isEmpty {
+                pieces.append(piece)
+            }
             current.removeAll(keepingCapacity: true)
         }
-        let remainder = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remainder = stripLeadingDecorativeMarkers(
+            from: current.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         if !remainder.isEmpty { pieces.append(remainder) }
         return pieces.filter { !$0.isEmpty }
+    }
+
+    private static func stripLeadingDecorativeMarkers(from text: String) -> String {
+        text.replacingOccurrences(
+            of: #"^\s*(?:(?:[-–—•·.…]){2,}|={2,}|>{2,}|<{2,}|/{2,}|\${2,}|#{2,})\s+"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 
     private static func isDecimalPeriod(

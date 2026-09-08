@@ -710,6 +710,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         assistantSpeechCoordinator.readLatestResponse(for: slotID)
     }
 
+    func readLatestOrStopSpeechForActiveTab() {
+        guard let activeSlotID = tabStore.activeTabID else {
+            NSSound.beep()
+            synchronizeSpeechPresentation()
+            return
+        }
+        if assistantSpeechCoordinator.currentSpeakingSlotID == activeSlotID {
+            stopSpeech()
+        } else {
+            readLatestResponseForActiveTab()
+        }
+    }
+
     func toggleAutoSpeakForActiveTab() {
         guard let slotID = tabStore.activeTabID else {
             NSSound.beep()
@@ -1569,6 +1582,12 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         case let .setResidency(policy):
             _ = setActiveResidency(policy)
+
+        case .readLatestOrStopSpeech:
+            readLatestOrStopSpeechForActiveTab()
+
+        case .toggleAutoSpeak:
+            toggleAutoSpeakForActiveTab()
         }
     }
 
