@@ -11,6 +11,17 @@ enum SpeechLanguageRole: String, CaseIterable, Equatable, Sendable {
 struct SpeechUtteranceRequest: Equatable, Sendable {
     let text: String
     let languageRole: SpeechLanguageRole
+    let sourceLocator: SpeechSourceLocator?
+
+    init(
+        text: String,
+        languageRole: SpeechLanguageRole,
+        sourceLocator: SpeechSourceLocator? = nil
+    ) {
+        self.text = text
+        self.languageRole = languageRole
+        self.sourceLocator = sourceLocator
+    }
 }
 
 struct SpeechPlaybackRequest: Equatable, Sendable {
@@ -68,7 +79,8 @@ enum SpeechLanguageRouter {
             .map { segment in
                 SpeechUtteranceRequest(
                     text: segment,
-                    languageRole: role(for: segment)
+                    languageRole: role(for: segment),
+                    sourceLocator: nil
                 )
             }
     }
@@ -111,7 +123,8 @@ enum SpeechLanguageRouter {
                         text: segment,
                         languageRole: languageRole == .automatic
                             ? role(for: segment)
-                            : languageRole
+                            : languageRole,
+                        sourceLocator: block.sourceLocator
                     )
                 })
         }
@@ -162,11 +175,13 @@ final class SpeechPreferencesStore {
     static let chineseVoiceIdentifierKey = "FloatTabs.speech.chineseVoiceIdentifier"
     static let englishVoiceIdentifierKey = "FloatTabs.speech.englishVoiceIdentifier"
     static let speechRateKey = "FloatTabs.speech.rate"
+    static let followSpeechOnPageKey = "FloatTabs.speech.followSpeechOnPage"
     /// Compatibility/audit marker only. No code reads this legacy mode key.
     static let legacyModeKey = "FloatTabs.chatGPTSpeechMode"
     static let defaultSpeechRate: Float = AVSpeechUtteranceDefaultSpeechRate
     static let minimumSpeechRate: Float = 0.35
     static let maximumSpeechRate: Float = 0.65
+    static let defaultFollowSpeechOnPage = true
 
     private let defaults: UserDefaults
 
@@ -197,6 +212,18 @@ final class SpeechPreferencesStore {
                 min(max(newValue, Self.minimumSpeechRate), Self.maximumSpeechRate),
                 forKey: Self.speechRateKey
             )
+        }
+    }
+
+    var followSpeechOnPage: Bool {
+        get {
+            guard defaults.object(forKey: Self.followSpeechOnPageKey) != nil else {
+                return Self.defaultFollowSpeechOnPage
+            }
+            return defaults.bool(forKey: Self.followSpeechOnPageKey)
+        }
+        set {
+            defaults.set(newValue, forKey: Self.followSpeechOnPageKey)
         }
     }
 

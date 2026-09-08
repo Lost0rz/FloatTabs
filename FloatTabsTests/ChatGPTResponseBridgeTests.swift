@@ -6,34 +6,64 @@ import XCTest
 final class ChatGPTResponseBridgeTests: XCTestCase {
     func testPayloadParsingAcceptsStructuredResponseOnly() {
         let payload = ChatGPTResponsePayload.parse([
-            "version": 2,
+            "version": ChatGPTResponsePayload.currentVersion,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
             "responseID": "document-12345678:response-1",
             "blocks": [
-                ["kind": "paragraph", "text": "Hello", "level": NSNull()],
-                ["kind": "heading", "text": "Title", "level": 2],
+                [
+                    "kind": "paragraph",
+                    "text": "Hello",
+                    "level": NSNull(),
+                    "sourceLocator": [
+                        "documentToken": "document-12345678",
+                        "responseID": "document-12345678:response-1",
+                        "blockID": "document-12345678:response-1:block-0",
+                    ],
+                ],
+                [
+                    "kind": "heading",
+                    "text": "Title",
+                    "level": 2,
+                    "sourceLocator": [
+                        "documentToken": "document-12345678",
+                        "responseID": "document-12345678:response-1",
+                        "blockID": "document-12345678:response-1:block-1",
+                    ],
+                ],
             ],
         ])
 
         XCTAssertEqual(payload?.blocks.count, 2)
         XCTAssertEqual(payload?.blocks.first?.kind, .paragraph)
         XCTAssertEqual(payload?.responseID, "document-12345678:response-1")
+        XCTAssertEqual(
+            payload?.blocks.first?.sourceLocator?.blockID,
+            "document-12345678:response-1:block-0"
+        )
     }
 
     func testPayloadParsingRejectsMalformedOrContentlessResponses() {
         XCTAssertNil(ChatGPTResponsePayload.parse([:]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 3,
+            "version": ChatGPTResponsePayload.currentVersion + 1,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
             "responseID": "document-12345678:response-1",
-            "blocks": [["kind": "paragraph", "text": "Hello"]],
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+                "sourceLocator": [
+                    "documentToken": "document-12345678",
+                    "responseID": "document-12345678:response-1",
+                    "blockID": "document-12345678:response-1:block-0",
+                ],
+            ]],
         ]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 2,
+            "version": ChatGPTResponsePayload.currentVersion,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -41,18 +71,56 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             "blocks": [],
         ]))
         XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": 2,
+            "version": ChatGPTResponsePayload.currentVersion,
             "kind": "response",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
             "responseID": "document-12345678:response-1",
-            "blocks": [["kind": "paragraph", "text": "Hello"], ["kind": "unknown", "text": "x"]],
+            "blocks": [
+                [
+                    "kind": "paragraph",
+                    "text": "Hello",
+                    "sourceLocator": [
+                        "documentToken": "document-12345678",
+                        "responseID": "document-12345678:response-1",
+                        "blockID": "document-12345678:response-1:block-0",
+                    ],
+                ],
+                ["kind": "unknown", "text": "x"],
+            ],
+        ]))
+        XCTAssertNil(ChatGPTResponsePayload.parse([
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-12345678",
+            "documentToken": "document-12345678",
+            "responseID": "document-12345678:response-1",
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+            ]],
+        ]))
+        XCTAssertNil(ChatGPTResponsePayload.parse([
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-12345678",
+            "documentToken": "document-12345678",
+            "responseID": "document-12345678:response-1",
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+                "sourceLocator": [
+                    "documentToken": "document-12345678",
+                    "responseID": "document-12345678:other-response",
+                    "blockID": "document-12345678:response-1:block-0",
+                ],
+            ]],
         ]))
     }
 
     func testEmptyPayloadIsValidWithoutResponseBody() {
         let payload = ChatGPTResponsePayload.parse([
-            "version": 2,
+            "version": ChatGPTResponsePayload.currentVersion,
             "kind": "empty",
             "requestID": "request-12345678",
             "documentToken": "document-12345678",
@@ -72,12 +140,21 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         )
         XCTAssertTrue(
             ChatGPTResponseExtraction.scriptSource.contains(
-                "__floatTabsChatGPTResponseRequestLatestV2"
+                "__floatTabsChatGPTResponseRequestLatestV3"
+            )
+        )
+        XCTAssertTrue(
+            ChatGPTResponseExtraction.scriptSource.contains(
+                "__floatTabsScrollToSpeechBlockV3"
             )
         )
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MutationObserver"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("characterData"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("document.body.innerText"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("scrollIntoView"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains(".focus()"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setInterval"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setTimeout"))
     }
 
     func testBridgeLifecycleResetRejectsOldPendingCallback() {
@@ -93,7 +170,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         bridge.attach(to: webView)
 
         var callbackResult: ChatGPTResponsePayload? = ChatGPTResponsePayload(
-            version: 2,
+            version: ChatGPTResponsePayload.currentVersion,
             kind: .empty,
             requestID: "request-12345678",
             documentToken: "document-12345678",

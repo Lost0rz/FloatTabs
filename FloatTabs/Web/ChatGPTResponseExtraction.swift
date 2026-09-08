@@ -9,7 +9,7 @@ enum ChatGPTResponseMessageKind: String, Equatable, Sendable {
 }
 
 struct ChatGPTResponsePayload: Equatable, Sendable {
-    static let currentVersion = 2
+    static let currentVersion = 3
     static let responseKind = ChatGPTResponseMessageKind.response.rawValue
     static let emptyKind = ChatGPTResponseMessageKind.empty.rawValue
 
@@ -39,7 +39,13 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
 
         let blocks: [SpeechContentBlock]
         if let rawBlocks = body["blocks"] as? [[String: Any]] {
-            let parsedBlocks = rawBlocks.compactMap(parseBlock)
+            let parsedBlocks = rawBlocks.compactMap {
+                parseBlock(
+                    $0,
+                    documentToken: documentToken,
+                    responseID: responseID
+                )
+            }
             guard parsedBlocks.count == rawBlocks.count else { return nil }
             blocks = parsedBlocks
         } else {
@@ -62,15 +68,56 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
         )
     }
 
-    private static func parseBlock(_ body: [String: Any]) -> SpeechContentBlock? {
+    func assigning(slotID: UUID) -> ChatGPTResponsePayload {
+        ChatGPTResponsePayload(
+            version: version,
+            kind: kind,
+            requestID: requestID,
+            documentToken: documentToken,
+            responseID: responseID,
+            blocks: blocks.map { block in
+                guard let locator = block.sourceLocator else { return block }
+                return SpeechContentBlock(
+                    kind: block.kind,
+                    text: block.text,
+                    level: block.level,
+                    sourceLocator: locator.assigning(slotID: slotID)
+                )
+            }
+        )
+    }
+
+    private static func parseBlock(
+        _ body: [String: Any],
+        documentToken: String,
+        responseID: String?
+    ) -> SpeechContentBlock? {
         guard let rawKind = body["kind"] as? String,
               let kind = SpeechContentBlockKind(rawValue: rawKind),
               let text = body["text"] as? String,
-              !text.isEmpty else {
+              !text.isEmpty,
+              let rawLocator = body["sourceLocator"] as? [String: Any],
+              let locatorDocumentToken = rawLocator["documentToken"] as? String,
+              let locatorResponseID = rawLocator["responseID"] as? String,
+              let blockID = rawLocator["blockID"] as? String,
+              locatorDocumentToken == documentToken,
+              locatorResponseID == responseID,
+              isOpaqueIdentifier(locatorDocumentToken),
+              isOpaqueIdentifier(locatorResponseID),
+              isOpaqueIdentifier(blockID) else {
             return nil
         }
         let level = (body["level"] as? NSNumber)?.intValue
-        return SpeechContentBlock(kind: kind, text: text, level: level)
+        return SpeechContentBlock(
+            kind: kind,
+            text: text,
+            level: level,
+            sourceLocator: SpeechSourceLocator(
+                documentToken: locatorDocumentToken,
+                responseID: locatorResponseID,
+                blockID: blockID
+            )
+        )
     }
 
     private static func isOpaqueIdentifier(_ value: String) -> Bool {
@@ -113,7 +160,9 @@ enum ChatGPTResponseExtraction {
             : "doc-" + Date.now().toString(36) + "-" +
               Math.random().toString(36).slice(2, 14);
           const responseKeys = new WeakMap();
+          const locatorRegistry = new Map();
           let nextOpaqueKey = 0;
+          let programmaticScrollGuardUntil = 0;
           const MAX_BLOCKS = 256;
           const MAX_BLOCK_TEXT = 4000;
 
@@ -214,21 +263,26 @@ enum ChatGPTResponseExtraction {
             return (candidate || '').replace(/\\s+/g, ' ').trim().slice(0, MAX_BLOCK_TEXT);
           };
 
-          const appendTextPart = (parts, kind, text, level) => {
+          const appendTextPart = (parts, kind, text, level, sourceElement) => {
             const value = (text || '').replace(/\\s+/g, ' ').trim();
             if (!value) return;
             const previous = parts[parts.length - 1];
             if (previous && previous.kind === kind && previous.level === level) {
               previous.text = (previous.text + ' ' + value).trim().slice(0, MAX_BLOCK_TEXT);
             } else {
-              parts.push({ kind: kind, text: value.slice(0, MAX_BLOCK_TEXT), level: level });
+              parts.push({
+                kind: kind,
+                text: value.slice(0, MAX_BLOCK_TEXT),
+                level: level,
+                sourceElement: sourceElement
+              });
             }
           };
 
-          const appendInlineParts = (element, kind, level, parts) => {
+          const appendInlineParts = (element, kind, level, parts, sourceElement = element) => {
             element.childNodes.forEach((node) => {
               if (node.nodeType === Node.TEXT_NODE) {
-                appendTextPart(parts, kind, node.nodeValue || '', level);
+                appendTextPart(parts, kind, node.nodeValue || '', level, sourceElement);
                 return;
               }
               if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -239,12 +293,13 @@ enum ChatGPTResponseExtraction {
                   parts.push({
                     kind: node.matches('.katex-display') ? 'mathBlock' : 'mathInline',
                     text: source,
-                    level: null
+                    level: null,
+                    sourceElement: node
                   });
                 }
                 return;
               }
-              appendInlineParts(node, kind, level, parts);
+              appendInlineParts(node, kind, level, parts, sourceElement);
             });
           };
 
@@ -255,7 +310,8 @@ enum ChatGPTResponseExtraction {
               if (text) blocks.push({
                 kind: tag === 'pre' ? 'code' : 'table',
                 text: text,
-                level: null
+                level: null,
+                sourceElement: element
               });
               return;
             }
@@ -285,7 +341,7 @@ enum ChatGPTResponseExtraction {
 
           const appendRichText = (element, blocks) => {
             const parts = [];
-            appendInlineParts(element, 'richText', null, parts);
+            appendInlineParts(element, 'richText', null, parts, element);
             if (parts.length) blocks.push(...parts);
           };
 
@@ -299,7 +355,8 @@ enum ChatGPTResponseExtraction {
                   blocks.push({
                     kind: element.matches('.katex-display') ? 'mathBlock' : 'mathInline',
                     text: source,
-                    level: null
+                    level: null,
+                    sourceElement: element
                   });
                 }
                 return;
@@ -321,44 +378,134 @@ enum ChatGPTResponseExtraction {
             visit(root);
             if (blocks.length) return blocks.slice(0, MAX_BLOCKS);
             const fallback = textWithoutControls(root);
-            return fallback ? [{ kind: 'paragraph', text: fallback, level: null }] : [];
+            return fallback ? [{
+              kind: 'paragraph',
+              text: fallback,
+              level: null,
+              sourceElement: root
+            }] : [];
           };
 
-          globalThis.__floatTabsChatGPTResponseRequestLatestV2 = (requestID) => {
+          const postEmpty = (target, requestID) => {
+            locatorRegistry.clear();
+            target.postMessage({
+              version: 3,
+              kind: "empty",
+              requestID: requestID,
+              documentToken: documentToken,
+              responseID: null,
+              blocks: []
+            });
+          };
+
+          const postManualScroll = () => {
+            const target = handler();
+            if (!target) return;
+            target.postMessage({
+              version: 3,
+              event: "manualScroll",
+              documentToken: documentToken
+            });
+          };
+
+          const isScrollKey = (event) =>
+            event.key === 'PageUp'
+              || event.key === 'PageDown'
+              || event.key === 'Home'
+              || event.key === 'End'
+              || event.key === ' '
+              || event.code === 'Space';
+
+          document.addEventListener('wheel', (event) => {
+            if (event.isTrusted) postManualScroll();
+          }, true);
+          document.addEventListener('keydown', (event) => {
+            if (event.isTrusted && isScrollKey(event)) postManualScroll();
+          }, true);
+          document.addEventListener('pointerdown', (event) => {
+            if (!event.isTrusted) return;
+            const root = document.documentElement;
+            const likelyScrollbar = event.clientX >= root.clientWidth
+              || event.clientY >= root.clientHeight;
+            if (likelyScrollbar) postManualScroll();
+          }, true);
+          document.addEventListener('scroll', () => {
+            // Scroll events generated by our own smooth scroll are deliberately
+            // ignored. User intent is reported by trusted wheel/keyboard/
+            // scrollbar input events above; no timer or position polling is used.
+            if (performance.now() < programmaticScrollGuardUntil) return;
+          }, true);
+
+          globalThis.__floatTabsScrollToSpeechBlockV3 = (
+            requestedDocumentToken,
+            requestedResponseID,
+            requestedBlockID
+          ) => {
+            if (requestedDocumentToken !== documentToken
+                || typeof requestedResponseID !== 'string'
+                || typeof requestedBlockID !== 'string') return false;
+            const entry = locatorRegistry.get(requestedBlockID);
+            if (!entry
+                || entry.documentToken !== requestedDocumentToken
+                || entry.responseID !== requestedResponseID) return false;
+            if (!entry.element
+                || !entry.element.isConnected
+                || !isRendered(entry.element)) {
+              locatorRegistry.delete(requestedBlockID);
+              return false;
+            }
+            programmaticScrollGuardUntil = performance.now() + 1200;
+            const reduceMotion = window.matchMedia
+              && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            entry.element.scrollIntoView({
+              behavior: reduceMotion ? 'auto' : 'smooth',
+              block: 'center',
+              inline: 'nearest'
+            });
+            return true;
+          };
+
+          globalThis.__floatTabsChatGPTResponseRequestLatestV3 = (requestID) => {
             const target = handler();
             if (!target || typeof requestID !== 'string') return false;
             const roots = assistantRoots();
             const root = roots[roots.length - 1];
             if (!root) {
-              target.postMessage({
-                version: 2,
-                kind: "empty",
-                requestID: requestID,
-                documentToken: documentToken,
-                responseID: null,
-                blocks: []
-              });
+              postEmpty(target, requestID);
               return true;
             }
             const blocks = structuredBlocks(root);
             if (!blocks.length) {
-              target.postMessage({
-                version: 2,
-                kind: "empty",
-                requestID: requestID,
-                documentToken: documentToken,
-                responseID: null,
-                blocks: []
-              });
+              postEmpty(target, requestID);
               return true;
             }
+            const responseID = responseIDFor(root);
+            locatorRegistry.clear();
+            const wireBlocks = blocks.map((block, index) => {
+              const blockID = responseID + ':block-' + index;
+              locatorRegistry.set(blockID, {
+                documentToken: documentToken,
+                responseID: responseID,
+                element: block.sourceElement
+              });
+              return {
+                kind: block.kind,
+                text: block.text,
+                level: block.level,
+                sourceLocator: {
+                  documentToken: documentToken,
+                  responseID: responseID,
+                  blockID: blockID
+                }
+              };
+            });
             target.postMessage({
-              version: 2,
+              version: 3,
               kind: "response",
               requestID: requestID,
               documentToken: documentToken,
-              responseID: responseIDFor(root),
-              blocks: blocks
+              responseID: responseID,
+              blocks: wireBlocks
             });
             return true;
           };

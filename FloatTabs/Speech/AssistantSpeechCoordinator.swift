@@ -72,6 +72,9 @@ final class AssistantSpeechCoordinator {
     private let speechService: SpeechSynthesizing
     private let webViewProvider: @MainActor (UUID) -> WKWebView?
     private let responseBridgeProvider: @MainActor (UUID) -> ChatGPTResponseExtracting?
+    private let followBridgeProvider: @MainActor (UUID) -> ChatGPTResponseFollowing?
+    private let activeSlotIDProvider: @MainActor () -> UUID?
+    private let followSpeechEnabled: @MainActor () -> Bool
     private var extractionRequests: [UUID: ExtractionRequest] = [:]
     private var nextGeneration: UInt64 = 0
     private var stopEpoch: UInt64 = 0
@@ -88,6 +91,9 @@ final class AssistantSpeechCoordinator {
     private var manualPlaybackBarrier: UInt64?
     private var pauseRequested = false
     private var resumeRequested = false
+    private var lastFollowedLocator: SpeechSourceLocator?
+    private var followSuspendedSlotIDs = Set<UUID>()
+    private var followGeneration: UInt64 = 0
 
     private(set) var autoSpeakSlotIDs = Set<UUID>()
     private(set) var currentSpeakingSlotID: UUID?
@@ -97,11 +103,17 @@ final class AssistantSpeechCoordinator {
     init(
         speechService: SpeechSynthesizing,
         webViewProvider: @escaping @MainActor (UUID) -> WKWebView?,
-        responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?
+        responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?,
+        followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
+        activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
+        followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) {
         self.speechService = speechService
         self.webViewProvider = webViewProvider
         self.responseBridgeProvider = responseBridgeProvider
+        self.followBridgeProvider = followBridgeProvider
+        self.activeSlotIDProvider = activeSlotIDProvider
+        self.followSpeechEnabled = followSpeechEnabled
         speechService.onUtteranceFinished = { [weak self] token in
             self?.handleUtteranceFinished(token: token)
         }
@@ -119,6 +131,11 @@ final class AssistantSpeechCoordinator {
 
     var currentResponseIdentity: SpeechResponseIdentity? {
         currentItem?.responseID
+    }
+
+    var isFollowSuspendedForCurrentSpeech: Bool {
+        guard let slotID = currentItem?.responseID?.slotID else { return false }
+        return followSuspendedSlotIDs.contains(slotID)
     }
 
     @discardableResult
@@ -150,6 +167,9 @@ final class AssistantSpeechCoordinator {
 
         pauseRequested = false
         resumeRequested = true
+        // Resuming is a user review boundary. The current block remains where
+        // the user left it; the next source block re-enables normal following.
+        followSuspendedSlotIDs.remove(slotID)
         let accepted = speechService.resume()
         if !accepted {
             resumeRequested = false
@@ -161,6 +181,31 @@ final class AssistantSpeechCoordinator {
         // stopped or superseded item.
         setPlaybackState(.speaking)
         return true
+    }
+
+    /// Receives a trusted page-scroll intent from the response content world.
+    /// Speech continues, but automatic following is suspended for this active
+    /// playback session until Resume or a new explicit Read Latest intent.
+    func handleManualScroll(for slotID: UUID, documentToken: String) {
+        guard let item = currentItem,
+              let responseID = item.responseID,
+              responseID.slotID == slotID,
+              responseID.documentToken == documentToken,
+              item.sourceLocator?.documentToken == documentToken else {
+            return
+        }
+        followSuspendedSlotIDs.insert(slotID)
+    }
+
+    /// Called after a user-selected Tab has become the physical presentation.
+    /// A background speech stream can be located once when the user returns to
+    /// its Tab, but it can never select, focus, or activate that Tab itself.
+    func handleActiveTabChange(to slotID: UUID) {
+        guard playbackState == .speaking,
+              currentSpeakingSlotID == slotID else {
+            return
+        }
+        followCurrentItem(force: true)
     }
 
     var isManualPlaybackBarrierActive: Bool {
@@ -233,6 +278,7 @@ final class AssistantSpeechCoordinator {
     /// extraction so an automatic result that resolves first can only stage.
     func readLatestResponse(for slotID: UUID) {
         playbackIntentEpoch &+= 1
+        resetFollowState(for: slotID)
         invalidateAllAutomaticPlayback()
         suppressCurrentAndPendingSpeech()
         speechQueue.clear()
@@ -266,6 +312,7 @@ final class AssistantSpeechCoordinator {
         guard !requests.isEmpty else { return }
         playbackIntentEpoch &+= 1
         stopEpoch &+= 1
+        resetFollowState()
         invalidateAllAutomaticPlayback()
         extractionRequests.removeAll()
         manualPlaybackBarrier = nil
@@ -291,6 +338,7 @@ final class AssistantSpeechCoordinator {
     func stop() {
         stopEpoch &+= 1
         playbackIntentEpoch &+= 1
+        resetFollowState()
         invalidateAllAutomaticPlayback()
         extractionRequests.removeAll()
         manualPlaybackBarrier = nil
@@ -331,6 +379,7 @@ final class AssistantSpeechCoordinator {
 
     private func resetRuntimeState(slotID: UUID) {
         nextGeneration &+= 1
+        resetFollowState(for: slotID)
         let affectedRequests = extractionRequests.filter { $0.value.slotID == slotID }
         for (requestID, request) in affectedRequests {
             extractionRequests.removeValue(forKey: requestID)
@@ -621,13 +670,23 @@ final class AssistantSpeechCoordinator {
             }
             let sequence = nextSequence
             nextSequence &+= 1
+            let sourceLocator: SpeechSourceLocator? = {
+                guard let responseID,
+                      let locator = request.sourceLocator,
+                      locator.documentToken == responseID.documentToken,
+                      locator.responseID == responseID.responseID else {
+                    return nil
+                }
+                return locator.assigning(slotID: responseID.slotID)
+            }()
             items.append(
                 SpeechQueueItem(
                     responseID: responseID,
                     sequence: sequence,
                     text: request.text,
                     languageRole: request.languageRole,
-                    origin: origin
+                    origin: origin,
+                    sourceLocator: sourceLocator
                 )
             )
         }
@@ -651,6 +710,52 @@ final class AssistantSpeechCoordinator {
                 languageRole: item.languageRole
             )
         )
+        followCurrentItem()
+    }
+
+    private func followCurrentItem(force: Bool = false) {
+        guard followSpeechEnabled(),
+              playbackState == .speaking,
+              let item = currentItem,
+              item.origin != .preview,
+              let responseID = item.responseID,
+              let locator = item.sourceLocator,
+              locator.slotID == responseID.slotID,
+              currentSpeakingSlotID == responseID.slotID,
+              activeSlotIDProvider() == responseID.slotID,
+              !followSuspendedSlotIDs.contains(responseID.slotID),
+              let bridge = followBridgeProvider(responseID.slotID) else {
+            return
+        }
+        if !force, lastFollowedLocator == locator {
+            return
+        }
+
+        // All identity checks happen immediately before dispatch. The one-shot
+        // bridge then validates the same document/response against its live
+        // content-world registry, so a late callback cannot retarget another
+        // Slot or document.
+        followGeneration &+= 1
+        let expectedGeneration = followGeneration
+        let expectedSequence = item.sequence
+        lastFollowedLocator = locator
+        bridge.scrollToSpeechBlock(locator) { [weak self] _ in
+            guard let self,
+                  self.followGeneration == expectedGeneration,
+                  self.currentItem?.sequence == expectedSequence else {
+                return
+            }
+        }
+    }
+
+    private func resetFollowState(for slotID: UUID? = nil) {
+        followGeneration &+= 1
+        lastFollowedLocator = nil
+        if let slotID {
+            followSuspendedSlotIDs.remove(slotID)
+        } else {
+            followSuspendedSlotIDs.removeAll()
+        }
     }
 
     private func setCurrentSpeakingSlot(_ slotID: UUID?) {

@@ -18,19 +18,22 @@ struct SpeechQueueItem: Equatable, Sendable {
     let text: String
     let languageRole: SpeechLanguageRole
     let origin: SpeechPlaybackOrigin
+    let sourceLocator: SpeechSourceLocator?
 
     init(
         responseID: SpeechResponseIdentity?,
         sequence: UInt64,
         text: String,
         languageRole: SpeechLanguageRole = .automatic,
-        origin: SpeechPlaybackOrigin = .automatic
+        origin: SpeechPlaybackOrigin = .automatic,
+        sourceLocator: SpeechSourceLocator? = nil
     ) {
         self.responseID = responseID
         self.sequence = sequence
         self.text = text
         self.languageRole = languageRole
         self.origin = origin
+        self.sourceLocator = sourceLocator
     }
 }
 

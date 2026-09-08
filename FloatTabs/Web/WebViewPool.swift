@@ -46,6 +46,7 @@ final class WebViewPool {
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
+    typealias SpeechManualScrollHandler = @MainActor (UUID, String) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
@@ -68,6 +69,11 @@ final class WebViewPool {
     /// Response extraction has its own lifecycle channel. It is intentionally
     /// separate from the metadata-only attention observation route.
     var onResponseRuntimeReset: ResponseRuntimeResetHandler?
+
+    /// Trusted page input can temporarily suspend Speech Follow for the
+    /// currently spoken response. This is a transient presentation signal;
+    /// the pool does not retain scroll or response state.
+    var onSpeechManualScroll: SpeechManualScrollHandler?
 
     /// Transient presentation seam for the selected Slot's committed
     /// top-level URL. Persistence continues to use `onURLChange`; this route
@@ -420,9 +426,15 @@ final class WebViewPool {
         let attentionBridge = ChatGPTAttentionBridge(slotID: profile.id) { [weak self] slotID, observation in
             self?.onAttentionObservation?(slotID, observation)
         }
-        let responseBridge = ChatGPTResponseBridge(slotID: profile.id) { [weak self] slotID in
-            self?.onResponseRuntimeReset?(slotID)
-        }
+        let responseBridge = ChatGPTResponseBridge(
+            slotID: profile.id,
+            onRuntimeReset: { [weak self] slotID in
+                self?.onResponseRuntimeReset?(slotID)
+            },
+            onManualScroll: { [weak self] slotID, documentToken in
+                self?.onSpeechManualScroll?(slotID, documentToken)
+            }
+        )
         let webView = WebViewFactory.makeWebView(
             renderingProfile: runtimeRendering,
             websiteDataStore: websiteDataStore,

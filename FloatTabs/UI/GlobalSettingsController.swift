@@ -265,6 +265,7 @@ final class SpeechSettingsViewController: NSViewController {
         target: nil,
         action: nil
     )
+    let followSpeechSwitch = NSSwitch()
     let chinesePreviewButton = NSButton(title: "中文试听", target: nil, action: nil)
     let englishPreviewButton = NSButton(title: "English Preview", target: nil, action: nil)
     let mixedPreviewButton = NSButton(title: "Mixed Language Preview", target: nil, action: nil)
@@ -315,6 +316,8 @@ final class SpeechSettingsViewController: NSViewController {
         speechRateSlider.widthAnchor.constraint(equalToConstant: 250).isActive = true
         speechRateValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         speechRateValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        followSpeechSwitch.target = self
+        followSpeechSwitch.action = #selector(followSpeechChanged(_:))
 
         chinesePreviewButton.target = self
         chinesePreviewButton.action = #selector(chinesePreview(_:))
@@ -364,6 +367,11 @@ final class SpeechSettingsViewController: NSViewController {
             makeRow(label: "Chinese Voice", control: chineseVoicePopup),
             makeRow(label: "English Voice", control: englishVoicePopup),
             makeRow(label: "Speech Rate", control: rateControls),
+            makeRow(label: "Follow Speech on Page", control: followSpeechSwitch),
+            Self.detailLabel(
+                "When speech starts a paragraph, formula, or rich-text block, the active "
+                    + "ChatGPT page follows it. Manual scrolling temporarily suspends follow."
+            ),
             Self.spacer(4),
             previewControls,
             Self.spacer(4),
@@ -413,6 +421,10 @@ final class SpeechSettingsViewController: NSViewController {
     @objc func speechRateChanged(_ sender: NSSlider) {
         preferencesStore.speechRate = Float(sender.doubleValue)
         updateSpeechRateLabel()
+    }
+
+    @objc func followSpeechChanged(_ sender: NSSwitch) {
+        preferencesStore.followSpeechOnPage = sender.state == .on
     }
 
     @objc func chinesePreview(_ sender: NSButton) {
@@ -472,6 +484,7 @@ final class SpeechSettingsViewController: NSViewController {
         )
         speechRateSlider.doubleValue = Double(preferencesStore.speechRate)
         updateSpeechRateLabel()
+        followSpeechSwitch.state = preferencesStore.followSpeechOnPage ? .on : .off
         // System Automatic remains a valid route even when the catalog is
         // temporarily empty while macOS refreshes its downloadable voices.
         let hasPreviewHandler = previewHandler != nil

@@ -143,4 +143,23 @@ final class SpeechContentCleanerTests: XCTestCase {
         )
         XCTAssertNotNil(SpeechContentCleaner.clean(blocks[1]))
     }
+
+    func testCleaningPreservesTransientSourceLocator() {
+        let locator = SpeechSourceLocator(
+            documentToken: "document-12345678",
+            responseID: "document-12345678:response-1",
+            blockID: "document-12345678:response-1:block-0"
+        )
+        let cleaned = SpeechContentCleaner.cleanBlocks([
+            SpeechContentBlock(
+                kind: .paragraph,
+                text: "**Readable.**",
+                level: nil,
+                sourceLocator: locator
+            ),
+        ])
+
+        XCTAssertEqual(cleaned.first?.text, "Readable.")
+        XCTAssertEqual(cleaned.first?.sourceLocator, locator)
+    }
 }

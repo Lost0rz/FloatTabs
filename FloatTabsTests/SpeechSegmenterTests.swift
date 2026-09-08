@@ -187,14 +187,17 @@ final class SpeechSettingsTests: XCTestCase {
 
         XCTAssertNil(store.chineseVoiceIdentifier)
         XCTAssertEqual(store.speechRate, SpeechPreferencesStore.defaultSpeechRate)
+        XCTAssertTrue(store.followSpeechOnPage)
         store.chineseVoiceIdentifier = "zh.premium"
         store.englishVoiceIdentifier = "en.enhanced"
         store.speechRate = 0.61
+        store.followSpeechOnPage = false
 
         let reloaded = SpeechPreferencesStore(defaults: defaults)
         XCTAssertEqual(reloaded.chineseVoiceIdentifier, "zh.premium")
         XCTAssertEqual(reloaded.englishVoiceIdentifier, "en.enhanced")
         XCTAssertEqual(reloaded.speechRate, 0.61, accuracy: 0.001)
+        XCTAssertFalse(reloaded.followSpeechOnPage)
         XCTAssertEqual(defaults.string(forKey: SpeechPreferencesStore.legacyModeKey), "speakWhenCompleted")
     }
 
@@ -242,6 +245,7 @@ final class SpeechSettingsTests: XCTestCase {
         controller.loadViewIfNeeded()
 
         XCTAssertEqual(controller.title, "Speech")
+        XCTAssertEqual(controller.followSpeechSwitch.state, .on)
         XCTAssertEqual(controller.chineseVoicePopup.item(at: 0)?.title, "System Automatic")
         XCTAssertEqual(controller.chineseVoicePopup.item(at: 1)?.title, "Chinese Premium — Chinese (zh-CN) — Premium")
         XCTAssertEqual(controller.englishVoicePopup.item(at: 1)?.title, "English Enhanced — English (en-US) — Enhanced")
@@ -253,6 +257,10 @@ final class SpeechSettingsTests: XCTestCase {
         controller.speechRateSlider.doubleValue = 0.60
         controller.speechRateChanged(controller.speechRateSlider)
         XCTAssertEqual(preferences.speechRate, 0.60, accuracy: 0.001)
+
+        controller.followSpeechSwitch.state = .off
+        controller.followSpeechChanged(controller.followSpeechSwitch)
+        XCTAssertFalse(preferences.followSpeechOnPage)
 
         controller.mixedPreview(controller.mixedPreviewButton)
         XCTAssertEqual(previewRequests.map(\.languageRole), [.chinese, .english, .chinese])

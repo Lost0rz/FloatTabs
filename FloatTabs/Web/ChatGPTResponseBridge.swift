@@ -6,12 +6,21 @@ protocol ChatGPTResponseExtracting: AnyObject {
     func extractLatest(completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void)
 }
 
+@MainActor
+protocol ChatGPTResponseFollowing: AnyObject {
+    func scrollToSpeechBlock(
+        _ locator: SpeechSourceLocator,
+        completion: @escaping @MainActor (Bool) -> Void
+    )
+}
+
 /// A per-WebView, one-shot ChatGPT response extractor. Unlike the attention
 /// bridge, this bridge never observes DOM mutations; it only evaluates the
 /// extraction function when explicitly requested.
 @MainActor
-final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseExtracting {
+final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseExtracting, ChatGPTResponseFollowing {
     typealias ResultHandler = @MainActor (ChatGPTResponsePayload?) -> Void
+    typealias ManualScrollHandler = @MainActor (UUID, String) -> Void
 
     private struct PendingRequest {
         let webViewIdentity: ObjectIdentifier
@@ -20,17 +29,22 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 
     let slotID: UUID
     private let onRuntimeReset: @MainActor (UUID) -> Void
+    private let onManualScroll: ManualScrollHandler
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var pendingRequests: [String: PendingRequest] = [:]
+    private var currentDocumentToken: String?
+    private var currentResponseID: String?
     private(set) var isInvalidated = false
 
     init(
         slotID: UUID,
-        onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in }
+        onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },
+        onManualScroll: @escaping ManualScrollHandler = { _, _ in }
     ) {
         self.slotID = slotID
         self.onRuntimeReset = onRuntimeReset
+        self.onManualScroll = onManualScroll
         super.init()
     }
 
@@ -55,6 +69,30 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     func attach(to webView: WKWebView) {
         guard !isInvalidated else { return }
         self.webView = webView
+    }
+
+    func scrollToSpeechBlock(
+        _ locator: SpeechSourceLocator,
+        completion: @escaping @MainActor (Bool) -> Void = { _ in }
+    ) {
+        guard !isInvalidated,
+              locator.slotID == slotID,
+              locator.documentToken == currentDocumentToken,
+              locator.responseID == currentResponseID,
+              let webView else {
+            completion(false)
+            return
+        }
+
+        webView.evaluateJavaScript(
+            Self.scrollScript(locator: locator),
+            in: nil,
+            in: ChatGPTResponseExtraction.contentWorld
+        ) { result in
+            Task { @MainActor in
+                completion((try? result.get() as? Bool) ?? false)
+            }
+        }
     }
 
     /// Requests one extraction from the currently attached document. The
@@ -92,6 +130,8 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 
     func handleRuntimeReplacement() {
+        currentDocumentToken = nil
+        currentResponseID = nil
         finishPendingRequests()
         onRuntimeReset(slotID)
     }
@@ -100,6 +140,8 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         guard !isInvalidated else { return }
         isInvalidated = true
         finishPendingRequests()
+        currentDocumentToken = nil
+        currentResponseID = nil
         userContentController?.removeScriptMessageHandler(
             forName: ChatGPTResponseExtraction.messageHandlerName,
             contentWorld: ChatGPTResponseExtraction.contentWorld
@@ -115,9 +157,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        guard let body = message.body as? [String: Any],
-              let payload = ChatGPTResponsePayload.parse(body),
-              let attachedWebView = webView,
+        guard let attachedWebView = webView,
               message.webView === attachedWebView,
               message.frameInfo.isMainFrame,
               ChatGPTSitePolicy.isSupportedHost(
@@ -126,11 +166,27 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
               ["http", "https"].contains(
                 message.frameInfo.securityOrigin.`protocol`.lowercased()
               ),
+              let body = message.body as? [String: Any] else {
+            return
+        }
+        if body["event"] as? String == "manualScroll",
+           body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+           let documentToken = body["documentToken"] as? String,
+           documentToken == currentDocumentToken {
+            onManualScroll(slotID, documentToken)
+            return
+        }
+
+        guard let payload = ChatGPTResponsePayload.parse(body),
               let pending = pendingRequests.removeValue(forKey: payload.requestID),
               pending.webViewIdentity == ObjectIdentifier(attachedWebView) else {
             return
         }
-        pending.completion(payload.kind == .response ? payload : nil)
+        currentDocumentToken = payload.documentToken
+        currentResponseID = payload.responseID
+        pending.completion(
+            payload.kind == .response ? payload.assigning(slotID: slotID) : nil
+        )
     }
 
     private func finishPendingRequests() {
@@ -147,6 +203,15 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         } else {
             encoded = "\"\""
         }
-        return "globalThis.__floatTabsChatGPTResponseRequestLatestV2?.(\(encoded)) === true"
+        return "globalThis.__floatTabsChatGPTResponseRequestLatestV3?.(\(encoded)) === true"
+    }
+
+    private static func scrollScript(locator: SpeechSourceLocator) -> String {
+        let values = [locator.documentToken, locator.responseID, locator.blockID]
+        guard let data = try? JSONSerialization.data(withJSONObject: values),
+              let json = String(data: data, encoding: .utf8) else {
+            return "false"
+        }
+        return "globalThis.__floatTabsScrollToSpeechBlockV3?.(\(json.dropFirst().dropLast())) === true"
     }
 }

@@ -68,6 +68,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let attentionCoordinator: WebAttentionCoordinator
     private let webFocusRouter: WebFocusRouter
     private let speechService: SpeechSynthesizing
+    private let speechPreferencesStore: SpeechPreferencesStore
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
@@ -105,6 +106,16 @@ final class PanelController: NSObject, NSWindowDelegate {
         },
         responseBridgeProvider: { [weak self] slotID in
             self?.webViewPool.responseBridge(for: slotID)
+        },
+        followBridgeProvider: { [weak self] slotID in
+            self?.webViewPool.responseBridge(for: slotID)
+        },
+        activeSlotIDProvider: { [weak self] in
+            self?.tabStore.activeTabID
+        },
+        followSpeechEnabled: { [weak self] in
+            self?.speechPreferencesStore.followSpeechOnPage
+                ?? SpeechPreferencesStore.defaultFollowSpeechOnPage
         }
     )
 
@@ -430,6 +441,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         self.attentionCoordinator = attentionCoordinator
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter()
         let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
+        self.speechPreferencesStore = resolvedSpeechPreferences
         let resolvedSpeechVoiceCatalog = speechVoiceCatalog ?? SpeechVoiceCatalog()
         self.speechService = speechService ?? SpeechService(
             preferences: resolvedSpeechPreferences,
@@ -541,6 +553,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onResponseRuntimeReset = { [weak self] slotID in
             self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
+        }
+        webViewPool.onSpeechManualScroll = { [weak self] slotID, documentToken in
+            self?.assistantSpeechCoordinator.handleManualScroll(
+                for: slotID,
+                documentToken: documentToken
+            )
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -2008,6 +2026,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.observeFullscreenState(of: webView)
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
+        if activeChanged {
+            assistantSpeechCoordinator.handleActiveTabChange(to: activeProfile.id)
+        }
         synchronizeResidentIndicators()
         synchronizeSpeechPresentation()
         onSelectedSlotPresentationChange?(
@@ -3064,7 +3085,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        if companionActiveProfile?.id != activeProfile.id {
+        let activeChanged = companionActiveProfile?.id != activeProfile.id
+        if activeChanged {
             deactivateCompanionProfile(pauseInactiveMedia: true)
             if preferencesStore.followPreferredSize {
                 applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
@@ -3107,6 +3129,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         companionActiveProfile = activeProfile
+        if activeChanged {
+            assistantSpeechCoordinator.handleActiveTabChange(to: activeProfile.id)
+        }
 
         guard requestedVisibility,
               sourceHostController.sessionState == .fullscreen else { return }

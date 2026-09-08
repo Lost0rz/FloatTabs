@@ -40,12 +40,12 @@ private final class ChatGPTResponsePageHarness {
         }
     }
 
-    func replaceLatestAssistantNode() async -> Bool {
+    func replaceLatestAssistantNode(id: String = "reply-latest") async -> Bool {
         await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(
                 """
                 (() => {
-                  const original = document.querySelector('[data-message-id="reply-latest"]');
+                  const original = document.querySelector('[data-message-id="\(id)"]');
                   if (!original) return false;
                   const replacement = original.cloneNode(true);
                   original.replaceWith(replacement);
@@ -56,6 +56,14 @@ private final class ChatGPTResponsePageHarness {
                     continuation.resume(returning: result as? Bool ?? false)
                 }
             )
+        }
+    }
+
+    func scroll(_ locator: SpeechSourceLocator) async -> Bool {
+        await withCheckedContinuation { continuation in
+            bridge.scrollToSpeechBlock(locator) { result in
+                continuation.resume(returning: result)
+            }
         }
     }
 }
@@ -102,6 +110,91 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(first?.responseID, second?.responseID)
         XCTAssertEqual(first?.blocks.map(\.text), ["Latest response."])
         XCTAssertEqual(second?.blocks.map(\.text), ["Latest response."])
+        XCTAssertEqual(
+            first?.blocks.map { $0.sourceLocator?.blockID },
+            second?.blocks.map { $0.sourceLocator?.blockID }
+        )
+        XCTAssertEqual(first?.blocks.first?.sourceLocator?.responseID, first?.responseID)
+    }
+
+    func testEveryEmittedLogicalBlockHasAnOpaqueLocatorInDocumentOrder() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-locators">
+          <p>A <span class="katex" style="display:inline-block"><math><semantics>
+            <annotation encoding="application/x-tex">x</annotation>
+          </semantics></math></span> B <span class="katex" style="display:inline-block"><math><semantics>
+            <annotation encoding="application/x-tex">y</annotation>
+          </semantics></math></span> C</p>
+          <div class="callout" style="display:block">A rich block.</div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let blocks = payload?.blocks ?? []
+        XCTAssertEqual(blocks.map(\.kind), [
+            .paragraph, .mathInline, .paragraph, .mathInline, .paragraph, .richText,
+        ])
+        let locators = blocks.compactMap(\.sourceLocator)
+        XCTAssertEqual(locators.count, blocks.count)
+        XCTAssertEqual(Set(locators.map(\.blockID)).count, blocks.count)
+        XCTAssertEqual(
+            locators.map(\.responseID),
+            Array(repeating: payload?.responseID ?? "", count: blocks.count)
+        )
+        XCTAssertEqual(
+            locators.map(\.blockID).enumerated().map {
+                $0.element.hasSuffix(":block-\($0.offset)")
+            },
+            Array(repeating: true, count: blocks.count)
+        )
+        XCTAssertTrue(locators.allSatisfy { $0.slotID == page.bridge.slotID })
+    }
+
+    func testScrollLocatorFailsClosedForUnknownIdentityAndDisconnectedElement() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-scroll">
+          <p>Scroll target.</p>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        guard let rawLocator = payload?.blocks.first?.sourceLocator,
+              let responseID = payload?.responseID else {
+            return XCTFail("Expected a response locator")
+        }
+        let validLocator = rawLocator.assigning(slotID: page.bridge.slotID)
+        let validScroll = await page.scroll(validLocator)
+        XCTAssertTrue(validScroll)
+        let unknownScroll = await page.scroll(SpeechSourceLocator(
+            slotID: page.bridge.slotID,
+            documentToken: rawLocator.documentToken,
+            responseID: responseID,
+            blockID: "unknown-block"
+        ))
+        XCTAssertFalse(unknownScroll)
+        let wrongResponseScroll = await page.scroll(SpeechSourceLocator(
+            slotID: page.bridge.slotID,
+            documentToken: rawLocator.documentToken,
+            responseID: "wrong-response",
+            blockID: rawLocator.blockID
+        ))
+        XCTAssertFalse(wrongResponseScroll)
+        let oldDocumentScroll = await page.scroll(SpeechSourceLocator(
+            slotID: page.bridge.slotID,
+            documentToken: "old-document",
+            responseID: responseID,
+            blockID: rawLocator.blockID
+        ))
+        XCTAssertFalse(oldDocumentScroll)
+
+        let replaced = await page.replaceLatestAssistantNode(id: "reply-scroll")
+        XCTAssertTrue(replaced)
+        let disconnectedScroll = await page.scroll(validLocator)
+        XCTAssertFalse(disconnectedScroll)
     }
 
     func testStructuredCodeAndTableBlocksAreMarkedForCleaner() async {

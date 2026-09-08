@@ -13,10 +13,54 @@ enum SpeechContentBlockKind: String, Equatable, Sendable {
     case link
 }
 
+/// A transient locator for one logical emitted response block. The optional
+/// Slot identity is attached by the coordinator after the response bridge has
+/// validated the owning WebView; it is never serialized or persisted.
+struct SpeechSourceLocator: Hashable, Equatable, Sendable {
+    let slotID: UUID?
+    let documentToken: String
+    let responseID: String
+    let blockID: String
+
+    init(
+        slotID: UUID? = nil,
+        documentToken: String,
+        responseID: String,
+        blockID: String
+    ) {
+        self.slotID = slotID
+        self.documentToken = documentToken
+        self.responseID = responseID
+        self.blockID = blockID
+    }
+
+    func assigning(slotID: UUID) -> SpeechSourceLocator {
+        SpeechSourceLocator(
+            slotID: slotID,
+            documentToken: documentToken,
+            responseID: responseID,
+            blockID: blockID
+        )
+    }
+}
+
 struct SpeechContentBlock: Equatable, Sendable {
     let kind: SpeechContentBlockKind
     let text: String
     let level: Int?
+    let sourceLocator: SpeechSourceLocator?
+
+    init(
+        kind: SpeechContentBlockKind,
+        text: String,
+        level: Int?,
+        sourceLocator: SpeechSourceLocator? = nil
+    ) {
+        self.kind = kind
+        self.text = text
+        self.level = level
+        self.sourceLocator = sourceLocator
+    }
 }
 
 enum SpeechSpeakabilityFilter {
@@ -39,7 +83,12 @@ enum SpeechContentCleaner {
     static func cleanBlocks(_ blocks: [SpeechContentBlock]) -> [SpeechContentBlock] {
         blocks.compactMap { block in
             guard let text = clean(block) else { return nil }
-            return SpeechContentBlock(kind: block.kind, text: text, level: block.level)
+            return SpeechContentBlock(
+                kind: block.kind,
+                text: text,
+                level: block.level,
+                sourceLocator: block.sourceLocator
+            )
         }
     }
 
