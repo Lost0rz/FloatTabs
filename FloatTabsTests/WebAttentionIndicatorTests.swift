@@ -524,7 +524,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.setSpeechPresentation(
             SpeechRailPresentation(
                 activeSlotID: profile.id,
-                autoSpeakSlotID: nil,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
                 currentSpeakingSlotID: nil,
                 activeSlotSupportsSpeech: true
             ),
@@ -576,7 +577,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.setSpeechPresentation(
             SpeechRailPresentation(
                 activeSlotID: first.id,
-                autoSpeakSlotID: first.id,
+                autoSpeakSlotIDs: [first.id],
+                activeSlotAutoSpeakEnabled: true,
                 currentSpeakingSlotID: second.id,
                 activeSlotSupportsSpeech: true
             ),
@@ -633,7 +635,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.setSpeechPresentation(
             SpeechRailPresentation(
                 activeSlotID: profile.id,
-                autoSpeakSlotID: nil,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
                 currentSpeakingSlotID: nil,
                 activeSlotSupportsSpeech: false
             ),
@@ -648,6 +651,30 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 $0.toolTip == "Speech is currently available for ChatGPT tabs."
             }
         )
+    }
+
+    func testUnsupportedArmedActiveTabKeepsAutoControlEnabledSoItCanBeDisarmed() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: nil,
+                activeSlotSupportsSpeech: false
+            ),
+            activeTabName: profile.name
+        )
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        let auto = try! XCTUnwrap(controls.first(where: { $0.kind == .autoSpeak }))
+        let read = try! XCTUnwrap(controls.first(where: { $0.kind == .readLatest }))
+        XCTAssertTrue(auto.isEnabledForSpeechPresentationState)
+        XCTAssertTrue(auto.isAutoSpeakEnabledForPresentation)
+        XCTAssertFalse(read.isEnabledForSpeechPresentationState)
+        XCTAssertTrue(auto.toolTip?.contains("Disable Auto Speak This Tab") == true)
     }
 
     private func makeZoneHarness() -> (host: NSView, zone: ExternalControlZoneView) {

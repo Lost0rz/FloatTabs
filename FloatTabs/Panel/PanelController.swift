@@ -421,13 +421,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
         speechService: SpeechSynthesizing? = nil,
+        speechPreferencesStore: SpeechPreferencesStore? = nil,
+        speechVoiceCatalog: SpeechVoiceCatalogProviding? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter()
-        self.speechService = speechService ?? SpeechService()
+        let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
+        let resolvedSpeechVoiceCatalog = speechVoiceCatalog ?? SpeechVoiceCatalog()
+        self.speechService = speechService ?? SpeechService(
+            preferences: resolvedSpeechPreferences,
+            voiceCatalog: resolvedSpeechVoiceCatalog
+        )
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
@@ -704,8 +711,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func toggleAutoSpeakForActiveTab() {
-        guard let slotID = tabStore.activeTabID,
-              activeSlotSupportsSpeech(slotID: slotID) else {
+        guard let slotID = tabStore.activeTabID else {
+            NSSound.beep()
+            synchronizeSpeechPresentation()
+            return
+        }
+        let canToggle = activeSlotSupportsSpeech(slotID: slotID)
+            || assistantSpeechCoordinator.autoSpeakSlotIDs.contains(slotID)
+        guard canToggle else {
             NSSound.beep()
             synchronizeSpeechPresentation()
             return
@@ -1445,8 +1458,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             .tabView(for: slotID)?.isShowingReadyAttention ?? false
     }
 
-    var debugAutoSpeakSlotID: UUID? {
-        assistantSpeechCoordinator.autoSpeakSlotID
+    var debugAutoSpeakSlotIDs: Set<UUID> {
+        assistantSpeechCoordinator.autoSpeakSlotIDs
     }
 
     var debugCurrentSpeakingSlotID: UUID? {
@@ -1973,7 +1986,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.externalControlZoneView.setSpeechPresentation(
             SpeechRailPresentation(
                 activeSlotID: activeSlotID,
-                autoSpeakSlotID: assistantSpeechCoordinator.autoSpeakSlotID,
+                autoSpeakSlotIDs: assistantSpeechCoordinator.autoSpeakSlotIDs,
+                activeSlotAutoSpeakEnabled: activeSlotID.map {
+                    assistantSpeechCoordinator.autoSpeakSlotIDs.contains($0)
+                } ?? false,
                 currentSpeakingSlotID: assistantSpeechCoordinator.currentSpeakingSlotID,
                 activeSlotSupportsSpeech: activeSlotID.map {
                     activeSlotSupportsSpeech(slotID: $0)

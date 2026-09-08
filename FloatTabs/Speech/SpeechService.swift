@@ -5,7 +5,7 @@ import Foundation
 protocol SpeechSynthesizing: AnyObject {
     var onUtteranceFinished: ((UInt64) -> Void)? { get set }
 
-    func speak(_ text: String, token: UInt64)
+    func speak(_ request: SpeechUtteranceRequest)
     func stop()
 }
 
@@ -14,21 +14,33 @@ protocol SpeechSynthesizing: AnyObject {
 @MainActor
 final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
+    private let preferences: SpeechPreferencesStore
+    private let voiceCatalog: SpeechVoiceCatalogProviding
     private var playbackTokens: [ObjectIdentifier: UInt64] = [:]
 
     var onUtteranceFinished: ((UInt64) -> Void)?
 
-    override init() {
+    init(
+        preferences: SpeechPreferencesStore = SpeechPreferencesStore(),
+        voiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog()
+    ) {
+        self.preferences = preferences
+        self.voiceCatalog = voiceCatalog
         super.init()
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String, token: UInt64) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    func speak(_ request: SpeechUtteranceRequest) {
+        guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        let utterance = AVSpeechUtterance(string: text)
-        playbackTokens[ObjectIdentifier(utterance)] = token
+        let utterance = AVSpeechUtterance(string: request.text)
+        utterance.voice = voiceCatalog.voice(
+            for: request.languageRole,
+            preferences: preferences
+        )
+        utterance.rate = preferences.speechRate
+        playbackTokens[ObjectIdentifier(utterance)] = request.token
         synthesizer.speak(utterance)
     }
 

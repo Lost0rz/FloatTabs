@@ -13,6 +13,8 @@ final class AppCoordinator {
         category: "WebsiteCache"
     )
     private let panelController: PanelController
+    private let speechPreferencesStore: SpeechPreferencesStore
+    private let speechVoiceCatalog: SpeechVoiceCatalog
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
@@ -55,12 +57,16 @@ final class AppCoordinator {
         }
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
+        let resolvedSpeechPreferencesStore = SpeechPreferencesStore()
+        let resolvedSpeechVoiceCatalog = SpeechVoiceCatalog()
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
         // they are created. Apply the stored appearance before PanelController
         // builds any windows/views so a saved Dark choice cannot be cached as
         // Aqua white until the next appearance transition.
         resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
+        self.speechPreferencesStore = resolvedSpeechPreferencesStore
+        self.speechVoiceCatalog = resolvedSpeechVoiceCatalog
         self.backupService = backupService
         self.attentionSoundPlayer = attentionSoundPlayer
         self.websiteCacheUsageStore = WebsiteCacheUsageStore()
@@ -93,7 +99,9 @@ final class AppCoordinator {
                 tabStore: tabStore,
                 webViewPool: webViewPool,
                 attentionCoordinator: attentionCoordinator,
-                preferencesStore: resolvedPreferencesStore
+                preferencesStore: resolvedPreferencesStore,
+                speechPreferencesStore: resolvedSpeechPreferencesStore,
+                speechVoiceCatalog: resolvedSpeechVoiceCatalog
             )
         }
     }
@@ -109,6 +117,8 @@ final class AppCoordinator {
 
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
+            speechPreferencesStore: speechPreferencesStore,
+            speechVoiceCatalog: speechVoiceCatalog,
             attentionSoundPlayer: attentionSoundPlayer,
             onExportBackup: { [weak self] url in
                 guard let self else { throw FloatTabsBackupError.restoreFailed }

@@ -10,6 +10,19 @@ struct SpeechQueueItem: Equatable, Sendable {
     let responseID: SpeechResponseIdentity
     let sequence: UInt64
     let text: String
+    let languageRole: SpeechLanguageRole
+
+    init(
+        responseID: SpeechResponseIdentity,
+        sequence: UInt64,
+        text: String,
+        languageRole: SpeechLanguageRole = .automatic
+    ) {
+        self.responseID = responseID
+        self.sequence = sequence
+        self.text = text
+        self.languageRole = languageRole
+    }
 }
 
 struct SpeechQueue {
@@ -22,25 +35,72 @@ struct SpeechQueue {
 
     var isEmpty: Bool { items.isEmpty }
 
+    /// Compatibility spelling for replacement semantics. Manual reads use
+    /// `replace`; automatic completions must use `append`.
     mutating func enqueue(
         responseID: SpeechResponseIdentity,
         segments: [String],
         startingSequence: UInt64
     ) {
-        // A newly extracted response takes priority over unfinished pending
-        // segments from an older response. The current AVSpeech utterance is
-        // stopped by the coordinator before this method is called.
+        replace(
+            responseID: responseID,
+            requests: segments.enumerated().map { offset, segment in
+                SpeechUtteranceRequest(
+                    text: segment,
+                    token: startingSequence + UInt64(offset),
+                    languageRole: .automatic
+                )
+            }
+        )
+    }
+
+    mutating func replace(
+        responseID: SpeechResponseIdentity,
+        requests: [SpeechUtteranceRequest]
+    ) {
         items.removeAll()
-        for (offset, segment) in segments.prefix(maximumPendingSegments).enumerated() {
-            guard !segment.isEmpty else { continue }
+        appendItems(
+            responseID: responseID,
+            requests: requests,
+            limit: maximumPendingSegments
+        )
+    }
+
+    @discardableResult
+    mutating func append(
+        responseID: SpeechResponseIdentity,
+        requests: [SpeechUtteranceRequest]
+    ) -> Int {
+        appendItems(
+            responseID: responseID,
+            requests: requests,
+            limit: maximumPendingSegments - items.count
+        )
+    }
+
+    @discardableResult
+    private mutating func appendItems(
+        responseID: SpeechResponseIdentity,
+        requests: [SpeechUtteranceRequest],
+        limit: Int
+    ) -> Int {
+        guard limit > 0 else { return 0 }
+        var appended = 0
+        for request in requests where appended < limit {
+            guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                continue
+            }
             items.append(
                 SpeechQueueItem(
                     responseID: responseID,
-                    sequence: startingSequence + UInt64(offset),
-                    text: segment
+                    sequence: request.token,
+                    text: request.text,
+                    languageRole: request.languageRole
                 )
             )
+            appended += 1
         }
+        return appended
     }
 
     mutating func dequeue() -> SpeechQueueItem? {

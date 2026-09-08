@@ -35,6 +35,41 @@ final class SpeechQueueTests: XCTestCase {
         XCTAssertEqual(queue.dequeue()?.text, "new")
     }
 
+    func testAppendPreservesExistingPendingSegmentsAcrossResponses() {
+        var queue = SpeechQueue(maximumPendingSegments: 4)
+        queue.append(
+            responseID: responseA,
+            requests: [
+                SpeechUtteranceRequest(text: "A one", token: 0, languageRole: .english),
+                SpeechUtteranceRequest(text: "A two", token: 1, languageRole: .english),
+            ]
+        )
+        queue.append(
+            responseID: responseB,
+            requests: [
+                SpeechUtteranceRequest(text: "B one", token: 2, languageRole: .chinese),
+            ]
+        )
+
+        XCTAssertEqual(queue.items.map(\.text), ["A one", "A two", "B one"])
+        XCTAssertEqual(queue.items.map(\.languageRole), [.english, .english, .chinese])
+    }
+
+    func testAppendIsBoundedByPendingSegmentCapacity() {
+        var queue = SpeechQueue(maximumPendingSegments: 2)
+        let appended = queue.append(
+            responseID: responseA,
+            requests: [
+                SpeechUtteranceRequest(text: "one", token: 0, languageRole: .english),
+                SpeechUtteranceRequest(text: "two", token: 1, languageRole: .english),
+                SpeechUtteranceRequest(text: "three", token: 2, languageRole: .english),
+            ]
+        )
+
+        XCTAssertEqual(appended, 2)
+        XCTAssertEqual(queue.items.count, 2)
+    }
+
     func testQueueIsBounded() {
         var queue = SpeechQueue(maximumPendingSegments: 2)
         queue.enqueue(

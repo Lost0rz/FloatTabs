@@ -8,7 +8,8 @@ enum SpeechRequestOrigin: Equatable, Sendable {
 
 struct SpeechRailPresentation: Equatable, Sendable {
     let activeSlotID: UUID?
-    let autoSpeakSlotID: UUID?
+    let autoSpeakSlotIDs: Set<UUID>
+    let activeSlotAutoSpeakEnabled: Bool
     let currentSpeakingSlotID: UUID?
     let activeSlotSupportsSpeech: Bool
 }
@@ -20,6 +21,7 @@ final class AssistantSpeechCoordinator {
     private struct ExtractionRequest {
         let generation: UInt64
         let stopEpoch: UInt64
+        let playbackIntentEpoch: UInt64
         let webView: WKWebView
         let origin: SpeechRequestOrigin
     }
@@ -30,6 +32,7 @@ final class AssistantSpeechCoordinator {
     private var extractionRequests: [UUID: ExtractionRequest] = [:]
     private var nextGeneration: UInt64 = 0
     private var stopEpoch: UInt64 = 0
+    private var playbackIntentEpoch: UInt64 = 0
     private var nextSequence: UInt64 = 0
     private var spokenResponses: [UUID: Set<SpeechResponseIdentity>] = [:]
     private var suppressedResponses: [UUID: Set<SpeechResponseIdentity>] = [:]
@@ -37,7 +40,7 @@ final class AssistantSpeechCoordinator {
     private var currentItem: SpeechQueueItem?
     private var speechQueue = SpeechQueue()
 
-    private(set) var autoSpeakSlotID: UUID?
+    private(set) var autoSpeakSlotIDs = Set<UUID>()
     private(set) var currentSpeakingSlotID: UUID?
     var onSpeechPresentationChange: (() -> Void)?
 
@@ -79,7 +82,7 @@ final class AssistantSpeechCoordinator {
         case .generationStarted:
             break
         case .generationFinished:
-            guard autoSpeakSlotID == slotID else { return }
+            guard autoSpeakSlotIDs.contains(slotID) else { return }
             requestLatestResponse(for: slotID, origin: .automatic)
         case .runtimeReset:
             resetRuntime(slotID: slotID)
@@ -87,7 +90,11 @@ final class AssistantSpeechCoordinator {
     }
 
     func toggleAutoSpeak(for slotID: UUID) {
-        autoSpeakSlotID = autoSpeakSlotID == slotID ? nil : slotID
+        if autoSpeakSlotIDs.contains(slotID) {
+            autoSpeakSlotIDs.remove(slotID)
+        } else {
+            autoSpeakSlotIDs.insert(slotID)
+        }
         onSpeechPresentationChange?()
     }
 
@@ -95,12 +102,27 @@ final class AssistantSpeechCoordinator {
     /// without an armed automatic source. It is also an explicit replay
     /// command, so the automatic dedupe/suppression sets do not block it.
     func readLatestResponse(for slotID: UUID) {
+        playbackIntentEpoch &+= 1
+        suppressCurrentAndPendingSpeech()
+        speechQueue.clear()
+        currentItem = nil
+        speechService.stop()
+        setCurrentSpeakingSlot(nil)
         requestLatestResponse(for: slotID, origin: .manual)
     }
 
     /// Stop is local to speech. It never sends a cancellation to ChatGPT.
     func stop() {
         stopEpoch &+= 1
+        playbackIntentEpoch &+= 1
+        suppressCurrentAndPendingSpeech()
+        speechQueue.clear()
+        currentItem = nil
+        speechService.stop()
+        setCurrentSpeakingSlot(nil)
+    }
+
+    private func suppressCurrentAndPendingSpeech() {
         if let currentItem {
             suppressedResponses[currentItem.responseID.slotID, default: []].insert(
                 currentItem.responseID
@@ -109,10 +131,6 @@ final class AssistantSpeechCoordinator {
         for item in speechQueue.items {
             suppressedResponses[item.responseID.slotID, default: []].insert(item.responseID)
         }
-        speechQueue.clear()
-        currentItem = nil
-        speechService.stop()
-        setCurrentSpeakingSlot(nil)
     }
 
     /// Resets only transient WebView/document state. An armed Slot remains
@@ -126,9 +144,7 @@ final class AssistantSpeechCoordinator {
     /// only this path clears the session-scoped Auto Speak source.
     func removeSlot(slotID: UUID) {
         resetRuntimeState(slotID: slotID)
-        if autoSpeakSlotID == slotID {
-            autoSpeakSlotID = nil
-        }
+        autoSpeakSlotIDs.remove(slotID)
         onSpeechPresentationChange?()
     }
 
@@ -140,6 +156,7 @@ final class AssistantSpeechCoordinator {
             currentItem = nil
             speechService.stop()
             setCurrentSpeakingSlot(nil)
+            speakNext()
         }
         spokenResponses.removeValue(forKey: slotID)
         suppressedResponses.removeValue(forKey: slotID)
@@ -159,6 +176,7 @@ final class AssistantSpeechCoordinator {
         let request = ExtractionRequest(
             generation: nextGeneration,
             stopEpoch: stopEpoch,
+            playbackIntentEpoch: playbackIntentEpoch,
             webView: webView,
             origin: origin
         )
@@ -176,6 +194,9 @@ final class AssistantSpeechCoordinator {
                 return
             }
             self.extractionRequests.removeValue(forKey: slotID)
+            guard request.playbackIntentEpoch == self.playbackIntentEpoch else {
+                return
+            }
             guard let payload,
                   let responseID = payload.responseID else {
                 return
@@ -212,22 +233,23 @@ final class AssistantSpeechCoordinator {
         }
 
         let cleaned = SpeechContentCleaner.clean(blocks)
-        let segments = SpeechSegmenter.segment(cleaned)
-        guard !segments.isEmpty else { return }
-
-        if currentItem != nil {
-            currentItem = nil
-            speechService.stop()
-        }
-        speechQueue.enqueue(
-            responseID: identity,
-            segments: segments,
-            startingSequence: nextSequence
+        let requests = SpeechLanguageRouter.utteranceRequests(
+            for: cleaned,
+            startingToken: nextSequence
         )
-        nextSequence += UInt64(segments.count)
+        guard !requests.isEmpty else { return }
+
         if origin == .automatic {
+            let appended = speechQueue.append(
+                responseID: identity,
+                requests: requests
+            )
+            guard appended > 0 else { return }
             spokenResponses[identity.slotID, default: []].insert(identity)
+        } else {
+            speechQueue.replace(responseID: identity, requests: requests)
         }
+        nextSequence &+= UInt64(requests.count)
         speakNext()
     }
 
@@ -238,7 +260,13 @@ final class AssistantSpeechCoordinator {
         }
         currentItem = item
         setCurrentSpeakingSlot(item.responseID.slotID)
-        speechService.speak(item.text, token: item.sequence)
+        speechService.speak(
+            SpeechUtteranceRequest(
+                text: item.text,
+                token: item.sequence,
+                languageRole: item.languageRole
+            )
+        )
     }
 
     private func setCurrentSpeakingSlot(_ slotID: UUID?) {

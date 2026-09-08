@@ -122,6 +122,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias RestoreBackupHandler = (URL) throws -> URL
 
     private let preferencesStore: AppPreferencesStore
+    private let speechPreferencesStore: SpeechPreferencesStore
+    private let speechVoiceCatalog: SpeechVoiceCatalogProviding
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
     private let onRestoreBackup: RestoreBackupHandler
@@ -131,6 +133,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
 
     init(
         preferencesStore: AppPreferencesStore,
+        speechPreferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
+        speechVoiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
@@ -138,6 +142,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         websiteCacheManager: WebsiteCacheManagementClient = .unavailable
     ) {
         self.preferencesStore = preferencesStore
+        self.speechPreferencesStore = speechPreferencesStore
+        self.speechVoiceCatalog = speechVoiceCatalog
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
         self.onRestoreBackup = onRestoreBackup
@@ -188,6 +194,15 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             to: tabs
         )
         addTab(
+            title: "Speech",
+            symbol: "speaker.wave.2",
+            controller: SpeechSettingsViewController(
+                preferencesStore: speechPreferencesStore,
+                voiceCatalog: speechVoiceCatalog
+            ),
+            to: tabs
+        )
+        addTab(
             title: "Shortcuts",
             symbol: "keyboard",
             controller: ShortcutsSettingsViewController(),
@@ -225,6 +240,301 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         item.label = title
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         tabs.addTabViewItem(item)
+    }
+}
+
+@MainActor
+final class SpeechSettingsViewController: NSViewController {
+    private let preferencesStore: SpeechPreferencesStore
+    private let voiceCatalog: SpeechVoiceCatalogProviding
+    private let previewService: SpeechSynthesizing
+    private let systemSettingsOpener: (URL) -> Bool
+
+    let chineseVoicePopup = NSPopUpButton()
+    let englishVoicePopup = NSPopUpButton()
+    let speechRateSlider = NSSlider(
+        value: Double(SpeechPreferencesStore.defaultSpeechRate),
+        minValue: Double(SpeechPreferencesStore.minimumSpeechRate),
+        maxValue: Double(SpeechPreferencesStore.maximumSpeechRate),
+        target: nil,
+        action: nil
+    )
+    let chinesePreviewButton = NSButton(title: "中文试听", target: nil, action: nil)
+    let englishPreviewButton = NSButton(title: "English Preview", target: nil, action: nil)
+    let mixedPreviewButton = NSButton(title: "Mixed Language Preview", target: nil, action: nil)
+    let refreshVoicesButton = NSButton(title: "Refresh Voices", target: nil, action: nil)
+    let manageHighQualityVoicesButton = NSButton(
+        title: "Manage High-Quality Voices…",
+        target: nil,
+        action: nil
+    )
+    private let speechRateValueLabel = NSTextField(labelWithString: "0.50")
+    private var previewToken: UInt64 = 0
+    private(set) var lastSystemSettingsOpenResult = false
+
+    init(
+        preferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
+        voiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
+        previewService: SpeechSynthesizing? = nil,
+        systemSettingsOpener: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }
+    ) {
+        self.preferencesStore = preferencesStore
+        self.voiceCatalog = voiceCatalog
+        self.previewService = previewService ?? SpeechService(
+            preferences: preferencesStore,
+            voiceCatalog: voiceCatalog
+        )
+        self.systemSettingsOpener = systemSettingsOpener
+        super.init(nibName: nil, bundle: nil)
+        title = "Speech"
+        voiceCatalog.onVoicesChanged = { [weak self] in
+            self?.synchronizeControls()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let root = NSView()
+
+        configureVoicePopup(chineseVoicePopup, role: .chinese)
+        configureVoicePopup(englishVoicePopup, role: .english)
+        chineseVoicePopup.target = self
+        chineseVoicePopup.action = #selector(chineseVoiceChanged(_:))
+        englishVoicePopup.target = self
+        englishVoicePopup.action = #selector(englishVoiceChanged(_:))
+
+        speechRateSlider.target = self
+        speechRateSlider.action = #selector(speechRateChanged(_:))
+        speechRateSlider.isContinuous = false
+        speechRateSlider.widthAnchor.constraint(equalToConstant: 250).isActive = true
+        speechRateValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        speechRateValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        chinesePreviewButton.target = self
+        chinesePreviewButton.action = #selector(chinesePreview(_:))
+        englishPreviewButton.target = self
+        englishPreviewButton.action = #selector(englishPreview(_:))
+        mixedPreviewButton.target = self
+        mixedPreviewButton.action = #selector(mixedPreview(_:))
+        refreshVoicesButton.target = self
+        refreshVoicesButton.action = #selector(refreshVoices(_:))
+        manageHighQualityVoicesButton.target = self
+        manageHighQualityVoicesButton.action = #selector(manageHighQualityVoices(_:))
+
+        let rateControls = NSStackView(views: [
+            NSTextField(labelWithString: "Slow"),
+            speechRateSlider,
+            NSTextField(labelWithString: "Fast"),
+            speechRateValueLabel,
+        ])
+        rateControls.orientation = .horizontal
+        rateControls.alignment = .centerY
+        rateControls.spacing = 8
+
+        let previewControls = NSStackView(views: [
+            chinesePreviewButton,
+            englishPreviewButton,
+            mixedPreviewButton,
+        ])
+        previewControls.orientation = .horizontal
+        previewControls.alignment = .centerY
+        previewControls.spacing = 8
+
+        let voiceActions = NSStackView(views: [
+            refreshVoicesButton,
+            manageHighQualityVoicesButton,
+        ])
+        voiceActions.orientation = .horizontal
+        voiceActions.alignment = .centerY
+        voiceActions.spacing = 8
+
+        let stack = NSStackView(views: [
+            Self.titleLabel("ChatGPT Speech"),
+            Self.detailLabel(
+                "Choose Apple voices and speaking rate for cleaned ChatGPT responses. "
+                    + "Auto Speak and Read Latest are controlled per Tab from the left rail."
+            ),
+            Self.spacer(8),
+            makeRow(label: "Chinese Voice", control: chineseVoicePopup),
+            makeRow(label: "English Voice", control: englishVoicePopup),
+            makeRow(label: "Speech Rate", control: rateControls),
+            Self.spacer(4),
+            previewControls,
+            Self.spacer(4),
+            voiceActions,
+            Self.detailLabel(
+                "Manage High-Quality Voices opens macOS System Settings. "
+                    + "If a direct Read & Speak link is unavailable, use Accessibility → "
+                    + "Read & Speak → System Voice → Manage Voices."
+            ),
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+        ])
+
+        view = root
+        synchronizeControls()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        voiceCatalog.refresh()
+        synchronizeControls()
+    }
+
+    @objc func chineseVoiceChanged(_ sender: NSPopUpButton) {
+        preferencesStore.setVoiceIdentifier(
+            sender.selectedItem?.representedObject as? String,
+            for: .chinese
+        )
+    }
+
+    @objc func englishVoiceChanged(_ sender: NSPopUpButton) {
+        preferencesStore.setVoiceIdentifier(
+            sender.selectedItem?.representedObject as? String,
+            for: .english
+        )
+    }
+
+    @objc func speechRateChanged(_ sender: NSSlider) {
+        preferencesStore.speechRate = Float(sender.doubleValue)
+        updateSpeechRateLabel()
+    }
+
+    @objc func chinesePreview(_ sender: NSButton) {
+        playPreview("这是 FloatTabs 中文语音测试。")
+    }
+
+    @objc func englishPreview(_ sender: NSButton) {
+        playPreview("This is a FloatTabs English voice test.")
+    }
+
+    @objc func mixedPreview(_ sender: NSButton) {
+        playPreview("这是中文测试。This is an English test.继续中文内容。")
+    }
+
+    @objc func refreshVoices(_ sender: NSButton) {
+        voiceCatalog.refresh()
+        synchronizeControls()
+    }
+
+    @objc func manageHighQualityVoices(_ sender: NSButton) {
+        lastSystemSettingsOpenResult = SpeechSystemSettings.openHighQualityVoices(
+            using: systemSettingsOpener
+        )
+    }
+
+    private func playPreview(_ text: String) {
+        previewToken &+= 1
+        previewService.stop()
+        let requests = SpeechLanguageRouter.utteranceRequests(
+            for: text,
+            startingToken: previewToken << 8
+        )
+        for request in requests {
+            previewService.speak(request)
+        }
+    }
+
+    private func configureVoicePopup(
+        _ popup: NSPopUpButton,
+        role: SpeechLanguageRole
+    ) {
+        popup.removeAllItems()
+        popup.addItem(withTitle: "System Automatic")
+        for voice in voiceCatalog.voices(for: role) {
+            popup.addItem(withTitle: voice.displayName(for: role))
+            popup.lastItem?.representedObject = voice.identifier
+        }
+    }
+
+    private func synchronizeControls() {
+        guard isViewLoaded else { return }
+        configureVoicePopup(chineseVoicePopup, role: .chinese)
+        configureVoicePopup(englishVoicePopup, role: .english)
+        selectVoice(
+            in: chineseVoicePopup,
+            identifier: preferencesStore.chineseVoiceIdentifier,
+            role: .chinese
+        )
+        selectVoice(
+            in: englishVoicePopup,
+            identifier: preferencesStore.englishVoiceIdentifier,
+            role: .english
+        )
+        speechRateSlider.doubleValue = Double(preferencesStore.speechRate)
+        updateSpeechRateLabel()
+        // System Automatic remains a valid route even when the catalog is
+        // temporarily empty while macOS refreshes its downloadable voices.
+        chinesePreviewButton.isEnabled = true
+        englishPreviewButton.isEnabled = true
+        mixedPreviewButton.isEnabled = true
+    }
+
+    private func selectVoice(
+        in popup: NSPopUpButton,
+        identifier: String?,
+        role: SpeechLanguageRole
+    ) {
+        guard let identifier else {
+            popup.selectItem(at: 0)
+            return
+        }
+        guard let index = popup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String) == identifier
+        }) else {
+            preferencesStore.setVoiceIdentifier(nil, for: role)
+            popup.selectItem(at: 0)
+            return
+        }
+        popup.selectItem(at: index)
+    }
+
+    private func updateSpeechRateLabel() {
+        speechRateValueLabel.stringValue = String(format: "%.2f", preferencesStore.speechRate)
+    }
+
+    private func makeRow(label text: String, control: NSView) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 16
+        return row
+    }
+
+    private static func titleLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        return label
+    }
+
+    private static func detailLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 0
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+        return label
+    }
+
+    private static func spacer(_ height: CGFloat) -> NSView {
+        let view = NSView()
+        view.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return view
     }
 }
 

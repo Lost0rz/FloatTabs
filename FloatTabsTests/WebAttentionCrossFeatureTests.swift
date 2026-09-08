@@ -1877,16 +1877,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         committedURL = chatURL
         pool.onCommittedURLChange?(first.id, chatURL)
         controller.toggleAutoSpeakForActiveTab()
-        XCTAssertEqual(controller.debugAutoSpeakSlotID, first.id)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
 
         XCTAssertTrue(store.select(id: second.id))
         controller.toggleAutoSpeakForActiveTab()
-        XCTAssertEqual(controller.debugAutoSpeakSlotID, second.id)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id, second.id]))
 
         committedURL = unsupportedURL
         pool.onCommittedURLChange?(second.id, unsupportedURL)
         controller.toggleAutoSpeakForActiveTab()
-        XCTAssertEqual(controller.debugAutoSpeakSlotID, second.id)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
     }
 
     // MARK: 4.12 Factory user-content seam

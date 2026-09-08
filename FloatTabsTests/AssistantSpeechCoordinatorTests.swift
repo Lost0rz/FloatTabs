@@ -4,14 +4,18 @@ import XCTest
 
 @MainActor
 private final class TestSpeechService: SpeechSynthesizing {
-    private(set) var spoken: [String] = []
-    private(set) var spokenTokens: [UInt64] = []
+    private(set) var spokenRequests: [SpeechUtteranceRequest] = []
     private(set) var stopCount = 0
     var onUtteranceFinished: ((UInt64) -> Void)?
 
-    func speak(_ text: String, token: UInt64) {
-        spoken.append(text)
-        spokenTokens.append(token)
+    var spoken: [String] { spokenRequests.map(\.text) }
+    var spokenTokens: [UInt64] { spokenRequests.map(\.token) }
+    var spokenLanguageRoles: [SpeechLanguageRole] {
+        spokenRequests.map(\.languageRole)
+    }
+
+    func speak(_ request: SpeechUtteranceRequest) {
+        spokenRequests.append(request)
     }
 
     func stop() {
@@ -85,7 +89,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
             webView: WKWebView()
         )
 
-        XCTAssertNil(coordinator.autoSpeakSlotID)
+        XCTAssertTrue(coordinator.autoSpeakSlotIDs.isEmpty)
         coordinator.handle(ChatGPTAttentionObservation.generationFinished, for: UUID())
         XCTAssertEqual(bridge.requestCount, 0)
     }
@@ -128,7 +132,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         bridge.resolve(makePayload(text: "Current response."))
 
         XCTAssertEqual(service.spoken, ["Current response.", "Current response."])
-        XCTAssertEqual(service.stopCount, 1)
+        XCTAssertEqual(service.stopCount, 2)
     }
 
     func testNextResponseCanSpeakAfterStop() {
@@ -237,7 +241,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.pendingQueueCount, 0)
     }
 
-    func testSupersedeIgnoresOldFinishUntilNewTokenFinishes() {
+    func testAutomaticResponsesAppendWithoutInterruptingCurrentUtterance() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()
         let slotID = UUID()
@@ -254,13 +258,16 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         coordinator.handle(.generationFinished, for: slotID)
         bridge.resolve(makePayload(responseID: "document-a:response-b", text: "B one. B two."))
-        let tokenB = service.spokenTokens[1]
-        XCTAssertEqual(service.spoken, ["A one.", "B one."])
+        XCTAssertEqual(service.spoken, ["A one."])
 
         service.finish(token: tokenA)
-        XCTAssertEqual(service.spoken, ["A one.", "B one."])
+        XCTAssertEqual(service.spoken, ["A one.", "A two."])
+        let tokenATwo = service.spokenTokens[1]
+        service.finish(token: tokenATwo)
+        XCTAssertEqual(service.spoken, ["A one.", "A two.", "B one."])
+        let tokenB = service.spokenTokens[2]
         service.finish(token: tokenB)
-        XCTAssertEqual(service.spoken, ["A one.", "B one.", "B two."])
+        XCTAssertEqual(service.spoken, ["A one.", "A two.", "B one.", "B two."])
     }
 
     func testCancelledUtteranceDoesNotAdvanceQueue() {
@@ -347,7 +354,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(service.spoken, ["New."])
     }
 
-    func testAutoSpeakSourceSwitchesAtomicallyBetweenSlots() {
+    func testMultipleAutoSpeakSlotsRemainArmedAndUseCompletionOrderFIFO() {
         let service = TestSpeechService()
         let slotA = UUID()
         let slotB = UUID()
@@ -365,17 +372,122 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
             }
         )
         coordinator.toggleAutoSpeak(for: slotA)
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotA)
         coordinator.toggleAutoSpeak(for: slotB)
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotB)
+        XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotA, slotB]))
 
         coordinator.handle(.generationFinished, for: slotA)
         coordinator.handle(.generationFinished, for: slotB)
-        XCTAssertEqual(bridgeA.requestCount, 0)
+        XCTAssertEqual(bridgeA.requestCount, 1)
         XCTAssertEqual(bridgeB.requestCount, 1)
+        bridgeA.resolve(makePayload(responseID: "document-a:a", text: "A."))
+        XCTAssertEqual(service.spoken, ["A."])
         bridgeB.resolve(makePayload(responseID: "document-b:b", text: "B."))
+        XCTAssertEqual(service.spoken, ["A."])
+        service.finish(token: service.spokenTokens[0])
 
-        XCTAssertEqual(service.spoken, ["B."])
+        XCTAssertEqual(service.spoken, ["A.", "B."])
+    }
+
+    func testManualReadInvalidatesPendingAutomaticFromAnotherSlot() {
+        let service = TestSpeechService()
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { slotID in slotID == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { slotID in slotID == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        coordinator.readLatestResponse(for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:manual", text: "B manual."))
+        XCTAssertEqual(service.spoken, ["B manual."])
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotB)
+
+        bridgeA.resolve(makePayload(responseID: "document-a:stale", text: "A stale."))
+
+        XCTAssertEqual(service.spoken, ["B manual."])
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotB)
+    }
+
+    func testAutomaticCompletionAfterManualReadQueuesBehindManualSpeech() {
+        let service = TestSpeechService()
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { slotID in slotID == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { slotID in slotID == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+
+        coordinator.readLatestResponse(for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:manual", text: "B manual."))
+        let manualToken = service.spokenTokens[0]
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:new", text: "A automatic."))
+
+        XCTAssertEqual(service.spoken, ["B manual."])
+        service.finish(token: manualToken)
+        XCTAssertEqual(service.spoken, ["B manual.", "A automatic."])
+    }
+
+    func testManualReadReplacesCurrentAndPendingAutomaticSpeech() {
+        let service = TestSpeechService()
+        let slotA = UUID()
+        let slotB = UUID()
+        let slotC = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let bridgeC = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let webViewC = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { slotID in
+                switch slotID {
+                case slotA: return webViewA
+                case slotB: return webViewB
+                default: return webViewC
+                }
+            },
+            responseBridgeProvider: { slotID in
+                switch slotID {
+                case slotA: return bridgeA
+                case slotB: return bridgeB
+                default: return bridgeC
+                }
+            }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:a", text: "A one. A two."))
+        let staleToken = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:b", text: "B pending."))
+
+        coordinator.readLatestResponse(for: slotC)
+        bridgeC.resolve(makePayload(responseID: "document-c:c", text: "C manual."))
+
+        XCTAssertEqual(service.spoken, ["A one.", "C manual."])
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotC)
+        XCTAssertEqual(coordinator.pendingQueueCount, 0)
+
+        service.finish(token: staleToken)
+        XCTAssertEqual(service.spoken, ["A one.", "C manual."])
     }
 
     func testManualReadWorksWhenAutomaticModeIsOff() {
@@ -427,7 +539,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         coordinator.toggleAutoSpeak(for: slotID)
         coordinator.toggleAutoSpeak(for: slotID)
 
-        XCTAssertNil(coordinator.autoSpeakSlotID)
+        XCTAssertTrue(coordinator.autoSpeakSlotIDs.isEmpty)
         coordinator.handle(.generationFinished, for: slotID)
         XCTAssertEqual(bridge.requestCount, 0)
     }
@@ -449,7 +561,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         bridge.resolve(makePayload(responseID: "document-a:reply", text: "Replay me."))
 
         XCTAssertEqual(service.spoken, ["Replay me.", "Replay me."])
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotID)
+        XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotID]))
     }
 
     func testStopSuppressesAutomaticRerenderButManualReplayBypassesSuppression() {
@@ -478,7 +590,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         coordinator.handle(.generationFinished, for: slotID)
         bridge.resolve(makePayload(responseID: "document-a:reply", text: "Replay me."))
         XCTAssertEqual(service.spoken, ["Replay me.", "Replay me."])
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotID)
+        XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotID]))
     }
 
     func testStopPreservesAutoSpeakSourceAndNextResponseSpeaks() {
@@ -495,7 +607,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         bridge.resolve(makePayload(responseID: "document-a:old", text: "Old."))
 
         coordinator.stop()
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotID)
+        XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotID]))
 
         coordinator.handle(.generationFinished, for: slotID)
         bridge.resolve(makePayload(responseID: "document-a:new", text: "New."))
@@ -517,7 +629,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         coordinator.resetRuntime(slotID: slotID)
 
-        XCTAssertEqual(coordinator.autoSpeakSlotID, slotID)
+        XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotID]))
         XCTAssertNil(coordinator.currentSpeakingSlotID)
         XCTAssertEqual(coordinator.pendingQueueCount, 0)
     }
@@ -535,7 +647,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         coordinator.removeSlot(slotID: slotID)
 
-        XCTAssertNil(coordinator.autoSpeakSlotID)
+        XCTAssertTrue(coordinator.autoSpeakSlotIDs.isEmpty)
     }
 
     func testCurrentSpeakingSlotProjectionTracksStartFinishAndStop() {

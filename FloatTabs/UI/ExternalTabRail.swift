@@ -266,8 +266,8 @@ final class SpeechRailControl: NSView {
                 : "Auto Speak for \(target)"
             tooltip = isEnabledForPresentation
                 ? (isAutoSpeakEnabled
-                    ? "Stop Auto Speaking This Tab · \(target)"
-                    : "Auto Speak This Tab · \(target)")
+                    ? "Disable Auto Speak This Tab · \(target)"
+                    : "Auto Speak This Tab — speaks new responses after they finish · \(target)")
                 : "Speech is currently available for ChatGPT tabs."
         case .readLatest:
             symbol = isCurrentlySpeaking ? "stop.fill" : "play.fill"
@@ -611,13 +611,12 @@ final class ExternalControlZoneView: NSView {
         activeTabName: String? = nil
     ) {
         let currentActive = presentation.activeSlotID
-        let isAutoSpeakEnabled = currentActive != nil
-            && currentActive == presentation.autoSpeakSlotID
+        let isAutoSpeakEnabled = presentation.activeSlotAutoSpeakEnabled
         let isCurrentlySpeaking = currentActive != nil
             && currentActive == presentation.currentSpeakingSlotID
         let targetName = activeTabName ?? currentActive.map { $0.uuidString }
         autoSpeakControl.setSpeechState(
-            isEnabled: presentation.activeSlotSupportsSpeech,
+            isEnabled: presentation.activeSlotSupportsSpeech || isAutoSpeakEnabled,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             isCurrentlySpeaking: isCurrentlySpeaking,
             activeTabName: targetName
@@ -630,7 +629,7 @@ final class ExternalControlZoneView: NSView {
         )
         for tab in tabViews.values {
             tab.setSpeechState(
-                isAutoSpeakSource: tab.slotID == presentation.autoSpeakSlotID,
+                isAutoSpeakSource: presentation.autoSpeakSlotIDs.contains(tab.slotID),
                 isCurrentlySpeaking: tab.slotID == presentation.currentSpeakingSlotID
             )
         }
