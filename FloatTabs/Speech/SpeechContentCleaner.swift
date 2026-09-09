@@ -144,16 +144,42 @@ enum SpeechContentCleaner {
         }
         text = replaceLongURLs(in: text)
         text = replaceLongPaths(in: text)
-        text = text
-            .split(whereSeparator: { $0.isWhitespace })
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if block.kind == .richText {
+            text = normalizePreformattedReadableText(text)
+        } else {
+            text = text
+                .split(whereSeparator: { $0.isWhitespace })
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
         guard !text.isEmpty,
               SpeechSpeakabilityFilter.containsSpeakableContent(text) else {
             return nil
         }
         return text
+    }
+
+    private static func normalizePreformattedReadableText(_ text: String) -> String {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var normalized: [String] = []
+        var blankRun = 0
+        for line in lines {
+            if line.isEmpty {
+                if blankRun == 0 { normalized.append("") }
+                blankRun += 1
+            } else {
+                blankRun = 0
+                normalized.append(String(line))
+            }
+        }
+        return normalized
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func cleanMathSource(_ text: String) -> String? {

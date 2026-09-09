@@ -181,6 +181,32 @@ final class SpeechContentCleanerTests: XCTestCase {
         XCTAssertNotNil(SpeechContentCleaner.clean(blocks[1]))
     }
 
+    func testPreformattedRichTextPreservesLineBoundariesWithoutIndentation() {
+        let block = SpeechContentBlock(
+            kind: .richText,
+            text: "    considering ...\n    考虑到 / 鉴于……\n\n        the next explanation",
+            level: nil
+        )
+
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(block),
+            "considering ...\n考虑到 / 鉴于……\n\nthe next explanation"
+        )
+    }
+
+    func testInlineCodeInReadableProseRemainsReadable() {
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "The `considering` phrase modifies the whole clause.",
+                    level: nil
+                )
+            ),
+            "The considering phrase modifies the whole clause."
+        )
+    }
+
     func testCleaningPreservesTransientSourceLocator() {
         let locator = SpeechSourceLocator(
             documentToken: "document-12345678",

@@ -248,6 +248,144 @@ enum ChatGPTResponseExtraction {
             return (clone.textContent || '').replace(/\\s+/g, ' ').trim();
           };
 
+          const normalizePreformattedLines = (value) => {
+            const lines = (value || '')
+              .replace(/\\r\\n?/g, '\\n')
+              .split('\\n');
+            const normalized = [];
+            let blankRun = 0;
+            lines.forEach((line) => {
+              const content = line.replace(/^[\\t ]+|[\\t ]+$/g, '');
+              if (!content) {
+                if (blankRun === 0) normalized.push('');
+                blankRun += 1;
+                return;
+              }
+              blankRun = 0;
+              normalized.push(content);
+            });
+            while (normalized[0] === '') normalized.shift();
+            while (normalized[normalized.length - 1] === '') normalized.pop();
+            return normalized.join('\\n');
+          };
+
+          const preformattedTextWithoutControls = (element) => {
+            const clone = element.cloneNode(true);
+            clone.querySelectorAll(excludedSelector).forEach((node) => node.remove());
+            const lineNodes = Array.from(clone.querySelectorAll(
+              '.cm-line,[data-line],[data-line-number]'
+            ));
+            const source = lineNodes.length
+              ? lineNodes.map((line) => line.textContent || '').join('\\n')
+              : (clone.textContent || '');
+            return normalizePreformattedLines(source);
+          };
+
+          const preformattedMetadata = (element) => {
+            const nodes = [element].concat(
+              Array.from(element.querySelectorAll ? element.querySelectorAll('*') : [])
+            );
+            return nodes.flatMap((node) => {
+              const className = typeof node.className === 'string' ? node.className : '';
+              return [
+                className,
+                node.getAttribute && node.getAttribute('data-language'),
+                node.getAttribute && node.getAttribute('data-code-language')
+              ].filter(Boolean);
+            });
+          };
+
+          const machineLanguageNames = new Set([
+            'bash', 'c', 'cpp', 'csharp', 'diff', 'go', 'java', 'javascript',
+            'js', 'json', 'kotlin', 'log', 'objc', 'perl', 'php', 'python',
+            'py', 'ruby', 'rust', 'shell', 'sh', 'swift', 'typescript', 'ts',
+            'xml', 'yaml', 'zsh'
+          ]);
+
+          const explicitMachineLanguage = (metadata) => metadata.some((value) => {
+            const tokens = value.toLowerCase().split(/\\s+/).filter(Boolean);
+            return tokens.some((token) => {
+              const language = token.startsWith('language-')
+                ? token.slice('language-'.length)
+                : token;
+              return language !== 'text'
+                && language !== 'plaintext'
+                && machineLanguageNames.has(language);
+            });
+          });
+
+          const isClearlyJSON = (text) => {
+            if (!/^[\\[{]/.test(text)) return false;
+            try {
+              const value = JSON.parse(text);
+              return Array.isArray(value)
+                || (value !== null && typeof value === 'object');
+            } catch (_) {
+              return false;
+            }
+          };
+
+          const classifyPreformattedContent = (element, text) => {
+            const metadata = preformattedMetadata(element);
+            if (explicitMachineLanguage(metadata)) return 'machineContent';
+
+            const trimmed = text.trim();
+            if (!trimmed) return 'naturalLanguage';
+            if (isClearlyJSON(trimmed)) return 'machineContent';
+
+            const lines = trimmed.split('\\n');
+            const diffLines = lines.filter((line) =>
+              /^\\s*diff --git\\s+\\S+\\s+\\S+/.test(line)
+                || /^\\s*---\\s+\\S+/.test(line)
+                || /^\\s*\\+\\+\\+\\s+\\S+/.test(line)
+                || /^\\s*@@\\s+/.test(line)
+            );
+            if (lines.some((line) => /^\\s*diff --git\\s+/.test(line))
+                && (diffLines.length >= 2 || lines.some((line) => /^\\s*@@\\s+/.test(line)))) {
+              return 'machineContent';
+            }
+
+            const stackLines = lines.filter((line) =>
+              /^\\s*Traceback(?: \\(.*\\))?(?:\\s*:?|\\s+\\.{3})$/.test(line)
+                || /^\\s*at\\s+\\S+/.test(line)
+                || /^\\s*[A-Za-z0-9_.]+(?:Exception|Error):/.test(line)
+            );
+            if (stackLines.length >= 2
+                && (lines.some((line) => /^\\s*Traceback/.test(line))
+                  || lines.some((line) => /(?:Exception|Error):/.test(line)))) {
+              return 'machineContent';
+            }
+
+            const shellPromptLines = lines.filter((line) =>
+              /^\\s*(?:[$%]\\s+\\S|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+(?::\\S+)?\\s*[#$]\\s+\\S|PS\\s+[^>]+>\\s+\\S)/.test(line)
+            );
+            const shellCommandLines = lines.filter((line) =>
+              /^\\s*(?:git|npm|pnpm|yarn|curl|xcodebuild|python3?|swift|make|cargo|brew|docker|node)\\b(?:\\s|$)/.test(line)
+            );
+            if (shellPromptLines.length >= 2
+                || (shellCommandLines.length >= 2
+                  && shellCommandLines.length * 2 >= lines.length)) {
+              return 'machineContent';
+            }
+
+            const sourceDeclarationLines = lines.filter((line) =>
+              /^\\s*(?:func|function|def|class|struct|enum|interface|import|export|const|let|var)\\b/.test(line)
+            );
+            const sourceSyntaxLines = lines.filter((line) =>
+              /[{};]|=>|\\breturn\\b|\\b(?:print|console\\.log)\\s*\\(|\\b(?:func|function|def)\\s+\\w+\\s*\\(|^\\s*(?:const|let|var)\\s+\\w+\\s*=/.test(line)
+            );
+            if (lines.length >= 2
+                && sourceDeclarationLines.length >= 1
+                && sourceSyntaxLines.length >= 2
+                && sourceSyntaxLines.length * 2 >= lines.length) {
+              return 'machineContent';
+            }
+
+            // In ambiguous cases, readable words or Han characters win over
+            // presentation syntax. A pre tag is not a content classification.
+            return 'naturalLanguage';
+          };
+
           const isCanonicalMathRoot = (element) => {
             if (!element.matches || !element.matches(mathSelector)) return false;
             if (!isRendered(element)) return false;
@@ -378,6 +516,30 @@ enum ChatGPTResponseExtraction {
             return pieces;
           };
 
+          const splitBoundedPreformattedText = (value) => {
+            const lines = normalizePreformattedLines(value).split('\\n');
+            const pieces = [];
+            let current = [];
+            const flush = () => {
+              const piece = current.join('\\n').trim();
+              if (piece) pieces.push(piece);
+              current = [];
+            };
+
+            lines.forEach((line) => {
+              if (line.length > MAX_BLOCK_TEXT) {
+                flush();
+                splitBoundedText(line).forEach((piece) => pieces.push(piece));
+                return;
+              }
+              const candidate = current.concat(line).join('\\n');
+              if (current.length && candidate.length > MAX_BLOCK_TEXT) flush();
+              current.push(line);
+            });
+            flush();
+            return pieces;
+          };
+
           const appendTextPart = (parts, kind, text, level, sourceElement) => {
             const value = (text || '').replace(/\\s+/g, ' ').trim();
             if (!value) return;
@@ -431,10 +593,25 @@ enum ChatGPTResponseExtraction {
 
           const appendSemanticBlock = (element, blocks) => {
             const tag = element.tagName.toLowerCase();
-            if (tag === 'pre' || tag === 'table') {
+            if (tag === 'pre') {
+              const text = preformattedTextWithoutControls(element);
+              const kind = classifyPreformattedContent(element, text) === 'machineContent'
+                ? 'code'
+                : 'richText';
+              splitBoundedPreformattedText(text).forEach((piece) => {
+                blocks.push({
+                  kind: kind,
+                  text: piece,
+                  level: null,
+                  sourceElement: element
+                });
+              });
+              return;
+            }
+            if (tag === 'table') {
               splitBoundedText(textWithoutControls(element)).forEach((text) => {
                 blocks.push({
-                  kind: tag === 'pre' ? 'code' : 'table',
+                  kind: 'table',
                   text: text,
                   level: null,
                   sourceElement: element

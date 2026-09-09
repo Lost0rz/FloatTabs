@@ -1557,6 +1557,43 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         ])
     }
 
+    func testFollowScrollsPreformattedRichTextOnceAcrossLineSegments() {
+        let service = TestSpeechService()
+        let responseBridge = TestResponseBridge()
+        let followBridge = TestFollowBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: responseBridge,
+            webView: WKWebView(),
+            followBridge: followBridge,
+            activeSlotIDProvider: { slotID }
+        )
+        coordinator.readLatestResponse(for: slotID)
+        responseBridge.resolve(makeFollowPayload(blocks: [
+            SpeechContentBlock(
+                kind: .richText,
+                text: "This is the first line.\n这是第二行。\nThis is the third line.",
+                level: nil
+            ),
+        ]))
+
+        XCTAssertEqual(followBridge.locators.map(\.blockID), [
+            "document-a-follow:response-a:block-0",
+        ])
+        service.finish(token: service.spokenTokens[0])
+        service.finish(token: service.spokenTokens[1])
+        service.finish(token: service.spokenTokens[2])
+        XCTAssertEqual(service.spoken, [
+            "This is the first line.",
+            "这是第二行。",
+            "This is the third line.",
+        ])
+        XCTAssertEqual(followBridge.locators.map(\.blockID), [
+            "document-a-follow:response-a:block-0",
+        ])
+    }
+
     func testFollowPreservesMathRichAndComplexFallbackLocators() {
         let service = TestSpeechService()
         let responseBridge = TestResponseBridge()

@@ -527,6 +527,131 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(Set(mathBlocks.compactMap(\.sourceLocator).map(\.responseID)).count, 1)
     }
 
+    func testPreformattedNaturalLanguageIsReadWithMeaningfulLineBoundaries() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-preformatted-prose">
+          <p>Opening paragraph.</p>
+          <pre><code><div class="cm-content">
+            <div class="cm-line">This isn't surprising,</div>
+            <div class="cm-line">这并不奇怪,</div>
+            <div class="cm-line"></div>
+            <div class="cm-line">considering the context,</div>
+            <div class="cm-line">考虑到上下文,</div>
+            <div class="cm-line">the basic mandatory high school curriculum</div>
+            <div class="cm-line">基础的、强制性的高中课程</div>
+            <div class="cm-line">leaves students with</div>
+            <div class="cm-line">使学生留下</div>
+            <div class="cm-line">a poor understanding of</div>
+            <div class="cm-line">对……缺乏充分了解</div>
+            <div class="cm-line">the vast academic possibilities</div>
+            <div class="cm-line">大量的学术可能性</div>
+            <div class="cm-line">that await them in college</div>
+            <div class="cm-line">他们进入大学后将会面对的</div>
+            <button>Copy</button>
+          </div></code></pre>
+        </div>
+        """)
+        await page.settle()
+
+        let blocks = await page.extract()?.blocks ?? []
+        XCTAssertEqual(blocks.map(\.kind), [.paragraph, .richText])
+        guard let richText = blocks.last else {
+            return XCTFail("Expected a readable preformatted block")
+        }
+        XCTAssertFalse(richText.text.contains("Copy"))
+        XCTAssertTrue(richText.text.contains("This isn't surprising,\n这并不奇怪,"))
+        XCTAssertTrue(richText.text.contains("curriculum\n基础的、强制性的高中课程"))
+
+        let cleaned = SpeechContentCleaner.cleanBlocks(blocks)
+        XCTAssertEqual(cleaned.map(\.kind), [.paragraph, .richText])
+        XCTAssertTrue(cleaned.last?.text.contains("considering the context,\n考虑到上下文,") == true)
+        XCTAssertFalse(cleaned.last?.text.contains("    ") == true)
+
+        let requests = SpeechLanguageRouter.utteranceRequests(for: blocks)
+        let requestText = requests.map(\.text).joined(separator: "\n")
+        for line in [
+            "This isn't surprising",
+            "considering",
+            "the basic mandatory high school curriculum",
+            "leaves students with",
+            "a poor understanding of",
+            "the vast academic possibilities",
+            "that await them in college",
+            "这并不奇怪",
+            "考虑到上下文",
+            "基础的、强制性的高中课程",
+            "使学生留下",
+            "对……缺乏充分了解",
+            "大量的学术可能性",
+            "他们进入大学后将会面对的",
+        ] {
+            XCTAssertTrue(requestText.contains(line), "Missing readable line: \(line)")
+        }
+
+        let richRequests = requests.filter { $0.sourceLocator == richText.sourceLocator }
+        XCTAssertGreaterThan(richRequests.count, 1)
+        XCTAssertEqual(Set(richRequests.compactMap(\.sourceLocator)).count, 1)
+        XCTAssertTrue(richRequests.contains { $0.languageRole == .english })
+        XCTAssertTrue(richRequests.contains { $0.languageRole == .chinese })
+    }
+
+    func testPreformattedMachineContentRemainsSkippedAcrossSupportedSignals() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-machine-preformatted">
+          <pre><code data-language="swift">func greet(name: String) {
+            print("Hello \\(name)")
+          }</code></pre>
+          <pre><code class="language-javascript">const value = 1;
+            console.log(value);</code></pre>
+          <pre><code class="language-python">def foo():
+            return 1</code></pre>
+          <pre><code class="language-shell">$ git status
+            $ git log --oneline</code></pre>
+          <pre><code class="language-json">{
+            "status": "ok",
+            "count": 3
+          }</code></pre>
+          <pre><code class="language-text">Traceback (most recent call last):
+            at Foo.bar
+          Exception: synthetic failure</code></pre>
+          <pre><code class="language-text">diff --git a/a.swift b/a.swift
+          --- a/a.swift
+          +++ b/a.swift
+          @@ -1 +1 @@</code></pre>
+        </div>
+        """)
+        await page.settle()
+
+        let blocks = await page.extract()?.blocks ?? []
+        XCTAssertEqual(blocks.count, 7)
+        XCTAssertTrue(blocks.allSatisfy { $0.kind == .code })
+        XCTAssertTrue(SpeechContentCleaner.cleanBlocks(blocks).isEmpty)
+    }
+
+    func testAmbiguousPreformattedProseAndInlineCodeRemainReadable() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-ambiguous-prose">
+          <pre><code class="language-text"><div class="cm-line">[Important] This sentence matters.</div>
+            <div class="cm-line">A = B because the two sides are equal.</div>
+            <div class="cm-line">if you consider the context, the answer changes.</div>
+          </code></pre>
+          <p>The <code>considering</code> phrase modifies the whole clause.</p>
+        </div>
+        """)
+        await page.settle()
+
+        let blocks = await page.extract()?.blocks ?? []
+        XCTAssertEqual(blocks.map(\.kind), [.richText, .paragraph])
+        let requests = SpeechLanguageRouter.utteranceRequests(for: blocks)
+        XCTAssertTrue(requests.contains { $0.text.contains("This sentence matters") })
+        XCTAssertTrue(requests.contains { $0.text.contains("A = B") })
+        XCTAssertTrue(requests.contains { $0.text.contains("if you consider") })
+        XCTAssertTrue(requests.contains { $0.text.contains("considering") })
+    }
+
     func testLongParagraphIsSplitWithoutSilentTextLoss() async {
         let page = ChatGPTResponsePageHarness()
         let words = (0..<1000).map { "word\($0)" }.joined(separator: " ")
