@@ -382,9 +382,8 @@ final class ExternalShellTests: XCTestCase {
 
         let tab = try! XCTUnwrap(zone.tabView(for: active.id))
         let pointInZone = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
 
-        XCTAssertTrue(zone.hitTest(pointInSuperview) === tab)
+        XCTAssertTrue(zone.hitTest(pointInZone) === tab)
     }
 
     func testBlankZoneDoesNotBecomeFullWidthInvisibleControl() {
@@ -404,8 +403,7 @@ final class ExternalShellTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
 
         let pointInZone = NSPoint(x: zone.addControlFrame.midX, y: zone.addControlFrame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        XCTAssertTrue(zone.hitTest(pointInSuperview) is AddWebAppControl)
+        XCTAssertTrue(zone.hitTest(pointInZone) is AddWebAppControl)
     }
 
     func testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState() {
@@ -415,8 +413,7 @@ final class ExternalShellTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
 
         let pointInZone = NSPoint(x: zone.pinControlFrame.midX, y: zone.pinControlFrame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        let pin = zone.hitTest(pointInSuperview) as? PinPanelControl
+        let pin = zone.hitTest(pointInZone) as? PinPanelControl
 
         XCTAssertNotNil(pin)
         XCTAssertTrue(pin?.isPinned == true)
@@ -592,8 +589,7 @@ final class ExternalShellTests: XCTestCase {
             x: zone.settingsControlFrame.midX,
             y: zone.settingsControlFrame.midY
         )
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        XCTAssertTrue(zone.hitTest(pointInSuperview) is GlobalSettingsControl)
+        XCTAssertTrue(zone.hitTest(pointInZone) is GlobalSettingsControl)
     }
 
     func testTabContextMenuStartsWithReturnToHome() {
@@ -923,8 +919,8 @@ final class ExternalShellTests: XCTestCase {
         for control: NSView in [tab, addControl, pinControl, settingsControl] {
             control.resetCursorRects()
             let center = NSPoint(x: control.bounds.midX, y: control.bounds.midY)
-            let centerInZoneSuperview = control.convert(center, to: root)
-            XCTAssertNotNil(root.externalControlZoneView.hitTest(centerInZoneSuperview))
+            let centerInZone = control.convert(center, to: root.externalControlZoneView)
+            XCTAssertNotNil(root.externalControlZoneView.hitTest(centerInZone))
         }
     }
 

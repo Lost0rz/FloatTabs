@@ -825,12 +825,172 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(auto.toolTip?.contains("Disable Auto Speak This Tab") == true)
     }
 
-    private func makeZoneHarness() -> (host: NSView, zone: ExternalControlZoneView) {
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: 820))
+    func testRailCapacityMatrixUsesCollisionFreeCompactOverflowLayout() {
+        let counts = [0, 1, 3, 4, 5, 9]
+        for count in counts {
+            let (host, zone) = makeZoneHarness(height: 400)
+            let profiles = (0..<count).map { index in
+                WebAppProfile(
+                    order: index,
+                    name: "Tab \(index)",
+                    homeURL: URL(string: "https://example.com/tab-\(index)")!
+                )
+            }
+            zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+            zone.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(
+                Set(zone.visibleTabIDs).union(zone.overflowTabIDs).count,
+                count
+            )
+            if count == 9 {
+                XCTAssertTrue(zone.isUsingCompactLayout)
+                XCTAssertFalse(zone.overflowTabIDs.isEmpty)
+                XCTAssertEqual(zone.overflowMenuItems.map(\.slotID), zone.overflowTabIDs)
+                XCTAssertTrue(zone.overflowControlAccessibilityLabel?.contains("More Tabs") == true)
+            }
+
+            assertRailFramesAreCollisionFree(zone, host: host)
+
+            zone.setCollapsed(true, animated: false)
+            let collapsedViews = railActionableViews(in: zone)
+            XCTAssertTrue(collapsedViews.allSatisfy(\.isHidden))
+
+            zone.setCollapsed(false, animated: false)
+            zone.layoutSubtreeIfNeeded()
+            assertRailFramesAreCollisionFree(zone, host: host)
+        }
+
+        let (defaultHost, defaultZone) = makeZoneHarness(height: 820)
+        let defaultProfiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Default Tab \(index)",
+                homeURL: URL(string: "https://example.com/default-\(index)")!
+            )
+        }
+        defaultZone.apply(profiles: defaultProfiles, activeTabID: defaultProfiles.first?.id)
+        defaultZone.layoutSubtreeIfNeeded()
+        XCTAssertFalse(defaultZone.isUsingCompactLayout)
+        XCTAssertTrue(defaultZone.overflowTabIDs.isEmpty)
+        XCTAssertEqual(defaultZone.visibleTabIDs.count, 9)
+        assertRailFramesAreCollisionFree(defaultZone, host: defaultHost)
+    }
+
+    func testCompactRailKeepsSpeechActionsSeparateAndAccessible() {
+        let (_, zone) = makeZoneHarness(height: 400)
+        let profiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Speech Tab \(index)",
+                homeURL: URL(string: "https://example.com/speech-\(index)")!
+            )
+        }
+        zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profiles[0].id,
+                autoSpeakSlotIDs: [profiles[0].id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profiles[0].id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profiles[0].name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        XCTAssertEqual(controls.count, 4)
+        XCTAssertTrue(controls.contains { $0.kind == .autoSpeak })
+        XCTAssertTrue(controls.contains { $0.kind == .readLatest })
+        XCTAssertTrue(controls.contains { $0.kind == .replay })
+        XCTAssertTrue(controls.contains { $0.kind == .stop })
+        XCTAssertTrue(controls.allSatisfy { !$0.isHidden && !$0.frame.isEmpty })
+        XCTAssertEqual(Set(controls.compactMap { $0.toolTip }).count, controls.count)
+        for control in controls {
+            XCTAssertTrue(control.accessibilityLabel()?.isEmpty == false)
+        }
+        for (index, first) in controls.enumerated() {
+            for second in controls.dropFirst(index + 1) {
+                XCTAssertFalse(first.frame.intersects(second.frame))
+            }
+        }
+        XCTAssertTrue(
+            controls.contains {
+                $0.kind == .readLatest && $0.toolTip?.contains("Pause Speech") == true
+            }
+        )
+        XCTAssertTrue(
+            controls.contains {
+                $0.kind == .stop && $0.toolTip?.contains("Stop Speech") == true
+            }
+        )
+    }
+
+    private func makeZoneHarness(height: CGFloat = 820) -> (host: NSView, zone: ExternalControlZoneView) {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: height))
         let zone = ExternalControlZoneView(frame: host.bounds)
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)
+    }
+
+    private func railActionableViews(in zone: ExternalControlZoneView) -> [NSView] {
+        zone.subviews.filter { view in
+            view is ExternalWebAppTabView
+                || view is AddWebAppControl
+                || view is SpeechRailControl
+                || view is GlobalSettingsControl
+                || view is PinPanelControl
+                || view is RailOverflowControl
+        }
+    }
+
+    private func assertRailFramesAreCollisionFree(
+        _ zone: ExternalControlZoneView,
+        host: NSView,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let visible = railActionableViews(in: zone).filter {
+            !$0.isHidden && !$0.frame.isEmpty
+        }
+        for view in visible {
+            XCTAssertTrue(
+                zone.bounds.contains(view.frame),
+                "Visible rail control must stay inside rail bounds: \(view)",
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(
+                view.hitTest(view.bounds.midPoint) === view,
+                "Visible rail control must own its hit target",
+                file: file,
+                line: line
+            )
+        }
+        for (index, first) in visible.enumerated() {
+            for second in visible.dropFirst(index + 1) {
+                XCTAssertFalse(
+                    first.frame.intersects(second.frame),
+                    "Rail controls must not overlap: \(first) / \(second)",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+
+        let exclusions = zone.movementExclusionRects(in: host)
+        for view in visible {
+            let frameInHost = view.convert(view.bounds, to: host)
+            XCTAssertTrue(
+                exclusions.contains(where: { $0 == frameInHost }),
+                "Movement exclusion must match visible control frame",
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func synchronize(

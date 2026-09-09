@@ -739,6 +739,80 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.map(\.text), ["A", "x", "B", "y", "C"])
     }
 
+    func testExtractionBoundary1023BlocksSucceedsCompletely() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load(responseHTML(blockCount: 1023, id: "reply-1023"))
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.count, 1023)
+        XCTAssertEqual(payload?.blocks.first?.text, "block-0")
+        XCTAssertEqual(payload?.blocks.last?.text, "block-1022")
+    }
+
+    func testExtractionBoundary1024BlocksSucceedsCompletely() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load(responseHTML(blockCount: 1024, id: "reply-1024"))
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.count, 1024)
+        XCTAssertEqual(payload?.blocks.first?.text, "block-0")
+        XCTAssertEqual(payload?.blocks.last?.text, "block-1023")
+    }
+
+    func testExtractionBoundary1025BlocksFailsClosedWithoutPartialPayload() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load(responseHTML(blockCount: 1025, id: "reply-1025"))
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertNil(payload)
+    }
+
+    func testOverflowDoesNotLeakPartialLocatorsAndNextResponseRecovers() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load(responseHTML(blockCount: 1, id: "reply-stable"))
+        await page.settle()
+
+        let stable = await page.extract()
+        guard let stableLocator = stable?.blocks.first?.sourceLocator else {
+            return XCTFail("Expected stable locator")
+        }
+        let appendedOverflow = await page.appendAssistantNode(
+            id: "reply-overflow",
+            bodyHTML: String(repeating: "<p>overflow</p>", count: 1025)
+        )
+        XCTAssertTrue(appendedOverflow)
+
+        let overflowPayload = await page.extract()
+        XCTAssertNil(overflowPayload)
+        let stableScroll = await page.scroll(stableLocator)
+        XCTAssertTrue(stableScroll)
+
+        let appendedRecovery = await page.appendAssistantNode(
+            id: "reply-recovered",
+            bodyHTML: "<p>Recovered response.</p>"
+        )
+        XCTAssertTrue(appendedRecovery)
+        let recovered = await page.extract()
+        XCTAssertEqual(recovered?.blocks.map(\.text), ["Recovered response."])
+    }
+
+    func testPreformattedSplitCrossing1024BoundaryFailsClosed() async {
+        let page = ChatGPTResponsePageHarness()
+        let longNaturalLanguageLine = String(repeating: "word ", count: 900)
+        page.load(
+            "<div data-message-author-role=\"assistant\" data-message-id=\"reply-pre-overflow\">"
+                + String(repeating: "<p>ordinary</p>", count: 1023)
+                + "<pre>\(longNaturalLanguageLine)</pre></div>"
+        )
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertNil(payload)
+    }
+
     func testNoAssistantMessageProducesEmptyExtraction() async {
         let page = ChatGPTResponsePageHarness()
         page.load("<div data-message-author-role=\"user\"><p>User text</p></div>")
@@ -746,5 +820,11 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
 
         let payload = await page.extract()
         XCTAssertNil(payload)
+    }
+
+    private func responseHTML(blockCount: Int, id: String) -> String {
+        "<div data-message-author-role=\"assistant\" data-message-id=\"\(id)\">"
+            + (0..<blockCount).map { "<p>block-\($0)</p>" }.joined()
+            + "</div>"
     }
 }

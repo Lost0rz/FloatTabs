@@ -368,6 +368,153 @@ final class SpeechRailControl: NSView {
     }
 }
 
+struct RailOverflowItem: Equatable {
+    let slotID: UUID
+    let title: String
+}
+
+/// Explicit compact-mode access to Tab views that cannot fit in the rail.
+/// This is a real button/menu surface, not a silently hidden action.
+@MainActor
+final class RailOverflowControl: NSView {
+    var onSelect: ((UUID) -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    private let imageView = NSImageView()
+    private var items: [RailOverflowItem] = []
+    private var trackingAreaReference: NSTrackingArea?
+
+    var menuItems: [RailOverflowItem] { items }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 13),
+            imageView.heightAnchor.constraint(equalToConstant: 13),
+        ])
+        setAccessibilityRole(.button)
+        refreshAppearance()
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        refreshAppearance(isHovered: true)
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        refreshAppearance(isHovered: false)
+        onPointerMoved?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard !items.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        makeMenu().popUp(
+            positioning: nil,
+            at: NSPoint(x: bounds.maxX, y: bounds.minY),
+            in: self
+        )
+    }
+
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        items.forEach { item in
+            let menuItem = NSMenuItem(
+                title: item.title,
+                action: #selector(selectTab(_:)),
+                keyEquivalent: ""
+            )
+            menuItem.target = self
+            menuItem.representedObject = item.slotID.uuidString
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func setItems(_ items: [RailOverflowItem]) {
+        self.items = items
+        let label = items.isEmpty
+            ? "More Tabs"
+            : "More Tabs (\(items.count) hidden)"
+        toolTip = label
+        setAccessibilityLabel(label)
+        imageView.image = NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: label
+        )
+        refreshAppearance()
+    }
+
+    func refreshAppearance(isHovered: Bool = false) {
+        imageView.contentTintColor = .labelColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlBackgroundColor
+                .blended(withFraction: isHovered ? 0.12 : 0.03, of: .labelColor)?
+                .withAlphaComponent(0.94)
+                .cgColor
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
+            layer?.borderWidth = 1
+        }
+    }
+
+    @objc private func selectTab(_ sender: NSMenuItem) {
+        guard let rawID = sender.representedObject as? String,
+              let slotID = UUID(uuidString: rawID) else {
+            return
+        }
+        onSelect?(slotID)
+    }
+}
+
 @MainActor
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
@@ -406,6 +553,7 @@ final class ExternalControlZoneView: NSView {
     private let stopControl = SpeechRailControl(kind: .stop)
     private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
+    private let tabOverflowControl = RailOverflowControl()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
@@ -415,6 +563,9 @@ final class ExternalControlZoneView: NSView {
     private var browserProfileDuplicationEnabled = true
     private var railVisibilityGeneration = 0
     private(set) var isRailCollapsed = false
+    private(set) var isUsingCompactLayout = false
+    private(set) var visibleTabIDs: [UUID] = []
+    private(set) var overflowTabIDs: [UUID] = []
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -432,6 +583,7 @@ final class ExternalControlZoneView: NSView {
         addSubview(stopControl)
         addSubview(settingsControl)
         addSubview(pinControl)
+        addSubview(tabOverflowControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
         autoSpeakControl.onActivate = { [weak self] in self?.onToggleAutoSpeak?() }
         readLatestControl.onActivate = { [weak self] in self?.onReadLatestResponse?() }
@@ -439,6 +591,7 @@ final class ExternalControlZoneView: NSView {
         stopControl.onActivate = { [weak self] in self?.onStopSpeech?() }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
+        tabOverflowControl.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         addControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
@@ -458,6 +611,9 @@ final class ExternalControlZoneView: NSView {
             self?.updateDockPointer(with: event)
         }
         pinControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        tabOverflowControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
     }
@@ -518,8 +674,19 @@ final class ExternalControlZoneView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let candidate = super.hitTest(point)
-        return candidate === self ? nil : candidate
+        guard bounds.contains(point) else { return nil }
+        for view in subviews.reversed() {
+            guard !view.isHidden,
+                  view.alphaValue > 0,
+                  view.frame.contains(point) else {
+                continue
+            }
+            let localPoint = view.convert(point, from: self)
+            if let candidate = view.hitTest(localPoint) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     func apply(profiles: [WebAppProfile], activeTabID: UUID?) {
@@ -607,6 +774,7 @@ final class ExternalControlZoneView: NSView {
         stopControl.refreshAppearance()
         settingsControl.refreshAppearance()
         pinControl.refreshAppearance()
+        tabOverflowControl.refreshAppearance()
     }
 
     func setCollapsed(_ collapsed: Bool, animated: Bool) {
@@ -618,7 +786,7 @@ final class ExternalControlZoneView: NSView {
         pointerY = nil
         synchronizeHoverState(at: nil)
 
-        let controls = railContentViews
+        let controls = railContentViews.filter { !isHiddenByOverflow($0) }
         controls.forEach { $0.isHidden = false }
 
         guard animated else {
@@ -736,7 +904,9 @@ final class ExternalControlZoneView: NSView {
         guard !isRailCollapsed,
               let activeTabID,
               let tab = tabViews[activeTabID],
-              tab.superview != nil else {
+              tab.superview != nil,
+              !tab.isHidden,
+              !tab.frame.isEmpty else {
             return nil
         }
         return tab.convert(tab.bounds, to: ancestor)
@@ -774,19 +944,38 @@ final class ExternalControlZoneView: NSView {
         stopControl.frame
     }
 
+    var tabOverflowControlFrame: NSRect {
+        tabOverflowControl.frame
+    }
+
+    var overflowMenuItems: [RailOverflowItem] {
+        tabOverflowControl.menuItems
+    }
+
+    var overflowControlAccessibilityLabel: String? {
+        tabOverflowControl.accessibilityLabel()
+    }
+
     private var railContentViews: [NSView] {
         Array(tabViews.values)
             + [
                 addControl, autoSpeakControl, readLatestControl, replayControl,
-                stopControl, settingsControl, pinControl,
+                stopControl, settingsControl, pinControl, tabOverflowControl,
             ]
+    }
+
+    private func isHiddenByOverflow(_ view: NSView) -> Bool {
+        if let tab = view as? ExternalWebAppTabView {
+            return overflowTabIDs.contains(tab.slotID)
+        }
+        return view === tabOverflowControl && overflowTabIDs.isEmpty
     }
 
     private func finishRailVisibility(generation: Int, collapsed: Bool) {
         guard generation == railVisibilityGeneration else { return }
         railContentViews.forEach {
             $0.alphaValue = collapsed ? 0 : 1
-            $0.isHidden = collapsed
+            $0.isHidden = collapsed || isHiddenByOverflow($0)
         }
         onActiveTabGeometryChange?()
     }
@@ -876,15 +1065,90 @@ final class ExternalControlZoneView: NSView {
             location.map { settingsControl.frame.contains($0) } ?? false
         )
         pinControl.setHovered(location.map { pinControl.frame.contains($0) } ?? false)
+        if let location {
+            tabOverflowControl.refreshAppearance(
+                isHovered: tabOverflowControl.frame.contains(location)
+            )
+        } else {
+            tabOverflowControl.refreshAppearance()
+        }
     }
 
     private func layoutControls(animated: Bool, duration: TimeInterval) {
         let updateFrames = {
-            var y = ExternalTabMetrics.topOffset
             let ids = self.previewOrderIDs ?? self.profiles.map(\.id)
+            let standardTabEnd = self.tabEndY(for: ids.count)
+            let standardControlsTop = max(
+                self.bounds.height
+                    - ExternalTabMetrics.systemControlBottomOffset
+                    - ExternalTabMetrics.systemControlHeight
+                    - 5 * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                0
+            )
+            let compact = standardTabEnd
+                + ExternalTabMetrics.addHeight
+                + ExternalTabMetrics.addGap
+                > standardControlsTop
+            self.isUsingCompactLayout = compact
 
+            var visibleIDs = ids
+            if compact {
+                let compactControlsTop = self.compactControlsTopY
+                let maximumAddBottom = max(
+                    compactControlsTop - ExternalTabMetrics.addGap,
+                    0
+                )
+                var visibleCount = ids.count
+                while visibleCount > 0 {
+                    let hasOverflow = visibleCount < ids.count
+                    let candidateAddY = self.tabEndY(for: visibleCount)
+                        + (hasOverflow
+                            ? ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
+                            : 0)
+                    if candidateAddY + ExternalTabMetrics.addHeight <= maximumAddBottom {
+                        break
+                    }
+                    visibleCount -= 1
+                }
+                visibleIDs = Array(ids.prefix(visibleCount))
+
+                // Selecting a hidden Tab must make that Tab visible in compact
+                // mode instead of leaving the selected page behind the menu.
+                if let activeTabID = self.activeTabID,
+                   ids.contains(activeTabID),
+                   !visibleIDs.contains(activeTabID),
+                   let replacement = visibleIDs.last {
+                    visibleIDs[visibleIDs.count - 1] = activeTabID
+                    if replacement == activeTabID {
+                        visibleIDs = ids.filter { visibleIDs.contains($0) }
+                    }
+                }
+                visibleIDs = ids.filter { visibleIDs.contains($0) }
+            }
+
+            let visibleSet = Set(visibleIDs)
+            let overflowIDs = ids.filter { !visibleSet.contains($0) }
+            self.visibleTabIDs = visibleIDs
+            self.overflowTabIDs = overflowIDs
+            self.tabOverflowControl.setItems(
+                overflowIDs.compactMap { id in
+                    guard let profile = self.profiles.first(where: { $0.id == id }) else {
+                        return nil
+                    }
+                    return RailOverflowItem(slotID: id, title: profile.name)
+                }
+            )
+
+            var y = ExternalTabMetrics.topOffset
             for id in ids {
                 guard let tab = self.tabViews[id] else { continue }
+                guard visibleSet.contains(id) else {
+                    tab.setDockInfluence(0)
+                    tab.isHidden = self.isRailCollapsed || overflowIDs.contains(id)
+                    self.setFrame(.zero, for: tab, animated: animated)
+                    continue
+                }
+                tab.isHidden = self.isRailCollapsed
                 let centerY = y + ExternalTabMetrics.tabHeight / 2
                 let influence = self.pointerY.map {
                     ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
@@ -901,14 +1165,34 @@ final class ExternalControlZoneView: NSView {
                 y += ExternalTabMetrics.tabHeight + ExternalTabMetrics.tabGap
             }
 
-            if !ids.isEmpty {
+            if !visibleIDs.isEmpty {
                 y += ExternalTabMetrics.addGap - ExternalTabMetrics.tabGap
             }
 
+            if !overflowIDs.isEmpty {
+                let overflowFrame = self.attachedFrame(
+                    preferredWidth: ExternalTabMetrics.systemControlNormalWidth,
+                    y: y,
+                    height: ExternalTabMetrics.systemControlHeight
+                )
+                self.setFrame(
+                    overflowFrame,
+                    for: self.tabOverflowControl,
+                    animated: animated
+                )
+                self.tabOverflowControl.isHidden = self.isRailCollapsed
+                y += ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
+            } else {
+                self.tabOverflowControl.isHidden = true
+                self.setFrame(.zero, for: self.tabOverflowControl, animated: animated)
+            }
+
             let addCenterY = y + ExternalTabMetrics.addHeight / 2
-            let addInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - addCenterY)
-            } ?? 0
+            let addInfluence = compact
+                ? 0
+                : self.pointerY.map {
+                    ExternalTabMetrics.dockInfluence(forDistance: $0 - addCenterY)
+                } ?? 0
             self.addControl.setDockInfluence(addInfluence)
 
             let addFrame = self.attachedFrame(
@@ -918,114 +1202,11 @@ final class ExternalControlZoneView: NSView {
             )
             self.setFrame(addFrame, for: self.addControl, animated: animated)
 
-            let pinY = max(
-                self.bounds.height
-                    - ExternalTabMetrics.systemControlBottomOffset
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let pinCenterY = pinY + ExternalTabMetrics.systemControlHeight / 2
-            let pinInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - pinCenterY)
-            } ?? 0
-            self.pinControl.setDockInfluence(pinInfluence)
-            let pinFrame = self.attachedFrame(
-                preferredWidth: self.pinControl.preferredWidth,
-                y: pinY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(pinFrame, for: self.pinControl, animated: animated)
-
-            let settingsY = max(
-                pinY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let settingsCenterY = settingsY + ExternalTabMetrics.systemControlHeight / 2
-            let systemInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - settingsCenterY)
-            } ?? 0
-            self.settingsControl.setDockInfluence(systemInfluence)
-            let systemFrame = self.attachedFrame(
-                preferredWidth: self.settingsControl.preferredWidth,
-                y: settingsY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
-
-            let stopY = max(
-                settingsY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let stopCenterY = stopY + ExternalTabMetrics.systemControlHeight / 2
-            let stopInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - stopCenterY)
-            } ?? 0
-            self.stopControl.setDockInfluence(stopInfluence)
-            let stopFrame = self.attachedFrame(
-                preferredWidth: self.stopControl.preferredWidth,
-                y: stopY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(stopFrame, for: self.stopControl, animated: animated)
-
-            let replayY = max(
-                stopY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let replayCenterY = replayY + ExternalTabMetrics.systemControlHeight / 2
-            let replayInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - replayCenterY)
-            } ?? 0
-            self.replayControl.setDockInfluence(replayInfluence)
-            let replayFrame = self.attachedFrame(
-                preferredWidth: self.replayControl.preferredWidth,
-                y: replayY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(replayFrame, for: self.replayControl, animated: animated)
-
-            let readLatestY = max(
-                replayY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let readLatestCenterY = readLatestY + ExternalTabMetrics.systemControlHeight / 2
-            let readLatestInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - readLatestCenterY)
-            } ?? 0
-            self.readLatestControl.setDockInfluence(readLatestInfluence)
-            let readLatestFrame = self.attachedFrame(
-                preferredWidth: self.readLatestControl.preferredWidth,
-                y: readLatestY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(readLatestFrame, for: self.readLatestControl, animated: animated)
-
-            let autoSpeakY = max(
-                readLatestY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let autoSpeakCenterY = autoSpeakY + ExternalTabMetrics.systemControlHeight / 2
-            let autoSpeakInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - autoSpeakCenterY)
-            } ?? 0
-            self.autoSpeakControl.setDockInfluence(autoSpeakInfluence)
-            let autoSpeakFrame = self.attachedFrame(
-                preferredWidth: self.autoSpeakControl.preferredWidth,
-                y: autoSpeakY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(autoSpeakFrame, for: self.autoSpeakControl, animated: animated)
-
+            if compact {
+                self.layoutCompactSystemControls(animated: animated)
+            } else {
+                self.layoutStandardSystemControls(animated: animated)
+            }
         }
 
         guard animated else {
@@ -1043,6 +1224,114 @@ final class ExternalControlZoneView: NSView {
         onActiveTabGeometryChange?()
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.onActiveTabGeometryChange?()
+        }
+    }
+
+    private var compactControlsTopY: CGFloat {
+        max(
+            bounds.height
+                - ExternalTabMetrics.systemControlBottomOffset
+                - ExternalTabMetrics.systemControlHeight
+                - 2 * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+            0
+        )
+    }
+
+    private func tabEndY(for count: Int) -> CGFloat {
+        guard count > 0 else { return ExternalTabMetrics.topOffset }
+        return ExternalTabMetrics.topOffset
+            + CGFloat(count) * (ExternalTabMetrics.tabHeight + ExternalTabMetrics.tabGap)
+            + ExternalTabMetrics.addGap
+            - ExternalTabMetrics.tabGap
+    }
+
+    private func setDockInfluence(_ influence: CGFloat, for view: NSView) {
+        switch view {
+        case let control as SpeechRailControl:
+            control.setDockInfluence(influence)
+        case let control as AddWebAppControl:
+            control.setDockInfluence(influence)
+        case let control as GlobalSettingsControl:
+            control.setDockInfluence(influence)
+        case let control as PinPanelControl:
+            control.setDockInfluence(influence)
+        default:
+            break
+        }
+    }
+
+    private func preferredWidth(for view: NSView) -> CGFloat {
+        switch view {
+        case let control as SpeechRailControl:
+            return control.preferredWidth
+        case let control as AddWebAppControl:
+            return control.preferredWidth
+        case let control as GlobalSettingsControl:
+            return control.preferredWidth
+        case let control as PinPanelControl:
+            return control.preferredWidth
+        default:
+            return ExternalTabMetrics.systemControlNormalWidth
+        }
+    }
+
+    private func layoutStandardSystemControls(animated: Bool) {
+        var y = max(
+            bounds.height
+                - ExternalTabMetrics.systemControlBottomOffset
+                - ExternalTabMetrics.systemControlHeight,
+            0
+        )
+        let controls: [NSView] = [
+            pinControl, settingsControl, stopControl, replayControl,
+            readLatestControl, autoSpeakControl,
+        ]
+        for control in controls {
+            let centerY = y + ExternalTabMetrics.systemControlHeight / 2
+            let influence = pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
+            } ?? 0
+            setDockInfluence(influence, for: control)
+            setFrame(
+                attachedFrame(
+                    preferredWidth: preferredWidth(for: control),
+                    y: y,
+                    height: ExternalTabMetrics.systemControlHeight
+                ),
+                for: control,
+                animated: animated
+            )
+            y = max(
+                y
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+        }
+    }
+
+    private func layoutCompactSystemControls(animated: Bool) {
+        let width = min(
+            ExternalTabMetrics.systemControlNormalWidth,
+            max((bounds.width - ExternalTabMetrics.systemControlGap) / 2, 0)
+        )
+        let controls: [NSView] = [
+            autoSpeakControl, readLatestControl, replayControl,
+            stopControl, settingsControl, pinControl,
+        ]
+        for (index, control) in controls.enumerated() {
+            setDockInfluence(0, for: control)
+            let row = index / 2
+            let column = index % 2
+            let frame = NSRect(
+                x: CGFloat(column) * (width + ExternalTabMetrics.systemControlGap),
+                y: compactControlsTopY
+                    + CGFloat(row)
+                        * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                width: width,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            setFrame(frame, for: control, animated: animated)
         }
     }
 
@@ -1144,7 +1433,7 @@ final class RailFoldControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func updateTrackingAreas() {
@@ -1752,7 +2041,7 @@ final class ExternalWebAppTabView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -2512,7 +2801,7 @@ final class AddWebAppControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -2650,7 +2939,7 @@ final class PinPanelControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -2803,7 +3092,7 @@ final class GlobalSettingsControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {

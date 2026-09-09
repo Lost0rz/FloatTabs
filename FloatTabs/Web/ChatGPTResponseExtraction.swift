@@ -174,6 +174,9 @@ enum ChatGPTResponseExtraction {
           // document-lifetime registry unbounded.
           const MAX_RESPONSE_GROUPS = 128;
           const MAX_BLOCK_TEXT = 4000;
+          // Extraction probes one block beyond the wire limit so an oversized
+          // response can fail closed instead of being silently truncated.
+          const MAX_BLOCK_PROBE = MAX_BLOCKS + 1;
 
           const normalizedText = (element) => (element.textContent || '')
             .replace(/\\s+/g, ' ')
@@ -540,55 +543,81 @@ enum ChatGPTResponseExtraction {
             return pieces;
           };
 
+          // Keep one bounded append owner for every logical block-producing
+          // path. The extra probe block is retained only as overflow evidence;
+          // callers must discard the whole extraction when it is present.
+          const appendBounded = (target, additions) => {
+            if (!additions.length) return false;
+            const available = Math.max(MAX_BLOCK_PROBE - target.length, 0);
+            if (available > 0) target.push(...additions.slice(0, available));
+            return additions.length > available
+              || target.length > MAX_BLOCKS
+              || target.length + Math.max(additions.length - available, 0) > MAX_BLOCKS;
+          };
+
           const appendTextPart = (parts, kind, text, level, sourceElement) => {
             const value = (text || '').replace(/\\s+/g, ' ').trim();
-            if (!value) return;
+            if (!value) return false;
             const previous = parts[parts.length - 1];
             if (previous && previous.kind === kind && previous.level === level) {
               parts.pop();
-              splitBoundedText((previous.text + ' ' + value).trim()).forEach((piece) => {
-                parts.push({
+              return appendBounded(
+                parts,
+                splitBoundedText((previous.text + ' ' + value).trim()).map((piece) => ({
                   kind: kind,
                   text: piece,
                   level: level,
                   sourceElement: sourceElement
-                });
-              });
-            } else {
-              splitBoundedText(value).forEach((piece) => {
-                parts.push({
-                  kind: kind,
-                  text: piece,
-                  level: level,
-                  sourceElement: sourceElement
-                });
-              });
+                }))
+              );
             }
+            return appendBounded(
+              parts,
+              splitBoundedText(value).map((piece) => ({
+                kind: kind,
+                text: piece,
+                level: level,
+                sourceElement: sourceElement
+              }))
+            );
           };
 
           const appendInlineParts = (element, kind, level, parts, sourceElement = element) => {
+            let overflowed = false;
             element.childNodes.forEach((node) => {
+              if (overflowed) return;
               if (node.nodeType === Node.TEXT_NODE) {
-                appendTextPart(parts, kind, node.nodeValue || '', level, sourceElement);
+                overflowed = appendTextPart(
+                  parts,
+                  kind,
+                  node.nodeValue || '',
+                  level,
+                  sourceElement
+                ) || overflowed;
                 return;
               }
               if (node.nodeType !== Node.ELEMENT_NODE) return;
               if (isCanonicalMathRoot(node)) {
                 const source = mathSource(node);
-                parts.push({
+                overflowed = appendBounded(parts, [{
                   kind: mathKind(node),
                   text: source,
                   level: null,
                   sourceElement: node
-                });
+                }]) || overflowed;
                 return;
               }
               if (isExcluded(node)) return;
-              if (node.matches && node.matches(mathSelector)) {
-                return;
-              }
-              appendInlineParts(node, kind, level, parts, sourceElement);
+              if (node.matches && node.matches(mathSelector)) return;
+              overflowed = appendInlineParts(
+                node,
+                kind,
+                level,
+                parts,
+                sourceElement
+              ) || overflowed;
             });
+            return overflowed;
           };
 
           const appendSemanticBlock = (element, blocks) => {
@@ -598,26 +627,28 @@ enum ChatGPTResponseExtraction {
               const kind = classifyPreformattedContent(element, text) === 'machineContent'
                 ? 'code'
                 : 'richText';
+              let overflowed = false;
               splitBoundedPreformattedText(text).forEach((piece) => {
-                blocks.push({
+                overflowed = appendBounded(blocks, [{
                   kind: kind,
                   text: piece,
                   level: null,
                   sourceElement: element
-                });
+                }]) || overflowed;
               });
-              return;
+              return overflowed;
             }
             if (tag === 'table') {
+              let overflowed = false;
               splitBoundedText(textWithoutControls(element)).forEach((text) => {
-                blocks.push({
+                overflowed = appendBounded(blocks, [{
                   kind: 'table',
                   text: text,
                   level: null,
                   sourceElement: element
-                });
+                }]) || overflowed;
               });
-              return;
+              return overflowed;
             }
             let kind = 'paragraph';
             let level = null;
@@ -630,8 +661,11 @@ enum ChatGPTResponseExtraction {
               kind = 'quote';
             }
             const parts = [];
-            appendInlineParts(element, kind, level, parts);
-            if (parts.length) blocks.push(...parts);
+            let overflowed = appendInlineParts(element, kind, level, parts);
+            if (parts.length) {
+              overflowed = appendBounded(blocks, parts) || overflowed;
+            }
+            return overflowed;
           };
 
           const hasDirectText = (element) =>
@@ -645,33 +679,37 @@ enum ChatGPTResponseExtraction {
 
           const appendRichText = (element, blocks) => {
             const parts = [];
-            appendInlineParts(element, 'richText', null, parts, element);
-            if (parts.length) blocks.push(...parts);
+            let overflowed = appendInlineParts(element, 'richText', null, parts, element);
+            if (parts.length) {
+              overflowed = appendBounded(blocks, parts) || overflowed;
+            }
+            return overflowed;
           };
 
           const structuredBlocks = (root) => {
             const blocks = [];
+            let overflowed = false;
             const visit = (element) => {
-              if (blocks.length >= MAX_BLOCKS) return;
+              if (overflowed) return;
               if (isCanonicalMathRoot(element)) {
                 const source = mathSource(element);
-                blocks.push({
+                overflowed = appendBounded(blocks, [{
                   kind: mathKind(element),
                   text: source,
                   level: null,
                   sourceElement: element
-                });
+                }]) || overflowed;
                 return;
               }
               if (isExcluded(element)) return;
               if (element.matches && element.matches(semanticSelector)) {
-                appendSemanticBlock(element, blocks);
+                overflowed = appendSemanticBlock(element, blocks) || overflowed;
                 return;
               }
               if (element !== root
                   && hasDirectText(element)
                   && !hasSemanticDescendant(element)) {
-                appendRichText(element, blocks);
+                overflowed = appendRichText(element, blocks) || overflowed;
                 return;
               }
               element.childNodes.forEach((node) => {
@@ -679,14 +717,18 @@ enum ChatGPTResponseExtraction {
               });
             };
             visit(root);
-            if (blocks.length) return blocks.slice(0, MAX_BLOCKS);
+            if (overflowed) return null;
+            if (blocks.length) return blocks;
             const fallback = textWithoutControls(root);
-            return splitBoundedText(fallback).map((text) => ({
+            const fallbackBlocks = splitBoundedText(fallback).map((text) => ({
               kind: 'paragraph',
               text: text,
               level: null,
               sourceElement: root
             }));
+            const boundedFallback = [];
+            if (appendBounded(boundedFallback, fallbackBlocks)) return null;
+            return boundedFallback;
           };
 
           const postEmpty = (target, requestID) => {
@@ -798,7 +840,10 @@ enum ChatGPTResponseExtraction {
               return true;
             }
             const blocks = structuredBlocks(root);
-            if (!blocks.length) {
+            if (blocks === null || !blocks.length) {
+              // Overflow is intentionally represented as the existing empty
+              // bridge result. Swift maps it to nil, so no partial response,
+              // speech queue item, or new locator set can be created.
               postEmpty(target, requestID);
               return true;
             }
