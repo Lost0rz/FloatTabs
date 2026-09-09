@@ -271,6 +271,76 @@ enum ChatGPTResponseExtraction {
               ? 'mathBlock'
               : 'mathInline';
 
+          // Recover only a bounded, common MathML subset when ChatGPT does
+          // not expose TeX annotation/data attributes. This is structural
+          // parsing, not MathML.textContent flattening: superscripts,
+          // subscripts, fractions, roots, and fenced groups retain their
+          // semantic shape for the local speech normalizer.
+          const semanticMathMLSource = (element) => {
+            const math = element.matches && element.matches('math')
+              ? element
+              : element.querySelector && element.querySelector('math');
+            if (!math) return null;
+
+            const children = (node) => Array.from(node.children || [])
+              .map(render)
+              .filter(Boolean)
+              .join(' ')
+              .trim();
+            const compactLabel = (value) => (value || '')
+              .replace(/\\s+/g, '')
+              .trim();
+            const render = (node) => {
+              if (!node || node.nodeType !== Node.ELEMENT_NODE) return '';
+              const tag = node.tagName.toLowerCase();
+              if (tag === 'semantics') {
+                const semanticChild = Array.from(node.children || [])
+                  .find((child) => !['annotation', 'annotation-xml'].includes(
+                    child.tagName.toLowerCase()
+                  ));
+                return semanticChild ? render(semanticChild) : '';
+              }
+              if (tag === 'annotation' || tag === 'annotation-xml') return '';
+              if (['mi', 'mn', 'mo', 'mtext'].includes(tag)) {
+                return (node.textContent || '').replace(/\\s+/g, ' ').trim();
+              }
+              if (tag === 'msup') {
+                const values = Array.from(node.children || []).map(render);
+                return values.length >= 2 ? values[0] + '^{' + values[1] + '}' : '';
+              }
+              if (tag === 'msub') {
+                const values = Array.from(node.children || []).map(render);
+                return values.length >= 2
+                  ? values[0] + '_{' + compactLabel(values[1]) + '}'
+                  : '';
+              }
+              if (tag === 'msubsup') {
+                const values = Array.from(node.children || []).map(render);
+                return values.length >= 3
+                  ? values[0] + '_{' + compactLabel(values[1]) + '}^{' + values[2] + '}'
+                  : '';
+              }
+              if (tag === 'mfrac') {
+                const values = Array.from(node.children || []).map(render);
+                return values.length >= 2
+                  ? '(' + values[0] + ') / (' + values[1] + ')'
+                  : '';
+              }
+              if (tag === 'msqrt') {
+                return '√(' + children(node) + ')';
+              }
+              if (tag === 'mfenced') {
+                const open = node.getAttribute('open') || '(';
+                const close = node.getAttribute('close') || ')';
+                return open + children(node) + close;
+              }
+              return children(node);
+            };
+
+            const source = render(math).replace(/\\s+/g, ' ').trim();
+            return source || null;
+          };
+
           const mathSource = (element) => {
             const annotation = Array.from(element.querySelectorAll('annotation'))
               .find((node) => (node.getAttribute('encoding') || '')
@@ -282,8 +352,10 @@ enum ChatGPTResponseExtraction {
             const ariaSource = element.getAttribute('aria-label')
               || element.getAttribute('alttext')
               || element.querySelector('[aria-label]')?.getAttribute('aria-label');
+            const semanticSource = semanticMathMLSource(element);
             const candidate = annotation?.textContent
               || dataSource
+              || semanticSource
               || ariaSource
               || textWithoutControls(element);
             const normalized = (candidate || '').replace(/\\s+/g, ' ').trim();

@@ -19,7 +19,8 @@ enum MathSpeechNormalizer {
     static let noSourceFormulaSentinel = "__floatTabs_formula_without_semantic_source__"
 
     private static let allowedCommands: Set<String> = [
-        "cdot", "div", "frac", "ge", "le", "neq", "pm", "sqrt", "times",
+        "angle", "cdot", "circ", "div", "frac", "ge", "le", "neq", "parallel",
+        "perp", "pm", "sqrt", "times", "triangle",
     ]
 
     static func normalize(
@@ -40,7 +41,10 @@ enum MathSpeechNormalizer {
             return MathSpeechNormalization(text: fallback, complexity: .complex)
         }
 
-        let unwrapped = unwrapDelimiters(trimmed)
+        guard let presentationNormalized = normalizePresentationalSyntax(trimmed) else {
+            return MathSpeechNormalization(text: fallback, complexity: .complex)
+        }
+        let unwrapped = unwrapDelimiters(presentationNormalized)
         guard !unwrapped.isEmpty,
               balancedDelimiters(in: unwrapped),
               !containsUnsupportedStructure(unwrapped),
@@ -75,6 +79,94 @@ enum MathSpeechNormalizer {
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Removes only syntax that changes presentation, not mathematical
+    /// meaning. This runs before command and complexity classification so a
+    /// boxed, spaced, or delimiter-sized common expression is judged by its
+    /// semantic structure instead of its TeX formatting tokens.
+    private static func normalizePresentationalSyntax(_ source: String) -> String? {
+        let presentationalCommands: Set<String> = [
+            "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle",
+        ]
+        let spacingCommands: Set<String> = [",", ":", ";", "!", "quad", "qquad"]
+        var output = ""
+        var index = source.startIndex
+
+        while index < source.endIndex {
+            let character = source[index]
+            guard character == "\\" else {
+                output.append(character)
+                index = source.index(after: index)
+                continue
+            }
+
+            let commandStart = source.index(after: index)
+            guard commandStart < source.endIndex else {
+                output.append("\\")
+                break
+            }
+            var commandEnd = commandStart
+            while commandEnd < source.endIndex, source[commandEnd].isLetter {
+                commandEnd = source.index(after: commandEnd)
+            }
+
+            // `\,`, `\:`, `\;`, `\!`, and an escaped space have no semantic
+            // content. Keep one ordinary space so neighboring tokens remain
+            // separable after the later whitespace normalization.
+            if commandEnd == commandStart {
+                let escaped = source[commandStart]
+                if escaped == "," || escaped == ":" || escaped == ";"
+                    || escaped == "!" || escaped.isWhitespace {
+                    output.append(" ")
+                } else {
+                    output.append("\\")
+                    output.append(escaped)
+                }
+                index = source.index(after: commandStart)
+                continue
+            }
+
+            let command = String(source[commandStart..<commandEnd]).lowercased()
+            if presentationalCommands.contains(command) {
+                index = commandEnd
+                continue
+            }
+            if spacingCommands.contains(command) {
+                output.append(" ")
+                index = commandEnd
+                continue
+            }
+            if command == "left" || command == "right" {
+                index = commandEnd
+                continue
+            }
+            if command == "boxed" {
+                var groupStart = commandEnd
+                while groupStart < source.endIndex, source[groupStart].isWhitespace {
+                    groupStart = source.index(after: groupStart)
+                }
+                guard groupStart < source.endIndex, source[groupStart] == "{" else {
+                    return nil
+                }
+                let (content, next) = consumeGroup(in: source, from: groupStart)
+                guard let content,
+                      let normalizedContent = normalizePresentationalSyntax(content) else {
+                    return nil
+                }
+                output.append(normalizedContent)
+                index = next
+                continue
+            }
+
+            // Preserve semantic and unknown commands for the dedicated
+            // classifier. Unknown commands must still fail closed later.
+            output.append("\\")
+            output.append(contentsOf: source[commandStart..<commandEnd])
+            index = commandEnd
+        }
+
+        return output
+    }
+
     private static func balancedDelimiters(in source: String) -> Bool {
         var braces = 0
         var parentheses = 0
@@ -106,10 +198,7 @@ enum MathSpeechNormalizer {
             "\\sum", "\\prod", "\\int", "\\lim", "\\operatorname", "\\left", "\\right",
             "\\overline", "\\underline", "\\text{",
         ]
-        if complexMarkers.contains(where: lowercased.contains) { return true }
-        return source.filter { $0 == "{" }.count > 4
-            || source.filter { $0 == "^" }.count > 4
-            || source.filter { $0 == "\\" }.count > 8
+        return complexMarkers.contains(where: lowercased.contains)
     }
 
     private static func containsUnknownCommand(_ source: String) -> Bool {
@@ -201,6 +290,12 @@ enum MathSpeechNormalizer {
         value = value.replacingOccurrences(of: "\\ge", with: " ≥ ")
         value = value.replacingOccurrences(of: "\\le", with: " ≤ ")
         value = value.replacingOccurrences(of: "\\neq", with: " ≠ ")
+        value = value.replacingOccurrences(of: "\\parallel", with: " ∥ ")
+        value = value.replacingOccurrences(of: "\\perp", with: " ⊥ ")
+        value = value.replacingOccurrences(of: "\\angle", with: " ∠ ")
+        value = value.replacingOccurrences(of: "\\triangle", with: " △ ")
+        value = value.replacingOccurrences(of: "^\\circ", with: " ° ")
+        value = value.replacingOccurrences(of: "\\circ", with: " ° ")
         value = value.replacingOccurrences(of: "\\pm", with: " ± ")
         value = replaceSimpleFractions(in: value)
         value = replaceSimpleSquareRoots(in: value)
@@ -293,6 +388,24 @@ enum MathSpeechNormalizer {
                 index = exponentEnd
                 continue
             }
+            if character == "_" {
+                let subscriptStart = source.index(after: index)
+                let (content, next) = consumeGroup(in: source, from: subscriptStart)
+                let label: String
+                if let content {
+                    label = renderChineseAtoms(content) ?? content
+                } else if subscriptStart < source.endIndex {
+                    label = String(source[subscriptStart])
+                } else {
+                    return nil
+                }
+                guard let prior = output.popLast() else { return nil }
+                output.append("\(prior) 下标 \(label)")
+                index = content == nil
+                    ? source.index(after: subscriptStart)
+                    : next
+                continue
+            }
             if character == "√" {
                 let start = source.index(after: index)
                 let (content, next) = consumeGroup(in: source, from: start)
@@ -325,6 +438,11 @@ enum MathSpeechNormalizer {
             case ":": output.append("比")
             case "±": output.append("加减")
             case "%": output.append("百分之")
+            case "∥": output.append("平行于")
+            case "⊥": output.append("垂直于")
+            case "∠": output.append("角")
+            case "△": output.append("三角形")
+            case "°": output.append("度")
             case "(", ")", "[", "]": break
             default:
                 if character.isLetter || character.isNumber || character == "." {
@@ -372,6 +490,24 @@ enum MathSpeechNormalizer {
                 index = exponentEnd
                 continue
             }
+            if character == "_" {
+                let subscriptStart = source.index(after: index)
+                let (content, next) = consumeGroup(in: source, from: subscriptStart)
+                let label: String
+                if let content {
+                    label = renderEnglishAtoms(content) ?? content
+                } else if subscriptStart < source.endIndex {
+                    label = String(source[subscriptStart])
+                } else {
+                    return nil
+                }
+                guard let prior = output.popLast() else { return nil }
+                output.append("\(prior) subscript \(label)")
+                index = content == nil
+                    ? source.index(after: subscriptStart)
+                    : next
+                continue
+            }
             if character == "√" {
                 let start = source.index(after: index)
                 let (content, next) = consumeGroup(in: source, from: start)
@@ -404,6 +540,11 @@ enum MathSpeechNormalizer {
             case ":": output.append("to")
             case "±": output.append("plus or minus")
             case "%": output.append("percent")
+            case "∥": output.append("parallel to")
+            case "⊥": output.append("perpendicular to")
+            case "∠": output.append("angle")
+            case "△": output.append("triangle")
+            case "°": output.append("degrees")
             case "(", ")", "[", "]": break
             default:
                 if character.isLetter || character.isNumber || character == "." {

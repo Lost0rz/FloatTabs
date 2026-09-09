@@ -80,6 +80,96 @@ final class MathSpeechNormalizerTests: XCTestCase {
         }
     }
 
+    func testCommonGeometryRatiosAreNotComplex() {
+        let cases = [
+            "AB : CD = m : n",
+            "m^2 : mn : mn : n^2",
+            "m^2 : mn : n^2 : mn",
+            "S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn",
+        ]
+
+        for source in cases {
+            let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+            XCTAssertNotEqual(result.complexity, .complex, source)
+            XCTAssertFalse(result.text.contains("复杂公式"), source)
+        }
+    }
+
+    func testSubscriptsAreRenderedStructurally() {
+        let result = MathSpeechNormalizer.normalize(
+            "S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}",
+            languageRole: .chinese
+        )
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertTrue(result.text.contains("S 下标 A O B"))
+        XCTAssertTrue(result.text.contains("S 下标 B O C"))
+        XCTAssertTrue(result.text.contains("S 下标 C O D"))
+        XCTAssertTrue(result.text.contains("S 下标 D O A"))
+    }
+
+    func testBoxedPresentationalWrapperIsIgnored() {
+        let source = #"\boxed{S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn}"#
+        let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertFalse(result.text.contains("方框"))
+        XCTAssertFalse(result.text.contains("复杂公式"))
+        XCTAssertTrue(result.text.contains("m 的平方"))
+    }
+
+    func testPresentationalDecoratorsAndSpacingAreIgnored() {
+        let source = #"\displaystyle\boxed{m^2\: :\quad mn\; :\!n^2}"#
+        let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertEqual(result.text, "m 的平方 比 m n 比 n 的平方")
+    }
+
+    func testLeftRightDecoratorsAreIgnored() {
+        let result = MathSpeechNormalizer.normalize(
+            #"\left( m^2 : n^2 \right)"#,
+            languageRole: .chinese
+        )
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertTrue(result.text.contains("m 的平方"))
+        XCTAssertTrue(result.text.contains("n 的平方"))
+    }
+
+    func testCommonGeometryCommandsAreReadable() {
+        let cases: [(String, String)] = [
+            (#"AB \parallel CD"#, "平行于"),
+            (#"AB \perp CD"#, "垂直于"),
+            (#"\angle ABC"#, "角"),
+            (#"\triangle ABC"#, "三角形"),
+            (#"60^\circ"#, "60 度"),
+        ]
+
+        for (source, expected) in cases {
+            let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+            XCTAssertNotEqual(result.complexity, .complex, source)
+            XCTAssertTrue(result.text.contains(expected), "\(source): \(result.text)")
+        }
+    }
+
+    func testUnsupportedSemanticStructuresRemainComplex() {
+        let cases = [
+            #"\begin{matrix}a&b\\c&d\end{matrix}"#,
+            #"\begin{cases}x & x > 0\\0 & otherwise\end{cases}"#,
+            #"\frac{\frac{a}{b}}{c}"#,
+            #"\unknown{x}"#,
+        ]
+
+        for source in cases {
+            XCTAssertEqual(
+                MathSpeechNormalizer.normalize(source, languageRole: .chinese).complexity,
+                .complex,
+                source
+            )
+        }
+    }
+
     func testMathLanguageUsesNearestSurroundingText() {
         let chinese = SpeechLanguageRouter.utteranceRequests(for: [
             SpeechContentBlock(kind: .paragraph, text: "由", level: nil),

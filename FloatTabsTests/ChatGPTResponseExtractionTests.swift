@@ -398,6 +398,27 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.first?.text, "CE : AD = 2 : 3")
     }
 
+    func testSemanticMathMLWithoutAnnotationPreservesCommonStructure() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-semantic-mathml">
+          <p>常见公式：</p>
+          <math style="display:inline-block"><semantics>
+            <mrow>
+              <msub><mi>S</mi><mrow><mi>A</mi><mi>O</mi><mi>B</mi></mrow></msub>
+              <mo>:</mo>
+              <msup><mi>m</mi><mn>2</mn></msup>
+            </mrow>
+          </semantics></math>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.kind), [.paragraph, .mathInline])
+        XCTAssertEqual(payload?.blocks.last?.text, "S_{AOB} : m^{2}")
+    }
+
     func testHiddenMathMLAccessibilityChildDoesNotHideRenderedFormula() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
@@ -461,6 +482,49 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
                 && ($0.text.contains("比") || $0.text.contains("to"))
         })
         XCTAssertTrue(requests.contains { $0.text.contains("This English text must not disappear") })
+    }
+
+    func testSyntheticGeometryQAConversationKeepsAllCommonMathSources() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-geometry-qa">
+          <p>如果两条平行边：</p>
+          <p><span data-math="true" data-latex="AB : CD = m : n" aria-hidden="true">visual</span></p>
+          <p>那么面积关系是：</p>
+          <div data-math="true" style="display:block" data-latex="S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn">
+            <span aria-hidden="true">visual area ratio</span>
+          </div>
+          <p><span data-math="true" data-latex="m^2 : mn : mn : n^2" aria-hidden="true">visual</span></p>
+          <p>靠着短底的那块：<span data-math="true" data-latex="m^2" aria-hidden="true">visual</span></p>
+          <p>两边翅膀都是 <span data-math="true" data-latex="mn" aria-hidden="true">visual</span></p>
+          <p>靠着长底的那块：<span data-math="true" data-latex="n^2" aria-hidden="true">visual</span></p>
+          <p><span data-math="true" data-latex="\\boxed{S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn}" aria-hidden="true">visual boxed ratio</span></p>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let mathBlocks = (payload?.blocks ?? []).filter {
+            $0.kind == .mathInline || $0.kind == .mathBlock
+        }
+        XCTAssertEqual(mathBlocks.count, 7)
+        XCTAssertEqual(
+            mathBlocks.map(\.text),
+            [
+                "AB : CD = m : n",
+                "S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn",
+                "m^2 : mn : mn : n^2",
+                "m^2",
+                "mn",
+                "n^2",
+                "\\boxed{S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn}",
+            ]
+        )
+        XCTAssertFalse(mathBlocks.contains { $0.text.contains("without_semantic_source") })
+        XCTAssertTrue(mathBlocks.allSatisfy {
+            MathSpeechNormalizer.normalize($0.text).complexity != .complex
+        })
+        XCTAssertEqual(Set(mathBlocks.compactMap(\.sourceLocator).map(\.responseID)).count, 1)
     }
 
     func testLongParagraphIsSplitWithoutSilentTextLoss() async {
