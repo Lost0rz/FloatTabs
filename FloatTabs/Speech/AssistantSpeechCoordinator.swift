@@ -57,7 +57,8 @@ final class AssistantSpeechCoordinator {
         case pending
         case staged(
             identity: SpeechResponseIdentity,
-            requests: [SpeechUtteranceRequest]
+            requests: [SpeechUtteranceRequest],
+            nextIndex: Int
         )
         case released
     }
@@ -67,6 +68,13 @@ final class AssistantSpeechCoordinator {
         let slotID: UUID
         let requestID: UUID
         var state: AutomaticReservationState
+    }
+
+    private struct SpeechPlaybackBatch {
+        let responseID: SpeechResponseIdentity?
+        let requests: [SpeechUtteranceRequest]
+        let origin: SpeechPlaybackOrigin
+        var nextIndex: Int
     }
 
     private let speechService: SpeechSynthesizing
@@ -87,6 +95,9 @@ final class AssistantSpeechCoordinator {
     private var latestResponse: [UUID: SpeechResponseIdentity] = [:]
     private var currentItem: SpeechQueueItem?
     private var speechQueue = SpeechQueue()
+    /// Transient response remainder. SpeechQueue stays bounded while this
+    /// cursor preserves FIFO order for a long manual or automatic response.
+    private var speechBacklog: [SpeechPlaybackBatch] = []
     private var automaticReservations: [AutomaticReservation] = []
     private var manualPlaybackBarrier: UInt64?
     private var pauseRequested = false
@@ -254,7 +265,6 @@ final class AssistantSpeechCoordinator {
     func toggleAutoSpeak(for slotID: UUID) {
         if autoSpeakSlotIDs.contains(slotID) {
             autoSpeakSlotIDs.remove(slotID)
-            invalidateAutomaticPlayback(for: slotID)
             let preservedResponseID: SpeechResponseIdentity? = {
                 guard currentItem?.origin == .automatic,
                       currentItem?.responseID?.slotID == slotID else {
@@ -262,11 +272,15 @@ final class AssistantSpeechCoordinator {
                 }
                 return currentItem?.responseID
             }()
+            invalidateAutomaticPlayback(
+                for: slotID,
+                preservingResponseID: preservedResponseID
+            )
             speechQueue.removeAutomaticItems(
                 forSlotID: slotID,
                 preservingResponseID: preservedResponseID
             )
-            drainAutomaticReservations()
+            drainPlayback()
         } else {
             autoSpeakSlotIDs.insert(slotID)
         }
@@ -281,6 +295,7 @@ final class AssistantSpeechCoordinator {
         resetFollowState(for: slotID)
         invalidateAllAutomaticPlayback()
         suppressCurrentAndPendingSpeech()
+        speechBacklog.removeAll()
         speechQueue.clear()
         currentItem = nil
         pauseRequested = false
@@ -317,6 +332,7 @@ final class AssistantSpeechCoordinator {
         extractionRequests.removeAll()
         manualPlaybackBarrier = nil
         suppressCurrentAndPendingSpeech()
+        speechBacklog.removeAll()
         speechQueue.clear()
         currentItem = nil
         pauseRequested = false
@@ -324,14 +340,13 @@ final class AssistantSpeechCoordinator {
         speechService.stop()
         setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)
-        let previewItems = makeQueueItems(
+        speechBacklog = [SpeechPlaybackBatch(
             responseID: nil,
             requests: requests,
             origin: .preview,
-            limit: speechQueue.maximumPendingSegments
-        )
-        speechQueue.replacePreview(items: previewItems)
-        speakNext()
+            nextIndex: 0
+        )]
+        drainPlayback()
     }
 
     /// Stop is local to speech. It never sends a cancellation to ChatGPT.
@@ -343,6 +358,7 @@ final class AssistantSpeechCoordinator {
         extractionRequests.removeAll()
         manualPlaybackBarrier = nil
         suppressCurrentAndPendingSpeech()
+        speechBacklog.removeAll()
         speechQueue.clear()
         currentItem = nil
         pauseRequested = false
@@ -386,6 +402,7 @@ final class AssistantSpeechCoordinator {
             releaseExtraction(request)
         }
         releaseAutomaticReservations(for: slotID)
+        speechBacklog.removeAll { $0.responseID?.slotID == slotID }
         let currentWasRemoved = currentItem?.responseID?.slotID == slotID
         speechQueue.removeItems(forSlotID: slotID)
         if currentWasRemoved {
@@ -400,7 +417,7 @@ final class AssistantSpeechCoordinator {
         spokenResponses.removeValue(forKey: slotID)
         suppressedResponses.removeValue(forKey: slotID)
         latestResponse.removeValue(forKey: slotID)
-        drainAutomaticReservations()
+        drainPlayback()
     }
 
     private func requestLatestResponse(
@@ -525,15 +542,16 @@ final class AssistantSpeechCoordinator {
               !suppressedResponses[identity.slotID, default: []].contains(identity),
               !spokenResponses[identity.slotID, default: []].contains(identity) else {
             automaticReservations[index].state = .released
-            drainAutomaticReservations()
+            drainPlayback()
             return
         }
 
         automaticReservations[index].state = .staged(
             identity: identity,
-            requests: requests
+            requests: requests,
+            nextIndex: 0
         )
-        drainAutomaticReservations()
+        drainPlayback()
     }
 
     private func finishManualExtraction(
@@ -550,8 +568,11 @@ final class AssistantSpeechCoordinator {
         // automatic item from becoming current, but a valid manual result is
         // still required to preempt one if a future state-machine change ever
         // lets that narrow race through.
-        let hasSpeechToPreempt = currentItem != nil || !speechQueue.isEmpty
+        let hasSpeechToPreempt = currentItem != nil
+            || !speechQueue.isEmpty
+            || !speechBacklog.isEmpty
         suppressCurrentAndPendingSpeech()
+        speechBacklog.removeAll()
         speechQueue.clear()
         currentItem = nil
         if hasSpeechToPreempt {
@@ -565,21 +586,19 @@ final class AssistantSpeechCoordinator {
         }
 
         latestResponse[request.slotID] = identity
-        let manualItems = makeQueueItems(
+        speechBacklog = [SpeechPlaybackBatch(
             responseID: identity,
             requests: requests,
             origin: .manual,
-            limit: speechQueue.maximumPendingSegments
-        )
-        speechQueue.replace(items: manualItems)
-        speakNext()
+            nextIndex: 0
+        )]
         releaseManualBarrier(intent: manualIntent)
     }
 
     private func releaseManualBarrier(intent: UInt64) {
         guard manualPlaybackBarrier == intent else { return }
         manualPlaybackBarrier = nil
-        drainAutomaticReservations()
+        drainPlayback()
     }
 
     private func invalidateAllAutomaticPlayback() {
@@ -592,7 +611,10 @@ final class AssistantSpeechCoordinator {
         automaticReservations.removeAll()
     }
 
-    private func invalidateAutomaticPlayback(for slotID: UUID) {
+    private func invalidateAutomaticPlayback(
+        for slotID: UUID,
+        preservingResponseID: SpeechResponseIdentity? = nil
+    ) {
         let automaticRequestIDs = extractionRequests.compactMap { requestID, request in
             request.origin == .automatic && request.slotID == slotID ? requestID : nil
         }
@@ -600,7 +622,12 @@ final class AssistantSpeechCoordinator {
             extractionRequests.removeValue(forKey: requestID)
         }
         automaticReservations.removeAll { reservation in
-            reservation.slotID == slotID
+            guard reservation.slotID == slotID else { return false }
+            guard let preservingResponseID else { return true }
+            if case let .staged(identity, _, _) = reservation.state {
+                return identity != preservingResponseID
+            }
+            return true
         }
     }
 
@@ -612,7 +639,9 @@ final class AssistantSpeechCoordinator {
             extractionRequests.removeValue(forKey: requestID)
         }
         automaticReservations.removeAll { reservation in
-            reservation.slotID == slotID
+            guard reservation.slotID == slotID else { return false }
+            if case .pending = reservation.state { return true }
+            return false
         }
     }
 
@@ -622,6 +651,43 @@ final class AssistantSpeechCoordinator {
 
     private func releaseAutomaticReservation(requestID: UUID) {
         automaticReservations.removeAll { $0.requestID == requestID }
+        drainPlayback()
+    }
+
+    private func drainPlayback() {
+        guard manualPlaybackBarrier == nil else { return }
+        if !speechBacklog.isEmpty {
+            drainSpeechBacklog()
+            return
+        }
+        drainAutomaticReservations()
+    }
+
+    private func drainSpeechBacklog() {
+        guard manualPlaybackBarrier == nil else { return }
+        while let first = speechBacklog.first {
+            let result = makeQueueItems(
+                responseID: first.responseID,
+                requests: first.requests,
+                origin: first.origin,
+                startIndex: first.nextIndex,
+                limit: speechQueue.availableCapacity
+            )
+            guard result.nextIndex > first.nextIndex || !result.items.isEmpty else { return }
+            if !result.items.isEmpty {
+                let appended = speechQueue.append(items: result.items)
+                guard appended > 0 else { return }
+            }
+            if result.nextIndex >= first.requests.count {
+                speechBacklog.removeFirst()
+            } else {
+                speechBacklog[0].nextIndex = result.nextIndex
+                if !result.items.isEmpty { speakNext() }
+                return
+            }
+            speakNext()
+            if speechQueue.availableCapacity == 0 { return }
+        }
         drainAutomaticReservations()
     }
 
@@ -634,23 +700,37 @@ final class AssistantSpeechCoordinator {
                 return
             case .released:
                 automaticReservations.removeFirst()
-            case let .staged(identity, requests):
+            case let .staged(identity, requests, nextIndex):
                 guard !suppressedResponses[identity.slotID, default: []].contains(identity) else {
                     automaticReservations.removeFirst()
                     continue
                 }
-                let automaticItems = makeQueueItems(
+                let result = makeQueueItems(
                     responseID: identity,
                     requests: requests,
                     origin: .automatic,
+                    startIndex: nextIndex,
                     limit: speechQueue.availableCapacity
                 )
-                guard !automaticItems.isEmpty else { return }
-                let appended = speechQueue.append(items: automaticItems)
-                guard appended > 0 else { return }
-                automaticReservations.removeFirst()
-                spokenResponses[identity.slotID, default: []].insert(identity)
+                guard result.nextIndex > nextIndex || !result.items.isEmpty else { return }
+                if !result.items.isEmpty {
+                    let appended = speechQueue.append(items: result.items)
+                    guard appended > 0 else { return }
+                    spokenResponses[identity.slotID, default: []].insert(identity)
+                }
+                if result.nextIndex >= requests.count {
+                    automaticReservations.removeFirst()
+                } else {
+                    automaticReservations[0].state = .staged(
+                        identity: identity,
+                        requests: requests,
+                        nextIndex: result.nextIndex
+                    )
+                    if !result.items.isEmpty { speakNext() }
+                    return
+                }
                 speakNext()
+                if speechQueue.availableCapacity == 0 { return }
             }
         }
     }
@@ -659,11 +739,15 @@ final class AssistantSpeechCoordinator {
         responseID: SpeechResponseIdentity?,
         requests: [SpeechUtteranceRequest],
         origin: SpeechPlaybackOrigin,
+        startIndex: Int,
         limit: Int
-    ) -> [SpeechQueueItem] {
-        guard limit > 0 else { return [] }
+    ) -> (items: [SpeechQueueItem], nextIndex: Int) {
+        guard limit > 0 else { return ([], max(0, min(startIndex, requests.count))) }
         var items: [SpeechQueueItem] = []
-        for request in requests where items.count < limit {
+        var index = max(0, min(startIndex, requests.count))
+        while index < requests.count && items.count < limit {
+            let request = requests[index]
+            index += 1
             guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   SpeechSpeakabilityFilter.containsSpeakableContent(request.text) else {
                 continue
@@ -690,7 +774,7 @@ final class AssistantSpeechCoordinator {
                 )
             )
         }
-        return items
+        return (items, index)
     }
 
     private func speakNext() {
@@ -783,7 +867,7 @@ final class AssistantSpeechCoordinator {
         if speechQueue.isEmpty {
             setCurrentSpeakingSlot(nil)
         }
-        drainAutomaticReservations()
+        drainPlayback()
         speakNext()
         if let finishedSlotID,
            currentSpeakingSlotID != finishedSlotID {

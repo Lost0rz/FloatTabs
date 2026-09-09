@@ -30,42 +30,39 @@ struct SpeechPlaybackRequest: Equatable, Sendable {
     let languageRole: SpeechLanguageRole
 }
 
-/// Chooses a voice role for already-cleaned, sentence-sized speech text.
-/// Technical identifiers are deliberately ignored as language evidence so a
-/// Chinese sentence containing API names does not turn into many tiny voice
-/// changes.
+/// Routes already-cleaned speech into coherent language runs. Technical
+/// identifiers are protected English islands rather than ignored evidence:
+/// they remain grouped with nearby English prose without turning every single
+/// Latin variable into a voice change.
 enum SpeechLanguageRouter {
     private static let technicalIdentifiers: Set<String> = [
         "api", "avspeechsynthesizer", "chatgpt", "gpt", "url", "http",
-        "https", "json", "ios", "macos", "sdk", "ui",
+        "https", "json", "ios", "macos", "sdk", "ui", "pr",
     ]
 
+    private struct LanguageRun {
+        let text: String
+        let role: SpeechLanguageRole
+    }
+
     static func role(for text: String) -> SpeechLanguageRole {
+        let runs = languageRuns(in: text)
+        guard !runs.isEmpty else { return .automatic }
+        if runs.allSatisfy({ $0.role == .automatic }) {
+            return .automatic
+        }
         let chineseCount = text.reduce(into: 0) { count, character in
             if isChinese(character) { count += 1 }
         }
-        guard chineseCount > 0 else {
-            return containsEnglishLetters(in: text) ? .english : .automatic
-        }
-
-        let englishWordCount = text
-            .split(whereSeparator: { character in
-                !character.isASCII || (!character.isLetter && !character.isNumber)
-            })
-            .map(String.init)
-            .filter { word in
-                let normalized = word.lowercased()
-                guard !technicalIdentifiers.contains(normalized),
-                      !word.contains(where: { $0.isNumber }) else {
-                    return false
-                }
-                return word.contains(where: { $0.isASCII && $0.isLetter })
+        let englishCount = runs
+            .filter { $0.role == .english }
+            .reduce(into: 0) { count, run in
+                count += run.text.filter { $0.isASCII && $0.isLetter }.count
             }
-            .count
-
-        // One incidental prose word inside Chinese remains on the Chinese
-        // route, while a fully English sentence remains English.
-        if englishWordCount >= 2 && englishWordCount > chineseCount {
+        if chineseCount == 0 && englishCount > 0 {
+            return .english
+        }
+        if englishCount >= 2 && englishCount > chineseCount {
             return .english
         }
         return .chinese
@@ -75,13 +72,18 @@ enum SpeechLanguageRouter {
         for text: String
     ) -> [SpeechUtteranceRequest] {
         SpeechSegmenter.segment(text)
-            .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
-            .map { segment in
-                SpeechUtteranceRequest(
-                    text: segment,
-                    languageRole: role(for: segment),
-                    sourceLocator: nil
-                )
+            .flatMap { sentence in
+                languageRuns(in: sentence).flatMap { run in
+                    SpeechSegmenter.segment(run.text)
+                        .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
+                        .map { segment in
+                            SpeechUtteranceRequest(
+                                text: segment,
+                                languageRole: run.role,
+                                sourceLocator: nil
+                            )
+                        }
+                }
             }
     }
 
@@ -111,24 +113,157 @@ enum SpeechLanguageRouter {
                     block.text,
                     languageRole: languageRole
                 ).text
-            } else {
-                languageRole = role(for: block.text)
-                text = block.text
+                requests.append(contentsOf: SpeechSegmenter.segment(text)
+                    .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
+                    .map { segment in
+                        SpeechUtteranceRequest(
+                            text: segment,
+                            languageRole: languageRole == .automatic
+                                ? role(for: segment)
+                                : languageRole,
+                            sourceLocator: block.sourceLocator
+                        )
+                    })
+                continue
             }
 
-            requests.append(contentsOf: SpeechSegmenter.segment(text)
-                .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
-                .map { segment in
-                    SpeechUtteranceRequest(
-                        text: segment,
-                        languageRole: languageRole == .automatic
-                            ? role(for: segment)
-                            : languageRole,
-                        sourceLocator: block.sourceLocator
-                    )
+            requests.append(contentsOf: SpeechSegmenter.segment(block.text)
+                .flatMap { sentence in
+                    languageRuns(in: sentence).flatMap { run in
+                        SpeechSegmenter.segment(run.text)
+                            .filter(SpeechSpeakabilityFilter.containsSpeakableContent)
+                            .map { segment in
+                                SpeechUtteranceRequest(
+                                    text: segment,
+                                    languageRole: run.role,
+                                    sourceLocator: block.sourceLocator
+                                )
+                            }
+                    }
                 })
         }
         return requests
+    }
+
+    private static func languageRuns(in text: String) -> [LanguageRun] {
+        let characters = Array(text)
+        guard !characters.isEmpty else { return [] }
+
+        var chunks: [(text: String, isChinese: Bool)] = []
+        var current = ""
+        var currentIsChinese: Bool?
+        for character in characters {
+            let chinese = isChinese(character)
+            if let currentIsChinese,
+               currentIsChinese != chinese,
+               !current.isEmpty {
+                chunks.append((current, currentIsChinese))
+                current.removeAll(keepingCapacity: true)
+            }
+            current.append(character)
+            currentIsChinese = chinese
+        }
+        if let currentIsChinese, !current.isEmpty {
+            chunks.append((current, currentIsChinese))
+        }
+
+        var runs: [LanguageRun] = []
+        var leadingNeutral = ""
+        for chunk in chunks {
+            guard !chunk.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+
+            let role: SpeechLanguageRole?
+            if chunk.isChinese {
+                role = .chinese
+            } else if containsEnglishEvidence(in: chunk.text) {
+                role = .english
+            } else {
+                role = nil
+            }
+
+            guard let role else {
+                if runs.isEmpty {
+                    leadingNeutral += chunk.text
+                } else {
+                    runs[runs.index(before: runs.endIndex)] = LanguageRun(
+                        text: runs[runs.index(before: runs.endIndex)].text + chunk.text,
+                        role: runs[runs.index(before: runs.endIndex)].role
+                    )
+                }
+                continue
+            }
+
+            let value = leadingNeutral + chunk.text
+            leadingNeutral.removeAll(keepingCapacity: true)
+            appendRun(&runs, text: value, role: role)
+        }
+
+        if !leadingNeutral.isEmpty, !runs.isEmpty {
+            let lastIndex = runs.index(before: runs.endIndex)
+            runs[lastIndex] = LanguageRun(
+                text: runs[lastIndex].text + leadingNeutral,
+                role: runs[lastIndex].role
+            )
+        }
+
+        if runs.isEmpty {
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty,
+               value.contains(where: { $0.isNumber }) {
+                return [LanguageRun(text: value, role: .automatic)]
+            }
+            if !value.isEmpty,
+               !value.contains(where: isChinese),
+               value.contains(where: { $0.isASCII && $0.isLetter }) {
+                return [LanguageRun(text: value, role: .english)]
+            }
+        }
+
+        return runs.compactMap { run in
+            let value = run.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            return LanguageRun(text: value, role: run.role)
+        }
+    }
+
+    private static func appendRun(
+        _ runs: inout [LanguageRun],
+        text: String,
+        role: SpeechLanguageRole
+    ) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let last = runs.last, last.role == role {
+            runs[runs.index(before: runs.endIndex)] = LanguageRun(
+                text: last.text + text,
+                role: role
+            )
+        } else {
+            runs.append(LanguageRun(text: text, role: role))
+        }
+    }
+
+    private static func containsEnglishEvidence(in text: String) -> Bool {
+        let tokens = text
+            .split { character in
+                !(character.isASCII && (character.isLetter || character.isNumber))
+            }
+            .map(String.init)
+        guard tokens.contains(where: { $0.contains(where: { $0.isASCII && $0.isLetter }) }) else {
+            return false
+        }
+
+        let compact = text
+            .lowercased()
+            .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        if technicalIdentifiers.contains(compact) {
+            return true
+        }
+        if tokens.count > 1 || text.contains("#") {
+            return true
+        }
+        guard let token = tokens.first else { return false }
+        return token.count >= 2 || token.contains(where: { $0.isNumber })
     }
 
     private static func nearestTextContext(
@@ -150,10 +285,6 @@ enum SpeechLanguageRouter {
 
     private static func isMath(_ block: SpeechContentBlock) -> Bool {
         block.kind == .mathInline || block.kind == .mathBlock
-    }
-
-    private static func containsEnglishLetters(in text: String) -> Bool {
-        text.contains { $0.isASCII && $0.isLetter }
     }
 
     private static func isChinese(_ character: Character) -> Bool {

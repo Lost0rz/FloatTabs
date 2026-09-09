@@ -105,11 +105,11 @@ enum SpeechContentCleaner {
             return nil
         }
 
-        if isRawMachineContent(text) { return nil }
-
         guard block.kind != .mathInline, block.kind != .mathBlock else {
             return cleanMathSource(text)
         }
+
+        if isRawMachineContent(text) { return nil }
 
         text = replaceMarkdownLinks(in: text)
         text = text
@@ -164,7 +164,6 @@ enum SpeechContentCleaner {
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty,
-              source.count <= MathSpeechNormalizer.maximumSourceLength,
               SpeechSpeakabilityFilter.containsSpeakableContent(source) else {
             return nil
         }
@@ -173,7 +172,7 @@ enum SpeechContentCleaner {
 
     private static func isRawMachineContent(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+        if isClearlyJSON(trimmed) {
             return true
         }
         let lines = trimmed.split(separator: "\n")
@@ -190,6 +189,18 @@ enum SpeechContentCleaner {
             stackTraceLines.count * 2 >= lines.count
                 || diffLines.count * 2 >= lines.count
         )
+    }
+
+    private static func isClearlyJSON(_ text: String) -> Bool {
+        guard let first = text.first, first == "{" || first == "[",
+              let data = text.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(
+                  with: data,
+                  options: [.fragmentsAllowed]
+              ) else {
+            return false
+        }
+        return value is [Any] || value is [String: Any]
     }
 
     private static func replaceMarkdownLinks(in text: String) -> String {

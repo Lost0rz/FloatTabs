@@ -417,6 +417,72 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.first?.text, "4 : 6 : 6 : 9")
     }
 
+    func testRealisticChatGPTMathStructureFixture() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-realistic">
+          <div class="markdown prose">
+            <p>下面测试数学公式和中英文混合朗读。</p>
+            <p>这个 PR uses a manual priority barrier，所以 Auto Speak 不会打断。</p>
+            <p>
+              <span data-math="true" aria-hidden="true" style="display:inline-block" data-latex="x^2 + y^2 = 25">
+                <span class="katex-mathml" style="display:none"><math><semantics>
+                  <annotation encoding="application/x-tex">x^2 + y^2 = 25</annotation>
+                </semantics></math></span>
+                <span class="katex-html" aria-hidden="true">visual x 2 y 2 25</span>
+              </span>
+            </p>
+            <div data-math="true" style="display:block" data-latex="CE : AD = 2 : 3">
+              <span aria-hidden="true">visual CE AD 2 3</span>
+            </div>
+            <p>[Important] This English text must not disappear.</p>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let blocks = payload?.blocks ?? []
+        XCTAssertEqual(blocks.map(\.kind), [
+            .paragraph, .paragraph, .mathInline, .mathBlock, .paragraph,
+        ])
+        XCTAssertTrue(blocks.contains { $0.text == "x^2 + y^2 = 25" })
+        XCTAssertTrue(blocks.contains { $0.text == "CE : AD = 2 : 3" })
+        XCTAssertTrue(blocks.contains { $0.text.contains("This English text must not disappear") })
+        XCTAssertEqual(Set(blocks.compactMap(\.sourceLocator).map(\.responseID)).count, 1)
+
+        let requests = SpeechLanguageRouter.utteranceRequests(for: blocks)
+        XCTAssertTrue(requests.contains {
+            $0.text.contains("x 的平方") || $0.text.contains("x squared")
+        })
+        XCTAssertTrue(requests.contains {
+            $0.text.contains("C E")
+                && $0.text.contains("A D")
+                && ($0.text.contains("比") || $0.text.contains("to"))
+        })
+        XCTAssertTrue(requests.contains { $0.text.contains("This English text must not disappear") })
+    }
+
+    func testLongParagraphIsSplitWithoutSilentTextLoss() async {
+        let page = ChatGPTResponsePageHarness()
+        let words = (0..<1000).map { "word\($0)" }.joined(separator: " ")
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="reply-long">
+          <p>START \(words) END</p>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let blocks = payload?.blocks ?? []
+        XCTAssertGreaterThan(blocks.count, 1)
+        XCTAssertTrue(blocks.allSatisfy { $0.text.count <= 4000 })
+        let joined = blocks.map(\.text).joined(separator: " ")
+        XCTAssertTrue(joined.contains("START"))
+        XCTAssertTrue(joined.contains("word999"))
+        XCTAssertTrue(joined.contains("END"))
+    }
+
     func testStandaloneBorderedRichTextIsExtractedOnce() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""

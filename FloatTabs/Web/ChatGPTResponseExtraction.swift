@@ -164,7 +164,10 @@ enum ChatGPTResponseExtraction {
           const responseLocatorKeys = new Map();
           let nextOpaqueKey = 0;
           let programmaticScrollGuardUntil = 0;
-          const MAX_BLOCKS = 256;
+          // Keep extraction bounded without dropping ordinary long replies.
+          // The coordinator owns the smaller playback window and drains the
+          // remainder incrementally.
+          const MAX_BLOCKS = 1024;
           // The speech queue holds at most 64 pending segments. Keeping a
           // larger bounded response-group window leaves room for the current
           // response plus ordinary queued responses without making the
@@ -222,13 +225,22 @@ enum ChatGPTResponseExtraction {
           };
 
           const semanticSelector = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table';
-          const mathSelector = 'math,.katex-display,.katex,mjx-container';
+          const mathSelector =
+            'math,.katex-display,.katex,mjx-container,' +
+            '[data-math],[data-latex],[data-tex],[role="math"]';
           const excludedSelector =
             'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
             '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
 
-          const isExcluded = (element) =>
-            Boolean(element.closest && element.closest(excludedSelector));
+          const isExcluded = (element) => {
+            if (!element || !element.closest) return false;
+            const excluded = element.closest(excludedSelector);
+            if (!excluded) return false;
+            // Rendered semantic math may wrap an aria-hidden visual branch.
+            // Let the canonical math root own that subtree instead of losing
+            // the formula to the visual-only exclusion rule.
+            return !isCanonicalMathRoot(excluded);
+          };
 
           const textWithoutControls = (element) => {
             const clone = element.cloneNode(true);
@@ -246,15 +258,23 @@ enum ChatGPTResponseExtraction {
             if (element.matches('mjx-container') && element.closest('mjx-container') !== element) {
               return false;
             }
+            if (element.matches('[data-math],[data-latex],[data-tex],[role="math"]')) {
+              const ancestor = element.parentElement?.closest(mathSelector);
+              if (ancestor && ancestor !== element && isRendered(ancestor)) return false;
+            }
             return true;
           };
 
+          const mathKind = (element) =>
+            element.matches('.katex-display')
+              || window.getComputedStyle(element).display === 'block'
+              ? 'mathBlock'
+              : 'mathInline';
+
           const mathSource = (element) => {
-            const annotation = element.querySelector(
-              'annotation[encoding="application/x-tex"],' +
-              'annotation[encoding="application/tex"],' +
-              'annotation[encoding="application/x-latex"]'
-            );
+            const annotation = Array.from(element.querySelectorAll('annotation'))
+              .find((node) => (node.getAttribute('encoding') || '')
+                .toLowerCase().includes('tex'));
             const dataSource = element.getAttribute('data-latex')
               || element.getAttribute('data-tex')
               || element.querySelector('[data-latex]')?.getAttribute('data-latex')
@@ -266,7 +286,24 @@ enum ChatGPTResponseExtraction {
               || dataSource
               || ariaSource
               || textWithoutControls(element);
-            return (candidate || '').replace(/\\s+/g, ' ').trim().slice(0, MAX_BLOCK_TEXT);
+            const normalized = (candidate || '').replace(/\\s+/g, ' ').trim();
+            return (normalized || '__floatTabs_formula_without_semantic_source__')
+              .slice(0, MAX_BLOCK_TEXT);
+          };
+
+          const splitBoundedText = (value) => {
+            const pieces = [];
+            let remainder = (value || '').replace(/\\s+/g, ' ').trim();
+            while (remainder.length > MAX_BLOCK_TEXT) {
+              const window = remainder.slice(0, MAX_BLOCK_TEXT);
+              const splitAt = Math.max(window.lastIndexOf(' '), window.lastIndexOf('\\t'));
+              const boundary = splitAt > 0 ? splitAt : MAX_BLOCK_TEXT;
+              const piece = remainder.slice(0, boundary).trim();
+              if (piece) pieces.push(piece);
+              remainder = remainder.slice(boundary).trim();
+            }
+            if (remainder) pieces.push(remainder);
+            return pieces;
           };
 
           const appendTextPart = (parts, kind, text, level, sourceElement) => {
@@ -274,13 +311,23 @@ enum ChatGPTResponseExtraction {
             if (!value) return;
             const previous = parts[parts.length - 1];
             if (previous && previous.kind === kind && previous.level === level) {
-              previous.text = (previous.text + ' ' + value).trim().slice(0, MAX_BLOCK_TEXT);
+              parts.pop();
+              splitBoundedText((previous.text + ' ' + value).trim()).forEach((piece) => {
+                parts.push({
+                  kind: kind,
+                  text: piece,
+                  level: level,
+                  sourceElement: sourceElement
+                });
+              });
             } else {
-              parts.push({
-                kind: kind,
-                text: value.slice(0, MAX_BLOCK_TEXT),
-                level: level,
-                sourceElement: sourceElement
+              splitBoundedText(value).forEach((piece) => {
+                parts.push({
+                  kind: kind,
+                  text: piece,
+                  level: level,
+                  sourceElement: sourceElement
+                });
               });
             }
           };
@@ -292,17 +339,18 @@ enum ChatGPTResponseExtraction {
                 return;
               }
               if (node.nodeType !== Node.ELEMENT_NODE) return;
-              if (isExcluded(node)) return;
               if (isCanonicalMathRoot(node)) {
                 const source = mathSource(node);
-                if (source) {
-                  parts.push({
-                    kind: node.matches('.katex-display') ? 'mathBlock' : 'mathInline',
-                    text: source,
-                    level: null,
-                    sourceElement: node
-                  });
-                }
+                parts.push({
+                  kind: mathKind(node),
+                  text: source,
+                  level: null,
+                  sourceElement: node
+                });
+                return;
+              }
+              if (isExcluded(node)) return;
+              if (node.matches && node.matches(mathSelector)) {
                 return;
               }
               appendInlineParts(node, kind, level, parts, sourceElement);
@@ -312,12 +360,13 @@ enum ChatGPTResponseExtraction {
           const appendSemanticBlock = (element, blocks) => {
             const tag = element.tagName.toLowerCase();
             if (tag === 'pre' || tag === 'table') {
-              const text = textWithoutControls(element).slice(0, MAX_BLOCK_TEXT);
-              if (text) blocks.push({
-                kind: tag === 'pre' ? 'code' : 'table',
-                text: text,
-                level: null,
-                sourceElement: element
+              splitBoundedText(textWithoutControls(element)).forEach((text) => {
+                blocks.push({
+                  kind: tag === 'pre' ? 'code' : 'table',
+                  text: text,
+                  level: null,
+                  sourceElement: element
+                });
               });
               return;
             }
@@ -354,19 +403,18 @@ enum ChatGPTResponseExtraction {
           const structuredBlocks = (root) => {
             const blocks = [];
             const visit = (element) => {
-              if (blocks.length >= MAX_BLOCKS || isExcluded(element)) return;
+              if (blocks.length >= MAX_BLOCKS) return;
               if (isCanonicalMathRoot(element)) {
                 const source = mathSource(element);
-                if (source) {
-                  blocks.push({
-                    kind: element.matches('.katex-display') ? 'mathBlock' : 'mathInline',
-                    text: source,
-                    level: null,
-                    sourceElement: element
-                  });
-                }
+                blocks.push({
+                  kind: mathKind(element),
+                  text: source,
+                  level: null,
+                  sourceElement: element
+                });
                 return;
               }
+              if (isExcluded(element)) return;
               if (element.matches && element.matches(semanticSelector)) {
                 appendSemanticBlock(element, blocks);
                 return;
@@ -384,12 +432,12 @@ enum ChatGPTResponseExtraction {
             visit(root);
             if (blocks.length) return blocks.slice(0, MAX_BLOCKS);
             const fallback = textWithoutControls(root);
-            return fallback ? [{
+            return splitBoundedText(fallback).map((text) => ({
               kind: 'paragraph',
-              text: fallback,
+              text: text,
               level: null,
               sourceElement: root
-            }] : [];
+            }));
           };
 
           const postEmpty = (target, requestID) => {

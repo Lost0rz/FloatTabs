@@ -73,8 +73,33 @@ final class SpeechSegmenterTests: XCTestCase {
             for: "这个 API 使用 AVSpeechSynthesizer。版本是 3.14，模型是 GPT-5.6。"
         )
 
-        XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests.allSatisfy { $0.languageRole == .chinese })
+        XCTAssertEqual(
+            requests.map(\.languageRole),
+            [.chinese, .english, .chinese, .english, .chinese, .english]
+        )
+        XCTAssertEqual(
+            requests.map(\.text),
+            ["这个", "API", "使用", "AVSpeechSynthesizer。", "版本是 3.14，模型是", "GPT-5.6。"]
+        )
+    }
+
+    func testLanguageRouterKeepsTechnicalIdentifiersAsEnglishIslands() {
+        let requests = SpeechLanguageRouter.utteranceRequests(
+            for: "这个 PR #71 使用 GPT-5.6 和 ChatGPT 的 API。"
+        )
+
+        XCTAssertTrue(requests.contains { $0.languageRole == .english && $0.text.contains("PR") })
+        XCTAssertTrue(requests.contains { $0.languageRole == .english && $0.text.contains("GPT-5.6") })
+        XCTAssertTrue(requests.contains { $0.languageRole == .english && $0.text.contains("ChatGPT") })
+        XCTAssertTrue(requests.contains { $0.languageRole == .english && $0.text.contains("API") })
+    }
+
+    func testSingleLatinVariableInChineseProseStaysWithChineseRun() {
+        let requests = SpeechLanguageRouter.utteranceRequests(for: "令 x 表示半径。")
+
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.languageRole, .chinese)
+        XCTAssertEqual(requests.first?.text, "令 x 表示半径。")
     }
 
     func testLanguageRouterDropsPunctuationOnlySegments() {

@@ -53,6 +53,43 @@ final class SpeechContentCleanerTests: XCTestCase {
         )
     }
 
+    func testPreservesBracketedProseAndMathLikeProse() {
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "[Important] This English text must not disappear.",
+                    level: nil
+                )
+            ),
+            "[Important] This English text must not disappear."
+        )
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "The interval [x + 1] is preserved.",
+                    level: nil
+                )
+            ),
+            "The interval [x + 1] is preserved."
+        )
+    }
+
+    func testSkipsOnlyClearlyParsedJSONObjectsAndArrays() {
+        XCTAssertNil(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .paragraph, text: "[\"secret\", 1]", level: nil)
+            )
+        )
+        XCTAssertEqual(
+            SpeechContentCleaner.clean(
+                SpeechContentBlock(kind: .paragraph, text: "[x + 1]", level: nil)
+            ),
+            "[x + 1]"
+        )
+    }
+
     func testCollapsesLongURLsAndFilesystemPaths() {
         let cleaned = SpeechContentCleaner.clean([
             SpeechContentBlock(

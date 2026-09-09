@@ -16,6 +16,7 @@ struct MathSpeechNormalization: Equatable, Sendable {
 /// turns unsupported structures into a safe semantic fallback.
 enum MathSpeechNormalizer {
     static let maximumSourceLength = 1600
+    static let noSourceFormulaSentinel = "__floatTabs_formula_without_semantic_source__"
 
     private static let allowedCommands: Set<String> = [
         "cdot", "div", "frac", "ge", "le", "neq", "pm", "sqrt", "times",
@@ -30,6 +31,10 @@ enum MathSpeechNormalizer {
             ? "There is a complex formula here."
             : "此处有一个复杂公式。"
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed == noSourceFormulaSentinel {
+            return MathSpeechNormalization(text: fallback, complexity: .complex)
+        }
 
         guard !trimmed.isEmpty, trimmed.count <= maximumSourceLength else {
             return MathSpeechNormalization(text: fallback, complexity: .complex)
@@ -306,7 +311,8 @@ enum MathSpeechNormalizer {
             }
             let atom = String(character)
             switch character {
-            case "*", "+": output.append("加")
+            case "*": output.append("乘")
+            case "+": output.append("加")
             case "-": output.append("减")
             case "×": output.append("乘")
             case "÷", "/": output.append("除以")
@@ -384,7 +390,8 @@ enum MathSpeechNormalizer {
             }
             let atom = String(character)
             switch character {
-            case "*", "+": output.append("plus")
+            case "*": output.append("times")
+            case "+": output.append("plus")
             case "-", "−": output.append("minus")
             case "×": output.append("times")
             case "÷", "/": output.append("divided by")

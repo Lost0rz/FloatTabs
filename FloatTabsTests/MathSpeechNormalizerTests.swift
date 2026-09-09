@@ -40,6 +40,28 @@ final class MathSpeechNormalizerTests: XCTestCase {
             MathSpeechNormalizer.normalize("\\frac{a}{b}", languageRole: .english).text,
             "a over b"
         )
+        XCTAssertTrue(
+            MathSpeechNormalizer.normalize("2 * 3", languageRole: .chinese).text.contains("2 乘 3")
+        )
+        XCTAssertTrue(
+            MathSpeechNormalizer.normalize("2 * 3", languageRole: .english).text.contains("2 times 3")
+        )
+    }
+
+    func testFormulaWithoutSemanticSourceUsesSafeFallback() {
+        let chinese = MathSpeechNormalizer.normalize(
+            MathSpeechNormalizer.noSourceFormulaSentinel,
+            languageRole: .chinese
+        )
+        let english = MathSpeechNormalizer.normalize(
+            MathSpeechNormalizer.noSourceFormulaSentinel,
+            languageRole: .english
+        )
+
+        XCTAssertEqual(chinese.text, "此处有一个复杂公式。")
+        XCTAssertEqual(english.text, "There is a complex formula here.")
+        XCTAssertEqual(chinese.complexity, .complex)
+        XCTAssertEqual(english.complexity, .complex)
     }
 
     func testUnsupportedMathUsesSemanticFallbackWithoutRawLatex() {

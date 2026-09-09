@@ -117,6 +117,18 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         )
     }
 
+    private func makeLongResponseText(prefix: String, count: Int) -> String {
+        (1...count).map { "\(prefix) segment \($0)." }.joined(separator: " ")
+    }
+
+    private func finishEverySpokenRequest(_ service: TestSpeechService) {
+        var index = 0
+        while index < service.spokenTokens.count {
+            service.finish(token: service.spokenTokens[index])
+            index += 1
+        }
+    }
+
     private func makeCoordinator(
         service: TestSpeechService,
         bridge: TestResponseBridge,
@@ -1902,5 +1914,197 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         ))
 
         XCTAssertEqual(followBridge.locators.last?.responseID, "document-a:response-a-two")
+    }
+
+    func testMANUAL_100_SEGMENTS_NO_LOSS() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: UUID())
+        bridge.resolve(makePayload(
+            responseID: "document-a:manual-100",
+            text: makeLongResponseText(prefix: "Manual", count: 100)
+        ))
+        finishEverySpokenRequest(service)
+
+        XCTAssertEqual(service.spoken.count, 100)
+        XCTAssertEqual(service.spoken.first, "Manual segment 1.")
+        XCTAssertEqual(service.spoken.last, "Manual segment 100.")
+    }
+
+    func testAUTO_100_SEGMENTS_NO_LOSS() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.toggleAutoSpeak(for: slotID)
+        coordinator.handle(.generationFinished, for: slotID)
+        XCTAssertEqual(
+            SpeechLanguageRouter.utteranceRequests(for: [
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: makeLongResponseText(prefix: "Auto", count: 100),
+                    level: nil
+                ),
+            ]).count,
+            100
+        )
+        bridge.resolve(makePayload(
+            responseID: "document-a:auto-100",
+            text: makeLongResponseText(prefix: "Auto", count: 100)
+        ))
+        finishEverySpokenRequest(service)
+
+        XCTAssertEqual(service.spoken.count, 100)
+        XCTAssertEqual(service.spoken.first, "Auto segment 1.")
+        XCTAssertEqual(service.spoken.last, "Auto segment 100.")
+    }
+
+    func testR1_100_THEN_R2_10_FIFO() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.toggleAutoSpeak(for: slotID)
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:auto-r1",
+            text: makeLongResponseText(prefix: "R1", count: 100)
+        ))
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:auto-r2",
+            text: makeLongResponseText(prefix: "R2", count: 10)
+        ))
+        finishEverySpokenRequest(service)
+
+        XCTAssertEqual(service.spoken.count, 110)
+        XCTAssertEqual(Array(service.spoken.prefix(100)), (1...100).map { "R1 segment \($0)." })
+        XCTAssertEqual(Array(service.spoken.suffix(10)), (1...10).map { "R2 segment \($0)." })
+    }
+
+    func testPAUSE_AT_30_RESUME_TO_100() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:manual-pause-100",
+            text: makeLongResponseText(prefix: "Pause", count: 100)
+        ))
+        for index in 0..<29 {
+            service.finish(token: service.spokenTokens[index])
+        }
+        let pausedToken = service.spokenTokens[29]
+        XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+        service.pause(token: pausedToken)
+        XCTAssertEqual(service.spoken.count, 30)
+
+        XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
+        finishEverySpokenRequest(service)
+        XCTAssertEqual(service.spoken.count, 100)
+        XCTAssertEqual(service.spoken.last, "Pause segment 100.")
+    }
+
+    func testSTOP_AT_30_DOES_NOT_CONTINUE() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:manual-stop-100",
+            text: makeLongResponseText(prefix: "Stop", count: 100)
+        ))
+        for index in 0..<29 {
+            service.finish(token: service.spokenTokens[index])
+        }
+        let stoppedToken = service.spokenTokens[29]
+        coordinator.stop()
+        service.finish(token: stoppedToken)
+
+        XCTAssertEqual(service.spoken.count, 30)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+    }
+
+    func testMANUAL_SUPERSEDE_DROPS_OLD_REMAINDER() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:manual-old",
+            text: makeLongResponseText(prefix: "Old", count: 100)
+        ))
+        let oldFirstToken = service.spokenTokens[0]
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:manual-new",
+            text: makeLongResponseText(prefix: "New", count: 3)
+        ))
+        finishEverySpokenRequest(service)
+        service.finish(token: oldFirstToken)
+
+        XCTAssertTrue(service.spoken.allSatisfy { !$0.hasPrefix("Old") || $0 == "Old segment 1." })
+        XCTAssertEqual(Array(service.spoken.suffix(3)), [
+            "New segment 1.", "New segment 2.", "New segment 3.",
+        ])
+    }
+
+    func testAUTO_OFF_PRESERVES_STARTED_RESPONSE_REMAINDER() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.toggleAutoSpeak(for: slotID)
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:auto-off-100",
+            text: makeLongResponseText(prefix: "Started", count: 100)
+        ))
+        let firstToken = service.spokenTokens[0]
+        coordinator.toggleAutoSpeak(for: slotID)
+        finishEverySpokenRequest(service)
+        service.finish(token: firstToken)
+
+        XCTAssertEqual(service.spoken.count, 100)
+        XCTAssertEqual(service.spoken.last, "Started segment 100.")
     }
 }
