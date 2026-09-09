@@ -728,6 +728,16 @@ final class PanelController: NSObject, NSWindowDelegate {
         assistantSpeechCoordinator.readLatestResponse(for: slotID)
     }
 
+    func replayLatestResponseForActiveTab() {
+        guard let slotID = tabStore.activeTabID,
+              activeSlotSupportsSpeech(slotID: slotID) else {
+            NSSound.beep()
+            synchronizeSpeechPresentation()
+            return
+        }
+        assistantSpeechCoordinator.replayLatestResponse(for: slotID)
+    }
+
     func readPauseResumeSpeechForActiveTab() {
         guard let activeSlotID = tabStore.activeTabID else {
             NSSound.beep()
@@ -742,6 +752,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                 _ = assistantSpeechCoordinator.pauseCurrentSpeech(for: activeSlotID)
             case .paused:
                 _ = assistantSpeechCoordinator.resumeCurrentSpeech(for: activeSlotID)
+            case .starting, .pausing, .resuming:
+                // Transitional states are confirmed by SpeechService's
+                // delegate callbacks. Do not turn a second click into a
+                // competing pause/resume request.
+                synchronizeSpeechPresentation()
             }
             return
         }
@@ -753,8 +768,7 @@ final class PanelController: NSObject, NSWindowDelegate {
               assistantSpeechCoordinator.currentSpeakingSlotID == activeSlotID else {
             return
         }
-        guard assistantSpeechCoordinator.playbackState == .speaking
-                || assistantSpeechCoordinator.playbackState == .paused else {
+        guard assistantSpeechCoordinator.playbackState != .idle else {
             return
         }
         assistantSpeechCoordinator.stop()
@@ -1633,6 +1647,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .readPauseResumeSpeechForActiveTab:
             readPauseResumeSpeechForActiveTab()
 
+        case .replayLatestSpeechForActiveTab:
+            replayLatestResponseForActiveTab()
+
         case .stopSpeechForActiveTab:
             stopSpeechForActiveTab()
 
@@ -1898,6 +1915,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onReadLatestResponse = { [weak self] in
             self?.readPauseResumeSpeechForActiveTab()
+        }
+        rail.onReplayLatestResponse = { [weak self] in
+            self?.replayLatestResponseForActiveTab()
         }
         rail.onToggleAutoSpeak = { [weak self] in
             self?.toggleAutoSpeakForActiveTab()

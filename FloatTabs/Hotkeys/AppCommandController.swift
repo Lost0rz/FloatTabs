@@ -18,6 +18,7 @@ enum AppCommand: Equatable {
     case togglePin
     case setResidency(SlotResidencyPolicy)
     case readPauseResumeSpeechForActiveTab
+    case replayLatestSpeechForActiveTab
     case stopSpeechForActiveTab
     case toggleAutoSpeakForActiveTab
 }
@@ -156,6 +157,10 @@ extension KeyboardShortcuts.Name {
         "readLatestOrStopSpeech",
         initial: .init(.r, modifiers: [.control, .shift])
     )
+    static let replayLatestSpeech = Self(
+        "replayLatestSpeech",
+        initial: .init(.e, modifiers: [.control, .shift])
+    )
     static let stopSpeechForActiveTab = Self(
         "stopSpeechForActiveTab",
         initial: .init(.s, modifiers: [.control, .shift])
@@ -221,6 +226,11 @@ enum AppShortcutCatalog {
             title: "Read / Pause / Resume Speech",
             command: .readPauseResumeSpeechForActiveTab,
             name: .readLatestOrStopSpeech
+        ),
+        .init(
+            title: "Replay Latest Speech",
+            command: .replayLatestSpeechForActiveTab,
+            name: .replayLatestSpeech
         ),
         .init(
             title: "Stop Speech",

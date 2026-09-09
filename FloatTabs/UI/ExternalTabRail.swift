@@ -103,19 +103,20 @@ final class SpeechRailControl: NSView {
     enum Kind: Equatable {
         case autoSpeak
         case readLatest
+        case replay
+        case stop
     }
 
     let kind: Kind
     var onActivate: (() -> Void)?
-    var onStop: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
-    private let stopButton = NSButton()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
     private var dockInfluence: CGFloat = 0
     private var isEnabledForPresentation = false
+    private var isActionEnabledForPresentation = false
     private var isAutoSpeakEnabled = false
     private var isCurrentActivePlayback = false
     private var playbackState: SpeechPlaybackState = .idle
@@ -134,7 +135,7 @@ final class SpeechRailControl: NSView {
     }
 
     var isStopActionVisible: Bool {
-        !stopButton.isHidden
+        kind == .stop && isActionEnabledForPresentation
     }
 
     var displayedPlaybackState: SpeechPlaybackState {
@@ -143,6 +144,10 @@ final class SpeechRailControl: NSView {
 
     var isEnabledForSpeechPresentationState: Bool {
         isEnabledForPresentation
+    }
+
+    var isActionEnabledForSpeechPresentationState: Bool {
+        isActionEnabledForPresentation
     }
 
     var isAutoSpeakEnabledForPresentation: Bool {
@@ -167,27 +172,7 @@ final class SpeechRailControl: NSView {
             imageView.widthAnchor.constraint(equalToConstant: 13),
             imageView.heightAnchor.constraint(equalToConstant: 13),
         ])
-        if kind == .readLatest {
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8).isActive = true
-            stopButton.translatesAutoresizingMaskIntoConstraints = false
-            stopButton.isBordered = false
-            stopButton.bezelStyle = .inline
-            stopButton.setButtonType(.momentaryPushIn)
-            stopButton.imagePosition = .imageOnly
-            stopButton.imageScaling = .scaleProportionallyUpOrDown
-            stopButton.target = self
-            stopButton.action = #selector(stopActivated)
-            stopButton.setAccessibilityRole(.button)
-            addSubview(stopButton)
-            NSLayoutConstraint.activate([
-                stopButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
-                stopButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-                stopButton.widthAnchor.constraint(equalToConstant: 13),
-                stopButton.heightAnchor.constraint(equalToConstant: 13),
-            ])
-        } else {
-            imageView.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
-        }
+        imageView.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
         setAccessibilityRole(.button)
         updatePresentation()
     }
@@ -205,12 +190,7 @@ final class SpeechRailControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if kind == .readLatest,
-           !stopButton.isHidden,
-           stopButton.frame.contains(point) {
-            return stopButton
-        }
-        return frame.contains(point) ? self : nil
+        return bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -235,22 +215,19 @@ final class SpeechRailControl: NSView {
 
     func setSpeechState(
         isEnabled: Bool,
+        isActionEnabled: Bool? = nil,
         isAutoSpeakEnabled: Bool,
         playbackState: SpeechPlaybackState,
         isCurrentActivePlayback: Bool,
         activeTabName: String?
     ) {
         self.isEnabledForPresentation = isEnabled
+        self.isActionEnabledForPresentation = isActionEnabled ?? isEnabled
         self.isAutoSpeakEnabled = isAutoSpeakEnabled
         self.playbackState = playbackState
         self.isCurrentActivePlayback = isCurrentActivePlayback
         self.activeTabName = activeTabName
         updatePresentation()
-    }
-
-    @objc private func stopActivated() {
-        guard !stopButton.isHidden else { return }
-        onStop?()
     }
 
     override func updateTrackingAreas() {
@@ -283,7 +260,7 @@ final class SpeechRailControl: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard isEnabledForPresentation else {
+        guard isActionEnabledForPresentation else {
             NSSound.beep()
             return
         }
@@ -330,6 +307,10 @@ final class SpeechRailControl: NSView {
                 tooltip = isEnabledForPresentation
                     ? "Resume Speech · \(target)"
                     : "Speech is currently available for ChatGPT tabs."
+            case (true, .starting), (true, .pausing), (true, .resuming):
+                symbol = "ellipsis.circle"
+                label = "Speech transition in progress for \(target)"
+                tooltip = "Speech transition in progress · \(target)"
             default:
                 symbol = "play.fill"
                 label = "Read latest response from \(target)"
@@ -337,39 +318,40 @@ final class SpeechRailControl: NSView {
                     ? "Read Latest Response From Current Active Tab · \(target)"
                     : "Speech is currently available for ChatGPT tabs."
             }
+        case .replay:
+            symbol = "arrow.counterclockwise"
+            label = "Replay latest response from \(target)"
+            tooltip = isEnabledForPresentation
+                ? "Replay Latest Response From \(target)"
+                : "Speech is currently available for ChatGPT tabs."
+        case .stop:
+            symbol = "stop.fill"
+            label = "Stop speech for \(target)"
+            tooltip = isEnabledForPresentation
+                ? "Stop Speech · \(target)"
+                : "Speech is currently available for ChatGPT tabs."
         }
 
         let hasActivePlayback = isCurrentActivePlayback
-            && (playbackState == .speaking || playbackState == .paused)
-        let stopVisible = kind == .readLatest && hasActivePlayback
-        stopButton.isHidden = !stopVisible
-        if stopVisible {
-            let stopLabel = "Stop speech for \(target)"
-            stopButton.image = NSImage(
-                systemSymbolName: "stop.fill",
-                accessibilityDescription: stopLabel
-            )
-            stopButton.contentTintColor = .systemRed
-            stopButton.toolTip = "Stop Speech · \(target)"
-            stopButton.setAccessibilityLabel(stopLabel)
-        }
-
+            && playbackState != .idle
         imageView.image = NSImage(
             systemSymbolName: symbol,
             accessibilityDescription: label
         )
-        imageView.contentTintColor = isEnabledForPresentation
-            ? (hasActivePlayback
-                ? (playbackState == .paused ? .systemOrange : .systemRed)
-                : .labelColor)
+        imageView.contentTintColor = isActionEnabledForPresentation
+            ? (kind == .stop
+                ? .systemRed
+                : kind == .readLatest && hasActivePlayback && playbackState == .paused
+                    ? .systemOrange
+                    : .labelColor)
             : .tertiaryLabelColor
-        imageView.alphaValue = isEnabledForPresentation ? 1 : 0.45
+        imageView.alphaValue = isActionEnabledForPresentation ? 1 : 0.45
         toolTip = tooltip
         setAccessibilityLabel(label)
 
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let fraction: CGFloat
-            if !isEnabledForPresentation {
+            if !isActionEnabledForPresentation {
                 fraction = isHovered ? 0.06 : 0.01
             } else if hasActivePlayback || isAutoSpeakEnabled {
                 fraction = isHovered ? 0.16 : 0.08
@@ -405,6 +387,7 @@ final class ExternalControlZoneView: NSView {
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
     var onReadLatestResponse: (() -> Void)?
+    var onReplayLatestResponse: (() -> Void)?
     var onToggleAutoSpeak: (() -> Void)?
     var onStopSpeech: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -419,6 +402,8 @@ final class ExternalControlZoneView: NSView {
     private let addControl = AddWebAppControl()
     private let autoSpeakControl = SpeechRailControl(kind: .autoSpeak)
     private let readLatestControl = SpeechRailControl(kind: .readLatest)
+    private let replayControl = SpeechRailControl(kind: .replay)
+    private let stopControl = SpeechRailControl(kind: .stop)
     private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
     private var trackingAreaReference: NSTrackingArea?
@@ -443,12 +428,15 @@ final class ExternalControlZoneView: NSView {
         addSubview(addControl)
         addSubview(autoSpeakControl)
         addSubview(readLatestControl)
+        addSubview(replayControl)
+        addSubview(stopControl)
         addSubview(settingsControl)
         addSubview(pinControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
         autoSpeakControl.onActivate = { [weak self] in self?.onToggleAutoSpeak?() }
         readLatestControl.onActivate = { [weak self] in self?.onReadLatestResponse?() }
-        readLatestControl.onStop = { [weak self] in self?.onStopSpeech?() }
+        replayControl.onActivate = { [weak self] in self?.onReplayLatestResponse?() }
+        stopControl.onActivate = { [weak self] in self?.onStopSpeech?() }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
         addControl.onPointerMoved = { [weak self] event in
@@ -458,6 +446,12 @@ final class ExternalControlZoneView: NSView {
             self?.updateDockPointer(with: event)
         }
         readLatestControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        replayControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        stopControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         settingsControl.onPointerMoved = { [weak self] event in
@@ -609,6 +603,8 @@ final class ExternalControlZoneView: NSView {
         addControl.refreshAppearance()
         autoSpeakControl.refreshAppearance()
         readLatestControl.refreshAppearance()
+        replayControl.refreshAppearance()
+        stopControl.refreshAppearance()
         settingsControl.refreshAppearance()
         pinControl.refreshAppearance()
     }
@@ -693,6 +689,25 @@ final class ExternalControlZoneView: NSView {
         )
         readLatestControl.setSpeechState(
             isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isActionEnabled: isCurrentActivePlayback
+                ? ![.starting, .pausing, .resuming].contains(presentation.playbackState)
+                : presentation.activeSlotSupportsSpeech,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        replayControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isActionEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        stopControl.setSpeechState(
+            isEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
+            isActionEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
@@ -751,9 +766,20 @@ final class ExternalControlZoneView: NSView {
         pinControl.frame
     }
 
+    var replayControlFrame: NSRect {
+        replayControl.frame
+    }
+
+    var stopControlFrame: NSRect {
+        stopControl.frame
+    }
+
     private var railContentViews: [NSView] {
         Array(tabViews.values)
-            + [addControl, autoSpeakControl, readLatestControl, settingsControl, pinControl]
+            + [
+                addControl, autoSpeakControl, readLatestControl, replayControl,
+                stopControl, settingsControl, pinControl,
+            ]
     }
 
     private func finishRailVisibility(generation: Int, collapsed: Bool) {
@@ -840,6 +866,12 @@ final class ExternalControlZoneView: NSView {
         readLatestControl.setHovered(
             location.map { readLatestControl.frame.contains($0) } ?? false
         )
+        replayControl.setHovered(
+            location.map { replayControl.frame.contains($0) } ?? false
+        )
+        stopControl.setHovered(
+            location.map { stopControl.frame.contains($0) } ?? false
+        )
         settingsControl.setHovered(
             location.map { settingsControl.frame.contains($0) } ?? false
         )
@@ -922,8 +954,44 @@ final class ExternalControlZoneView: NSView {
             )
             self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
 
-            let readLatestY = max(
+            let stopY = max(
                 settingsY
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+            let stopCenterY = stopY + ExternalTabMetrics.systemControlHeight / 2
+            let stopInfluence = self.pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - stopCenterY)
+            } ?? 0
+            self.stopControl.setDockInfluence(stopInfluence)
+            let stopFrame = self.attachedFrame(
+                preferredWidth: self.stopControl.preferredWidth,
+                y: stopY,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            self.setFrame(stopFrame, for: self.stopControl, animated: animated)
+
+            let replayY = max(
+                stopY
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+            let replayCenterY = replayY + ExternalTabMetrics.systemControlHeight / 2
+            let replayInfluence = self.pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - replayCenterY)
+            } ?? 0
+            self.replayControl.setDockInfluence(replayInfluence)
+            let replayFrame = self.attachedFrame(
+                preferredWidth: self.replayControl.preferredWidth,
+                y: replayY,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            self.setFrame(replayFrame, for: self.replayControl, animated: animated)
+
+            let readLatestY = max(
+                replayY
                     - ExternalTabMetrics.systemControlGap
                     - ExternalTabMetrics.systemControlHeight,
                 0
@@ -2216,6 +2284,12 @@ final class ExternalWebAppTabView: NSView {
             parts.append("Currently speaking")
         case .paused:
             parts.append("Speech paused")
+        case .starting:
+            parts.append("Speech starting")
+        case .pausing:
+            parts.append("Speech pausing")
+        case .resuming:
+            parts.append("Speech resuming")
         case .idle:
             break
         }
@@ -2231,6 +2305,14 @@ final class ExternalWebAppTabView: NSView {
         let description: String
         let tint: NSColor
         switch speechPlaybackState {
+        case .starting, .resuming:
+            symbol = "speaker.wave.2"
+            description = "Speech transition in progress"
+            tint = .systemOrange
+        case .pausing:
+            symbol = "pause.fill"
+            description = "Speech pausing"
+            tint = .systemOrange
         case .speaking:
             symbol = "speaker.wave.2.fill"
             description = "Currently speaking"

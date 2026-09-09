@@ -517,7 +517,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    func testSpeechControlsUseAutoReadSettingsPinBottomUpOrder() {
+    func testSpeechControlsUseAutoReplayStopSettingsPinBottomUpOrder() {
         let profile = makeProfile(name: "ChatGPT")
         let (host, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
@@ -541,16 +541,30 @@ final class WebAttentionIndicatorTests: XCTestCase {
             zone.subviews.compactMap { $0 as? SpeechRailControl }
                 .first(where: { $0.kind == .readLatest })
         )
+        let replay = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .replay })
+        )
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
 
         XCTAssertLessThan(auto.frame.minY, read.frame.minY)
-        XCTAssertLessThan(read.frame.minY, zone.settingsControlFrame.minY)
+        XCTAssertLessThan(read.frame.minY, replay.frame.minY)
+        XCTAssertLessThan(replay.frame.minY, stop.frame.minY)
+        XCTAssertLessThan(stop.frame.minY, zone.settingsControlFrame.minY)
         XCTAssertLessThan(zone.settingsControlFrame.minY, zone.pinControlFrame.minY)
 
         let exclusions = zone.movementExclusionRects(in: host)
         let autoFrameInHost = auto.convert(auto.bounds, to: host)
         let readFrameInHost = read.convert(read.bounds, to: host)
+        let replayFrameInHost = replay.convert(replay.bounds, to: host)
+        let stopFrameInHost = stop.convert(stop.bounds, to: host)
         XCTAssertTrue(exclusions.contains(where: { $0 == autoFrameInHost }))
         XCTAssertTrue(exclusions.contains(where: { $0 == readFrameInHost }))
+        XCTAssertTrue(exclusions.contains(where: { $0 == replayFrameInHost }))
+        XCTAssertTrue(exclusions.contains(where: { $0 == stopFrameInHost }))
     }
 
     func testSpeechControlsCollapseAndExpandWithRail() {
@@ -559,7 +573,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.apply(profiles: [profile], activeTabID: profile.id)
         zone.layoutSubtreeIfNeeded()
         let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
-        XCTAssertEqual(controls.count, 2)
+        XCTAssertEqual(controls.count, 4)
         XCTAssertTrue(controls.allSatisfy { !$0.isHidden })
 
         zone.setCollapsed(true, animated: false)
@@ -611,7 +625,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    func testSpeechRailProjectsPauseResumeAndVisibleStopWithoutAddingARow() {
+    func testSpeechRailProjectsIndependentPlayPauseReplayAndStopTargets() {
         let profile = makeProfile(name: "ChatGPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
@@ -633,10 +647,25 @@ final class WebAttentionIndicatorTests: XCTestCase {
             zone.subviews.compactMap { $0 as? SpeechRailControl }
                 .first(where: { $0.kind == .readLatest })
         )
+        let replay = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .replay })
+        )
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
         XCTAssertEqual(read.displayedPlaybackState, .speaking)
         XCTAssertTrue(read.isCurrentlySpeakingForAction)
-        XCTAssertTrue(read.isStopActionVisible)
         XCTAssertTrue(read.toolTip?.contains("Pause Speech") == true)
+        XCTAssertTrue(replay.toolTip?.contains("Replay Latest Response") == true)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.toolTip?.contains("Stop Speech") == true)
+        XCTAssertFalse(read.frame.intersects(replay.frame))
+        XCTAssertFalse(replay.frame.intersects(stop.frame))
+        XCTAssertTrue(read.hitTest(NSPoint(x: read.bounds.midX, y: read.bounds.midY)) === read)
+        XCTAssertTrue(replay.hitTest(NSPoint(x: replay.bounds.midX, y: replay.bounds.midY)) === replay)
+        XCTAssertTrue(stop.hitTest(NSPoint(x: stop.bounds.midX, y: stop.bounds.midY)) === stop)
 
         let readFrame = read.frame
         zone.setSpeechPresentation(
@@ -654,8 +683,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         XCTAssertEqual(read.displayedPlaybackState, .paused)
         XCTAssertTrue(read.isCurrentlyPausedForAction)
-        XCTAssertTrue(read.isStopActionVisible)
         XCTAssertTrue(read.toolTip?.contains("Resume Speech") == true)
+        XCTAssertTrue(stop.isStopActionVisible)
         XCTAssertEqual(read.frame.height, readFrame.height)
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
@@ -668,13 +697,29 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 activeSlotID: profile.id,
                 autoSpeakSlotIDs: [profile.id],
                 activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .resuming,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        XCTAssertFalse(read.isActionEnabledForSpeechPresentationState)
+        XCTAssertTrue(read.toolTip?.contains("transition") == true)
+        XCTAssertTrue(replay.isActionEnabledForSpeechPresentationState)
+        XCTAssertTrue(stop.isStopActionVisible)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
                 currentSpeakingSlotID: nil,
                 playbackState: .idle,
                 activeSlotSupportsSpeech: true
             ),
             activeTabName: profile.name
         )
-        XCTAssertFalse(read.isStopActionVisible)
+        XCTAssertFalse(stop.isStopActionVisible)
         XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
     }
 
@@ -704,7 +749,11 @@ final class WebAttentionIndicatorTests: XCTestCase {
             zone.subviews.compactMap { $0 as? SpeechRailControl }
                 .first(where: { $0.kind == .readLatest })
         )
-        XCTAssertFalse(read.isStopActionVisible)
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
+        XCTAssertFalse(stop.isStopActionVisible)
         XCTAssertFalse(read.isCurrentlyPausedForAction)
         XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
     }

@@ -3,9 +3,11 @@ import Foundation
 
 @MainActor
 protocol SpeechSynthesizing: AnyObject {
+    var onUtteranceStarted: ((UInt64) -> Void)? { get set }
     var onUtteranceFinished: ((UInt64) -> Void)? { get set }
     var onUtterancePaused: ((UInt64) -> Void)? { get set }
     var onUtteranceContinued: ((UInt64) -> Void)? { get set }
+    var onUtteranceCancelled: ((UInt64) -> Void)? { get set }
 
     func speak(_ request: SpeechPlaybackRequest)
     @discardableResult
@@ -20,19 +22,31 @@ protocol SpeechSynthesizing: AnyObject {
 @MainActor
 final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDelegate {
     private enum DelegateEvent: Sendable {
+        case started
         case paused
         case continued
         case finished
+        case cancelled
+    }
+
+    private struct ActiveUtterance {
+        let utterance: AVSpeechUtterance
+        let token: UInt64
     }
 
     private let synthesizer = AVSpeechSynthesizer()
     private let preferences: SpeechPreferencesStore
     private let voiceCatalog: SpeechVoiceCatalogProviding
-    private var playbackTokens: [ObjectIdentifier: UInt64] = [:]
+    /// Retaining each active utterance keeps its identity stable until the
+    /// delegate terminal event arrives. This prevents an old async callback
+    /// from deleting a newer token after ObjectIdentifier address reuse.
+    private var activeUtterances: [ObjectIdentifier: ActiveUtterance] = [:]
 
+    var onUtteranceStarted: ((UInt64) -> Void)?
     var onUtteranceFinished: ((UInt64) -> Void)?
     var onUtterancePaused: ((UInt64) -> Void)?
     var onUtteranceContinued: ((UInt64) -> Void)?
+    var onUtteranceCancelled: ((UInt64) -> Void)?
 
     init(
         preferences: SpeechPreferencesStore = SpeechPreferencesStore(),
@@ -54,7 +68,10 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
             preferences: preferences
         )
         utterance.rate = preferences.speechRate
-        playbackTokens[ObjectIdentifier(utterance)] = request.transportToken
+        activeUtterances[ObjectIdentifier(utterance)] = ActiveUtterance(
+            utterance: utterance,
+            token: request.transportToken
+        )
         synthesizer.speak(utterance)
     }
 
@@ -70,6 +87,13 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
 
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didStart utterance: AVSpeechUtterance
+    ) {
+        notify(tokenFor: utterance, event: .started)
     }
 
     nonisolated func speechSynthesizer(
@@ -97,12 +121,7 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         _ synthesizer: AVSpeechSynthesizer,
         didCancel utterance: AVSpeechUtterance
     ) {
-        let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
-            self?.playbackTokens.removeValue(forKey: utteranceID)
-        }
-        // Cancellation is intentionally not an advance event. The
-        // coordinator clears its current item before calling stop().
+        notify(tokenFor: utterance, removing: true, event: .cancelled)
     }
 
     private nonisolated func notify(
@@ -111,22 +130,27 @@ final class SpeechService: NSObject, SpeechSynthesizing, AVSpeechSynthesizerDele
         event: DelegateEvent
     ) {
         let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
+        Task { @MainActor [weak self, utterance] in
             guard let self else { return }
-            let token: UInt64?
-            if removing {
-                token = self.playbackTokens.removeValue(forKey: utteranceID)
-            } else {
-                token = self.playbackTokens[utteranceID]
+            guard let active = self.activeUtterances[utteranceID],
+                  active.utterance === utterance else {
+                return
             }
-            guard let token else { return }
+            let token = active.token
+            if removing {
+                self.activeUtterances.removeValue(forKey: utteranceID)
+            }
             switch event {
+            case .started:
+                self.onUtteranceStarted?(token)
             case .paused:
                 self.onUtterancePaused?(token)
             case .continued:
                 self.onUtteranceContinued?(token)
             case .finished:
                 self.onUtteranceFinished?(token)
+            case .cancelled:
+                self.onUtteranceCancelled?(token)
             }
         }
     }

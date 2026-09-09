@@ -114,9 +114,9 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
         XCTAssertEqual(AppShortcutCatalog.residencyBindings.count, 3)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.speechBindings.count, 3)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 27)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 27)
+        XCTAssertEqual(AppShortcutCatalog.speechBindings.count, 4)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 28)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 28)
     }
 
     func testSpeechShortcutsRouteDefaultsAndRemainConfigurable() {
@@ -137,6 +137,13 @@ final class AppCommandControllerTests: XCTestCase {
         )
         XCTAssertEqual(
             defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.e.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .replayLatestSpeechForActiveTab
+        )
+        XCTAssertEqual(
+            defaultCommand(
                 keyCode: UInt16(KeyboardShortcuts.Key.a.rawValue),
                 modifiers: [.control, .shift]
             ),
@@ -146,6 +153,7 @@ final class AppCommandControllerTests: XCTestCase {
             AppShortcutCatalog.speechBindings.map(\.title),
             [
                 "Read / Pause / Resume Speech",
+                "Replay Latest Speech",
                 "Stop Speech",
                 "Toggle Auto Speak This Tab",
             ]

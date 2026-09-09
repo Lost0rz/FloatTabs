@@ -8,11 +8,14 @@ private final class TestSpeechService: SpeechSynthesizing {
     private(set) var pauseCount = 0
     private(set) var resumeCount = 0
     private(set) var stopCount = 0
+    var onUtteranceStarted: ((UInt64) -> Void)?
     var onUtteranceFinished: ((UInt64) -> Void)?
     var onUtterancePaused: ((UInt64) -> Void)?
     var onUtteranceContinued: ((UInt64) -> Void)?
+    var onUtteranceCancelled: ((UInt64) -> Void)?
     var pauseResult = true
     var resumeResult = true
+    var automaticallyConfirmsStart = true
 
     var spoken: [String] { spokenRequests.map(\.text) }
     var spokenTokens: [UInt64] { spokenRequests.map(\.transportToken) }
@@ -22,6 +25,9 @@ private final class TestSpeechService: SpeechSynthesizing {
 
     func speak(_ request: SpeechPlaybackRequest) {
         spokenRequests.append(request)
+        if automaticallyConfirmsStart {
+            onUtteranceStarted?(request.transportToken)
+        }
     }
 
     func pause() -> Bool {
@@ -42,6 +48,10 @@ private final class TestSpeechService: SpeechSynthesizing {
         onUtteranceFinished?(token)
     }
 
+    func start(token: UInt64) {
+        onUtteranceStarted?(token)
+    }
+
     func pause(token: UInt64) {
         onUtterancePaused?(token)
     }
@@ -51,7 +61,7 @@ private final class TestSpeechService: SpeechSynthesizing {
     }
 
     func cancel(token: UInt64) {
-        // didCancel is intentionally not surfaced as a finish callback.
+        onUtteranceCancelled?(token)
     }
 }
 
@@ -379,8 +389,10 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         service.cancel(token: service.spokenTokens[0])
 
         XCTAssertEqual(service.spoken, ["One."])
-        XCTAssertEqual(coordinator.pendingQueueCount, 1)
-        XCTAssertNotNil(coordinator.currentResponseIdentity)
+        XCTAssertEqual(coordinator.pendingQueueCount, 0)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+        XCTAssertNil(coordinator.currentSpeakingSlotID)
+        XCTAssertEqual(coordinator.playbackState, .idle)
     }
 
     func testOlderExtractionCannotConsumeNewerRequest() {
@@ -786,7 +798,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
         XCTAssertEqual(service.pauseCount, 1)
-        XCTAssertEqual(coordinator.playbackState, .speaking)
+        XCTAssertEqual(coordinator.playbackState, .pausing)
 
         service.pause(token: token)
         XCTAssertEqual(coordinator.playbackState, .paused)
@@ -817,7 +829,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
         XCTAssertEqual(service.resumeCount, 1)
-        XCTAssertEqual(coordinator.playbackState, .speaking)
+        XCTAssertEqual(coordinator.playbackState, .resuming)
         XCTAssertEqual(coordinator.currentSpeakingSlotID, slotID)
         XCTAssertEqual(coordinator.autoSpeakSlotIDs, Set([slotID]))
 
@@ -825,6 +837,224 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.playbackState, .speaking)
         XCTAssertFalse(coordinator.resumeCurrentSpeech(for: slotID))
         XCTAssertEqual(service.resumeCount, 1)
+    }
+
+    func testPlaybackRequiresDidStartConfirmationBeforeSpeakingState() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(text: "Start me."))
+        let token = service.spokenTokens[0]
+
+        XCTAssertEqual(coordinator.playbackState, .starting)
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotID)
+        service.start(token: token)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+    }
+
+    func testStaleDidStartCannotContaminateNewPlaybackSession() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:old", text: "Old response."))
+        let oldToken = service.spokenTokens[0]
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        coordinator.replayLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:new", text: "New response."))
+        let newToken = service.spokenTokens[1]
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        service.start(token: oldToken)
+        XCTAssertEqual(coordinator.playbackState, .starting)
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:new")
+
+        service.start(token: newToken)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+    }
+
+    func testResumeTransitionIgnoresSecondPauseOrResumeUntilDidContinue() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(text: "Do not race me."))
+        let token = service.spokenTokens[0]
+        XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+        service.pause(token: token)
+
+        XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
+        XCTAssertEqual(coordinator.playbackState, .resuming)
+        XCTAssertFalse(coordinator.pauseCurrentSpeech(for: slotID))
+        XCTAssertFalse(coordinator.resumeCurrentSpeech(for: slotID))
+        XCTAssertEqual(service.pauseCount, 1)
+        XCTAssertEqual(service.resumeCount, 1)
+
+        service.continue(token: token)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+    }
+
+    func testPauseAtSegmentBoundaryHoldsNextSegmentsUntilResume() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(text: "A. B. C."))
+        let tokenA = service.spokenTokens[0]
+
+        XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+        XCTAssertEqual(coordinator.playbackState, .pausing)
+        service.finish(token: tokenA)
+        service.pause(token: tokenA)
+
+        XCTAssertEqual(coordinator.playbackState, .paused)
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotID)
+        XCTAssertEqual(service.spoken, ["A."])
+        XCTAssertEqual(coordinator.pendingQueueCount, 2)
+
+        XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        XCTAssertEqual(service.spoken, ["A.", "B."])
+        service.finish(token: service.spokenTokens[1])
+        service.finish(token: service.spokenTokens[2])
+        XCTAssertEqual(service.spoken, ["A.", "B.", "C."])
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testCancelClearsCurrentTransportWithoutAdvancingAndStaleCancelCannotAffectNewPlayback() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:cancelled", text: "Old."))
+        let oldToken = service.spokenTokens[0]
+        service.cancel(token: oldToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+        XCTAssertNil(coordinator.currentSpeakingSlotID)
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:new", text: "New."))
+        let newToken = service.spokenTokens[1]
+        service.cancel(token: oldToken)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        XCTAssertEqual(coordinator.currentSpeakingSlotID, slotID)
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:new")
+        XCTAssertNotEqual(oldToken, newToken)
+    }
+
+    func testReplayFromPausedAndResumingStartsLatestResponseAtSegmentOne() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+
+        coordinator.readLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:first", text: "First one. First two."))
+        let firstToken = service.spokenTokens[0]
+        XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+        service.pause(token: firstToken)
+
+        coordinator.replayLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:replay", text: "Replay one. Replay two."))
+        let replayToken = service.spokenTokens[1]
+        XCTAssertEqual(service.spoken, ["First one.", "Replay one."])
+        service.continue(token: firstToken)
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:replay")
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+
+        XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+        service.pause(token: replayToken)
+        XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
+        XCTAssertEqual(coordinator.playbackState, .resuming)
+        coordinator.replayLatestResponse(for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:replay-again", text: "Replay again."))
+        XCTAssertEqual(service.spoken.last, "Replay again.")
+        service.continue(token: replayToken)
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:replay-again")
+    }
+
+    func testStopSafelyTerminatesEveryTransportState() {
+        for desiredState: SpeechPlaybackState in [
+            .starting, .speaking, .pausing, .paused, .resuming,
+        ] {
+            let service = TestSpeechService()
+            service.automaticallyConfirmsStart = false
+            let bridge = TestResponseBridge()
+            let slotID = UUID()
+            let coordinator = makeCoordinator(
+                service: service,
+                bridge: bridge,
+                webView: WKWebView()
+            )
+            coordinator.readLatestResponse(for: slotID)
+            bridge.resolve(makePayload(text: "Stop every state."))
+            let token = service.spokenTokens[0]
+
+            switch desiredState {
+            case .starting:
+                break
+            case .speaking:
+                service.start(token: token)
+            case .pausing:
+                service.start(token: token)
+                XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+            case .paused:
+                service.start(token: token)
+                XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+                service.pause(token: token)
+            case .resuming:
+                service.start(token: token)
+                XCTAssertTrue(coordinator.pauseCurrentSpeech(for: slotID))
+                service.pause(token: token)
+                XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
+            case .idle:
+                XCTFail("idle is not an active transport state")
+            }
+
+            XCTAssertEqual(coordinator.playbackState, desiredState)
+            coordinator.stop()
+            XCTAssertEqual(coordinator.playbackState, .idle)
+            XCTAssertNil(coordinator.currentSpeakingSlotID)
+            XCTAssertNil(coordinator.currentResponseIdentity)
+        }
     }
 
     func testFinishWinsWhenPauseBoundaryArrivesLate() {
@@ -1700,7 +1930,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         service.pause(token: qToken)
         XCTAssertEqual(coordinator.playbackState, .paused)
         XCTAssertTrue(coordinator.resumeCurrentSpeech(for: slotID))
-        XCTAssertEqual(coordinator.playbackState, .speaking)
+        XCTAssertEqual(coordinator.playbackState, .resuming)
         XCTAssertEqual(followBridge.locators.count, 1)
 
         service.finish(token: qToken)
