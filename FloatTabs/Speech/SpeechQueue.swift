@@ -98,6 +98,10 @@ struct SpeechQueue {
         items.removeAll { $0.responseID?.slotID == slotID }
     }
 
+    mutating func removeItems(forResponseID responseID: SpeechResponseIdentity) {
+        items.removeAll { $0.responseID == responseID }
+    }
+
     mutating func removeAutomaticItems(
         forSlotID slotID: UUID,
         preservingResponseID responseID: SpeechResponseIdentity? = nil

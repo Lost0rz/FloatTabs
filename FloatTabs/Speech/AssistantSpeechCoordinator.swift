@@ -568,7 +568,7 @@ final class AssistantSpeechCoordinator {
         guard autoSpeakSlotIDs.contains(request.slotID),
               !requests.isEmpty,
               !suppressedResponses[identity.slotID, default: []].contains(identity),
-              !spokenResponses[identity.slotID, default: []].contains(identity) else {
+              !isAutomaticResponsePendingOrActive(identity) else {
             automaticReservations[index].state = .released
             drainPlayback()
             return
@@ -686,6 +686,53 @@ final class AssistantSpeechCoordinator {
         drainPlayback()
     }
 
+    private func isAutomaticResponsePendingOrActive(
+        _ identity: SpeechResponseIdentity
+    ) -> Bool {
+        if spokenResponses[identity.slotID, default: []].contains(identity) {
+            return true
+        }
+        if currentItem?.origin == .automatic,
+           currentItem?.responseID == identity {
+            return true
+        }
+        if pausedStreamOrigin == .automatic,
+           pausedResponseID == identity {
+            return true
+        }
+        if speechQueue.items.contains(where: {
+            $0.origin == .automatic && $0.responseID == identity
+        }) {
+            return true
+        }
+        if speechBacklog.contains(where: {
+            $0.origin == .automatic && $0.responseID == identity
+        }) {
+            return true
+        }
+        return automaticReservations.contains { reservation in
+            guard reservation.slotID == identity.slotID else { return false }
+            guard case let .staged(stagedIdentity, _, _) = reservation.state else {
+                return false
+            }
+            return stagedIdentity == identity
+        }
+    }
+
+    private func invalidateAutomaticResponse(
+        _ identity: SpeechResponseIdentity
+    ) {
+        speechQueue.removeItems(forResponseID: identity)
+        speechBacklog.removeAll { $0.responseID == identity }
+        automaticReservations.removeAll { reservation in
+            guard reservation.slotID == identity.slotID else { return false }
+            guard case let .staged(stagedIdentity, _, _) = reservation.state else {
+                return false
+            }
+            return stagedIdentity == identity
+        }
+    }
+
     private func drainPlayback() {
         guard manualPlaybackBarrier == nil else { return }
         if !speechBacklog.isEmpty {
@@ -748,7 +795,6 @@ final class AssistantSpeechCoordinator {
                 if !result.items.isEmpty {
                     let appended = speechQueue.append(items: result.items)
                     guard appended > 0 else { return }
-                    spokenResponses[identity.slotID, default: []].insert(identity)
                 }
                 if result.nextIndex >= requests.count {
                     automaticReservations.removeFirst()
@@ -893,6 +939,12 @@ final class AssistantSpeechCoordinator {
               playbackState == .starting else {
             return
         }
+        if currentItem.origin == .automatic,
+           let responseID = currentItem.responseID {
+            // Queue admission only proves that the response is pending. Mark
+            // it as spoken only after AVFoundation confirms its first start.
+            spokenResponses[responseID.slotID, default: []].insert(responseID)
+        }
         setPlaybackState(.speaking)
         followCurrentItem()
     }
@@ -958,16 +1010,25 @@ final class AssistantSpeechCoordinator {
         }
 
         // Cancellation is a terminal transport event, not a finish event.
-        // Drop the remainder so no late cancel can advance the FIFO or leave
-        // a ghost speaking state behind. A future response may arm a fresh
-        // playback session normally.
+        // Drop only this response's remainder. Other responses may already be
+        // queued behind it and must remain eligible for FIFO playback.
+        let cancelledItem = currentItem
         self.currentItem = nil
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        speechQueue.clear()
-        speechBacklog.removeAll()
-        invalidateAllAutomaticPlayback()
+        if let responseID = cancelledItem.responseID {
+            suppressedResponses[responseID.slotID, default: []].insert(responseID)
+            invalidateAutomaticResponse(responseID)
+        } else {
+            // Preview has no response owner; retain its historical whole
+            // preview-pipeline cancellation behavior.
+            speechQueue.clear()
+            speechBacklog.removeAll()
+            invalidateAllAutomaticPlayback()
+        }
         setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)
+        drainPlayback()
+        speakNext()
     }
 }

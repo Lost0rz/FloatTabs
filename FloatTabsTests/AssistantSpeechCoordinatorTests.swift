@@ -373,6 +373,296 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(service.spoken, ["A one.", "A two.", "B one.", "B two."])
     }
 
+    func testUnexpectedCancelPreservesQueuedAutomaticResponseAcrossSlots() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { slotID in
+                slotID == slotA ? webViewA : webViewB
+            },
+            responseBridgeProvider: { slotID in
+                slotID == slotA ? bridgeA : bridgeB
+            }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(
+            responseID: "document-a:response-a",
+            text: "A one. A two."
+        ))
+        let tokenA = service.spokenTokens[0]
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(
+            responseID: "document-b:response-b",
+            text: "B one. B two."
+        ))
+        XCTAssertEqual(service.spoken, ["A one."])
+        XCTAssertEqual(coordinator.pendingQueueCount, 3)
+
+        service.cancel(token: tokenA)
+
+        XCTAssertEqual(service.spoken, ["A one.", "B one."])
+        XCTAssertEqual(coordinator.currentResponseIdentity?.slotID, slotB)
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Queued Slot B response did not start after cancelling Slot A")
+            return
+        }
+        let tokenB = service.spokenTokens[1]
+        service.start(token: tokenB)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        service.finish(token: tokenB)
+        XCTAssertEqual(service.spoken, ["A one.", "B one.", "B two."])
+        service.finish(token: service.spokenTokens[2])
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testUnexpectedCancelPreservesThreeResponseAutomaticFIFO() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let slotC = UUID()
+        let bridges = [slotA: TestResponseBridge(), slotB: TestResponseBridge(), slotC: TestResponseBridge()]
+        let webViews = [slotA: WKWebView(), slotB: WKWebView(), slotC: WKWebView()]
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { webViews[$0] },
+            responseBridgeProvider: { bridges[$0] }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+        coordinator.toggleAutoSpeak(for: slotC)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridges[slotA]?.resolve(makePayload(responseID: "document-a:a", text: "A."))
+        let tokenA = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotB)
+        bridges[slotB]?.resolve(makePayload(responseID: "document-b:b", text: "B."))
+        coordinator.handle(.generationFinished, for: slotC)
+        bridges[slotC]?.resolve(makePayload(responseID: "document-c:c", text: "C."))
+
+        service.cancel(token: tokenA)
+        XCTAssertEqual(service.spoken, ["A.", "B."])
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Slot B did not remain queued after cancelling Slot A")
+            return
+        }
+        let tokenB = service.spokenTokens[1]
+        service.start(token: tokenB)
+        service.finish(token: tokenB)
+
+        XCTAssertEqual(service.spoken, ["A.", "B.", "C."])
+        let tokenC = service.spokenTokens[2]
+        service.start(token: tokenC)
+        service.finish(token: tokenC)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testUnexpectedCancelDropsCancelledResponseRemainderButPreservesOtherResponse() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { $0 == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:a", text: "A one. A two. A three."))
+        let tokenA = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:b", text: "B."))
+
+        service.cancel(token: tokenA)
+
+        XCTAssertEqual(service.spoken, ["A one.", "B."])
+        XCTAssertFalse(service.spoken.contains("A two."))
+        XCTAssertFalse(service.spoken.contains("A three."))
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Unrelated Slot B response was not preserved")
+            return
+        }
+        let tokenB = service.spokenTokens[1]
+        service.start(token: tokenB)
+        service.finish(token: tokenB)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testDuplicateAutomaticObservationDoesNotDuplicateQueuedResponseBeforeDidStart() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:response-a",
+            text: "One. Two."
+        ))
+        let token = service.spokenTokens[0]
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:response-a",
+            text: "One. Two."
+        ))
+
+        service.start(token: token)
+        service.finish(token: token)
+        XCTAssertEqual(service.spoken, ["One.", "Two."])
+        service.finish(token: service.spokenTokens[1])
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testLateCancelForCancelledResponseCannotAffectNextSlot() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { $0 == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:a", text: "A one. A two."))
+        let tokenA = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:b", text: "B one. B two."))
+
+        service.cancel(token: tokenA)
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Slot B did not start after cancelling Slot A")
+            return
+        }
+        let tokenB = service.spokenTokens[1]
+        service.start(token: tokenB)
+        service.cancel(token: tokenA)
+
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-b:b")
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        service.finish(token: tokenB)
+        XCTAssertEqual(service.spoken, ["A one.", "B one.", "B two."])
+        service.finish(token: service.spokenTokens[2])
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testUnexpectedCancelPreservesQueuedResponseAfterAutomaticBacklog() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { $0 == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(
+            responseID: "document-a:a",
+            text: makeLongResponseText(prefix: "A", count: 70)
+        ))
+        let tokenA = service.spokenTokens[0]
+        XCTAssertEqual(coordinator.pendingQueueCount, 63)
+
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:b", text: "B."))
+        service.cancel(token: tokenA)
+
+        XCTAssertEqual(service.spoken.last, "B.")
+        XCTAssertFalse(service.spoken.contains { $0.hasPrefix("A segment") && $0 != service.spoken[0] })
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-b:b")
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Backlog cancellation did not preserve Slot B")
+            return
+        }
+        service.start(token: service.spokenTokens[1])
+        service.finish(token: service.spokenTokens[1])
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testManualReplayRemainsIsolatedFromLateAutomaticCancellation() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { $0 == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:auto", text: "Automatic."))
+        let automaticToken = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:queued", text: "Queued."))
+
+        coordinator.replayLatestResponse(for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:replay", text: "Replay."))
+        guard service.spokenTokens.indices.contains(1) else {
+            XCTFail("Manual replay did not start")
+            return
+        }
+        let replayToken = service.spokenTokens[1]
+        service.start(token: replayToken)
+        service.cancel(token: automaticToken)
+
+        XCTAssertEqual(service.spoken, ["Automatic.", "Replay."])
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:replay")
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        service.finish(token: replayToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
     func testCancelledUtteranceDoesNotAdvanceQueue() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()
