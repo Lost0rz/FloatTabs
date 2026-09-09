@@ -108,6 +108,64 @@ final class MathSpeechNormalizerTests: XCTestCase {
         XCTAssertTrue(result.text.contains("S 下标 D O A"))
     }
 
+    func testUnbracedSubscriptSingle() {
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("S_A", languageRole: .chinese).text,
+            "S 下标 A"
+        )
+    }
+
+    func testUnbracedNumericSubscript() {
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("x_1", languageRole: .chinese).text,
+            "x 下标 1"
+        )
+    }
+
+    func testMultipleUnbracedSubscriptsPreserveRatio() {
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("S_A:S_B", languageRole: .chinese).text,
+            "S 下标 A 比 S 下标 B"
+        )
+    }
+
+    func testUnbracedSubscriptsPreservePlusExpression() {
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("x_1+y_2", languageRole: .chinese).text,
+            "x 下标 1 加 y 下标 2"
+        )
+    }
+
+    func testSubscriptThenSuperscript() {
+        XCTAssertEqual(
+            MathSpeechNormalizer.normalize("A_i^2", languageRole: .chinese).text,
+            "A 下标 i 的平方"
+        )
+    }
+
+    func testBracedSubscriptRegression() {
+        let result = MathSpeechNormalizer.normalize("S_{AOB}", languageRole: .chinese)
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertEqual(result.text, "S 下标 A O B")
+    }
+
+    func testAreaRatioRegressionRemainsReadable() {
+        let source = "S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn"
+        let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertFalse(result.text.contains("复杂公式"))
+    }
+
+    func testBoxedAreaRatioRegressionRemainsReadable() {
+        let source = #"\boxed{S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn}"#
+        let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)
+
+        XCTAssertNotEqual(result.complexity, .complex)
+        XCTAssertFalse(result.text.contains("复杂公式"))
+    }
+
     func testBoxedPresentationalWrapperIsIgnored() {
         let source = #"\boxed{S_{AOB}:S_{BOC}:S_{COD}:S_{DOA}=m^2:mn:n^2:mn}"#
         let result = MathSpeechNormalizer.normalize(source, languageRole: .chinese)

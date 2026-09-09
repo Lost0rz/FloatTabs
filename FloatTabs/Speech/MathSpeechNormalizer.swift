@@ -390,20 +390,12 @@ enum MathSpeechNormalizer {
             }
             if character == "_" {
                 let subscriptStart = source.index(after: index)
-                let (content, next) = consumeGroup(in: source, from: subscriptStart)
-                let label: String
-                if let content {
-                    label = renderChineseAtoms(content) ?? content
-                } else if subscriptStart < source.endIndex {
-                    label = String(source[subscriptStart])
-                } else {
-                    return nil
-                }
+                let (content, next) = consumeSubscriptToken(in: source, from: subscriptStart)
+                guard let content else { return nil }
+                let label = renderChineseAtoms(content) ?? content
                 guard let prior = output.popLast() else { return nil }
                 output.append("\(prior) 下标 \(label)")
-                index = content == nil
-                    ? source.index(after: subscriptStart)
-                    : next
+                index = next
                 continue
             }
             if character == "√" {
@@ -492,20 +484,12 @@ enum MathSpeechNormalizer {
             }
             if character == "_" {
                 let subscriptStart = source.index(after: index)
-                let (content, next) = consumeGroup(in: source, from: subscriptStart)
-                let label: String
-                if let content {
-                    label = renderEnglishAtoms(content) ?? content
-                } else if subscriptStart < source.endIndex {
-                    label = String(source[subscriptStart])
-                } else {
-                    return nil
-                }
+                let (content, next) = consumeSubscriptToken(in: source, from: subscriptStart)
+                guard let content else { return nil }
+                let label = renderEnglishAtoms(content) ?? content
                 guard let prior = output.popLast() else { return nil }
                 output.append("\(prior) subscript \(label)")
-                index = content == nil
-                    ? source.index(after: subscriptStart)
-                    : next
+                index = next
                 continue
             }
             if character == "√" {
@@ -556,6 +540,21 @@ enum MathSpeechNormalizer {
             index = source.index(after: index)
         }
         return output.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Subscripts have a narrower TeX grammar than the general group
+    /// consumers. A braced subscript keeps the existing balanced-group
+    /// semantics; an unbraced subscript is exactly one Character so the
+    /// following expression remains available to the renderer.
+    private static func consumeSubscriptToken(
+        in source: String,
+        from start: String.Index
+    ) -> (String?, String.Index) {
+        guard start < source.endIndex else { return (nil, start) }
+        if source[start] == "{" {
+            return consumeGroup(in: source, from: start)
+        }
+        return (String(source[start]), source.index(after: start))
     }
 
     private static func consumeGroup(
