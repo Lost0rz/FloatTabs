@@ -663,6 +663,332 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.playbackState, .idle)
     }
 
+    func testPreviewCancelDropsOnlyPreviewItems() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: TestResponseBridge(),
+            webView: WKWebView()
+        )
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview one.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview two.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview three.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        service.cancel(token: previewToken)
+
+        XCTAssertEqual(service.spoken, ["Preview one."])
+        XCTAssertEqual(coordinator.pendingQueueCount, 0)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+        XCTAssertNil(coordinator.currentSpeakingSlotID)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testPreviewCancelPreservesQueuedAutomaticResponse() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotID = UUID()
+        let bridge = TestResponseBridge()
+        let webView = WKWebView()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: webView
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview one.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview remainder.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:auto", text: "Automatic response."))
+        XCTAssertEqual(coordinator.pendingQueueCount, 2)
+
+        service.cancel(token: previewToken)
+
+        XCTAssertEqual(service.spoken, ["Preview one.", "Automatic response."])
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:auto")
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        let automaticToken = service.spokenTokens[1]
+        service.start(token: automaticToken)
+        XCTAssertEqual(coordinator.playbackState, .speaking)
+        service.finish(token: automaticToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+        XCTAssertFalse(service.spoken.contains("Preview remainder."))
+    }
+
+    func testPreviewCancelPreservesThreeResponseFIFO() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotB = UUID()
+        let slotC = UUID()
+        let slotD = UUID()
+        let bridges = [
+            slotB: TestResponseBridge(),
+            slotC: TestResponseBridge(),
+            slotD: TestResponseBridge(),
+        ]
+        let webViews = [slotB: WKWebView(), slotC: WKWebView(), slotD: WKWebView()]
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { webViews[$0] },
+            responseBridgeProvider: { bridges[$0] }
+        )
+        coordinator.toggleAutoSpeak(for: slotB)
+        coordinator.toggleAutoSpeak(for: slotC)
+        coordinator.toggleAutoSpeak(for: slotD)
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview remainder.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        coordinator.handle(.generationFinished, for: slotB)
+        coordinator.handle(.generationFinished, for: slotC)
+        coordinator.handle(.generationFinished, for: slotD)
+        bridges[slotB]?.resolve(makePayload(responseID: "document-b:b", text: "B."))
+        bridges[slotC]?.resolve(makePayload(responseID: "document-c:c", text: "C."))
+        bridges[slotD]?.resolve(makePayload(responseID: "document-d:d", text: "D."))
+
+        service.cancel(token: previewToken)
+        XCTAssertEqual(service.spoken, ["Preview.", "B."])
+
+        let tokenB = service.spokenTokens[1]
+        service.start(token: tokenB)
+        service.finish(token: tokenB)
+        XCTAssertEqual(service.spoken, ["Preview.", "B.", "C."])
+
+        let tokenC = service.spokenTokens[2]
+        service.start(token: tokenC)
+        service.finish(token: tokenC)
+        XCTAssertEqual(service.spoken, ["Preview.", "B.", "C.", "D."])
+
+        let tokenD = service.spokenTokens[3]
+        service.start(token: tokenD)
+        service.finish(token: tokenD)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testPreviewCancelPreservesAutomaticBacklog() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotID = UUID()
+        let bridge = TestResponseBridge()
+        let webView = WKWebView()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: webView
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(
+            responseID: "document-a:long-auto",
+            text: makeLongResponseText(prefix: "Automatic", count: 70)
+        ))
+        XCTAssertEqual(coordinator.pendingQueueCount, 64)
+
+        service.cancel(token: previewToken)
+
+        XCTAssertEqual(service.spoken[0], "Preview.")
+        XCTAssertEqual(service.spoken[1], "Automatic segment 1.")
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:long-auto")
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        finishEverySpokenRequest(service)
+        let automaticSegments = service.spoken.filter { $0.hasPrefix("Automatic segment") }
+        XCTAssertEqual(automaticSegments.count, 70)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testPreviewCancelDoesNotClearPendingAutomaticExtraction() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotID = UUID()
+        let bridge = TestResponseBridge()
+        let webView = WKWebView()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: webView
+        )
+        coordinator.toggleAutoSpeak(for: slotID)
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        coordinator.handle(.generationFinished, for: slotID)
+        XCTAssertEqual(bridge.requestCount, 1)
+        service.cancel(token: previewToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+        XCTAssertEqual(bridge.requestCount, 1)
+
+        bridge.resolve(makePayload(responseID: "document-a:pending", text: "Late automatic response."))
+        XCTAssertEqual(service.spoken, ["Preview.", "Late automatic response."])
+
+        let automaticToken = service.spokenTokens[1]
+        service.start(token: automaticToken)
+        service.finish(token: automaticToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testExplicitStopRemainsGlobal() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotB = UUID()
+        let slotC = UUID()
+        let bridgeB = TestResponseBridge()
+        let bridgeC = TestResponseBridge()
+        let webViewB = WKWebView()
+        let webViewC = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotB ? webViewB : webViewC },
+            responseBridgeProvider: { $0 == slotB ? bridgeB : bridgeC }
+        )
+        coordinator.toggleAutoSpeak(for: slotB)
+        coordinator.toggleAutoSpeak(for: slotC)
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Preview remainder.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        coordinator.handle(.generationFinished, for: slotB)
+        bridgeB.resolve(makePayload(responseID: "document-b:queued", text: "Queued automatic."))
+        coordinator.handle(.generationFinished, for: slotC)
+        XCTAssertEqual(bridgeC.requestCount, 1)
+
+        coordinator.stop()
+
+        XCTAssertEqual(service.stopCount, 2)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+        XCTAssertNil(coordinator.currentResponseIdentity)
+        XCTAssertNil(coordinator.currentSpeakingSlotID)
+        XCTAssertEqual(coordinator.pendingQueueCount, 0)
+        bridgeC.resolve(makePayload(responseID: "document-c:pending", text: "Should not play."))
+        service.cancel(token: previewToken)
+        XCTAssertEqual(service.spoken, ["Preview."])
+    }
+
+    func testPlayPreviewSupersedesPreviousPreview() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: TestResponseBridge(),
+            webView: WKWebView()
+        )
+
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Old preview one.", languageRole: .english),
+            SpeechUtteranceRequest(text: "Old preview remainder.", languageRole: .english),
+        ])
+        let oldPreviewToken = service.spokenTokens[0]
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "New preview.", languageRole: .english),
+        ])
+        let newPreviewToken = service.spokenTokens[1]
+
+        service.cancel(token: oldPreviewToken)
+        XCTAssertEqual(service.spoken, ["Old preview one.", "New preview."])
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        service.start(token: newPreviewToken)
+        service.finish(token: newPreviewToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+        XCTAssertFalse(service.spoken.contains("Old preview remainder."))
+    }
+
+    func testManualReplayRemainsExplicitSupersession() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotA = UUID()
+        let slotB = UUID()
+        let bridgeA = TestResponseBridge()
+        let bridgeB = TestResponseBridge()
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        let coordinator = AssistantSpeechCoordinator(
+            speechService: service,
+            webViewProvider: { $0 == slotA ? webViewA : webViewB },
+            responseBridgeProvider: { $0 == slotA ? bridgeA : bridgeB }
+        )
+        coordinator.toggleAutoSpeak(for: slotA)
+        coordinator.toggleAutoSpeak(for: slotB)
+
+        coordinator.handle(.generationFinished, for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:original", text: "Original."))
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[1]
+
+        coordinator.handle(.generationFinished, for: slotB)
+        XCTAssertEqual(bridgeB.requestCount, 1)
+        coordinator.replayLatestResponse(for: slotA)
+        bridgeA.resolve(makePayload(responseID: "document-a:replay", text: "Replay."))
+
+        XCTAssertEqual(service.spoken, ["Original.", "Preview.", "Replay."])
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:replay")
+        service.cancel(token: previewToken)
+        bridgeB.resolve(makePayload(responseID: "document-b:late", text: "Should not play."))
+        XCTAssertEqual(service.spoken, ["Original.", "Preview.", "Replay."])
+
+        let replayToken = service.spokenTokens[2]
+        service.start(token: replayToken)
+        service.finish(token: replayToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
+    func testLatePreviewCancelCannotClearNewAutomaticPlayback() {
+        let service = TestSpeechService()
+        service.automaticallyConfirmsStart = false
+        let slotID = UUID()
+        let bridge = TestResponseBridge()
+        let webView = WKWebView()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: webView
+        )
+        coordinator.playPreview([
+            SpeechUtteranceRequest(text: "Preview.", languageRole: .english),
+        ])
+        let previewToken = service.spokenTokens[0]
+
+        coordinator.stop()
+        coordinator.toggleAutoSpeak(for: slotID)
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(responseID: "document-a:new-auto", text: "New automatic."))
+        let automaticToken = service.spokenTokens[1]
+        XCTAssertEqual(coordinator.playbackState, .starting)
+
+        service.cancel(token: previewToken)
+
+        XCTAssertEqual(coordinator.currentResponseIdentity?.responseID, "document-a:new-auto")
+        XCTAssertEqual(coordinator.playbackState, .starting)
+        XCTAssertEqual(coordinator.pendingQueueCount, 0)
+        service.start(token: automaticToken)
+        service.finish(token: automaticToken)
+        XCTAssertEqual(coordinator.playbackState, .idle)
+    }
+
     func testCancelledUtteranceDoesNotAdvanceQueue() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()

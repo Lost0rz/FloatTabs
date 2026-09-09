@@ -733,6 +733,11 @@ final class AssistantSpeechCoordinator {
         }
     }
 
+    private func removePreviewPlayback() {
+        speechQueue.removeItems(forOrigin: .preview)
+        speechBacklog.removeAll { $0.origin == .preview }
+    }
+
     private func drainPlayback() {
         guard manualPlaybackBarrier == nil else { return }
         if !speechBacklog.isEmpty {
@@ -1020,11 +1025,10 @@ final class AssistantSpeechCoordinator {
             suppressedResponses[responseID.slotID, default: []].insert(responseID)
             invalidateAutomaticResponse(responseID)
         } else {
-            // Preview has no response owner; retain its historical whole
-            // preview-pipeline cancellation behavior.
-            speechQueue.clear()
-            speechBacklog.removeAll()
-            invalidateAllAutomaticPlayback()
+            // Preview has no response identity, so use its playback origin as
+            // the ownership boundary. Automatic extraction, reservations,
+            // queued items, and backlog remain eligible for FIFO playback.
+            removePreviewPlayback()
         }
         setPlaybackState(.idle)
         setCurrentSpeakingSlot(nil)

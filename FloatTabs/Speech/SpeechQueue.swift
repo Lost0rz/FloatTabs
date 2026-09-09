@@ -102,6 +102,10 @@ struct SpeechQueue {
         items.removeAll { $0.responseID == responseID }
     }
 
+    mutating func removeItems(forOrigin origin: SpeechPlaybackOrigin) {
+        items.removeAll { $0.origin == origin }
+    }
+
     mutating func removeAutomaticItems(
         forSlotID slotID: UUID,
         preservingResponseID responseID: SpeechResponseIdentity? = nil
