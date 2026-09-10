@@ -2328,7 +2328,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func presentAddWebAppEditor() {
-        guard panel.attachedSheet == nil else { return }
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil else {
+            return
+        }
         beginRailModalInteraction()
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
@@ -2337,7 +2340,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             defaultProfileName: tabStore.defaultBrowserProfilePresentation.name,
             customProfilesSupported: webViewPool.customBrowserProfilesSupported,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
-            attachedTo: panel
+            attachedTo: modalHost
         ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -2360,14 +2363,15 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
             }
         }
-        if panel.attachedSheet == nil {
+        if modalHost.attachedSheet == nil {
             endRailModalInteraction()
             rootView.externalControlZoneView.setAddEditorOpen(false)
         }
     }
 
     private func presentEditWebAppEditor(id: UUID) {
-        guard panel.attachedSheet == nil,
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil,
               let profile = tabStore.profiles.first(where: { $0.id == id }) else {
             return
         }
@@ -2376,7 +2380,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         WebAppEditorController.presentEdit(
             profile: profile,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
-            attachedTo: panel
+            attachedTo: modalHost
         ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -2405,7 +2409,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
             }
         }
-        if panel.attachedSheet == nil {
+        if modalHost.attachedSheet == nil {
             endRailModalInteraction()
         }
     }
@@ -2419,13 +2423,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             NSSound.beep()
             return
         }
-        guard panel.attachedSheet == nil,
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil,
               let profile = tabStore.profiles.first(where: { $0.id == id }) else {
             return
         }
 
         beginRailModalInteraction()
-        WebAppEditorController.confirmRemove(profile: profile, attachedTo: panel) { [weak self] confirmed in
+        WebAppEditorController.confirmRemove(profile: profile, attachedTo: modalHost) { [weak self] confirmed in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.endRailModalInteraction()
@@ -2439,7 +2444,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 self.attentionCoordinator.removeSlot(id)
             }
         }
-        if panel.attachedSheet == nil {
+        if modalHost.attachedSheet == nil {
             endRailModalInteraction()
         }
     }
@@ -2525,6 +2530,48 @@ final class PanelController: NSObject, NSWindowDelegate {
         !sessionIsLocked || slotID != fullscreenSourceSlotID
     }
 
+    enum ModalPresentationHost: Equatable {
+        case sourceWindow
+        case shellWindow
+    }
+
+    /// Select the window that owns an editor/confirmation sheet without
+    /// attaching normal-state modals to the transparent shell. During a
+    /// WebKit fullscreen transition the source window is intentionally hidden
+    /// and locked as WebKit's restore owner, so only the visible companion
+    /// shell can safely host a modal in those states.
+    static func modalPresentationHost(
+        sessionState: FullscreenSourceSessionState,
+        sourceWindowIsVisible: Bool,
+        sourceWindowHasScreen: Bool,
+        shellWindowIsVisible: Bool
+    ) -> ModalPresentationHost? {
+        guard sessionState != .idle else {
+            guard sourceWindowIsVisible, sourceWindowHasScreen else {
+                return nil
+            }
+            return .sourceWindow
+        }
+
+        return shellWindowIsVisible ? .shellWindow : nil
+    }
+
+    private func modalPresentationHostWindow() -> NSWindow? {
+        switch Self.modalPresentationHost(
+            sessionState: sourceHostController.sessionState,
+            sourceWindowIsVisible: sourceHostController.window.isVisible,
+            sourceWindowHasScreen: sourceHostController.window.screen != nil,
+            shellWindowIsVisible: panel.isVisible
+        ) {
+        case .sourceWindow:
+            return sourceHostController.window
+        case .shellWindow:
+            return panel
+        case nil:
+            return nil
+        }
+    }
+
     private func commitAddress(_ rawValue: String) -> Bool {
         guard let id = tabStore.activeTabID,
               let normalized = WebAppURL.normalizedEntry(from: rawValue) else {
@@ -2553,7 +2600,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func presentDerivedWebAppFromCurrentPage() {
-        guard panel.attachedSheet == nil,
+        guard let modalHost = modalPresentationHostWindow(),
+              modalHost.attachedSheet == nil,
               let source = tabStore.activeProfile,
               let currentURL = currentAddressURL() else {
             return
@@ -2565,7 +2613,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         WebAppEditorController.presentDerivedAdd(
             sourceProfile: source,
             currentURL: currentURL,
-            attachedTo: panel
+            attachedTo: modalHost
         ) { [weak self] name in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -2579,7 +2627,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 )
             }
         }
-        if panel.attachedSheet == nil {
+        if modalHost.attachedSheet == nil {
             endRailModalInteraction()
         }
     }

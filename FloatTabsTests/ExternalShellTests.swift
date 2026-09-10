@@ -97,6 +97,67 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testNormalModalUsesVisibleSourceWindowInsteadOfTransparentShell() {
+        XCTAssertEqual(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: true,
+                sourceWindowHasScreen: true,
+                shellWindowIsVisible: true
+            ),
+            .sourceWindow
+        )
+    }
+
+    func testModalFallsBackToVisibleShellOnlyWhileSourceSessionIsLocked() {
+        for state in [
+            FullscreenSourceSessionState.entering,
+            .fullscreen,
+            .exiting,
+            .restoring,
+        ] {
+            XCTAssertEqual(
+                PanelController.modalPresentationHost(
+                    sessionState: state,
+                    sourceWindowIsVisible: false,
+                    sourceWindowHasScreen: false,
+                    shellWindowIsVisible: true
+                ),
+                .shellWindow
+            )
+        }
+    }
+
+    func testNormalModalDoesNotUseShellWhenSourceWindowIsUnavailable() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true
+            )
+        )
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: true,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true
+            )
+        )
+    }
+
+    func testLockedModalRequiresVisibleCompanionShell() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: false
+            )
+        )
+    }
+
     func testAppLocalCommandsFollowFloatTabsPresentationInsteadOfAccessoryActivationFlag() {
         XCTAssertTrue(
             PanelController.acceptsAppCommands(
