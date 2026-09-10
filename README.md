@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.2.3"><strong>Download FloatTabs v0.2.3</strong></a>
-  · macOS 13 or later · Apple Silicon and Intel
+  · macOS 13 or later · Apple Silicon required · arm64
 </p>
 
 **Current release package:** **v0.2.3 Build 11**.
@@ -265,6 +265,7 @@ Only install an unsigned build when you trust this repository and the checksum m
 
 Requirements:
 
+- Apple Silicon Mac (arm64)
 - macOS 13 or later
 - Xcode with the macOS SDK
 - Git
@@ -276,11 +277,11 @@ xcodebuild \
   -project FloatTabs.xcodeproj \
   -scheme FloatTabs \
   -configuration Debug \
-  -destination 'platform=macOS' \
+  -destination 'platform=macOS,arch=arm64' \
   test
 ```
 
-Build the unsigned Universal 2 package used by the release workflow:
+Build the unsigned Apple Silicon arm64-only package used by the release workflow:
 
 ```bash
 tools/release/build_dmg.sh

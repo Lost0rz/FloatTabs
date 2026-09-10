@@ -10,6 +10,8 @@ For shell interaction, rail geometry, movement, resize and fullscreen coordinati
 - production code and regression tests on `main`
 - the current release record under `../release/`
 
+The supported runtime and release architecture is Apple Silicon arm64 only.
+
 ## Existing architecture references
 
 ### `FloatTabs_Technical_Architecture_v1.2.md`

@@ -1104,7 +1104,7 @@ Before first public beta freeze：
 - Bundle Identifier；
 - Developer ID Team；
 - minimum macOS；
-- arm64 vs Universal 2；
+- Apple Silicon arm64 only；
 - version/build scheme；
 - update strategy；
 - final app icon/logo。
