@@ -2538,22 +2538,32 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// Select the window that owns an editor/confirmation sheet without
     /// attaching normal-state modals to the transparent shell. During a
     /// WebKit fullscreen transition the source window is intentionally hidden
-    /// and locked as WebKit's restore owner, so only the visible companion
-    /// shell can safely host a modal in those states.
+    /// and locked as WebKit's restore owner. Transitional states never expose
+    /// a modal host; only a visible shell that has explicitly entered the
+    /// fullscreen companion presentation may host one while fully fullscreen.
     static func modalPresentationHost(
         sessionState: FullscreenSourceSessionState,
         sourceWindowIsVisible: Bool,
         sourceWindowHasScreen: Bool,
-        shellWindowIsVisible: Bool
+        shellWindowIsVisible: Bool,
+        fullscreenCompanionIsReady: Bool
     ) -> ModalPresentationHost? {
-        guard sessionState != .idle else {
+        switch sessionState {
+        case .idle:
             guard sourceWindowIsVisible, sourceWindowHasScreen else {
                 return nil
             }
             return .sourceWindow
-        }
 
-        return shellWindowIsVisible ? .shellWindow : nil
+        case .fullscreen:
+            guard shellWindowIsVisible, fullscreenCompanionIsReady else {
+                return nil
+            }
+            return .shellWindow
+
+        case .entering, .exiting, .restoring:
+            return nil
+        }
     }
 
     private func modalPresentationHostWindow() -> NSWindow? {
@@ -2561,7 +2571,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             sessionState: sourceHostController.sessionState,
             sourceWindowIsVisible: sourceHostController.window.isVisible,
             sourceWindowHasScreen: sourceHostController.window.screen != nil,
-            shellWindowIsVisible: panel.isVisible
+            shellWindowIsVisible: panel.isVisible,
+            fullscreenCompanionIsReady: panel.isFullscreenCompanionPresentationReady
         ) {
         case .sourceWindow:
             return sourceHostController.window

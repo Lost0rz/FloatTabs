@@ -103,29 +103,11 @@ final class ExternalShellTests: XCTestCase {
                 sessionState: .idle,
                 sourceWindowIsVisible: true,
                 sourceWindowHasScreen: true,
-                shellWindowIsVisible: true
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
             ),
             .sourceWindow
         )
-    }
-
-    func testModalFallsBackToVisibleShellOnlyWhileSourceSessionIsLocked() {
-        for state in [
-            FullscreenSourceSessionState.entering,
-            .fullscreen,
-            .exiting,
-            .restoring,
-        ] {
-            XCTAssertEqual(
-                PanelController.modalPresentationHost(
-                    sessionState: state,
-                    sourceWindowIsVisible: false,
-                    sourceWindowHasScreen: false,
-                    shellWindowIsVisible: true
-                ),
-                .shellWindow
-            )
-        }
     }
 
     func testNormalModalDoesNotUseShellWhenSourceWindowIsUnavailable() {
@@ -134,7 +116,8 @@ final class ExternalShellTests: XCTestCase {
                 sessionState: .idle,
                 sourceWindowIsVisible: false,
                 sourceWindowHasScreen: false,
-                shellWindowIsVisible: true
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
             )
         )
         XCTAssertNil(
@@ -142,18 +125,78 @@ final class ExternalShellTests: XCTestCase {
                 sessionState: .idle,
                 sourceWindowIsVisible: true,
                 sourceWindowHasScreen: false,
-                shellWindowIsVisible: true
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
             )
         )
     }
 
-    func testLockedModalRequiresVisibleCompanionShell() {
+    func testEnteringFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .entering,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testExitingFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .exiting,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testRestoringFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .restoring,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testFullscreenModalRequiresExplicitCompanionReadiness() {
         XCTAssertNil(
             PanelController.modalPresentationHost(
                 sessionState: .fullscreen,
                 sourceWindowIsVisible: false,
                 sourceWindowHasScreen: false,
-                shellWindowIsVisible: false
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
+            )
+        )
+        XCTAssertEqual(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            ),
+            .shellWindow
+        )
+    }
+
+    func testFullscreenModalRequiresVisibleReadyCompanionShell() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: false,
+                fullscreenCompanionIsReady: true
             )
         )
     }
@@ -211,11 +254,16 @@ final class ExternalShellTests: XCTestCase {
             contentRect: NSRect(x: 20, y: 20, width: 688, height: 844)
         )
 
+        XCTAssertFalse(panel.isFullscreenCompanionPresentationReady)
         panel.setFullscreenCompanionPresentation(true)
 
+        XCTAssertTrue(panel.isFullscreenCompanionPresentationReady)
         XCTAssertTrue(panel.collectionBehavior.contains(.moveToActiveSpace))
         XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
         XCTAssertFalse(panel.collectionBehavior.contains(.canJoinAllSpaces))
+
+        panel.setFullscreenCompanionPresentation(false)
+        XCTAssertFalse(panel.isFullscreenCompanionPresentationReady)
     }
 
     func testToggleUsesPhysicalShellVisibilityDuringTransitions() {

@@ -22,6 +22,8 @@ final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    private(set) var isFullscreenCompanionPresentationReady = false
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -58,6 +60,7 @@ final class FloatingPanel: NSPanel {
     }
 
     func setFullscreenCompanionPresentation(_ enabled: Bool) {
+        isFullscreenCompanionPresentationReady = enabled
         collectionBehavior = enabled
             ? Self.fullscreenCompanionCollectionBehavior
             : Self.ordinaryCollectionBehavior
