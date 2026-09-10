@@ -37,6 +37,39 @@ struct WebAppEditorValue {
 }
 
 @MainActor
+final class WebAppEditorPresentationCompletionGate {
+    private let completion: (WebAppEditorValue?) -> Void
+    private var validationWarningPending = false
+    private var didComplete = false
+
+    init(completion: @escaping (WebAppEditorValue?) -> Void) {
+        self.completion = completion
+    }
+
+    func editorDidFinish(with value: WebAppEditorValue?) {
+        guard !validationWarningPending else { return }
+        finish(with: value)
+    }
+
+    func validationWarningDidBegin() {
+        guard !didComplete else { return }
+        validationWarningPending = true
+    }
+
+    func validationWarningDidFinish() {
+        guard validationWarningPending else { return }
+        validationWarningPending = false
+        finish(with: nil)
+    }
+
+    private func finish(with value: WebAppEditorValue?) {
+        guard !didComplete else { return }
+        didComplete = true
+        completion(value)
+    }
+}
+
+@MainActor
 enum WebAppEditorController {
     static func browserProfileOptions(
         browserProfiles: [BrowserProfile],
@@ -282,9 +315,11 @@ enum WebAppEditorController {
         stack.setFrameSize(NSSize(width: 400, height: ceil(stack.fittingSize.height)))
         alert.accessoryView = stack
 
+        let completionGate = WebAppEditorPresentationCompletionGate(completion: completion)
+
         alert.beginSheetModal(for: window) { response in
             guard response == .alertFirstButtonReturn else {
-                completion(nil)
+                completionGate.editorDidFinish(with: nil)
                 return
             }
 
@@ -293,11 +328,14 @@ enum WebAppEditorController {
             guard let normalized = WebAppURL.normalizedEntry(from: rawURL),
                   let rendering = renderingForm.value(),
                   nameIsOptional || !name.isEmpty else {
+                completionGate.validationWarningDidBegin()
                 presentValidationError(
                     nameIsOptional: nameIsOptional,
-                    attachedTo: window
+                    attachedTo: window,
+                    completion: {
+                        completionGate.validationWarningDidFinish()
+                    }
                 )
-                completion(nil)
                 return
             }
 
@@ -318,8 +356,8 @@ enum WebAppEditorController {
             let selectedProfileID = profilePicker.map {
                 selectedBrowserProfileID(from: $0)
             } ?? initialBrowserProfileID
-            completion(
-                makeValue(
+            completionGate.editorDidFinish(
+                with: makeValue(
                     name: name,
                     url: normalized.url,
                     homeURLSchemeWasInferred: schemeWasInferred,
@@ -345,7 +383,8 @@ enum WebAppEditorController {
 
     private static func presentValidationError(
         nameIsOptional: Bool,
-        attachedTo window: NSWindow
+        attachedTo window: NSWindow,
+        completion: @escaping () -> Void
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -354,7 +393,9 @@ enum WebAppEditorController {
             ? "URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
             : "Name is required, URL must be http/https, Custom Window Size must be at least 320 × 400, and a Custom User Agent cannot be empty."
         alert.addButton(withTitle: "OK")
-        alert.beginSheetModal(for: window)
+        alert.beginSheetModal(for: window) { _ in
+            completion()
+        }
     }
 
     private static func presentRenderingValidationError(attachedTo window: NSWindow) {
