@@ -206,6 +206,71 @@ final class BrowserProfileAddTests: XCTestCase {
         XCTAssertEqual(value.browserProfileID, existingID)
     }
 
+    func testEditorCompletionWaitsForValidationWarningDismissal() {
+        var completions: [WebAppEditorValue?] = []
+        let gate = WebAppEditorPresentationCompletionGate { value in
+            completions.append(value)
+        }
+
+        gate.validationWarningDidBegin()
+        gate.editorDidFinish(with: nil)
+
+        XCTAssertTrue(completions.isEmpty)
+
+        gate.validationWarningDidFinish()
+
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertNil(completions[0])
+    }
+
+    func testEditorCompletionDoesNotDoubleFireAcrossValidationDismissal() {
+        var completionCount = 0
+        let gate = WebAppEditorPresentationCompletionGate { _ in
+            completionCount += 1
+        }
+
+        gate.validationWarningDidBegin()
+        gate.validationWarningDidFinish()
+        gate.validationWarningDidFinish()
+        gate.editorDidFinish(with: nil)
+
+        XCTAssertEqual(completionCount, 1)
+    }
+
+    func testEditorCancelCompletesOnceWithoutValidationWarning() {
+        var completions: [WebAppEditorValue?] = []
+        let gate = WebAppEditorPresentationCompletionGate { value in
+            completions.append(value)
+        }
+
+        gate.editorDidFinish(with: nil)
+        gate.editorDidFinish(with: nil)
+
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertNil(completions[0])
+    }
+
+    func testEditorValidSaveCompletesOnceWithoutValidationWarning() {
+        let expected = WebAppEditorController.makeValue(
+            name: "Saved App",
+            url: homeURL,
+            homeURLSchemeWasInferred: false,
+            renderingProfile: .canonicalDefault,
+            browserProfileID: nil
+        )
+        var completions: [WebAppEditorValue?] = []
+        let gate = WebAppEditorPresentationCompletionGate { value in
+            completions.append(value)
+        }
+
+        gate.editorDidFinish(with: expected)
+        gate.editorDidFinish(with: nil)
+
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertEqual(completions[0]?.name, expected.name)
+        XCTAssertEqual(completions[0]?.url, expected.url)
+    }
+
     private func makeBrowserProfile(name: String) -> BrowserProfile {
         BrowserProfile(
             id: UUID(),

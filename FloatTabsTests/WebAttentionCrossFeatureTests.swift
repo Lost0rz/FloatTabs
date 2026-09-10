@@ -1859,6 +1859,69 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
     }
 
+    func testPanelSpeechAutoSpeakActionTracksActiveSlotAndFailsClosed() throws {
+        var committedURL: URL?
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+            ],
+            committedURLProvider: { _ in committedURL }
+        )
+        let chatURL = URL(string: "https://chatgpt.com/chat-a")!
+        let unsupportedURL = URL(string: "https://example.com/plain")!
+        let first = try profile(named: "ChatA", in: store)
+        let second = try profile(named: "ChatB", in: store)
+
+        XCTAssertTrue(store.select(id: first.id))
+        committedURL = chatURL
+        pool.onCommittedURLChange?(first.id, chatURL)
+        controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
+
+        XCTAssertTrue(store.select(id: second.id))
+        controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id, second.id]))
+
+        committedURL = unsupportedURL
+        pool.onCommittedURLChange?(second.id, unsupportedURL)
+        controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
+    }
+
+    func testPanelSpeechReadStopCommandUsesActiveTabAndFailsClosed() throws {
+        var committedURL: URL?
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "Plain", url: "https://example.com/plain"),
+            ],
+            committedURLProvider: { _ in committedURL }
+        )
+        let chat = try profile(named: "ChatA", in: store)
+        let plain = try profile(named: "Plain", in: store)
+
+        XCTAssertTrue(store.select(id: chat.id))
+        committedURL = URL(string: "https://chatgpt.com/chat-a")
+        pool.onCommittedURLChange?(chat.id, committedURL!)
+        controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
+
+        XCTAssertTrue(store.select(id: plain.id))
+        committedURL = URL(string: "https://example.com/plain")
+        pool.onCommittedURLChange?(plain.id, committedURL!)
+
+        // The read/stop command must consult the active Tab only. An
+        // unsupported active page cannot fall back to ChatA's response.
+        controller.handle(.readPauseResumeSpeechForActiveTab)
+        XCTAssertEqual(controller.debugCurrentSpeakingSlotID, nil)
+
+        // Unsupported Auto Speak remains fail-closed, while ChatA's armed
+        // membership is preserved across the active-Tab switch.
+        controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
+    }
+
     // MARK: 4.12 Factory user-content seam
 
     func testFactorySeamUsesConfiguredUserContentController() throws {

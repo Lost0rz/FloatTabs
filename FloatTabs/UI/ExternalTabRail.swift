@@ -99,6 +99,448 @@ struct ExternalTabMetrics {
 }
 
 @MainActor
+private protocol RailHoverInteractionOwner: AnyObject {
+    func setHoverInteractionSuspended(_ suspended: Bool)
+}
+
+@MainActor
+final class SpeechRailControl: NSView, RailHoverInteractionOwner {
+    enum Kind: Equatable {
+        case autoSpeak
+        case readLatest
+        case replay
+        case stop
+    }
+
+    let kind: Kind
+    var onActivate: (() -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    private let imageView = NSImageView()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private var isHoverInteractionSuspended = false
+    private var dockInfluence: CGFloat = 0
+    private var isEnabledForPresentation = false
+    private var isActionEnabledForPresentation = false
+    private var isAutoSpeakEnabled = false
+    private var isCurrentActivePlayback = false
+    private var playbackState: SpeechPlaybackState = .idle
+    private var activeTabName: String?
+
+    var preferredWidth: CGFloat {
+        ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
+    }
+
+    var isCurrentlySpeakingForAction: Bool {
+        isCurrentActivePlayback && playbackState == .speaking
+    }
+
+    var isCurrentlyPausedForAction: Bool {
+        isCurrentActivePlayback && playbackState == .paused
+    }
+
+    var isStopActionVisible: Bool {
+        kind == .stop && isActionEnabledForPresentation
+    }
+
+    var displayedPlaybackState: SpeechPlaybackState {
+        playbackState
+    }
+
+    var isEnabledForSpeechPresentationState: Bool {
+        isEnabledForPresentation
+    }
+
+    var isActionEnabledForSpeechPresentationState: Bool {
+        isActionEnabledForPresentation
+    }
+
+    var isAutoSpeakEnabledForPresentation: Bool {
+        isAutoSpeakEnabled
+    }
+
+    var displayedActiveTabName: String? {
+        activeTabName
+    }
+
+    init(kind: Kind) {
+        self.kind = kind
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 13),
+            imageView.heightAnchor.constraint(equalToConstant: 13),
+        ])
+        imageView.centerXAnchor.constraint(equalTo: centerXAnchor).isActive = true
+        setAccessibilityRole(.button)
+        updatePresentation()
+    }
+
+    convenience init() {
+        self.init(kind: .readLatest)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return bounds.contains(point) ? self : nil
+    }
+
+    override func layout() {
+        super.layout()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    func setDockInfluence(_ influence: CGFloat) {
+        dockInfluence = min(max(influence, 0), 1)
+    }
+
+    func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updatePresentation()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
+    }
+
+    func setSpeechState(
+        isEnabled: Bool,
+        isActionEnabled: Bool? = nil,
+        isAutoSpeakEnabled: Bool,
+        playbackState: SpeechPlaybackState,
+        isCurrentActivePlayback: Bool,
+        activeTabName: String?
+    ) {
+        self.isEnabledForPresentation = isEnabled
+        self.isActionEnabledForPresentation = isActionEnabled ?? isEnabled
+        self.isAutoSpeakEnabled = isAutoSpeakEnabled
+        self.playbackState = playbackState
+        self.isCurrentActivePlayback = isCurrentActivePlayback
+        self.activeTabName = activeTabName
+        updatePresentation()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+        onPointerMoved?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isActionEnabledForPresentation else {
+            NSSound.beep()
+            return
+        }
+        onActivate?()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func refreshAppearance() {
+        updatePresentation()
+    }
+
+    private func updatePresentation() {
+        let target = activeTabName ?? "Current Tab"
+        let symbol: String
+        let label: String
+        let tooltip: String
+
+        switch kind {
+        case .autoSpeak:
+            symbol = isAutoSpeakEnabled ? "speaker.wave.2.fill" : "speaker"
+            label = isAutoSpeakEnabled
+                ? "Auto Speak enabled for \(target)"
+                : "Auto Speak for \(target)"
+            tooltip = isEnabledForPresentation
+                ? (isAutoSpeakEnabled
+                    ? "Disable Auto Speak This Tab · \(target)"
+                    : "Auto Speak This Tab — speaks new responses after they finish · \(target)")
+                : "Speech is currently available for ChatGPT tabs."
+        case .readLatest:
+            switch (isCurrentActivePlayback, playbackState) {
+            case (true, .speaking):
+                symbol = "pause.fill"
+                label = "Pause speech for \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Pause Speech · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            case (true, .paused):
+                symbol = "play.fill"
+                label = "Resume speech for \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Resume Speech · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            case (true, .starting), (true, .pausing), (true, .resuming):
+                symbol = "ellipsis.circle"
+                label = "Speech transition in progress for \(target)"
+                tooltip = "Speech transition in progress · \(target)"
+            default:
+                symbol = "play.fill"
+                label = "Read latest response from \(target)"
+                tooltip = isEnabledForPresentation
+                    ? "Read Latest Response From Current Active Tab · \(target)"
+                    : "Speech is currently available for ChatGPT tabs."
+            }
+        case .replay:
+            symbol = "arrow.counterclockwise"
+            label = "Replay latest response from \(target)"
+            tooltip = isEnabledForPresentation
+                ? "Replay Latest Response From \(target)"
+                : "Speech is currently available for ChatGPT tabs."
+        case .stop:
+            symbol = "stop.fill"
+            label = "Stop speech for \(target)"
+            tooltip = isEnabledForPresentation
+                ? "Stop Speech · \(target)"
+                : "Speech is currently available for ChatGPT tabs."
+        }
+
+        let hasActivePlayback = isCurrentActivePlayback
+            && playbackState != .idle
+        imageView.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )
+        imageView.contentTintColor = isActionEnabledForPresentation
+            ? (kind == .stop
+                ? .systemRed
+                : kind == .readLatest && hasActivePlayback && playbackState == .paused
+                    ? .systemOrange
+                    : .labelColor)
+            : .tertiaryLabelColor
+        imageView.alphaValue = isActionEnabledForPresentation ? 1 : 0.45
+        toolTip = tooltip
+        setAccessibilityLabel(label)
+
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let fraction: CGFloat
+            if !isActionEnabledForPresentation {
+                fraction = isHovered ? 0.06 : 0.01
+            } else if hasActivePlayback || isAutoSpeakEnabled {
+                fraction = isHovered ? 0.16 : 0.08
+            } else {
+                fraction = isHovered ? 0.10 : 0.02
+            }
+            layer?.backgroundColor = NSColor.controlBackgroundColor
+                .blended(withFraction: fraction, of: .labelColor)?
+                .withAlphaComponent(0.94)
+                .cgColor
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
+            layer?.borderWidth = 1
+        }
+    }
+}
+
+struct RailOverflowItem: Equatable {
+    let slotID: UUID
+    let title: String
+}
+
+/// Explicit compact-mode access to Tab views that cannot fit in the rail.
+/// This is a real button/menu surface, not a silently hidden action.
+@MainActor
+final class RailOverflowControl: NSView, RailHoverInteractionOwner {
+    var onSelect: ((UUID) -> Void)?
+    var onPointerMoved: ((NSEvent) -> Void)?
+
+    private let imageView = NSImageView()
+    private var items: [RailOverflowItem] = []
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHoverInteractionSuspended = false
+
+    var menuItems: [RailOverflowItem] { items }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = ExternalTabMetrics.tabRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 13),
+            imageView.heightAnchor.constraint(equalToConstant: 13),
+        ])
+        setAccessibilityRole(.button)
+        refreshAppearance()
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
+        refreshAppearance(isHovered: true)
+        onPointerMoved?(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
+        onPointerMoved?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        refreshAppearance(isHovered: false)
+        guard !isHoverInteractionSuspended else { return }
+        onPointerMoved?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard !items.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        makeMenu().popUp(
+            positioning: nil,
+            at: NSPoint(x: bounds.maxX, y: bounds.minY),
+            in: self
+        )
+    }
+
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        items.forEach { item in
+            let menuItem = NSMenuItem(
+                title: item.title,
+                action: #selector(selectTab(_:)),
+                keyEquivalent: ""
+            )
+            menuItem.target = self
+            menuItem.representedObject = item.slotID.uuidString
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func setItems(_ items: [RailOverflowItem]) {
+        self.items = items
+        let label = items.isEmpty
+            ? "More Tabs"
+            : "More Tabs (\(items.count) hidden)"
+        toolTip = label
+        setAccessibilityLabel(label)
+        imageView.image = NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: label
+        )
+        refreshAppearance()
+    }
+
+    func refreshAppearance(isHovered: Bool = false) {
+        imageView.contentTintColor = .labelColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlBackgroundColor
+                .blended(withFraction: isHovered ? 0.12 : 0.03, of: .labelColor)?
+                .withAlphaComponent(0.94)
+                .cgColor
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
+            layer?.borderWidth = 1
+        }
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            refreshAppearance()
+        }
+    }
+
+    @objc private func selectTab(_ sender: NSMenuItem) {
+        guard let rawID = sender.representedObject as? String,
+              let slotID = UUID(uuidString: rawID) else {
+            return
+        }
+        onSelect?(slotID)
+    }
+}
+
+@MainActor
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
@@ -116,6 +558,10 @@ final class ExternalControlZoneView: NSView {
     var onManageBrowserProfiles: (() -> Void)?
     var onReorder: ((UUID, Int) -> Void)?
     var onSettings: (() -> Void)?
+    var onReadLatestResponse: (() -> Void)?
+    var onReplayLatestResponse: (() -> Void)?
+    var onToggleAutoSpeak: (() -> Void)?
+    var onStopSpeech: (() -> Void)?
     var onTogglePin: (() -> Void)?
     var onActiveTabGeometryChange: (() -> Void)?
 
@@ -126,8 +572,13 @@ final class ExternalControlZoneView: NSView {
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
+    private let autoSpeakControl = SpeechRailControl(kind: .autoSpeak)
+    private let readLatestControl = SpeechRailControl(kind: .readLatest)
+    private let replayControl = SpeechRailControl(kind: .replay)
+    private let stopControl = SpeechRailControl(kind: .stop)
     private let settingsControl = GlobalSettingsControl()
     private let pinControl = PinPanelControl()
+    private let tabOverflowControl = RailOverflowControl()
     private var trackingAreaReference: NSTrackingArea?
     private var pointerLocation: NSPoint?
     private var pointerY: CGFloat?
@@ -137,6 +588,10 @@ final class ExternalControlZoneView: NSView {
     private var browserProfileDuplicationEnabled = true
     private var railVisibilityGeneration = 0
     private(set) var isRailCollapsed = false
+    private(set) var isUsingCompactLayout = false
+    private(set) var visibleTabIDs: [UUID] = []
+    private(set) var overflowTabIDs: [UUID] = []
+    private(set) var isModalPresentationActive = false
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -148,18 +603,43 @@ final class ExternalControlZoneView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         addSubview(addControl)
+        addSubview(autoSpeakControl)
+        addSubview(readLatestControl)
+        addSubview(replayControl)
+        addSubview(stopControl)
         addSubview(settingsControl)
         addSubview(pinControl)
+        addSubview(tabOverflowControl)
         addControl.onActivate = { [weak self] in self?.onAdd?() }
+        autoSpeakControl.onActivate = { [weak self] in self?.onToggleAutoSpeak?() }
+        readLatestControl.onActivate = { [weak self] in self?.onReadLatestResponse?() }
+        replayControl.onActivate = { [weak self] in self?.onReplayLatestResponse?() }
+        stopControl.onActivate = { [weak self] in self?.onStopSpeech?() }
         settingsControl.onActivate = { [weak self] in self?.onSettings?() }
         pinControl.onActivate = { [weak self] in self?.onTogglePin?() }
+        tabOverflowControl.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         addControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        autoSpeakControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        readLatestControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        replayControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        stopControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         settingsControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
         pinControl.onPointerMoved = { [weak self] event in
+            self?.updateDockPointer(with: event)
+        }
+        tabOverflowControl.onPointerMoved = { [weak self] event in
             self?.updateDockPointer(with: event)
         }
     }
@@ -219,9 +699,38 @@ final class ExternalControlZoneView: NSView {
         layoutControls(animated: true, duration: ExternalTabMetrics.dockSettleDuration)
     }
 
+    /// Modal sheets can prevent AppKit from delivering the mouse-exit that
+    /// normally clears Dock magnification. Suspend every rail hover owner and
+    /// clear the pointer-derived authority explicitly so the sheet cannot
+    /// inherit a stale expanded Tab. Dismissal deliberately leaves the rail
+    /// neutral; a new real pointer event must establish hover again.
+    func setModalPresentationActive(_ active: Bool) {
+        isModalPresentationActive = active
+        pointerLocation = nil
+        pointerY = nil
+        hoverInteractionOwners.forEach {
+            $0.setHoverInteractionSuspended(active)
+        }
+        if !active {
+            synchronizeHoverState(at: nil)
+        }
+        layoutControls(animated: false, duration: 0)
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let candidate = super.hitTest(point)
-        return candidate === self ? nil : candidate
+        guard bounds.contains(point) else { return nil }
+        for view in subviews.reversed() {
+            guard !view.isHidden,
+                  view.alphaValue > 0,
+                  view.frame.contains(point) else {
+                continue
+            }
+            let localPoint = view.convert(point, from: self)
+            if let candidate = view.hitTest(localPoint) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     func apply(profiles: [WebAppProfile], activeTabID: UUID?) {
@@ -303,8 +812,13 @@ final class ExternalControlZoneView: NSView {
             tab.refreshAppearance()
         }
         addControl.refreshAppearance()
+        autoSpeakControl.refreshAppearance()
+        readLatestControl.refreshAppearance()
+        replayControl.refreshAppearance()
+        stopControl.refreshAppearance()
         settingsControl.refreshAppearance()
         pinControl.refreshAppearance()
+        tabOverflowControl.refreshAppearance()
     }
 
     func setCollapsed(_ collapsed: Bool, animated: Bool) {
@@ -316,7 +830,7 @@ final class ExternalControlZoneView: NSView {
         pointerY = nil
         synchronizeHoverState(at: nil)
 
-        let controls = railContentViews
+        let controls = railContentViews.filter { !isHiddenByOverflow($0) }
         controls.forEach { $0.isHidden = false }
 
         guard animated else {
@@ -369,6 +883,58 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
+    func setSpeechPresentation(
+        _ presentation: SpeechRailPresentation,
+        activeTabName: String? = nil
+    ) {
+        let currentActive = presentation.activeSlotID
+        let isAutoSpeakEnabled = presentation.activeSlotAutoSpeakEnabled
+        let isCurrentActivePlayback = currentActive != nil
+            && currentActive == presentation.currentSpeakingSlotID
+        let targetName = activeTabName ?? currentActive.map { $0.uuidString }
+        autoSpeakControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech || isAutoSpeakEnabled,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        readLatestControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isActionEnabled: isCurrentActivePlayback
+                ? ![.starting, .pausing, .resuming].contains(presentation.playbackState)
+                : presentation.activeSlotSupportsSpeech,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        replayControl.setSpeechState(
+            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isActionEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        stopControl.setSpeechState(
+            isEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
+            isActionEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
+            isAutoSpeakEnabled: isAutoSpeakEnabled,
+            playbackState: presentation.playbackState,
+            isCurrentActivePlayback: isCurrentActivePlayback,
+            activeTabName: targetName
+        )
+        for tab in tabViews.values {
+            tab.setSpeechState(
+                isAutoSpeakSource: presentation.autoSpeakSlotIDs.contains(tab.slotID),
+                playbackState: tab.slotID == presentation.currentSpeakingSlotID
+                    ? presentation.playbackState
+                    : .idle
+            )
+        }
+    }
+
     override func layout() {
         super.layout()
         layoutControls(animated: false, duration: 0)
@@ -382,7 +948,9 @@ final class ExternalControlZoneView: NSView {
         guard !isRailCollapsed,
               let activeTabID,
               let tab = tabViews[activeTabID],
-              tab.superview != nil else {
+              tab.superview != nil,
+              !tab.isHidden,
+              !tab.frame.isEmpty else {
             return nil
         }
         return tab.convert(tab.bounds, to: ancestor)
@@ -412,21 +980,53 @@ final class ExternalControlZoneView: NSView {
         pinControl.frame
     }
 
+    var replayControlFrame: NSRect {
+        replayControl.frame
+    }
+
+    var stopControlFrame: NSRect {
+        stopControl.frame
+    }
+
+    var tabOverflowControlFrame: NSRect {
+        tabOverflowControl.frame
+    }
+
+    var overflowMenuItems: [RailOverflowItem] {
+        tabOverflowControl.menuItems
+    }
+
+    var overflowControlAccessibilityLabel: String? {
+        tabOverflowControl.accessibilityLabel()
+    }
+
     private var railContentViews: [NSView] {
-        Array(tabViews.values) + [addControl, settingsControl, pinControl]
+        Array(tabViews.values)
+            + [
+                addControl, autoSpeakControl, readLatestControl, replayControl,
+                stopControl, settingsControl, pinControl, tabOverflowControl,
+            ]
+    }
+
+    private func isHiddenByOverflow(_ view: NSView) -> Bool {
+        if let tab = view as? ExternalWebAppTabView {
+            return overflowTabIDs.contains(tab.slotID)
+        }
+        return view === tabOverflowControl && overflowTabIDs.isEmpty
     }
 
     private func finishRailVisibility(generation: Int, collapsed: Bool) {
         guard generation == railVisibilityGeneration else { return }
         railContentViews.forEach {
             $0.alphaValue = collapsed ? 0 : 1
-            $0.isHidden = collapsed
+            $0.isHidden = collapsed || isHiddenByOverflow($0)
         }
         onActiveTabGeometryChange?()
     }
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
+        view.setHoverInteractionSuspended(isModalPresentationActive)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
         view.setBrowserProfileMenuSnapshot(
             options: browserProfileMenuOptions,
@@ -481,6 +1081,7 @@ final class ExternalControlZoneView: NSView {
     }
 
     private func updateDockPointer(with event: NSEvent) {
+        guard !isModalPresentationActive else { return }
         let location = convert(event.locationInWindow, from: nil)
         pointerLocation = location
         pointerY = location.y
@@ -489,24 +1090,111 @@ final class ExternalControlZoneView: NSView {
     }
 
     private func synchronizeHoverState(at location: NSPoint?) {
-        guard !isRailCollapsed else { return }
+        guard !isRailCollapsed, !isModalPresentationActive else { return }
         for tab in tabViews.values {
             tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
         }
         addControl.setHovered(location.map { addControl.frame.contains($0) } ?? false)
+        autoSpeakControl.setHovered(
+            location.map { autoSpeakControl.frame.contains($0) } ?? false
+        )
+        readLatestControl.setHovered(
+            location.map { readLatestControl.frame.contains($0) } ?? false
+        )
+        replayControl.setHovered(
+            location.map { replayControl.frame.contains($0) } ?? false
+        )
+        stopControl.setHovered(
+            location.map { stopControl.frame.contains($0) } ?? false
+        )
         settingsControl.setHovered(
             location.map { settingsControl.frame.contains($0) } ?? false
         )
         pinControl.setHovered(location.map { pinControl.frame.contains($0) } ?? false)
+        if let location {
+            tabOverflowControl.refreshAppearance(
+                isHovered: tabOverflowControl.frame.contains(location)
+            )
+        } else {
+            tabOverflowControl.refreshAppearance()
+        }
     }
 
     private func layoutControls(animated: Bool, duration: TimeInterval) {
         let updateFrames = {
-            var y = ExternalTabMetrics.topOffset
             let ids = self.previewOrderIDs ?? self.profiles.map(\.id)
+            let standardTabEnd = self.tabEndY(for: ids.count)
+            let standardControlsTop = max(
+                self.bounds.height
+                    - ExternalTabMetrics.systemControlBottomOffset
+                    - ExternalTabMetrics.systemControlHeight
+                    - 5 * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                0
+            )
+            let compact = standardTabEnd
+                + ExternalTabMetrics.addHeight
+                + ExternalTabMetrics.addGap
+                > standardControlsTop
+            self.isUsingCompactLayout = compact
 
+            var visibleIDs = ids
+            if compact {
+                let compactControlsTop = self.compactControlsTopY
+                let maximumAddBottom = max(
+                    compactControlsTop - ExternalTabMetrics.addGap,
+                    0
+                )
+                var visibleCount = ids.count
+                while visibleCount > 0 {
+                    let hasOverflow = visibleCount < ids.count
+                    let candidateAddY = self.tabEndY(for: visibleCount)
+                        + (hasOverflow
+                            ? ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
+                            : 0)
+                    if candidateAddY + ExternalTabMetrics.addHeight <= maximumAddBottom {
+                        break
+                    }
+                    visibleCount -= 1
+                }
+                visibleIDs = Array(ids.prefix(visibleCount))
+
+                // Selecting a hidden Tab must make that Tab visible in compact
+                // mode instead of leaving the selected page behind the menu.
+                if let activeTabID = self.activeTabID,
+                   ids.contains(activeTabID),
+                   !visibleIDs.contains(activeTabID),
+                   let replacement = visibleIDs.last {
+                    visibleIDs[visibleIDs.count - 1] = activeTabID
+                    if replacement == activeTabID {
+                        visibleIDs = ids.filter { visibleIDs.contains($0) }
+                    }
+                }
+                visibleIDs = ids.filter { visibleIDs.contains($0) }
+            }
+
+            let visibleSet = Set(visibleIDs)
+            let overflowIDs = ids.filter { !visibleSet.contains($0) }
+            self.visibleTabIDs = visibleIDs
+            self.overflowTabIDs = overflowIDs
+            self.tabOverflowControl.setItems(
+                overflowIDs.compactMap { id in
+                    guard let profile = self.profiles.first(where: { $0.id == id }) else {
+                        return nil
+                    }
+                    return RailOverflowItem(slotID: id, title: profile.name)
+                }
+            )
+
+            var y = ExternalTabMetrics.topOffset
             for id in ids {
                 guard let tab = self.tabViews[id] else { continue }
+                guard visibleSet.contains(id) else {
+                    tab.setDockInfluence(0)
+                    tab.isHidden = self.isRailCollapsed || overflowIDs.contains(id)
+                    self.setFrame(.zero, for: tab, animated: animated)
+                    continue
+                }
+                tab.isHidden = self.isRailCollapsed
                 let centerY = y + ExternalTabMetrics.tabHeight / 2
                 let influence = self.pointerY.map {
                     ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
@@ -523,14 +1211,34 @@ final class ExternalControlZoneView: NSView {
                 y += ExternalTabMetrics.tabHeight + ExternalTabMetrics.tabGap
             }
 
-            if !ids.isEmpty {
+            if !visibleIDs.isEmpty {
                 y += ExternalTabMetrics.addGap - ExternalTabMetrics.tabGap
             }
 
+            if !overflowIDs.isEmpty {
+                let overflowFrame = self.attachedFrame(
+                    preferredWidth: ExternalTabMetrics.systemControlNormalWidth,
+                    y: y,
+                    height: ExternalTabMetrics.systemControlHeight
+                )
+                self.setFrame(
+                    overflowFrame,
+                    for: self.tabOverflowControl,
+                    animated: animated
+                )
+                self.tabOverflowControl.isHidden = self.isRailCollapsed
+                y += ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
+            } else {
+                self.tabOverflowControl.isHidden = true
+                self.setFrame(.zero, for: self.tabOverflowControl, animated: animated)
+            }
+
             let addCenterY = y + ExternalTabMetrics.addHeight / 2
-            let addInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - addCenterY)
-            } ?? 0
+            let addInfluence = compact
+                ? 0
+                : self.pointerY.map {
+                    ExternalTabMetrics.dockInfluence(forDistance: $0 - addCenterY)
+                } ?? 0
             self.addControl.setDockInfluence(addInfluence)
 
             let addFrame = self.attachedFrame(
@@ -540,42 +1248,11 @@ final class ExternalControlZoneView: NSView {
             )
             self.setFrame(addFrame, for: self.addControl, animated: animated)
 
-            let pinY = max(
-                self.bounds.height
-                    - ExternalTabMetrics.systemControlBottomOffset
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let pinCenterY = pinY + ExternalTabMetrics.systemControlHeight / 2
-            let pinInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - pinCenterY)
-            } ?? 0
-            self.pinControl.setDockInfluence(pinInfluence)
-            let pinFrame = self.attachedFrame(
-                preferredWidth: self.pinControl.preferredWidth,
-                y: pinY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(pinFrame, for: self.pinControl, animated: animated)
-
-            let systemY = max(
-                pinY
-                    - ExternalTabMetrics.systemControlGap
-                    - ExternalTabMetrics.systemControlHeight,
-                0
-            )
-            let systemCenterY = systemY + ExternalTabMetrics.systemControlHeight / 2
-            let systemInfluence = self.pointerY.map {
-                ExternalTabMetrics.dockInfluence(forDistance: $0 - systemCenterY)
-            } ?? 0
-            self.settingsControl.setDockInfluence(systemInfluence)
-            let systemFrame = self.attachedFrame(
-                preferredWidth: self.settingsControl.preferredWidth,
-                y: systemY,
-                height: ExternalTabMetrics.systemControlHeight
-            )
-            self.setFrame(systemFrame, for: self.settingsControl, animated: animated)
-
+            if compact {
+                self.layoutCompactSystemControls(animated: animated)
+            } else {
+                self.layoutStandardSystemControls(animated: animated)
+            }
         }
 
         guard animated else {
@@ -593,6 +1270,129 @@ final class ExternalControlZoneView: NSView {
         onActiveTabGeometryChange?()
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.onActiveTabGeometryChange?()
+        }
+    }
+
+    private var hoverInteractionOwners: [RailHoverInteractionOwner] {
+        var owners: [RailHoverInteractionOwner] = Array(tabViews.values)
+        owners.append(contentsOf: [
+            addControl,
+            autoSpeakControl,
+            readLatestControl,
+            replayControl,
+            stopControl,
+            settingsControl,
+            pinControl,
+            tabOverflowControl,
+        ])
+        return owners
+    }
+
+    private var compactControlsTopY: CGFloat {
+        max(
+            bounds.height
+                - ExternalTabMetrics.systemControlBottomOffset
+                - ExternalTabMetrics.systemControlHeight
+                - 2 * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+            0
+        )
+    }
+
+    private func tabEndY(for count: Int) -> CGFloat {
+        guard count > 0 else { return ExternalTabMetrics.topOffset }
+        return ExternalTabMetrics.topOffset
+            + CGFloat(count) * (ExternalTabMetrics.tabHeight + ExternalTabMetrics.tabGap)
+            + ExternalTabMetrics.addGap
+            - ExternalTabMetrics.tabGap
+    }
+
+    private func setDockInfluence(_ influence: CGFloat, for view: NSView) {
+        switch view {
+        case let control as SpeechRailControl:
+            control.setDockInfluence(influence)
+        case let control as AddWebAppControl:
+            control.setDockInfluence(influence)
+        case let control as GlobalSettingsControl:
+            control.setDockInfluence(influence)
+        case let control as PinPanelControl:
+            control.setDockInfluence(influence)
+        default:
+            break
+        }
+    }
+
+    private func preferredWidth(for view: NSView) -> CGFloat {
+        switch view {
+        case let control as SpeechRailControl:
+            return control.preferredWidth
+        case let control as AddWebAppControl:
+            return control.preferredWidth
+        case let control as GlobalSettingsControl:
+            return control.preferredWidth
+        case let control as PinPanelControl:
+            return control.preferredWidth
+        default:
+            return ExternalTabMetrics.systemControlNormalWidth
+        }
+    }
+
+    private func layoutStandardSystemControls(animated: Bool) {
+        var y = max(
+            bounds.height
+                - ExternalTabMetrics.systemControlBottomOffset
+                - ExternalTabMetrics.systemControlHeight,
+            0
+        )
+        let controls: [NSView] = [
+            pinControl, settingsControl, stopControl, replayControl,
+            readLatestControl, autoSpeakControl,
+        ]
+        for control in controls {
+            let centerY = y + ExternalTabMetrics.systemControlHeight / 2
+            let influence = pointerY.map {
+                ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
+            } ?? 0
+            setDockInfluence(influence, for: control)
+            setFrame(
+                attachedFrame(
+                    preferredWidth: preferredWidth(for: control),
+                    y: y,
+                    height: ExternalTabMetrics.systemControlHeight
+                ),
+                for: control,
+                animated: animated
+            )
+            y = max(
+                y
+                    - ExternalTabMetrics.systemControlGap
+                    - ExternalTabMetrics.systemControlHeight,
+                0
+            )
+        }
+    }
+
+    private func layoutCompactSystemControls(animated: Bool) {
+        let width = min(
+            ExternalTabMetrics.systemControlNormalWidth,
+            max((bounds.width - ExternalTabMetrics.systemControlGap) / 2, 0)
+        )
+        let controls: [NSView] = [
+            autoSpeakControl, readLatestControl, replayControl,
+            stopControl, settingsControl, pinControl,
+        ]
+        for (index, control) in controls.enumerated() {
+            setDockInfluence(0, for: control)
+            let row = index / 2
+            let column = index % 2
+            let frame = NSRect(
+                x: CGFloat(column) * (width + ExternalTabMetrics.systemControlGap),
+                y: compactControlsTopY
+                    + CGFloat(row)
+                        * (ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.systemControlGap),
+                width: width,
+                height: ExternalTabMetrics.systemControlHeight
+            )
+            setFrame(frame, for: control, animated: animated)
         }
     }
 
@@ -694,7 +1494,7 @@ final class RailFoldControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func updateTrackingAreas() {
@@ -1141,7 +1941,7 @@ final class WebsiteFaviconProvider {
 }
 
 @MainActor
-final class ExternalWebAppTabView: NSView {
+final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     let slotID: UUID
 
     var onSelect: ((UUID) -> Void)?
@@ -1163,12 +1963,14 @@ final class ExternalWebAppTabView: NSView {
 
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let speechBadgeView = NSImageView()
     private let shapeLayer = CAShapeLayer()
     private let readyAttentionLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
     private var isResident = false
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
@@ -1185,6 +1987,8 @@ final class ExternalWebAppTabView: NSView {
     private var faviconOriginKey: String?
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
+    private var isAutoSpeakSource = false
+    private var speechPlaybackState: SpeechPlaybackState = .idle
 
     private static let grayscaleContext = CIContext(options: nil)
     private static let readyAttentionDiameter: CGFloat = 6
@@ -1220,6 +2024,9 @@ final class ExternalWebAppTabView: NSView {
         return label.textColor
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
+    var isShowingAutoSpeakBadge: Bool { isAutoSpeakSource }
+    var isShowingSpeakingBadge: Bool { speechPlaybackState == .speaking }
+    var isShowingPausedSpeechBadge: Bool { speechPlaybackState == .paused }
 
     init(slotID: UUID) {
         self.slotID = slotID
@@ -1248,6 +2055,13 @@ final class ExternalWebAppTabView: NSView {
         label.isHidden = true
         addSubview(label)
 
+        speechBadgeView.imageScaling = .scaleProportionallyUpOrDown
+        speechBadgeView.isHidden = true
+        speechBadgeView.setContentHuggingPriority(.required, for: .horizontal)
+        speechBadgeView.setContentHuggingPriority(.required, for: .vertical)
+        speechBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(speechBadgeView)
+
         let labelTrailingConstraint = label.trailingAnchor.constraint(
             equalTo: trailingAnchor,
             constant: -8
@@ -1266,6 +2080,10 @@ final class ExternalWebAppTabView: NSView {
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             labelTrailingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            speechBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            speechBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            speechBadgeView.widthAnchor.constraint(equalToConstant: 10),
+            speechBadgeView.heightAnchor.constraint(equalToConstant: 10),
         ])
 
         updateAppearance()
@@ -1285,7 +2103,7 @@ final class ExternalWebAppTabView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -1311,10 +2129,18 @@ final class ExternalWebAppTabView: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         label.isHidden = !hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     func setResident(_ resident: Bool) {
@@ -1327,6 +2153,27 @@ final class ExternalWebAppTabView: NSView {
     func setReadyAttention(_ ready: Bool) {
         guard isShowingReadyAttention != ready else { return }
         readyAttentionLayer.isHidden = !ready
+    }
+
+    func setSpeechState(
+        isAutoSpeakSource: Bool,
+        playbackState: SpeechPlaybackState
+    ) {
+        guard self.isAutoSpeakSource != isAutoSpeakSource
+            || self.speechPlaybackState != playbackState else {
+            return
+        }
+        self.isAutoSpeakSource = isAutoSpeakSource
+        self.speechPlaybackState = playbackState
+        updateSpeechBadge()
+        updateAccessibilityLabel()
+    }
+
+    func setSpeechState(isAutoSpeakSource: Bool, isCurrentlySpeaking: Bool) {
+        setSpeechState(
+            isAutoSpeakSource: isAutoSpeakSource,
+            playbackState: isCurrentlySpeaking ? .speaking : .idle
+        )
     }
 
     func setWindowSizeEditingEnabled(_ enabled: Bool) {
@@ -1391,6 +2238,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
         onPointerMoved?(event)
         if isDragging {
             onDragChanged?(slotID, event)
@@ -1783,7 +2631,66 @@ final class ExternalWebAppTabView: NSView {
             $0.id == browserProfileID
         })?.color ?? .default
         label.stringValue = displayedPresentationTitle
-        setAccessibilityLabel(displayedPresentationTitle)
+        updateAccessibilityLabel()
+    }
+
+    private func updateAccessibilityLabel() {
+        var parts = [displayedPresentationTitle]
+        if isAutoSpeakSource {
+            parts.append("Auto Speak enabled")
+        }
+        switch speechPlaybackState {
+        case .speaking:
+            parts.append("Currently speaking")
+        case .paused:
+            parts.append("Speech paused")
+        case .starting:
+            parts.append("Speech starting")
+        case .pausing:
+            parts.append("Speech pausing")
+        case .resuming:
+            parts.append("Speech resuming")
+        case .idle:
+            break
+        }
+        setAccessibilityLabel(parts.joined(separator: " · "))
+    }
+
+    private func updateSpeechBadge() {
+        let visible = isAutoSpeakSource || speechPlaybackState != .idle
+        speechBadgeView.isHidden = !visible
+        guard visible else { return }
+
+        let symbol: String
+        let description: String
+        let tint: NSColor
+        switch speechPlaybackState {
+        case .starting, .resuming:
+            symbol = "speaker.wave.2"
+            description = "Speech transition in progress"
+            tint = .systemOrange
+        case .pausing:
+            symbol = "pause.fill"
+            description = "Speech pausing"
+            tint = .systemOrange
+        case .speaking:
+            symbol = "speaker.wave.2.fill"
+            description = "Currently speaking"
+            tint = .systemRed
+        case .paused:
+            symbol = "pause.fill"
+            description = "Speech paused"
+            tint = .systemOrange
+        case .idle:
+            symbol = "speaker.wave.2"
+            description = "Auto Speak enabled"
+            tint = .controlAccentColor
+        }
+        speechBadgeView.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: description
+        )
+        speechBadgeView.contentTintColor = tint
     }
 
     private func setSourceIcon(_ image: NSImage?) {
@@ -1905,13 +2812,14 @@ final class ExternalWebAppTabView: NSView {
 }
 
 @MainActor
-final class AddWebAppControl: NSView {
+final class AddWebAppControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     var isEditorOpen = false {
@@ -1965,7 +2873,7 @@ final class AddWebAppControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -1987,9 +2895,17 @@ final class AddWebAppControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     override func updateTrackingAreas() {
@@ -2053,13 +2969,14 @@ final class AddWebAppControl: NSView {
 
 
 @MainActor
-final class PinPanelControl: NSView {
+final class PinPanelControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     private(set) var isPinned = false {
@@ -2103,7 +3020,7 @@ final class PinPanelControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -2125,9 +3042,17 @@ final class PinPanelControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     func setPinned(_ pinned: Bool) {
@@ -2207,13 +3132,14 @@ final class PinPanelControl: NSView {
 }
 
 @MainActor
-final class GlobalSettingsControl: NSView {
+final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     var preferredWidth: CGFloat {
@@ -2256,7 +3182,7 @@ final class GlobalSettingsControl: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        bounds.contains(point) ? self : nil
     }
 
     override func layout() {
@@ -2278,9 +3204,17 @@ final class GlobalSettingsControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     override func updateTrackingAreas() {

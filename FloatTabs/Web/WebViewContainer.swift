@@ -175,7 +175,15 @@ final class PanelRootView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point)
+        // ExternalControlZoneView is flipped while the shell root is not.
+        // Route through its own coordinate space before falling through to
+        // the perimeter movement surface; otherwise a rail click can be
+        // interpreted at the root's mirrored Y position.
+        let zonePoint = externalControlZoneView.convert(point, from: self)
+        if let railHit = externalControlZoneView.hitTest(zonePoint) {
+            return railHit
+        }
+        return super.hitTest(point)
     }
 
     private func synchronizeInteractionBorderGeometry() {

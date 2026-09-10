@@ -97,6 +97,110 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testNormalModalUsesVisibleSourceWindowInsteadOfTransparentShell() {
+        XCTAssertEqual(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: true,
+                sourceWindowHasScreen: true,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
+            ),
+            .sourceWindow
+        )
+    }
+
+    func testNormalModalDoesNotUseShellWhenSourceWindowIsUnavailable() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
+            )
+        )
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .idle,
+                sourceWindowIsVisible: true,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
+            )
+        )
+    }
+
+    func testEnteringFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .entering,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testExitingFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .exiting,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testRestoringFullscreenNeverUsesVisibleShellAsModalHost() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .restoring,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
+    func testFullscreenModalRequiresExplicitCompanionReadiness() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: false
+            )
+        )
+        XCTAssertEqual(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: true,
+                fullscreenCompanionIsReady: true
+            ),
+            .shellWindow
+        )
+    }
+
+    func testFullscreenModalRequiresVisibleReadyCompanionShell() {
+        XCTAssertNil(
+            PanelController.modalPresentationHost(
+                sessionState: .fullscreen,
+                sourceWindowIsVisible: false,
+                sourceWindowHasScreen: false,
+                shellWindowIsVisible: false,
+                fullscreenCompanionIsReady: true
+            )
+        )
+    }
+
     func testAppLocalCommandsFollowFloatTabsPresentationInsteadOfAccessoryActivationFlag() {
         XCTAssertTrue(
             PanelController.acceptsAppCommands(
@@ -150,11 +254,16 @@ final class ExternalShellTests: XCTestCase {
             contentRect: NSRect(x: 20, y: 20, width: 688, height: 844)
         )
 
+        XCTAssertFalse(panel.isFullscreenCompanionPresentationReady)
         panel.setFullscreenCompanionPresentation(true)
 
+        XCTAssertTrue(panel.isFullscreenCompanionPresentationReady)
         XCTAssertTrue(panel.collectionBehavior.contains(.moveToActiveSpace))
         XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
         XCTAssertFalse(panel.collectionBehavior.contains(.canJoinAllSpaces))
+
+        panel.setFullscreenCompanionPresentation(false)
+        XCTAssertFalse(panel.isFullscreenCompanionPresentationReady)
     }
 
     func testToggleUsesPhysicalShellVisibilityDuringTransitions() {
@@ -382,9 +491,8 @@ final class ExternalShellTests: XCTestCase {
 
         let tab = try! XCTUnwrap(zone.tabView(for: active.id))
         let pointInZone = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
 
-        XCTAssertTrue(zone.hitTest(pointInSuperview) === tab)
+        XCTAssertTrue(zone.hitTest(pointInZone) === tab)
     }
 
     func testBlankZoneDoesNotBecomeFullWidthInvisibleControl() {
@@ -404,8 +512,7 @@ final class ExternalShellTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
 
         let pointInZone = NSPoint(x: zone.addControlFrame.midX, y: zone.addControlFrame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        XCTAssertTrue(zone.hitTest(pointInSuperview) is AddWebAppControl)
+        XCTAssertTrue(zone.hitTest(pointInZone) is AddWebAppControl)
     }
 
     func testPinControlUsesActualVisibleHitAreaAndReflectsPinnedState() {
@@ -415,8 +522,7 @@ final class ExternalShellTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
 
         let pointInZone = NSPoint(x: zone.pinControlFrame.midX, y: zone.pinControlFrame.midY)
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        let pin = zone.hitTest(pointInSuperview) as? PinPanelControl
+        let pin = zone.hitTest(pointInZone) as? PinPanelControl
 
         XCTAssertNotNil(pin)
         XCTAssertTrue(pin?.isPinned == true)
@@ -592,8 +698,7 @@ final class ExternalShellTests: XCTestCase {
             x: zone.settingsControlFrame.midX,
             y: zone.settingsControlFrame.midY
         )
-        let pointInSuperview = zone.convert(pointInZone, to: zone.superview)
-        XCTAssertTrue(zone.hitTest(pointInSuperview) is GlobalSettingsControl)
+        XCTAssertTrue(zone.hitTest(pointInZone) is GlobalSettingsControl)
     }
 
     func testTabContextMenuStartsWithReturnToHome() {
@@ -783,6 +888,117 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(inactiveView.isShowingLabel)
     }
 
+    func testModalPresentationClearsTabHoverAndRequiresFreshPointerState() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(zone.tabView(for: active.id))
+        tab.setHovered(true)
+        XCTAssertTrue(tab.isShowingLabel)
+        XCTAssertEqual(tab.preferredWidth, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
+
+        zone.setModalPresentationActive(true)
+
+        XCTAssertTrue(zone.isModalPresentationActive)
+        XCTAssertFalse(tab.isShowingLabel)
+        XCTAssertEqual(tab.preferredWidth, ExternalTabMetrics.activeWidth, accuracy: 0.001)
+
+        // A child tracking callback arriving while the sheet owns the panel
+        // must not recreate the old magnification.
+        tab.setHovered(true)
+        XCTAssertFalse(tab.isShowingLabel)
+
+        zone.setModalPresentationActive(false)
+
+        XCTAssertFalse(zone.isModalPresentationActive)
+        XCTAssertFalse(tab.isShowingLabel)
+        // The first post-dismissal pointer event is the only thing allowed to
+        // establish a new hover identity.
+        tab.setHovered(true)
+        XCTAssertTrue(tab.isShowingLabel)
+    }
+
+    func testModalPresentationSuppressesRailPointerUpdatesAndKeepsActiveTab() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        let inactive = makeProfile(order: 1, name: "Other")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let activeView = try! XCTUnwrap(zone.tabView(for: active.id))
+        let inactiveView = try! XCTUnwrap(zone.tabView(for: inactive.id))
+        activeView.setHovered(true)
+        zone.setModalPresentationActive(true)
+
+        let event = try! XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: NSPoint(x: inactiveView.frame.midX, y: inactiveView.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 70,
+            clickCount: 0,
+            pressure: 0
+        ))
+        zone.mouseMoved(with: event)
+
+        XCTAssertTrue(zone.isModalPresentationActive)
+        XCTAssertFalse(activeView.isShowingLabel)
+        XCTAssertFalse(inactiveView.isShowingLabel)
+        XCTAssertTrue(activeView.isActiveTab)
+        XCTAssertFalse(inactiveView.isActiveTab)
+    }
+
+    func testRepeatedModalLifecycleAndNewTabDoNotRemainSuspended() {
+        let (_, zone) = makeZoneHarness()
+        let first = makeProfile(order: 0, name: "First")
+        zone.apply(profiles: [first], activeTabID: first.id)
+        zone.layoutSubtreeIfNeeded()
+
+        zone.setModalPresentationActive(true)
+        zone.setModalPresentationActive(false)
+        zone.setModalPresentationActive(true)
+
+        let second = makeProfile(order: 1, name: "Second")
+        zone.apply(profiles: [first, second], activeTabID: first.id)
+        zone.layoutSubtreeIfNeeded()
+        let secondView = try! XCTUnwrap(zone.tabView(for: second.id))
+        secondView.setHovered(true)
+        XCTAssertFalse(secondView.isShowingLabel)
+
+        zone.setModalPresentationActive(false)
+        secondView.setHovered(true)
+        XCTAssertTrue(secondView.isShowingLabel)
+
+        zone.setModalPresentationActive(true)
+        zone.setModalPresentationActive(false)
+        XCTAssertFalse(zone.isModalPresentationActive)
+    }
+
+    func testModalLifecyclePreservesCompactRailExclusions() {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: 400))
+        let zone = ExternalControlZoneView(frame: host.bounds)
+        host.addSubview(zone)
+        let profiles = (0..<9).map { makeProfile(order: $0, name: "Tab \($0)") }
+        zone.apply(profiles: profiles, activeTabID: profiles[0].id)
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(zone.isUsingCompactLayout)
+        zone.setModalPresentationActive(true)
+        zone.layoutSubtreeIfNeeded()
+
+        let exclusions = zone.movementExclusionRects(in: host)
+        XCTAssertFalse(exclusions.isEmpty)
+        for (index, exclusion) in exclusions.enumerated() {
+            for other in exclusions.dropFirst(index + 1) {
+                XCTAssertFalse(exclusion.intersects(other))
+            }
+        }
+    }
+
     func testDarkRailReapplyAndNewInactiveTabResolveLayerColorsFromEffectiveAppearance() {
         let (_, zone) = makeZoneHarness()
         zone.appearance = NSAppearance(named: .darkAqua)
@@ -923,8 +1139,8 @@ final class ExternalShellTests: XCTestCase {
         for control: NSView in [tab, addControl, pinControl, settingsControl] {
             control.resetCursorRects()
             let center = NSPoint(x: control.bounds.midX, y: control.bounds.midY)
-            let centerInZoneSuperview = control.convert(center, to: root)
-            XCTAssertNotNil(root.externalControlZoneView.hitTest(centerInZoneSuperview))
+            let centerInZone = control.convert(center, to: root.externalControlZoneView)
+            XCTAssertNotNil(root.externalControlZoneView.hitTest(centerInZone))
         }
     }
 

@@ -17,6 +17,10 @@ enum AppCommand: Equatable {
     case settings
     case togglePin
     case setResidency(SlotResidencyPolicy)
+    case readPauseResumeSpeechForActiveTab
+    case replayLatestSpeechForActiveTab
+    case stopSpeechForActiveTab
+    case toggleAutoSpeakForActiveTab
 }
 
 /// Commands sent by RemoteOrbit's semantic adapter. This IPC surface stays
@@ -149,6 +153,22 @@ extension KeyboardShortcuts.Name {
         initial: .init(.c, modifiers: [.control, .option])
     )
     static let floatTabsSettings = Self("floatTabsSettings", initial: .init(.comma, modifiers: [.command]))
+    static let readLatestOrStopSpeech = Self(
+        "readLatestOrStopSpeech",
+        initial: .init(.r, modifiers: [.control, .shift])
+    )
+    static let replayLatestSpeech = Self(
+        "replayLatestSpeech",
+        initial: .init(.e, modifiers: [.control, .shift])
+    )
+    static let stopSpeechForActiveTab = Self(
+        "stopSpeechForActiveTab",
+        initial: .init(.s, modifiers: [.control, .shift])
+    )
+    static let toggleAutoSpeak = Self(
+        "toggleAutoSpeak",
+        initial: .init(.a, modifiers: [.control, .shift])
+    )
 }
 
 struct AppShortcutBinding {
@@ -201,8 +221,36 @@ enum AppShortcutCatalog {
         .init(title: "Global Settings", command: .settings, name: .floatTabsSettings),
     ]
 
+    static let speechBindings: [AppShortcutBinding] = [
+        .init(
+            title: "Read / Pause / Resume Speech",
+            command: .readPauseResumeSpeechForActiveTab,
+            name: .readLatestOrStopSpeech
+        ),
+        .init(
+            title: "Replay Latest Speech",
+            command: .replayLatestSpeechForActiveTab,
+            name: .replayLatestSpeech
+        ),
+        .init(
+            title: "Stop Speech",
+            command: .stopSpeechForActiveTab,
+            name: .stopSpeechForActiveTab
+        ),
+        .init(
+            title: "Toggle Auto Speak This Tab",
+            command: .toggleAutoSpeakForActiveTab,
+            name: .toggleAutoSpeak
+        ),
+    ]
+
     static var allBindings: [AppShortcutBinding] {
-        slotBindings + navigationBindings + viewBindings + residencyBindings + applicationBindings
+        slotBindings
+            + navigationBindings
+            + viewBindings
+            + speechBindings
+            + residencyBindings
+            + applicationBindings
     }
 
     static var allNames: [KeyboardShortcuts.Name] {

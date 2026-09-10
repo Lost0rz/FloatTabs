@@ -114,8 +114,70 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(AppShortcutCatalog.viewBindings.count, 4)
         XCTAssertEqual(AppShortcutCatalog.residencyBindings.count, 3)
         XCTAssertEqual(AppShortcutCatalog.applicationBindings.count, 1)
-        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 24)
-        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 24)
+        XCTAssertEqual(AppShortcutCatalog.speechBindings.count, 4)
+        XCTAssertEqual(AppShortcutCatalog.allBindings.count, 28)
+        XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 28)
+    }
+
+    func testSpeechShortcutsRouteDefaultsAndRemainConfigurable() {
+        XCTAssertEqual(KeyboardShortcuts.Name.readLatestOrStopSpeech.rawValue, "readLatestOrStopSpeech")
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.r.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .readPauseResumeSpeechForActiveTab
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.s.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .stopSpeechForActiveTab
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.e.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .replayLatestSpeechForActiveTab
+        )
+        XCTAssertEqual(
+            defaultCommand(
+                keyCode: UInt16(KeyboardShortcuts.Key.a.rawValue),
+                modifiers: [.control, .shift]
+            ),
+            .toggleAutoSpeakForActiveTab
+        )
+        XCTAssertEqual(
+            AppShortcutCatalog.speechBindings.map(\.title),
+            [
+                "Read / Pause / Resume Speech",
+                "Replay Latest Speech",
+                "Stop Speech",
+                "Toggle Auto Speak This Tab",
+            ]
+        )
+
+        let custom = KeyboardShortcuts.Shortcut(.x, modifiers: [.control, .option])
+        let shortcutFor: (KeyboardShortcuts.Name) -> KeyboardShortcuts.Shortcut? = { name in
+            name == .readLatestOrStopSpeech ? custom : name.initialShortcut
+        }
+        XCTAssertEqual(
+            AppShortcutCatalog.command(
+                keyCode: UInt16(KeyboardShortcuts.Key.x.rawValue),
+                modifiers: [.control, .option],
+                shortcutFor: shortcutFor
+            ),
+            .readPauseResumeSpeechForActiveTab
+        )
+        XCTAssertNil(
+            AppShortcutCatalog.command(
+                keyCode: UInt16(KeyboardShortcuts.Key.r.rawValue),
+                modifiers: [.control, .shift],
+                shortcutFor: shortcutFor
+            )
+        )
     }
 
     func testResidencyShortcutsSelectHotWarmAndCold() {

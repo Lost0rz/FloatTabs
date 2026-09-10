@@ -517,12 +517,480 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    private func makeZoneHarness() -> (host: NSView, zone: ExternalControlZoneView) {
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: 820))
+    func testSpeechControlsUseAutoReplayStopSettingsPinBottomUpOrder() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (host, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: nil,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let auto = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .autoSpeak })
+        )
+        let read = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .readLatest })
+        )
+        let replay = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .replay })
+        )
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
+
+        XCTAssertLessThan(auto.frame.minY, read.frame.minY)
+        XCTAssertLessThan(read.frame.minY, replay.frame.minY)
+        XCTAssertLessThan(replay.frame.minY, stop.frame.minY)
+        XCTAssertLessThan(stop.frame.minY, zone.settingsControlFrame.minY)
+        XCTAssertLessThan(zone.settingsControlFrame.minY, zone.pinControlFrame.minY)
+
+        let exclusions = zone.movementExclusionRects(in: host)
+        let autoFrameInHost = auto.convert(auto.bounds, to: host)
+        let readFrameInHost = read.convert(read.bounds, to: host)
+        let replayFrameInHost = replay.convert(replay.bounds, to: host)
+        let stopFrameInHost = stop.convert(stop.bounds, to: host)
+        XCTAssertTrue(exclusions.contains(where: { $0 == autoFrameInHost }))
+        XCTAssertTrue(exclusions.contains(where: { $0 == readFrameInHost }))
+        XCTAssertTrue(exclusions.contains(where: { $0 == replayFrameInHost }))
+        XCTAssertTrue(exclusions.contains(where: { $0 == stopFrameInHost }))
+    }
+
+    func testSpeechControlsCollapseAndExpandWithRail() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.layoutSubtreeIfNeeded()
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        XCTAssertEqual(controls.count, 4)
+        XCTAssertTrue(controls.allSatisfy { !$0.isHidden })
+
+        zone.setCollapsed(true, animated: false)
+        XCTAssertTrue(controls.allSatisfy { $0.isHidden })
+
+        zone.setCollapsed(false, animated: false)
+        XCTAssertTrue(controls.allSatisfy { !$0.isHidden })
+    }
+
+    func testSpeechPresentationProjectsActiveTargetAndPerTabBadges() {
+        let first = makeProfile(name: "ChatGPT A")
+        let second = makeProfile(name: "ChatGPT B")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [first, second], activeTabID: first.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: first.id,
+                autoSpeakSlotIDs: [first.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: second.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: first.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let tabs = [
+            try! XCTUnwrap(zone.tabView(for: first.id)),
+            try! XCTUnwrap(zone.tabView(for: second.id)),
+        ]
+        XCTAssertTrue(tabs[0].isShowingAutoSpeakBadge)
+        XCTAssertFalse(tabs[0].isShowingSpeakingBadge)
+        XCTAssertFalse(tabs[1].isShowingAutoSpeakBadge)
+        XCTAssertTrue(tabs[1].isShowingSpeakingBadge)
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        let auto = try! XCTUnwrap(controls.first(where: { $0.kind == .autoSpeak }))
+        let read = try! XCTUnwrap(controls.first(where: { $0.kind == .readLatest }))
+        XCTAssertTrue(auto.isAutoSpeakEnabledForPresentation)
+        XCTAssertFalse(read.isCurrentlySpeakingForAction)
+        XCTAssertEqual(auto.displayedActiveTabName, first.name)
+        XCTAssertEqual(read.displayedActiveTabName, first.name)
+        XCTAssertTrue(
+            tabs[0].accessibilityLabel()?.contains("Auto Speak enabled") == true
+        )
+        XCTAssertTrue(
+            tabs[1].accessibilityLabel()?.contains("Currently speaking") == true
+        )
+    }
+
+    func testSpeechRailProjectsIndependentPlayPauseReplayAndStopTargets() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let read = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .readLatest })
+        )
+        let replay = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .replay })
+        )
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
+        XCTAssertEqual(read.displayedPlaybackState, .speaking)
+        XCTAssertTrue(read.isCurrentlySpeakingForAction)
+        XCTAssertTrue(read.toolTip?.contains("Pause Speech") == true)
+        XCTAssertTrue(replay.toolTip?.contains("Replay Latest Response") == true)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.toolTip?.contains("Stop Speech") == true)
+        XCTAssertFalse(read.frame.intersects(replay.frame))
+        XCTAssertFalse(replay.frame.intersects(stop.frame))
+        XCTAssertTrue(read.hitTest(NSPoint(x: read.bounds.midX, y: read.bounds.midY)) === read)
+        XCTAssertTrue(replay.hitTest(NSPoint(x: replay.bounds.midX, y: replay.bounds.midY)) === replay)
+        XCTAssertTrue(stop.hitTest(NSPoint(x: stop.bounds.midX, y: stop.bounds.midY)) === stop)
+
+        let readFrame = read.frame
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(read.displayedPlaybackState, .paused)
+        XCTAssertTrue(read.isCurrentlyPausedForAction)
+        XCTAssertTrue(read.toolTip?.contains("Resume Speech") == true)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertEqual(read.frame.height, readFrame.height)
+
+        let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
+        XCTAssertTrue(tab.isShowingPausedSpeechBadge)
+        XCTAssertFalse(tab.isShowingSpeakingBadge)
+        XCTAssertTrue(tab.accessibilityLabel()?.contains("Speech paused") == true)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profile.id,
+                playbackState: .resuming,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        XCTAssertFalse(read.isActionEnabledForSpeechPresentationState)
+        XCTAssertTrue(read.toolTip?.contains("transition") == true)
+        XCTAssertTrue(replay.isActionEnabledForSpeechPresentationState)
+        XCTAssertTrue(stop.isStopActionVisible)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: nil,
+                playbackState: .idle,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profile.name
+        )
+        XCTAssertFalse(stop.isStopActionVisible)
+        XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
+    }
+
+    func testPausedBackgroundTabBadgeDoesNotExposeStopForAnotherActiveTab() {
+        let first = makeProfile(name: "ChatGPT A")
+        let second = makeProfile(name: "ChatGPT B")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [first, second], activeTabID: second.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: second.id,
+                autoSpeakSlotIDs: [first.id],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: first.id,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: second.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let firstTab = try! XCTUnwrap(zone.tabView(for: first.id))
+        XCTAssertTrue(firstTab.isShowingPausedSpeechBadge)
+        XCTAssertFalse(firstTab.isShowingSpeakingBadge)
+
+        let read = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .readLatest })
+        )
+        let stop = try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
+        XCTAssertFalse(stop.isStopActionVisible)
+        XCTAssertFalse(read.isCurrentlyPausedForAction)
+        XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
+    }
+
+    func testSpeechBadgeDoesNotChangeTabHitGeometry() {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: 180,
+            height: ExternalTabMetrics.tabHeight
+        )
+        tab.setSpeechState(isAutoSpeakSource: true, isCurrentlySpeaking: true)
+        tab.layoutSubtreeIfNeeded()
+
+        let badgePoint = NSPoint(
+            x: tab.bounds.maxX - 5,
+            y: tab.bounds.maxY - 5
+        )
+        XCTAssertTrue(tab.hitTest(badgePoint) === tab)
+    }
+
+    func testUnsupportedActiveTabDisablesSpeechControls() {
+        let profile = makeProfile(name: "GitHub")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: nil,
+                activeSlotSupportsSpeech: false
+            ),
+            activeTabName: profile.name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        XCTAssertTrue(controls.allSatisfy { !$0.isEnabledForSpeechPresentationState })
+        XCTAssertTrue(
+            controls.allSatisfy {
+                $0.toolTip == "Speech is currently available for ChatGPT tabs."
+            }
+        )
+    }
+
+    func testUnsupportedArmedActiveTabKeepsAutoControlEnabledSoItCanBeDisarmed() {
+        let profile = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [profile], activeTabID: profile.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profile.id,
+                autoSpeakSlotIDs: [profile.id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: nil,
+                activeSlotSupportsSpeech: false
+            ),
+            activeTabName: profile.name
+        )
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        let auto = try! XCTUnwrap(controls.first(where: { $0.kind == .autoSpeak }))
+        let read = try! XCTUnwrap(controls.first(where: { $0.kind == .readLatest }))
+        XCTAssertTrue(auto.isEnabledForSpeechPresentationState)
+        XCTAssertTrue(auto.isAutoSpeakEnabledForPresentation)
+        XCTAssertFalse(read.isEnabledForSpeechPresentationState)
+        XCTAssertTrue(auto.toolTip?.contains("Disable Auto Speak This Tab") == true)
+    }
+
+    func testRailCapacityMatrixUsesCollisionFreeCompactOverflowLayout() {
+        let counts = [0, 1, 3, 4, 5, 9]
+        for count in counts {
+            let (host, zone) = makeZoneHarness(height: 400)
+            let profiles = (0..<count).map { index in
+                WebAppProfile(
+                    order: index,
+                    name: "Tab \(index)",
+                    homeURL: URL(string: "https://example.com/tab-\(index)")!
+                )
+            }
+            zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+            zone.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(
+                Set(zone.visibleTabIDs).union(zone.overflowTabIDs).count,
+                count
+            )
+            if count == 9 {
+                XCTAssertTrue(zone.isUsingCompactLayout)
+                XCTAssertFalse(zone.overflowTabIDs.isEmpty)
+                XCTAssertEqual(zone.overflowMenuItems.map(\.slotID), zone.overflowTabIDs)
+                XCTAssertTrue(zone.overflowControlAccessibilityLabel?.contains("More Tabs") == true)
+            }
+
+            assertRailFramesAreCollisionFree(zone, host: host)
+
+            zone.setCollapsed(true, animated: false)
+            let collapsedViews = railActionableViews(in: zone)
+            XCTAssertTrue(collapsedViews.allSatisfy(\.isHidden))
+
+            zone.setCollapsed(false, animated: false)
+            zone.layoutSubtreeIfNeeded()
+            assertRailFramesAreCollisionFree(zone, host: host)
+        }
+
+        let (defaultHost, defaultZone) = makeZoneHarness(height: 820)
+        let defaultProfiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Default Tab \(index)",
+                homeURL: URL(string: "https://example.com/default-\(index)")!
+            )
+        }
+        defaultZone.apply(profiles: defaultProfiles, activeTabID: defaultProfiles.first?.id)
+        defaultZone.layoutSubtreeIfNeeded()
+        XCTAssertFalse(defaultZone.isUsingCompactLayout)
+        XCTAssertTrue(defaultZone.overflowTabIDs.isEmpty)
+        XCTAssertEqual(defaultZone.visibleTabIDs.count, 9)
+        assertRailFramesAreCollisionFree(defaultZone, host: defaultHost)
+    }
+
+    func testCompactRailKeepsSpeechActionsSeparateAndAccessible() {
+        let (_, zone) = makeZoneHarness(height: 400)
+        let profiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Speech Tab \(index)",
+                homeURL: URL(string: "https://example.com/speech-\(index)")!
+            )
+        }
+        zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: profiles[0].id,
+                autoSpeakSlotIDs: [profiles[0].id],
+                activeSlotAutoSpeakEnabled: true,
+                currentSpeakingSlotID: profiles[0].id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true
+            ),
+            activeTabName: profiles[0].name
+        )
+        zone.layoutSubtreeIfNeeded()
+
+        let controls = zone.subviews.compactMap { $0 as? SpeechRailControl }
+        XCTAssertEqual(controls.count, 4)
+        XCTAssertTrue(controls.contains { $0.kind == .autoSpeak })
+        XCTAssertTrue(controls.contains { $0.kind == .readLatest })
+        XCTAssertTrue(controls.contains { $0.kind == .replay })
+        XCTAssertTrue(controls.contains { $0.kind == .stop })
+        XCTAssertTrue(controls.allSatisfy { !$0.isHidden && !$0.frame.isEmpty })
+        XCTAssertEqual(Set(controls.compactMap { $0.toolTip }).count, controls.count)
+        for control in controls {
+            XCTAssertTrue(control.accessibilityLabel()?.isEmpty == false)
+        }
+        for (index, first) in controls.enumerated() {
+            for second in controls.dropFirst(index + 1) {
+                XCTAssertFalse(first.frame.intersects(second.frame))
+            }
+        }
+        XCTAssertTrue(
+            controls.contains {
+                $0.kind == .readLatest && $0.toolTip?.contains("Pause Speech") == true
+            }
+        )
+        XCTAssertTrue(
+            controls.contains {
+                $0.kind == .stop && $0.toolTip?.contains("Stop Speech") == true
+            }
+        )
+    }
+
+    private func makeZoneHarness(height: CGFloat = 820) -> (host: NSView, zone: ExternalControlZoneView) {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: height))
         let zone = ExternalControlZoneView(frame: host.bounds)
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)
+    }
+
+    private func railActionableViews(in zone: ExternalControlZoneView) -> [NSView] {
+        zone.subviews.filter { view in
+            view is ExternalWebAppTabView
+                || view is AddWebAppControl
+                || view is SpeechRailControl
+                || view is GlobalSettingsControl
+                || view is PinPanelControl
+                || view is RailOverflowControl
+        }
+    }
+
+    private func assertRailFramesAreCollisionFree(
+        _ zone: ExternalControlZoneView,
+        host: NSView,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let visible = railActionableViews(in: zone).filter {
+            !$0.isHidden && !$0.frame.isEmpty
+        }
+        for view in visible {
+            XCTAssertTrue(
+                zone.bounds.contains(view.frame),
+                "Visible rail control must stay inside rail bounds: \(view)",
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(
+                view.hitTest(view.bounds.midPoint) === view,
+                "Visible rail control must own its hit target",
+                file: file,
+                line: line
+            )
+        }
+        for (index, first) in visible.enumerated() {
+            for second in visible.dropFirst(index + 1) {
+                XCTAssertFalse(
+                    first.frame.intersects(second.frame),
+                    "Rail controls must not overlap: \(first) / \(second)",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+
+        let exclusions = zone.movementExclusionRects(in: host)
+        for view in visible {
+            let frameInHost = view.convert(view.bounds, to: host)
+            XCTAssertTrue(
+                exclusions.contains(where: { $0 == frameInHost }),
+                "Movement exclusion must match visible control frame",
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func synchronize(
