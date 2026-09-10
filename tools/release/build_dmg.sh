@@ -42,12 +42,8 @@ verify_arm64_binary() {
   local architectures
 
   architectures="$(lipo -archs "$binary")"
-  if [[ " $architectures " != *" $REQUIRED_ARCHITECTURE "* ]]; then
-    echo "error: $binary is missing required architecture $REQUIRED_ARCHITECTURE (found: $architectures)" >&2
-    return 1
-  fi
-  if [[ " $architectures " == *" x86_64 "* ]]; then
-    echo "error: $binary contains unsupported x86_64 architecture (found: $architectures)" >&2
+  if [[ "$architectures" != "$REQUIRED_ARCHITECTURE" ]]; then
+    echo "error: $binary must be $REQUIRED_ARCHITECTURE-only (found: $architectures)" >&2
     return 1
   fi
 

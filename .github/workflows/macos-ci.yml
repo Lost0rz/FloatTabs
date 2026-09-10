@@ -85,12 +85,8 @@ jobs:
           fi
           architectures="$(lipo -archs "$binary")"
           echo "Release binary architectures: $architectures"
-          if [[ " $architectures " != *" arm64 "* ]]; then
-            echo "Expected architecture arm64 is missing." >&2
-            exit 1
-          fi
-          if [[ " $architectures " == *" x86_64 "* ]]; then
-            echo "Release binary must not contain x86_64: $architectures" >&2
+          if [[ "$architectures" != "arm64" ]]; then
+            echo "Release binary must be arm64-only; found: $architectures" >&2
             exit 1
           fi
 
