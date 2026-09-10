@@ -23,6 +23,7 @@ final class AppCoordinator {
     private var externalVoiceFocusRequestID: String?
     private let preferencesStore: AppPreferencesStore
     private let backupService: FloatTabsBackupService
+    private let attentionSoundAssetStore: AttentionSoundAssetStore
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let websiteCacheUsageStore: WebsiteCacheUsageStore
     private let websiteCacheClock: WebsiteCacheClock
@@ -44,6 +45,7 @@ final class AppCoordinator {
         panelController: PanelController? = nil,
         preferencesStore: AppPreferencesStore? = nil,
         backupService: FloatTabsBackupService = FloatTabsBackupService(),
+        attentionSoundAssetStore: AttentionSoundAssetStore? = nil,
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         websiteCacheClock: @escaping WebsiteCacheClock = Date.init,
         websiteCacheSleeper: @escaping WebsiteCacheSleeper = { delay in
@@ -59,6 +61,7 @@ final class AppCoordinator {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         let resolvedSpeechPreferencesStore = SpeechPreferencesStore()
         let resolvedSpeechVoiceCatalog = SpeechVoiceCatalog()
+        let resolvedAttentionSoundAssetStore = attentionSoundAssetStore ?? AttentionSoundAssetStore()
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
         // they are created. Apply the stored appearance before PanelController
         // builds any windows/views so a saved Dark choice cannot be cached as
@@ -68,6 +71,7 @@ final class AppCoordinator {
         self.speechPreferencesStore = resolvedSpeechPreferencesStore
         self.speechVoiceCatalog = resolvedSpeechVoiceCatalog
         self.backupService = backupService
+        self.attentionSoundAssetStore = resolvedAttentionSoundAssetStore
         self.attentionSoundPlayer = attentionSoundPlayer
         self.websiteCacheUsageStore = WebsiteCacheUsageStore()
         self.websiteCacheClock = websiteCacheClock
@@ -127,6 +131,7 @@ final class AppCoordinator {
             speechPreviewHandler: { [weak self] requests in
                 self?.panelController.playSpeechPreview(requests)
             },
+            attentionSoundAssetStore: attentionSoundAssetStore,
             attentionSoundPlayer: attentionSoundPlayer,
             onExportBackup: { [weak self] url in
                 guard let self else { throw FloatTabsBackupError.restoreFailed }
@@ -177,6 +182,7 @@ final class AppCoordinator {
                 previousReadyCount: self.lastAttentionReadyCount,
                 currentReadyCount: readyCount,
                 preferencesStore: self.preferencesStore,
+                assetStore: self.attentionSoundAssetStore,
                 player: self.attentionSoundPlayer
             )
             self.lastAttentionReadyCount = max(0, readyCount)
@@ -337,6 +343,44 @@ final class AppCoordinator {
         }
         player.play(
             soundName: preferencesStore.attentionSoundName,
+            volume: preferencesStore.attentionSoundVolume
+        )
+        return true
+    }
+
+    static func attentionSoundPlaybackSource(
+        preferencesStore: AppPreferencesStore,
+        assetStore: AttentionSoundAssetStore
+    ) -> AttentionSoundPlaybackSource {
+        guard preferencesStore.attentionSoundSourceKind == .custom else {
+            return .system(name: preferencesStore.attentionSoundName)
+        }
+        guard let reference = preferencesStore.customAttentionSoundReference,
+              let url = assetStore.url(for: reference) else {
+            return .system(name: AppPreferencesStore.defaultAttentionSoundName)
+        }
+        return .custom(url: url)
+    }
+
+    @discardableResult
+    static func playAttentionReadySoundIfNeeded(
+        previousReadyCount: Int,
+        currentReadyCount: Int,
+        preferencesStore: AppPreferencesStore,
+        assetStore: AttentionSoundAssetStore,
+        player: AttentionSoundPlaying
+    ) -> Bool {
+        guard shouldPlayAttentionReadySound(
+            previousReadyCount: previousReadyCount,
+            currentReadyCount: currentReadyCount
+        ), preferencesStore.attentionSoundEnabled else {
+            return false
+        }
+        player.play(
+            source: attentionSoundPlaybackSource(
+                preferencesStore: preferencesStore,
+                assetStore: assetStore
+            ),
             volume: preferencesStore.attentionSoundVolume
         )
         return true
@@ -614,6 +658,10 @@ final class AppCoordinator {
             backupPreferences.resolvedAttentionSoundName
         preferencesStore.attentionSoundVolume =
             backupPreferences.resolvedAttentionSoundVolume
+        // Custom audio is machine-local and is intentionally absent from the
+        // backup schema. A restore must never activate a local custom asset
+        // merely because the current machine still has one.
+        preferencesStore.attentionSoundSourceKind = .system
     }
 
     private func showGlobalSettings() {

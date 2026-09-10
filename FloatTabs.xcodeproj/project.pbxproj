@@ -99,6 +99,9 @@
 		A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */; };
 		A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005E /* MathSpeechNormalizer.swift */; };
 		A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005F /* MathSpeechNormalizerTests.swift */; };
+		A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* AttentionSoundAssetStore.swift */; };
+		A00000000000000000000061 /* AttentionSoundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* AttentionSoundTests.swift */; };
+		A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -206,6 +209,9 @@
 		B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinatorTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005E /* MathSpeechNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizer.swift; sourceTree = "<group>"; };
 		B0000000000000000000005F /* MathSpeechNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizerTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000060 /* AttentionSoundAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundAssetStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000061 /* AttentionSoundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechVoiceDefaultsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -261,6 +267,7 @@
 				B0000000000000000000AB /* Info.plist */,
 				B00000000000000000000002 /* AppDelegate.swift */,
 				B00000000000000000000003 /* AppCoordinator.swift */,
+				B00000000000000000000060 /* AttentionSoundAssetStore.swift */,
 				B00000000000000000000035 /* AttentionSoundPlayer.swift */,
 				B00000000000000000000022 /* BenchmarkControlServer.swift */,
 			);
@@ -426,6 +433,8 @@
 				B0000000000000000000005C /* SpeechQueueTests.swift */,
 				B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */,
 				B0000000000000000000005F /* MathSpeechNormalizerTests.swift */,
+				B00000000000000000000061 /* AttentionSoundTests.swift */,
+				B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -545,6 +554,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
+				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
 				A00000000000000000000024 /* GlobalSettingsController.swift in Sources */,
@@ -641,6 +651,8 @@
 				A0000000000000000000005C /* SpeechQueueTests.swift in Sources */,
 				A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */,
 				A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */,
+				A00000000000000000000061 /* AttentionSoundTests.swift in Sources */,
+				A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

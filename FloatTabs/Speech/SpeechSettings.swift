@@ -429,8 +429,16 @@ protocol SpeechVoiceCatalogProviding: AnyObject {
 /// AVSpeechSynthesizer's public available-voices notification.
 @MainActor
 final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
+    typealias VoiceResolver = @MainActor (String) -> AVSpeechSynthesisVoice?
+    typealias LanguageVoiceResolver = @MainActor (String) -> AVSpeechSynthesisVoice?
+
+    static let chineseDefaultVoiceName = "Ting-Ting"
+    static let englishDefaultVoiceName = "Samantha"
+
     private let notificationCenter: NotificationCenter
     private let voicesProvider: () -> [AVSpeechSynthesisVoice]
+    private let voiceResolver: VoiceResolver
+    private let languageVoiceResolver: LanguageVoiceResolver
     private var voicesDidChangeObserver: NSObjectProtocol?
 
     private(set) var voices: [SpeechVoiceDescriptor] = []
@@ -438,10 +446,14 @@ final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
 
     init(
         notificationCenter: NotificationCenter = .default,
-        voicesProvider: @escaping () -> [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices
+        voicesProvider: @escaping () -> [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices,
+        voiceResolver: @escaping VoiceResolver = { AVSpeechSynthesisVoice(identifier: $0) },
+        languageVoiceResolver: @escaping LanguageVoiceResolver = { AVSpeechSynthesisVoice(language: $0) }
     ) {
         self.notificationCenter = notificationCenter
         self.voicesProvider = voicesProvider
+        self.voiceResolver = voiceResolver
+        self.languageVoiceResolver = languageVoiceResolver
         refresh()
         if #available(macOS 14.0, *) {
             voicesDidChangeObserver = notificationCenter.addObserver(
@@ -495,19 +507,64 @@ final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
     ) -> AVSpeechSynthesisVoice? {
         guard role != .automatic else { return nil }
         if let identifier = preferences.voiceIdentifier(for: role),
-           voices.contains(where: { $0.identifier == identifier }),
-           let preferred = AVSpeechSynthesisVoice(identifier: identifier) {
+           let preferred = voiceResolver(identifier) {
             return preferred
         }
-        if let matching = voices(for: role).first,
-           let voice = AVSpeechSynthesisVoice(identifier: matching.identifier) {
+        if let matching = Self.defaultVoiceDescriptor(for: role, voices: voices(for: role)),
+           let voice = voiceResolver(matching.identifier) {
             return voice
         }
         let language = role == .chinese ? "zh-CN" : "en-US"
-        return AVSpeechSynthesisVoice(language: language)
+        if let systemVoice = languageVoiceResolver(language) {
+            return systemVoice
+        }
+        return voices(for: role).compactMap { voiceResolver($0.identifier) }.first
     }
 
-    private static func sorted(_ voices: [SpeechVoiceDescriptor]) -> [SpeechVoiceDescriptor] {
+    static func defaultVoiceDisplayName(for role: SpeechLanguageRole) -> String {
+        switch role {
+        case .chinese:
+            return "FloatTabs Default — \(chineseDefaultVoiceName)"
+        case .english:
+            return "FloatTabs Default — \(englishDefaultVoiceName)"
+        case .automatic:
+            return "System Automatic"
+        }
+    }
+
+    static func normalizedVoiceName(_ name: String) -> String {
+        String(name.lowercased().unicodeScalars.filter {
+            CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0)
+        })
+    }
+
+    static func defaultVoiceDescriptor(
+        for role: SpeechLanguageRole,
+        voices: [SpeechVoiceDescriptor]
+    ) -> SpeechVoiceDescriptor? {
+        guard let defaultName = defaultVoiceName(for: role) else { return nil }
+        let target = normalizedVoiceName(defaultName)
+        let roleVoices = voices.filter { voice in
+            switch role {
+            case .chinese: return voice.language.lowercased().hasPrefix("zh-")
+            case .english: return voice.language.lowercased().hasPrefix("en-")
+            case .automatic: return true
+            }
+        }
+        return sorted(roleVoices).first {
+            normalizedVoiceName($0.name) == target
+        }
+    }
+
+    private static func defaultVoiceName(for role: SpeechLanguageRole) -> String? {
+        switch role {
+        case .chinese: return chineseDefaultVoiceName
+        case .english: return englishDefaultVoiceName
+        case .automatic: return nil
+        }
+    }
+
+    static func sorted(_ voices: [SpeechVoiceDescriptor]) -> [SpeechVoiceDescriptor] {
         voices.sorted {
             if $0.quality.sortRank != $1.quality.sortRank {
                 return $0.quality.sortRank > $1.quality.sortRank

@@ -12,7 +12,12 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         private(set) var calls: [Call] = []
 
-        func play(soundName: String, volume: Double) {
+        func play(source: AttentionSoundPlaybackSource, volume: Double) {
+            let soundName: String
+            switch source {
+            case let .system(name): soundName = name
+            case .custom: soundName = "Custom Audio"
+            }
             calls.append(Call(soundName: soundName, volume: volume))
         }
     }

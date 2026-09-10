@@ -171,6 +171,11 @@ final class AppPreferencesStore {
     static let attentionSoundEnabledKey = "FloatTabs.attentionSoundEnabled"
     static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
     static let attentionSoundVolumeKey = "FloatTabs.attentionSoundVolume"
+    static let attentionSoundSourceKindKey = "FloatTabs.attentionSoundSourceKind"
+    static let attentionCustomSoundManagedFileNameKey =
+        "FloatTabs.attentionCustomSoundManagedFileName"
+    static let attentionCustomSoundDisplayNameKey =
+        "FloatTabs.attentionCustomSoundDisplayName"
     static let websiteCacheAutomaticCleanupEnabledKey =
         "FloatTabs.websiteCache.automaticCleanupEnabled"
     static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
@@ -353,6 +358,68 @@ final class AppPreferencesStore {
                 forKey: Self.attentionSoundVolumeKey
             )
         }
+    }
+
+    /// The system sound name remains independent from the active source so it
+    /// can continue to serve as the configured system choice and custom-sound
+    /// fallback input without being overloaded with a file path.
+    var attentionSoundSourceKind: AttentionSoundSourceKind {
+        get {
+            guard let raw = defaults.string(forKey: Self.attentionSoundSourceKindKey),
+                  let kind = AttentionSoundSourceKind(rawValue: raw) else {
+                return .system
+            }
+            return kind
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.attentionSoundSourceKindKey)
+        }
+    }
+
+    var attentionCustomSoundManagedFileName: String? {
+        get { defaults.string(forKey: Self.attentionCustomSoundManagedFileNameKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults.set(newValue, forKey: Self.attentionCustomSoundManagedFileNameKey)
+            } else {
+                defaults.removeObject(forKey: Self.attentionCustomSoundManagedFileNameKey)
+            }
+        }
+    }
+
+    var attentionCustomSoundDisplayName: String? {
+        get { defaults.string(forKey: Self.attentionCustomSoundDisplayNameKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults.set(newValue, forKey: Self.attentionCustomSoundDisplayNameKey)
+            } else {
+                defaults.removeObject(forKey: Self.attentionCustomSoundDisplayNameKey)
+            }
+        }
+    }
+
+    var customAttentionSoundReference: CustomAttentionSoundReference? {
+        guard let managedFileName = attentionCustomSoundManagedFileName,
+              !managedFileName.isEmpty else {
+            return nil
+        }
+        let displayName = attentionCustomSoundDisplayName?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        return CustomAttentionSoundReference(
+            managedFileName: managedFileName,
+            displayName: displayName.flatMap { $0.isEmpty ? nil : $0 } ?? managedFileName
+        )
+    }
+
+    func setCustomAttentionSoundReference(_ reference: CustomAttentionSoundReference) {
+        attentionCustomSoundManagedFileName = reference.managedFileName
+        attentionCustomSoundDisplayName = reference.displayName
+    }
+
+    func clearCustomAttentionSoundReference() {
+        attentionCustomSoundManagedFileName = nil
+        attentionCustomSoundDisplayName = nil
     }
 
     /// Cache policy is persisted as operational app preferences, separate from
