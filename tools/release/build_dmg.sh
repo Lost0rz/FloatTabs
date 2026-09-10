@@ -11,7 +11,7 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app"
 DSYM_PATH="$DERIVED_DATA/Build/Products/Release/FloatTabs.app.dSYM"
 SIGN_IDENTITY="${FLOATTABS_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${FLOATTABS_NOTARY_PROFILE:-}"
-REQUIRED_ARCHITECTURES=(arm64 x86_64)
+REQUIRED_ARCHITECTURE="arm64"
 
 rm -rf "$DERIVED_DATA" "$STAGE_DIR"
 mkdir -p "$OUTPUT_DIR" "$STAGE_DIR"
@@ -22,17 +22,13 @@ xcodebuild \
   -resolvePackageDependencies \
   -onlyUsePackageVersionsFromResolvedFile
 
-# Release packages ship one Universal 2 application containing both Apple
-# Silicon and Intel slices. Build against a generic macOS destination so the
-# result does not collapse to the architecture of whichever runner executes it.
+# Release packages target Apple Silicon arm64 only.
 xcodebuild \
   -project FloatTabs.xcodeproj \
   -scheme FloatTabs \
   -configuration Release \
-  -destination 'generic/platform=macOS' \
+  -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$DERIVED_DATA" \
-  ARCHS='arm64 x86_64' \
-  ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO \
   build
 
@@ -41,22 +37,24 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
-verify_universal_binary() {
+verify_arm64_binary() {
   local binary="$1"
   local architectures
 
   architectures="$(lipo -archs "$binary")"
-  for required in "${REQUIRED_ARCHITECTURES[@]}"; do
-    if [[ " $architectures " != *" $required "* ]]; then
-      echo "error: $binary is missing required architecture $required (found: $architectures)" >&2
-      return 1
-    fi
-  done
+  if [[ " $architectures " != *" $REQUIRED_ARCHITECTURE "* ]]; then
+    echo "error: $binary is missing required architecture $REQUIRED_ARCHITECTURE (found: $architectures)" >&2
+    return 1
+  fi
+  if [[ " $architectures " == *" x86_64 "* ]]; then
+    echo "error: $binary contains unsupported x86_64 architecture (found: $architectures)" >&2
+    return 1
+  fi
 
-  echo "Universal binary verified: $binary [$architectures]"
+  echo "Apple Silicon arm64 binary verified: $binary [$architectures]"
 }
 
-verify_universal_app() {
+verify_arm64_app() {
   local app="$1"
   local candidate
   local found_macho=0
@@ -69,7 +67,7 @@ verify_universal_app() {
   while IFS= read -r -d '' candidate; do
     if /usr/bin/file -b "$candidate" | /usr/bin/grep -q 'Mach-O'; then
       found_macho=1
-      verify_universal_binary "$candidate"
+      verify_arm64_binary "$candidate"
     fi
   done < <(/usr/bin/find "$app/Contents" -type f -print0)
 
@@ -79,7 +77,7 @@ verify_universal_app() {
   fi
 }
 
-verify_universal_app "$APP_PATH"
+verify_arm64_app "$APP_PATH"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")"
@@ -110,7 +108,7 @@ rm -f "$DSYM_ARCHIVE_PATH"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$DSYM_PATH" "$DSYM_ARCHIVE_PATH"
 
 /usr/bin/ditto "$APP_PATH" "$STAGE_DIR/FloatTabs.app"
-verify_universal_app "$STAGE_DIR/FloatTabs.app"
+verify_arm64_app "$STAGE_DIR/FloatTabs.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 rm -f "$DMG_PATH"
 
@@ -158,10 +156,10 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
   xcrun stapler staple "$DMG_PATH"
   xcrun stapler validate "$DMG_PATH"
   spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG_PATH"
-  echo "Signed/notarized Universal 2 DMG ready: $DMG_PATH"
+  echo "Signed/notarized Apple Silicon DMG ready: $DMG_PATH"
 else
-  echo "Universal 2 QA DMG ready: $DMG_PATH"
-  echo "Architectures: ${REQUIRED_ARCHITECTURES[*]}"
+  echo "Apple Silicon QA DMG ready: $DMG_PATH"
+  echo "Architectures: $REQUIRED_ARCHITECTURE"
   echo "Version: $VERSION ($BUILD)"
   echo "NOTE: This is not a public notarized release unless Developer ID + notary credentials were supplied."
 fi

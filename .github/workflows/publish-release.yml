@@ -70,7 +70,7 @@ jobs:
             echo "refresh=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and verify Universal 2 release package
+      - name: Build and verify Apple Silicon release package
         if: steps.existing.outputs.exists != 'true' || steps.existing.outputs.refresh == 'true'
         env:
           FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease

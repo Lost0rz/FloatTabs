@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build and verify Universal 2 QA DMG
+      - name: Build and verify Apple Silicon QA DMG
         env:
           FLOATTABS_OUTPUT_DIR: ${{ runner.temp }}/FloatTabsRelease
         run: |
@@ -27,11 +27,11 @@ jobs:
       # The repository is public, while QA builds are intentionally unsigned and
       # private. Pull requests still build and verify the image, but only an
       # explicit maintainer dispatch retains the binary artifacts.
-      - name: Upload manually requested Universal 2 QA DMG and debug symbols
+      - name: Upload manually requested Apple Silicon QA DMG and debug symbols
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: FloatTabs-Universal-QA-DMG
+          name: FloatTabs-Apple-Silicon-QA-DMG
           if-no-files-found: error
           path: |
             ${{ runner.temp }}/FloatTabsRelease/FloatTabs-*.dmg

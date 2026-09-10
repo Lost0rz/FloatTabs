@@ -999,16 +999,10 @@ Bundle Identifier must remain stable once users begin retaining long-lived websi
 
 ## 16.2 CPU Architecture
 
-Development may begin on Apple Silicon.
+FloatTabs supports Apple Silicon arm64 only.
 
-Public V1 decision remains open between:
-
-```text
-arm64 only
-Universal 2 (arm64 + x86_64)
-```
-
-Do not claim Universal 2 until release CI verifies both slices.
+Development, CI, QA packaging and public release artifacts must target arm64
+and must not produce additional architecture slices.
 
 ## 16.3 Updates
 
@@ -1111,8 +1105,7 @@ Must be resolved before first public beta, but do not block core construction:
 
 1. final Bundle Identifier string;
 2. minimum supported macOS version;
-3. arm64-only vs Universal 2 public V1;
-4. final App Sandbox decision after compatibility QA;
-5. manual update vs Sparkle in first public release;
-6. final FloatTabs logo/app icon;
-7. maintained Safari/Chrome UA profiles for supported macOS versions.
+3. final App Sandbox decision after compatibility QA;
+4. manual update vs Sparkle in first public release;
+5. final FloatTabs logo/app icon;
+6. maintained Safari/Chrome UA profiles for supported macOS versions.
