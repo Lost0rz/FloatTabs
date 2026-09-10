@@ -779,6 +779,117 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(inactiveView.isShowingLabel)
     }
 
+    func testModalPresentationClearsTabHoverAndRequiresFreshPointerState() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try! XCTUnwrap(zone.tabView(for: active.id))
+        tab.setHovered(true)
+        XCTAssertTrue(tab.isShowingLabel)
+        XCTAssertEqual(tab.preferredWidth, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
+
+        zone.setModalPresentationActive(true)
+
+        XCTAssertTrue(zone.isModalPresentationActive)
+        XCTAssertFalse(tab.isShowingLabel)
+        XCTAssertEqual(tab.preferredWidth, ExternalTabMetrics.activeWidth, accuracy: 0.001)
+
+        // A child tracking callback arriving while the sheet owns the panel
+        // must not recreate the old magnification.
+        tab.setHovered(true)
+        XCTAssertFalse(tab.isShowingLabel)
+
+        zone.setModalPresentationActive(false)
+
+        XCTAssertFalse(zone.isModalPresentationActive)
+        XCTAssertFalse(tab.isShowingLabel)
+        // The first post-dismissal pointer event is the only thing allowed to
+        // establish a new hover identity.
+        tab.setHovered(true)
+        XCTAssertTrue(tab.isShowingLabel)
+    }
+
+    func testModalPresentationSuppressesRailPointerUpdatesAndKeepsActiveTab() {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "GPT")
+        let inactive = makeProfile(order: 1, name: "Other")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.layoutSubtreeIfNeeded()
+
+        let activeView = try! XCTUnwrap(zone.tabView(for: active.id))
+        let inactiveView = try! XCTUnwrap(zone.tabView(for: inactive.id))
+        activeView.setHovered(true)
+        zone.setModalPresentationActive(true)
+
+        let event = try! XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: NSPoint(x: inactiveView.frame.midX, y: inactiveView.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 70,
+            clickCount: 0,
+            pressure: 0
+        ))
+        zone.mouseMoved(with: event)
+
+        XCTAssertTrue(zone.isModalPresentationActive)
+        XCTAssertFalse(activeView.isShowingLabel)
+        XCTAssertFalse(inactiveView.isShowingLabel)
+        XCTAssertTrue(activeView.isActiveTab)
+        XCTAssertFalse(inactiveView.isActiveTab)
+    }
+
+    func testRepeatedModalLifecycleAndNewTabDoNotRemainSuspended() {
+        let (_, zone) = makeZoneHarness()
+        let first = makeProfile(order: 0, name: "First")
+        zone.apply(profiles: [first], activeTabID: first.id)
+        zone.layoutSubtreeIfNeeded()
+
+        zone.setModalPresentationActive(true)
+        zone.setModalPresentationActive(false)
+        zone.setModalPresentationActive(true)
+
+        let second = makeProfile(order: 1, name: "Second")
+        zone.apply(profiles: [first, second], activeTabID: first.id)
+        zone.layoutSubtreeIfNeeded()
+        let secondView = try! XCTUnwrap(zone.tabView(for: second.id))
+        secondView.setHovered(true)
+        XCTAssertFalse(secondView.isShowingLabel)
+
+        zone.setModalPresentationActive(false)
+        secondView.setHovered(true)
+        XCTAssertTrue(secondView.isShowingLabel)
+
+        zone.setModalPresentationActive(true)
+        zone.setModalPresentationActive(false)
+        XCTAssertFalse(zone.isModalPresentationActive)
+    }
+
+    func testModalLifecyclePreservesCompactRailExclusions() {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: 400))
+        let zone = ExternalControlZoneView(frame: host.bounds)
+        host.addSubview(zone)
+        let profiles = (0..<9).map { makeProfile(order: $0, name: "Tab \($0)") }
+        zone.apply(profiles: profiles, activeTabID: profiles[0].id)
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(zone.isUsingCompactLayout)
+        zone.setModalPresentationActive(true)
+        zone.layoutSubtreeIfNeeded()
+
+        let exclusions = zone.movementExclusionRects(in: host)
+        XCTAssertFalse(exclusions.isEmpty)
+        for (index, exclusion) in exclusions.enumerated() {
+            for other in exclusions.dropFirst(index + 1) {
+                XCTAssertFalse(exclusion.intersects(other))
+            }
+        }
+    }
+
     func testDarkRailReapplyAndNewInactiveTabResolveLayerColorsFromEffectiveAppearance() {
         let (_, zone) = makeZoneHarness()
         zone.appearance = NSAppearance(named: .darkAqua)

@@ -2329,6 +2329,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func presentAddWebAppEditor() {
         guard panel.attachedSheet == nil else { return }
+        beginRailModalInteraction()
         rootView.externalControlZoneView.setAddEditorOpen(true)
 
         WebAppEditorController.presentAdd(
@@ -2340,6 +2341,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         ) { [weak self] value in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.endRailModalInteraction()
                 self.rootView.externalControlZoneView.setAddEditorOpen(false)
                 guard let value,
                       value.browserProfileID == nil || self.webViewPool.customBrowserProfilesSupported,
@@ -2358,6 +2360,10 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
             }
         }
+        if panel.attachedSheet == nil {
+            endRailModalInteraction()
+            rootView.externalControlZoneView.setAddEditorOpen(false)
+        }
     }
 
     private func presentEditWebAppEditor(id: UUID) {
@@ -2366,13 +2372,16 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        beginRailModalInteraction()
         WebAppEditorController.presentEdit(
             profile: profile,
             allowsWindowSizeEditing: preferencesStore.windowSizeMode == .perWebApp,
             attachedTo: panel
         ) { [weak self] value in
             Task { @MainActor [weak self] in
-                guard let self, let value else { return }
+                guard let self else { return }
+                self.endRailModalInteraction()
+                guard let value else { return }
                 let oldHomeURL = self.tabStore.profiles.first(where: { $0.id == id })?.homeURL
                 guard self.tabStore.update(
                     id: id,
@@ -2396,6 +2405,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
             }
         }
+        if panel.attachedSheet == nil {
+            endRailModalInteraction()
+        }
     }
 
     private func presentRemoveConfirmation(id: UUID) {
@@ -2412,9 +2424,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        beginRailModalInteraction()
         WebAppEditorController.confirmRemove(profile: profile, attachedTo: panel) { [weak self] confirmed in
             Task { @MainActor [weak self] in
-                guard let self, confirmed,
+                guard let self else { return }
+                self.endRailModalInteraction()
+                guard confirmed,
                       self.tabStore.remove(id: id) else { return }
                 self.assistantSpeechCoordinator.removeSlot(slotID: id)
                 self.slotLifecycleCoordinator.remove(slotID: id)
@@ -2423,6 +2438,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 // dropping the bookkeeping fully forgets the deleted Slot.
                 self.attentionCoordinator.removeSlot(id)
             }
+        }
+        if panel.attachedSheet == nil {
+            endRailModalInteraction()
         }
     }
 
@@ -2542,6 +2560,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         let sourceID = source.id
+        beginRailModalInteraction()
         addressOverlayView.dismiss()
         WebAppEditorController.presentDerivedAdd(
             sourceProfile: source,
@@ -2550,6 +2569,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         ) { [weak self] name in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.endRailModalInteraction()
                 defer { self.focusActiveWebViewIfAvailable() }
                 guard let name else { return }
                 _ = self.tabStore.addDerived(
@@ -2559,6 +2579,17 @@ final class PanelController: NSObject, NSWindowDelegate {
                 )
             }
         }
+        if panel.attachedSheet == nil {
+            endRailModalInteraction()
+        }
+    }
+
+    private func beginRailModalInteraction() {
+        rootView.externalControlZoneView.setModalPresentationActive(true)
+    }
+
+    private func endRailModalInteraction() {
+        rootView.externalControlZoneView.setModalPresentationActive(false)
     }
 
     private func handleManualResizeEnded() {
@@ -2887,6 +2918,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         synchronizeSourceHostFrame(display: false)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === panel else { return }
+        endRailModalInteraction()
     }
 
     func windowDidResize(_ notification: Notification) {

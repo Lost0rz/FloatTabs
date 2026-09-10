@@ -99,7 +99,12 @@ struct ExternalTabMetrics {
 }
 
 @MainActor
-final class SpeechRailControl: NSView {
+private protocol RailHoverInteractionOwner: AnyObject {
+    func setHoverInteractionSuspended(_ suspended: Bool)
+}
+
+@MainActor
+final class SpeechRailControl: NSView, RailHoverInteractionOwner {
     enum Kind: Equatable {
         case autoSpeak
         case readLatest
@@ -114,6 +119,7 @@ final class SpeechRailControl: NSView {
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
     private var isEnabledForPresentation = false
     private var isActionEnabledForPresentation = false
@@ -208,9 +214,17 @@ final class SpeechRailControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updatePresentation()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     func setSpeechState(
@@ -376,13 +390,14 @@ struct RailOverflowItem: Equatable {
 /// Explicit compact-mode access to Tab views that cannot fit in the rail.
 /// This is a real button/menu surface, not a silently hidden action.
 @MainActor
-final class RailOverflowControl: NSView {
+final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     var onSelect: ((UUID) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var items: [RailOverflowItem] = []
     private var trackingAreaReference: NSTrackingArea?
+    private var isHoverInteractionSuspended = false
 
     var menuItems: [RailOverflowItem] { items }
 
@@ -434,16 +449,19 @@ final class RailOverflowControl: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
         refreshAppearance(isHovered: true)
         onPointerMoved?(event)
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
         onPointerMoved?(event)
     }
 
     override func mouseExited(with event: NSEvent) {
         refreshAppearance(isHovered: false)
+        guard !isHoverInteractionSuspended else { return }
         onPointerMoved?(event)
     }
 
@@ -503,6 +521,13 @@ final class RailOverflowControl: NSView {
                 .cgColor
             layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.30).cgColor
             layer?.borderWidth = 1
+        }
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            refreshAppearance()
         }
     }
 
@@ -566,6 +591,7 @@ final class ExternalControlZoneView: NSView {
     private(set) var isUsingCompactLayout = false
     private(set) var visibleTabIDs: [UUID] = []
     private(set) var overflowTabIDs: [UUID] = []
+    private(set) var isModalPresentationActive = false
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -671,6 +697,24 @@ final class ExternalControlZoneView: NSView {
         pointerY = nil
         synchronizeHoverState(at: nil)
         layoutControls(animated: true, duration: ExternalTabMetrics.dockSettleDuration)
+    }
+
+    /// Modal sheets can prevent AppKit from delivering the mouse-exit that
+    /// normally clears Dock magnification. Suspend every rail hover owner and
+    /// clear the pointer-derived authority explicitly so the sheet cannot
+    /// inherit a stale expanded Tab. Dismissal deliberately leaves the rail
+    /// neutral; a new real pointer event must establish hover again.
+    func setModalPresentationActive(_ active: Bool) {
+        isModalPresentationActive = active
+        pointerLocation = nil
+        pointerY = nil
+        hoverInteractionOwners.forEach {
+            $0.setHoverInteractionSuspended(active)
+        }
+        if !active {
+            synchronizeHoverState(at: nil)
+        }
+        layoutControls(animated: false, duration: 0)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -982,6 +1026,7 @@ final class ExternalControlZoneView: NSView {
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
+        view.setHoverInteractionSuspended(isModalPresentationActive)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
         view.setBrowserProfileMenuSnapshot(
             options: browserProfileMenuOptions,
@@ -1036,6 +1081,7 @@ final class ExternalControlZoneView: NSView {
     }
 
     private func updateDockPointer(with event: NSEvent) {
+        guard !isModalPresentationActive else { return }
         let location = convert(event.locationInWindow, from: nil)
         pointerLocation = location
         pointerY = location.y
@@ -1044,7 +1090,7 @@ final class ExternalControlZoneView: NSView {
     }
 
     private func synchronizeHoverState(at location: NSPoint?) {
-        guard !isRailCollapsed else { return }
+        guard !isRailCollapsed, !isModalPresentationActive else { return }
         for tab in tabViews.values {
             tab.setHovered(location.map { tab.frame.contains($0) } ?? false)
         }
@@ -1225,6 +1271,21 @@ final class ExternalControlZoneView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.onActiveTabGeometryChange?()
         }
+    }
+
+    private var hoverInteractionOwners: [RailHoverInteractionOwner] {
+        var owners: [RailHoverInteractionOwner] = Array(tabViews.values)
+        owners.append(contentsOf: [
+            addControl,
+            autoSpeakControl,
+            readLatestControl,
+            replayControl,
+            stopControl,
+            settingsControl,
+            pinControl,
+            tabOverflowControl,
+        ])
+        return owners
     }
 
     private var compactControlsTopY: CGFloat {
@@ -1880,7 +1941,7 @@ final class WebsiteFaviconProvider {
 }
 
 @MainActor
-final class ExternalWebAppTabView: NSView {
+final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     let slotID: UUID
 
     var onSelect: ((UUID) -> Void)?
@@ -1909,6 +1970,7 @@ final class ExternalWebAppTabView: NSView {
     private var isActive = false
     private var isResident = false
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
     private var mouseDownLocation: NSPoint?
     private var isDragging = false
@@ -2067,10 +2129,18 @@ final class ExternalWebAppTabView: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         label.isHidden = !hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     func setResident(_ resident: Bool) {
@@ -2168,6 +2238,7 @@ final class ExternalWebAppTabView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !isHoverInteractionSuspended else { return }
         onPointerMoved?(event)
         if isDragging {
             onDragChanged?(slotID, event)
@@ -2741,13 +2812,14 @@ final class ExternalWebAppTabView: NSView {
 }
 
 @MainActor
-final class AddWebAppControl: NSView {
+final class AddWebAppControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     var isEditorOpen = false {
@@ -2823,9 +2895,17 @@ final class AddWebAppControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     override func updateTrackingAreas() {
@@ -2889,13 +2969,14 @@ final class AddWebAppControl: NSView {
 
 
 @MainActor
-final class PinPanelControl: NSView {
+final class PinPanelControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     private(set) var isPinned = false {
@@ -2961,9 +3042,17 @@ final class PinPanelControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     func setPinned(_ pinned: Bool) {
@@ -3043,13 +3132,14 @@ final class PinPanelControl: NSView {
 }
 
 @MainActor
-final class GlobalSettingsControl: NSView {
+final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
     var onActivate: (() -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
+    private var isHoverInteractionSuspended = false
     private var dockInfluence: CGFloat = 0
 
     var preferredWidth: CGFloat {
@@ -3114,9 +3204,17 @@ final class GlobalSettingsControl: NSView {
     }
 
     func setHovered(_ hovered: Bool) {
+        guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
         updateAppearance()
+    }
+
+    func setHoverInteractionSuspended(_ suspended: Bool) {
+        isHoverInteractionSuspended = suspended
+        if suspended {
+            setHovered(false)
+        }
     }
 
     override func updateTrackingAreas() {
