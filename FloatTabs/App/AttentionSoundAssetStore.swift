@@ -6,9 +6,20 @@ enum AttentionSoundSourceKind: String, CaseIterable, Equatable, Sendable {
     case custom
 }
 
-struct CustomAttentionSoundReference: Equatable, Sendable {
+struct CustomAttentionSoundAsset: Codable, Equatable, Sendable, Identifiable {
+    let id: UUID
     let managedFileName: String
     let displayName: String
+
+    init(
+        id: UUID = UUID(),
+        managedFileName: String,
+        displayName: String
+    ) {
+        self.id = id
+        self.managedFileName = managedFileName
+        self.displayName = displayName
+    }
 }
 
 enum AttentionSoundPlaybackSource: Equatable, Sendable {
@@ -16,7 +27,7 @@ enum AttentionSoundPlaybackSource: Equatable, Sendable {
     case custom(url: URL)
 }
 
-enum AttentionSoundAssetError: LocalizedError, Equatable {
+enum AttentionSoundAssetError: LocalizedError, Equatable, Sendable {
     case notARegularFile
     case fileTooLarge(maxBytes: Int64)
     case cannotDecode
@@ -37,14 +48,34 @@ enum AttentionSoundAssetError: LocalizedError, Equatable {
         case let .durationTooLong(maxSeconds):
             return "The audio file is too long. Choose a file no longer than \(Int(maxSeconds)) seconds."
         case .importFailed:
-            return "FloatTabs could not copy the audio file into its managed sound library. Your previous sound was kept."
+            return "FloatTabs could not copy the audio file into its managed sound library."
         }
     }
 }
 
-/// Owns user-imported Ready alert audio without persisting the user's source
-/// URL. The store is deliberately independent of Preferences and UI so every
-/// file operation can be tested against an injected temporary directory.
+struct AttentionSoundImportFailure: Equatable, Sendable {
+    let displayName: String
+    let error: AttentionSoundAssetError
+}
+
+struct AttentionSoundBatchImportError: LocalizedError, Equatable, Sendable {
+    let failures: [AttentionSoundImportFailure]
+
+    var errorDescription: String? {
+        let count = failures.count
+        let names = failures.map(\.displayName).joined(separator: ", ")
+        return "\(count) file\(count == 1 ? "" : "s") failed to import: \(names)."
+    }
+
+    var failureReason: String? {
+        failures.map { "\($0.displayName): \($0.error.localizedDescription)" }
+            .joined(separator: "\n")
+    }
+}
+
+/// Owns user-imported Ready alert audio without persisting source URLs. The
+/// store is deliberately independent of Preferences and UI so every file
+/// operation can be tested against an injected temporary directory.
 @MainActor
 final class AttentionSoundAssetStore {
     static let maxFileSizeBytes: Int64 = 20 * 1_048_576
@@ -70,7 +101,7 @@ final class AttentionSoundAssetStore {
         self.audioDurationProbe = audioDurationProbe
     }
 
-    func importAudio(from sourceURL: URL) throws -> CustomAttentionSoundReference {
+    func importAudio(from sourceURL: URL) throws -> CustomAttentionSoundAsset {
         try validateFile(at: sourceURL)
         try validateAudio(at: sourceURL)
 
@@ -83,15 +114,34 @@ final class AttentionSoundAssetStore {
             throw AttentionSoundAssetError.importFailed
         }
 
-        let managedFileName = Self.generatedManagedFileName(for: sourceURL)
-        let managedURL = managedDirectoryURL.appendingPathComponent(
-            managedFileName,
-            isDirectory: false
-        )
+        var asset: CustomAttentionSoundAsset?
+        var managedURL: URL?
+        repeat {
+            let id = UUID()
+            let managedFileName = Self.generatedManagedFileName(
+                for: sourceURL,
+                id: id
+            )
+            let candidateURL = managedDirectoryURL.appendingPathComponent(
+                managedFileName,
+                isDirectory: false
+            )
+            guard !fileManager.fileExists(atPath: candidateURL.path) else { continue }
+            asset = CustomAttentionSoundAsset(
+                id: id,
+                managedFileName: managedFileName,
+                displayName: sourceURL.lastPathComponent
+            )
+            managedURL = candidateURL
+        } while asset == nil
+        guard let asset, let managedURL else {
+            throw AttentionSoundAssetError.importFailed
+        }
 
         do {
             try fileManager.copyItem(at: sourceURL, to: managedURL)
             do {
+                try validateFile(at: managedURL)
                 try validateAudio(at: managedURL)
             } catch {
                 try? fileManager.removeItem(at: managedURL)
@@ -103,23 +153,46 @@ final class AttentionSoundAssetStore {
             throw AttentionSoundAssetError.importFailed
         }
 
-        return CustomAttentionSoundReference(
-            managedFileName: managedFileName,
-            displayName: sourceURL.lastPathComponent
-        )
+        return asset
+    }
+
+    func importAudio(
+        from sourceURLs: [URL]
+    ) -> (assets: [CustomAttentionSoundAsset], failures: [AttentionSoundImportFailure]) {
+        var assets: [CustomAttentionSoundAsset] = []
+        var failures: [AttentionSoundImportFailure] = []
+        for sourceURL in sourceURLs {
+            do {
+                assets.append(try importAudio(from: sourceURL))
+            } catch let error as AttentionSoundAssetError {
+                failures.append(
+                    AttentionSoundImportFailure(
+                        displayName: sourceURL.lastPathComponent,
+                        error: error
+                    )
+                )
+            } catch {
+                failures.append(
+                    AttentionSoundImportFailure(
+                        displayName: sourceURL.lastPathComponent,
+                        error: .importFailed
+                    )
+                )
+            }
+        }
+        return (assets, failures)
     }
 
     /// Returns a safe path inside the managed directory even when the file is
-    /// missing, allowing the UI to show a Missing state and the player to use
-    /// its normal audible fallback.
-    func url(for reference: CustomAttentionSoundReference) -> URL? {
-        guard Self.isValidManagedFileName(reference.managedFileName) else {
+    /// missing, allowing the UI to show Missing and playback to use fallback.
+    func url(for asset: CustomAttentionSoundAsset) -> URL? {
+        guard Self.isValidManagedFileName(asset.managedFileName) else {
             return nil
         }
 
         let directory = managedDirectoryURL.standardizedFileURL
         let candidate = directory.appendingPathComponent(
-            reference.managedFileName,
+            asset.managedFileName,
             isDirectory: false
         ).standardizedFileURL
         guard candidate.deletingLastPathComponent() == directory else {
@@ -133,8 +206,8 @@ final class AttentionSoundAssetStore {
         return candidate
     }
 
-    func existingURL(for reference: CustomAttentionSoundReference) -> URL? {
-        guard let url = url(for: reference),
+    func existingURL(for asset: CustomAttentionSoundAsset) -> URL? {
+        guard let url = url(for: asset),
               fileManager.fileExists(atPath: url.path),
               (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
             return nil
@@ -142,8 +215,8 @@ final class AttentionSoundAssetStore {
         return url
     }
 
-    func remove(_ reference: CustomAttentionSoundReference) throws {
-        guard let url = url(for: reference),
+    func remove(_ asset: CustomAttentionSoundAsset) throws {
+        guard let url = url(for: asset),
               fileManager.fileExists(atPath: url.path) else {
             return
         }
@@ -197,15 +270,18 @@ final class AttentionSoundAssetStore {
             .appendingPathComponent("AttentionSounds", isDirectory: true)
     }
 
-    private static func generatedManagedFileName(for sourceURL: URL) -> String {
+    private static func generatedManagedFileName(
+        for sourceURL: URL,
+        id: UUID
+    ) -> String {
         let extensionName = sourceURL.pathExtension.lowercased()
             .unicodeScalars
             .filter { CharacterSet.alphanumerics.contains($0) }
         let sanitizedExtension = String(extensionName.map(Character.init))
         guard !sanitizedExtension.isEmpty else {
-            return UUID().uuidString
+            return id.uuidString
         }
-        return "\(UUID().uuidString).\(sanitizedExtension)"
+        return "\(id.uuidString).\(sanitizedExtension)"
     }
 
     private static func isValidManagedFileName(_ name: String) -> Bool {

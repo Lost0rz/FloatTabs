@@ -172,10 +172,10 @@ final class AppPreferencesStore {
     static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
     static let attentionSoundVolumeKey = "FloatTabs.attentionSoundVolume"
     static let attentionSoundSourceKindKey = "FloatTabs.attentionSoundSourceKind"
-    static let attentionCustomSoundManagedFileNameKey =
-        "FloatTabs.attentionCustomSoundManagedFileName"
-    static let attentionCustomSoundDisplayNameKey =
-        "FloatTabs.attentionCustomSoundDisplayName"
+    static let customAttentionSoundLibraryKey =
+        "FloatTabs.customAttentionSoundLibrary"
+    static let selectedCustomAttentionSoundIDKey =
+        "FloatTabs.selectedCustomAttentionSoundID"
     static let websiteCacheAutomaticCleanupEnabledKey =
         "FloatTabs.websiteCache.automaticCleanupEnabled"
     static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
@@ -376,50 +376,55 @@ final class AppPreferencesStore {
         }
     }
 
-    var attentionCustomSoundManagedFileName: String? {
-        get { defaults.string(forKey: Self.attentionCustomSoundManagedFileNameKey) }
+    var customAttentionSoundLibrary: [CustomAttentionSoundAsset] {
+        get {
+            guard let data = defaults.data(forKey: Self.customAttentionSoundLibraryKey),
+                  let assets = try? JSONDecoder().decode(
+                    [CustomAttentionSoundAsset].self,
+                    from: data
+                  ) else {
+                return []
+            }
+            return assets
+        }
         set {
-            if let newValue, !newValue.isEmpty {
-                defaults.set(newValue, forKey: Self.attentionCustomSoundManagedFileNameKey)
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Self.customAttentionSoundLibraryKey)
+        }
+    }
+
+    var selectedCustomAttentionSoundID: UUID? {
+        get {
+            guard let raw = defaults.string(forKey: Self.selectedCustomAttentionSoundIDKey) else {
+                return nil
+            }
+            return UUID(uuidString: raw)
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.uuidString, forKey: Self.selectedCustomAttentionSoundIDKey)
             } else {
-                defaults.removeObject(forKey: Self.attentionCustomSoundManagedFileNameKey)
+                defaults.removeObject(forKey: Self.selectedCustomAttentionSoundIDKey)
             }
         }
     }
 
-    var attentionCustomSoundDisplayName: String? {
-        get { defaults.string(forKey: Self.attentionCustomSoundDisplayNameKey) }
-        set {
-            if let newValue, !newValue.isEmpty {
-                defaults.set(newValue, forKey: Self.attentionCustomSoundDisplayNameKey)
-            } else {
-                defaults.removeObject(forKey: Self.attentionCustomSoundDisplayNameKey)
-            }
-        }
+    func customAttentionSoundAsset(id: UUID) -> CustomAttentionSoundAsset? {
+        customAttentionSoundLibrary.first { $0.id == id }
     }
 
-    var customAttentionSoundReference: CustomAttentionSoundReference? {
-        guard let managedFileName = attentionCustomSoundManagedFileName,
-              !managedFileName.isEmpty else {
-            return nil
-        }
-        let displayName = attentionCustomSoundDisplayName?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        return CustomAttentionSoundReference(
-            managedFileName: managedFileName,
-            displayName: displayName.flatMap { $0.isEmpty ? nil : $0 } ?? managedFileName
-        )
+    func appendCustomAttentionSoundAssets(_ assets: [CustomAttentionSoundAsset]) {
+        guard !assets.isEmpty else { return }
+        customAttentionSoundLibrary += assets
     }
 
-    func setCustomAttentionSoundReference(_ reference: CustomAttentionSoundReference) {
-        attentionCustomSoundManagedFileName = reference.managedFileName
-        attentionCustomSoundDisplayName = reference.displayName
-    }
-
-    func clearCustomAttentionSoundReference() {
-        attentionCustomSoundManagedFileName = nil
-        attentionCustomSoundDisplayName = nil
+    @discardableResult
+    func removeCustomAttentionSoundAsset(id: UUID) -> CustomAttentionSoundAsset? {
+        var library = customAttentionSoundLibrary
+        guard let index = library.firstIndex(where: { $0.id == id }) else { return nil }
+        let removed = library.remove(at: index)
+        customAttentionSoundLibrary = library
+        return removed
     }
 
     /// Cache policy is persisted as operational app preferences, separate from

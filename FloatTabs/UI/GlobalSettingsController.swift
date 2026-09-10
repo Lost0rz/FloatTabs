@@ -558,15 +558,11 @@ final class NotificationsSettingsViewController: NSViewController {
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let availableSoundNames: [String]
     private let errorPresenter: (Error) -> Void
-    private var systemSoundRow: NSView?
-    private var customSoundRow: NSView?
 
     private let enabledSwitch = NSSwitch()
-    let sourcePopup = NSPopUpButton()
     let soundPopup = NSPopUpButton()
-    let customSoundLabel = NSTextField(labelWithString: "")
-    let chooseAudioButton = NSButton(title: "Choose Audio…", target: nil, action: nil)
-    let removeCustomAudioButton = NSButton(title: "Remove", target: nil, action: nil)
+    let importAudioButton = NSButton(title: "Import Audio…", target: nil, action: nil)
+    let removeSelectedAudioButton = NSButton(title: "Remove Selected", target: nil, action: nil)
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
@@ -600,16 +596,9 @@ final class NotificationsSettingsViewController: NSViewController {
         enabledSwitch.target = self
         enabledSwitch.action = #selector(enabledChanged(_:))
 
-        sourcePopup.addItem(withTitle: "System Sound")
-        sourcePopup.addItem(withTitle: "Custom Audio")
-        sourcePopup.target = self
-        sourcePopup.action = #selector(sourceChanged(_:))
-        sourcePopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
-
-        soundPopup.addItems(withTitles: availableSoundNames)
+        soundPopup.widthAnchor.constraint(equalToConstant: 300).isActive = true
         soundPopup.target = self
         soundPopup.action = #selector(soundChanged(_:))
-        soundPopup.widthAnchor.constraint(equalToConstant: 180).isActive = true
 
         volumeSlider.target = self
         volumeSlider.action = #selector(volumeChanged(_:))
@@ -629,27 +618,17 @@ final class NotificationsSettingsViewController: NSViewController {
         previewButton.action = #selector(playPreview(_:))
         previewButton.bezelStyle = .rounded
 
-        customSoundLabel.lineBreakMode = .byTruncatingMiddle
-        customSoundLabel.widthAnchor.constraint(equalToConstant: 270).isActive = true
-        chooseAudioButton.target = self
-        chooseAudioButton.action = #selector(chooseAudio(_:))
-        removeCustomAudioButton.target = self
-        removeCustomAudioButton.action = #selector(removeCustomAudio(_:))
+        importAudioButton.target = self
+        importAudioButton.action = #selector(importAudio(_:))
+        removeSelectedAudioButton.target = self
+        removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
         let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
-        let sourceRow = makeRow(label: "Source", control: sourcePopup)
-        let soundRow = makeRow(label: "Sound", control: soundPopup)
-        let customActions = NSStackView(views: [chooseAudioButton, removeCustomAudioButton])
-        customActions.orientation = .horizontal
-        customActions.alignment = .centerY
-        customActions.spacing = 8
-        let customControls = NSStackView(views: [customSoundLabel, customActions])
-        customControls.orientation = .vertical
-        customControls.alignment = .leading
-        customControls.spacing = 6
-        let customRow = makeRow(label: "Custom Audio", control: customControls)
-        systemSoundRow = soundRow
-        customSoundRow = customRow
+        let soundRow = makeRow(label: "Ready Sound", control: soundPopup)
+        let audioActions = NSStackView(views: [importAudioButton, removeSelectedAudioButton])
+        audioActions.orientation = .horizontal
+        audioActions.alignment = .centerY
+        audioActions.spacing = 8
         let volumeControls = NSStackView(views: [volumeSlider, volumeValueLabel])
         volumeControls.orientation = .horizontal
         volumeControls.alignment = .centerY
@@ -663,9 +642,8 @@ final class NotificationsSettingsViewController: NSViewController {
             ),
             Self.spacer(8),
             enabledRow,
-            sourceRow,
             soundRow,
-            customRow,
+            audioActions,
             volumeRow,
             Self.spacer(4),
             previewButton,
@@ -697,31 +675,28 @@ final class NotificationsSettingsViewController: NSViewController {
         preferencesStore.attentionSoundEnabled = sender.state == .on
     }
 
-    @objc private func sourceChanged(_ sender: NSPopUpButton) {
-        guard AttentionSoundSourceKind.allCases.indices.contains(sender.indexOfSelectedItem) else {
+    @objc private func soundChanged(_ sender: NSPopUpButton) {
+        guard let selection = sender.selectedItem?.representedObject as? String else { return }
+        if selection == Self.importMenuSelection {
+            importAudio()
+            synchronizeControls()
             return
         }
-        let sourceKind = AttentionSoundSourceKind.allCases[sender.indexOfSelectedItem]
-        if sourceKind == .system {
+        if let name = selection.systemSoundName {
             preferencesStore.attentionSoundSourceKind = .system
+            preferencesStore.attentionSoundName = name
             synchronizeControls()
             previewCurrentSound()
-        } else {
-            let hasExistingCustomSound = preferencesStore.customAttentionSoundReference
-                .flatMap(assetStore.existingURL(for:)) != nil
-            if hasExistingCustomSound {
-                preferencesStore.attentionSoundSourceKind = .custom
-                synchronizeControls()
-                previewCurrentSound()
-            } else {
-                chooseAudio()
-            }
+            return
         }
-    }
-
-    @objc private func soundChanged(_ sender: NSPopUpButton) {
-        guard let name = sender.selectedItem?.title else { return }
-        preferencesStore.attentionSoundName = name
+        guard let id = UUID(uuidString: selection.customAssetID),
+              preferencesStore.customAttentionSoundAsset(id: id) != nil else {
+            synchronizeControls()
+            return
+        }
+        preferencesStore.attentionSoundSourceKind = .custom
+        preferencesStore.selectedCustomAttentionSoundID = id
+        synchronizeControls()
         previewCurrentSound()
     }
 
@@ -735,55 +710,50 @@ final class NotificationsSettingsViewController: NSViewController {
         previewCurrentSound()
     }
 
-    @objc private func chooseAudio(_ sender: NSButton) {
-        chooseAudio()
+    @objc private func importAudio(_ sender: NSButton) {
+        importAudio()
     }
 
-    @objc private func removeCustomAudio(_ sender: NSButton) {
-        guard let reference = preferencesStore.customAttentionSoundReference else {
-            preferencesStore.attentionSoundSourceKind = .system
+    @objc private func removeSelectedAudio(_ sender: NSButton) {
+        guard let id = selectedCustomAssetID else { return }
+        removeCustomAudioAsset(id: id)
+    }
+
+    /// Removes one library asset without touching a different active custom
+    /// asset. The popup normally targets the active item, while this method
+    /// also gives tests and future library affordances a safe non-active path.
+    func removeCustomAudioAsset(id: UUID) {
+        guard let asset = preferencesStore.customAttentionSoundAsset(id: id) else {
             synchronizeControls()
             return
         }
         do {
-            try assetStore.remove(reference)
+            try assetStore.remove(asset)
         } catch {
             errorPresenter(error)
             return
         }
-        preferencesStore.clearCustomAttentionSoundReference()
-        preferencesStore.attentionSoundSourceKind = .system
+        _ = preferencesStore.removeCustomAttentionSoundAsset(id: id)
+        if preferencesStore.selectedCustomAttentionSoundID == id {
+            preferencesStore.selectedCustomAttentionSoundID = nil
+            preferencesStore.attentionSoundSourceKind = .system
+        }
         synchronizeControls()
     }
 
-    /// Testable import seam used by the panel action and by UI-level tests.
-    func importCustomAudio(from sourceURL: URL) {
-        do {
-            let oldReference = preferencesStore.customAttentionSoundReference
-            let oldURL = oldReference.flatMap(assetStore.existingURL(for:))
-            let newReference = try assetStore.importAudio(from: sourceURL)
-            preferencesStore.setCustomAttentionSoundReference(newReference)
-            preferencesStore.attentionSoundSourceKind = .custom
-            let sourcePath = sourceURL.standardizedFileURL.resolvingSymlinksInPath().path
-            let sourceIsOldManagedAsset = oldURL.map {
-                $0.standardizedFileURL.resolvingSymlinksInPath().path == sourcePath
-            } ?? false
-            if let oldReference, oldReference != newReference, !sourceIsOldManagedAsset {
-                do {
-                    try assetStore.remove(oldReference)
-                } catch {
-                    // The new reference is already active and persisted. An
-                    // orphaned managed asset is safe; surface cleanup failure
-                    // without reverting the working replacement.
-                    errorPresenter(error)
-                }
-            }
-            synchronizeControls()
-            previewCurrentSound()
-        } catch {
-            synchronizeControls()
-            errorPresenter(error)
+    /// Testable import seam used by the panel action and UI-level tests. An
+    /// import only appends assets; it never changes the active sound.
+    func importCustomAudio(from sourceURLs: [URL]) {
+        let result = assetStore.importAudio(from: sourceURLs)
+        preferencesStore.appendCustomAttentionSoundAssets(result.assets)
+        if !result.failures.isEmpty {
+            errorPresenter(AttentionSoundBatchImportError(failures: result.failures))
         }
+        synchronizeControls()
+    }
+
+    func importCustomAudio(from sourceURL: URL) {
+        importCustomAudio(from: [sourceURL])
     }
 
     /// The single preview path shared by the sound popup, the volume slider,
@@ -801,19 +771,20 @@ final class NotificationsSettingsViewController: NSViewController {
         )
     }
 
-    private func chooseAudio() {
+    private func importAudio() {
         let panel = NSOpenPanel()
+        panel.title = "Import Ready Audio"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.audio]
 
         let importSelection: (NSApplication.ModalResponse) -> Void = { [weak self, weak panel] response in
-            guard let self, response == .OK, let url = panel?.url else {
+            guard let self, response == .OK, let urls = panel?.urls, !urls.isEmpty else {
                 self?.synchronizeControls()
                 return
             }
-            self.importCustomAudio(from: url)
+            self.importCustomAudio(from: urls)
         }
         if let window = view.window {
             panel.beginSheetModal(for: window, completionHandler: importSelection)
@@ -825,48 +796,76 @@ final class NotificationsSettingsViewController: NSViewController {
     private func synchronizeControls() {
         guard isViewLoaded else { return }
         enabledSwitch.state = preferencesStore.attentionSoundEnabled ? .on : .off
-
-        let preferredName = preferencesStore.attentionSoundName
-        let selectedName: String?
-        if availableSoundNames.contains(preferredName) {
-            selectedName = preferredName
-        } else if availableSoundNames.contains(AppPreferencesStore.defaultAttentionSoundName) {
-            selectedName = AppPreferencesStore.defaultAttentionSoundName
-        } else {
-            selectedName = availableSoundNames.first
+        configureSoundPopup()
+        if let selection = currentMenuSelection,
+           let index = soundPopup.itemArray.firstIndex(where: {
+               ($0.representedObject as? String) == selection
+           }) {
+            soundPopup.selectItem(at: index)
+        } else if let firstSystemIndex = soundPopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String)?.systemSoundName != nil
+        }) {
+            soundPopup.selectItem(at: firstSystemIndex)
         }
-        if let selectedName {
-            soundPopup.selectItem(withTitle: selectedName)
-            if preferencesStore.attentionSoundSourceKind == .system,
-               selectedName != preferredName {
-                preferencesStore.attentionSoundName = selectedName
-            }
-        }
-        let isCustom = preferencesStore.attentionSoundSourceKind == .custom
-        sourcePopup.selectItem(at: isCustom ? 1 : 0)
-        systemSoundRow?.isHidden = isCustom
-        soundPopup.isEnabled = !isCustom && selectedName != nil
-        customSoundRow?.isHidden = !isCustom
-        if isCustom {
-            if let reference = preferencesStore.customAttentionSoundReference {
-                let status = assetStore.existingURL(for: reference) == nil ? " — Missing" : ""
-                customSoundLabel.stringValue = reference.displayName + status
-                removeCustomAudioButton.isEnabled = true
-            } else {
-                customSoundLabel.stringValue = "Missing"
-                removeCustomAudioButton.isEnabled = false
-            }
-        } else {
-            customSoundLabel.stringValue = ""
-            removeCustomAudioButton.isEnabled = false
-        }
-        // Preview deliberately remains available for a missing custom asset:
-        // the production player resolves it to Ping and then to beep.
+        removeSelectedAudioButton.isEnabled = selectedCustomAssetID != nil
         previewButton.isEnabled = true
 
         let volumePercent = preferencesStore.attentionSoundVolume * 100
         volumeSlider.doubleValue = volumePercent
         updateVolumeLabel(volumePercent)
+    }
+
+    private func configureSoundPopup() {
+        soundPopup.removeAllItems()
+
+        soundPopup.addItem(withTitle: "System")
+        soundPopup.lastItem?.isEnabled = false
+        for name in availableSoundNames {
+            soundPopup.addItem(withTitle: name)
+            soundPopup.lastItem?.representedObject = Self.systemSelection(name)
+        }
+
+        soundPopup.menu?.addItem(NSMenuItem.separator())
+        soundPopup.addItem(withTitle: "Custom")
+        soundPopup.lastItem?.isEnabled = false
+        for asset in preferencesStore.customAttentionSoundLibrary {
+            let isMissing = assetStore.existingURL(for: asset) == nil
+            let title = asset.displayName + (isMissing ? " — Missing" : "")
+            soundPopup.addItem(withTitle: title)
+            soundPopup.lastItem?.representedObject = Self.customSelection(asset.id)
+        }
+
+        soundPopup.menu?.addItem(NSMenuItem.separator())
+        soundPopup.addItem(withTitle: "Import Audio…")
+        soundPopup.lastItem?.representedObject = Self.importMenuSelection
+    }
+
+    private var currentMenuSelection: String? {
+        if preferencesStore.attentionSoundSourceKind == .custom {
+            if let selectedID = preferencesStore.selectedCustomAttentionSoundID,
+               preferencesStore.customAttentionSoundAsset(id: selectedID) != nil {
+                return Self.customSelection(selectedID)
+            }
+            return Self.systemSelection(AppPreferencesStore.defaultAttentionSoundName)
+        }
+        return Self.systemSelection(preferencesStore.attentionSoundName)
+    }
+
+    private var selectedCustomAssetID: UUID? {
+        guard let selection = soundPopup.selectedItem?.representedObject as? String else {
+            return nil
+        }
+        return UUID(uuidString: selection.customAssetID)
+    }
+
+    private static let importMenuSelection = "import"
+
+    private static func systemSelection(_ name: String) -> String {
+        "system:\(name)"
+    }
+
+    private static func customSelection(_ id: UUID) -> String {
+        "custom:\(id.uuidString)"
     }
 
     private func makeRow(label text: String, control: NSView) -> NSView {
@@ -904,6 +903,16 @@ final class NotificationsSettingsViewController: NSViewController {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
+    }
+}
+
+private extension String {
+    var systemSoundName: String? {
+        hasPrefix("system:") ? String(dropFirst("system:".count)) : nil
+    }
+
+    var customAssetID: String {
+        hasPrefix("custom:") ? String(dropFirst("custom:".count)) : ""
     }
 }
 

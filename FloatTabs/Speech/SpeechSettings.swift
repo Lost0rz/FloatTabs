@@ -413,6 +413,11 @@ struct SpeechVoiceDescriptor: Equatable, Sendable {
     }
 }
 
+enum SpeechVoiceResolutionAttempt: Equatable, Sendable {
+    case identifier(String)
+    case language(String)
+}
+
 @MainActor
 protocol SpeechVoiceCatalogProviding: AnyObject {
     var voices: [SpeechVoiceDescriptor] { get }
@@ -505,20 +510,56 @@ final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
         for role: SpeechLanguageRole,
         preferences: SpeechPreferencesStore
     ) -> AVSpeechSynthesisVoice? {
-        guard role != .automatic else { return nil }
-        if let identifier = preferences.voiceIdentifier(for: role),
-           let preferred = voiceResolver(identifier) {
-            return preferred
+        for attempt in Self.resolutionPlan(
+            for: role,
+            preferences: preferences,
+            voices: voices(for: role)
+        ) {
+            switch attempt {
+            case let .identifier(identifier):
+                if let voice = voiceResolver(identifier) {
+                    return voice
+                }
+            case let .language(language):
+                if let voice = languageVoiceResolver(language) {
+                    return voice
+                }
+            }
         }
-        if let matching = Self.defaultVoiceDescriptor(for: role, voices: voices(for: role)),
-           let voice = voiceResolver(matching.identifier) {
-            return voice
+        return nil
+    }
+
+    /// This is the production-consumed precedence contract. Keeping the
+    /// ordered attempts explicit makes resolver coverage deterministic without
+    /// creating a test-only decision model.
+    static func resolutionPlan(
+        for role: SpeechLanguageRole,
+        preferences: SpeechPreferencesStore,
+        voices: [SpeechVoiceDescriptor]
+    ) -> [SpeechVoiceResolutionAttempt] {
+        guard role != .automatic else { return [] }
+
+        var attempts: [SpeechVoiceResolutionAttempt] = []
+        var seenIdentifiers = Set<String>()
+        func appendIdentifier(_ identifier: String) {
+            guard !identifier.isEmpty, seenIdentifiers.insert(identifier).inserted else { return }
+            attempts.append(.identifier(identifier))
         }
+
+        if let explicitIdentifier = preferences.voiceIdentifier(for: role) {
+            appendIdentifier(explicitIdentifier)
+        }
+        let targetName = normalizedVoiceName(defaultVoiceName(for: role) ?? "")
+        sorted(roleFiltered(voices, for: role))
+            .filter { normalizedVoiceName($0.name) == targetName }
+            .forEach { appendIdentifier($0.identifier) }
+
         let language = role == .chinese ? "zh-CN" : "en-US"
-        if let systemVoice = languageVoiceResolver(language) {
-            return systemVoice
+        attempts.append(.language(language))
+        sorted(roleFiltered(voices, for: role)).forEach {
+            appendIdentifier($0.identifier)
         }
-        return voices(for: role).compactMap { voiceResolver($0.identifier) }.first
+        return attempts
     }
 
     static func defaultVoiceDisplayName(for role: SpeechLanguageRole) -> String {
@@ -544,15 +585,22 @@ final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
     ) -> SpeechVoiceDescriptor? {
         guard let defaultName = defaultVoiceName(for: role) else { return nil }
         let target = normalizedVoiceName(defaultName)
-        let roleVoices = voices.filter { voice in
+        let roleVoices = roleFiltered(voices, for: role)
+        return sorted(roleVoices).first {
+            normalizedVoiceName($0.name) == target
+        }
+    }
+
+    private static func roleFiltered(
+        _ voices: [SpeechVoiceDescriptor],
+        for role: SpeechLanguageRole
+    ) -> [SpeechVoiceDescriptor] {
+        voices.filter { voice in
             switch role {
             case .chinese: return voice.language.lowercased().hasPrefix("zh-")
             case .english: return voice.language.lowercased().hasPrefix("en-")
             case .automatic: return true
             }
-        }
-        return sorted(roleVoices).first {
-            normalizedVoiceName($0.name) == target
         }
     }
 

@@ -335,8 +335,9 @@ final class AppCoordinator {
         guard preferencesStore.attentionSoundSourceKind == .custom else {
             return .system(name: preferencesStore.attentionSoundName)
         }
-        guard let reference = preferencesStore.customAttentionSoundReference,
-              let url = assetStore.url(for: reference) else {
+        guard let selectedID = preferencesStore.selectedCustomAttentionSoundID,
+              let asset = preferencesStore.customAttentionSoundAsset(id: selectedID),
+              let url = assetStore.existingURL(for: asset) else {
             return .system(name: AppPreferencesStore.defaultAttentionSoundName)
         }
         return .custom(url: url)

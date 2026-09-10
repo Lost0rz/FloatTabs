@@ -4,100 +4,182 @@ import XCTest
 
 @MainActor
 final class AttentionSoundTests: XCTestCase {
-    func testPreferencesDefaultToSystemAndPersistTypedCustomReference() {
-        let suite = "FloatTabsTests.AttentionSoundPreferences.\(UUID().uuidString)"
+    func testPreferencesLibraryDefaultsEmptyAndPersistsMultipleAssetsAndSelection() {
+        let suite = "FloatTabsTests.AttentionSoundLibrary.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        let first = makeAsset(name: "first.aiff")
+        let second = makeAsset(name: "second.aiff")
+
         let store = AppPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.customAttentionSoundLibrary.isEmpty)
 
-        XCTAssertEqual(store.attentionSoundSourceKind, .system)
-        defaults.set("future-source", forKey: AppPreferencesStore.attentionSoundSourceKindKey)
-        XCTAssertEqual(store.attentionSoundSourceKind, .system)
+        store.customAttentionSoundLibrary = [first, second]
+        store.selectedCustomAttentionSoundID = second.id
 
-        let reference = CustomAttentionSoundReference(
-            managedFileName: "managed.aiff",
-            displayName: "My Ready Sound.aiff"
+        let reloaded = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(reloaded.customAttentionSoundLibrary, [first, second])
+        XCTAssertEqual(reloaded.selectedCustomAttentionSoundID, second.id)
+    }
+
+    func testBatchImportAddsThreeAssetsWithoutChangingSystemSelection() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundBatch")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sources = ["ready-1.wav", "ready-2.m4a", "ready-3.mp3"].map {
+            directory.appendingPathComponent($0)
+        }
+        for source in sources {
+            try Data("audio \(source.lastPathComponent)".utf8).write(to: source)
+        }
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: directory.appendingPathComponent("managed"),
+            audioDurationProbe: { _ in 1 }
         )
-        store.setCustomAttentionSoundReference(reference)
-        store.attentionSoundSourceKind = .custom
+        let suite = "FloatTabsTests.AttentionSoundBatchPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundName = "Glass"
+        let player = SoundSpy()
+        let errors = ErrorSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping", "Glass"],
+            assetStore: assetStore,
+            errorPresenter: { errors.errors.append($0) }
+        )
+        controller.loadViewIfNeeded()
 
-        XCTAssertEqual(store.customAttentionSoundReference, reference)
+        controller.importCustomAudio(from: sources)
+
+        XCTAssertEqual(preferences.customAttentionSoundLibrary.count, 3)
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .system)
+        XCTAssertNil(preferences.selectedCustomAttentionSoundID)
+        XCTAssertEqual(preferences.attentionSoundName, "Glass")
+        XCTAssertTrue(player.sources.isEmpty)
+        XCTAssertTrue(errors.errors.isEmpty)
+        XCTAssertTrue(
+            preferences.customAttentionSoundLibrary.allSatisfy {
+                assetStore.existingURL(for: $0) != nil
+            }
+        )
+    }
+
+    func testBatchImportKeepsValidFilesAndReportsOnlyInvalidFile() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundPartialBatch")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let validA = directory.appendingPathComponent("valid-a.aiff")
+        let invalid = directory.appendingPathComponent("invalid.aiff")
+        let validC = directory.appendingPathComponent("valid-c.aiff")
+        for source in [validA, invalid, validC] {
+            try Data("audio".utf8).write(to: source)
+        }
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: directory.appendingPathComponent("managed"),
+            audioDurationProbe: { url in
+                url.lastPathComponent == "invalid.aiff" ? nil : 1
+            }
+        )
+        let suite = "FloatTabsTests.AttentionSoundPartialBatch.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let errors = ErrorSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundSpy(),
+            availableSoundNames: ["Ping"],
+            assetStore: assetStore,
+            errorPresenter: { errors.errors.append($0) }
+        )
+        controller.loadViewIfNeeded()
+
+        controller.importCustomAudio(from: [validA, invalid, validC])
+
+        XCTAssertEqual(preferences.customAttentionSoundLibrary.count, 2)
         XCTAssertEqual(
-            AppPreferencesStore(defaults: defaults).customAttentionSoundReference,
-            reference
+            Set(preferences.customAttentionSoundLibrary.map(\.displayName)),
+            Set(["valid-a.aiff", "valid-c.aiff"])
         )
+        XCTAssertEqual(errors.errors.count, 1)
+        let batchError = errors.errors.first as? AttentionSoundBatchImportError
+        XCTAssertEqual(batchError?.failures.count, 1)
+        XCTAssertEqual(batchError?.failures.first?.displayName, "invalid.aiff")
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .system)
     }
 
-    func testImportCopiesAudioAndNeverDependsOnOriginalPath() throws {
-        let directory = makeTemporaryDirectory("AttentionSoundImport")
+    func testImportDoesNotDeleteExistingAssetsOrChangeActiveCustomSelection() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundAppend")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let source = directory.appendingPathComponent("ready tone.aiff")
-        try Data("audio source".utf8).write(to: source)
-        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
-        let store = AttentionSoundAssetStore(
-            managedDirectoryURL: managedDirectory,
-            audioDurationProbe: { _ in 1 }
-        )
-
-        let reference = try store.importAudio(from: source)
-        let managedURL = try XCTUnwrap(store.existingURL(for: reference))
-        XCTAssertNotEqual(managedURL, source)
-        XCTAssertEqual(try Data(contentsOf: managedURL), Data("audio source".utf8))
-
-        try FileManager.default.removeItem(at: source)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: managedURL.path))
-        XCTAssertEqual(store.existingURL(for: reference), managedURL)
-    }
-
-    func testValidImportsAlwaysUseUniqueManagedNamesAndPreserveExtension() throws {
-        let directory = makeTemporaryDirectory("AttentionSoundUniqueImport")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let firstSource = directory.appendingPathComponent("first.aiff")
-        let secondSource = directory.appendingPathComponent("second.aiff")
-        try Data("first audio".utf8).write(to: firstSource)
-        try Data("second audio".utf8).write(to: secondSource)
-        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
-        let store = AttentionSoundAssetStore(
-            managedDirectoryURL: managedDirectory,
-            audioDurationProbe: { _ in 1 }
-        )
-
-        let first = try store.importAudio(from: firstSource)
-        let second = try store.importAudio(from: secondSource)
-        let firstURL = try XCTUnwrap(store.existingURL(for: first))
-        let secondURL = try XCTUnwrap(store.existingURL(for: second))
-
-        XCTAssertNotEqual(first.managedFileName, second.managedFileName)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
-        XCTAssertEqual(URL(fileURLWithPath: first.managedFileName).pathExtension, "aiff")
-        XCTAssertEqual(URL(fileURLWithPath: second.managedFileName).pathExtension, "aiff")
-        XCTAssertNotEqual(
-            first.managedFileName,
-            "(UUID().uuidString).(sanitizedExtension)"
-        )
-        XCTAssertNotEqual(
-            second.managedFileName,
-            "(UUID().uuidString).(sanitizedExtension)"
-        )
-    }
-
-    func testSuccessfulReplacementActivatesNewAssetAndRemovesOldAsset() throws {
-        let directory = makeTemporaryDirectory("AttentionSoundSuccessfulReplacement")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let firstSource = directory.appendingPathComponent("first.aiff")
-        let secondSource = directory.appendingPathComponent("second.aiff")
-        try Data("first audio".utf8).write(to: firstSource)
-        try Data("second audio".utf8).write(to: secondSource)
-        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
+        let existing = makeAsset(name: "existing.aiff")
+        let existingURL = directory.appendingPathComponent(existing.managedFileName)
+        try Data("existing".utf8).write(to: existingURL)
+        let newSource = directory.appendingPathComponent("new.aiff")
+        try Data("new".utf8).write(to: newSource)
+        let managedDirectory = directory.appendingPathComponent("managed")
         let assetStore = AttentionSoundAssetStore(
             managedDirectoryURL: managedDirectory,
             audioDurationProbe: { _ in 1 }
         )
-        let suite = "FloatTabsTests.AttentionSoundSuccessfulReplacement.\(UUID().uuidString)"
+        let suite = "FloatTabsTests.AttentionSoundAppendPreferences.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.customAttentionSoundLibrary = [existing]
+        preferences.attentionSoundSourceKind = .custom
+        preferences.selectedCustomAttentionSoundID = existing.id
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundSpy(),
+            availableSoundNames: ["Ping"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
+
+        controller.importCustomAudio(from: newSource)
+
+        XCTAssertEqual(preferences.customAttentionSoundLibrary.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: existingURL.path))
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .custom)
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, existing.id)
+    }
+
+    func testDuplicateDisplayNamesHaveDistinctIDsAndManagedFiles() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundDuplicateNames")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstDirectory = directory.appendingPathComponent("first")
+        let secondDirectory = directory.appendingPathComponent("second")
+        try FileManager.default.createDirectory(at: firstDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        let firstSource = firstDirectory.appendingPathComponent("same-name.wav")
+        let secondSource = secondDirectory.appendingPathComponent("same-name.wav")
+        try Data("first".utf8).write(to: firstSource)
+        try Data("second".utf8).write(to: secondSource)
+        let store = AttentionSoundAssetStore(
+            managedDirectoryURL: directory.appendingPathComponent("managed"),
+            audioDurationProbe: { _ in 1 }
+        )
+
+        let result = store.importAudio(from: [firstSource, secondSource])
+
+        XCTAssertEqual(result.failures.count, 0)
+        XCTAssertEqual(result.assets.map(\.displayName), ["same-name.wav", "same-name.wav"])
+        XCTAssertEqual(Set(result.assets.map(\.id)).count, 2)
+        XCTAssertEqual(Set(result.assets.map(\.managedFileName)).count, 2)
+    }
+
+    func testSelectingCustomAThenBUpdatesActiveIDAndPreviewsEachAsset() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundSelection")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = try writeAsset(named: "first.aiff", in: directory)
+        let second = try writeAsset(named: "second.aiff", in: directory)
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: directory, audioDurationProbe: { _ in 1 })
+        let suite = "FloatTabsTests.AttentionSoundSelectionPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.customAttentionSoundLibrary = [first, second]
         let player = SoundSpy()
         let controller = NotificationsSettingsViewController(
             preferencesStore: preferences,
@@ -107,99 +189,163 @@ final class AttentionSoundTests: XCTestCase {
         )
         controller.loadViewIfNeeded()
 
-        controller.importCustomAudio(from: firstSource)
-        let firstReference = try XCTUnwrap(preferences.customAttentionSoundReference)
-        let firstURL = try XCTUnwrap(assetStore.existingURL(for: firstReference))
+        selectCustomAsset(first.id, in: controller)
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, first.id)
+        XCTAssertEqual(player.sources.last, .custom(url: try XCTUnwrap(assetStore.existingURL(for: first))))
 
-        controller.importCustomAudio(from: secondSource)
-        let secondReference = try XCTUnwrap(preferences.customAttentionSoundReference)
-        let secondURL = try XCTUnwrap(assetStore.existingURL(for: secondReference))
-
-        XCTAssertNotEqual(firstReference, secondReference)
-        XCTAssertEqual(preferences.attentionSoundSourceKind, .custom)
-        XCTAssertEqual(secondReference, preferences.customAttentionSoundReference)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
-        XCTAssertEqual(player.sources.last, .custom(url: secondURL))
+        selectCustomAsset(second.id, in: controller)
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, second.id)
+        XCTAssertEqual(player.sources.last, .custom(url: try XCTUnwrap(assetStore.existingURL(for: second))))
     }
 
-    func testReadyResolutionUsesManagedCustomURLAndBackupForcesSystemSource() throws {
-        let directory = makeTemporaryDirectory("AttentionSoundReady")
+    func testRemoveNonActiveAssetLeavesActiveAssetAndSelection() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundRemoveNonActive")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
-        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
-        let managedURL = managedDirectory.appendingPathComponent("ready.aiff")
-        try Data("managed audio".utf8).write(to: managedURL)
-        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
-        let suite = "FloatTabsTests.AttentionSoundReady.\(UUID().uuidString)"
+        let first = try writeAsset(named: "first.aiff", in: directory)
+        let second = try writeAsset(named: "second.aiff", in: directory)
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: directory)
+        let suite = "FloatTabsTests.AttentionSoundRemoveNonActivePreferences.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferencesStore(defaults: defaults)
-        preferences.setCustomAttentionSoundReference(
-            CustomAttentionSoundReference(managedFileName: "ready.aiff", displayName: "Ready")
-        )
+        preferences.customAttentionSoundLibrary = [first, second]
         preferences.attentionSoundSourceKind = .custom
+        preferences.selectedCustomAttentionSoundID = second.id
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundSpy(),
+            availableSoundNames: ["Ping"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
+
+        controller.removeCustomAudioAsset(id: first.id)
+
+        XCTAssertNil(preferences.customAttentionSoundAsset(id: first.id))
+        XCTAssertNotNil(preferences.customAttentionSoundAsset(id: second.id))
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .custom)
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, second.id)
+        XCTAssertNotNil(assetStore.existingURL(for: second))
+        XCTAssertNil(assetStore.existingURL(for: first))
+    }
+
+    func testRemoveActiveAssetFallsBackToConfiguredSystemSound() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundRemoveActive")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let active = try writeAsset(named: "active.aiff", in: directory)
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: directory)
+        let suite = "FloatTabsTests.AttentionSoundRemoveActivePreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.customAttentionSoundLibrary = [active]
+        preferences.attentionSoundName = "Glass"
+        preferences.attentionSoundSourceKind = .custom
+        preferences.selectedCustomAttentionSoundID = active.id
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundSpy(),
+            availableSoundNames: ["Ping", "Glass"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
+
+        controller.removeCustomAudioAsset(id: active.id)
+
+        XCTAssertTrue(preferences.customAttentionSoundLibrary.isEmpty)
+        XCTAssertNil(preferences.selectedCustomAttentionSoundID)
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .system)
+        XCTAssertEqual(
+            AppCoordinator.attentionSoundPlaybackSource(
+                preferencesStore: preferences,
+                assetStore: assetStore
+            ),
+            .system(name: "Glass")
+        )
+    }
+
+    func testMissingSelectedAssetRemainsVisibleAndPreviewUsesPingFallback() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundMissing")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let missing = makeAsset(name: "missing.aiff")
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: directory)
+        let suite = "FloatTabsTests.AttentionSoundMissingPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.customAttentionSoundLibrary = [missing]
+        preferences.attentionSoundSourceKind = .custom
+        preferences.selectedCustomAttentionSoundID = missing.id
+        let player = SoundSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
+
+        XCTAssertTrue(controller.soundPopup.itemArray.contains {
+            $0.title == "missing.aiff — Missing"
+        })
+        XCTAssertTrue(controller.removeSelectedAudioButton.isEnabled)
+        controller.previewButton.performClick(nil)
+        XCTAssertEqual(player.sources.last, .system(name: "Ping"))
+        XCTAssertEqual(preferences.customAttentionSoundLibrary, [missing])
+    }
+
+    func testUnknownSelectedAssetFallsBackToPingWithoutChangingLibrary() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundUnknownSelection")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let known = makeAsset(name: "known.aiff")
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: directory)
+        let suite = "FloatTabsTests.AttentionSoundUnknownSelectionPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.customAttentionSoundLibrary = [known]
+        preferences.attentionSoundSourceKind = .custom
+        let unknownID = UUID()
+        preferences.selectedCustomAttentionSoundID = unknownID
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundSpy(),
+            availableSoundNames: ["Ping", "Glass"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
 
         XCTAssertEqual(
             AppCoordinator.attentionSoundPlaybackSource(
                 preferencesStore: preferences,
                 assetStore: assetStore
             ),
-            .custom(url: managedURL)
+            .system(name: "Ping")
         )
-
-        let backup = FloatTabsBackupPreferences(
-            appearanceMode: .system,
-            followPreferredSize: true,
-            attentionSoundEnabled: true,
-            attentionSoundName: "Glass",
-            attentionSoundVolume: 0.5
-        )
-        AppCoordinator.restoreAttentionSoundPreferences(backup, to: preferences)
-        XCTAssertEqual(preferences.attentionSoundSourceKind, .system)
-        XCTAssertEqual(preferences.attentionSoundName, "Glass")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: managedURL.path))
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, unknownID)
+        XCTAssertEqual(preferences.customAttentionSoundLibrary, [known])
+        XCTAssertEqual(controller.soundPopup.selectedItem?.title, "Ping")
     }
 
-    func testFailedReplacementKeepsPreviousCustomReferenceAndAsset() throws {
-        let directory = makeTemporaryDirectory("AttentionSoundReplacement")
+    func testImportedManagedCopySurvivesSourceDeletion() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundSourceDeletion")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let firstSource = directory.appendingPathComponent("first.aiff")
-        let invalidSource = directory.appendingPathComponent("too-large.aiff")
-        try Data("first".utf8).write(to: firstSource)
-        try Data(repeating: 0, count: Int(AttentionSoundAssetStore.maxFileSizeBytes) + 1)
-            .write(to: invalidSource)
-        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
-        let assetStore = AttentionSoundAssetStore(
-            managedDirectoryURL: managedDirectory,
+        let source = directory.appendingPathComponent("source.m4a")
+        try Data("source audio".utf8).write(to: source)
+        let store = AttentionSoundAssetStore(
+            managedDirectoryURL: directory.appendingPathComponent("managed"),
             audioDurationProbe: { _ in 1 }
         )
-        let suite = "FloatTabsTests.AttentionSoundReplacement.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let preferences = AppPreferencesStore(defaults: defaults)
-        let player = SoundSpy()
-        var errors: [Error] = []
-        let controller = NotificationsSettingsViewController(
-            preferencesStore: preferences,
-            attentionSoundPlayer: player,
-            availableSoundNames: ["Ping"],
-            assetStore: assetStore,
-            errorPresenter: { errors.append($0) }
-        )
-        controller.loadViewIfNeeded()
 
-        controller.importCustomAudio(from: firstSource)
-        let oldReference = try XCTUnwrap(preferences.customAttentionSoundReference)
-        let oldURL = try XCTUnwrap(assetStore.existingURL(for: oldReference))
-        controller.importCustomAudio(from: invalidSource)
+        let asset = try store.importAudio(from: source)
+        let managedURL = try XCTUnwrap(store.existingURL(for: asset))
+        try FileManager.default.removeItem(at: source)
 
-        XCTAssertEqual(preferences.customAttentionSoundReference, oldReference)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: oldURL.path))
-        XCTAssertEqual(errors.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: managedURL.path))
+        XCTAssertEqual(store.existingURL(for: asset), managedURL)
     }
 
-    func testImportRejectsSizeDurationAndDecodeLimits() throws {
+    func testImportRejectsSizeDurationAndDecodeLimitsPerFile() throws {
         let directory = makeTemporaryDirectory("AttentionSoundLimits")
         defer { try? FileManager.default.removeItem(at: directory) }
         let source = directory.appendingPathComponent("tone.wav")
@@ -239,7 +385,7 @@ final class AttentionSoundTests: XCTestCase {
         }
     }
 
-    func testMalformedReferenceCannotEscapeManagedDirectoryOrDeleteOriginal() throws {
+    func testMalformedAssetCannotEscapeManagedDirectoryOrDeleteOriginal() throws {
         let directory = makeTemporaryDirectory("AttentionSoundTraversal")
         defer { try? FileManager.default.removeItem(at: directory) }
         let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
@@ -247,23 +393,23 @@ final class AttentionSoundTests: XCTestCase {
         let outside = directory.appendingPathComponent("outside.aiff")
         try Data("do not delete".utf8).write(to: outside)
         let store = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
-        let reference = CustomAttentionSoundReference(
+        let outsideAsset = CustomAttentionSoundAsset(
             managedFileName: "../outside.aiff",
             displayName: "Outside"
         )
-        let directoryReference = CustomAttentionSoundReference(
+        let directoryAsset = CustomAttentionSoundAsset(
             managedFileName: ".",
             displayName: "Managed Directory"
         )
 
-        XCTAssertNil(store.url(for: reference))
-        XCTAssertNil(store.url(for: directoryReference))
-        try store.remove(reference)
-        try store.remove(directoryReference)
+        XCTAssertNil(store.url(for: outsideAsset))
+        XCTAssertNil(store.url(for: directoryAsset))
+        try store.remove(outsideAsset)
+        try store.remove(directoryAsset)
         XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
     }
 
-    func testCustomPlaybackFallsBackButZeroVolumeStaysSilent() throws {
+    func testCustomPlaybackRetainsActiveSoundAndZeroVolumeStaysSilent() throws {
         var systemCalls: [(String, Float)] = []
         var beepCount = 0
         guard let sound = NSSound(named: NSSound.Name("Ping")) else {
@@ -286,49 +432,32 @@ final class AttentionSoundTests: XCTestCase {
         XCTAssertNil(player.activeSound)
         XCTAssertTrue(systemCalls.isEmpty)
         XCTAssertEqual(beepCount, 0)
-
-        let failingPlayer = AttentionSoundPlayer(
-            playSystemSound: { name, volume in
-                systemCalls.append((name, volume))
-                return false
-            },
-            loadCustomSound: { _ in nil },
-            beep: { beepCount += 1 }
-        )
-        failingPlayer.play(source: .custom(url: URL(fileURLWithPath: "/missing")), volume: 1)
-        XCTAssertEqual(systemCalls.last?.0, AppPreferencesStore.defaultAttentionSoundName)
-        XCTAssertEqual(beepCount, 1)
     }
 
-    func testNotificationsShowsMissingCustomAndPreviewsThroughFallbackPath() {
-        let suite = "FloatTabsTests.AttentionSoundUI.\(UUID().uuidString)"
+    func testRestoreForcesSystemWithoutDeletingLocalLibrary() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundRestore")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let asset = try writeAsset(named: "local.aiff", in: directory)
+        let suite = "FloatTabsTests.AttentionSoundRestorePreferences.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferencesStore(defaults: defaults)
-        preferences.setCustomAttentionSoundReference(
-            CustomAttentionSoundReference(
-                managedFileName: "missing.aiff",
-                displayName: "My Alert.aiff"
-            )
-        )
+        preferences.customAttentionSoundLibrary = [asset]
+        preferences.selectedCustomAttentionSoundID = asset.id
         preferences.attentionSoundSourceKind = .custom
-        let managedDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FloatTabsSoundUI-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: managedDirectory) }
-        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
-        let player = SoundSpy()
-        let controller = NotificationsSettingsViewController(
-            preferencesStore: preferences,
-            attentionSoundPlayer: player,
-            availableSoundNames: ["Ping"],
-            assetStore: assetStore
+        let backup = FloatTabsBackupPreferences(
+            appearanceMode: .system,
+            followPreferredSize: true,
+            attentionSoundEnabled: true,
+            attentionSoundName: "Glass",
+            attentionSoundVolume: 0.5
         )
-        controller.loadViewIfNeeded()
 
-        XCTAssertEqual(controller.sourcePopup.indexOfSelectedItem, 1)
-        XCTAssertEqual(controller.customSoundLabel.stringValue, "My Alert.aiff — Missing")
-        controller.previewButton.performClick(nil)
-        XCTAssertEqual(player.sources, [.system(name: "Ping")])
+        AppCoordinator.restoreAttentionSoundPreferences(backup, to: preferences)
+
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .system)
+        XCTAssertEqual(preferences.customAttentionSoundLibrary, [asset])
+        XCTAssertEqual(preferences.selectedCustomAttentionSoundID, asset.id)
     }
 
     private func makeTemporaryDirectory(_ name: String) -> URL {
@@ -338,11 +467,49 @@ final class AttentionSoundTests: XCTestCase {
         return directory
     }
 
+    private func makeAsset(name: String) -> CustomAttentionSoundAsset {
+        let id = UUID()
+        return CustomAttentionSoundAsset(
+            id: id,
+            managedFileName: "\(id.uuidString).aiff",
+            displayName: name
+        )
+    }
+
+    private func writeAsset(named name: String, in directory: URL) throws -> CustomAttentionSoundAsset {
+        let id = UUID()
+        let asset = CustomAttentionSoundAsset(
+            id: id,
+            managedFileName: "\(id.uuidString).aiff",
+            displayName: name
+        )
+        try Data("managed audio".utf8).write(
+            to: directory.appendingPathComponent(asset.managedFileName)
+        )
+        return asset
+    }
+
+    private func selectCustomAsset(
+        _ id: UUID,
+        in controller: NotificationsSettingsViewController
+    ) {
+        let selection = "custom:\(id.uuidString)"
+        let index = controller.soundPopup.itemArray.firstIndex {
+            ($0.representedObject as? String) == selection
+        }!
+        controller.soundPopup.selectItem(at: index)
+        _ = controller.perform(controller.soundPopup.action, with: controller.soundPopup)
+    }
+
     private final class SoundSpy: AttentionSoundPlaying {
         private(set) var sources: [AttentionSoundPlaybackSource] = []
 
         func play(source: AttentionSoundPlaybackSource, volume: Double) {
             sources.append(source)
         }
+    }
+
+    private final class ErrorSpy {
+        var errors: [Error] = []
     }
 }

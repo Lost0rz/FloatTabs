@@ -163,10 +163,15 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let managedURL = managedDirectory.appendingPathComponent("ready.aiff")
         try Data("managed audio".utf8).write(to: managedURL)
         let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
-        preferences.setCustomAttentionSoundReference(
-            CustomAttentionSoundReference(managedFileName: "ready.aiff", displayName: "Ready")
+        let customID = UUID()
+        let customAsset = CustomAttentionSoundAsset(
+            id: customID,
+            managedFileName: "ready.aiff",
+            displayName: "Ready"
         )
+        preferences.customAttentionSoundLibrary = [customAsset]
         preferences.attentionSoundSourceKind = .custom
+        preferences.selectedCustomAttentionSoundID = customID
         let player = SoundPlayerSpy()
 
         XCTAssertTrue(
