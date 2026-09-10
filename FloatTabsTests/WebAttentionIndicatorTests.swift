@@ -11,8 +11,10 @@ final class WebAttentionIndicatorTests: XCTestCase {
         }
 
         private(set) var calls: [Call] = []
+        private(set) var sources: [AttentionSoundPlaybackSource] = []
 
         func play(source: AttentionSoundPlaybackSource, volume: Double) {
+            sources.append(source)
             let soundName: String
             switch source {
             case let .system(name): soundName = name
@@ -117,12 +119,17 @@ final class WebAttentionIndicatorTests: XCTestCase {
         preferences.attentionSoundName = "Glass"
         preferences.attentionSoundVolume = 0.42
         let player = SoundPlayerSpy()
+        let managedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsReadySound-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: managedDirectory) }
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
 
         XCTAssertTrue(
             AppCoordinator.playAttentionReadySoundIfNeeded(
                 previousReadyCount: 0,
                 currentReadyCount: 1,
                 preferencesStore: preferences,
+                assetStore: assetStore,
                 player: player
             )
         )
@@ -137,10 +144,62 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 previousReadyCount: 1,
                 currentReadyCount: 2,
                 preferencesStore: preferences,
+                assetStore: assetStore,
                 player: player
             )
         )
         XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testReadySoundCustomSourceUsesManagedAssetAndPreservesGates() throws {
+        let suiteName = "FloatTabsTests.ReadyCustomSound.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let managedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsReadyCustom-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: managedDirectory) }
+        try FileManager.default.createDirectory(at: managedDirectory, withIntermediateDirectories: true)
+        let managedURL = managedDirectory.appendingPathComponent("ready.aiff")
+        try Data("managed audio".utf8).write(to: managedURL)
+        let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
+        preferences.setCustomAttentionSoundReference(
+            CustomAttentionSoundReference(managedFileName: "ready.aiff", displayName: "Ready")
+        )
+        preferences.attentionSoundSourceKind = .custom
+        let player = SoundPlayerSpy()
+
+        XCTAssertTrue(
+            AppCoordinator.playAttentionReadySoundIfNeeded(
+                previousReadyCount: 0,
+                currentReadyCount: 1,
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
+            )
+        )
+        XCTAssertEqual(player.sources, [.custom(url: managedURL)])
+
+        XCTAssertFalse(
+            AppCoordinator.playAttentionReadySoundIfNeeded(
+                previousReadyCount: 1,
+                currentReadyCount: 1,
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
+            )
+        )
+        preferences.attentionSoundEnabled = false
+        XCTAssertFalse(
+            AppCoordinator.playAttentionReadySoundIfNeeded(
+                previousReadyCount: 1,
+                currentReadyCount: 2,
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
+            )
+        )
+        XCTAssertEqual(player.sources, [.custom(url: managedURL)])
     }
 
     func testAttentionSoundPlayerNormalizesVolumeAndUsesFallbackOnlyForAudibleFailures() {

@@ -328,26 +328,6 @@ final class AppCoordinator {
         max(0, currentReadyCount) > max(0, previousReadyCount)
     }
 
-    @discardableResult
-    static func playAttentionReadySoundIfNeeded(
-        previousReadyCount: Int,
-        currentReadyCount: Int,
-        preferencesStore: AppPreferencesStore,
-        player: AttentionSoundPlaying
-    ) -> Bool {
-        guard shouldPlayAttentionReadySound(
-            previousReadyCount: previousReadyCount,
-            currentReadyCount: currentReadyCount
-        ), preferencesStore.attentionSoundEnabled else {
-            return false
-        }
-        player.play(
-            soundName: preferencesStore.attentionSoundName,
-            volume: preferencesStore.attentionSoundVolume
-        )
-        return true
-    }
-
     static func attentionSoundPlaybackSource(
         preferencesStore: AppPreferencesStore,
         assetStore: AttentionSoundAssetStore

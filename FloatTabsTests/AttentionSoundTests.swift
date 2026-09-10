@@ -49,6 +49,80 @@ final class AttentionSoundTests: XCTestCase {
         XCTAssertEqual(store.existingURL(for: reference), managedURL)
     }
 
+    func testValidImportsAlwaysUseUniqueManagedNamesAndPreserveExtension() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundUniqueImport")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstSource = directory.appendingPathComponent("first.aiff")
+        let secondSource = directory.appendingPathComponent("second.aiff")
+        try Data("first audio".utf8).write(to: firstSource)
+        try Data("second audio".utf8).write(to: secondSource)
+        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
+        let store = AttentionSoundAssetStore(
+            managedDirectoryURL: managedDirectory,
+            audioDurationProbe: { _ in 1 }
+        )
+
+        let first = try store.importAudio(from: firstSource)
+        let second = try store.importAudio(from: secondSource)
+        let firstURL = try XCTUnwrap(store.existingURL(for: first))
+        let secondURL = try XCTUnwrap(store.existingURL(for: second))
+
+        XCTAssertNotEqual(first.managedFileName, second.managedFileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
+        XCTAssertEqual(URL(fileURLWithPath: first.managedFileName).pathExtension, "aiff")
+        XCTAssertEqual(URL(fileURLWithPath: second.managedFileName).pathExtension, "aiff")
+        XCTAssertNotEqual(
+            first.managedFileName,
+            "(UUID().uuidString).(sanitizedExtension)"
+        )
+        XCTAssertNotEqual(
+            second.managedFileName,
+            "(UUID().uuidString).(sanitizedExtension)"
+        )
+    }
+
+    func testSuccessfulReplacementActivatesNewAssetAndRemovesOldAsset() throws {
+        let directory = makeTemporaryDirectory("AttentionSoundSuccessfulReplacement")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstSource = directory.appendingPathComponent("first.aiff")
+        let secondSource = directory.appendingPathComponent("second.aiff")
+        try Data("first audio".utf8).write(to: firstSource)
+        try Data("second audio".utf8).write(to: secondSource)
+        let managedDirectory = directory.appendingPathComponent("managed", isDirectory: true)
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: managedDirectory,
+            audioDurationProbe: { _ in 1 }
+        )
+        let suite = "FloatTabsTests.AttentionSoundSuccessfulReplacement.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let player = SoundSpy()
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: player,
+            availableSoundNames: ["Ping"],
+            assetStore: assetStore
+        )
+        controller.loadViewIfNeeded()
+
+        controller.importCustomAudio(from: firstSource)
+        let firstReference = try XCTUnwrap(preferences.customAttentionSoundReference)
+        let firstURL = try XCTUnwrap(assetStore.existingURL(for: firstReference))
+
+        controller.importCustomAudio(from: secondSource)
+        let secondReference = try XCTUnwrap(preferences.customAttentionSoundReference)
+        let secondURL = try XCTUnwrap(assetStore.existingURL(for: secondReference))
+
+        XCTAssertNotEqual(firstReference, secondReference)
+        XCTAssertEqual(preferences.attentionSoundSourceKind, .custom)
+        XCTAssertEqual(secondReference, preferences.customAttentionSoundReference)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
+        XCTAssertEqual(player.sources.last, .custom(url: secondURL))
+    }
+
     func testReadyResolutionUsesManagedCustomURLAndBackupForcesSystemSource() throws {
         let directory = makeTemporaryDirectory("AttentionSoundReady")
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -205,7 +205,7 @@ final class AttentionSoundAssetStore {
         guard !sanitizedExtension.isEmpty else {
             return UUID().uuidString
         }
-        return "(UUID().uuidString).(sanitizedExtension)"
+        return "\(UUID().uuidString).\(sanitizedExtension)"
     }
 
     private static func isValidManagedFileName(_ name: String) -> Bool {
