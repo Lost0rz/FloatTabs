@@ -56,6 +56,30 @@ final class PanelMetricsTests: XCTestCase {
 }
 
 final class ScreenPositioningTests: XCTestCase {
+    func testSameKnownDisplaysAreRecognized() {
+        XCTAssertTrue(
+            ScreenPositioning.isSameKnownDisplay(1, 1)
+        )
+    }
+
+    func testDifferentKnownDisplaysAreNotRecognizedAsTheSame() {
+        XCTAssertFalse(
+            ScreenPositioning.isSameKnownDisplay(1, 2)
+        )
+    }
+
+    func testUnknownDisplaysFailClosed() {
+        XCTAssertFalse(
+            ScreenPositioning.isSameKnownDisplay(nil, 1)
+        )
+        XCTAssertFalse(
+            ScreenPositioning.isSameKnownDisplay(1, nil)
+        )
+        XCTAssertFalse(
+            ScreenPositioning.isSameKnownDisplay(nil, nil)
+        )
+    }
+
     func testCenteredFrameUsesRequestedSizeWhenItFits() {
         let visible = NSRect(x: 0, y: 0, width: 1440, height: 1000)
 

@@ -183,6 +183,23 @@ struct PanelFrameStore {
 }
 
 enum ScreenPositioning {
+    static func displayID(for screen: NSScreen?) -> CGDirectDisplayID? {
+        guard let number = screen?.deviceDescription[
+            NSDeviceDescriptionKey("NSScreenNumber")
+        ] as? NSNumber else {
+            return nil
+        }
+        return CGDirectDisplayID(number.uint32Value)
+    }
+
+    static func isSameKnownDisplay(
+        _ lhs: CGDirectDisplayID?,
+        _ rhs: CGDirectDisplayID?
+    ) -> Bool {
+        guard let lhs, let rhs else { return false }
+        return lhs == rhs
+    }
+
     static func targetScreen(
         mouseLocation: NSPoint = NSEvent.mouseLocation,
         screens: [NSScreen] = NSScreen.screens,
