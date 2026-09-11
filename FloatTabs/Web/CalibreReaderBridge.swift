@@ -173,12 +173,12 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         detectionSequence &+= 1
         runtimeReady = false
         readinessObserverGeneration = nil
+        cancelPendingWork()
         currentDocumentIdentity = Self.documentIdentity(
             slotID: slotID,
             generation: documentGeneration,
             url: committedURL
         )
-        cancelPendingWork()
         onRuntimeReset(slotID)
         onCandidateChange(slotID)
         guard currentDocumentIdentity != nil else { return }
@@ -331,6 +331,11 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
                   let result = value as? [String: Any],
                   result["valid"] as? Bool == true,
                   result["requested"] as? Bool == true else {
+                self.clearAdvanceTransaction(
+                    generation: expectedDocument.documentGeneration,
+                    transitionToken: pending.transitionToken,
+                    in: webView
+                )
                 self.pendingAdvance = nil
                 pending.completion(false)
                 return
@@ -348,6 +353,14 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         extractions.forEach { $0(.failure(CalibreReaderBridgeError.staleDocument)) }
         if let pendingAdvance {
             self.pendingAdvance = nil
+            if let document = currentDocumentIdentity,
+               let webView {
+                clearAdvanceTransaction(
+                    generation: document.documentGeneration,
+                    transitionToken: pendingAdvance.transitionToken,
+                    in: webView
+                )
+            }
             pendingAdvance.completion(false)
         }
     }
@@ -357,8 +370,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         detectionSequence &+= 1
         runtimeReady = false
         readinessObserverGeneration = nil
-        currentDocumentIdentity = nil
         cancelPendingWork()
+        currentDocumentIdentity = nil
         onRuntimeReset(slotID)
         onCandidateChange(slotID)
     }
@@ -404,6 +417,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             }
             self.pendingAdvance = nil
             pendingAdvance.completion(false)
+        case "sourceAdvanceRelocated":
+            handleSourceAdvanceRelocatedMessage(body, document: document)
         case "relocated":
             handleRelocatedMessage(body, document: document)
         default:
@@ -450,21 +465,43 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             startCFI: startCFI,
             endCFI: endCFI
         )
-        if let pendingAdvance {
-            guard pendingAdvance.identity != identity else {
-                // The reader acknowledged the old location again. It is not
-                // a completed transition, so keep waiting for a changed CFI.
-                return
-            }
-            self.pendingAdvance = nil
-            pendingAdvance.completion(true)
-            onRelocation?(CalibreReaderRelocation(
-                identity: identity,
-                transitionToken: pendingAdvance.transitionToken
-            ))
+        // A generic EPUB.js relocation has no navigation origin. Never infer
+        // FloatTabs ownership from Swift's pending request state.
+        onRelocation?(CalibreReaderRelocation(identity: identity, transitionToken: nil))
+    }
+
+    private func handleSourceAdvanceRelocatedMessage(
+        _ body: [String: Any],
+        document: CalibreReaderDocumentIdentity
+    ) {
+        guard let pendingAdvance,
+              let eventToken = body["transitionToken"] as? NSNumber,
+              eventToken.uint64Value == pendingAdvance.transitionToken,
+              let fromStartCFI = body["fromStartCFI"] as? String,
+              let fromEndCFI = body["fromEndCFI"] as? String,
+              fromStartCFI == pendingAdvance.identity.startCFI,
+              fromEndCFI == pendingAdvance.identity.endCFI,
+              let startCFI = body["startCFI"] as? String,
+              let endCFI = body["endCFI"] as? String,
+              !startCFI.isEmpty,
+              !endCFI.isEmpty else {
             return
         }
-        onRelocation?(CalibreReaderRelocation(identity: identity, transitionToken: nil))
+
+        let identity = CalibreReadingUnitIdentity(
+            document: document,
+            startCFI: startCFI,
+            endCFI: endCFI
+        )
+        guard identity != pendingAdvance.identity else {
+            return
+        }
+        self.pendingAdvance = nil
+        pendingAdvance.completion(true)
+        onRelocation?(CalibreReaderRelocation(
+            identity: identity,
+            transitionToken: pendingAdvance.transitionToken
+        ))
     }
 
     // MARK: Pinned Calibre-Web reader scripts
@@ -484,6 +521,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         const location = rendition && typeof rendition.currentLocation === 'function';
         const next = rendition && typeof rendition.next === 'function';
         const on = rendition && typeof rendition.on === 'function';
+        const queue = rendition && rendition.q;
+        const queueLength = queue && typeof queue.length === 'function';
         const pathParts = String(window.location && window.location.pathname || '')
             .split('/').filter(Boolean);
         const routeKind = pathParts.length ? pathParts[pathParts.length - 1].toLowerCase() : '';
@@ -491,7 +530,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             .toLowerCase().includes('kepub')) ? 'kepub' : 'epub';
         const kind = routeKind === 'kepub' || routeKind === 'epub' ? routeKind : bookUrlKind;
         return {
-            valid: !!(reader && book && book.package && rendition && location && next && on),
+            valid: !!(reader && book && book.package && rendition && location && next && on
+                && queue && queueLength),
             readinessPending: !!(reader && book && !book.package
                 && opened && typeof opened.then === 'function'),
             kind: kind
@@ -628,12 +668,38 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             if (currentStart !== (\(start)) || currentEnd !== (\(end))) {
                 return { valid: false, requested: false };
             }
+            const queue = rendition.q;
+            let queueIdle = false;
+            try {
+                queueIdle = !!(queue && typeof queue.length === 'function'
+                    && queue.length() === 0 && !queue.running && !queue.paused);
+            } catch (_) {
+                queueIdle = false;
+            }
+            if (!queueIdle) {
+                return { valid: false, requested: false, reason: 'queueBusy' };
+            }
+
+            const transactionMarker = '__floatTabsCalibreReaderAdvanceTransaction';
+            if (window[transactionMarker]) {
+                return { valid: false, requested: false, reason: 'transactionPending' };
+            }
+            const transaction = {
+                generation: \(generation),
+                transitionToken: \(transitionToken),
+                fromStartCFI: String(currentStart),
+                fromEndCFI: String(currentEnd)
+            };
+            window[transactionMarker] = transaction;
             try {
                 const result = rendition.next();
                 if (result && typeof result.then === 'function') {
                     result.then(
                         () => {},
                         () => {
+                            if (window[transactionMarker] === transaction) {
+                                window[transactionMarker] = null;
+                            }
                             const handler = window.webkit && window.webkit.messageHandlers[\(handler)];
                             if (!handler) return;
                             handler.postMessage({
@@ -646,10 +712,47 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
                 }
                 return { valid: true, requested: true };
             } catch (_) {
+                if (window[transactionMarker] === transaction) {
+                    window[transactionMarker] = null;
+                }
                 return { valid: false, requested: false };
             }
         })()
         """
+    }
+
+    static func clearAdvanceTransactionScript(
+        generation: UInt64,
+        transitionToken: UInt64
+    ) -> String {
+        let generation = String(generation)
+        let transitionToken = String(transitionToken)
+        return """
+        (() => {
+            const marker = '__floatTabsCalibreReaderAdvanceTransaction';
+            const transaction = window[marker];
+            if (transaction
+                && transaction.generation === (\(generation))
+                && transaction.transitionToken === (\(transitionToken))) {
+                window[marker] = null;
+            }
+            return true;
+        })()
+        """
+    }
+
+    private func clearAdvanceTransaction(
+        generation: UInt64,
+        transitionToken: UInt64,
+        in webView: WKWebView
+    ) {
+        evaluate(
+            Self.clearAdvanceTransactionScript(
+                generation: generation,
+                transitionToken: transitionToken
+            ),
+            in: webView
+        ) { _, _ in }
     }
 
     private static func jsonString(_ value: String) -> String {
@@ -705,11 +808,31 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             rendition.on('relocated', (location) => {
                 const handler = window.webkit && window.webkit.messageHandlers[\(handler)];
                 if (!handler || !location || !location.start || !location.end) return;
+                const startCFI = String(location.start.cfi || '');
+                const endCFI = String(location.end.cfi || '');
+                const transactionMarker = '__floatTabsCalibreReaderAdvanceTransaction';
+                const transaction = window[transactionMarker];
+                if (transaction
+                    && transaction.generation === (\(generation))
+                    && (startCFI !== transaction.fromStartCFI
+                        || endCFI !== transaction.fromEndCFI)) {
+                    window[transactionMarker] = null;
+                    handler.postMessage({
+                        event: 'sourceAdvanceRelocated',
+                        generation: \(generation),
+                        transitionToken: transaction.transitionToken,
+                        fromStartCFI: transaction.fromStartCFI,
+                        fromEndCFI: transaction.fromEndCFI,
+                        startCFI: startCFI,
+                        endCFI: endCFI
+                    });
+                    return;
+                }
                 handler.postMessage({
                     event: 'relocated',
                     generation: \(generation),
-                    startCFI: String(location.start.cfi || ''),
-                    endCFI: String(location.end.cfi || '')
+                    startCFI: startCFI,
+                    endCFI: endCFI
                 });
             });
             window[marker] = (\(generation));

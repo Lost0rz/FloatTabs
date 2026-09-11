@@ -41,7 +41,6 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
     var currentPage: CalibreReaderPage
     private(set) var extractionCount = 0
     private(set) var advanceCount = 0
-    private var pendingTransitionToken: UInt64?
     var deferAdvanceFailure = false
     private var pendingAdvanceFailure: (() -> Void)?
 
@@ -72,11 +71,9 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
             return
         }
         advanceCount += 1
-        pendingTransitionToken = transitionToken
         if deferAdvanceFailure {
             completion(true)
-            pendingAdvanceFailure = { [weak self] in
-                self?.pendingTransitionToken = nil
+            pendingAdvanceFailure = {
                 completion(false)
             }
         } else {
@@ -85,7 +82,6 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
     }
 
     func cancelPendingWork() {
-        pendingTransitionToken = nil
         pendingAdvanceFailure = nil
     }
 
@@ -97,20 +93,16 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
 
     func emitRelocation(
         _ page: CalibreReaderPage,
-        token: UInt64? = nil,
-        usePendingTransitionToken: Bool = true
+        token: UInt64? = nil
     ) {
         currentPage = page
         currentDocumentIdentity = page.identity.document
         onRelocation?(
             CalibreReaderRelocation(
                 identity: page.identity,
-                transitionToken: usePendingTransitionToken
-                    ? token ?? pendingTransitionToken
-                    : token
+                transitionToken: token
             )
         )
-        pendingTransitionToken = nil
     }
 }
 
@@ -173,21 +165,58 @@ private final class CalibreReaderPageHarness {
             """
             <!doctype html>
             <html><body><script>
+              window.__calibrePageText = 'First page.';
+              window.__calibreLocation = {
+                start: { cfi: 'a' },
+                end: { cfi: 'b' }
+              };
+              window.__calibreRelocationHandlers = [];
+              window.__calibreQueue = {
+                length: () => window.__calibreQueueLength || 0,
+                running: false,
+                paused: false
+              };
+              window.__calibreSetLocation = (startCFI, endCFI, text) => {
+                window.__calibreLocation = {
+                  start: { cfi: startCFI },
+                  end: { cfi: endCFI }
+                };
+                document.getElementById('calibre-text').textContent = text;
+              };
               window.reader = {
-                book: { package: \(package), opened: \(opened) },
+                book: {
+                  package: \(package),
+                  opened: \(opened),
+                  renderer: { document: document }
+                },
                 rendition: {
-                  currentLocation: () => ({
-                    start: { cfi: 'epubcfi(/6/2[a]!/4/1)' },
-                    end: { cfi: 'epubcfi(/6/2[a]!/4/2)' }
-                  }),
+                  q: window.__calibreQueue,
+                  currentLocation: () => window.__calibreLocation,
+                  getContents: () => [{ document: document }],
                   next: () => Promise.resolve(),
-                  on: () => {}
+                  on: (event, handler) => {
+                    if (event === 'relocated') {
+                      window.__calibreRelocationHandlers.push(handler);
+                    }
+                  }
+                },
+                calibre: {}
+              };
+              window.ePub = {
+                CFI: function() {
+                  this.toRange = (doc) => {
+                    const node = doc.getElementById('calibre-text').firstChild;
+                    const range = doc.createRange();
+                    range.setStart(node, 0);
+                    range.setEnd(node, node.length);
+                    return range;
+                  };
                 }
               };
               if (!window.__resolveCalibreOpened) {
                 window.__resolveCalibreOpened = () => {};
               }
-            </script></body></html>
+            </script><p id="calibre-text">First page.</p></body></html>
             """,
             baseURL: url
         )
@@ -220,6 +249,97 @@ private final class CalibreReaderPageHarness {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return condition()
+    }
+
+    func waitForPageFlag(
+        _ javascript: String,
+        timeout: TimeInterval = 5
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await (run(javascript) as? Bool) == true { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (await run(javascript) as? Bool) == true
+    }
+
+    func setQueueBusy(_ busy: Bool) async {
+        _ = await run("window.__calibreQueueLength = \(busy ? 1 : 0); window.__calibreQueue.running = \(busy ? "true" : "false"); true")
+    }
+
+    func emitRenditionRelocation(
+        _ page: CalibreReaderPage
+    ) async {
+        let start = jsonString(page.identity.startCFI)
+        let end = jsonString(page.identity.endCFI)
+        let text = jsonString(page.text)
+        _ = await run(
+            """
+            (() => {
+                window.__calibreSetLocation(\(start), \(end), \(text));
+                window.__calibreRelocationHandlers.forEach((handler) => handler(window.__calibreLocation));
+                return true;
+            })()
+            """
+        )
+    }
+
+    func emitGenericRelocation(
+        _ page: CalibreReaderPage,
+        generation: UInt64 = 1
+    ) async {
+        let start = jsonString(page.identity.startCFI)
+        let end = jsonString(page.identity.endCFI)
+        let text = jsonString(page.text)
+        let handler = jsonString(CalibreReaderBridge.messageHandlerName)
+        _ = await run(
+            """
+            (() => {
+                window.__calibreSetLocation(\(start), \(end), \(text));
+                const handler = window.webkit.messageHandlers[\(handler)];
+                handler.postMessage({
+                    event: 'relocated',
+                    generation: \(generation),
+                    startCFI: \(start),
+                    endCFI: \(end)
+                });
+                return true;
+            })()
+            """
+        )
+    }
+
+    func postSourceAck(
+        generation: UInt64,
+        transitionToken: UInt64,
+        fromStartCFI: String,
+        fromEndCFI: String,
+        startCFI: String,
+        endCFI: String
+    ) async {
+        let handler = jsonString(CalibreReaderBridge.messageHandlerName)
+        let fromStart = jsonString(fromStartCFI)
+        let fromEnd = jsonString(fromEndCFI)
+        let start = jsonString(startCFI)
+        let end = jsonString(endCFI)
+        _ = await run(
+            """
+            window.webkit.messageHandlers[\(handler)].postMessage({
+                event: 'sourceAdvanceRelocated',
+                generation: \(generation),
+                transitionToken: \(transitionToken),
+                fromStartCFI: \(fromStart),
+                fromEndCFI: \(fromEnd),
+                startCFI: \(start),
+                endCFI: \(end)
+            }); true
+            """
+        )
+    }
+
+    private func jsonString(_ value: String) -> String {
+        let data = try! JSONEncoder().encode(value)
+        return String(data: data, encoding: .utf8)!
     }
 }
 
@@ -297,7 +417,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        bridge: CalibreTestReaderBridge,
+        bridge: CalibreReaderAccess,
         service: CalibreTestSpeechService,
         watchdogScheduler: CalibreSpeechWatchdogScheduling? = nil
     ) -> (CalibreSpeechCoordinator, SpeechPlaybackSessionController) {
@@ -431,6 +551,9 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(source.contains("ePub.CFI"))
         XCTAssertTrue(source.contains("rendition.next()"))
         XCTAssertTrue(source.contains("relocated"))
+        XCTAssertTrue(source.contains("sourceAdvanceRelocated"))
+        XCTAssertTrue(source.contains("__floatTabsCalibreReaderAdvanceTransaction"))
+        XCTAssertTrue(source.contains("queueBusy"))
         XCTAssertTrue(source.contains("generation"))
         XCTAssertTrue(source.contains("startCFI"))
         XCTAssertTrue(source.contains("endCFI"))
@@ -553,6 +676,181 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(script.contains("generation: 4"))
         XCTAssertTrue(script.contains("transitionToken: 9"))
         XCTAssertTrue(script.contains("rendition.next()"))
+        XCTAssertTrue(script.contains("rendition.q"))
+        XCTAssertTrue(script.contains("queue.length()"))
+        XCTAssertTrue(script.contains("fromStartCFI"))
+        XCTAssertTrue(script.contains("fromEndCFI"))
+        XCTAssertTrue(
+            CalibreReaderBridge.clearAdvanceTransactionScript(
+                generation: 4,
+                transitionToken: 9
+            ).contains("transitionToken === (9)")
+        )
+    }
+
+    private func makeReadyPageHarness() async -> (
+        harness: CalibreReaderPageHarness,
+        document: CalibreReaderDocumentIdentity
+    ) {
+        let harness = CalibreReaderPageHarness()
+        harness.bridge.handleNavigationCommit(harness.url)
+        harness.load(readerInitiallyReady: true)
+        let loaded = await harness.waitFor { !harness.webView.isLoading }
+        XCTAssertTrue(loaded)
+        harness.bridge.handleNavigationFinish(harness.url)
+        let ready = await harness.waitFor { harness.bridge.isReaderCandidate }
+        XCTAssertTrue(ready)
+        let observerReady = await harness.waitForPageFlag(
+            "window.__floatTabsCalibreRelocationGeneration === 1"
+        )
+        XCTAssertTrue(observerReady)
+        return (harness, try! XCTUnwrap(harness.bridge.currentDocumentIdentity))
+    }
+
+    func testRealBridgeGenericRelocationNeverReceivesPendingSourceToken() async {
+        let (harness, document) = await makeReadyPageHarness()
+        let second = page(document: document, start: "c", end: "d", text: "Manual page.")
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: harness.bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: harness.bridge.slotID))
+        let firstSpeech = await harness.waitFor { service.spokenRequests.count == 1 }
+        XCTAssertTrue(firstSpeech)
+        service.emitStart()
+        service.emitFinish()
+        let awaitingRelocation = await harness.waitFor {
+            coordinator.state == .awaitingRelocation
+        }
+        XCTAssertTrue(awaitingRelocation)
+
+        await harness.emitGenericRelocation(second)
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(scheduler.tasks.count, 1)
+    }
+
+    func testRealBridgeSourceTransactionOwnsRelocationAndContinuesSpeech() async {
+        let (harness, document) = await makeReadyPageHarness()
+        let second = page(document: document, start: "c", end: "d", text: "Second page.")
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: harness.bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: harness.bridge.slotID))
+        let firstSpeech = await harness.waitFor { service.spokenRequests.count == 1 }
+        XCTAssertTrue(firstSpeech)
+        service.emitStart()
+        service.emitFinish()
+        let awaitingRelocation = await harness.waitFor {
+            coordinator.state == .awaitingRelocation
+        }
+        XCTAssertTrue(awaitingRelocation)
+
+        await harness.emitRenditionRelocation(second)
+        let continued = await harness.waitFor { coordinator.state == .speakingUnit }
+        XCTAssertTrue(continued)
+
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+        XCTAssertTrue(scheduler.tasks.first?.isCancelled == true)
+    }
+
+    func testRealBridgeStaleSourceAckCannotTouchCurrentSession() async {
+        let (harness, document) = await makeReadyPageHarness()
+        let first = page(document: document, start: "a", end: "b", text: "First page.")
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: harness.bridge,
+            service: service
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: harness.bridge.slotID))
+        let firstSpeech = await harness.waitFor { service.spokenRequests.count == 1 }
+        XCTAssertTrue(firstSpeech)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        await harness.postSourceAck(
+            generation: 0,
+            transitionToken: 999,
+            fromStartCFI: first.identity.startCFI,
+            fromEndCFI: first.identity.endCFI,
+            startCFI: "c",
+            endCFI: "d"
+        )
+
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+    }
+
+    func testRealBridgeLaterGenericRelocationTerminatesAfterOwnedAck() async {
+        let (harness, document) = await makeReadyPageHarness()
+        let second = page(document: document, start: "c", end: "d", text: "Second page.")
+        let third = page(document: document, start: "e", end: "f", text: "Manual page.")
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: harness.bridge,
+            service: service
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: harness.bridge.slotID))
+        let firstSpeech = await harness.waitFor { service.spokenRequests.count == 1 }
+        XCTAssertTrue(firstSpeech)
+        service.emitStart()
+        service.emitFinish()
+        let awaitingRelocation = await harness.waitFor {
+            coordinator.state == .awaitingRelocation
+        }
+        XCTAssertTrue(awaitingRelocation)
+        await harness.emitRenditionRelocation(second)
+        let continued = await harness.waitFor { coordinator.state == .speakingUnit }
+        XCTAssertTrue(continued)
+        XCTAssertEqual(service.spokenRequests.count, 2)
+
+        await harness.emitGenericRelocation(third)
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(service.spokenRequests.count, 2)
+    }
+
+    func testRealBridgePreexistingQueueWorkFailsClosedWithoutSourceAck() async {
+        let (harness, _) = await makeReadyPageHarness()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: harness.bridge,
+            service: service
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: harness.bridge.slotID))
+        let firstSpeech = await harness.waitFor { service.spokenRequests.count == 1 }
+        XCTAssertTrue(firstSpeech)
+        service.emitStart()
+        await harness.setQueueBusy(true)
+        service.emitFinish()
+
+        let stopped = await harness.waitFor { coordinator.state == .idle }
+        XCTAssertTrue(stopped)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        let transactionCleared = await harness.run(
+            "window.__floatTabsCalibreReaderAdvanceTransaction == null"
+        ) as? Bool
+        XCTAssertEqual(transactionCleared, true)
     }
 
     func testReadHoldsSourceLeaseAcrossTransportIdleAndAdvancesOnlyAfterChangedRelocation() {
@@ -747,8 +1045,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         service.emitStart()
         bridge.emitRelocation(
             second,
-            token: nil,
-            usePendingTransitionToken: false
+            token: nil
         )
 
         XCTAssertEqual(coordinator.state, .idle)
@@ -772,8 +1069,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
 
         bridge.emitRelocation(
             second,
-            token: nil,
-            usePendingTransitionToken: false
+            token: nil
         )
 
         XCTAssertEqual(coordinator.state, .idle)
