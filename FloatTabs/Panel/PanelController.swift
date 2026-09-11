@@ -56,6 +56,11 @@ struct WorkspaceAutoHideSuppression: Equatable {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
+    private struct PreviousApplicationContext {
+        let application: NSRunningApplication
+        let displayID: CGDirectDisplayID?
+    }
+
     private let externalCommandLogger = Logger(
         subsystem: "com.lost0rz.FloatTabs",
         category: "ExternalCommand"
@@ -119,7 +124,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     )
 
-    private var previousApplication: NSRunningApplication?
+    private var previousApplicationContext: PreviousApplicationContext?
     private var restoredFrame: NSRect?
     private var preferredPanelSize: NSSize?
     private var hasPositionedPanel = false
@@ -672,6 +677,9 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     func hideFloatTabs() {
         let wasVisible = requestedVisibility
+        let currentPresentationDisplayID = ScreenPositioning.displayID(
+            for: sourceHostController.window.screen ?? panel.screen
+        )
         fullscreenExperimentLog(
             "HIDE_REQUEST requestedBefore=\(wasVisible) "
                 + "session=\(sourceHostController.sessionState.rawValue) "
@@ -703,14 +711,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.orderOutIfSafe()
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
 
-        guard let previousApplication else {
+        guard let previousApplicationContext else {
             NSApp.deactivate()
             return
         }
 
-        self.previousApplication = nil
+        self.previousApplicationContext = nil
         NSApp.deactivate()
-        _ = previousApplication.activate(options: [])
+        guard ScreenPositioning.isSameKnownDisplay(
+            previousApplicationContext.displayID,
+            currentPresentationDisplayID
+        ) else {
+            return
+        }
+        _ = previousApplicationContext.application.activate(options: [])
     }
 
     func prepareForTermination() {
@@ -1460,7 +1474,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func autoHideAfterApplicationDeactivation() {
         // The user has already selected another application. Unlike the explicit
-        // global-toggle hide path, do not reactivate `previousApplication` here:
+        // global-toggle hide path, do not reactivate the previous application here:
         // doing so would steal focus from the application the user just chose.
         updateRequestedVisibility(false)
         presentationFocusTask?.cancel()
@@ -1476,12 +1490,12 @@ final class PanelController: NSObject, NSWindowDelegate {
                 pauseInactiveMedia: true,
                 hidePanel: true
             )
-            previousApplication = nil
+            previousApplicationContext = nil
             return
         }
         sourceHostController.orderOutIfSafe()
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
-        previousApplication = nil
+        previousApplicationContext = nil
     }
 
 #if DEBUG
@@ -2872,7 +2886,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func capturePreviousApplication() {
         guard let frontmost = NSWorkspace.shared.frontmostApplication else { return }
         guard frontmost.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-        previousApplication = frontmost
+        previousApplicationContext = PreviousApplicationContext(
+            application: frontmost,
+            displayID: ScreenPositioning.displayID(for: NSScreen.main)
+        )
     }
 
     private func positionPanelForCurrentScreens() {
