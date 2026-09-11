@@ -15,6 +15,48 @@ enum SpeechPlaybackState: Equatable, Sendable {
     case resuming
 }
 
+struct SpeechCapabilities: Equatable, Sendable {
+    let canRead: Bool
+    let canReplay: Bool
+    let canAutoSpeak: Bool
+
+    static let chatGPT = SpeechCapabilities(
+        canRead: true,
+        canReplay: true,
+        canAutoSpeak: true
+    )
+
+    static let calibreReader = SpeechCapabilities(
+        canRead: true,
+        canReplay: true,
+        canAutoSpeak: false
+    )
+
+    static let unsupported = SpeechCapabilities(
+        canRead: false,
+        canReplay: false,
+        canAutoSpeak: false
+    )
+}
+
+struct SpeechPresentationLabels: Equatable, Sendable {
+    let read: String
+    let replay: String
+    let autoSpeak: String
+
+    static let chatGPT = SpeechPresentationLabels(
+        read: "Read latest response from",
+        replay: "Replay latest response from",
+        autoSpeak: "Auto Speak for"
+    )
+
+    static let calibreReader = SpeechPresentationLabels(
+        read: "Read From Current Page",
+        replay: "Replay Current Page",
+        autoSpeak: "Auto Speak unavailable for"
+    )
+}
+
 struct SpeechRailPresentation: Equatable, Sendable {
     let activeSlotID: UUID?
     let autoSpeakSlotIDs: Set<UUID>
@@ -22,6 +64,9 @@ struct SpeechRailPresentation: Equatable, Sendable {
     let currentSpeakingSlotID: UUID?
     let playbackState: SpeechPlaybackState
     let activeSlotSupportsSpeech: Bool
+    let capabilities: SpeechCapabilities
+    let labels: SpeechPresentationLabels
+    let hasActiveSourceSession: Bool
 
     init(
         activeSlotID: UUID?,
@@ -29,7 +74,10 @@ struct SpeechRailPresentation: Equatable, Sendable {
         activeSlotAutoSpeakEnabled: Bool,
         currentSpeakingSlotID: UUID?,
         playbackState: SpeechPlaybackState = .idle,
-        activeSlotSupportsSpeech: Bool
+        activeSlotSupportsSpeech: Bool,
+        capabilities: SpeechCapabilities = .chatGPT,
+        labels: SpeechPresentationLabels = .chatGPT,
+        hasActiveSourceSession: Bool = false
     ) {
         self.activeSlotID = activeSlotID
         self.autoSpeakSlotIDs = autoSpeakSlotIDs
@@ -37,6 +85,9 @@ struct SpeechRailPresentation: Equatable, Sendable {
         self.currentSpeakingSlotID = currentSpeakingSlotID
         self.playbackState = playbackState
         self.activeSlotSupportsSpeech = activeSlotSupportsSpeech
+        self.capabilities = capabilities
+        self.labels = labels
+        self.hasActiveSourceSession = hasActiveSourceSession
     }
 }
 
@@ -87,6 +138,7 @@ final class AssistantSpeechCoordinator {
     private let followBridgeProvider: @MainActor (UUID) -> ChatGPTResponseFollowing?
     private let activeSlotIDProvider: @MainActor () -> UUID?
     private let followSpeechEnabled: @MainActor () -> Bool
+    private let automaticSpeechSuppressed: @MainActor (UUID) -> Bool
     private var extractionRequests: [UUID: ExtractionRequest] = [:]
     private var nextGeneration: UInt64 = 0
     private var stopEpoch: UInt64 = 0
@@ -122,7 +174,8 @@ final class AssistantSpeechCoordinator {
         responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?,
         followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
-        followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
+        followSpeechEnabled: @escaping @MainActor () -> Bool = { true },
+        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false }
     ) {
         self.playbackSession = playbackSession
         self.webViewProvider = webViewProvider
@@ -130,6 +183,7 @@ final class AssistantSpeechCoordinator {
         self.followBridgeProvider = followBridgeProvider
         self.activeSlotIDProvider = activeSlotIDProvider
         self.followSpeechEnabled = followSpeechEnabled
+        self.automaticSpeechSuppressed = automaticSpeechSuppressed
     }
 
     /// Compatibility construction for existing source-level clients and tests.
@@ -140,7 +194,8 @@ final class AssistantSpeechCoordinator {
         responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?,
         followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
-        followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
+        followSpeechEnabled: @escaping @MainActor () -> Bool = { true },
+        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false }
     ) {
         let playbackSession = SpeechPlaybackSessionController(
             speechService: speechService
@@ -151,7 +206,8 @@ final class AssistantSpeechCoordinator {
             responseBridgeProvider: responseBridgeProvider,
             followBridgeProvider: followBridgeProvider,
             activeSlotIDProvider: activeSlotIDProvider,
-            followSpeechEnabled: followSpeechEnabled
+            followSpeechEnabled: followSpeechEnabled,
+            automaticSpeechSuppressed: automaticSpeechSuppressed
         )
         // Compatibility construction is intentionally explicit: production
         // Panel wiring creates the adapter at the source boundary instead.
@@ -263,7 +319,11 @@ final class AssistantSpeechCoordinator {
         case .generationStarted:
             break
         case .generationFinished:
-            guard autoSpeakSlotIDs.contains(slotID) else { return }
+            // Source-session ownership is checked before creating a queue
+            // reservation. A foreign continuous reader therefore cannot
+            // leave deferred ChatGPT work that would backfill after Stop.
+            guard autoSpeakSlotIDs.contains(slotID),
+                  !automaticSpeechSuppressed(slotID) else { return }
             // A newer completion from the same Tab supersedes only an older
             // pending or staged extraction. Already speaking or queued items
             // remain valid and are never interrupted here.

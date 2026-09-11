@@ -48,6 +48,8 @@ final class WebViewPool {
     typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias SpeechManualScrollHandler = @MainActor (UUID, String) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
+    typealias CalibreReaderCandidateChangeHandler = @MainActor (UUID) -> Void
+    typealias CalibreReaderRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
     private var webViews: [UUID: WKWebView] = [:]
@@ -55,6 +57,7 @@ final class WebViewPool {
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
     private var responseBridges: [UUID: ChatGPTResponseBridge] = [:]
+    private var calibreReaderBridges: [UUID: CalibreReaderBridge] = [:]
     private var appliedRenderingProfiles: [UUID: WebRenderingProfile] = [:]
     private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
@@ -79,6 +82,11 @@ final class WebViewPool {
     /// top-level URL. Persistence continues to use `onURLChange`; this route
     /// exists only so presentation owners can project the current-site favicon.
     var onCommittedURLChange: CommittedURLChangeHandler?
+
+    /// Calibre reader capability is a transient WebView/runtime fact. The pool
+    /// forwards it without retaining reader state or assigning speech policy.
+    var onCalibreReaderCandidateChange: CalibreReaderCandidateChangeHandler?
+    var onCalibreReaderRuntimeReset: CalibreReaderRuntimeResetHandler?
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
@@ -175,6 +183,10 @@ final class WebViewPool {
         webViews[slotID]
     }
 
+    func calibreReaderBridge(for slotID: UUID) -> CalibreReaderBridge? {
+        calibreReaderBridges[slotID]
+    }
+
     /// Returns the URL of the live WebKit history item that most recently
     /// committed for this Slot. A persisted `currentURL` or a load request is
     /// deliberately not considered committed presentation state.
@@ -232,6 +244,7 @@ final class WebViewPool {
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
         invalidateResponseBridge(slotID: slotID)
+        invalidateCalibreReaderBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -339,6 +352,7 @@ final class WebViewPool {
         // bridge installation itself stays usable for the recovered document.
         attentionBridges[slotID]?.handleRuntimeReplacement()
         responseBridges[slotID]?.handleRuntimeReplacement()
+        calibreReaderBridges[slotID]?.handleRuntimeReplacement()
 
         switch Self.recoveryDisposition(isActive: isSlotActive(slotID)) {
         case .reloadNow:
@@ -375,6 +389,7 @@ final class WebViewPool {
     ) throws -> WKWebView {
         invalidateAttentionBridge(slotID: profile.id)
         invalidateResponseBridge(slotID: profile.id)
+        invalidateCalibreReaderBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
@@ -435,16 +450,27 @@ final class WebViewPool {
                 self?.onSpeechManualScroll?(slotID, documentToken)
             }
         )
+        let calibreReaderBridge = CalibreReaderBridge(
+            slotID: profile.id,
+            onRuntimeReset: { [weak self] slotID in
+                self?.onCalibreReaderRuntimeReset?(slotID)
+            },
+            onCandidateChange: { [weak self] slotID in
+                self?.onCalibreReaderCandidateChange?(slotID)
+            }
+        )
         let webView = WebViewFactory.makeWebView(
             renderingProfile: runtimeRendering,
             websiteDataStore: websiteDataStore,
             configureUserContentController: { userContentController in
                 attentionBridge.install(into: userContentController)
                 responseBridge.install(into: userContentController)
+                calibreReaderBridge.install(into: userContentController)
             }
         )
         attentionBridge.attach(to: webView)
         responseBridge.attach(to: webView)
+        calibreReaderBridge.attach(to: webView)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
@@ -468,10 +494,19 @@ final class WebViewPool {
                 attentionBridge?.cancelInstantBackHandoff()
                 attentionBridge?.handleRuntimeReplacement(committedURL: commitURL)
                 responseBridge.handleRuntimeReplacement()
+                calibreReaderBridge.handleNavigationCommit(commitURL)
                 guard let committedURL else {
                     return
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
+            },
+            onNavigationFinish: { [weak self, weak calibreReaderBridge, weak webView] slotID, finishURL in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                calibreReaderBridge?.handleNavigationFinish(finishURL)
             },
             onInstantBackRequest: { [weak self, weak attentionBridge, weak webView] slotID, targetURL in
                 guard let self,
@@ -497,6 +532,9 @@ final class WebViewPool {
                 }
                 self.attentionBridges[slotID]?.confirmInstantBackHandoff()
                 self.responseBridges[slotID]?.handleRuntimeReplacement()
+                self.calibreReaderBridges[slotID]?.handleNavigationCommit(
+                    self.committedURL(for: slotID)
+                )
                 // Confirmed Instant Back resets and resyncs through the bridge
                 // handoff, but it must not reuse ordinary didCommit projection
                 // semantics or create a duplicate replacement boundary.
@@ -518,6 +556,7 @@ final class WebViewPool {
         popupCoordinators[profile.id] = popupCoordinator
         attentionBridges[profile.id] = attentionBridge
         responseBridges[profile.id] = responseBridge
+        calibreReaderBridges[profile.id] = calibreReaderBridge
 
         // A recreated runtime may inherit `currentURL` from arbitrary page
         // navigation. Only the configured Home URL can reuse persisted entry
@@ -586,6 +625,11 @@ final class WebViewPool {
 
     private func invalidateResponseBridge(slotID: UUID) {
         guard let bridge = responseBridges.removeValue(forKey: slotID) else { return }
+        bridge.invalidate()
+    }
+
+    private func invalidateCalibreReaderBridge(slotID: UUID) {
+        guard let bridge = calibreReaderBridges.removeValue(forKey: slotID) else { return }
         bridge.invalidate()
     }
 

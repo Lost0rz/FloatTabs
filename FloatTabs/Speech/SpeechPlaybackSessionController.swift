@@ -1,9 +1,9 @@
 import Foundation
 
-/// The source that owns a speech playback session. C1 intentionally registers
-/// only ChatGPT; adding a case here is not enough to make a source runnable.
+/// The source that owns a speech playback session.
 enum SpeechSourceKind: String, CaseIterable, Equatable, Hashable, Sendable {
     case chatGPT
+    case calibreReader
 }
 
 /// Identity carried from a source through the shared transport boundary.
@@ -77,11 +77,23 @@ final class SpeechPlaybackSessionController {
     private var hasCurrentUtterance = false
     private var nextTransportToken: UInt64 = 0
     private var activeTransport: ActiveTransport?
+    private var nextSourceSessionToken: UInt64 = 0
+    private var activeSourceSession: (
+        kind: SpeechSourceKind,
+        slotID: UUID?,
+        token: UInt64
+    )?
 
     private(set) var playbackState: SpeechPlaybackState = .idle
     /// Source-level identity for the currently admitted transport.
     var activeContext: SpeechPlaybackContext? { activeTransport?.context }
     var onPlaybackStateChange: (() -> Void)?
+    /// A source session is intentionally independent from AV transport. A
+    /// reader can own this lease while the transport is idle between visual
+    /// pages, so another source cannot acquire the continuous-reading path.
+    var activeSourceSessionKind: SpeechSourceKind? { activeSourceSession?.kind }
+    var activeSourceSessionSlotID: UUID? { activeSourceSession?.slotID }
+    var activeSourceSessionToken: UInt64? { activeSourceSession?.token }
 
     init(speechService: SpeechSynthesizing) {
         self.speechService = speechService
@@ -114,6 +126,44 @@ final class SpeechPlaybackSessionController {
     var activeTransportToken: UInt64? { activeTransportCallbackToken }
     var isAtSegmentBoundary: Bool {
         playbackState == .paused && !hasCurrentUtterance
+    }
+
+    @discardableResult
+    func acquireSourceSession(
+        sourceKind: SpeechSourceKind,
+        slotID: UUID? = nil
+    ) -> UInt64? {
+        if let activeSourceSession {
+            return activeSourceSession.kind == sourceKind
+                && activeSourceSession.slotID == slotID
+                ? activeSourceSession.token
+                : nil
+        }
+        nextSourceSessionToken &+= 1
+        let token = nextSourceSessionToken
+        activeSourceSession = (sourceKind, slotID, token)
+        return token
+    }
+
+    func ownsSourceSession(
+        sourceKind: SpeechSourceKind,
+        token: UInt64? = nil
+    ) -> Bool {
+        guard let activeSourceSession,
+              activeSourceSession.kind == sourceKind else {
+            return false
+        }
+        return token == nil || activeSourceSession.token == token
+    }
+
+    func releaseSourceSession(
+        sourceKind: SpeechSourceKind,
+        token: UInt64? = nil
+    ) {
+        guard ownsSourceSession(sourceKind: sourceKind, token: token) else {
+            return
+        }
+        activeSourceSession = nil
     }
 
     func register(

@@ -222,6 +222,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
+    private let onNavigationFinish: @MainActor (UUID, URL?) -> Void
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
@@ -261,6 +262,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
+        onNavigationFinish: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
@@ -276,6 +278,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
         self.onNavigationCommit = onNavigationCommit
+        self.onNavigationFinish = onNavigationFinish
         self.onInstantBackRequest = onInstantBackRequest
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
@@ -394,6 +397,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+
+        onNavigationFinish(slotID, webView.url)
 
         if let url = webView.url, WebAppURL.isSafe(url) {
             confirmInstantBackActivation(in: webView, observedURL: url)
