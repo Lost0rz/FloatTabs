@@ -120,6 +120,19 @@ final class SpeechPlaybackSessionController {
             return false
         }
 
+        let isBoundaryHandoff = playbackState == .resuming
+            && !hasCurrentUtterance
+            && activeContext?.sourceKind == context.sourceKind
+        let isOrdinaryAdmission = playbackState == .idle
+            && !hasCurrentUtterance
+            && activeContext == nil
+        guard isOrdinaryAdmission || isBoundaryHandoff else {
+            // A source must explicitly terminate its current session before
+            // another ordinary utterance can replace its transport identity.
+            // The only exception is the owning source's boundary resume.
+            return false
+        }
+
         activeContext = context
         hasCurrentUtterance = true
         setPlaybackState(.starting)

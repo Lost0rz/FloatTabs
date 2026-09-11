@@ -113,6 +113,67 @@ final class SpeechPlaybackSessionControllerTests: XCTestCase {
         ])
     }
 
+    func testStartingRejectsSecondSpeakWithoutChangingTransport() {
+        let service = SessionControllerSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let first = context(token: 20)
+        let second = context(token: 21)
+
+        XCTAssertTrue(session.speak(
+            context: first,
+            text: "First.",
+            languageRole: .english
+        ))
+        XCTAssertFalse(session.speak(
+            context: second,
+            text: "Second.",
+            languageRole: .english
+        ))
+        XCTAssertEqual(session.activeContext, first)
+        XCTAssertEqual(session.playbackState, .starting)
+        XCTAssertEqual(service.spokenRequests.map(\.transportToken), [20])
+    }
+
+    func testSpeakingRejectsSecondSpeakWithoutChangingTransport() {
+        let service = SessionControllerSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let first = context(token: 22)
+        let second = context(token: 23)
+
+        _ = session.speak(context: first, text: "First.", languageRole: .english)
+        service.emitStart(22)
+        XCTAssertFalse(session.speak(
+            context: second,
+            text: "Second.",
+            languageRole: .english
+        ))
+        XCTAssertEqual(session.activeContext, first)
+        XCTAssertEqual(session.playbackState, .speaking)
+        XCTAssertEqual(service.spokenRequests.map(\.transportToken), [22])
+    }
+
+    func testPausingPausedAndResumingTransportRejectSecondSpeak() {
+        let service = SessionControllerSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let first = context(token: 24)
+        let second = context(token: 25)
+
+        _ = session.speak(context: first, text: "First.", languageRole: .english)
+        service.emitStart(24)
+        XCTAssertTrue(session.pause(sourceKind: .chatGPT, slotID: first.slotID))
+        XCTAssertFalse(session.speak(context: second, text: "Second.", languageRole: .english))
+        service.emitPause(24)
+        XCTAssertFalse(session.speak(context: second, text: "Second.", languageRole: .english))
+        XCTAssertEqual(
+            session.resume(sourceKind: .chatGPT, slotID: first.slotID),
+            .continuedCurrentUtterance
+        )
+        XCTAssertFalse(session.speak(context: second, text: "Second.", languageRole: .english))
+        XCTAssertEqual(session.activeContext, first)
+        XCTAssertEqual(session.playbackState, .resuming)
+        XCTAssertEqual(service.spokenRequests.map(\.transportToken), [24])
+    }
+
     func testFailedPauseAndResumeRollBackWithoutPublishingACompetingState() {
         let service = SessionControllerSpeechService()
         let session = SpeechPlaybackSessionController(speechService: service)

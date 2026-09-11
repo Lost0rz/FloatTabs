@@ -8,10 +8,12 @@ private final class RouterSpeechService: SpeechSynthesizing {
     var onUtterancePaused: ((UInt64) -> Void)?
     var onUtteranceContinued: ((UInt64) -> Void)?
     var onUtteranceCancelled: ((UInt64) -> Void)?
+    var pauseResult = true
+    var resumeResult = true
 
     func speak(_ request: SpeechPlaybackRequest) {}
-    func pause() -> Bool { true }
-    func resume() -> Bool { true }
+    func pause() -> Bool { pauseResult }
+    func resume() -> Bool { resumeResult }
     func stop() {}
     func emitStart(_ token: UInt64) { onUtteranceStarted?(token) }
     func emitPause(_ token: UInt64) { onUtterancePaused?(token) }
@@ -189,6 +191,41 @@ final class SpeechCommandRouterTests: XCTestCase {
             .resumed(sourceKind: .chatGPT, slotID: slotID)
         )
         XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
+    }
+
+    func testTransportPauseAndResumeFailureIsNoOpWithoutBeepOutcome() {
+        let slotID = UUID()
+        let service = RouterSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let adapter = TestSpeechSourceAdapter(slotID: slotID)
+        adapter.session = session
+        let router = SpeechCommandRouter(
+            sources: [adapter],
+            playbackSession: session,
+            activeSlotIDProvider: { slotID }
+        )
+        let context = SpeechPlaybackContext(
+            sourceKind: .chatGPT,
+            slotID: slotID,
+            transportToken: 30,
+            origin: .manual
+        )
+        _ = session.speak(context: context, text: "Read.", languageRole: .english)
+        service.emitStart(30)
+
+        service.pauseResult = false
+        XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
+        XCTAssertEqual(session.playbackState, .speaking)
+
+        service.pauseResult = true
+        XCTAssertEqual(
+            router.readPauseResumeForActiveSlot(),
+            .paused(sourceKind: .chatGPT, slotID: slotID)
+        )
+        service.emitPause(30)
+        service.resumeResult = false
+        XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
+        XCTAssertEqual(session.playbackState, .paused)
     }
 
     func testStopIsScopedToTheActiveSlotAndReturnsTypedOutcome() {

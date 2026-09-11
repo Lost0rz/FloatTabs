@@ -148,7 +148,7 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) -> AssistantSpeechCoordinator {
         let playbackSession = SpeechPlaybackSessionController(speechService: service)
-        return AssistantSpeechCoordinator(
+        let coordinator = AssistantSpeechCoordinator(
             playbackSession: playbackSession,
             webViewProvider: { _ in webView },
             responseBridgeProvider: { _ in bridge },
@@ -156,6 +156,11 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
             activeSlotIDProvider: activeSlotIDProvider,
             followSpeechEnabled: followSpeechEnabled
         )
+        _ = ChatGPTSpeechSourceAdapter(
+            coordinator: coordinator,
+            playbackSession: playbackSession
+        )
+        return coordinator
     }
 
     private func makeFollowPayload(

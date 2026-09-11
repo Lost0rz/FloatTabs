@@ -92,8 +92,8 @@ final class ChatGPTSpeechSourceAdapter: SpeechSourceAdapter {
     init(
         coordinator: AssistantSpeechCoordinator,
         playbackSession: SpeechPlaybackSessionController,
-        activeSlotIDProvider: @escaping @MainActor () -> UUID?,
-        supportsSpeechQuery: @escaping @MainActor (UUID) -> Bool
+        activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
+        supportsSpeechQuery: @escaping @MainActor (UUID) -> Bool = { _ in true }
     ) {
         self.coordinator = coordinator
         self.activeSlotIDProvider = activeSlotIDProvider
@@ -197,16 +197,12 @@ final class SpeechCommandRouter {
     }
 
     var presentation: SpeechSourcePresentation {
-        guard let source = sources[.chatGPT] else {
-            return SpeechSourcePresentation(
-                sourceKind: .chatGPT,
-                activeSlotID: activeSlotIDProvider(),
-                autoSpeakSlotIDs: [],
-                activeSlotAutoSpeakEnabled: false,
-                currentSpeakingSlotID: playbackSession.activeSlotID,
-                playbackState: playbackSession.playbackState,
-                activeSlotSupportsSpeech: false
-            )
+        if let slotID = activeSlotIDProvider(),
+           let source = resolveSource(for: slotID, allowingArmed: true) {
+            return source.presentation
+        }
+        guard let source = orderedSources.first else {
+            fatalError("SpeechCommandRouter requires a registered source")
         }
         return source.presentation
     }
@@ -214,8 +210,7 @@ final class SpeechCommandRouter {
     @discardableResult
     func readLatestForActiveSlot() -> SpeechCommandOutcome {
         guard let slotID = activeSlotIDProvider(),
-              let source = sources[.chatGPT],
-              source.supportsSpeech(slotID: slotID) else {
+              let source = resolveSource(for: slotID) else {
             return .rejected
         }
         // Preserve the pre-router contract: an unavailable source/Slot is a
@@ -228,39 +223,41 @@ final class SpeechCommandRouter {
     @discardableResult
     func readPauseResumeForActiveSlot() -> SpeechCommandOutcome {
         guard let slotID = activeSlotIDProvider() else { return .rejected }
-        guard let chatGPT = sources[.chatGPT] else { return .rejected }
 
         if let activeContext = playbackSession.activeContext,
-           activeContext.slotID == slotID,
-           let source = sources[activeContext.sourceKind] {
+           activeContext.slotID == slotID {
+            // An active transport owner always wins. Never fall through to a
+            // different source when that owner cannot be resolved.
+            guard let source = sources[activeContext.sourceKind] else {
+                return .noOp
+            }
             switch playbackSession.playbackState {
             case .speaking:
                 return source.pause(slotID: slotID)
                     ? .paused(sourceKind: source.kind, slotID: slotID)
-                    : .rejected
+                    : .noOp
             case .paused:
                 return source.resume(slotID: slotID)
                     ? .resumed(sourceKind: source.kind, slotID: slotID)
-                    : .rejected
+                    : .noOp
             case .starting, .pausing, .resuming:
                 return .noOp
             case .idle:
-                break
+                return .noOp
             }
         }
 
-        guard chatGPT.supportsSpeech(slotID: slotID) else {
+        guard let source = resolveSource(for: slotID) else {
             return .rejected
         }
-        guard chatGPT.readLatest(slotID: slotID) else { return .noOp }
-        return .manualReadAccepted(sourceKind: .chatGPT, slotID: slotID)
+        guard source.readLatest(slotID: slotID) else { return .noOp }
+        return .manualReadAccepted(sourceKind: source.kind, slotID: slotID)
     }
 
     @discardableResult
     func replayLatestForActiveSlot() -> SpeechCommandOutcome {
         guard let slotID = activeSlotIDProvider(),
-              let source = sources[.chatGPT],
-              source.supportsSpeech(slotID: slotID) else {
+              let source = resolveSource(for: slotID) else {
             return .rejected
         }
         guard source.replayLatest(slotID: slotID) else { return .noOp }
@@ -298,13 +295,27 @@ final class SpeechCommandRouter {
     @discardableResult
     func stopCurrentPlayback() -> SpeechCommandOutcome {
         let activeContext = playbackSession.activeContext
-        let source = activeContext.flatMap { sources[$0.sourceKind] }
-            ?? sources[.chatGPT]
-        guard let source, source.stopCurrentPlayback() else {
+        let targetSources: [SpeechSourceAdapter]
+        if let activeContext,
+           let source = sources[activeContext.sourceKind] {
+            targetSources = [source]
+        } else {
+            // With no live transport, global Stop still has to clear pending
+            // extraction/queue work. C1 has one registered source, while this
+            // iteration keeps the global command independent of its kind.
+            targetSources = orderedSources
+        }
+        guard !targetSources.isEmpty else {
             return .noOp
         }
+
+        var stoppedSource: SpeechSourceAdapter?
+        for source in targetSources where source.stopCurrentPlayback() {
+            stoppedSource = stoppedSource ?? source
+        }
+        guard let stoppedSource else { return .noOp }
         return .stopped(
-            sourceKind: source.kind,
+            sourceKind: stoppedSource.kind,
             slotID: activeContext?.slotID
         )
     }
@@ -312,9 +323,7 @@ final class SpeechCommandRouter {
     @discardableResult
     func toggleAutoSpeakForActiveSlot() -> SpeechCommandOutcome {
         guard let slotID = activeSlotIDProvider(),
-              let source = sources[.chatGPT],
-              source.supportsSpeech(slotID: slotID)
-                    || source.isAutoSpeakArmed(slotID: slotID),
+              let source = resolveSource(for: slotID, allowingArmed: true),
               source.toggleAutoSpeak(slotID: slotID) else {
             return .rejected
         }
@@ -327,6 +336,27 @@ final class SpeechCommandRouter {
     }
 
     func playPreview(_ requests: [SpeechUtteranceRequest]) {
+        // Settings preview is an existing ChatGPT-only compatibility path in
+        // C1. It is intentionally not generic Slot source resolution.
         sources[.chatGPT]?.playPreview(requests)
+    }
+
+    private var orderedSources: [SpeechSourceAdapter] {
+        sources.values.sorted { $0.kind.rawValue < $1.kind.rawValue }
+    }
+
+    private func resolveSource(
+        for slotID: UUID,
+        allowingArmed: Bool = false
+    ) -> SpeechSourceAdapter? {
+        if let supportingSource = orderedSources.first(where: {
+            $0.supportsSpeech(slotID: slotID)
+        }) {
+            return supportingSource
+        }
+        guard allowingArmed else { return nil }
+        return orderedSources.first(where: {
+            $0.isAutoSpeakArmed(slotID: slotID)
+        })
     }
 }

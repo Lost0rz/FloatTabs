@@ -133,12 +133,6 @@ final class AssistantSpeechCoordinator {
         playbackSession.onPlaybackStateChange = { [weak self] in
             self?.onSpeechPresentationChange?()
         }
-        // Keep direct Coordinator test construction source-compatible while
-        // still routing through the typed session event boundary. Production
-        // Panel wiring replaces this registration with ChatGPTSpeechSourceAdapter.
-        playbackSession.register(sourceKind: .chatGPT) { [weak self] event in
-            self?.handlePlaybackEvent(event)
-        }
     }
 
     /// Compatibility construction for existing source-level clients and tests.
@@ -151,15 +145,22 @@ final class AssistantSpeechCoordinator {
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) {
+        let playbackSession = SpeechPlaybackSessionController(
+            speechService: speechService
+        )
         self.init(
-            playbackSession: SpeechPlaybackSessionController(
-                speechService: speechService
-            ),
+            playbackSession: playbackSession,
             webViewProvider: webViewProvider,
             responseBridgeProvider: responseBridgeProvider,
             followBridgeProvider: followBridgeProvider,
             activeSlotIDProvider: activeSlotIDProvider,
             followSpeechEnabled: followSpeechEnabled
+        )
+        // Compatibility construction is intentionally explicit: production
+        // Panel wiring creates the adapter at the source boundary instead.
+        _ = ChatGPTSpeechSourceAdapter(
+            coordinator: self,
+            playbackSession: playbackSession
         )
     }
 
@@ -880,7 +881,7 @@ final class AssistantSpeechCoordinator {
         currentItem = item
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        _ = playbackSession.speak(
+        let admitted = playbackSession.speak(
             context: SpeechPlaybackContext(
                 sourceKind: .chatGPT,
                 slotID: item.responseID?.slotID,
@@ -890,6 +891,16 @@ final class AssistantSpeechCoordinator {
             text: item.text,
             languageRole: item.languageRole
         )
+        guard admitted else {
+            // Admission failures are not expected on a legal ChatGPT FIFO
+            // path, but never leave a dequeued item pretending to be active.
+            currentItem = nil
+            speechQueue.prepend(item)
+            if playbackState == .resuming {
+                playbackSession.finishBoundaryResumeWithoutSpeech()
+            }
+            return
+        }
     }
 
     private func followCurrentItem(force: Bool = false) {
