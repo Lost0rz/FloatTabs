@@ -124,6 +124,36 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
+    func testPanelOwnsGlobalSpeechPresentationSynchronization() {
+        let service = CrossFeatureSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let (controller, _, _, _) = makeController(
+            speechService: service,
+            speechPlaybackSessionController: session
+        )
+        let before = controller.debugSpeechPresentationSynchronizationCount
+        let context = SpeechPlaybackContext(
+            sourceKind: .chatGPT,
+            slotID: nil,
+            sourceSequence: 50,
+            origin: .manual
+        )
+
+        XCTAssertTrue(session.speak(
+            context: context,
+            text: "Panel observer.",
+            languageRole: .english
+        ))
+
+        // CrossFeatureSpeechService confirms didStart synchronously, so the
+        // Panel observes both idle → starting and starting → speaking.
+        XCTAssertEqual(
+            controller.debugSpeechPresentationSynchronizationCount,
+            before + 2
+        )
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
+    }
+
     // MARK: 4.5 Selected-hidden completion
 
     func testSelectedHiddenCompletionDuringGraceBecomesReadyProtectedAndProjected() throws {
@@ -2954,6 +2984,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
         speechService: SpeechSynthesizing? = nil,
+        speechPlaybackSessionController: SpeechPlaybackSessionController? = nil,
         preferencesStore: AppPreferencesStore? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
@@ -2965,7 +2996,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             attentionCoordinator: attentionCoordinator,
             frameStore: PanelFrameStore(),
             preferencesStore: resolvedPreferencesStore,
-            speechService: speechService
+            speechService: speechService,
+            speechPlaybackSessionController: speechPlaybackSessionController
         )
         retainedControllers.append(controller)
         return (controller, attentionCoordinator, tabStore, pool)

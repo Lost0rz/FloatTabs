@@ -73,7 +73,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let attentionCoordinator: WebAttentionCoordinator
     private let unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator
     private let webFocusRouter: WebFocusRouter
-    private let speechService: SpeechSynthesizing
+    private let speechPlaybackSessionController: SpeechPlaybackSessionController
     private let speechPreferencesStore: SpeechPreferencesStore
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
@@ -92,7 +92,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         },
         attentionProtectionQuery: { [weak self] slotID in
             self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
-        }
+        },
+        // C1 exposes the independent seam without changing ChatGPT residency.
+        // ChatGPT's source adapter deliberately has no speech protection yet.
+        speechProtectionQuery: { _ in false }
     )
 
     /// Stage C routing boundary: normalized bridge observations become
@@ -106,7 +109,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     )
 
     private lazy var assistantSpeechCoordinator = AssistantSpeechCoordinator(
-        speechService: speechService,
+        playbackSession: speechPlaybackSessionController,
         webViewProvider: { [weak self] slotID in
             self?.webViewPool.existingWebView(for: slotID)
         },
@@ -122,6 +125,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         followSpeechEnabled: { [weak self] in
             self?.speechPreferencesStore.followSpeechOnPage
                 ?? SpeechPreferencesStore.defaultFollowSpeechOnPage
+        }
+    )
+
+    private lazy var chatGPTSpeechSourceAdapter = ChatGPTSpeechSourceAdapter(
+        coordinator: assistantSpeechCoordinator,
+        playbackSession: speechPlaybackSessionController,
+        activeSlotIDProvider: { [weak self] in
+            self?.tabStore.activeTabID
+        },
+        supportsSpeechQuery: { [weak self] slotID in
+            self?.activeSlotSupportsSpeech(slotID: slotID) ?? false
+        }
+    )
+
+    private lazy var speechCommandRouter = SpeechCommandRouter(
+        sources: [chatGPTSpeechSourceAdapter],
+        playbackSession: speechPlaybackSessionController,
+        activeSlotIDProvider: { [weak self] in
+            self?.tabStore.activeTabID
         }
     )
 
@@ -152,6 +174,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationWebFocusPending = false
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
+    private(set) var debugSpeechPresentationSynchronizationCount = 0
 #endif
 
     var isVisible: Bool {
@@ -448,6 +471,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
         speechService: SpeechSynthesizing? = nil,
+        speechPlaybackSessionController: SpeechPlaybackSessionController? = nil,
         speechPreferencesStore: SpeechPreferencesStore? = nil,
         speechVoiceCatalog: SpeechVoiceCatalogProviding? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation
@@ -463,10 +487,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
         self.speechPreferencesStore = resolvedSpeechPreferences
         let resolvedSpeechVoiceCatalog = speechVoiceCatalog ?? SpeechVoiceCatalog()
-        self.speechService = speechService ?? SpeechService(
+        let resolvedSpeechService = speechService ?? SpeechService(
             preferences: resolvedSpeechPreferences,
             voiceCatalog: resolvedSpeechVoiceCatalog
         )
+        self.speechPlaybackSessionController = speechPlaybackSessionController
+            ?? SpeechPlaybackSessionController(speechService: resolvedSpeechService)
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
@@ -507,9 +533,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         configureTransientUI()
 
+        // The shared session owns global transport-state presentation. The
+        // ChatGPT coordinator below only reports source-local presentation
+        // facts such as Auto Speak membership and runtime resets.
+        self.speechPlaybackSessionController.onPlaybackStateChange = { [weak self] in
+            self?.synchronizeSpeechPresentation()
+        }
         assistantSpeechCoordinator.onSpeechPresentationChange = { [weak self] in
             self?.synchronizeSpeechPresentation()
         }
+        // Register the ChatGPT source before any WebView lifecycle callback can
+        // deliver an automatic completion into the shared playback session.
+        _ = speechCommandRouter
 
         rootView.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
@@ -745,19 +780,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func prepareForTermination() {
-        assistantSpeechCoordinator.stop()
+        _ = speechCommandRouter.stopCurrentPlayback()
         persistPanelFrame()
     }
 
     @discardableResult
     func readLatestResponseForActiveTab() -> Bool {
-        guard let slotID = tabStore.activeTabID,
-              activeSlotSupportsSpeech(slotID: slotID) else {
-            NSSound.beep()
-            synchronizeSpeechPresentation()
-            return false
-        }
-        guard assistantSpeechCoordinator.readLatestResponse(for: slotID) else {
+        let outcome = speechCommandRouter.readLatestForActiveSlot()
+        guard case let .manualReadAccepted(sourceKind, slotID) = outcome,
+              sourceKind == .chatGPT else {
+            if outcome == .rejected { NSSound.beep() }
             synchronizeSpeechPresentation()
             return false
         }
@@ -767,13 +799,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func replayLatestResponseForActiveTab() -> Bool {
-        guard let slotID = tabStore.activeTabID,
-              activeSlotSupportsSpeech(slotID: slotID) else {
-            NSSound.beep()
-            synchronizeSpeechPresentation()
-            return false
-        }
-        guard assistantSpeechCoordinator.replayLatestResponse(for: slotID) else {
+        let outcome = speechCommandRouter.replayLatestForActiveSlot()
+        guard case let .replayAccepted(sourceKind, slotID) = outcome,
+              sourceKind == .chatGPT else {
+            if outcome == .rejected { NSSound.beep() }
             synchronizeSpeechPresentation()
             return false
         }
@@ -782,39 +811,22 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func readPauseResumeSpeechForActiveTab() {
-        guard let activeSlotID = tabStore.activeTabID else {
+        let outcome = speechCommandRouter.readPauseResumeForActiveSlot()
+        switch outcome {
+        case let .manualReadAccepted(sourceKind, slotID)
+            where sourceKind == .chatGPT:
+            acknowledgeUnreadAfterManualSpeech(slotID: slotID)
+        case .rejected:
             NSSound.beep()
-            synchronizeSpeechPresentation()
-            return
+        default:
+            break
         }
-        guard assistantSpeechCoordinator.currentSpeakingSlotID != activeSlotID else {
-            switch assistantSpeechCoordinator.playbackState {
-            case .idle:
-                readLatestResponseForActiveTab()
-            case .speaking:
-                _ = assistantSpeechCoordinator.pauseCurrentSpeech(for: activeSlotID)
-            case .paused:
-                _ = assistantSpeechCoordinator.resumeCurrentSpeech(for: activeSlotID)
-            case .starting, .pausing, .resuming:
-                // Transitional states are confirmed by SpeechService's
-                // delegate callbacks. Do not turn a second click into a
-                // competing pause/resume request.
-                synchronizeSpeechPresentation()
-            }
-            return
-        }
-        readLatestResponseForActiveTab()
+        synchronizeSpeechPresentation()
     }
 
     func stopSpeechForActiveTab() {
-        guard let activeSlotID = tabStore.activeTabID,
-              assistantSpeechCoordinator.currentSpeakingSlotID == activeSlotID else {
-            return
-        }
-        guard assistantSpeechCoordinator.playbackState != .idle else {
-            return
-        }
-        assistantSpeechCoordinator.stop()
+        _ = speechCommandRouter.stopForActiveSlot()
+        synchronizeSpeechPresentation()
     }
 
     func readLatestOrStopSpeechForActiveTab() {
@@ -824,27 +836,19 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func toggleAutoSpeakForActiveTab() {
-        guard let slotID = tabStore.activeTabID else {
+        if speechCommandRouter.toggleAutoSpeakForActiveSlot() == .rejected {
             NSSound.beep()
-            synchronizeSpeechPresentation()
-            return
         }
-        let canToggle = activeSlotSupportsSpeech(slotID: slotID)
-            || assistantSpeechCoordinator.autoSpeakSlotIDs.contains(slotID)
-        guard canToggle else {
-            NSSound.beep()
-            synchronizeSpeechPresentation()
-            return
-        }
-        assistantSpeechCoordinator.toggleAutoSpeak(for: slotID)
+        synchronizeSpeechPresentation()
     }
 
     func stopSpeech() {
-        assistantSpeechCoordinator.stop()
+        _ = speechCommandRouter.stopCurrentPlayback()
+        synchronizeSpeechPresentation()
     }
 
     func playSpeechPreview(_ requests: [SpeechUtteranceRequest]) {
-        assistantSpeechCoordinator.playPreview(requests)
+        speechCommandRouter.playPreview(requests)
     }
 
     func stopSpeaking() {
@@ -1640,15 +1644,15 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     var debugAutoSpeakSlotIDs: Set<UUID> {
-        assistantSpeechCoordinator.autoSpeakSlotIDs
+        speechCommandRouter.presentation.autoSpeakSlotIDs
     }
 
     var debugCurrentSpeakingSlotID: UUID? {
-        assistantSpeechCoordinator.currentSpeakingSlotID
+        speechCommandRouter.presentation.currentSpeakingSlotID
     }
 
     var debugSpeechPlaybackState: SpeechPlaybackState {
-        assistantSpeechCoordinator.playbackState
+        speechCommandRouter.presentation.playbackState
     }
 
     var debugPendingColdReleaseCount: Int {
@@ -2194,20 +2198,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSpeechPresentation() {
-        let activeSlotID = tabStore.activeTabID
+#if DEBUG
+        debugSpeechPresentationSynchronizationCount += 1
+#endif
         rootView.externalControlZoneView.setSpeechPresentation(
-            SpeechRailPresentation(
-                activeSlotID: activeSlotID,
-                autoSpeakSlotIDs: assistantSpeechCoordinator.autoSpeakSlotIDs,
-                activeSlotAutoSpeakEnabled: activeSlotID.map {
-                    assistantSpeechCoordinator.autoSpeakSlotIDs.contains($0)
-                } ?? false,
-                currentSpeakingSlotID: assistantSpeechCoordinator.currentSpeakingSlotID,
-                playbackState: assistantSpeechCoordinator.playbackState,
-                activeSlotSupportsSpeech: activeSlotID.map {
-                    activeSlotSupportsSpeech(slotID: $0)
-                } ?? false
-            ),
+            speechCommandRouter.presentation.railPresentation,
             activeTabName: tabStore.activeProfile?.name
         )
     }

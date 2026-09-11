@@ -105,6 +105,10 @@
 		A00000000000000000000063 /* UnreadResponseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* UnreadResponseStore.swift */; };
 		A00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */; };
 		A00000000000000000000065 /* UnreadResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000065 /* UnreadResponseTests.swift */; };
+		A00000000000000000000066 /* SpeechPlaybackSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000066 /* SpeechPlaybackSessionController.swift */; };
+		A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000067 /* SpeechSourceRouting.swift */; };
+		A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */; };
+		A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000069 /* SpeechCommandRouterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -218,6 +222,10 @@
 		B00000000000000000000063 /* UnreadResponseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTUnreadResponseCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000065 /* UnreadResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000066 /* SpeechPlaybackSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionController.swift; sourceTree = "<group>"; };
+		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
+		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -387,6 +395,8 @@
 			children = (
 				B00000000000000000000052 /* SpeechSettings.swift */,
 				B00000000000000000000053 /* SpeechService.swift */,
+				B00000000000000000000066 /* SpeechPlaybackSessionController.swift */,
+				B00000000000000000000067 /* SpeechSourceRouting.swift */,
 				B00000000000000000000054 /* SpeechQueue.swift */,
 				B00000000000000000000055 /* SpeechContentCleaner.swift */,
 				B0000000000000000000005E /* MathSpeechNormalizer.swift */,
@@ -444,6 +454,8 @@
 				B00000000000000000000061 /* AttentionSoundTests.swift */,
 				B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */,
 				B00000000000000000000065 /* UnreadResponseTests.swift */,
+				B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */,
+				B00000000000000000000069 /* SpeechCommandRouterTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -621,6 +633,8 @@
 				A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */,
 				A00000000000000000000056 /* SpeechSegmenter.swift in Sources */,
 				A00000000000000000000057 /* AssistantSpeechCoordinator.swift in Sources */,
+				A00000000000000000000066 /* SpeechPlaybackSessionController.swift in Sources */,
+				A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -665,6 +679,8 @@
 				A00000000000000000000061 /* AttentionSoundTests.swift in Sources */,
 				A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */,
 				A00000000000000000000065 /* UnreadResponseTests.swift in Sources */,
+				A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */,
+				A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -90,6 +90,13 @@ struct SpeechQueue {
         return items.removeFirst()
     }
 
+    /// Puts a dequeued item back at the head when the shared transport rejects
+    /// admission. The caller has already removed one item, so the queue's
+    /// bounded capacity remains intact.
+    mutating func prepend(_ item: SpeechQueueItem) {
+        items.insert(item, at: 0)
+    }
+
     mutating func clear() {
         items.removeAll(keepingCapacity: true)
     }

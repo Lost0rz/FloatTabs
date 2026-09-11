@@ -147,14 +147,20 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) -> AssistantSpeechCoordinator {
-        AssistantSpeechCoordinator(
-            speechService: service,
+        let playbackSession = SpeechPlaybackSessionController(speechService: service)
+        let coordinator = AssistantSpeechCoordinator(
+            playbackSession: playbackSession,
             webViewProvider: { _ in webView },
             responseBridgeProvider: { _ in bridge },
             followBridgeProvider: { _ in followBridge },
             activeSlotIDProvider: activeSlotIDProvider,
             followSpeechEnabled: followSpeechEnabled
         )
+        _ = ChatGPTSpeechSourceAdapter(
+            coordinator: coordinator,
+            playbackSession: playbackSession
+        )
+        return coordinator
     }
 
     private func makeFollowPayload(
