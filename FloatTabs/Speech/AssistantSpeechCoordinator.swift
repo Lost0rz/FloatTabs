@@ -307,7 +307,8 @@ final class AssistantSpeechCoordinator {
     /// Manual reading is an explicit user action and therefore works even
     /// without an armed automatic source. It establishes a barrier before
     /// extraction so an automatic result that resolves first can only stage.
-    func readLatestResponse(for slotID: UUID) {
+    @discardableResult
+    func readLatestResponse(for slotID: UUID) -> Bool {
         playbackIntentEpoch &+= 1
         resetFollowState(for: slotID)
         invalidateAllAutomaticPlayback()
@@ -333,14 +334,16 @@ final class AssistantSpeechCoordinator {
             manualIntent: manualIntent
         ) else {
             releaseManualBarrier(intent: manualIntent)
-            return
+            return false
         }
+        return true
     }
 
     /// Replays the latest response from segment one. The response body is not
     /// retained; this deliberately reuses the trusted latest-response bridge
     /// and the same supersession/token invalidation path as manual reading.
-    func replayLatestResponse(for slotID: UUID) {
+    @discardableResult
+    func replayLatestResponse(for slotID: UUID) -> Bool {
         readLatestResponse(for: slotID)
     }
 

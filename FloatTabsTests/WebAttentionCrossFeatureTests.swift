@@ -9,7 +9,7 @@ import XCTest
 /// real production wiring, not the individual pieces Stages A–E already
 /// cover: the pool-created `ChatGPTAttentionBridge` on a real WKWebView →
 /// `WebViewPool.onAttentionObservation` → `PanelController` routing →
-/// `WebAttentionCoordinator` → rail Ready projection → lifecycle protection
+/// `WebAttentionCoordinator` plus unread response projection → lifecycle protection
 /// and fresh-boundary restarts.
 ///
 /// Where a boundary needs time compression (Warm TTL, Warm release timers),
@@ -31,9 +31,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: 4.1 Live observation → Ready → UI projection
+    // MARK: 4.1 Live observation → Attention + unread UI projection
 
-    func testLiveBridgeChainProjectsReadyDotAndNewGenerationClearsItImmediately() throws {
+    func testLiveBridgeChainProjectsUnreadDotAndNewGenerationKeepsIt() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -43,19 +43,20 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // The shell was never presented, so the real router resolves actual
         // visibility from the real (unordered) windows and finishes to Ready.
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
-        // A new generation supersedes Ready and the dot must clear at once.
+        // A new generation supersedes the transient Ready state, but the
+        // independent unread response remains until explicit acknowledgement.
         acceptState(generating: true, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertEqual(controller.attentionReadyCount, 0)
 
         // A later completion while still unseen must create a fresh Ready
@@ -63,7 +64,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(controller.attentionReadyCount, 1)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     // MARK: 4.5 Selected-hidden completion
@@ -89,7 +90,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // router must latch Ready, not Idle.
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertTrue(controller.debugIsHiddenActiveGracePending)
     }
@@ -121,7 +122,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // Off-screen completion latches Ready and must not churn the plan.
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
         XCTAssertEqual(controller.debugInactivePlanToken(slotID: slot.id), planToken)
@@ -151,7 +152,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
         XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
@@ -236,7 +237,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // boundary as well.
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: chat.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: chat.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         let ordinaryD = try materializeRuntime(
             pool: pool, store: store, slotName: "OrdinaryD"
@@ -286,7 +287,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: chat)
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: chat.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: chat.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: chat.id))
 
         makeInactive(lifecycle, profile: ordinaryA)
         makeInactive(lifecycle, profile: ordinaryB)
@@ -330,7 +331,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         observer.webViewWebContentProcessDidTerminate(webView)
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 1)
         let newToken = try XCTUnwrap(controller.debugInactivePlanToken(slotID: slot.id))
@@ -367,12 +368,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         controller.hideFloatTabs()
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // A non-visible acknowledgement must not clear Ready.
         controller.acknowledgeAttentionIfActuallyVisible(slotID: slot.id)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // The test host's AppKit activation state is environment-dependent.
         // Whatever the actual WebView window topology is, the controller's
@@ -384,10 +385,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             coordinator.state(for: slot.id),
             webInteractionRegained ? .idle : .ready
         )
-        XCTAssertEqual(
-            controller.debugIsProjectingReadyAttention(slotID: slot.id),
-            !webInteractionRegained
-        )
+        // Presentation/focus acknowledgement belongs only to transient
+        // Attention Ready. Showing the shell is not unread acknowledgement.
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         // Acknowledgement itself never evicts: the runtime is still resident
         // and no inactive plan exists while the Slot stays selected.
         XCTAssertTrue(pool.contains(slotID: slot.id))
@@ -530,7 +530,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
 
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() async throws {
@@ -644,7 +644,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.8 Committed replacement
 
-    func testCommittedTopLevelReplacementClearsReadyWithoutStaleProjection() throws {
+    func testCommittedTopLevelReplacementClearsAttentionWithoutStaleUnreadProjection() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -656,13 +656,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
-        // A committed top-level document replacement resets the runtime.
+        // A committed top-level document replacement resets the runtime, but
+        // the completed response remains unread until explicit selection.
         observer.webView(webView, didCommit: nil)
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
 
         // A late state message from the superseded document is rejected.
@@ -718,7 +719,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             token: "old-chatgpt-document"
         )
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // A later supported commit reopens attention only through the
         // authorized current-document resync. The live stop control makes the
@@ -1255,7 +1256,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testInstantBackBaselineBeforeConfirmationReestablishesGenerating() throws {
@@ -1505,7 +1506,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testInstantBackFallbackKeepsOrdinaryDidCommitAsTheOnlyReplacementBoundary() throws {
@@ -1579,7 +1580,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // Hiding before the provisional failure must not retroactively change
         // the visibility decision already made at completion time.
@@ -1599,7 +1600,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testHiddenCompletionDuringProvisionalNavigationRemainsReadyBeforeAndAfterFailure() throws {
@@ -1622,7 +1623,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // Physical presentation in this inactive test host does not own Web
         // interaction, so it must not acknowledge Ready. The failed
@@ -1630,7 +1631,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         controller.showFloatTabs()
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         let error = NSError(
             domain: NSURLErrorDomain,
@@ -1647,7 +1648,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(coordinator.readySlotIDs, [slot.id])
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     // MARK: 4.8 Release / rebuild stale callbacks
@@ -1674,7 +1675,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: slot.id))
         XCTAssertFalse(bridge.isInstantBackHandoffPending)
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // Stale callbacks from the invalidated bridge are rejected.
         acceptState(generating: false, bridge: bridge, webView: webView)
@@ -1771,7 +1772,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         acceptBaseline(generating: true, bridge: bridge, webView: webView)
         acceptState(generating: false, bridge: bridge, webView: webView)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
-        XCTAssertTrue(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
 
         // The persisted document contains no attention state of any kind.
         let repositoryURL = try XCTUnwrap(repositoryURLs.first)
@@ -1815,7 +1816,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertEqual(freshCoordinator.state(for: slot.id), .idle)
         XCTAssertTrue(freshCoordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(freshController.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertTrue(freshController.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     // MARK: 4.11 Non-ChatGPT isolation
@@ -1854,7 +1855,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingReadyAttention(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(pool.contains(slotID: slot.id))
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
     }

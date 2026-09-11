@@ -243,8 +243,8 @@ final class BrowserProfileSwitchTests: XCTestCase {
             isResident: true
         )
         let sourceIcon = try XCTUnwrap(tab.displayedIcon)
-        tab.setReadyAttention(true)
-        assertColor(tab.readyAttentionColor, matches: .systemRed)
+        tab.setUnreadResponse(true)
+        assertColor(tab.unreadResponseColor, matches: .systemRed)
 
         tab.setBrowserProfileMenuSnapshot(
             options: [
@@ -254,7 +254,7 @@ final class BrowserProfileSwitchTests: XCTestCase {
         )
 
         XCTAssertTrue(tab.displayedIcon === sourceIcon)
-        assertColor(tab.readyAttentionColor, matches: .systemRed)
+        assertColor(tab.unreadResponseColor, matches: .systemRed)
     }
 
     func testUnsupportedAndFullscreenLockedAssignmentItemsAreDisabledButManageRemainsAvailable() throws {

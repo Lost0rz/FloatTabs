@@ -385,6 +385,13 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
 struct RailOverflowItem: Equatable {
     let slotID: UUID
     let title: String
+    let isUnread: Bool
+
+    init(slotID: UUID, title: String, isUnread: Bool = false) {
+        self.slotID = slotID
+        self.title = title
+        self.isUnread = isUnread
+    }
 }
 
 /// Explicit compact-mode access to Tab views that cannot fit in the rail.
@@ -395,17 +402,29 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     var onPointerMoved: ((NSEvent) -> Void)?
 
     private let imageView = NSImageView()
+    private let unreadResponseLayer = CAShapeLayer()
     private var items: [RailOverflowItem] = []
     private var trackingAreaReference: NSTrackingArea?
     private var isHoverInteractionSuspended = false
 
+    private static let unreadResponseDiameter: CGFloat = 6
+
     var menuItems: [RailOverflowItem] { items }
+    var isShowingUnreadResponse: Bool { !unreadResponseLayer.isHidden }
+    var unreadResponseFrame: NSRect { unreadResponseLayer.frame }
+    var unreadResponseColor: NSColor? {
+        unreadResponseLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
+        unreadResponseLayer.isHidden = true
+        unreadResponseLayer.zPosition = 1
+        layer?.addSublayer(unreadResponseLayer)
 
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
@@ -477,6 +496,11 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
         )
     }
 
+    override func layout() {
+        super.layout()
+        updateUnreadResponseGeometry()
+    }
+
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -488,6 +512,10 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             )
             menuItem.target = self
             menuItem.representedObject = item.slotID.uuidString
+            if item.isUnread {
+                menuItem.image = Self.unreadMarkerImage()
+                menuItem.setAccessibilityLabel("\(item.title) · Unread response")
+            }
             menu.addItem(menuItem)
         }
         return menu
@@ -508,6 +536,12 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
         imageView.image = NSImage(
             systemSymbolName: "ellipsis",
             accessibilityDescription: label
+        )
+        unreadResponseLayer.isHidden = !items.contains(where: \.isUnread)
+        setAccessibilityLabel(
+            items.contains(where: \.isUnread)
+                ? "\(label) · Unread response"
+                : label
         )
         refreshAppearance()
     }
@@ -537,6 +571,33 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             return
         }
         onSelect?(slotID)
+    }
+
+    private func updateUnreadResponseGeometry() {
+        guard layer != nil else { return }
+        let imageFrame = imageView.convert(imageView.bounds, to: self)
+        let diameter = Self.unreadResponseDiameter
+        let frame = NSRect(
+            x: imageFrame.maxX - diameter * 0.75,
+            y: imageFrame.maxY - diameter * 0.75,
+            width: diameter,
+            height: diameter
+        )
+        unreadResponseLayer.frame = frame
+        unreadResponseLayer.path = CGPath(
+            ellipseIn: CGRect(origin: .zero, size: frame.size),
+            transform: nil
+        )
+    }
+
+    private static func unreadMarkerImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 8, height: 8))
+        image.lockFocus()
+        NSColor.systemRed.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 6, height: 6)).fill()
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 }
 
@@ -568,7 +629,7 @@ final class ExternalControlZoneView: NSView {
     private var profiles: [WebAppProfile] = []
     private var activeTabID: UUID?
     private var residentSlotIDs = Set<UUID>()
-    private var readySlotIDs = Set<UUID>()
+    private var unreadSlotIDs = Set<UUID>()
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
@@ -752,7 +813,7 @@ final class ExternalControlZoneView: NSView {
                 isActive: profile.id == activeTabID,
                 isResident: residentSlotIDs.contains(profile.id)
             )
-            view.setReadyAttention(readySlotIDs.contains(profile.id))
+            view.setUnreadResponse(unreadSlotIDs.contains(profile.id))
         }
 
         needsLayout = true
@@ -875,11 +936,11 @@ final class ExternalControlZoneView: NSView {
         }
     }
 
-    func setReadySlotIDs(_ slotIDs: Set<UUID>) {
-        guard readySlotIDs != slotIDs else { return }
-        readySlotIDs = slotIDs
+    func setUnreadSlotIDs(_ slotIDs: Set<UUID>) {
+        guard unreadSlotIDs != slotIDs else { return }
+        unreadSlotIDs = slotIDs
         for (slotID, tab) in tabViews {
-            tab.setReadyAttention(slotIDs.contains(slotID))
+            tab.setUnreadResponse(slotIDs.contains(slotID))
         }
     }
 
@@ -1181,7 +1242,11 @@ final class ExternalControlZoneView: NSView {
                     guard let profile = self.profiles.first(where: { $0.id == id }) else {
                         return nil
                     }
-                    return RailOverflowItem(slotID: id, title: profile.name)
+                    return RailOverflowItem(
+                        slotID: id,
+                        title: profile.name,
+                        isUnread: self.unreadSlotIDs.contains(id)
+                    )
                 }
             )
 
@@ -1965,7 +2030,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private let label = NSTextField(labelWithString: "")
     private let speechBadgeView = NSImageView()
     private let shapeLayer = CAShapeLayer()
-    private let readyAttentionLayer = CAShapeLayer()
+    private let unreadResponseLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
     private var isResident = false
@@ -1988,10 +2053,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var sourceIcon: NSImage?
     private var grayscaleIcon: NSImage?
     private var isAutoSpeakSource = false
+    private var isUnreadResponse = false
     private var speechPlaybackState: SpeechPlaybackState = .idle
 
     private static let grayscaleContext = CIContext(options: nil)
-    private static let readyAttentionDiameter: CGFloat = 6
+    private static let unreadResponseDiameter: CGFloat = 6
 
     var preferredWidth: CGFloat {
         // Resting tabs are icon-only. Only the hovered row fully expands;
@@ -2005,11 +2071,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
-    var isShowingReadyAttention: Bool { !readyAttentionLayer.isHidden }
-    var readyAttentionFrame: NSRect { readyAttentionLayer.frame }
+    var isShowingUnreadResponse: Bool { !unreadResponseLayer.isHidden }
+    var unreadResponseFrame: NSRect { unreadResponseLayer.frame }
     var iconFrame: NSRect { iconView.frame }
-    var readyAttentionColor: NSColor? {
-        readyAttentionLayer.fillColor.flatMap(NSColor.init(cgColor:))
+    var unreadResponseColor: NSColor? {
+        unreadResponseLayer.fillColor.flatMap(NSColor.init(cgColor:))
     }
     var displayedBrowserProfileColor: BrowserProfileColor { browserProfileColor }
     var displayedActiveTabFillColor: NSColor? {
@@ -2035,10 +2101,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         wantsLayer = true
         layer?.masksToBounds = false
         layer?.addSublayer(shapeLayer)
-        readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
-        readyAttentionLayer.isHidden = true
-        readyAttentionLayer.zPosition = 1
-        layer?.addSublayer(readyAttentionLayer)
+        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
+        unreadResponseLayer.isHidden = true
+        unreadResponseLayer.zPosition = 1
+        layer?.addSublayer(unreadResponseLayer)
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
@@ -2112,7 +2178,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         // the registered arrow rect always covers the expanded row.
         window?.invalidateCursorRects(for: self)
         updateShape()
-        updateReadyAttentionGeometry()
+        updateUnreadResponseGeometry()
     }
 
     override func resetCursorRects() {
@@ -2150,9 +2216,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         updateRuntimeToolTip()
     }
 
-    func setReadyAttention(_ ready: Bool) {
-        guard isShowingReadyAttention != ready else { return }
-        readyAttentionLayer.isHidden = !ready
+    func setUnreadResponse(_ unread: Bool) {
+        guard isUnreadResponse != unread else { return }
+        isUnreadResponse = unread
+        unreadResponseLayer.isHidden = !unread
+        updateAccessibilityLabel()
     }
 
     func setSpeechState(
@@ -2579,8 +2647,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             : .secondaryLabelColor
         applyIconAppearance(activeBackground: activeBackground)
         updateShape(activeBackground: activeBackground)
-        readyAttentionLayer.fillColor = NSColor.systemRed.cgColor
-        updateReadyAttentionGeometry()
+        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
+        updateUnreadResponseGeometry()
     }
 
     static func activeBackgroundColor(
@@ -2636,6 +2704,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     private func updateAccessibilityLabel() {
         var parts = [displayedPresentationTitle]
+        if isUnreadResponse {
+            parts.append("Unread response")
+        }
         if isAutoSpeakSource {
             parts.append("Auto Speak enabled")
         }
@@ -2772,18 +2843,18 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         }
     }
 
-    private func updateReadyAttentionGeometry() {
+    private func updateUnreadResponseGeometry() {
         guard layer != nil else { return }
         let iconFrame = iconView.convert(iconView.bounds, to: self)
-        let diameter = Self.readyAttentionDiameter
+        let diameter = Self.unreadResponseDiameter
         let frame = NSRect(
             x: iconFrame.maxX - diameter * 0.75,
             y: iconFrame.maxY - diameter * 0.75,
             width: diameter,
             height: diameter
         )
-        readyAttentionLayer.frame = frame
-        readyAttentionLayer.path = CGPath(
+        unreadResponseLayer.frame = frame
+        unreadResponseLayer.path = CGPath(
             ellipseIn: CGRect(origin: .zero, size: frame.size),
             transform: nil
         )

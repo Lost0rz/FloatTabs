@@ -102,6 +102,9 @@
 		A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* AttentionSoundAssetStore.swift */; };
 		A00000000000000000000061 /* AttentionSoundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* AttentionSoundTests.swift */; };
 		A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */; };
+		A00000000000000000000063 /* UnreadResponseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* UnreadResponseStore.swift */; };
+		A00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */; };
+		A00000000000000000000065 /* UnreadResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000065 /* UnreadResponseTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -212,6 +215,9 @@
 		B00000000000000000000060 /* AttentionSoundAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundAssetStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000061 /* AttentionSoundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechVoiceDefaultsTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000063 /* UnreadResponseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTUnreadResponseCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000065 /* UnreadResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -321,6 +327,7 @@
 				B00000000000000000000014 /* ProfileRepository.swift */,
 				B00000000000000000000023 /* AppPreferencesStore.swift */,
 				B00000000000000000000026 /* FloatTabsBackupService.swift */,
+				B00000000000000000000063 /* UnreadResponseStore.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -351,6 +358,7 @@
 				B00000000000000000000016 /* SlotNavigationObserver.swift */,
 				B0000000000000000000002A /* WebAttentionCoordinator.swift */,
 				B0000000000000000000002C /* ChatGPTAttentionBridge.swift */,
+				B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */,
 				B00000000000000000000048 /* WebSiteAdapter.swift */,
 				B00000000000000000000049 /* GenericWebAdapter.swift */,
 				B0000000000000000000004A /* ChatGPTAdapter.swift */,
@@ -435,6 +443,7 @@
 				B0000000000000000000005F /* MathSpeechNormalizerTests.swift */,
 				B00000000000000000000061 /* AttentionSoundTests.swift */,
 				B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */,
+				B00000000000000000000065 /* UnreadResponseTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -557,6 +566,7 @@
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
+				A00000000000000000000063 /* UnreadResponseStore.swift in Sources */,
 				A00000000000000000000024 /* GlobalSettingsController.swift in Sources */,
 				A00000000000000000000026 /* FloatTabsBackupService.swift in Sources */,
 				A00000000000000000000022 /* BenchmarkControlServer.swift in Sources */,
@@ -586,6 +596,7 @@
 				A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */,
 				A0000000000000000000002A /* WebAttentionCoordinator.swift in Sources */,
 				A0000000000000000000002C /* ChatGPTAttentionBridge.swift in Sources */,
+				A00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift in Sources */,
 				A0000000000000000000002F /* AttentionPresentation.swift in Sources */,
 				A00000000000000000000030 /* WebAttentionRouting.swift in Sources */,
 				A00000000000000000000036 /* BrowserProfile.swift in Sources */,
@@ -653,6 +664,7 @@
 				A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */,
 				A00000000000000000000061 /* AttentionSoundTests.swift in Sources */,
 				A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */,
+				A00000000000000000000065 /* UnreadResponseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
