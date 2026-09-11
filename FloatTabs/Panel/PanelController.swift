@@ -1570,6 +1570,30 @@ final class PanelController: NSObject, NSWindowDelegate {
             .tabView(for: slotID)?.isShowingUnreadResponse ?? false
     }
 
+    /// Test-only forwarding to the actual rail selection callback configured
+    /// by `configureSlotInteractions()`. Keeping this seam here lets
+    /// production-path tests exercise PanelController acknowledgement wiring
+    /// without exposing the root view or reimplementing selection behavior.
+    @discardableResult
+    func debugInvokeRailSelection(slotID: UUID) -> Bool {
+        rootView.externalControlZoneView.onSelect?(slotID)
+        return tabStore.activeTabID == slotID
+    }
+
+    @discardableResult
+    func debugInvokeOverflowSelection(slotID: UUID) -> Bool {
+        guard rootView.externalControlZoneView
+            .debugInvokeOverflowSelection(slotID: slotID) else {
+            return false
+        }
+        return tabStore.activeTabID == slotID
+    }
+
+    var debugOverflowSlotIDs: [UUID] {
+        rootView.externalControlZoneView.layoutSubtreeIfNeeded()
+        return rootView.externalControlZoneView.overflowTabIDs
+    }
+
     var debugAutoSpeakSlotIDs: Set<UUID> {
         assistantSpeechCoordinator.autoSpeakSlotIDs
     }

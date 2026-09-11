@@ -50,6 +50,18 @@ final class UnreadResponseTests: XCTestCase {
         )
     }
 
+    func testMixedTypeCorruptStoreKeepsEveryValidUUID() {
+        defaults.set(
+            [slotA.uuidString, NSNumber(value: 7), "invalid", slotB.uuidString],
+            forKey: UnreadResponseStore.slotIDsKey
+        )
+
+        XCTAssertEqual(
+            UnreadResponseStore(defaults: defaults).unreadSlotIDs,
+            [slotA, slotB]
+        )
+    }
+
     func testPruneRemovesUnknownSlotIDsAndPersistsThePrunedSet() {
         let store = UnreadResponseStore(defaults: defaults)
         store.markUnread(slotA)
@@ -164,6 +176,73 @@ final class UnreadResponseTests: XCTestCase {
         let menuItem = overflow.makeMenu().items.last
         XCTAssertEqual(menuItem?.title, item.title)
         XCTAssertNotNil(menuItem?.image)
+    }
+
+    func testOverflowUnreadProjectionRefreshesWithoutRelayout() throws {
+        let profiles = (0..<8).map { index in
+            makeProfile(name: "Overflow \(index)")
+        }
+        let zone = ExternalControlZoneView(
+            frame: NSRect(x: 0, y: 0, width: 80, height: 270)
+        )
+        zone.apply(profiles: profiles, activeTabID: profiles[0].id)
+        zone.layoutSubtreeIfNeeded()
+
+        let overflow = try XCTUnwrap(
+            zone.subviews.compactMap { $0 as? RailOverflowControl }.first
+        )
+        XCTAssertFalse(zone.overflowTabIDs.isEmpty)
+        let hiddenSlotID = try XCTUnwrap(zone.overflowTabIDs.last)
+        let initialItem = try XCTUnwrap(
+            overflow.menuItems.first(where: { $0.slotID == hiddenSlotID })
+        )
+        XCTAssertFalse(initialItem.isUnread)
+        XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(
+            overflow.accessibilityLabel()?.contains("Unread response") == true
+        )
+
+        // The compact geometry is intentionally not recalculated here. The
+        // unread projection must refresh the existing overflow snapshot alone.
+        zone.setUnreadSlotIDs([hiddenSlotID])
+
+        let unreadItem = try XCTUnwrap(
+            overflow.menuItems.first(where: { $0.slotID == hiddenSlotID })
+        )
+        XCTAssertTrue(unreadItem.isUnread)
+        XCTAssertTrue(overflow.isShowingUnreadResponse)
+        XCTAssertTrue(
+            overflow.accessibilityLabel()?.contains("Unread response") == true
+        )
+        let unreadMenuItem = try XCTUnwrap(
+            overflow.makeMenu().items.first {
+                $0.representedObject as? String == hiddenSlotID.uuidString
+            }
+        )
+        XCTAssertNotNil(unreadMenuItem.image)
+        XCTAssertTrue(
+            unreadMenuItem.accessibilityLabel()?.contains("Unread response") == true
+        )
+
+        zone.setUnreadSlotIDs([])
+
+        let clearedItem = try XCTUnwrap(
+            overflow.menuItems.first(where: { $0.slotID == hiddenSlotID })
+        )
+        XCTAssertFalse(clearedItem.isUnread)
+        XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(
+            overflow.accessibilityLabel()?.contains("Unread response") == true
+        )
+        let clearedMenuItem = try XCTUnwrap(
+            overflow.makeMenu().items.first {
+                $0.representedObject as? String == hiddenSlotID.uuidString
+            }
+        )
+        XCTAssertNil(clearedMenuItem.image)
+        XCTAssertFalse(
+            clearedMenuItem.accessibilityLabel()?.contains("Unread response") == true
+        )
     }
 
     private func makeCoordinator() -> ChatGPTUnreadResponseCoordinator {

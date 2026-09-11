@@ -937,11 +937,11 @@ final class ExternalControlZoneView: NSView {
     }
 
     func setUnreadSlotIDs(_ slotIDs: Set<UUID>) {
-        guard unreadSlotIDs != slotIDs else { return }
         unreadSlotIDs = slotIDs
         for (slotID, tab) in tabViews {
             tab.setUnreadResponse(slotIDs.contains(slotID))
         }
+        synchronizeOverflowItems()
     }
 
     func setSpeechPresentation(
@@ -1060,6 +1060,17 @@ final class ExternalControlZoneView: NSView {
     var overflowControlAccessibilityLabel: String? {
         tabOverflowControl.accessibilityLabel()
     }
+
+#if DEBUG
+    /// Test-only access to the configured control callback. This intentionally
+    /// forwards through the same closure that a real rail/overflow click uses;
+    /// it does not duplicate selection or acknowledgement logic.
+    func debugInvokeOverflowSelection(slotID: UUID) -> Bool {
+        guard overflowTabIDs.contains(slotID) else { return false }
+        tabOverflowControl.onSelect?(slotID)
+        return true
+    }
+#endif
 
     private var railContentViews: [NSView] {
         Array(tabViews.values)
@@ -1237,18 +1248,7 @@ final class ExternalControlZoneView: NSView {
             let overflowIDs = ids.filter { !visibleSet.contains($0) }
             self.visibleTabIDs = visibleIDs
             self.overflowTabIDs = overflowIDs
-            self.tabOverflowControl.setItems(
-                overflowIDs.compactMap { id in
-                    guard let profile = self.profiles.first(where: { $0.id == id }) else {
-                        return nil
-                    }
-                    return RailOverflowItem(
-                        slotID: id,
-                        title: profile.name,
-                        isUnread: self.unreadSlotIDs.contains(id)
-                    )
-                }
-            )
+            self.synchronizeOverflowItems()
 
             var y = ExternalTabMetrics.topOffset
             for id in ids {
@@ -1336,6 +1336,21 @@ final class ExternalControlZoneView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             self?.onActiveTabGeometryChange?()
         }
+    }
+
+    private func synchronizeOverflowItems() {
+        tabOverflowControl.setItems(
+            overflowTabIDs.compactMap { id in
+                guard let profile = profiles.first(where: { $0.id == id }) else {
+                    return nil
+                }
+                return RailOverflowItem(
+                    slotID: id,
+                    title: profile.name,
+                    isUnread: unreadSlotIDs.contains(id)
+                )
+            }
+        )
     }
 
     private var hoverInteractionOwners: [RailHoverInteractionOwner] {

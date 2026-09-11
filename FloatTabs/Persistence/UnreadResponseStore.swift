@@ -17,10 +17,13 @@ final class UnreadResponseStore {
     /// deliberately best-effort so one malformed entry cannot hide valid
     /// unread markers.
     var unreadSlotIDs: Set<UUID> {
-        guard let values = defaults.array(forKey: Self.slotIDsKey) as? [String] else {
+        guard let values = defaults.array(forKey: Self.slotIDsKey) else {
             return []
         }
-        return Set(values.compactMap(UUID.init(uuidString:)))
+        return Set(values.compactMap { value in
+            guard let string = value as? String else { return nil }
+            return UUID(uuidString: string)
+        })
     }
 
     func markUnread(_ slotID: UUID) {
