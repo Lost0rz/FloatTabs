@@ -147,8 +147,9 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) -> AssistantSpeechCoordinator {
-        AssistantSpeechCoordinator(
-            speechService: service,
+        let playbackSession = SpeechPlaybackSessionController(speechService: service)
+        return AssistantSpeechCoordinator(
+            playbackSession: playbackSession,
             webViewProvider: { _ in webView },
             responseBridgeProvider: { _ in bridge },
             followBridgeProvider: { _ in followBridge },

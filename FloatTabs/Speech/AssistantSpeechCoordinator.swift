@@ -40,8 +40,9 @@ struct SpeechRailPresentation: Equatable, Sendable {
     }
 }
 
-/// Coordinates response extraction, privacy-safe cleaning, bounded speech
-/// segmentation, and the one app-global speech service.
+/// Coordinates ChatGPT response extraction, privacy-safe cleaning, bounded
+/// speech segmentation, and ChatGPT's FIFO policy. Shared transport and global
+/// playback state live in SpeechPlaybackSessionController.
 @MainActor
 final class AssistantSpeechCoordinator {
     private struct ExtractionRequest {
@@ -80,7 +81,7 @@ final class AssistantSpeechCoordinator {
         var nextIndex: Int
     }
 
-    private let speechService: SpeechSynthesizing
+    private let playbackSession: SpeechPlaybackSessionController
     private let webViewProvider: @MainActor (UUID) -> WKWebView?
     private let responseBridgeProvider: @MainActor (UUID) -> ChatGPTResponseExtracting?
     private let followBridgeProvider: @MainActor (UUID) -> ChatGPTResponseFollowing?
@@ -113,11 +114,36 @@ final class AssistantSpeechCoordinator {
     private var followGeneration: UInt64 = 0
 
     private(set) var autoSpeakSlotIDs = Set<UUID>()
-    private(set) var currentSpeakingSlotID: UUID?
-    private(set) var playbackState: SpeechPlaybackState = .idle
     var onSpeechPresentationChange: (() -> Void)?
 
     init(
+        playbackSession: SpeechPlaybackSessionController,
+        webViewProvider: @escaping @MainActor (UUID) -> WKWebView?,
+        responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?,
+        followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
+        activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
+        followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
+    ) {
+        self.playbackSession = playbackSession
+        self.webViewProvider = webViewProvider
+        self.responseBridgeProvider = responseBridgeProvider
+        self.followBridgeProvider = followBridgeProvider
+        self.activeSlotIDProvider = activeSlotIDProvider
+        self.followSpeechEnabled = followSpeechEnabled
+        playbackSession.onPlaybackStateChange = { [weak self] in
+            self?.onSpeechPresentationChange?()
+        }
+        // Keep direct Coordinator test construction source-compatible while
+        // still routing through the typed session event boundary. Production
+        // Panel wiring replaces this registration with ChatGPTSpeechSourceAdapter.
+        playbackSession.register(sourceKind: .chatGPT) { [weak self] event in
+            self?.handlePlaybackEvent(event)
+        }
+    }
+
+    /// Compatibility construction for existing source-level clients and tests.
+    /// The session controller is still created first and owns every callback.
+    convenience init(
         speechService: SpeechSynthesizing,
         webViewProvider: @escaping @MainActor (UUID) -> WKWebView?,
         responseBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseExtracting?,
@@ -125,28 +151,20 @@ final class AssistantSpeechCoordinator {
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
     ) {
-        self.speechService = speechService
-        self.webViewProvider = webViewProvider
-        self.responseBridgeProvider = responseBridgeProvider
-        self.followBridgeProvider = followBridgeProvider
-        self.activeSlotIDProvider = activeSlotIDProvider
-        self.followSpeechEnabled = followSpeechEnabled
-        speechService.onUtteranceStarted = { [weak self] token in
-            self?.handleUtteranceStarted(token: token)
-        }
-        speechService.onUtteranceFinished = { [weak self] token in
-            self?.handleUtteranceFinished(token: token)
-        }
-        speechService.onUtterancePaused = { [weak self] token in
-            self?.handleUtterancePaused(token: token)
-        }
-        speechService.onUtteranceContinued = { [weak self] token in
-            self?.handleUtteranceContinued(token: token)
-        }
-        speechService.onUtteranceCancelled = { [weak self] token in
-            self?.handleUtteranceCancelled(token: token)
-        }
+        self.init(
+            playbackSession: SpeechPlaybackSessionController(
+                speechService: speechService
+            ),
+            webViewProvider: webViewProvider,
+            responseBridgeProvider: responseBridgeProvider,
+            followBridgeProvider: followBridgeProvider,
+            activeSlotIDProvider: activeSlotIDProvider,
+            followSpeechEnabled: followSpeechEnabled
+        )
     }
+
+    var currentSpeakingSlotID: UUID? { playbackSession.activeSlotID }
+    var playbackState: SpeechPlaybackState { playbackSession.playbackState }
 
     var pendingQueueCount: Int {
         speechQueue.items.count
@@ -169,12 +187,10 @@ final class AssistantSpeechCoordinator {
             return false
         }
 
-        setPlaybackState(.pausing)
-        let accepted = speechService.pause()
-        if !accepted {
-            setPlaybackState(.speaking)
-        }
-        return accepted
+        return playbackSession.pause(
+            sourceKind: .chatGPT,
+            slotID: slotID
+        )
     }
 
     @discardableResult
@@ -187,28 +203,29 @@ final class AssistantSpeechCoordinator {
         // Resuming is a user review boundary. The current block remains where
         // the user left it; the next source block re-enables normal following.
         followSuspendedSlotIDs.remove(slotID)
-        guard currentItem != nil else {
+        let disposition = playbackSession.resume(
+            sourceKind: .chatGPT,
+            slotID: slotID
+        )
+        switch disposition {
+        case .continuedCurrentUtterance:
+            return true
+        case .resumeAtSegmentBoundary:
             // If the utterance finished just before didPause, AVFoundation no
             // longer has an utterance to continue. Resume the held FIFO stream
             // by starting its next item; the next didStart callback confirms
             // audible playback.
-            setPlaybackState(.resuming)
+            guard playbackSession.beginBoundaryResume() else { return false }
             drainPlayback()
             speakNext()
             if currentItem == nil {
-                setPlaybackState(.idle)
-                setCurrentSpeakingSlot(nil)
+                playbackSession.finishBoundaryResumeWithoutSpeech()
                 return false
             }
             return true
+        case .rejected:
+            return false
         }
-
-        setPlaybackState(.resuming)
-        let accepted = speechService.resume()
-        if !accepted {
-            setPlaybackState(.paused)
-        }
-        return accepted
     }
 
     /// Receives a trusted page-scroll intent from the response content world.
@@ -318,9 +335,7 @@ final class AssistantSpeechCoordinator {
         currentItem = nil
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        speechService.stop()
-        setPlaybackState(.idle)
-        setCurrentSpeakingSlot(nil)
+        playbackSession.stop()
 
         nextManualIntent &+= 1
         let manualIntent = nextManualIntent
@@ -364,9 +379,7 @@ final class AssistantSpeechCoordinator {
         currentItem = nil
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        speechService.stop()
-        setPlaybackState(.idle)
-        setCurrentSpeakingSlot(nil)
+        playbackSession.stop()
         speechBacklog = [SpeechPlaybackBatch(
             responseID: nil,
             requests: requests,
@@ -390,9 +403,7 @@ final class AssistantSpeechCoordinator {
         currentItem = nil
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        speechService.stop()
-        setPlaybackState(.idle)
-        setCurrentSpeakingSlot(nil)
+        playbackSession.stop()
     }
 
     private func suppressCurrentAndPendingSpeech() {
@@ -440,9 +451,7 @@ final class AssistantSpeechCoordinator {
             currentItem = nil
             pausedResponseID = nil
             pausedStreamOrigin = nil
-            speechService.stop()
-            setPlaybackState(.idle)
-            setCurrentSpeakingSlot(nil)
+            playbackSession.stop()
             speakNext()
         }
         spokenResponses.removeValue(forKey: slotID)
@@ -609,11 +618,9 @@ final class AssistantSpeechCoordinator {
         currentItem = nil
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        setPlaybackState(.idle)
         if hasSpeechToPreempt {
-            speechService.stop()
+            playbackSession.stop()
         }
-        setCurrentSpeakingSlot(nil)
 
         guard !requests.isEmpty else {
             releaseManualBarrier(intent: manualIntent)
@@ -873,14 +880,15 @@ final class AssistantSpeechCoordinator {
         currentItem = item
         pausedResponseID = nil
         pausedStreamOrigin = nil
-        setCurrentSpeakingSlot(item.responseID?.slotID)
-        setPlaybackState(.starting)
-        speechService.speak(
-            SpeechPlaybackRequest(
-                text: item.text,
+        _ = playbackSession.speak(
+            context: SpeechPlaybackContext(
+                sourceKind: .chatGPT,
+                slotID: item.responseID?.slotID,
                 transportToken: item.sequence,
-                languageRole: item.languageRole
-            )
+                origin: item.origin
+            ),
+            text: item.text,
+            languageRole: item.languageRole
         )
     }
 
@@ -929,113 +937,90 @@ final class AssistantSpeechCoordinator {
         }
     }
 
-    private func setCurrentSpeakingSlot(_ slotID: UUID?) {
-        guard currentSpeakingSlotID != slotID else { return }
-        currentSpeakingSlotID = slotID
-        onSpeechPresentationChange?()
-    }
+    /// Receives only typed events routed by the shared playback authority.
+    /// Transport callbacks never enter this coordinator directly.
+    func handlePlaybackEvent(_ event: SpeechPlaybackEvent) {
+        guard event.context.sourceKind == .chatGPT else { return }
 
-    private func setPlaybackState(_ state: SpeechPlaybackState) {
-        guard playbackState != state else { return }
-        playbackState = state
-        onSpeechPresentationChange?()
-    }
+        switch event {
+        case let .started(context):
+            guard let currentItem,
+                  currentItem.sequence == context.transportToken else {
+                return
+            }
+            if currentItem.origin == .automatic,
+               let responseID = currentItem.responseID {
+                // Queue admission only proves that the response is pending.
+                // Mark it spoken only after the shared authority confirms start.
+                spokenResponses[responseID.slotID, default: []].insert(responseID)
+            }
+            followCurrentItem()
 
-    private func handleUtteranceStarted(token: UInt64) {
-        guard let currentItem,
-              currentItem.sequence == token,
-              playbackState == .starting else {
-            return
-        }
-        if currentItem.origin == .automatic,
-           let responseID = currentItem.responseID {
-            // Queue admission only proves that the response is pending. Mark
-            // it as spoken only after AVFoundation confirms its first start.
-            spokenResponses[responseID.slotID, default: []].insert(responseID)
-        }
-        setPlaybackState(.speaking)
-        followCurrentItem()
-    }
+        case let .paused(context):
+            // The shared controller has already entered .paused. Keeping this
+            // guard makes a late/foreign event harmless to the ChatGPT FIFO.
+            guard currentItem?.sequence == context.transportToken else { return }
 
-    private func handleUtteranceFinished(token: UInt64) {
-        guard let currentItem,
-              currentItem.sequence == token else {
-            return
-        }
-        let finishedItem = currentItem
-        let finishedSlotID = finishedItem.responseID?.slotID
-        let pauseReachedBoundary = playbackState == .pausing || playbackState == .paused
-        self.currentItem = nil
+        case let .continued(context):
+            guard currentItem?.sequence == context.transportToken else { return }
 
-        if pauseReachedBoundary,
-           !speechQueue.isEmpty || !speechBacklog.isEmpty {
-            pausedResponseID = finishedItem.responseID
-            pausedStreamOrigin = finishedItem.origin
-            setPlaybackState(.paused)
-            return
-        }
+        case let .finished(context, boundary):
+            guard let currentItem,
+                  currentItem.sequence == context.transportToken else {
+                return
+            }
+            let finishedItem = currentItem
+            let finishedSlotID = finishedItem.responseID?.slotID
+            self.currentItem = nil
+            let pauseReachedBoundary = boundary == .pausedAtSegmentBoundary
 
-        pausedResponseID = nil
-        pausedStreamOrigin = nil
-        setPlaybackState(.idle)
-        if speechQueue.isEmpty {
-            setCurrentSpeakingSlot(nil)
-        }
-        drainPlayback()
-        speakNext()
-        if let finishedSlotID,
-           currentSpeakingSlotID != finishedSlotID {
-            // Manual scroll suspension belongs to the continuous speech
-            // session, not to a permanently remembered Slot. Keep it while
-            // the same Slot has another queued item, but release it when the
-            // stream ends or moves to another Slot.
-            followSuspendedSlotIDs.remove(finishedSlotID)
-        }
-    }
+            if pauseReachedBoundary,
+               !speechQueue.isEmpty || !speechBacklog.isEmpty {
+                pausedResponseID = finishedItem.responseID
+                pausedStreamOrigin = finishedItem.origin
+                return
+            }
 
-    private func handleUtterancePaused(token: UInt64) {
-        guard let currentItem,
-              currentItem.sequence == token,
-              playbackState == .pausing else {
-            return
-        }
-        setPlaybackState(.paused)
-    }
+            pausedResponseID = nil
+            pausedStreamOrigin = nil
+            if pauseReachedBoundary {
+                playbackSession.dismissPausedBoundary()
+            }
+            drainPlayback()
+            speakNext()
+            if let finishedSlotID,
+               currentSpeakingSlotID != finishedSlotID {
+                // Manual scroll suspension belongs to the continuous speech
+                // session, not to a permanently remembered Slot. Keep it while
+                // the same Slot has another queued item, but release it when
+                // the stream ends or moves to another Slot.
+                followSuspendedSlotIDs.remove(finishedSlotID)
+            }
 
-    private func handleUtteranceContinued(token: UInt64) {
-        guard let currentItem,
-              currentItem.sequence == token,
-              playbackState == .resuming else {
-            return
-        }
-        setPlaybackState(.speaking)
-    }
+        case let .cancelled(context):
+            guard let currentItem,
+                  currentItem.sequence == context.transportToken else {
+                return
+            }
 
-    private func handleUtteranceCancelled(token: UInt64) {
-        guard let currentItem,
-              currentItem.sequence == token else {
-            return
+            // Cancellation is a terminal transport event, not a finish event.
+            // Drop only this response's remainder. Other responses may already
+            // be queued behind it and must remain eligible for FIFO playback.
+            let cancelledItem = currentItem
+            self.currentItem = nil
+            pausedResponseID = nil
+            pausedStreamOrigin = nil
+            if let responseID = cancelledItem.responseID {
+                suppressedResponses[responseID.slotID, default: []].insert(responseID)
+                invalidateAutomaticResponse(responseID)
+            } else {
+                // Preview has no response identity, so use its playback origin
+                // as the ownership boundary. Automatic extraction,
+                // reservations, queued items, and backlog remain eligible.
+                removePreviewPlayback()
+            }
+            drainPlayback()
+            speakNext()
         }
-
-        // Cancellation is a terminal transport event, not a finish event.
-        // Drop only this response's remainder. Other responses may already be
-        // queued behind it and must remain eligible for FIFO playback.
-        let cancelledItem = currentItem
-        self.currentItem = nil
-        pausedResponseID = nil
-        pausedStreamOrigin = nil
-        if let responseID = cancelledItem.responseID {
-            suppressedResponses[responseID.slotID, default: []].insert(responseID)
-            invalidateAutomaticResponse(responseID)
-        } else {
-            // Preview has no response identity, so use its playback origin as
-            // the ownership boundary. Automatic extraction, reservations,
-            // queued items, and backlog remain eligible for FIFO playback.
-            removePreviewPlayback()
-        }
-        setPlaybackState(.idle)
-        setCurrentSpeakingSlot(nil)
-        drainPlayback()
-        speakNext()
     }
 }

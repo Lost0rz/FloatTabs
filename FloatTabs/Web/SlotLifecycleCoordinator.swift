@@ -19,6 +19,7 @@ final class SlotLifecycleCoordinator {
     typealias MediaPauseAction = (UUID) -> Void
     typealias RuntimeReleasedHandler = @MainActor (WebAppProfile) -> Void
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
+    typealias SpeechProtectionQuery = @MainActor (UUID) -> Bool
 
     private struct InactivePlan {
         let token: UUID
@@ -38,6 +39,7 @@ final class SlotLifecycleCoordinator {
     private let mediaPauseAction: MediaPauseAction
     private let onRuntimeReleased: RuntimeReleasedHandler
     private let attentionProtectionQuery: AttentionProtectionQuery
+    private let speechProtectionQuery: SpeechProtectionQuery
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
@@ -62,6 +64,7 @@ final class SlotLifecycleCoordinator {
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
         attentionProtectionQuery: @escaping AttentionProtectionQuery = { _ in false },
+        speechProtectionQuery: @escaping SpeechProtectionQuery = { _ in false },
         installsMemoryPressureSource: Bool = true
     ) {
         self.webViewPool = webViewPool
@@ -83,6 +86,7 @@ final class SlotLifecycleCoordinator {
         }
         self.onRuntimeReleased = onRuntimeReleased
         self.attentionProtectionQuery = attentionProtectionQuery
+        self.speechProtectionQuery = speechProtectionQuery
 
         if installsMemoryPressureSource {
             configureMemoryPressureSource()
@@ -214,7 +218,8 @@ final class SlotLifecycleCoordinator {
               profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
               webViewPool.contains(slotID: slotID),
               !isVisibleSlot(slotID),
-              !attentionProtectionQuery(slotID) else {
+              !attentionProtectionQuery(slotID),
+              !speechProtectionQuery(slotID) else {
             return
         }
 
@@ -429,7 +434,7 @@ final class SlotLifecycleCoordinator {
                 if wasProtected, profile.residencyPolicy == .warm {
                     self.markWarmAsMostRecent(profile.id)
                 }
-                guard !self.attentionProtectionQuery(profile.id) else {
+                guard !self.isProactivelyProtected(slotID: profile.id) else {
                     return
                 }
                 self.scheduleRelease(for: profile, plan: plan)
@@ -556,6 +561,7 @@ final class SlotLifecycleCoordinator {
                 !isVisibleSlot(slotID)
                     && !mediaProtectedSlotIDs.contains(slotID)
                     && !attentionProtectionQuery(slotID)
+                    && !speechProtectionQuery(slotID)
                     && webViewPool.contains(slotID: slotID)
                     && inactivePlans[slotID]?.residencyPolicy == .warm
             }
@@ -621,5 +627,6 @@ final class SlotLifecycleCoordinator {
     private func isProactivelyProtected(slotID: UUID) -> Bool {
         mediaProtectedSlotIDs.contains(slotID)
             || attentionProtectionQuery(slotID)
+            || speechProtectionQuery(slotID)
     }
 }

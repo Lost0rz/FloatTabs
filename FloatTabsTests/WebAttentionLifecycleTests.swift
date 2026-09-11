@@ -24,6 +24,48 @@ final class WebAttentionLifecycleTests: XCTestCase {
         attentionProtected = false
     }
 
+    func testIndependentSpeechProtectionBlocksColdRelease() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "SpeechProtectedCold", policy: .cold)
+        _ = try pool.webView(for: profile)
+        var speechProtected = true
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            speechProtectionQuery: { _ in speechProtected }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 70)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        speechProtected = false
+        lifecycle.reconcile(profiles: [profile])
+    }
+
+    func testIndependentSpeechProtectionBlocksWarmEvictionAndMemoryPressure() throws {
+        let pool = makePool()
+        let protected = makeProfile(name: "SpeechProtectedWarm", policy: .warm)
+        let eligible = makeProfile(name: "SpeechEligibleWarm", policy: .warm)
+        _ = try pool.webView(for: protected)
+        _ = try pool.webView(for: eligible)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 60,
+            warmResidentLimit: 1,
+            speechProtectionQuery: { $0 == protected.id }
+        )
+
+        makeInactive(lifecycle, profile: protected)
+        makeInactive(lifecycle, profile: eligible)
+        XCTAssertTrue(pool.contains(slotID: protected.id))
+        XCTAssertTrue(pool.contains(slotID: eligible.id))
+
+        lifecycle.handleMemoryPressure(.critical)
+        XCTAssertTrue(pool.contains(slotID: protected.id))
+        XCTAssertFalse(pool.contains(slotID: eligible.id))
+    }
+
     func testInactiveWarmAttentionProtectedSurvivesWarmTTL() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "ProtectedWarm", policy: .warm)
@@ -509,7 +551,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         mediaProtectionPollDelay: TimeInterval = 0.01,
         warmResidentLimit: Int = 2,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
-        attentionProtectionQuery: @escaping SlotLifecycleCoordinator.AttentionProtectionQuery = { _ in false }
+        attentionProtectionQuery: @escaping SlotLifecycleCoordinator.AttentionProtectionQuery = { _ in false },
+        speechProtectionQuery: @escaping SlotLifecycleCoordinator.SpeechProtectionQuery = { _ in false }
     ) -> SlotLifecycleCoordinator {
         let container = WebPanelContainerView(
             frame: NSRect(x: 0, y: 0, width: 430, height: 820)
@@ -525,6 +568,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
             warmResidentLimit: warmResidentLimit,
             mediaPlayingQuery: mediaPlayingQuery,
             attentionProtectionQuery: attentionProtectionQuery,
+            speechProtectionQuery: speechProtectionQuery,
             installsMemoryPressureSource: false
         )
     }
