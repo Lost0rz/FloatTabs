@@ -85,6 +85,31 @@ final class SpeechPlaybackSessionControllerTests: XCTestCase {
         XCTAssertEqual(events, [.started(playbackContext)])
     }
 
+    func testAssistantConstructionDoesNotReplaceGlobalStateObserver() {
+        let service = SessionControllerSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        var stateChangeCount = 0
+        session.onPlaybackStateChange = { stateChangeCount += 1 }
+
+        _ = AssistantSpeechCoordinator(
+            playbackSession: session,
+            webViewProvider: { _ in nil },
+            responseBridgeProvider: { _ in nil }
+        )
+
+        let playbackContext = context(sourceSequence: 101)
+        XCTAssertTrue(session.speak(
+            context: playbackContext,
+            text: "Hello.",
+            languageRole: .english
+        ))
+        XCTAssertEqual(stateChangeCount, 1)
+
+        let callbackToken = service.spokenRequests[0].transportToken
+        service.emitStart(callbackToken)
+        XCTAssertEqual(stateChangeCount, 2)
+    }
+
     func testTransportCallbacksDriveTheSharedStateMachine() {
         let service = SessionControllerSpeechService()
         let session = SpeechPlaybackSessionController(speechService: service)

@@ -130,9 +130,6 @@ final class AssistantSpeechCoordinator {
         self.followBridgeProvider = followBridgeProvider
         self.activeSlotIDProvider = activeSlotIDProvider
         self.followSpeechEnabled = followSpeechEnabled
-        playbackSession.onPlaybackStateChange = { [weak self] in
-            self?.onSpeechPresentationChange?()
-        }
     }
 
     /// Compatibility construction for existing source-level clients and tests.

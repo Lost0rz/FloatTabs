@@ -295,28 +295,31 @@ final class SpeechCommandRouter {
     @discardableResult
     func stopCurrentPlayback() -> SpeechCommandOutcome {
         let activeContext = playbackSession.activeContext
-        let targetSources: [SpeechSourceAdapter]
-        if let activeContext,
-           let source = sources[activeContext.sourceKind] {
-            targetSources = [source]
-        } else {
-            // With no live transport, global Stop still has to clear pending
-            // extraction/queue work. C1 has one registered source, while this
-            // iteration keeps the global command independent of its kind.
-            targetSources = orderedSources
+        let activeSourceKind = activeContext?.sourceKind
+        var targetSources = orderedSources
+        if let activeSourceKind,
+           let activeIndex = targetSources.firstIndex(where: {
+               $0.kind == activeSourceKind
+           }) {
+            // Active ownership changes ordering and outcome priority only. It
+            // must never remove the other registered sources from Global Stop.
+            let activeSource = targetSources.remove(at: activeIndex)
+            targetSources.insert(activeSource, at: 0)
         }
         guard !targetSources.isEmpty else {
             return .noOp
         }
 
-        var stoppedSource: SpeechSourceAdapter?
-        for source in targetSources where source.stopCurrentPlayback() {
-            stoppedSource = stoppedSource ?? source
-        }
+        let stoppedSources = targetSources.filter { $0.stopCurrentPlayback() }
+        let stoppedSource = activeSourceKind.flatMap { activeSourceKind in
+            stoppedSources.first { $0.kind == activeSourceKind }
+        } ?? stoppedSources.first
         guard let stoppedSource else { return .noOp }
         return .stopped(
             sourceKind: stoppedSource.kind,
-            slotID: activeContext?.slotID
+            slotID: stoppedSource.kind == activeSourceKind
+                ? activeContext?.slotID
+                : nil
         )
     }
 

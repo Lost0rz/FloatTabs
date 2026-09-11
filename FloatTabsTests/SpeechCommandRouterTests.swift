@@ -277,6 +277,37 @@ final class SpeechCommandRouterTests: XCTestCase {
         XCTAssertEqual(adapter.globalStopCount, 1)
     }
 
+    func testGlobalStopRoutesActiveTransportThroughSourceGlobalStop() {
+        let slotID = UUID()
+        let service = RouterSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let adapter = TestSpeechSourceAdapter(slotID: slotID)
+        adapter.session = session
+        let router = SpeechCommandRouter(
+            sources: [adapter],
+            playbackSession: session,
+            activeSlotIDProvider: { slotID }
+        )
+        let context = SpeechPlaybackContext(
+            sourceKind: .chatGPT,
+            slotID: slotID,
+            sourceSequence: 40,
+            origin: .manual
+        )
+
+        _ = session.speak(context: context, text: "Stop.", languageRole: .english)
+        let callbackToken = service.spokenRequests[0].transportToken
+        service.emitStart(callbackToken)
+
+        XCTAssertEqual(
+            router.stopCurrentPlayback(),
+            .stopped(sourceKind: .chatGPT, slotID: slotID)
+        )
+        XCTAssertEqual(adapter.globalStopCount, 1)
+        XCTAssertEqual(session.playbackState, .idle)
+        XCTAssertNil(session.activeContext)
+    }
+
     func testAutoSpeakAllowsArmedUnsupportedSlotAndReportsToggle() {
         let slotID = UUID()
         let session = SpeechPlaybackSessionController(speechService: RouterSpeechService())

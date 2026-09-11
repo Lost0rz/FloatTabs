@@ -174,6 +174,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationWebFocusPending = false
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
+    private(set) var debugSpeechPresentationSynchronizationCount = 0
 #endif
 
     var isVisible: Bool {
@@ -532,6 +533,12 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         configureTransientUI()
 
+        // The shared session owns global transport-state presentation. The
+        // ChatGPT coordinator below only reports source-local presentation
+        // facts such as Auto Speak membership and runtime resets.
+        self.speechPlaybackSessionController.onPlaybackStateChange = { [weak self] in
+            self?.synchronizeSpeechPresentation()
+        }
         assistantSpeechCoordinator.onSpeechPresentationChange = { [weak self] in
             self?.synchronizeSpeechPresentation()
         }
@@ -2191,6 +2198,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSpeechPresentation() {
+#if DEBUG
+        debugSpeechPresentationSynchronizationCount += 1
+#endif
         rootView.externalControlZoneView.setSpeechPresentation(
             speechCommandRouter.presentation.railPresentation,
             activeTabName: tabStore.activeProfile?.name
