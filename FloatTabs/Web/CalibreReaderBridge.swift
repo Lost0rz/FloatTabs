@@ -116,6 +116,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     private var documentGeneration: UInt64 = 0
     private(set) var currentDocumentIdentity: CalibreReaderDocumentIdentity?
     private var runtimeReady = false
+    private var readinessObserverGeneration: UInt64?
     private var pendingExtractions: [UUID: PageCompletion] = [:]
     private var pendingAdvance: (
         identity: CalibreReadingUnitIdentity,
@@ -169,6 +170,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     func handleNavigationCommit(_ committedURL: URL?) {
         documentGeneration &+= 1
         runtimeReady = false
+        readinessObserverGeneration = nil
         currentDocumentIdentity = Self.documentIdentity(
             slotID: slotID,
             generation: documentGeneration,
@@ -209,17 +211,28 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             }
             guard let webView,
                   let expectedDocument,
-                  self.isCurrent(expectedDocument: expectedDocument, webView: webView),
-                  error == nil,
+                  self.isCurrent(expectedDocument: expectedDocument, webView: webView) else {
+                completion(false)
+                return
+            }
+            guard error == nil,
                   let result = value as? [String: Any],
                   result["valid"] as? Bool == true,
                   result["kind"] as? String == expectedDocument.readerKind.rawValue else {
                 self.runtimeReady = false
+                if let result = value as? [String: Any],
+                   result["readinessPending"] as? Bool == true {
+                    self.installReaderReadinessObserver(
+                        expectedDocument: expectedDocument,
+                        webView: webView
+                    )
+                }
                 self.onCandidateChange(self.slotID)
                 completion(false)
                 return
             }
             self.runtimeReady = true
+            self.readinessObserverGeneration = nil
             self.installRelocationObserver(
                 expectedDocument: expectedDocument,
                 webView: webView
@@ -295,7 +308,12 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         }
         pendingAdvance = (identity, transitionToken, completion)
         evaluate(
-            Self.advanceScript(startCFI: identity.startCFI, endCFI: identity.endCFI),
+            Self.advanceScript(
+                startCFI: identity.startCFI,
+                endCFI: identity.endCFI,
+                generation: expectedDocument.documentGeneration,
+                transitionToken: transitionToken
+            ),
             in: webView
         ) { [weak self, weak webView] value, error in
             guard let self,
@@ -332,6 +350,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     func handleRuntimeReplacement() {
         documentGeneration &+= 1
         runtimeReady = false
+        readinessObserverGeneration = nil
         currentDocumentIdentity = nil
         cancelPendingWork()
         onRuntimeReset(slotID)
@@ -344,6 +363,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         cancelPendingWork()
         currentDocumentIdentity = nil
         runtimeReady = false
+        readinessObserverGeneration = nil
         userContentController?.removeScriptMessageHandler(
             forName: Self.messageHandlerName,
             contentWorld: Self.contentWorld
@@ -358,20 +378,60 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
+        guard let (document, body) = validatedPageMessage(message) else {
+            return
+        }
+
+        switch body["event"] as? String {
+        case "readerReady":
+            guard readinessObserverGeneration == document.documentGeneration else {
+                return
+            }
+            readinessObserverGeneration = nil
+            detectCurrentReader()
+        case "advanceFailed":
+            guard let pendingAdvance,
+                  let eventToken = body["transitionToken"] as? NSNumber,
+                  eventToken.uint64Value == pendingAdvance.transitionToken else {
+                return
+            }
+            self.pendingAdvance = nil
+            pendingAdvance.completion(false)
+        case "relocated":
+            handleRelocatedMessage(body, document: document)
+        default:
+            return
+        }
+    }
+
+    private func validatedPageMessage(
+        _ message: WKScriptMessage
+    ) -> (CalibreReaderDocumentIdentity, [String: Any])? {
         guard !isInvalidated,
               let attachedWebView = webView,
-              message.webView === attachedWebView,
-              message.frameInfo.isMainFrame,
               let document = currentDocumentIdentity,
-              Self.matches(
-                  message.frameInfo.securityOrigin,
+              Self.pageMessagePassesSecurityContract(
+                  messageWebView: message.webView,
+                  attachedWebView: attachedWebView,
+                  isMainFrame: message.frameInfo.isMainFrame,
+                  originScheme: message.frameInfo.securityOrigin.protocol,
+                  originHost: message.frameInfo.securityOrigin.host,
+                  originPort: message.frameInfo.securityOrigin.port,
                   documentOrigin: document.origin
               ),
               let body = message.body as? [String: Any],
-              body["event"] as? String == "relocated",
               let eventGeneration = body["generation"] as? NSNumber,
-              eventGeneration.uint64Value == document.documentGeneration,
-              let startCFI = body["startCFI"] as? String,
+              eventGeneration.uint64Value == document.documentGeneration else {
+            return nil
+        }
+        return (document, body)
+    }
+
+    private func handleRelocatedMessage(
+        _ body: [String: Any],
+        document: CalibreReaderDocumentIdentity
+    ) {
+        guard let startCFI = body["startCFI"] as? String,
               let endCFI = body["endCFI"] as? String,
               !startCFI.isEmpty,
               !endCFI.isEmpty else {
@@ -413,6 +473,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         const reader = window.reader;
         const rendition = reader && reader.rendition;
         const book = reader && reader.book;
+        const opened = book && book.opened;
         const location = rendition && typeof rendition.currentLocation === 'function';
         const next = rendition && typeof rendition.next === 'function';
         const on = rendition && typeof rendition.on === 'function';
@@ -424,10 +485,40 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         const kind = routeKind === 'kepub' || routeKind === 'epub' ? routeKind : bookUrlKind;
         return {
             valid: !!(reader && book && book.package && rendition && location && next && on),
+            readinessPending: !!(reader && book && !book.package
+                && opened && typeof opened.then === 'function'),
             kind: kind
         };
     })()
     """
+
+    static func readerReadinessObserverScript(generation: UInt64) -> String {
+        let generation = String(generation)
+        let handler = Self.jsonString(Self.messageHandlerName)
+        return """
+        (() => {
+            const reader = window.reader;
+            const book = reader && reader.book;
+            const opened = book && book.opened;
+            if (!book || !opened || typeof opened.then !== 'function') return false;
+            const marker = '__floatTabsCalibreReaderReadinessGeneration';
+            if (window[marker] === (\(generation))) return true;
+            window[marker] = (\(generation));
+            opened.then(
+                () => {
+                    const handler = window.webkit && window.webkit.messageHandlers[\(handler)];
+                    if (!handler) return;
+                    handler.postMessage({
+                        event: 'readerReady',
+                        generation: \(generation)
+                    });
+                },
+                () => {}
+            );
+            return true;
+        })()
+        """
+    }
 
     static let currentReadingUnitScript = """
     (() => {
@@ -504,9 +595,17 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     })()
     """
 
-    static func advanceScript(startCFI: String, endCFI: String) -> String {
+    static func advanceScript(
+        startCFI: String,
+        endCFI: String,
+        generation: UInt64 = 0,
+        transitionToken: UInt64 = 0
+    ) -> String {
         let start = Self.jsonString(startCFI)
         let end = Self.jsonString(endCFI)
+        let generation = String(generation)
+        let transitionToken = String(transitionToken)
+        let handler = Self.jsonString(Self.messageHandlerName)
         return """
         (() => {
             const reader = window.reader;
@@ -523,7 +622,21 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
                 return { valid: false, requested: false };
             }
             try {
-                rendition.next();
+                const result = rendition.next();
+                if (result && typeof result.then === 'function') {
+                    result.then(
+                        () => {},
+                        () => {
+                            const handler = window.webkit && window.webkit.messageHandlers[\(handler)];
+                            if (!handler) return;
+                            handler.postMessage({
+                                event: 'advanceFailed',
+                                generation: \(generation),
+                                transitionToken: \(transitionToken)
+                            });
+                        }
+                    );
+                }
                 return { valid: true, requested: true };
             } catch (_) {
                 return { valid: false, requested: false };
@@ -547,6 +660,29 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             ),
             in: webView
         ) { _, _ in }
+    }
+
+    private func installReaderReadinessObserver(
+        expectedDocument: CalibreReaderDocumentIdentity,
+        webView: WKWebView
+    ) {
+        guard readinessObserverGeneration != expectedDocument.documentGeneration else {
+            return
+        }
+        readinessObserverGeneration = expectedDocument.documentGeneration
+        evaluate(
+            Self.readerReadinessObserverScript(
+                generation: expectedDocument.documentGeneration
+            ),
+            in: webView
+        ) { [weak self, weak webView] value, _ in
+            guard let self,
+                  let webView,
+                  self.isCurrent(expectedDocument: expectedDocument, webView: webView),
+                  (value as? Bool) == true else {
+                return
+            }
+        }
     }
 
     static func relocationObserverScript(generation: UInt64) -> String {
@@ -620,23 +756,47 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         )
     }
 
-    private static func matches(
-        _ securityOrigin: WKSecurityOrigin,
+    static func pageMessagePassesSecurityContract(
+        messageWebView: WKWebView?,
+        attachedWebView: WKWebView,
+        isMainFrame: Bool,
+        originScheme: String,
+        originHost: String,
+        originPort: Int,
         documentOrigin: URL
     ) -> Bool {
-        guard let scheme = documentOrigin.scheme,
-              let host = documentOrigin.host,
-              securityOrigin.protocol.caseInsensitiveCompare(scheme) == .orderedSame,
-              securityOrigin.host.caseInsensitiveCompare(host) == .orderedSame else {
+        guard let messageWebView,
+              messageWebView === attachedWebView,
+              isMainFrame else {
+            return false
+        }
+        return originMatches(
+            scheme: originScheme,
+            host: originHost,
+            port: originPort,
+            documentOrigin: documentOrigin
+        )
+    }
+
+    private static func originMatches(
+        scheme: String,
+        host: String,
+        port: Int,
+        documentOrigin: URL
+    ) -> Bool {
+        guard let documentScheme = documentOrigin.scheme,
+              let documentHost = documentOrigin.host,
+              scheme.caseInsensitiveCompare(documentScheme) == .orderedSame,
+              host.caseInsensitiveCompare(documentHost) == .orderedSame else {
             return false
         }
 
         let defaultPort: Int?
-        switch scheme.lowercased() {
+        switch documentScheme.lowercased() {
         case "http": defaultPort = 80
         case "https": defaultPort = 443
         default: defaultPort = nil
         }
-        return securityOrigin.port == (documentOrigin.port ?? defaultPort)
+        return port == (documentOrigin.port ?? defaultPort)
     }
 }

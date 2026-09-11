@@ -24,6 +24,36 @@ enum CalibreReaderTextNormalizer {
     }
 }
 
+@MainActor
+protocol CalibreSpeechWatchdogScheduling: AnyObject {
+    func schedule(
+        after delay: TimeInterval,
+        operation: @escaping @MainActor () -> Void
+    ) -> AnyObject
+    func cancel(_ task: AnyObject)
+}
+
+@MainActor
+final class CalibreSpeechWatchdogScheduler: CalibreSpeechWatchdogScheduling {
+    func schedule(
+        after delay: TimeInterval,
+        operation: @escaping @MainActor () -> Void
+    ) -> AnyObject {
+        let workItem = DispatchWorkItem {
+            operation()
+        }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(0, delay),
+            execute: workItem
+        )
+        return workItem
+    }
+
+    func cancel(_ task: AnyObject) {
+        (task as? DispatchWorkItem)?.cancel()
+    }
+}
+
 /// Source-local continuous-reading lifecycle. The shared Session remains the
 /// sole AV/state authority; this coordinator owns only the reader unit and
 /// the asynchronous relocation transition between units.
@@ -37,12 +67,15 @@ final class CalibreSpeechCoordinator {
 
     private let playbackSession: SpeechPlaybackSessionController
     private let bridgeProvider: @MainActor (UUID) -> CalibreReaderAccess?
+    private let watchdogScheduler: CalibreSpeechWatchdogScheduling
+    private let relocationWatchdogDelay: TimeInterval
     private var ownedSession: OwnedSession?
     private var currentUnit: CalibreReadingUnitIdentity?
     private var sourceSequence: UInt64 = 0
     private var operationGeneration: UInt64 = 0
     private var nextTransitionToken: UInt64 = 0
     private var pendingTransitionToken: UInt64?
+    private var relocationWatchdog: AnyObject?
     private var segments: [SpeechUtteranceRequest] = []
     private var nextSegmentIndex = 0
     private var currentSegmentIndex: Int?
@@ -50,12 +83,28 @@ final class CalibreSpeechCoordinator {
 
     var onPresentationChange: (() -> Void)?
 
-    init(
+    convenience init(
         playbackSession: SpeechPlaybackSessionController,
         bridgeProvider: @escaping @MainActor (UUID) -> CalibreReaderAccess?
     ) {
+        self.init(
+            playbackSession: playbackSession,
+            bridgeProvider: bridgeProvider,
+            watchdogScheduler: CalibreSpeechWatchdogScheduler(),
+            relocationWatchdogDelay: 5
+        )
+    }
+
+    init(
+        playbackSession: SpeechPlaybackSessionController,
+        bridgeProvider: @escaping @MainActor (UUID) -> CalibreReaderAccess?,
+        watchdogScheduler: CalibreSpeechWatchdogScheduling,
+        relocationWatchdogDelay: TimeInterval = 5
+    ) {
         self.playbackSession = playbackSession
         self.bridgeProvider = bridgeProvider
+        self.watchdogScheduler = watchdogScheduler
+        self.relocationWatchdogDelay = relocationWatchdogDelay
     }
 
     var activeSlotID: UUID? {
@@ -166,6 +215,7 @@ final class CalibreSpeechCoordinator {
 
     func stop() {
         operationGeneration &+= 1
+        cancelRelocationWatchdog()
         let oldSession = ownedSession
         ownedSession = nil
         currentUnit = nil
@@ -385,8 +435,53 @@ final class CalibreSpeechCoordinator {
             }
             if !accepted {
                 self.failCurrentOperation(operation: operation)
+                return
             }
+            self.startRelocationWatchdog(
+                operation: operation,
+                document: unit.document,
+                transition: transition
+            )
         }
+    }
+
+    private func startRelocationWatchdog(
+        operation: UInt64,
+        document: CalibreReaderDocumentIdentity,
+        transition: UInt64
+    ) {
+        cancelRelocationWatchdog()
+        relocationWatchdog = watchdogScheduler.schedule(
+            after: relocationWatchdogDelay
+        ) { [weak self] in
+            self?.handleRelocationWatchdog(
+                operation: operation,
+                document: document,
+                transition: transition
+            )
+        }
+    }
+
+    private func cancelRelocationWatchdog() {
+        guard let relocationWatchdog else { return }
+        watchdogScheduler.cancel(relocationWatchdog)
+        self.relocationWatchdog = nil
+    }
+
+    private func handleRelocationWatchdog(
+        operation: UInt64,
+        document: CalibreReaderDocumentIdentity,
+        transition: UInt64
+    ) {
+        relocationWatchdog = nil
+        guard let ownedSession,
+              isCurrent(operation: operation),
+              ownedSession.document == document,
+              state == .awaitingRelocation,
+              pendingTransitionToken == transition else {
+            return
+        }
+        failCurrentOperation(operation: operation)
     }
 
     private func handleRelocation(
@@ -409,6 +504,7 @@ final class CalibreSpeechCoordinator {
                 terminateExternalRelocation(operation: operation)
                 return
             }
+            cancelRelocationWatchdog()
             pendingTransitionToken = nil
             guard let bridge = bridgeProvider(ownedSession.slotID) else {
                 failCurrentOperation(operation: operation)

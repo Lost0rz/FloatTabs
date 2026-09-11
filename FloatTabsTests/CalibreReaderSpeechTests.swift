@@ -42,6 +42,8 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
     private(set) var extractionCount = 0
     private(set) var advanceCount = 0
     private var pendingTransitionToken: UInt64?
+    var deferAdvanceFailure = false
+    private var pendingAdvanceFailure: (() -> Void)?
 
     init(slotID: UUID, pages: [CalibreReaderPage]) {
         self.slotID = slotID
@@ -71,11 +73,26 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
         }
         advanceCount += 1
         pendingTransitionToken = transitionToken
-        completion(true)
+        if deferAdvanceFailure {
+            completion(true)
+            pendingAdvanceFailure = { [weak self] in
+                self?.pendingTransitionToken = nil
+                completion(false)
+            }
+        } else {
+            completion(true)
+        }
     }
 
     func cancelPendingWork() {
         pendingTransitionToken = nil
+        pendingAdvanceFailure = nil
+    }
+
+    func emitAdvanceFailure() {
+        let failure = pendingAdvanceFailure
+        pendingAdvanceFailure = nil
+        failure?()
     }
 
     func emitRelocation(
@@ -94,6 +111,37 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
             )
         )
         pendingTransitionToken = nil
+    }
+}
+
+@MainActor
+private final class CalibreTestWatchdogScheduler: CalibreSpeechWatchdogScheduling {
+    final class Task {
+        let operation: @MainActor () -> Void
+        var isCancelled = false
+
+        init(operation: @escaping @MainActor () -> Void) {
+            self.operation = operation
+        }
+    }
+
+    private(set) var tasks: [Task] = []
+
+    func schedule(
+        after delay: TimeInterval,
+        operation: @escaping @MainActor () -> Void
+    ) -> AnyObject {
+        let task = Task(operation: operation)
+        tasks.append(task)
+        return task
+    }
+
+    func cancel(_ task: AnyObject) {
+        (task as? Task)?.isCancelled = true
+    }
+
+    func fireLatestIgnoringCancellation() {
+        tasks.last?.operation()
     }
 }
 
@@ -172,13 +220,23 @@ final class CalibreReaderSpeechTests: XCTestCase {
 
     private func makeCoordinator(
         bridge: CalibreTestReaderBridge,
-        service: CalibreTestSpeechService
+        service: CalibreTestSpeechService,
+        watchdogScheduler: CalibreSpeechWatchdogScheduling? = nil
     ) -> (CalibreSpeechCoordinator, SpeechPlaybackSessionController) {
         let session = SpeechPlaybackSessionController(speechService: service)
-        let coordinator = CalibreSpeechCoordinator(
-            playbackSession: session,
-            bridgeProvider: { id in id == bridge.slotID ? bridge : nil }
-        )
+        let coordinator: CalibreSpeechCoordinator
+        if let watchdogScheduler {
+            coordinator = CalibreSpeechCoordinator(
+                playbackSession: session,
+                bridgeProvider: { id in id == bridge.slotID ? bridge : nil },
+                watchdogScheduler: watchdogScheduler
+            )
+        } else {
+            coordinator = CalibreSpeechCoordinator(
+                playbackSession: session,
+                bridgeProvider: { id in id == bridge.slotID ? bridge : nil }
+            )
+        }
         _ = CalibreSpeechSourceAdapter(
             coordinator: coordinator,
             playbackSession: session,
@@ -303,6 +361,85 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertFalse(source.contains("spine"))
     }
 
+    func testReaderReadinessUsesBookOpenedPromiseAndGenerationScopedObserver() {
+        let detection = CalibreReaderBridge.runtimeDetectionScript
+        let observer = CalibreReaderBridge.readerReadinessObserverScript(generation: 7)
+
+        XCTAssertTrue(detection.contains("book.opened"))
+        XCTAssertTrue(detection.contains("readinessPending"))
+        XCTAssertTrue(observer.contains("opened.then"))
+        XCTAssertTrue(observer.contains("event: 'readerReady'"))
+        XCTAssertTrue(observer.contains("generation: 7"))
+        XCTAssertTrue(observer.contains("__floatTabsCalibreReaderReadinessGeneration"))
+        XCTAssertTrue(observer.contains("() => {}"))
+    }
+
+    func testReaderReadyAndAdvanceFailureMessagesRequireWebViewFrameAndOrigin() {
+        let attachedWebView = WKWebView(frame: .zero)
+        let otherWebView = WKWebView(frame: .zero)
+        let origin = URL(string: "https://reader.example.test")!
+
+        XCTAssertTrue(
+            CalibreReaderBridge.pageMessagePassesSecurityContract(
+                messageWebView: attachedWebView,
+                attachedWebView: attachedWebView,
+                isMainFrame: true,
+                originScheme: "https",
+                originHost: "reader.example.test",
+                originPort: 443,
+                documentOrigin: origin
+            )
+        )
+        XCTAssertFalse(
+            CalibreReaderBridge.pageMessagePassesSecurityContract(
+                messageWebView: otherWebView,
+                attachedWebView: attachedWebView,
+                isMainFrame: true,
+                originScheme: "https",
+                originHost: "reader.example.test",
+                originPort: 443,
+                documentOrigin: origin
+            )
+        )
+        XCTAssertFalse(
+            CalibreReaderBridge.pageMessagePassesSecurityContract(
+                messageWebView: attachedWebView,
+                attachedWebView: attachedWebView,
+                isMainFrame: false,
+                originScheme: "https",
+                originHost: "reader.example.test",
+                originPort: 443,
+                documentOrigin: origin
+            )
+        )
+        XCTAssertFalse(
+            CalibreReaderBridge.pageMessagePassesSecurityContract(
+                messageWebView: attachedWebView,
+                attachedWebView: attachedWebView,
+                isMainFrame: true,
+                originScheme: "https",
+                originHost: "other.example.test",
+                originPort: 443,
+                documentOrigin: origin
+            )
+        )
+    }
+
+    func testAdvanceScriptObservesAsyncRejectionWithBoundTransitionIdentity() {
+        let script = CalibreReaderBridge.advanceScript(
+            startCFI: "a",
+            endCFI: "b",
+            generation: 4,
+            transitionToken: 9
+        )
+
+        XCTAssertTrue(script.contains("result.then"))
+        XCTAssertTrue(script.contains("event: 'advanceFailed'"))
+        XCTAssertTrue(script.contains("generation: 4"))
+        XCTAssertTrue(script.contains("transitionToken: 9"))
+        XCTAssertTrue(script.contains("rendition.next()"))
+    }
+
     func testReadHoldsSourceLeaseAcrossTransportIdleAndAdvancesOnlyAfterChangedRelocation() {
         let doc = document()
         let first = page(document: doc, start: "a", end: "b", text: "First page.")
@@ -328,6 +465,159 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .speakingUnit)
         XCTAssertEqual(service.spokenRequests.count, 2)
         XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+    }
+
+    func testAsyncAdvanceFailureStopsAndReleasesLeaseAndProtection() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        bridge.deferAdvanceFailure = true
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+        XCTAssertNotNil(session.activeSourceSessionKind)
+
+        bridge.emitAdvanceFailure()
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(bridge.extractionCount, 2)
+    }
+
+    func testRelocationWatchdogFailsClosedWithoutChangedRelocation() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+        XCTAssertEqual(scheduler.tasks.count, 1)
+
+        scheduler.fireLatestIgnoringCancellation()
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(bridge.extractionCount, 2)
+    }
+
+    func testSuccessfulRelocationCancelsWatchdogAndOldCallbackIsInert() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let second = page(document: doc, start: "c", end: "d", text: "Second page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        bridge.emitRelocation(second, token: 1)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertTrue(scheduler.tasks.first?.isCancelled == true)
+
+        scheduler.fireLatestIgnoringCancellation()
+
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+    }
+
+    func testSameCFIRelocationDoesNotCompleteTransitionAndWatchdogReleases() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        bridge.emitRelocation(first, token: 1)
+
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+        XCTAssertNotNil(session.activeSourceSessionKind)
+        scheduler.fireLatestIgnoringCancellation()
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+    }
+
+    func testNavigationWhileAwaitingRelocationInvalidatesOldWatchdogAndFailure() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+
+        coordinator.resetRuntime(slotID: slotID)
+        bridge.emitAdvanceFailure()
+        scheduler.fireLatestIgnoringCancellation()
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+    }
+
+    func testExplicitStopWhileAwaitingRelocationRemainsFinalAfterWatchdog() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+
+        coordinator.stop()
+        scheduler.fireLatestIgnoringCancellation()
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
     }
 
     func testExternalRelocationTerminatesContinuousSessionWithoutIssuingAdvance() {
