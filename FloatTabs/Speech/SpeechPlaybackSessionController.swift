@@ -7,23 +7,25 @@ enum SpeechSourceKind: String, CaseIterable, Equatable, Hashable, Sendable {
 }
 
 /// Identity carried from a source through the shared transport boundary.
+/// `sourceSequence` identifies the source item and is intentionally distinct
+/// from the callback token minted by `SpeechPlaybackSessionController`.
 /// `SpeechPlaybackOrigin` remains an intent (automatic/manual/preview), while
 /// `sourceKind` identifies the source that owns the resulting callbacks.
 struct SpeechPlaybackContext: Equatable, Sendable {
     let sourceKind: SpeechSourceKind
     let slotID: UUID?
-    let transportToken: UInt64
+    let sourceSequence: UInt64
     let origin: SpeechPlaybackOrigin
 
     init(
         sourceKind: SpeechSourceKind,
         slotID: UUID?,
-        transportToken: UInt64,
+        sourceSequence: UInt64,
         origin: SpeechPlaybackOrigin = .manual
     ) {
         self.sourceKind = sourceKind
         self.slotID = slotID
-        self.transportToken = transportToken
+        self.sourceSequence = sourceSequence
         self.origin = origin
     }
 }
@@ -65,12 +67,20 @@ enum SpeechPlaybackResumeDisposition: Equatable, Sendable {
 final class SpeechPlaybackSessionController {
     typealias EventHandler = @MainActor (SpeechPlaybackEvent) -> Void
 
+    private struct ActiveTransport {
+        let context: SpeechPlaybackContext
+        let callbackToken: UInt64
+    }
+
     private let speechService: SpeechSynthesizing
     private var eventHandlers: [SpeechSourceKind: EventHandler] = [:]
     private var hasCurrentUtterance = false
+    private var nextTransportToken: UInt64 = 0
+    private var activeTransport: ActiveTransport?
 
     private(set) var playbackState: SpeechPlaybackState = .idle
-    private(set) var activeContext: SpeechPlaybackContext?
+    /// Source-level identity for the currently admitted transport.
+    var activeContext: SpeechPlaybackContext? { activeTransport?.context }
     var onPlaybackStateChange: (() -> Void)?
 
     init(speechService: SpeechSynthesizing) {
@@ -98,7 +108,10 @@ final class SpeechPlaybackSessionController {
     var activeSlotID: UUID? { activeContext?.slotID }
     var currentSpeakingSlotID: UUID? { activeSlotID }
     var activeSourceKind: SpeechSourceKind? { activeContext?.sourceKind }
-    var activeTransportToken: UInt64? { activeContext?.transportToken }
+    /// Session-owned AV callback identity. Sources must use `activeContext`'s
+    /// `sourceSequence` for their own item matching instead.
+    var activeTransportCallbackToken: UInt64? { activeTransport?.callbackToken }
+    var activeTransportToken: UInt64? { activeTransportCallbackToken }
     var isAtSegmentBoundary: Bool {
         playbackState == .paused && !hasCurrentUtterance
     }
@@ -133,13 +146,17 @@ final class SpeechPlaybackSessionController {
             return false
         }
 
-        activeContext = context
+        let callbackToken = mintTransportToken()
+        activeTransport = ActiveTransport(
+            context: context,
+            callbackToken: callbackToken
+        )
         hasCurrentUtterance = true
         setPlaybackState(.starting)
         speechService.speak(
             SpeechPlaybackRequest(
                 text: text,
-                transportToken: context.transportToken,
+                transportToken: callbackToken,
                 languageRole: languageRole
             )
         )
@@ -151,7 +168,9 @@ final class SpeechPlaybackSessionController {
         _ request: SpeechPlaybackRequest,
         context: SpeechPlaybackContext
     ) -> Bool {
-        guard request.transportToken == context.transportToken else { return false }
+        // The request token is transport-owned input and is deliberately not
+        // trusted here. This compatibility overload still routes through the
+        // canonical admission path, which mints a fresh callback token.
         return speak(
             context: context,
             text: request.text,
@@ -229,7 +248,7 @@ final class SpeechPlaybackSessionController {
     /// Rolls an empty boundary resume back to a terminal idle state.
     func finishBoundaryResumeWithoutSpeech() {
         guard playbackState == .resuming else { return }
-        activeContext = nil
+        activeTransport = nil
         hasCurrentUtterance = false
         setPlaybackState(.idle)
     }
@@ -238,14 +257,14 @@ final class SpeechPlaybackSessionController {
     /// from stop so no extra transport cancellation is sent to AVFoundation.
     func dismissPausedBoundary() {
         guard playbackState == .paused, !hasCurrentUtterance else { return }
-        activeContext = nil
+        activeTransport = nil
         setPlaybackState(.idle)
     }
 
     /// Explicit stop invalidates the context before asking AVFoundation to
     /// stop, so a synchronous or late cancellation cannot affect new speech.
     func stop() {
-        activeContext = nil
+        activeTransport = nil
         hasCurrentUtterance = false
         setPlaybackState(.idle)
         speechService.stop()
@@ -266,22 +285,23 @@ final class SpeechPlaybackSessionController {
     }
 
     private func handleUtteranceStarted(token: UInt64) {
-        guard let context = activeContext,
-              context.transportToken == token,
+        guard let activeTransport,
+              activeTransport.callbackToken == token,
               playbackState == .starting else {
             return
         }
         hasCurrentUtterance = true
         setPlaybackState(.speaking)
-        route(.started(context))
+        route(.started(activeTransport.context))
     }
 
     private func handleUtteranceFinished(token: UInt64) {
-        guard let context = activeContext,
-              context.transportToken == token else {
+        guard let activeTransport,
+              activeTransport.callbackToken == token else {
             return
         }
 
+        let context = activeTransport.context
         hasCurrentUtterance = false
         let boundary: SpeechPlaybackBoundaryDisposition =
             playbackState == .pausing || playbackState == .paused
@@ -295,42 +315,47 @@ final class SpeechPlaybackSessionController {
             return
         }
 
-        activeContext = nil
+        self.activeTransport = nil
         setPlaybackState(.idle)
         route(.finished(context, boundary: boundary))
     }
 
     private func handleUtterancePaused(token: UInt64) {
-        guard let context = activeContext,
-              context.transportToken == token,
+        guard let activeTransport,
+              activeTransport.callbackToken == token,
               playbackState == .pausing,
               hasCurrentUtterance else {
             return
         }
         setPlaybackState(.paused)
-        route(.paused(context))
+        route(.paused(activeTransport.context))
     }
 
     private func handleUtteranceContinued(token: UInt64) {
-        guard let context = activeContext,
-              context.transportToken == token,
+        guard let activeTransport,
+              activeTransport.callbackToken == token,
               playbackState == .resuming,
               hasCurrentUtterance else {
             return
         }
         setPlaybackState(.speaking)
-        route(.continued(context))
+        route(.continued(activeTransport.context))
     }
 
     private func handleUtteranceCancelled(token: UInt64) {
-        guard let context = activeContext,
-              context.transportToken == token else {
+        guard let activeTransport,
+              activeTransport.callbackToken == token else {
             return
         }
-        activeContext = nil
+        self.activeTransport = nil
         hasCurrentUtterance = false
         setPlaybackState(.idle)
-        route(.cancelled(context))
+        route(.cancelled(activeTransport.context))
+    }
+
+    private func mintTransportToken() -> UInt64 {
+        nextTransportToken &+= 1
+        return nextTransportToken
     }
 
     private func setPlaybackState(_ state: SpeechPlaybackState) {

@@ -885,7 +885,7 @@ final class AssistantSpeechCoordinator {
             context: SpeechPlaybackContext(
                 sourceKind: .chatGPT,
                 slotID: item.responseID?.slotID,
-                transportToken: item.sequence,
+                sourceSequence: item.sequence,
                 origin: item.origin
             ),
             text: item.text,
@@ -956,7 +956,7 @@ final class AssistantSpeechCoordinator {
         switch event {
         case let .started(context):
             guard let currentItem,
-                  currentItem.sequence == context.transportToken else {
+                  currentItem.sequence == context.sourceSequence else {
                 return
             }
             if currentItem.origin == .automatic,
@@ -970,14 +970,14 @@ final class AssistantSpeechCoordinator {
         case let .paused(context):
             // The shared controller has already entered .paused. Keeping this
             // guard makes a late/foreign event harmless to the ChatGPT FIFO.
-            guard currentItem?.sequence == context.transportToken else { return }
+            guard currentItem?.sequence == context.sourceSequence else { return }
 
         case let .continued(context):
-            guard currentItem?.sequence == context.transportToken else { return }
+            guard currentItem?.sequence == context.sourceSequence else { return }
 
         case let .finished(context, boundary):
             guard let currentItem,
-                  currentItem.sequence == context.transportToken else {
+                  currentItem.sequence == context.sourceSequence else {
                 return
             }
             let finishedItem = currentItem
@@ -1010,7 +1010,7 @@ final class AssistantSpeechCoordinator {
 
         case let .cancelled(context):
             guard let currentItem,
-                  currentItem.sequence == context.transportToken else {
+                  currentItem.sequence == context.sourceSequence else {
                 return
             }
 

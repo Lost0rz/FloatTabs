@@ -3,6 +3,7 @@ import XCTest
 
 @MainActor
 private final class RouterSpeechService: SpeechSynthesizing {
+    private(set) var spokenRequests: [SpeechPlaybackRequest] = []
     var onUtteranceStarted: ((UInt64) -> Void)?
     var onUtteranceFinished: ((UInt64) -> Void)?
     var onUtterancePaused: ((UInt64) -> Void)?
@@ -11,7 +12,7 @@ private final class RouterSpeechService: SpeechSynthesizing {
     var pauseResult = true
     var resumeResult = true
 
-    func speak(_ request: SpeechPlaybackRequest) {}
+    func speak(_ request: SpeechPlaybackRequest) { spokenRequests.append(request) }
     func pause() -> Bool { pauseResult }
     func resume() -> Bool { resumeResult }
     func stop() {}
@@ -174,18 +175,19 @@ final class SpeechCommandRouterTests: XCTestCase {
         let context = SpeechPlaybackContext(
             sourceKind: .chatGPT,
             slotID: slotID,
-            transportToken: 10,
+            sourceSequence: 10,
             origin: .manual
         )
         _ = session.speak(context: context, text: "Read.", languageRole: .english)
-        service.emitStart(10)
+        let callbackToken = service.spokenRequests[0].transportToken
+        service.emitStart(callbackToken)
 
         XCTAssertEqual(
             router.readPauseResumeForActiveSlot(),
             .paused(sourceKind: .chatGPT, slotID: slotID)
         )
         XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
-        service.emitPause(10)
+        service.emitPause(callbackToken)
         XCTAssertEqual(
             router.readPauseResumeForActiveSlot(),
             .resumed(sourceKind: .chatGPT, slotID: slotID)
@@ -207,11 +209,12 @@ final class SpeechCommandRouterTests: XCTestCase {
         let context = SpeechPlaybackContext(
             sourceKind: .chatGPT,
             slotID: slotID,
-            transportToken: 30,
+            sourceSequence: 30,
             origin: .manual
         )
         _ = session.speak(context: context, text: "Read.", languageRole: .english)
-        service.emitStart(30)
+        let callbackToken = service.spokenRequests[0].transportToken
+        service.emitStart(callbackToken)
 
         service.pauseResult = false
         XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
@@ -222,7 +225,7 @@ final class SpeechCommandRouterTests: XCTestCase {
             router.readPauseResumeForActiveSlot(),
             .paused(sourceKind: .chatGPT, slotID: slotID)
         )
-        service.emitPause(30)
+        service.emitPause(callbackToken)
         service.resumeResult = false
         XCTAssertEqual(router.readPauseResumeForActiveSlot(), .noOp)
         XCTAssertEqual(session.playbackState, .paused)
@@ -242,11 +245,12 @@ final class SpeechCommandRouterTests: XCTestCase {
         let context = SpeechPlaybackContext(
             sourceKind: .chatGPT,
             slotID: slotID,
-            transportToken: 11,
+            sourceSequence: 11,
             origin: .manual
         )
         _ = session.speak(context: context, text: "Stop.", languageRole: .english)
-        service.emitStart(11)
+        let callbackToken = service.spokenRequests[0].transportToken
+        service.emitStart(callbackToken)
 
         XCTAssertEqual(
             router.stopForActiveSlot(),
