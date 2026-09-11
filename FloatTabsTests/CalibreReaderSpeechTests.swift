@@ -146,6 +146,84 @@ private final class CalibreTestWatchdogScheduler: CalibreSpeechWatchdogSchedulin
 }
 
 @MainActor
+private final class CalibreReaderPageHarness {
+    let webView: WKWebView
+    let bridge: CalibreReaderBridge
+    let url = URL(string: "https://reader.example.test/read/7/epub")!
+
+    init() {
+        let bridge = CalibreReaderBridge(slotID: UUID())
+        let configuration = WKWebViewConfiguration()
+        bridge.install(into: configuration.userContentController)
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        bridge.attach(to: webView)
+        self.bridge = bridge
+        self.webView = webView
+    }
+
+    func load(readerInitiallyReady: Bool) {
+        let package = readerInitiallyReady ? "{}" : "null"
+        let opened = readerInitiallyReady
+            ? "Promise.resolve()"
+            : "new Promise((resolve) => { window.__resolveCalibreOpened = resolve; })"
+        webView.loadHTMLString(
+            """
+            <!doctype html>
+            <html><body><script>
+              window.reader = {
+                book: { package: \(package), opened: \(opened) },
+                rendition: {
+                  currentLocation: () => ({
+                    start: { cfi: 'epubcfi(/6/2[a]!/4/1)' },
+                    end: { cfi: 'epubcfi(/6/2[a]!/4/2)' }
+                  }),
+                  next: () => Promise.resolve(),
+                  on: () => {}
+                }
+              };
+              if (!window.__resolveCalibreOpened) {
+                window.__resolveCalibreOpened = () => {};
+              }
+            </script></body></html>
+            """,
+            baseURL: url
+        )
+    }
+
+    func run(_ javascript: String) async -> Any? {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                javascript,
+                in: nil,
+                in: CalibreReaderBridge.contentWorld
+            ) { result in
+                switch result {
+                case let .success(value):
+                    continuation.resume(returning: value)
+                case .failure:
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    func waitFor(
+        _ condition: @escaping @MainActor () -> Bool,
+        timeout: TimeInterval = 5
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return condition()
+    }
+}
+
+@MainActor
 private final class CalibreStubSpeechSource: SpeechSourceAdapter {
     let kind: SpeechSourceKind = .chatGPT
     let slotID: UUID
@@ -372,6 +450,43 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(observer.contains("generation: 7"))
         XCTAssertTrue(observer.contains("__floatTabsCalibreReaderReadinessGeneration"))
         XCTAssertTrue(observer.contains("() => {}"))
+    }
+
+    func testAsyncReaderReadinessAfterDidFinishPromotesCandidate() async {
+        let page = CalibreReaderPageHarness()
+        page.bridge.handleNavigationCommit(page.url)
+        page.load(readerInitiallyReady: false)
+
+        let loaded = await page.waitFor { !page.webView.isLoading }
+        XCTAssertTrue(loaded)
+        page.bridge.handleNavigationFinish(page.url)
+        XCTAssertFalse(page.bridge.isReaderCandidate)
+
+        let resolverType = await page.run("typeof window.__resolveCalibreOpened") as? String
+        XCTAssertEqual(resolverType, "function")
+        let observerGeneration = await page.run(
+            "window.__floatTabsCalibreReaderReadinessGeneration || null"
+        ) as? NSNumber
+        XCTAssertEqual(observerGeneration?.uint64Value, 1)
+        _ = await page.run("window.reader.book.package = {}; window.__resolveCalibreOpened(); true")
+        let detected = await page.run(CalibreReaderBridge.runtimeDetectionScript) as? [String: Any]
+        XCTAssertEqual(detected?["valid"] as? Bool, true)
+
+        let ready = await page.waitFor { page.bridge.isReaderCandidate }
+        XCTAssertTrue(ready)
+    }
+
+    func testAlreadyReadyReaderStillPromotesImmediatelyAfterDidFinish() async {
+        let page = CalibreReaderPageHarness()
+        page.bridge.handleNavigationCommit(page.url)
+        page.load(readerInitiallyReady: true)
+
+        let loaded = await page.waitFor { !page.webView.isLoading }
+        XCTAssertTrue(loaded)
+        page.bridge.handleNavigationFinish(page.url)
+
+        let ready = await page.waitFor { page.bridge.isReaderCandidate }
+        XCTAssertTrue(ready)
     }
 
     func testReaderReadyAndAdvanceFailureMessagesRequireWebViewFrameAndOrigin() {

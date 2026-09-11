@@ -114,6 +114,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var documentGeneration: UInt64 = 0
+    private var detectionSequence: UInt64 = 0
     private(set) var currentDocumentIdentity: CalibreReaderDocumentIdentity?
     private var runtimeReady = false
     private var readinessObserverGeneration: UInt64?
@@ -169,6 +170,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     /// generation and the exact WebView instance.
     func handleNavigationCommit(_ committedURL: URL?) {
         documentGeneration &+= 1
+        detectionSequence &+= 1
         runtimeReady = false
         readinessObserverGeneration = nil
         currentDocumentIdentity = Self.documentIdentity(
@@ -203,6 +205,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             completion(false)
             return
         }
+        detectionSequence &+= 1
+        let detection = detectionSequence
         let expectedDocument = currentDocumentIdentity
         evaluate(Self.runtimeDetectionScript, in: webView) { [weak self, weak webView] value, error in
             guard let self else {
@@ -211,7 +215,8 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
             }
             guard let webView,
                   let expectedDocument,
-                  self.isCurrent(expectedDocument: expectedDocument, webView: webView) else {
+                  self.isCurrent(expectedDocument: expectedDocument, webView: webView),
+                  self.detectionSequence == detection else {
                 completion(false)
                 return
             }
@@ -349,6 +354,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
 
     func handleRuntimeReplacement() {
         documentGeneration &+= 1
+        detectionSequence &+= 1
         runtimeReady = false
         readinessObserverGeneration = nil
         currentDocumentIdentity = nil
@@ -360,6 +366,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
     func invalidate() {
         guard !isInvalidated else { return }
         isInvalidated = true
+        detectionSequence &+= 1
         cancelPendingWork()
         currentDocumentIdentity = nil
         runtimeReady = false
@@ -797,6 +804,7 @@ final class CalibreReaderBridge: NSObject, WKScriptMessageHandler, CalibreReader
         case "https": defaultPort = 443
         default: defaultPort = nil
         }
-        return port == (documentOrigin.port ?? defaultPort)
+        let normalizedPort = port == 0 ? defaultPort : port
+        return normalizedPort == (documentOrigin.port ?? defaultPort)
     }
 }
