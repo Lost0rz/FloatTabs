@@ -171,6 +171,11 @@ final class AppPreferencesStore {
     static let attentionSoundEnabledKey = "FloatTabs.attentionSoundEnabled"
     static let attentionSoundNameKey = "FloatTabs.attentionSoundName"
     static let attentionSoundVolumeKey = "FloatTabs.attentionSoundVolume"
+    static let attentionSoundSourceKindKey = "FloatTabs.attentionSoundSourceKind"
+    static let customAttentionSoundLibraryKey =
+        "FloatTabs.customAttentionSoundLibrary"
+    static let selectedCustomAttentionSoundIDKey =
+        "FloatTabs.selectedCustomAttentionSoundID"
     static let websiteCacheAutomaticCleanupEnabledKey =
         "FloatTabs.websiteCache.automaticCleanupEnabled"
     static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
@@ -353,6 +358,73 @@ final class AppPreferencesStore {
                 forKey: Self.attentionSoundVolumeKey
             )
         }
+    }
+
+    /// The system sound name remains independent from the active source so it
+    /// can continue to serve as the configured system choice and custom-sound
+    /// fallback input without being overloaded with a file path.
+    var attentionSoundSourceKind: AttentionSoundSourceKind {
+        get {
+            guard let raw = defaults.string(forKey: Self.attentionSoundSourceKindKey),
+                  let kind = AttentionSoundSourceKind(rawValue: raw) else {
+                return .system
+            }
+            return kind
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.attentionSoundSourceKindKey)
+        }
+    }
+
+    var customAttentionSoundLibrary: [CustomAttentionSoundAsset] {
+        get {
+            guard let data = defaults.data(forKey: Self.customAttentionSoundLibraryKey),
+                  let assets = try? JSONDecoder().decode(
+                    [CustomAttentionSoundAsset].self,
+                    from: data
+                  ) else {
+                return []
+            }
+            return assets
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Self.customAttentionSoundLibraryKey)
+        }
+    }
+
+    var selectedCustomAttentionSoundID: UUID? {
+        get {
+            guard let raw = defaults.string(forKey: Self.selectedCustomAttentionSoundIDKey) else {
+                return nil
+            }
+            return UUID(uuidString: raw)
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.uuidString, forKey: Self.selectedCustomAttentionSoundIDKey)
+            } else {
+                defaults.removeObject(forKey: Self.selectedCustomAttentionSoundIDKey)
+            }
+        }
+    }
+
+    func customAttentionSoundAsset(id: UUID) -> CustomAttentionSoundAsset? {
+        customAttentionSoundLibrary.first { $0.id == id }
+    }
+
+    func appendCustomAttentionSoundAssets(_ assets: [CustomAttentionSoundAsset]) {
+        guard !assets.isEmpty else { return }
+        customAttentionSoundLibrary += assets
+    }
+
+    @discardableResult
+    func removeCustomAttentionSoundAsset(id: UUID) -> CustomAttentionSoundAsset? {
+        var library = customAttentionSoundLibrary
+        guard let index = library.firstIndex(where: { $0.id == id }) else { return nil }
+        let removed = library.remove(at: index)
+        customAttentionSoundLibrary = library
+        return removed
     }
 
     /// Cache policy is persisted as operational app preferences, separate from

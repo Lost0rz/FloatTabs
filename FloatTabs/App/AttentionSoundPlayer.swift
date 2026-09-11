@@ -2,36 +2,76 @@ import AppKit
 
 /// The one production seam for playing the ChatGPT Ready attention sound.
 /// Both the automatic Ready alert and the Settings preview route through a
-/// single player so sound choice, volume normalization, and the beep
-/// fallback can never drift between call sites.
+/// single player so sound choice, volume normalization, and the beep/fallback
+/// behavior can never drift between call sites.
 @MainActor
 protocol AttentionSoundPlaying {
-    func play(soundName: String, volume: Double)
+    func play(source: AttentionSoundPlaybackSource, volume: Double)
+}
+
+@MainActor
+extension AttentionSoundPlaying {
+    func play(soundName: String, volume: Double) {
+        play(source: .system(name: soundName), volume: volume)
+    }
 }
 
 @MainActor
 final class AttentionSoundPlayer: AttentionSoundPlaying {
     typealias SystemPlayback = @MainActor (String, Float) -> Bool
+    typealias CustomSoundLoader = @MainActor (URL) -> NSSound?
+    typealias CustomPlayback = @MainActor (NSSound, Float) -> Bool
 
     private let playSystemSound: SystemPlayback
+    private let loadCustomSound: CustomSoundLoader
+    private let playCustomSound: CustomPlayback
     private let beep: () -> Void
+    private(set) var activeSound: NSSound?
 
     init(
         playSystemSound: @escaping SystemPlayback = AttentionSoundPlayer.playSystemSound,
+        loadCustomSound: @escaping CustomSoundLoader = AttentionSoundPlayer.loadCustomSound,
+        playCustomSound: @escaping CustomPlayback = AttentionSoundPlayer.playCustomSound,
         beep: @escaping () -> Void = { NSSound.beep() }
     ) {
         self.playSystemSound = playSystemSound
+        self.loadCustomSound = loadCustomSound
+        self.playCustomSound = playCustomSound
         self.beep = beep
     }
 
-    /// Plays `soundName` at `volume`. Any raw volume is normalized into the
-    /// closed 0...1 range first. The beep fires only when the named system
-    /// sound cannot load or start — an intentional zero volume is a valid
-    /// silent configuration and must not fall back.
-    func play(soundName: String, volume: Double) {
+    /// Plays a typed system or managed custom source at `volume`. Any raw
+    /// volume is normalized into the closed 0...1 range first. A custom source
+    /// that cannot load or start falls back to Ping and then beep. A missing
+    /// system sound keeps the existing direct-beep behavior. Zero stays silent.
+    func play(source: AttentionSoundPlaybackSource, volume: Double) {
         let normalized = AppPreferencesStore.normalizedAttentionSoundVolume(volume)
+        activeSound?.stop()
+        activeSound = nil
         guard normalized > 0 else { return }
-        if !playSystemSound(soundName, Float(normalized)) {
+
+        let volume = Float(normalized)
+        switch source {
+        case let .system(name):
+            if !playSystemSound(name, volume) {
+                // Preserve the existing system-sound behavior: an invalid
+                // configured macOS name falls straight to the platform beep.
+                beep()
+            }
+        case let .custom(url):
+            guard let sound = loadCustomSound(url),
+                  playCustomSound(sound, volume) else {
+                playFallback(volume: volume)
+                return
+            }
+            // NSSound must stay alive for the duration of asynchronous
+            // playback. The next preview/Ready sound replaces this handle.
+            activeSound = sound
+        }
+    }
+
+    private func playFallback(volume: Float) {
+        if !playSystemSound(AppPreferencesStore.defaultAttentionSoundName, volume) {
             beep()
         }
     }
@@ -42,6 +82,15 @@ final class AttentionSoundPlayer: AttentionSoundPlaying {
         guard let sound = NSSound(named: NSSound.Name(name)) else {
             return false
         }
+        sound.volume = volume
+        return sound.play()
+    }
+
+    private static func loadCustomSound(url: URL) -> NSSound? {
+        NSSound(contentsOf: url, byReference: false)
+    }
+
+    private static func playCustomSound(sound: NSSound, volume: Float) -> Bool {
         sound.volume = volume
         return sound.play()
     }

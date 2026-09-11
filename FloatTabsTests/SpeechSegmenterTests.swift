@@ -271,7 +271,7 @@ final class SpeechSettingsTests: XCTestCase {
 
         XCTAssertEqual(controller.title, "Speech")
         XCTAssertEqual(controller.followSpeechSwitch.state, .on)
-        XCTAssertEqual(controller.chineseVoicePopup.item(at: 0)?.title, "System Automatic")
+        XCTAssertEqual(controller.chineseVoicePopup.item(at: 0)?.title, "FloatTabs Default — Ting-Ting")
         XCTAssertEqual(controller.chineseVoicePopup.item(at: 1)?.title, "Chinese Premium — Chinese (zh-CN) — Premium")
         XCTAssertEqual(controller.englishVoicePopup.item(at: 1)?.title, "English Enhanced — English (en-US) — Enhanced")
 
