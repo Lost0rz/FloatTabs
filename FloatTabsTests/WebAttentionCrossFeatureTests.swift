@@ -590,7 +590,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
-    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() async throws {
+    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -598,13 +598,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         defer { controller.hideFloatTabs() }
 
-        // Establish the actual Web presentation first. Accessory-app
-        // activation may complete on a later run-loop turn, so wait for the
-        // same real visibility authority used by production acknowledgement.
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: slot.id
-        )
+        controller.showFloatTabs()
 
         // Seed an already-selected Ready state after presentation so the
         // notification below is the acknowledgement boundary under test.
@@ -612,13 +606,18 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         coordinator.apply(.generationFinished(userVisible: false), for: slot.id)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
 
-        NotificationCenter.default.post(
-            name: NSWindow.didBecomeKeyNotification,
-            object: nil
-        )
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            NotificationCenter.default.post(
+                name: NSWindow.didBecomeKeyNotification,
+                object: nil
+            )
 
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+            XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+            XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        }
     }
 
     // MARK: 4.7 Visible / fullscreen completion decisions through the router
@@ -1417,7 +1416,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(coordinator.isAttentionProtected(slot.id))
     }
 
-    func testRestoredGeneratingInstantBackCompletionUsesVisiblePresentation() async throws {
+    func testRestoredGeneratingInstantBackCompletionUsesVisiblePresentation() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -1426,34 +1425,36 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: slot)
         defer { controller.hideFloatTabs() }
 
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: slot.id
-        )
-        acceptBaseline(
-            generating: false,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-current-b"
-        )
-        bridge.beginInstantBackHandoff()
-        bridge.confirmInstantBackHandoff()
-        acceptBaseline(
-            generating: true,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-restored-a"
-        )
-        acceptState(
-            generating: false,
-            bridge: bridge,
-            webView: webView,
-            token: "instant-back-restored-a"
-        )
+        controller.showFloatTabs()
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            acceptBaseline(
+                generating: false,
+                bridge: bridge,
+                webView: webView,
+                token: "instant-back-current-b"
+            )
+            bridge.beginInstantBackHandoff()
+            bridge.confirmInstantBackHandoff()
+            acceptBaseline(
+                generating: true,
+                bridge: bridge,
+                webView: webView,
+                token: "instant-back-restored-a"
+            )
+            acceptState(
+                generating: false,
+                bridge: bridge,
+                webView: webView,
+                token: "instant-back-restored-a"
+            )
 
-        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+            XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
+            XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+            XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        }
     }
 
     func testStaleHistoricalInstantBackStateRemainsRejectedUntilConfirmation() throws {
@@ -1610,7 +1611,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.8 Provisional navigation completion visibility
 
-    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() async throws {
+    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -1620,24 +1621,27 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let observer = try navigationObserver(of: webView)
         defer { controller.hideFloatTabs() }
 
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: slot.id
-        )
+        controller.showFloatTabs()
         XCTAssertTrue(controller.isVisible)
-        XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
 
-        acceptBaseline(generating: true, bridge: bridge, webView: webView)
-        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            XCTAssertTrue(controller.isAttentionUserVisible(slotID: slot.id))
 
-        // The old accepted document remains authoritative until commit, so a
-        // completion observed while its WebView is visible must resolve Idle
-        // before any later provisional-failure callback can run.
-        observer.webView(webView, didStartProvisionalNavigation: nil)
-        acceptState(generating: false, bridge: bridge, webView: webView)
-        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+            acceptBaseline(generating: true, bridge: bridge, webView: webView)
+            XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+
+            // The old accepted document remains authoritative until commit, so a
+            // completion observed while its WebView is visible must resolve Idle
+            // before any later provisional-failure callback can run.
+            observer.webView(webView, didStartProvisionalNavigation: nil)
+            acceptState(generating: false, bridge: bridge, webView: webView)
+            XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+            XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+            XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        }
 
         // Hiding before the provisional failure must not retroactively change
         // the visibility decision already made at completion time.
@@ -2364,7 +2368,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
-    func testKeyboardAndRelativeSelectionsAcknowledgeTheirUnreadTargets() async throws {
+    func testKeyboardAndRelativeSelectionsAcknowledgeTheirUnreadTargets() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
@@ -2372,7 +2376,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 spec(name: "ChatC", url: "https://chatgpt.com/chat-c"),
             ]
         )
-        let first = try profile(named: "ChatA", in: store)
         let second = try profile(named: "ChatB", in: store)
         let third = try profile(named: "ChatC", in: store)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -2390,43 +2393,46 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let thirdBridge = try attentionBridge(pool: pool, slot: third)
         defer { controller.hideFloatTabs() }
 
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: first.id
-        )
+        controller.showFloatTabs()
 
         completeGeneration(
             bridge: secondBridge,
             webView: secondRuntime.webView,
             token: "keyboard-selection"
         )
-        controller.handle(.selectSlot(2))
-        let keyboardCleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(second.id)
+        controller.debugWithPresentationFact(
+            slotID: second.id,
+            presentationFact: true
+        ) {
+            controller.handle(.selectSlot(2))
         }
-        XCTAssertTrue(keyboardCleared)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(second.id))
 
         completeGeneration(
             bridge: thirdBridge,
             webView: thirdRuntime.webView,
             token: "next-selection"
         )
-        controller.handle(.nextSlot)
-        let nextCleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(third.id)
+        controller.debugWithPresentationFact(
+            slotID: third.id,
+            presentationFact: true
+        ) {
+            controller.handle(.nextSlot)
         }
-        XCTAssertTrue(nextCleared)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(third.id))
 
         completeGeneration(
             bridge: secondBridge,
             webView: secondRuntime.webView,
             token: "previous-selection"
         )
-        controller.handle(.previousSlot)
-        let previousCleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(second.id)
+        controller.debugWithPresentationFact(
+            slotID: second.id,
+            presentationFact: true
+        ) {
+            controller.handle(.previousSlot)
         }
-        XCTAssertTrue(previousCleared)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(second.id))
     }
 
     func testOverflowSelectionUsesPanelRailWiringToAcknowledgeUnread() async throws {
@@ -2550,6 +2556,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         committedURL = URL(string: "https://chatgpt.com/chat-a")!
         pool.onCommittedURLChange?(slot.id, committedURL!)
         controller.handle(.toggleAutoSpeakForActiveTab)
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "deterministic-document"
+            )
+        )
 
         completeGeneration(
             bridge: bridge,
@@ -2627,6 +2638,42 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testTrustedManualScrollAcknowledgesUnreadWithoutSpeechExtraction() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        XCTAssertFalse(controller.debugAutoSpeakSlotIDs.contains(slot.id))
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "no-extraction-visible-scroll"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "live-document-12345678"
+            )
+        )
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            XCTAssertTrue(
+                responseBridge.debugInvokeTrustedManualScroll(
+                    documentToken: "live-document-12345678"
+                )
+            )
+        }
+
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
     func testBackgroundManualScrollDoesNotAcknowledgeUnread() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
@@ -2655,6 +2702,86 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testBackgroundManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "no-extraction-background-scroll"
+        )
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "background-live-12345678"
+            )
+        )
+        XCTAssertTrue(
+            responseBridge.debugInvokeTrustedManualScroll(
+                documentToken: "background-live-12345678"
+            )
+        )
+
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testStaleDocumentManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        XCTAssertFalse(controller.debugAutoSpeakSlotIDs.contains(slot.id))
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "stale-document-scroll"
+        )
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "document-a-12345678"
+            )
+        )
+        responseBridge.handleRuntimeReplacement()
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "document-b-12345678"
+            )
+        )
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            XCTAssertFalse(
+                responseBridge.debugInvokeTrustedManualScroll(
+                    documentToken: "document-a-12345678"
+                )
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            XCTAssertTrue(
+                responseBridge.debugInvokeTrustedManualScroll(
+                    documentToken: "document-b-12345678"
+                )
+            )
+        }
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
     func testProgrammaticSpeechFollowScrollDoesNotAcknowledgeUnread() throws {
         var committedURL: URL?
         let speechService = CrossFeatureSpeechService()
@@ -2667,6 +2794,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let attentionBridge = try attentionBridge(pool: pool, slot: slot)
         let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(
+                documentToken: "programmatic-follow-document"
+            )
+        )
         committedURL = URL(string: "https://chatgpt.com/chat-a")!
         pool.onCommittedURLChange?(slot.id, committedURL!)
         controller.handle(.toggleAutoSpeakForActiveTab)
@@ -3059,6 +3191,9 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         responseBridge: ChatGPTResponseBridge,
         documentToken: String
     ) {
+        XCTAssertTrue(
+            responseBridge.debugReceiveDocumentReady(documentToken: documentToken)
+        )
         responseBridge.extractLatest { _ in }
         let emptyPayload = ChatGPTResponsePayload(
             version: ChatGPTResponsePayload.currentVersion,
@@ -3104,26 +3239,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     private func wait(milliseconds: UInt64) async throws {
         try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
-    }
-
-    private func showAndWaitForAttentionVisible(
-        controller: PanelController,
-        slotID: UUID
-    ) async throws {
-        controller.showFloatTabs()
-
-        let becameVisible = try await waitUntil {
-            controller.isAttentionUserVisible(slotID: slotID)
-        }
-
-        XCTAssertTrue(
-            becameVisible,
-            "actual Web presentation never acquired active interaction"
-        )
-        _ = try XCTUnwrap(
-            becameVisible ? true : nil,
-            "actual Web presentation never acquired active interaction"
-        )
     }
 
     @discardableResult

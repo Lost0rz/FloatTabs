@@ -160,6 +160,8 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
                 "if (event.isTrusted) postManualScroll();"
             )
         )
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("DOMContentLoaded"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event: \"documentReady\""))
         XCTAssertTrue(
             ChatGPTResponseExtraction.scriptSource.contains(
                 "if (!event.isTrusted) return;"
@@ -200,5 +202,72 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
 
         XCTAssertEqual(resetSlotID, slotID)
         XCTAssertNil(callbackResult)
+    }
+
+    func testDocumentReadyEstablishesLiveIdentityWithoutExtraction() {
+        let slotID = UUID()
+        var manualScrollCount = 0
+        let bridge = ChatGPTResponseBridge(
+            slotID: slotID,
+            onManualScroll: { _, _ in manualScrollCount += 1 }
+        )
+
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(
+                documentToken: "document-ready-12345678"
+            )
+        )
+        XCTAssertTrue(
+            bridge.debugInvokeTrustedManualScroll(
+                documentToken: "document-ready-12345678"
+            )
+        )
+        XCTAssertEqual(manualScrollCount, 1)
+    }
+
+    func testDocumentReadyRejectsInvalidTokenAndWrongVersion() {
+        let bridge = ChatGPTResponseBridge(slotID: UUID())
+
+        XCTAssertFalse(
+            bridge.debugReceiveDocumentReady(documentToken: "short")
+        )
+        XCTAssertFalse(
+            bridge.debugReceiveDocumentReady(
+                documentToken: "document-ready-12345678",
+                version: ChatGPTResponsePayload.currentVersion + 1
+            )
+        )
+        XCTAssertFalse(
+            bridge.debugInvokeTrustedManualScroll(
+                documentToken: "document-ready-12345678"
+            )
+        )
+    }
+
+    func testDocumentReadyReplacesLiveIdentityAndRuntimeResetRejectsOldToken() {
+        var manualScrollTokens: [String] = []
+        let bridge = ChatGPTResponseBridge(
+            slotID: UUID(),
+            onManualScroll: { _, token in manualScrollTokens.append(token) }
+        )
+
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "document-a-12345678")
+        )
+        bridge.handleRuntimeReplacement()
+        XCTAssertFalse(
+            bridge.debugInvokeTrustedManualScroll(documentToken: "document-a-12345678")
+        )
+
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "document-b-12345678")
+        )
+        XCTAssertFalse(
+            bridge.debugInvokeTrustedManualScroll(documentToken: "document-a-12345678")
+        )
+        XCTAssertTrue(
+            bridge.debugInvokeTrustedManualScroll(documentToken: "document-b-12345678")
+        )
+        XCTAssertEqual(manualScrollTokens, ["document-b-12345678"])
     }
 }
