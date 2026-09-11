@@ -78,13 +78,19 @@ private final class CalibreTestReaderBridge: CalibreReaderAccess {
         pendingTransitionToken = nil
     }
 
-    func emitRelocation(_ page: CalibreReaderPage, token: UInt64? = nil) {
+    func emitRelocation(
+        _ page: CalibreReaderPage,
+        token: UInt64? = nil,
+        usePendingTransitionToken: Bool = true
+    ) {
         currentPage = page
         currentDocumentIdentity = page.identity.document
         onRelocation?(
             CalibreReaderRelocation(
                 identity: page.identity,
-                transitionToken: token ?? pendingTransitionToken
+                transitionToken: usePendingTransitionToken
+                    ? token ?? pendingTransitionToken
+                    : token
             )
         )
         pendingTransitionToken = nil
@@ -334,12 +340,40 @@ final class CalibreReaderSpeechTests: XCTestCase {
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
         service.emitStart()
-        bridge.emitRelocation(second, token: nil)
+        bridge.emitRelocation(
+            second,
+            token: nil,
+            usePendingTransitionToken: false
+        )
 
         XCTAssertEqual(coordinator.state, .idle)
         XCTAssertNil(session.activeSourceSessionKind)
         XCTAssertEqual(bridge.advanceCount, 0)
         XCTAssertEqual(service.stopCount, 1)
+    }
+
+    func testExternalRelocationDuringAdvanceWaitTerminatesSession() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let second = page(document: doc, start: "c", end: "d", text: "Manual page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+
+        bridge.emitRelocation(
+            second,
+            token: nil,
+            usePendingTransitionToken: false
+        )
+
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertEqual(service.spokenRequests.count, 1)
     }
 
     func testDuplicateRelocationDoesNotDuplicateNextPageSpeech() {

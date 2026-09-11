@@ -401,9 +401,12 @@ final class CalibreSpeechCoordinator {
 
         switch state {
         case .awaitingRelocation:
-            guard relocation.transitionToken == pendingTransitionToken,
-                  let unit = currentUnit,
+            guard let unit = currentUnit,
                   relocation.identity != unit else {
+                return
+            }
+            guard relocation.transitionToken == pendingTransitionToken else {
+                terminateExternalRelocation(operation: operation)
                 return
             }
             pendingTransitionToken = nil
