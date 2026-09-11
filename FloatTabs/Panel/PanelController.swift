@@ -150,6 +150,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationFocusGeneration: UInt64 = 0
     private var presentationNativeFocusPending = false
     private var presentationWebFocusPending = false
+#if DEBUG
+    private var debugPresentationFactOverrides: [UUID: Bool] = [:]
+#endif
 
     var isVisible: Bool {
         requestedVisibility
@@ -1580,6 +1583,18 @@ final class PanelController: NSObject, NSWindowDelegate {
         return tabStore.activeTabID == slotID
     }
 
+    /// Test-only deterministic presentation fact for exercising the real
+    /// selection callback without depending on WindowServer activation.
+    @discardableResult
+    func debugInvokeRailSelection(
+        slotID: UUID,
+        presentationFact: Bool
+    ) -> Bool {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return debugInvokeRailSelection(slotID: slotID)
+    }
+
     @discardableResult
     func debugInvokeOverflowSelection(slotID: UUID) -> Bool {
         guard rootView.externalControlZoneView
@@ -1587,6 +1602,19 @@ final class PanelController: NSObject, NSWindowDelegate {
             return false
         }
         return tabStore.activeTabID == slotID
+    }
+
+    /// Test-only deterministic presentation fact for exercising the real
+    /// overflow selection callback without depending on WindowServer
+    /// activation.
+    @discardableResult
+    func debugInvokeOverflowSelection(
+        slotID: UUID,
+        presentationFact: Bool
+    ) -> Bool {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return debugInvokeOverflowSelection(slotID: slotID)
     }
 
     var debugOverflowSlotIDs: [UUID] {
@@ -2275,6 +2303,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// acknowledgement policies. This helper only observes topology; it does
     /// not read or mutate either attention authority.
     private func isSlotActuallyPresented(slotID: UUID) -> Bool {
+#if DEBUG
+        if let override = debugPresentationFactOverrides[slotID] {
+            return override
+        }
+#endif
         let pooledWebView = webViewPool.existingWebView(for: slotID)
         let facts = AttentionPresentation.Facts(
             slotID: slotID,

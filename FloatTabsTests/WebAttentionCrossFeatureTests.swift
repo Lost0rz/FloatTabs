@@ -3,6 +3,49 @@ import WebKit
 import XCTest
 @testable import FloatTabs
 
+@MainActor
+private final class CrossFeatureSpeechService: SpeechSynthesizing {
+    private(set) var lastTransportToken: UInt64?
+    private(set) var pauseCount = 0
+    private(set) var resumeCount = 0
+    private(set) var stopCount = 0
+
+    var onUtteranceStarted: ((UInt64) -> Void)?
+    var onUtteranceFinished: ((UInt64) -> Void)?
+    var onUtterancePaused: ((UInt64) -> Void)?
+    var onUtteranceContinued: ((UInt64) -> Void)?
+    var onUtteranceCancelled: ((UInt64) -> Void)?
+
+    func speak(_ request: SpeechPlaybackRequest) {
+        lastTransportToken = request.transportToken
+        onUtteranceStarted?(request.transportToken)
+    }
+
+    func pause() -> Bool {
+        pauseCount += 1
+        return true
+    }
+
+    func resume() -> Bool {
+        resumeCount += 1
+        return true
+    }
+
+    func stop() {
+        stopCount += 1
+    }
+
+    func confirmPause() {
+        guard let lastTransportToken else { return }
+        onUtterancePaused?(lastTransportToken)
+    }
+
+    func confirmResume() {
+        guard let lastTransportToken else { return }
+        onUtteranceContinued?(lastTransportToken)
+    }
+}
+
 /// Stage F — cross-feature closure.
 ///
 /// These tests prove the COMPOSITION of the attention feature across the
@@ -1944,7 +1987,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
             ]
         )
-        let first = try profile(named: "ChatA", in: store)
         let second = try profile(named: "ChatB", in: store)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let secondWebView = try materializeRuntime(
@@ -1953,12 +1995,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             slotName: "ChatB"
         ).webView
         let secondBridge = try attentionBridge(pool: pool, slot: second)
-        defer { controller.hideFloatTabs() }
-
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: first.id
-        )
         completeGeneration(
             bridge: secondBridge,
             webView: secondWebView,
@@ -1967,11 +2003,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(second.id))
         XCTAssertFalse(controller.isAttentionUserVisible(slotID: second.id))
 
-        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: second.id))
-        let cleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(second.id)
-        }
-        XCTAssertTrue(cleared)
+        // The production callback is exercised directly. Only the physical
+        // presentation fact is deterministic so this test does not depend on
+        // WindowServer/AppKit activation on a CI runner.
+        XCTAssertTrue(
+            controller.debugInvokeRailSelection(
+                slotID: second.id,
+                presentationFact: true
+            )
+        )
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(second.id))
     }
 
     func testExplicitRailReclickAcknowledgesAlreadyActiveUnread() async throws {
@@ -1981,12 +2022,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
-        defer { controller.hideFloatTabs() }
 
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: slot.id
-        )
         completeGeneration(
             bridge: bridge,
             webView: webView,
@@ -1994,11 +2030,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
 
-        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slot.id))
-        let cleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(slot.id)
-        }
-        XCTAssertTrue(cleared)
+        // The selection callback remains the real production rail callback.
+        // Only the presentation fact is deterministic here, so this test does
+        // not require WindowServer/AppKit activation on a CI runner.
+        XCTAssertTrue(
+            controller.debugInvokeRailSelection(
+                slotID: slot.id,
+                presentationFact: true
+            )
+        )
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testKeyboardAndRelativeSelectionsAcknowledgeTheirUnreadTargets() async throws {
@@ -2071,14 +2113,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             spec(name: "Chat\(index)", url: "https://chatgpt.com/chat-\(index)")
         }
         let (controller, _, store, pool) = makeController(profiles: profiles)
-        let first = try profile(named: "Chat0", in: store)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "Chat0")
-        defer { controller.hideFloatTabs() }
-
-        try await showAndWaitForAttentionVisible(
-            controller: controller,
-            slotID: first.id
-        )
         let hasOverflow = try await waitUntil {
             !controller.debugOverflowSlotIDs.isEmpty
         }
@@ -2096,11 +2131,15 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(hiddenSlotID))
 
-        XCTAssertTrue(controller.debugInvokeOverflowSelection(slotID: hiddenSlotID))
-        let cleared = try await waitUntil {
-            !controller.unreadResponseSlotIDs.contains(hiddenSlotID)
-        }
-        XCTAssertTrue(cleared)
+        // Keep the real overflow menu callback and make only its presentation
+        // fact deterministic; no WindowServer/AppKit activation is needed.
+        XCTAssertTrue(
+            controller.debugInvokeOverflowSelection(
+                slotID: hiddenSlotID,
+                presentationFact: true
+            )
+        )
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(hiddenSlotID))
     }
 
     func testManualReadAndReplayAcceptedRequestsClearUnreadButRejectedRequestsDoNot() throws {
@@ -2175,6 +2214,64 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testActualPauseAndResumeCommandsPreserveUnreadWhileSpeaking() throws {
+        var committedURL: URL?
+        let speechService = CrossFeatureSpeechService()
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            committedURLProvider: { _ in committedURL },
+            speechService: speechService
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        committedURL = URL(string: "https://chatgpt.com/chat-a")!
+        pool.onCommittedURLChange?(slot.id, committedURL!)
+        controller.handle(.toggleAutoSpeakForActiveTab)
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "pause-resume-unread"
+        )
+        let payload = ChatGPTResponsePayload(
+            version: ChatGPTResponsePayload.currentVersion,
+            kind: .response,
+            requestID: "deterministic-request",
+            documentToken: "deterministic-document",
+            responseID: "deterministic-response",
+            blocks: [
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "Deterministic response.",
+                    level: nil
+                )
+            ]
+        )
+        XCTAssertTrue(responseBridge.debugResolveFirstPendingRequest(with: payload))
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
+        XCTAssertEqual(controller.debugCurrentSpeakingSlotID, slot.id)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.handle(.readPauseResumeSpeechForActiveTab)
+        XCTAssertEqual(speechService.pauseCount, 1)
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .pausing)
+        speechService.confirmPause()
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .paused)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.handle(.readPauseResumeSpeechForActiveTab)
+        XCTAssertEqual(speechService.resumeCount, 1)
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .resuming)
+        speechService.confirmResume()
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.handle(.stopSpeechForActiveTab)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
     // MARK: 4.12 Factory user-content seam
 
     func testFactorySeamUsesConfiguredUserContentController() throws {
@@ -2206,7 +2303,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         profiles: [(name: String, url: URL)]? = nil,
         store: TabStore? = nil,
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
-        committedURLProvider: WebViewPool.CommittedURLProvider? = nil
+        committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
+        speechService: SpeechSynthesizing? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
         let pool = makePool(committedURLProvider: committedURLProvider)
@@ -2215,7 +2313,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             webViewPool: pool,
             attentionCoordinator: attentionCoordinator,
             frameStore: PanelFrameStore(),
-            preferencesStore: AppPreferencesStore()
+            preferencesStore: AppPreferencesStore(),
+            speechService: speechService
         )
         retainedControllers.append(controller)
         return (controller, attentionCoordinator, tabStore, pool)

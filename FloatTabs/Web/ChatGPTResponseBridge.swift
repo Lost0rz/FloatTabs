@@ -127,6 +127,28 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
     }
 
+#if DEBUG
+    /// Test-only response delivery for a pending extraction. This preserves
+    /// the bridge's normal completion path while avoiding a real WebKit page
+    /// and network response in deterministic speech state tests.
+    @discardableResult
+    func debugResolveFirstPendingRequest(
+        with payload: ChatGPTResponsePayload
+    ) -> Bool {
+        guard let requestID = pendingRequests.keys.first,
+              let pending = pendingRequests.removeValue(forKey: requestID) else {
+            return false
+        }
+        currentDocumentToken = payload.documentToken
+        pending.completion(
+            payload.kind == .response
+                ? payload.assigning(slotID: slotID)
+                : nil
+        )
+        return true
+    }
+#endif
+
     func handleRuntimeReplacement() {
         currentDocumentToken = nil
         finishPendingRequests()
