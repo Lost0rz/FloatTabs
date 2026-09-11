@@ -155,6 +155,17 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("plaintext-only"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'Home'"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'End'"))
+        XCTAssertTrue(
+            ChatGPTResponseExtraction.scriptSource.contains(
+                "if (event.isTrusted) postManualScroll();"
+            )
+        )
+        XCTAssertTrue(
+            ChatGPTResponseExtraction.scriptSource.contains(
+                "if (!event.isTrusted) return;"
+            )
+        )
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("mousemove"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MutationObserver"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("characterData"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("document.body.innerText"))

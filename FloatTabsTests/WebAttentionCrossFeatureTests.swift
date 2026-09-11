@@ -46,6 +46,20 @@ private final class CrossFeatureSpeechService: SpeechSynthesizing {
     }
 }
 
+@MainActor
+private final class CrossFeatureSoundPlayer: AttentionSoundPlaying {
+    struct Call: Equatable {
+        let source: AttentionSoundPlaybackSource
+        let volume: Double
+    }
+
+    private(set) var calls: [Call] = []
+
+    func play(source: AttentionSoundPlaybackSource, volume: Double) {
+        calls.append(Call(source: source, volume: volume))
+    }
+}
+
 /// Stage F — cross-feature closure.
 ///
 /// These tests prove the COMPOSITION of the attention feature across the
@@ -1980,6 +1994,313 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.13 Production acknowledgement wiring
 
+    func testVisibleValidCompletionPlaysSoundOnceWithoutMakingAttentionReady() throws {
+        let preferences = AppPreferencesStore()
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsVisibleCompletion-\(UUID().uuidString)")
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            preferencesStore: preferences
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: preferences,
+            assetStore: assetStore,
+            player: player
+        )
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "visible-completion-sound"
+            )
+        }
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testHiddenValidCompletionPlaysSoundOnceAndBecomesAttentionReady() throws {
+        let preferences = AppPreferencesStore()
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsHiddenCompletion-\(UUID().uuidString)")
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            preferencesStore: preferences
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: preferences,
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "hidden-completion-sound"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testDuplicateFinishDoesNotReplayCompletionSound() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsDuplicateFinish-\(UUID().uuidString)")
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(bridge: bridge, webView: webView, token: "duplicate-finish")
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "duplicate-finish"
+        )
+
+        XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testStrayFinishDoesNotPlayCompletionSound() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsStrayFinish-\(UUID().uuidString)")
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        acceptBaseline(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "stray-finish"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+        XCTAssertTrue(player.calls.isEmpty)
+    }
+
+    func testRuntimeResetDoesNotPlayCompletionSound() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsRuntimeResetSound-\(UUID().uuidString)")
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        acceptBaseline(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "runtime-reset-sound"
+        )
+        bridge.handleRuntimeReplacement()
+
+        XCTAssertTrue(player.calls.isEmpty)
+    }
+
+    func testAttentionAcknowledgeDoesNotPlayAnotherCompletionSound() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsAcknowledgeSound-\(UUID().uuidString)")
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "acknowledge-sound"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            controller.acknowledgeAttentionIfActuallyVisible(slotID: slot.id)
+        }
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testTwoValidCompletionsOnOneSlotPlayTwoSounds() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsTwoCompletions-\(UUID().uuidString)")
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(bridge: bridge, webView: webView, token: "two-completions")
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "two-completions"
+        )
+        acceptState(
+            generating: false,
+            bridge: bridge,
+            webView: webView,
+            token: "two-completions"
+        )
+
+        XCTAssertEqual(player.calls.count, 2)
+    }
+
+    func testTwoSlotsWithValidCompletionsPlayTwoSounds() throws {
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsTwoSlotCompletions-\(UUID().uuidString)")
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+            ]
+        )
+        let first = try profile(named: "ChatA", in: store)
+        let second = try profile(named: "ChatB", in: store)
+        let firstWebView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let secondWebView = try XCTUnwrap(pool.webView(for: second))
+        let firstBridge = try attentionBridge(pool: pool, slot: first)
+        let secondBridge = try attentionBridge(pool: pool, slot: second)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: AppPreferencesStore(),
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(
+            bridge: firstBridge,
+            webView: firstWebView,
+            token: "two-slot-completion-a"
+        )
+        completeGeneration(
+            bridge: secondBridge,
+            webView: secondWebView,
+            token: "two-slot-completion-b"
+        )
+
+        XCTAssertEqual(player.calls.count, 2)
+    }
+
+    func testSoundDisabledSuppressesCompletionPlaybackButKeepsUnreadAndAttention() throws {
+        let suite = "FloatTabsTests.CompletionSoundDisabled.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundEnabled = false
+        let player = CrossFeatureSoundPlayer()
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsDisabledCompletion-\(UUID().uuidString)")
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            preferencesStore: preferences
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        routeCompletionSound(
+            controller: controller,
+            preferencesStore: preferences,
+            assetStore: assetStore,
+            player: player
+        )
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "disabled-completion-sound"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(player.calls.isEmpty)
+    }
+
     func testExplicitRailSelectionAcknowledgesInactiveUnreadAfterActualPresentation() async throws {
         let (controller, _, store, pool) = makeController(
             profiles: [
@@ -2272,6 +2593,202 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testTrustedManualScrollAcknowledgesVisibleUnread() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "trusted-scroll-visible"
+        )
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: "trusted-scroll-document"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            XCTAssertTrue(
+                responseBridge.debugInvokeTrustedManualScroll(
+                    documentToken: "trusted-scroll-document"
+                )
+            )
+        }
+
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testBackgroundManualScrollDoesNotAcknowledgeUnread() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "trusted-scroll-background"
+        )
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: "background-scroll-document"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(
+            responseBridge.debugInvokeTrustedManualScroll(
+                documentToken: "background-scroll-document"
+            )
+        )
+
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testProgrammaticSpeechFollowScrollDoesNotAcknowledgeUnread() throws {
+        var committedURL: URL?
+        let speechService = CrossFeatureSpeechService()
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            committedURLProvider: { _ in committedURL },
+            speechService: speechService
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        committedURL = URL(string: "https://chatgpt.com/chat-a")!
+        pool.onCommittedURLChange?(slot.id, committedURL!)
+        controller.handle(.toggleAutoSpeakForActiveTab)
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "programmatic-follow"
+        )
+        XCTAssertTrue(
+            responseBridge.debugResolveFirstPendingRequest(
+                with: responsePayload(
+                    documentToken: "programmatic-follow-document",
+                    responseID: "programmatic-follow-response",
+                    withLocator: true
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testVisibleGenerationStartedAcknowledgesExistingUnread() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "visible-generation-start"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            acceptState(
+                generating: true,
+                bridge: bridge,
+                webView: webView,
+                token: "visible-generation-start"
+            )
+        }
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testBackgroundGenerationStartedPreservesUnread() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "background-generation-start"
+        )
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: "background-generation-start"
+        )
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testNextCompletionMarksUnreadAgainAfterVisibleGenerationStart() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "next-completion"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            acceptState(
+                generating: true,
+                bridge: bridge,
+                webView: webView,
+                token: "next-completion"
+            )
+        }
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            acceptState(
+                generating: false,
+                bridge: bridge,
+                webView: webView,
+                token: "next-completion"
+            )
+        }
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
     // MARK: 4.12 Factory user-content seam
 
     func testFactorySeamUsesConfiguredUserContentController() throws {
@@ -2304,16 +2821,18 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         store: TabStore? = nil,
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
-        speechService: SpeechSynthesizing? = nil
+        speechService: SpeechSynthesizing? = nil,
+        preferencesStore: AppPreferencesStore? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
         let pool = makePool(committedURLProvider: committedURLProvider)
+        let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         let controller = PanelController(
             tabStore: tabStore,
             webViewPool: pool,
             attentionCoordinator: attentionCoordinator,
             frameStore: PanelFrameStore(),
-            preferencesStore: AppPreferencesStore(),
+            preferencesStore: resolvedPreferencesStore,
             speechService: speechService
         )
         retainedControllers.append(controller)
@@ -2518,6 +3037,68 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             bridge: bridge,
             webView: webView,
             token: token
+        )
+    }
+
+    private func routeCompletionSound(
+        controller: PanelController,
+        preferencesStore: AppPreferencesStore,
+        assetStore: AttentionSoundAssetStore,
+        player: CrossFeatureSoundPlayer
+    ) {
+        controller.onChatGPTGenerationCompleted = { _ in
+            _ = AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferencesStore,
+                assetStore: assetStore,
+                player: player
+            )
+        }
+    }
+
+    private func primeResponseDocument(
+        responseBridge: ChatGPTResponseBridge,
+        documentToken: String
+    ) {
+        responseBridge.extractLatest { _ in }
+        let emptyPayload = ChatGPTResponsePayload(
+            version: ChatGPTResponsePayload.currentVersion,
+            kind: .empty,
+            requestID: "prime-request",
+            documentToken: documentToken,
+            responseID: nil,
+            blocks: []
+        )
+        XCTAssertTrue(
+            responseBridge.debugResolveFirstPendingRequest(with: emptyPayload)
+        )
+    }
+
+    private func responsePayload(
+        documentToken: String,
+        responseID: String,
+        withLocator: Bool = false
+    ) -> ChatGPTResponsePayload {
+        let locator = withLocator
+            ? SpeechSourceLocator(
+                documentToken: documentToken,
+                responseID: responseID,
+                blockID: "(responseID):block-0"
+            )
+            : nil
+        return ChatGPTResponsePayload(
+            version: ChatGPTResponsePayload.currentVersion,
+            kind: .response,
+            requestID: "request-(responseID)",
+            documentToken: documentToken,
+            responseID: responseID,
+            blocks: [
+                SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "Deterministic response.",
+                    level: nil,
+                    sourceLocator: locator
+                )
+            ]
         )
     }
 

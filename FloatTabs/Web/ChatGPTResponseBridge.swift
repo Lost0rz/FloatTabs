@@ -147,6 +147,17 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         )
         return true
     }
+
+    /// Test-only forwarding for a manual-scroll event after the production
+    /// content-world trust/document checks have been modeled deterministically.
+    @discardableResult
+    func debugInvokeTrustedManualScroll(documentToken: String) -> Bool {
+        guard !isInvalidated, documentToken == currentDocumentToken else {
+            return false
+        }
+        onManualScroll(slotID, documentToken)
+        return true
+    }
 #endif
 
     func handleRuntimeReplacement() {

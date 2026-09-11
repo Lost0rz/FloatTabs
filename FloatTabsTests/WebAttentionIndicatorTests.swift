@@ -56,61 +56,35 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(tab.isShowingUnreadResponse)
     }
 
-    func testReadySoundPolicyOnlyTriggersWhenReadyCountIncreases() {
+    func testCompletionSoundPlaybackRequiresAnExplicitCompletionEdge() {
+        let suiteName = "FloatTabsTests.CompletionSoundEdge.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsCompletionSound-\(UUID().uuidString)")
+        )
+        let player = SoundPlayerSpy()
+
         XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 0,
-                currentReadyCount: 1
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
             )
         )
         XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 2
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
             )
         )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 1
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 2,
-                currentReadyCount: 1
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 0
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 0,
-                currentReadyCount: 0
-            )
-        )
+        XCTAssertEqual(player.calls.count, 2)
     }
 
-    func testReadySoundPolicyNormalizesInvalidNegativeCounts() {
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: -1,
-                currentReadyCount: 0
-            )
-        )
-        XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: -1,
-                currentReadyCount: 1
-            )
-        )
-    }
-
-    func testReadySoundEnabledGateAndConfiguredValuesAreForwarded() {
+    func testCompletionSoundEnabledGateAndConfiguredValuesAreForwarded() {
         let suiteName = "FloatTabsTests.ReadySound.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -124,9 +98,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
 
         XCTAssertTrue(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 0,
-                currentReadyCount: 1,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -139,9 +111,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         preferences.attentionSoundEnabled = false
         XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 2,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -150,7 +120,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(player.calls.count, 1)
     }
 
-    func testReadySoundCustomSourceUsesManagedAssetAndPreservesGates() throws {
+    func testCompletionSoundCustomSourceUsesManagedAssetAndPreservesGates() throws {
         let suiteName = "FloatTabsTests.ReadyCustomSound.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -174,9 +144,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let player = SoundPlayerSpy()
 
         XCTAssertTrue(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 0,
-                currentReadyCount: 1,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -184,26 +152,55 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
         XCTAssertEqual(player.sources, [.custom(url: managedURL)])
 
-        XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 1,
+        XCTAssertTrue(
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
             )
         )
+        XCTAssertEqual(player.sources, [.custom(url: managedURL), .custom(url: managedURL)])
+
         preferences.attentionSoundEnabled = false
         XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 2,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
             )
         )
-        XCTAssertEqual(player.sources, [.custom(url: managedURL)])
+        XCTAssertEqual(player.sources, [.custom(url: managedURL), .custom(url: managedURL)])
+    }
+
+    func testCompletionSoundAtZeroVolumeRemainsAbsolutelySilent() {
+        let suiteName = "FloatTabsTests.CompletionSoundZeroVolume.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundVolume = 0
+        var systemCalls: [(String, Float)] = []
+        var beepCount = 0
+        let player = AttentionSoundPlayer(
+            playSystemSound: { name, volume in
+                systemCalls.append((name, volume))
+                return false
+            },
+            beep: { beepCount += 1 }
+        )
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsZeroVolume-\(UUID().uuidString)")
+        )
+
+        XCTAssertTrue(
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
+            )
+        )
+        XCTAssertTrue(systemCalls.isEmpty)
+        XCTAssertEqual(beepCount, 0)
     }
 
     func testAttentionSoundPlayerNormalizesVolumeAndUsesFallbackOnlyForAudibleFailures() {

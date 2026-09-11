@@ -435,6 +435,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
+    var onChatGPTGenerationCompleted: ((UUID) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
     init(
@@ -574,10 +575,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
         }
         webViewPool.onSpeechManualScroll = { [weak self] slotID, documentToken in
-            self?.assistantSpeechCoordinator.handleManualScroll(
+            guard let self else { return }
+            self.assistantSpeechCoordinator.handleManualScroll(
                 for: slotID,
                 documentToken: documentToken
             )
+            self.acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -1573,6 +1576,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             .tabView(for: slotID)?.isShowingUnreadResponse ?? false
     }
 
+    /// Test-only scoped presentation fact for deterministic observation
+    /// routing. The operation still enters through the real pool/bridge
+    /// callback; only WindowServer-owned topology is replaced for the scope.
+    @discardableResult
+    func debugWithPresentationFact<Result>(
+        slotID: UUID,
+        presentationFact: Bool,
+        operation: () -> Result
+    ) -> Result {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return operation()
+    }
+
     /// Test-only forwarding to the actual rail selection callback configured
     /// by `configureSlotInteractions()`. Keeping this seam here lets
     /// production-path tests exercise PanelController acknowledgement wiring
@@ -2270,6 +2287,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         observation: ChatGPTAttentionObservation
     ) {
+        let isValidGenerationCompletion = observation == .generationFinished
+            && attentionCoordinator.state(for: slotID) == .generating
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
         assistantSpeechCoordinator.handle(observation, for: slotID)
@@ -2277,6 +2296,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         unreadResponseCoordinator.handle(observation, for: slotID)
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
+
+        if observation == .generationStarted {
+            acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
+        }
+        if isValidGenerationCompletion {
+            onChatGPTGenerationCompleted?(slotID)
+        }
 
         let isProtected = attentionCoordinator.isAttentionProtected(slotID)
         guard wasProtected,
@@ -2395,6 +2421,19 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// coordinator accepted an extraction request for the active ChatGPT Slot.
     private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
         guard tabStore.activeTabID == slotID else { return }
+        unreadResponseCoordinator.acknowledge(slotID: slotID)
+        synchronizeUnreadIndicators()
+    }
+
+    /// A trusted page interaction means the user has started processing the
+    /// response in the WebView itself. The bridge validates the event's trust,
+    /// document, host, frame, and WebView identity before reaching this route;
+    /// this method adds the physical presentation/active-interaction gate.
+    private func acknowledgeUnreadAfterTrustedPageInteraction(slotID: UUID) {
+        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID),
+              isSlotActuallyPresented(slotID: slotID) else {
+            return
+        }
         unreadResponseCoordinator.acknowledge(slotID: slotID)
         synchronizeUnreadIndicators()
     }
