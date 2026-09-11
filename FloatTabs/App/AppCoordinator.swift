@@ -36,7 +36,6 @@ final class AppCoordinator {
     private var externalSlotFlushScheduled = false
     private var isTerminating = false
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
-    private var lastAttentionReadyCount = 0
 #if DEBUG
     private var benchmarkControlServer: BenchmarkControlServer?
 #endif
@@ -175,17 +174,16 @@ final class AppCoordinator {
         panelController.onSelectedSlotPresentationChange = { [weak self] name, faviconURL in
             self?.statusItemController?.setActiveWebApp(name: name, faviconURL: faviconURL)
         }
-        lastAttentionReadyCount = max(0, panelController.attentionReadyCount)
-        panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
+        panelController.onChatGPTGenerationCompleted = { [weak self] _ in
             guard let self else { return }
-            _ = Self.playAttentionReadySoundIfNeeded(
-                previousReadyCount: self.lastAttentionReadyCount,
-                currentReadyCount: readyCount,
+            _ = Self.playAttentionSoundForGenerationCompletion(
                 preferencesStore: self.preferencesStore,
                 assetStore: self.attentionSoundAssetStore,
                 player: self.attentionSoundPlayer
             )
-            self.lastAttentionReadyCount = max(0, readyCount)
+        }
+        panelController.onAttentionPresentationChange = { [weak self] readyCount, floatTabsVisible in
+            guard let self else { return }
             self.statusItemController?.setAttentionPresentation(
                 readyCount: readyCount,
                 floatTabsVisible: floatTabsVisible
@@ -321,13 +319,6 @@ final class AppCoordinator {
         startWebsiteCacheAutomaticSchedule(initialDelay: 0)
     }
 
-    nonisolated static func shouldPlayAttentionReadySound(
-        previousReadyCount: Int,
-        currentReadyCount: Int
-    ) -> Bool {
-        max(0, currentReadyCount) > max(0, previousReadyCount)
-    }
-
     static func attentionSoundPlaybackSource(
         preferencesStore: AppPreferencesStore,
         assetStore: AttentionSoundAssetStore
@@ -344,17 +335,12 @@ final class AppCoordinator {
     }
 
     @discardableResult
-    static func playAttentionReadySoundIfNeeded(
-        previousReadyCount: Int,
-        currentReadyCount: Int,
+    static func playAttentionSoundForGenerationCompletion(
         preferencesStore: AppPreferencesStore,
         assetStore: AttentionSoundAssetStore,
         player: AttentionSoundPlaying
     ) -> Bool {
-        guard shouldPlayAttentionReadySound(
-            previousReadyCount: previousReadyCount,
-            currentReadyCount: currentReadyCount
-        ), preferencesStore.attentionSoundEnabled else {
+        guard preferencesStore.attentionSoundEnabled else {
             return false
         }
         player.play(

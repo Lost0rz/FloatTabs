@@ -120,7 +120,9 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
         )
     }
 
-    private static func isOpaqueIdentifier(_ value: String) -> Bool {
+    /// Shared with the live-document handshake so payloads and lifecycle
+    /// events use the same bounded opaque-identifier contract.
+    static func isOpaqueIdentifier(_ value: String) -> Bool {
         value.count >= 8
             && value.count <= 256
             && value.range(of: #"^[A-Za-z0-9._:-]+$"#, options: .regularExpression) != nil
@@ -751,6 +753,31 @@ enum ChatGPTResponseExtraction {
               documentToken: documentToken
             });
           };
+
+          const postDocumentReady = () => {
+            const target = handler();
+            if (!target) return;
+            target.postMessage({
+              version: 3,
+              event: "documentReady",
+              documentToken: documentToken
+            });
+          };
+
+          const announceDocumentReady = () => {
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', postDocumentReady, {
+                once: true
+              });
+              return;
+            }
+            Promise.resolve().then(postDocumentReady);
+          };
+
+          // didCommit resets the native live identity. Announcing after the
+          // document reaches DOMContentLoaded prevents the document-start
+          // script from being erased by that replacement boundary.
+          announceDocumentReady();
 
           const isScrollKey = (event) =>
             event.key === 'PageUp'

@@ -127,6 +127,57 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
     }
 
+#if DEBUG
+    /// Test-only delivery of the post-commit document identity. The helper
+    /// shares the native validation used by the real script-message route and
+    /// deliberately does not invoke extraction.
+    @discardableResult
+    func debugReceiveDocumentReady(
+        documentToken: String,
+        version: Int = ChatGPTResponsePayload.currentVersion
+    ) -> Bool {
+        guard !isInvalidated,
+              version == ChatGPTResponsePayload.currentVersion else {
+            return false
+        }
+        return acceptDocumentReady(documentToken)
+    }
+
+    /// Test-only response delivery for a pending extraction. This preserves
+    /// the bridge's normal completion path while avoiding a real WebKit page
+    /// and network response in deterministic speech state tests.
+    @discardableResult
+    func debugResolveFirstPendingRequest(
+        with payload: ChatGPTResponsePayload
+    ) -> Bool {
+        guard let requestID = pendingRequests.keys.first,
+              let pending = pendingRequests.removeValue(forKey: requestID) else {
+            return false
+        }
+        guard payload.documentToken == currentDocumentToken else {
+            pending.completion(nil)
+            return true
+        }
+        pending.completion(
+            payload.kind == .response
+                ? payload.assigning(slotID: slotID)
+                : nil
+        )
+        return true
+    }
+
+    /// Test-only forwarding for a manual-scroll event after the production
+    /// content-world trust/document checks have been modeled deterministically.
+    @discardableResult
+    func debugInvokeTrustedManualScroll(documentToken: String) -> Bool {
+        guard !isInvalidated, documentToken == currentDocumentToken else {
+            return false
+        }
+        onManualScroll(slotID, documentToken)
+        return true
+    }
+#endif
+
     func handleRuntimeReplacement() {
         currentDocumentToken = nil
         finishPendingRequests()
@@ -165,6 +216,14 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
               let body = message.body as? [String: Any] else {
             return
         }
+        if body["event"] as? String == "documentReady" {
+            guard body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+                  let documentToken = body["documentToken"] as? String,
+                  acceptDocumentReady(documentToken) else {
+                return
+            }
+            return
+        }
         if body["event"] as? String == "manualScroll",
            body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
            let documentToken = body["documentToken"] as? String,
@@ -178,10 +237,22 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
               pending.webViewIdentity == ObjectIdentifier(attachedWebView) else {
             return
         }
-        currentDocumentToken = payload.documentToken
+        guard payload.documentToken == currentDocumentToken else {
+            pending.completion(nil)
+            return
+        }
         pending.completion(
             payload.kind == .response ? payload.assigning(slotID: slotID) : nil
         )
+    }
+
+    @discardableResult
+    private func acceptDocumentReady(_ documentToken: String) -> Bool {
+        guard ChatGPTResponsePayload.isOpaqueIdentifier(documentToken) else {
+            return false
+        }
+        currentDocumentToken = documentToken
+        return true
     }
 
     private func finishPendingRequests() {

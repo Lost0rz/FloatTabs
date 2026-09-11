@@ -24,94 +24,67 @@ final class WebAttentionIndicatorTests: XCTestCase {
         }
     }
 
-    func testIdleAndGeneratingSlotsHaveNoReadyDot() {
-        let coordinator = WebAttentionCoordinator()
+    func testIdleAndGeneratingSlotsHaveNoUnreadDot() {
+        let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
-        synchronize(zone, from: coordinator)
+        synchronizeUnread(zone, from: coordinator)
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
-        XCTAssertFalse(tab.isShowingReadyAttention)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
 
-        coordinator.apply(.generationStarted, for: profile.id)
-        synchronize(zone, from: coordinator)
-        XCTAssertFalse(tab.isShowingReadyAttention)
+        coordinator.handle(.generationStarted, for: profile.id)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
     }
 
-    func testGenerationCompletionProjectsReadyDotAndNewGenerationClearsIt() {
-        let coordinator = WebAttentionCoordinator()
+    func testGenerationCompletionProjectsUnreadDotAndNewGenerationKeepsIt() {
+        let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
 
-        coordinator.apply(.generationStarted, for: profile.id)
-        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
-        synchronize(zone, from: coordinator)
+        coordinator.handle(.generationFinished, for: profile.id)
+        synchronizeUnread(zone, from: coordinator)
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
-        XCTAssertTrue(tab.isShowingReadyAttention)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
 
-        coordinator.apply(.generationStarted, for: profile.id)
-        synchronize(zone, from: coordinator)
-        XCTAssertFalse(tab.isShowingReadyAttention)
+        coordinator.handle(.generationStarted, for: profile.id)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
     }
 
-    func testReadySoundPolicyOnlyTriggersWhenReadyCountIncreases() {
-        XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 0,
-                currentReadyCount: 1
-            )
+    func testCompletionSoundPlaybackRequiresAnExplicitCompletionEdge() {
+        let suiteName = "FloatTabsTests.CompletionSoundEdge.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsCompletionSound-\(UUID().uuidString)")
         )
-        XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 2
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 1
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 2,
-                currentReadyCount: 1
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 1,
-                currentReadyCount: 0
-            )
-        )
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: 0,
-                currentReadyCount: 0
-            )
-        )
-    }
+        let player = SoundPlayerSpy()
 
-    func testReadySoundPolicyNormalizesInvalidNegativeCounts() {
-        XCTAssertFalse(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: -1,
-                currentReadyCount: 0
+        XCTAssertTrue(
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
             )
         )
         XCTAssertTrue(
-            AppCoordinator.shouldPlayAttentionReadySound(
-                previousReadyCount: -1,
-                currentReadyCount: 1
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
             )
         )
+        XCTAssertEqual(player.calls.count, 2)
     }
 
-    func testReadySoundEnabledGateAndConfiguredValuesAreForwarded() {
+    func testCompletionSoundEnabledGateAndConfiguredValuesAreForwarded() {
         let suiteName = "FloatTabsTests.ReadySound.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -125,9 +98,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let assetStore = AttentionSoundAssetStore(managedDirectoryURL: managedDirectory)
 
         XCTAssertTrue(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 0,
-                currentReadyCount: 1,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -140,9 +111,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         preferences.attentionSoundEnabled = false
         XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 2,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -151,7 +120,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(player.calls.count, 1)
     }
 
-    func testReadySoundCustomSourceUsesManagedAssetAndPreservesGates() throws {
+    func testCompletionSoundCustomSourceUsesManagedAssetAndPreservesGates() throws {
         let suiteName = "FloatTabsTests.ReadyCustomSound.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -175,9 +144,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let player = SoundPlayerSpy()
 
         XCTAssertTrue(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 0,
-                currentReadyCount: 1,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
@@ -185,26 +152,55 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
         XCTAssertEqual(player.sources, [.custom(url: managedURL)])
 
-        XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 1,
+        XCTAssertTrue(
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
             )
         )
+        XCTAssertEqual(player.sources, [.custom(url: managedURL), .custom(url: managedURL)])
+
         preferences.attentionSoundEnabled = false
         XCTAssertFalse(
-            AppCoordinator.playAttentionReadySoundIfNeeded(
-                previousReadyCount: 1,
-                currentReadyCount: 2,
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
                 preferencesStore: preferences,
                 assetStore: assetStore,
                 player: player
             )
         )
-        XCTAssertEqual(player.sources, [.custom(url: managedURL)])
+        XCTAssertEqual(player.sources, [.custom(url: managedURL), .custom(url: managedURL)])
+    }
+
+    func testCompletionSoundAtZeroVolumeRemainsAbsolutelySilent() {
+        let suiteName = "FloatTabsTests.CompletionSoundZeroVolume.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionSoundVolume = 0
+        var systemCalls: [(String, Float)] = []
+        var beepCount = 0
+        let player = AttentionSoundPlayer(
+            playSystemSound: { name, volume in
+                systemCalls.append((name, volume))
+                return false
+            },
+            beep: { beepCount += 1 }
+        )
+        let assetStore = AttentionSoundAssetStore(
+            managedDirectoryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("FloatTabsZeroVolume-\(UUID().uuidString)")
+        )
+
+        XCTAssertTrue(
+            AppCoordinator.playAttentionSoundForGenerationCompletion(
+                preferencesStore: preferences,
+                assetStore: assetStore,
+                player: player
+            )
+        )
+        XCTAssertTrue(systemCalls.isEmpty)
+        XCTAssertEqual(beepCount, 0)
     }
 
     func testAttentionSoundPlayerNormalizesVolumeAndUsesFallbackOnlyForAudibleFailures() {
@@ -391,72 +387,68 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(beepCount, 0)
     }
 
-    func testReadyAcknowledgementAndRuntimeResetClearTheDot() {
-        let coordinator = WebAttentionCoordinator()
+    func testUnreadAcknowledgementClearsButRuntimeResetPreservesTheDot() {
+        let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
 
-        coordinator.apply(.generationStarted, for: profile.id)
-        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
-        synchronize(zone, from: coordinator)
-        XCTAssertTrue(tab.isShowingReadyAttention)
+        coordinator.handle(.generationFinished, for: profile.id)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
 
-        coordinator.acknowledge(slotID: profile.id, userVisible: true)
-        synchronize(zone, from: coordinator)
-        XCTAssertFalse(tab.isShowingReadyAttention)
+        coordinator.acknowledge(slotID: profile.id)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
 
-        coordinator.apply(.generationStarted, for: profile.id)
-        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
-        coordinator.apply(.runtimeReset, for: profile.id)
-        synchronize(zone, from: coordinator)
-        XCTAssertFalse(tab.isShowingReadyAttention)
+        coordinator.handle(.generationFinished, for: profile.id)
+        coordinator.handle(.runtimeReset, for: profile.id)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
     }
 
-    func testMultipleSlotsOnlyReadyIDsDisplayDots() {
-        let coordinator = WebAttentionCoordinator()
+    func testMultipleSlotsOnlyUnreadIDsDisplayDots() {
+        let coordinator = makeUnreadCoordinator()
         let ready = makeProfile(name: "Ready")
         let idle = makeProfile(name: "Idle")
         let generating = makeProfile(name: "Generating")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [ready, idle, generating], activeTabID: ready.id)
 
-        coordinator.apply(.generationStarted, for: ready.id)
-        coordinator.apply(.generationFinished(userVisible: false), for: ready.id)
-        coordinator.apply(.generationStarted, for: generating.id)
-        synchronize(zone, from: coordinator)
+        coordinator.markUnread(slotID: ready.id)
+        synchronizeUnread(zone, from: coordinator)
 
-        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: ready.id)).isShowingReadyAttention)
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: idle.id)).isShowingReadyAttention)
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: generating.id)).isShowingReadyAttention)
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: ready.id)).isShowingUnreadResponse)
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: idle.id)).isShowingUnreadResponse)
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: generating.id)).isShowingUnreadResponse)
     }
 
-    func testReadyProjectionReplacesInsteadOfAccumulating() {
+    func testUnreadProjectionReplacesInsteadOfAccumulating() {
         let first = makeProfile(name: "First")
         let second = makeProfile(name: "Second")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [first, second], activeTabID: first.id)
 
-        zone.setReadySlotIDs([first.id])
-        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingReadyAttention)
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingReadyAttention)
+        zone.setUnreadSlotIDs([first.id])
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingUnreadResponse)
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingUnreadResponse)
 
-        zone.setReadySlotIDs([second.id])
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingReadyAttention)
-        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingReadyAttention)
+        zone.setUnreadSlotIDs([second.id])
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingUnreadResponse)
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingUnreadResponse)
 
-        zone.setReadySlotIDs([])
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingReadyAttention)
-        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingReadyAttention)
+        zone.setUnreadSlotIDs([])
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: first.id)).isShowingUnreadResponse)
+        XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingUnreadResponse)
     }
 
-    func testRemovedSlotHasNoVisibleTabOrReadyDot() {
+    func testRemovedSlotHasNoVisibleTabOrUnreadDot() {
         let removed = makeProfile(name: "Removed")
         let remaining = makeProfile(name: "Remaining")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [removed, remaining], activeTabID: remaining.id)
-        zone.setReadySlotIDs([removed.id])
+        zone.setUnreadSlotIDs([removed.id])
 
         zone.apply(profiles: [remaining], activeTabID: remaining.id)
 
@@ -464,34 +456,33 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertNotNil(zone.tabView(for: remaining.id))
     }
 
-    func testRailReapplyKeepsReadyProjectionOnRecreatedAndUpdatedTabs() {
-        let coordinator = WebAttentionCoordinator()
+    func testRailReapplyKeepsUnreadProjectionOnRecreatedAndUpdatedTabs() {
+        let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
-        coordinator.apply(.generationStarted, for: profile.id)
-        coordinator.apply(.generationFinished(userVisible: false), for: profile.id)
+        coordinator.markUnread(slotID: profile.id)
 
         zone.apply(profiles: [profile], activeTabID: profile.id)
-        synchronize(zone, from: coordinator)
-        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingReadyAttention)
+        synchronizeUnread(zone, from: coordinator)
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingUnreadResponse)
 
         zone.apply(profiles: [profile], activeTabID: nil)
-        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingReadyAttention)
+        XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingUnreadResponse)
     }
 
-    func testReadyDotUsesFaviconGeometryAtRestAndMagnifiedWidths() {
+    func testUnreadDotUsesFaviconGeometryAtRestAndMagnifiedWidths() {
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
-        zone.setReadySlotIDs([profile.id])
+        zone.setUnreadSlotIDs([profile.id])
         zone.layoutSubtreeIfNeeded()
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
         let restingWidth = tab.frame.width
         let restingIconFrame = tab.iconFrame
-        let restingDotFrame = tab.readyAttentionFrame
+        let restingDotFrame = tab.unreadResponseFrame
         XCTAssertEqual(restingWidth, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
-        assertReadyDot(
+        assertUnreadDot(
             restingDotFrame,
             isAttachedTo: restingIconFrame,
             file: #filePath,
@@ -503,7 +494,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
 
         let magnifiedIconFrame = tab.iconFrame
-        let magnifiedDotFrame = tab.readyAttentionFrame
+        let magnifiedDotFrame = tab.unreadResponseFrame
         XCTAssertEqual(tab.frame.width, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
         XCTAssertEqual(magnifiedIconFrame, restingIconFrame)
         XCTAssertEqual(
@@ -519,7 +510,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertLessThan(magnifiedDotFrame.maxX, tab.bounds.maxX)
     }
 
-    func testReadyDotDoesNotChangeTabWidthOrDockMagnification() {
+    func testUnreadDotDoesNotChangeTabWidthOrDockMagnification() {
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.frame = NSRect(
             x: 0,
@@ -530,48 +521,48 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         tab.setDockInfluence(1)
         let normalWidth = tab.preferredWidth
-        tab.setReadyAttention(true)
+        tab.setUnreadResponse(true)
         XCTAssertEqual(tab.preferredWidth, normalWidth, accuracy: 0.001)
 
         tab.setHovered(true)
         let hoveredWidth = tab.preferredWidth
-        tab.setReadyAttention(false)
+        tab.setUnreadResponse(false)
         XCTAssertEqual(tab.preferredWidth, hoveredWidth, accuracy: 0.001)
     }
 
-    func testReadyDotIsNonInteractiveAndSemanticRed() {
+    func testUnreadDotIsNonInteractiveAndSemanticRed() {
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
-        tab.setReadyAttention(true)
+        tab.setUnreadResponse(true)
         tab.layoutSubtreeIfNeeded()
 
-        XCTAssertTrue(tab.hitTest(tab.readyAttentionFrame.midPoint) === tab)
+        XCTAssertTrue(tab.hitTest(tab.unreadResponseFrame.midPoint) === tab)
         let red = try! XCTUnwrap(
-            tab.readyAttentionColor?.usingColorSpace(.deviceRGB)
+            tab.unreadResponseColor?.usingColorSpace(.deviceRGB)
         )
         XCTAssertGreaterThan(red.redComponent, red.greenComponent)
         XCTAssertGreaterThan(red.redComponent, red.blueComponent)
     }
 
-    func testReadyDotDoesNotChangeResidentOrReleasedFaviconPresentation() {
+    func testUnreadDotDoesNotChangeResidentOrReleasedFaviconPresentation() {
         let tab = ExternalWebAppTabView(slotID: UUID())
 
         tab.setResident(true)
         let residentIcon = try! XCTUnwrap(tab.displayedIcon)
-        tab.setReadyAttention(true)
+        tab.setUnreadResponse(true)
         XCTAssertTrue(tab.isResidentRuntime)
         XCTAssertTrue(tab.displayedIcon === residentIcon)
 
         tab.setResident(false)
         let releasedIcon = try! XCTUnwrap(tab.displayedIcon)
-        tab.setReadyAttention(false)
-        tab.setReadyAttention(true)
+        tab.setUnreadResponse(false)
+        tab.setUnreadResponse(true)
         XCTAssertFalse(tab.isResidentRuntime)
         XCTAssertTrue(tab.displayedIcon === releasedIcon)
-        XCTAssertTrue(tab.isShowingReadyAttention)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
     }
 
-    func testReadyAttentionIsNotPersistedInWebAppProfile() throws {
+    func testUnreadResponseIsNotPersistedInWebAppProfile() throws {
         let profile = makeProfile(name: "GPT")
         let data = try JSONEncoder().encode(profile)
         let object = try XCTUnwrap(
@@ -581,7 +572,9 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(
             object.keys.contains { key in
                 let normalized = key.lowercased()
-                return normalized.contains("ready") || normalized.contains("attention")
+                return normalized.contains("ready")
+                    || normalized.contains("attention")
+                    || normalized.contains("unread")
             }
         )
     }
@@ -1062,15 +1055,15 @@ final class WebAttentionIndicatorTests: XCTestCase {
         }
     }
 
-    private func synchronize(
+    private func synchronizeUnread(
         _ zone: ExternalControlZoneView,
-        from coordinator: WebAttentionCoordinator
+        from coordinator: ChatGPTUnreadResponseCoordinator
     ) {
-        zone.setReadySlotIDs(coordinator.readySlotIDs)
+        zone.setUnreadSlotIDs(coordinator.unreadSlotIDs)
         zone.layoutSubtreeIfNeeded()
     }
 
-    private func assertReadyDot(
+    private func assertUnreadDot(
         _ dot: NSRect,
         isAttachedTo icon: NSRect,
         file: StaticString,
@@ -1082,6 +1075,15 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertGreaterThan(dot.minY, icon.minY, file: file, line: line)
         XCTAssertGreaterThanOrEqual(dot.maxX, icon.maxX, file: file, line: line)
         XCTAssertGreaterThanOrEqual(dot.maxY, icon.maxY, file: file, line: line)
+    }
+
+    private func makeUnreadCoordinator() -> ChatGPTUnreadResponseCoordinator {
+        let suiteName = "FloatTabsTests.UnreadIndicator.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
     }
 
     private func makeProfile(name: String) -> WebAppProfile {

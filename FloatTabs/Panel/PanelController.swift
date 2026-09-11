@@ -71,6 +71,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let tabStore: TabStore
     private let webViewPool: WebViewPool
     private let attentionCoordinator: WebAttentionCoordinator
+    private let unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator
     private let webFocusRouter: WebFocusRouter
     private let speechService: SpeechSynthesizing
     private let speechPreferencesStore: SpeechPreferencesStore
@@ -149,6 +150,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationFocusGeneration: UInt64 = 0
     private var presentationNativeFocusPending = false
     private var presentationWebFocusPending = false
+#if DEBUG
+    private var debugPresentationFactOverrides: [UUID: Bool] = [:]
+#endif
 
     var isVisible: Bool {
         requestedVisibility
@@ -425,14 +429,21 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator.readySlotIDs.count
     }
 
+    var unreadResponseSlotIDs: Set<UUID> {
+        unreadResponseCoordinator.unreadSlotIDs
+    }
+
     var onSelectedSlotPresentationChange: ((String?, URL?) -> Void)?
     var onAttentionPresentationChange: ((Int, Bool) -> Void)?
+    var onChatGPTGenerationCompleted: ((UUID) -> Void)?
     var onOpenGlobalSettings: (() -> Void)?
 
     init(
         tabStore: TabStore,
         webViewPool: WebViewPool,
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
+        unreadResponseStore: UnreadResponseStore? = nil,
+        unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator? = nil,
         frameStore: PanelFrameStore = PanelFrameStore(),
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
@@ -444,6 +455,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
+        self.unreadResponseCoordinator = unreadResponseCoordinator
+            ?? ChatGPTUnreadResponseCoordinator(
+                store: unreadResponseStore ?? UnreadResponseStore()
+            )
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter()
         let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
         self.speechPreferencesStore = resolvedSpeechPreferences
@@ -560,10 +575,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
         }
         webViewPool.onSpeechManualScroll = { [weak self] slotID, documentToken in
-            self?.assistantSpeechCoordinator.handleManualScroll(
+            guard let self else { return }
+            self.assistantSpeechCoordinator.handleManualScroll(
                 for: slotID,
                 documentToken: documentToken
             )
+            self.acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -732,24 +749,36 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
-    func readLatestResponseForActiveTab() {
+    @discardableResult
+    func readLatestResponseForActiveTab() -> Bool {
         guard let slotID = tabStore.activeTabID,
               activeSlotSupportsSpeech(slotID: slotID) else {
             NSSound.beep()
             synchronizeSpeechPresentation()
-            return
+            return false
         }
-        assistantSpeechCoordinator.readLatestResponse(for: slotID)
+        guard assistantSpeechCoordinator.readLatestResponse(for: slotID) else {
+            synchronizeSpeechPresentation()
+            return false
+        }
+        acknowledgeUnreadAfterManualSpeech(slotID: slotID)
+        return true
     }
 
-    func replayLatestResponseForActiveTab() {
+    @discardableResult
+    func replayLatestResponseForActiveTab() -> Bool {
         guard let slotID = tabStore.activeTabID,
               activeSlotSupportsSpeech(slotID: slotID) else {
             NSSound.beep()
             synchronizeSpeechPresentation()
-            return
+            return false
         }
-        assistantSpeechCoordinator.replayLatestResponse(for: slotID)
+        guard assistantSpeechCoordinator.replayLatestResponse(for: slotID) else {
+            synchronizeSpeechPresentation()
+            return false
+        }
+        acknowledgeUnreadAfterManualSpeech(slotID: slotID)
+        return true
     }
 
     func readPauseResumeSpeechForActiveTab() {
@@ -1311,6 +1340,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             // Replacement Slots are new identities: their attention
             // bookkeeping starts fresh rather than being restored.
             attentionCoordinator.removeSlot(slotID)
+            unreadResponseCoordinator.removeSlot(slotID: slotID)
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
@@ -1537,13 +1567,76 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     /// Read-only cross-feature diagnostics. Each accessor exposes one piece
-    /// of already-existing internal state — the rail's current Ready
+    /// of already-existing internal state — the rail's current unread
     /// projection and the lifecycle coordinator's current plan bookkeeping —
     /// so integration tests can observe real wiring without any mutation,
     /// second source of truth, or test-specific business path.
-    func debugIsProjectingReadyAttention(slotID: UUID) -> Bool {
+    func debugIsProjectingUnreadResponse(slotID: UUID) -> Bool {
         rootView.externalControlZoneView
-            .tabView(for: slotID)?.isShowingReadyAttention ?? false
+            .tabView(for: slotID)?.isShowingUnreadResponse ?? false
+    }
+
+    /// Test-only scoped presentation fact for deterministic observation
+    /// routing. The operation still enters through the real pool/bridge
+    /// callback; only WindowServer-owned topology is replaced for the scope.
+    @discardableResult
+    func debugWithPresentationFact<Result>(
+        slotID: UUID,
+        presentationFact: Bool,
+        operation: () -> Result
+    ) -> Result {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return operation()
+    }
+
+    /// Test-only forwarding to the actual rail selection callback configured
+    /// by `configureSlotInteractions()`. Keeping this seam here lets
+    /// production-path tests exercise PanelController acknowledgement wiring
+    /// without exposing the root view or reimplementing selection behavior.
+    @discardableResult
+    func debugInvokeRailSelection(slotID: UUID) -> Bool {
+        rootView.externalControlZoneView.onSelect?(slotID)
+        return tabStore.activeTabID == slotID
+    }
+
+    /// Test-only deterministic presentation fact for exercising the real
+    /// selection callback without depending on WindowServer activation.
+    @discardableResult
+    func debugInvokeRailSelection(
+        slotID: UUID,
+        presentationFact: Bool
+    ) -> Bool {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return debugInvokeRailSelection(slotID: slotID)
+    }
+
+    @discardableResult
+    func debugInvokeOverflowSelection(slotID: UUID) -> Bool {
+        guard rootView.externalControlZoneView
+            .debugInvokeOverflowSelection(slotID: slotID) else {
+            return false
+        }
+        return tabStore.activeTabID == slotID
+    }
+
+    /// Test-only deterministic presentation fact for exercising the real
+    /// overflow selection callback without depending on WindowServer
+    /// activation.
+    @discardableResult
+    func debugInvokeOverflowSelection(
+        slotID: UUID,
+        presentationFact: Bool
+    ) -> Bool {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        defer { debugPresentationFactOverrides.removeValue(forKey: slotID) }
+        return debugInvokeOverflowSelection(slotID: slotID)
+    }
+
+    var debugOverflowSlotIDs: [UUID] {
+        rootView.externalControlZoneView.layoutSubtreeIfNeeded()
+        return rootView.externalControlZoneView.overflowTabIDs
     }
 
     var debugAutoSpeakSlotIDs: Set<UUID> {
@@ -1610,14 +1703,18 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func selectSlot(relativeOffset: Int) -> Bool {
-        tabStore.selectRelative(by: relativeOffset) != nil
+        guard let selected = tabStore.selectRelative(by: relativeOffset) else {
+            return false
+        }
+        acknowledgeUnreadAfterExplicitSelection(slotID: selected.id)
+        return true
     }
 
     func handle(_ command: AppCommand) {
         switch command {
         case let .selectSlot(index):
             guard let slot = tabStore.slotByKeyboardIndex(index) else { return }
-            _ = tabStore.select(id: slot.id)
+            _ = selectSlotFromExplicitUserAction(slot.id)
 
         case .nextSlot:
             _ = selectSlot(relativeOffset: 1)
@@ -1859,7 +1956,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let rail = rootView.externalControlZoneView
 
         rail.onSelect = { [weak self] id in
-            _ = self?.tabStore.select(id: id)
+            _ = self?.selectSlotFromExplicitUserAction(id)
         }
         rail.onReturnHome = { [weak self] id in
             self?.returnSlotHome(id: id)
@@ -1986,6 +2083,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func synchronizeSlotState() {
         synchronizeBrowserProfileMenuPresentation()
         synchronizeSpeechPresentation()
+        let orderedProfiles = tabStore.orderedProfiles
+        unreadResponseCoordinator.prune(
+            validSlotIDs: Set(orderedProfiles.map(\.id))
+        )
+        synchronizeUnreadIndicators()
         guard !sourceHostController.isSessionLocked else {
             pendingSlotSynchronization = true
             synchronizeFullscreenCompanionSlotState()
@@ -1993,13 +2095,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         pendingSlotSynchronization = false
 
-        let orderedProfiles = tabStore.orderedProfiles
         rootView.externalControlZoneView.apply(
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
         synchronizeSpeechPresentation()
-        synchronizeAttentionIndicators()
+        synchronizeAttentionPresentation()
+        synchronizeUnreadIndicators()
         synchronizeResidentIndicators()
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
@@ -2156,10 +2258,15 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
-    private func synchronizeAttentionIndicators() {
+    private func synchronizeAttentionPresentation() {
         let readySlotIDs = attentionCoordinator.readySlotIDs
-        rootView.externalControlZoneView.setReadySlotIDs(readySlotIDs)
         onAttentionPresentationChange?(readySlotIDs.count, requestedVisibility)
+    }
+
+    private func synchronizeUnreadIndicators() {
+        rootView.externalControlZoneView.setUnreadSlotIDs(
+            unreadResponseCoordinator.unreadSlotIDs
+        )
     }
 
     private func updateRequestedVisibility(_ visible: Bool) {
@@ -2180,11 +2287,22 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         observation: ChatGPTAttentionObservation
     ) {
+        let isValidGenerationCompletion = observation == .generationFinished
+            && attentionCoordinator.state(for: slotID) == .generating
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
         assistantSpeechCoordinator.handle(observation, for: slotID)
         attentionRouter.handle(observation, for: slotID)
-        synchronizeAttentionIndicators()
+        unreadResponseCoordinator.handle(observation, for: slotID)
+        synchronizeAttentionPresentation()
+        synchronizeUnreadIndicators()
+
+        if observation == .generationStarted {
+            acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
+        }
+        if isValidGenerationCompletion {
+            onChatGPTGenerationCompleted?(slotID)
+        }
 
         let isProtected = attentionCoordinator.isAttentionProtected(slotID)
         guard wasProtected,
@@ -2204,6 +2322,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// state — and lets `AttentionPresentation` decide. Logical selection or
     /// residency alone never make a Slot visible.
     func isAttentionUserVisible(slotID: UUID) -> Bool {
+        isSlotActuallyPresented(slotID: slotID)
+    }
+
+    /// Returns the physical presentation fact shared by the two independent
+    /// acknowledgement policies. This helper only observes topology; it does
+    /// not read or mutate either attention authority.
+    private func isSlotActuallyPresented(slotID: UUID) -> Bool {
+#if DEBUG
+        if let override = debugPresentationFactOverrides[slotID] {
+            return override
+        }
+#endif
         let pooledWebView = webViewPool.existingWebView(for: slotID)
         let facts = AttentionPresentation.Facts(
             slotID: slotID,
@@ -2244,12 +2374,68 @@ final class PanelController: NSObject, NSWindowDelegate {
             slotID: slotID,
             userVisible: isAttentionUserVisible(slotID: slotID)
         )
-        synchronizeAttentionIndicators()
+        synchronizeAttentionPresentation()
     }
 
     private func acknowledgeActiveAttentionIfActuallyPresented() {
         guard let activeSlotID = tabStore.activeTabID else { return }
         acknowledgeAttentionIfActuallyVisible(slotID: activeSlotID)
+    }
+
+    private func selectSlotFromExplicitUserAction(_ slotID: UUID) -> Bool {
+        guard tabStore.select(id: slotID) else { return false }
+        acknowledgeUnreadAfterExplicitSelection(slotID: slotID)
+        return true
+    }
+
+    /// A rail/menu/keyboard selection is the only selection-driven unread
+    /// acknowledgement. It is allowed only after the selected Slot is the
+    /// actual current presentation, including a re-click of the active Tab.
+    private func acknowledgeUnreadAfterExplicitSelection(slotID: UUID) {
+        guard tabStore.activeTabID == slotID,
+              unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+            return
+        }
+
+        if isSlotActuallyPresented(slotID: slotID) {
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+            synchronizeUnreadIndicators()
+            return
+        }
+
+        // WebView/window ordering can finish one main-queue turn after the
+        // model selection. Re-check once, without turning selection into a
+        // polling or focus state machine.
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.tabStore.activeTabID == slotID,
+                  self.isSlotActuallyPresented(slotID: slotID) else {
+                return
+            }
+            self.unreadResponseCoordinator.acknowledge(slotID: slotID)
+            self.synchronizeUnreadIndicators()
+        }
+    }
+
+    /// Manual Read Latest and Replay Latest acknowledge only after the speech
+    /// coordinator accepted an extraction request for the active ChatGPT Slot.
+    private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
+        guard tabStore.activeTabID == slotID else { return }
+        unreadResponseCoordinator.acknowledge(slotID: slotID)
+        synchronizeUnreadIndicators()
+    }
+
+    /// A trusted page interaction means the user has started processing the
+    /// response in the WebView itself. The bridge validates the event's trust,
+    /// document, host, frame, and WebView identity before reaching this route;
+    /// this method adds the physical presentation/active-interaction gate.
+    private func acknowledgeUnreadAfterTrustedPageInteraction(slotID: UUID) {
+        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID),
+              isSlotActuallyPresented(slotID: slotID) else {
+            return
+        }
+        unreadResponseCoordinator.acknowledge(slotID: slotID)
+        synchronizeUnreadIndicators()
     }
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
@@ -2456,6 +2642,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 // Pool removal already routed the bridge's final runtimeReset;
                 // dropping the bookkeeping fully forgets the deleted Slot.
                 self.attentionCoordinator.removeSlot(id)
+                self.unreadResponseCoordinator.removeSlot(slotID: id)
             }
         }
         if modalHost.attachedSheet == nil {
@@ -3184,7 +3371,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
-        synchronizeAttentionIndicators()
+        synchronizeAttentionPresentation()
+        synchronizeUnreadIndicators()
         synchronizeResidentIndicators()
 
         guard let activeProfile = tabStore.activeProfile else {
