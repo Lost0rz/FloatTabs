@@ -2144,7 +2144,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testAutoSpeakToggleAndStopDoNotAcknowledgeUnread() throws {
+    func testPauseResumeStopAndAutoSpeakDoNotAcknowledgeUnread() throws {
         var committedURL: URL?
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
@@ -2155,6 +2155,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: slot)
         committedURL = URL(string: "https://chatgpt.com/chat-a")!
         pool.onCommittedURLChange?(slot.id, committedURL!)
+        controller.handle(.toggleAutoSpeakForActiveTab)
         completeGeneration(
             bridge: bridge,
             webView: webView,
@@ -2162,7 +2163,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
 
-        controller.handle(.toggleAutoSpeakForActiveTab)
+        // With no committed source, the combined read/pause/resume command
+        // fails closed and must not turn an unavailable operation into an
+        // unread acknowledgement. Stop is likewise a no-op here.
+        committedURL = nil
+        controller.handle(.readPauseResumeSpeechForActiveTab)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        controller.handle(.readPauseResumeSpeechForActiveTab)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
         controller.handle(.stopSpeechForActiveTab)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
