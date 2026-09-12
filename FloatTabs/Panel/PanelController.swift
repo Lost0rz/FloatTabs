@@ -90,11 +90,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         onRuntimeReleased: { [weak self] profile in
             self?.handleRuntimeReleased(profile)
         },
+        prepareRuntimeForRelease: { [weak self] slotID in
+            self?.calibreSpeechCoordinator.prepareForRuntimeRelease(slotID: slotID)
+        },
+        onSlotBecameInactive: { [weak self] profile in
+            self?.calibreSpeechCoordinator.handleBecameInactive(profile: profile)
+        },
         attentionProtectionQuery: { [weak self] slotID in
             self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
         },
         speechProtectionQuery: { [weak self] slotID in
-            self?.calibreSpeechCoordinator.isSpeechProtectionActive(slotID: slotID)
+            self?.calibreSpeechCoordinator.isSpeechRuntimeProtectionActive(slotID: slotID)
                 ?? false
         }
     )
@@ -175,6 +181,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var hasPositionedPanel = false
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
+    private var lastSynchronizedProfilesByID: [UUID: WebAppProfile] = [:]
     private let preferencesStore: AppPreferencesStore
     private(set) var isPinned = false
     private var externalMouseMonitor: Any?
@@ -566,6 +573,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         calibreSpeechCoordinator.onPresentationChange = { [weak self] in
             self?.synchronizeSpeechPresentation()
+        }
+        calibreSpeechCoordinator.onSpeechProtectionChange = { [weak self] slotID, isProtected in
+            guard let self, !isProtected,
+                  let profile = self.tabStore.profiles.first(where: { $0.id == slotID }) else {
+                return
+            }
+            self.slotLifecycleCoordinator.restartAfterProtectionEnded(profile: profile)
         }
         // Register both source adapters before any WebView lifecycle callback
         // can deliver a completion into the shared playback session.
@@ -1383,6 +1397,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
+        lastSynchronizedProfilesByID.removeAll()
         synchronizeSlotState()
         return true
     }
@@ -2123,6 +2138,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeBrowserProfileMenuPresentation()
         synchronizeSpeechPresentation()
         let orderedProfiles = tabStore.orderedProfiles
+        synchronizeCalibreBackgroundMediaPolicy(for: orderedProfiles)
         unreadResponseCoordinator.prune(
             validSlotIDs: Set(orderedProfiles.map(\.id))
         )
@@ -2219,6 +2235,30 @@ final class PanelController: NSObject, NSWindowDelegate {
            panel.isKeyWindow || sourceHostController.window.isKeyWindow {
             sourceHostController.orderFrontAndFocus(webView)
         }
+    }
+
+    /// Background Media Policy has one source-local bridge for Calibre. The
+    /// profile snapshot is only used to detect policy transitions; it is not a
+    /// second persisted preference or a speech-state authority.
+    private func synchronizeCalibreBackgroundMediaPolicy(
+        for profiles: [WebAppProfile]
+    ) {
+        let currentProfilesByID = Dictionary(
+            uniqueKeysWithValues: profiles.map { ($0.id, $0) }
+        )
+        for (slotID, previousProfile) in lastSynchronizedProfilesByID {
+            guard let currentProfile = currentProfilesByID[slotID],
+                  previousProfile.backgroundMediaPolicy
+                    != currentProfile.backgroundMediaPolicy else {
+                continue
+            }
+            calibreSpeechCoordinator.handleBackgroundMediaPolicyChange(
+                slotID: slotID,
+                policy: currentProfile.backgroundMediaPolicy,
+                isInactive: !isSlotActuallyPresented(slotID: slotID)
+            )
+        }
+        lastSynchronizedProfilesByID = currentProfilesByID
     }
 
     private func faviconURL(for profile: WebAppProfile) -> URL? {

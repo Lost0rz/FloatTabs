@@ -223,6 +223,34 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         XCTAssertEqual(bridge.requestCount, 0)
     }
 
+    func testChatGPTAutoSpeakRemainsIndependentFromBackgroundMediaPolicy() {
+        for policy in BackgroundMediaPolicy.allCases {
+            let service = TestSpeechService()
+            let bridge = TestResponseBridge()
+            let slotID = UUID()
+            let coordinator = makeCoordinator(
+                service: service,
+                bridge: bridge,
+                webView: WKWebView()
+            )
+            coordinator.toggleAutoSpeak(for: slotID)
+
+            // BackgroundMediaPolicy is a Web/Calibre lifecycle input. It is
+            // intentionally not supplied to AssistantSpeechCoordinator.
+            var profile = WebAppProfile(
+                order: 0,
+                name: "ChatGPT (\(policy.rawValue))",
+                homeURL: URL(string: "https://chatgpt.example.test")!
+            )
+            profile.backgroundMediaPolicy = policy
+            coordinator.handle(.generationFinished, for: slotID)
+            bridge.resolve(makePayload(text: "ChatGPT remains eligible."))
+
+            XCTAssertEqual(profile.backgroundMediaPolicy, policy)
+            XCTAssertEqual(service.spoken, ["ChatGPT remains eligible."])
+        }
+    }
+
     func testStopSuppressesCurrentResponseAndClearsSpeech() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()

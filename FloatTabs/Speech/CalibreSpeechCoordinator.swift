@@ -5,6 +5,7 @@ enum CalibreReaderSpeechState: Equatable, Sendable {
     case extracting
     case speakingUnit
     case pausedAtBoundary
+    case suspended
     case awaitingAdvance
     case awaitingRelocation
 }
@@ -79,9 +80,17 @@ final class CalibreSpeechCoordinator {
     private var segments: [SpeechUtteranceRequest] = []
     private var nextSegmentIndex = 0
     private var currentSegmentIndex: Int?
+    /// Background suspension is source-local. The shared playback session
+    /// remains the only transport authority, while this remembers the state
+    /// whose bounded transaction may still settle underneath suspension.
+    private var suspendedState: CalibreReaderSpeechState?
     private(set) var state: CalibreReaderSpeechState = .idle
 
     var onPresentationChange: (() -> Void)?
+    /// Reports only changes to the WebView-runtime protection condition. This
+    /// lets lifecycle timers restart after EOF/Stop/suspension without making
+    /// the source lease itself a permanent WebView retention reason.
+    var onSpeechProtectionChange: ((UUID, Bool) -> Void)?
 
     convenience init(
         playbackSession: SpeechPlaybackSessionController,
@@ -208,9 +217,105 @@ final class CalibreSpeechCoordinator {
             }
             continueAfterBoundary(operation: operation)
             return true
+        case .suspended:
+            guard let bridge = bridgeProvider(slotID),
+                  bridge.isReaderCandidate,
+                  let ownedSession,
+                  bridge.currentDocumentIdentity == ownedSession.document,
+                  let operation = currentOperation else {
+                stop()
+                return false
+            }
+
+            let underlyingState = suspendedState ?? .speakingUnit
+            if underlyingState == .speakingUnit,
+               playbackSession.playbackState == .starting {
+                suspendedState = nil
+                state = .speakingUnit
+                notifyPresentationChange()
+                return true
+            }
+            let resumeDisposition = playbackSession.resume(
+                sourceKind: .calibreReader,
+                slotID: slotID
+            )
+            switch resumeDisposition {
+            case .continuedCurrentUtterance:
+                suspendedState = nil
+                state = .speakingUnit
+                notifyPresentationChange()
+                return true
+            case .resumeAtSegmentBoundary:
+                guard playbackSession.beginBoundaryResume() else {
+                    return false
+                }
+                suspendedState = nil
+                state = .speakingUnit
+                notifyPresentationChange()
+                continueAfterBoundary(operation: operation)
+                return true
+            case .rejected:
+                // A suspension that outlived its shared transport must not
+                // invent a new CFI or silently restart from an unknown unit.
+                if underlyingState == .speakingUnit {
+                    guard playbackSession.playbackState == .idle else {
+                        return false
+                    }
+                    suspendedState = nil
+                    state = .speakingUnit
+                    notifyPresentationChange()
+                    if nextSegmentIndex < segments.count {
+                        speakNextSegment(operation: operation)
+                    } else {
+                        finishCurrentUnit(operation: operation)
+                    }
+                    return true
+                }
+                guard underlyingState == .extracting
+                        || underlyingState == .awaitingAdvance
+                        || underlyingState == .awaitingRelocation else {
+                    return false
+                }
+                suspendedState = nil
+                state = underlyingState
+                notifyPresentationChange()
+                return true
+            }
         case .idle, .extracting, .awaitingAdvance, .awaitingRelocation:
             return false
         }
+    }
+
+    /// Applies the source half of Background Media Policy. Allowing
+    /// background audio never resumes a suspended source; only an explicit
+    /// Resume command can do that.
+    func handleBackgroundMediaPolicyChange(
+        slotID: UUID,
+        policy: BackgroundMediaPolicy,
+        isInactive: Bool
+    ) {
+        guard activeSlotID == slotID else { return }
+        guard policy == .pauseWhenInactive, isInactive else { return }
+        suspendForBackgroundIfNeeded(slotID: slotID)
+    }
+
+    func handleBecameInactive(profile: WebAppProfile) {
+        handleBackgroundMediaPolicyChange(
+            slotID: profile.id,
+            policy: profile.backgroundMediaPolicy,
+            isInactive: true
+        )
+    }
+
+    /// Tears down the source before SlotLifecycleCoordinator releases the
+    /// underlying WebView. Protection notifications are intentionally
+    /// suppressed here so a release cannot recreate a fresh inactive plan
+    /// while its current plan is being removed.
+    func prepareForRuntimeRelease(slotID: UUID) {
+        guard activeSlotID == slotID else { return }
+        suppressSpeechProtectionNotifications = true
+        stop()
+        suppressSpeechProtectionNotifications = false
     }
 
     func stop() {
@@ -223,6 +328,7 @@ final class CalibreSpeechCoordinator {
         segments.removeAll()
         nextSegmentIndex = 0
         currentSegmentIndex = nil
+        suspendedState = nil
         state = .idle
 
         if let slotID = oldSession?.slotID,
@@ -264,11 +370,28 @@ final class CalibreSpeechCoordinator {
 
         switch event {
         case .started:
+            if isSuspendedForBackground {
+                _ = playbackSession.pause(
+                    sourceKind: .calibreReader,
+                    slotID: ownedSession.slotID
+                )
+                notifyPresentationChange()
+                return
+            }
             state = .speakingUnit
             notifyPresentationChange()
         case .paused:
             notifyPresentationChange()
         case .continued:
+            if isSuspendedForBackground {
+                _ = playbackSession.pause(
+                    sourceKind: .calibreReader,
+                    slotID: ownedSession.slotID
+                )
+                notifyPresentationChange()
+                return
+            }
+            suspendedState = nil
             state = .speakingUnit
             notifyPresentationChange()
         case let .finished(_, boundary):
@@ -279,11 +402,29 @@ final class CalibreSpeechCoordinator {
     }
 
     var isSpeechProtectionActive: Bool {
-        hasActiveSourceSession
+        isSpeechRuntimeProtectionActive
     }
 
     func isSpeechProtectionActive(slotID: UUID) -> Bool {
-        ownedSession?.slotID == slotID && hasActiveSourceSession
+        isSpeechRuntimeProtectionActive(slotID: slotID)
+    }
+
+    var isSpeechRuntimeProtectionActive: Bool {
+        guard let slotID = ownedSession?.slotID else { return false }
+        return isSpeechRuntimeProtectionActive(slotID: slotID)
+    }
+
+    func isSpeechRuntimeProtectionActive(slotID: UUID) -> Bool {
+        guard ownedSession?.slotID == slotID,
+              hasActiveSourceSession else {
+            return false
+        }
+        switch state {
+        case .extracting, .speakingUnit, .awaitingAdvance, .awaitingRelocation:
+            return true
+        case .idle, .pausedAtBoundary, .suspended:
+            return false
+        }
     }
 
     var capabilities: SpeechCapabilities {
@@ -317,6 +458,11 @@ final class CalibreSpeechCoordinator {
         segments = requests
         nextSegmentIndex = 0
         currentSegmentIndex = nil
+        if isSuspendedForBackground {
+            suspendedState = .speakingUnit
+            notifyPresentationChange()
+            return
+        }
         state = .speakingUnit
         notifyPresentationChange()
         speakNextSegment(operation: operation)
@@ -325,6 +471,7 @@ final class CalibreSpeechCoordinator {
     private func speakNextSegment(operation: UInt64) {
         guard let ownedSession,
               isCurrent(operation: operation),
+              !isSuspendedForBackground,
               nextSegmentIndex < segments.count else {
             return
         }
@@ -354,11 +501,21 @@ final class CalibreSpeechCoordinator {
         guard let operation = currentOperation else { return }
         switch boundary {
         case .pausedAtSegmentBoundary:
+            if isSuspendedForBackground {
+                suspendedState = .pausedAtBoundary
+                notifyPresentationChange()
+                return
+            }
             state = .pausedAtBoundary
             notifyPresentationChange()
         case .notAtBoundary:
             if nextSegmentIndex < segments.count {
-                speakNextSegment(operation: operation)
+                if isSuspendedForBackground {
+                    suspendedState = .speakingUnit
+                    notifyPresentationChange()
+                } else {
+                    speakNextSegment(operation: operation)
+                }
             } else {
                 finishCurrentUnit(operation: operation)
             }
@@ -374,7 +531,11 @@ final class CalibreSpeechCoordinator {
             return
         }
 
-        state = .awaitingAdvance
+        if isSuspendedForBackground {
+            suspendedState = .awaitingAdvance
+        } else {
+            state = .awaitingAdvance
+        }
         notifyPresentationChange()
         bridge.extractCurrentReadingUnit { [weak self, weak bridge] result in
             guard let self,
@@ -435,7 +596,11 @@ final class CalibreSpeechCoordinator {
         nextTransitionToken &+= 1
         let transition = nextTransitionToken
         pendingTransitionToken = transition
-        state = .awaitingRelocation
+        if isSuspendedForBackground {
+            suspendedState = .awaitingRelocation
+        } else {
+            state = .awaitingRelocation
+        }
         notifyPresentationChange()
         bridge.requestAdvance(
             from: unit,
@@ -490,7 +655,7 @@ final class CalibreSpeechCoordinator {
         guard let ownedSession,
               isCurrent(operation: operation),
               ownedSession.document == document,
-              state == .awaitingRelocation,
+              operationalState == .awaitingRelocation,
               pendingTransitionToken == transition else {
             return
         }
@@ -507,7 +672,7 @@ final class CalibreSpeechCoordinator {
             return
         }
 
-        switch state {
+        switch operationalState {
         case .awaitingRelocation:
             guard let unit = currentUnit,
                   relocation.identity != unit else {
@@ -523,7 +688,11 @@ final class CalibreSpeechCoordinator {
                 failCurrentOperation(operation: operation)
                 return
             }
-            state = .extracting
+            if isSuspendedForBackground {
+                suspendedState = .extracting
+            } else {
+                state = .extracting
+            }
             notifyPresentationChange()
             bridge.extractCurrentReadingUnit { [weak self, weak bridge] result in
                 guard let self,
@@ -542,7 +711,7 @@ final class CalibreSpeechCoordinator {
             if let unit = currentUnit, relocation.identity != unit {
                 terminateExternalRelocation(operation: operation)
             }
-        case .idle, .extracting:
+        case .idle, .extracting, .suspended:
             break
         }
     }
@@ -577,8 +746,58 @@ final class CalibreSpeechCoordinator {
         return true
     }
 
+    private var isSuspendedForBackground: Bool {
+        state == .suspended
+    }
+
+    private var operationalState: CalibreReaderSpeechState {
+        suspendedState ?? state
+    }
+
+    private var suppressSpeechProtectionNotifications = false
+    private var lastSpeechProtection = false
+    private var lastSpeechProtectionSlotID: UUID?
+
+    private func suspendForBackgroundIfNeeded(slotID: UUID) {
+        guard activeSlotID == slotID,
+              state != .idle,
+              state != .suspended else {
+            return
+        }
+
+        suspendedState = state
+        state = .suspended
+        if playbackSession.playbackState == .speaking {
+            _ = playbackSession.pause(
+                sourceKind: .calibreReader,
+                slotID: slotID
+            )
+        }
+        notifyPresentationChange()
+    }
+
     private func notifyPresentationChange() {
         onPresentationChange?()
+        guard !suppressSpeechProtectionNotifications else {
+            lastSpeechProtection = isSpeechRuntimeProtectionActive
+            lastSpeechProtectionSlotID = ownedSession?.slotID
+            return
+        }
+
+        let currentSlotID = ownedSession?.slotID
+        let currentProtection = isSpeechRuntimeProtectionActive
+        if currentProtection != lastSpeechProtection
+            || currentSlotID != lastSpeechProtectionSlotID {
+            if let previousSlotID = lastSpeechProtectionSlotID,
+               lastSpeechProtection {
+                onSpeechProtectionChange?(previousSlotID, false)
+            }
+            if let currentSlotID, currentProtection {
+                onSpeechProtectionChange?(currentSlotID, true)
+            }
+        }
+        lastSpeechProtection = currentProtection
+        lastSpeechProtectionSlotID = currentProtection ? currentSlotID : nil
     }
 }
 

@@ -5,6 +5,8 @@ import XCTest
 @MainActor
 private final class CalibreTestSpeechService: SpeechSynthesizing {
     private(set) var spokenRequests: [SpeechPlaybackRequest] = []
+    private(set) var pauseCount = 0
+    private(set) var resumeCount = 0
     private(set) var stopCount = 0
 
     var onUtteranceStarted: ((UInt64) -> Void)?
@@ -17,8 +19,15 @@ private final class CalibreTestSpeechService: SpeechSynthesizing {
         spokenRequests.append(request)
     }
 
-    func pause() -> Bool { true }
-    func resume() -> Bool { true }
+    func pause() -> Bool {
+        pauseCount += 1
+        return true
+    }
+
+    func resume() -> Bool {
+        resumeCount += 1
+        return true
+    }
     func stop() { stopCount += 1 }
 
     func emitStart() {
@@ -560,6 +569,126 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertEqual(session.playbackState, .idle)
         session.releaseSourceSession(sourceKind: .calibreReader, token: token)
         XCTAssertNil(session.activeSourceSessionKind)
+    }
+
+    func testPauseWhenInactiveSuspendsAtBoundaryWithoutAutoAdvancing() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let second = page(document: doc, start: "c", end: "d", text: "Next page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+        let firstToken = try! XCTUnwrap({
+            XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+            return service.spokenRequests.first?.transportToken
+        }())
+
+        service.emitStart(token: firstToken)
+        coordinator.handleBackgroundMediaPolicyChange(
+            slotID: slotID,
+            policy: .pauseWhenInactive,
+            isInactive: true
+        )
+        XCTAssertEqual(coordinator.state, .suspended)
+        XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
+        XCTAssertTrue(coordinator.hasActiveSourceSession)
+        XCTAssertEqual(service.pauseCount, 1)
+
+        // The accepted pause transaction may settle through a finish callback;
+        // it must remain source-suspended at the boundary.
+        service.emitFinish(token: firstToken)
+        XCTAssertEqual(coordinator.state, .suspended)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.resumeCount, 0)
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(bridge.advanceCount, 0)
+    }
+
+    func testPauseWhenInactiveSuspendsAcceptedRelocationBeforeNextPageSpeech() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let second = page(document: doc, start: "c", end: "d", text: "Second page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, _) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+
+        coordinator.handleBackgroundMediaPolicyChange(
+            slotID: slotID,
+            policy: .pauseWhenInactive,
+            isInactive: true
+        )
+        XCTAssertEqual(coordinator.state, .suspended)
+        XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
+
+        bridge.emitRelocation(second, token: 1)
+        XCTAssertEqual(coordinator.state, .suspended)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(bridge.currentPage.identity, second.identity)
+
+        // Resume is the only admission point after the inactive suspension.
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(service.spokenRequests.last?.text, "Second page.")
+    }
+
+    func testAllowBackgroundAudioDoesNotAutoResumeASuspendedCalibreSource() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let (coordinator, _) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        let token = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        service.emitStart(token: token)
+        coordinator.handleBackgroundMediaPolicyChange(
+            slotID: slotID,
+            policy: .pauseWhenInactive,
+            isInactive: true
+        )
+        service.emitFinish(token: token)
+
+        coordinator.handleBackgroundMediaPolicyChange(
+            slotID: slotID,
+            policy: .allowBackgroundAudio,
+            isInactive: true
+        )
+        XCTAssertEqual(coordinator.state, .suspended)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
+    }
+
+    func testManualPausedBoundaryDoesNotProtectInactiveWebViewRuntime() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "First page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let (coordinator, _) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish()
+
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+        XCTAssertTrue(coordinator.hasActiveSourceSession)
+        XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
     }
 
     func testPinnedBridgeScriptsUseRuntimeCFIAndRelocationWithoutWholeDocumentText() {
