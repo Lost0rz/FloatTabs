@@ -18,7 +18,11 @@ final class SlotLifecycleCoordinator {
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
     typealias RuntimeReleasedHandler = @MainActor (WebAppProfile) -> Void
+    typealias RuntimeReleasePreparation = @MainActor (UUID) -> Void
+    typealias SlotBecameInactiveHandler = @MainActor (WebAppProfile) -> Void
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
+    /// This query covers source work that must finish before a WebView can be
+    /// released. A source lease or a paused source is not sufficient here.
     typealias SpeechProtectionQuery = @MainActor (UUID) -> Bool
 
     private struct InactivePlan {
@@ -38,6 +42,8 @@ final class SlotLifecycleCoordinator {
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
     private let onRuntimeReleased: RuntimeReleasedHandler
+    private let prepareRuntimeForRelease: RuntimeReleasePreparation
+    private let onSlotBecameInactive: SlotBecameInactiveHandler
     private let attentionProtectionQuery: AttentionProtectionQuery
     private let speechProtectionQuery: SpeechProtectionQuery
 
@@ -63,6 +69,8 @@ final class SlotLifecycleCoordinator {
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
+        prepareRuntimeForRelease: @escaping RuntimeReleasePreparation = { _ in },
+        onSlotBecameInactive: @escaping SlotBecameInactiveHandler = { _ in },
         attentionProtectionQuery: @escaping AttentionProtectionQuery = { _ in false },
         speechProtectionQuery: @escaping SpeechProtectionQuery = { _ in false },
         installsMemoryPressureSource: Bool = true
@@ -85,6 +93,8 @@ final class SlotLifecycleCoordinator {
             webViewPool?.pauseMediaPlayback(slotID: slotID)
         }
         self.onRuntimeReleased = onRuntimeReleased
+        self.prepareRuntimeForRelease = prepareRuntimeForRelease
+        self.onSlotBecameInactive = onSlotBecameInactive
         self.attentionProtectionQuery = attentionProtectionQuery
         self.speechProtectionQuery = speechProtectionQuery
 
@@ -182,6 +192,9 @@ final class SlotLifecycleCoordinator {
             if activeProfile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(activeProfile.id)
             }
+            // Match webpage media's immediate background boundary. The
+            // hidden-active grace still controls WebView eviction below.
+            onSlotBecameInactive(activeProfile)
             scheduleHiddenActiveTransition(profile: activeProfile)
         }
     }
@@ -199,6 +212,7 @@ final class SlotLifecycleCoordinator {
     func deactivate(profile: WebAppProfile) {
         guard fullscreenSourceProfile?.id != profile.id else { return }
         if activeSlotID == profile.id {
+            onSlotBecameInactive(profile)
             activeSlotID = nil
         }
         hiddenActiveToken = nil
@@ -206,11 +220,12 @@ final class SlotLifecycleCoordinator {
         prepareInactive(profile: profile, resetWarmRecency: true)
     }
 
-    /// Restarts normal Warm/Cold handling after an attention runtime reset
-    /// removed protection from an already lifecycle-inactive Slot. A reset can
-    /// arrive after the old release timer has fired and been skipped, so this
-    /// deliberately creates a new plan rather than reusing the old deadline.
-    func restartAfterAttentionProtectionEnded(profile: WebAppProfile) {
+    /// Restarts normal Warm/Cold handling after an attention or speech runtime
+    /// reset removed protection from an already lifecycle-inactive Slot. A
+    /// reset can arrive after the old release timer has fired and been
+    /// skipped, so this deliberately creates a new plan rather than reusing
+    /// the old deadline.
+    func restartAfterProtectionEnded(profile: WebAppProfile) {
         let slotID = profile.id
         guard let existingPlan = inactivePlans[slotID],
               existingPlan.residencyPolicy == profile.residencyPolicy,
@@ -232,6 +247,12 @@ final class SlotLifecycleCoordinator {
             preservingMediaProtection: preserveMediaProtection
         )
         createInactivePlan(for: profile, resetWarmRecency: true)
+    }
+
+    /// Keep the existing attention-specific entry point while sharing the
+    /// same lifecycle restart engine with speech protection.
+    func restartAfterAttentionProtectionEnded(profile: WebAppProfile) {
+        restartAfterProtectionEnded(profile: profile)
     }
 
     /// Explicitly protects the WebView WebKit is presenting in element
@@ -270,10 +291,12 @@ final class SlotLifecycleCoordinator {
         guard supplementalVisibleProfile?.id == profile.id else { return }
         supplementalVisibleProfile = nil
         guard prepareAsInactive, activeSlotID != profile.id else { return }
+        onSlotBecameInactive(profile)
         prepareInactive(profile: profile, resetWarmRecency: true)
     }
 
     func remove(slotID: UUID) {
+        prepareRuntimeForRelease(slotID)
         if activeSlotID == slotID {
             activeSlotID = nil
         }
@@ -297,6 +320,7 @@ final class SlotLifecycleCoordinator {
         inactiveWarmRecency.removeAll()
         warmRecencyCounter = 0
         for slotID in slotIDs {
+            prepareRuntimeForRelease(slotID)
             container.removeSlot(slotID)
         }
     }
@@ -542,6 +566,7 @@ final class SlotLifecycleCoordinator {
 
             self.hiddenActiveToken = nil
             self.activeSlotID = nil
+            self.onSlotBecameInactive(profile)
             self.container.deactivate(
                 slotID: profile.id,
                 residencyPolicy: profile.residencyPolicy
@@ -594,6 +619,7 @@ final class SlotLifecycleCoordinator {
               webViewPool.contains(slotID: slotID) else {
             return
         }
+        prepareRuntimeForRelease(slotID)
         container.removeSlot(slotID)
         webViewPool.release(slotID: slotID)
         cancelInactivePlan(slotID: slotID)

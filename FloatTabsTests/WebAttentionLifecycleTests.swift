@@ -43,6 +43,31 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.reconcile(profiles: [profile])
     }
 
+    func testManualPausedSpeechProtectionEndsAndColdRuntimeReleases() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "ManualPausedCold", policy: .cold)
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = try pool.webView(for: profile)
+        var speechProtected = true
+        var prepared = false
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            prepareRuntimeForRelease: { _ in
+                prepared = true
+            },
+            speechProtectionQuery: { _ in speechProtected }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        speechProtected = false
+        lifecycle.restartAfterProtectionEnded(profile: profile)
+        try await wait(milliseconds: 70)
+
+        XCTAssertTrue(prepared)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
     func testIndependentSpeechProtectionBlocksWarmEvictionAndMemoryPressure() throws {
         let pool = makePool()
         let protected = makeProfile(name: "SpeechProtectedWarm", policy: .warm)
@@ -64,6 +89,94 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.handleMemoryPressure(.critical)
         XCTAssertTrue(pool.contains(slotID: protected.id))
         XCTAssertFalse(pool.contains(slotID: eligible.id))
+    }
+
+    func testSuspendedSpeechIsNotPermanentColdRuntimeProtection() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "SuspendedCold", policy: .cold)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            speechProtectionQuery: { _ in false }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 70)
+
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testSpeechProtectionEndingRestartsFreshInactivePlan() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "SpeechRestart", policy: .warm)
+        _ = try pool.webView(for: profile)
+        var speechProtected = true
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 60,
+            speechProtectionQuery: { _ in speechProtected }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        let oldToken = try XCTUnwrap(lifecycle.debugInactivePlanToken(slotID: profile.id))
+        speechProtected = false
+        lifecycle.restartAfterProtectionEnded(profile: profile)
+
+        let newToken = try XCTUnwrap(lifecycle.debugInactivePlanToken(slotID: profile.id))
+        XCTAssertNotEqual(oldToken, newToken)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+    }
+
+    func testRuntimeReleasePreparationRunsBeforeWebViewRelease() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "ReleaseOrder", policy: .cold)
+        _ = try pool.webView(for: profile)
+        var wasResidentDuringPreparation = false
+        var releasedProfile: WebAppProfile?
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            prepareRuntimeForRelease: { preparedSlotID in
+                wasResidentDuringPreparation = pool.contains(slotID: preparedSlotID)
+            },
+            onRuntimeReleased: { profile in
+                releasedProfile = profile
+            }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 70)
+
+        XCTAssertTrue(wasResidentDuringPreparation)
+        XCTAssertEqual(releasedProfile?.id, profile.id)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testHidingPanelNotifiesBackgroundPolicyBeforeHiddenGraceRelease() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "HiddenSpeech", policy: .warm)
+        _ = try pool.webView(for: profile)
+        var becameInactiveCount = 0
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 60,
+            hiddenActiveGraceDelay: 0.06,
+            onSlotBecameInactive: { _ in
+                becameInactiveCount += 1
+            }
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        XCTAssertEqual(becameInactiveCount, 1)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+
+        try await wait(milliseconds: 20)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
     func testInactiveWarmAttentionProtectedSurvivesWarmTTL() async throws {
@@ -551,6 +664,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
         mediaProtectionPollDelay: TimeInterval = 0.01,
         warmResidentLimit: Int = 2,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
+        prepareRuntimeForRelease: @escaping SlotLifecycleCoordinator.RuntimeReleasePreparation = { _ in },
+        onRuntimeReleased: @escaping SlotLifecycleCoordinator.RuntimeReleasedHandler = { _ in },
+        onSlotBecameInactive: @escaping SlotLifecycleCoordinator.SlotBecameInactiveHandler = { _ in },
         attentionProtectionQuery: @escaping SlotLifecycleCoordinator.AttentionProtectionQuery = { _ in false },
         speechProtectionQuery: @escaping SlotLifecycleCoordinator.SpeechProtectionQuery = { _ in false }
     ) -> SlotLifecycleCoordinator {
@@ -567,6 +683,9 @@ final class WebAttentionLifecycleTests: XCTestCase {
             mediaProtectionPollDelay: mediaProtectionPollDelay,
             warmResidentLimit: warmResidentLimit,
             mediaPlayingQuery: mediaPlayingQuery,
+            onRuntimeReleased: onRuntimeReleased,
+            prepareRuntimeForRelease: prepareRuntimeForRelease,
+            onSlotBecameInactive: onSlotBecameInactive,
             attentionProtectionQuery: attentionProtectionQuery,
             speechProtectionQuery: speechProtectionQuery,
             installsMemoryPressureSource: false

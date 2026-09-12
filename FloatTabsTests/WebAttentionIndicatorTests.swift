@@ -820,6 +820,190 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(read.toolTip?.contains("Read Latest Response") == true)
     }
 
+    func testStopRequiresCurrentActiveSpeechOwner() {
+        let activeChatGPT = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [activeChatGPT], activeTabID: activeChatGPT.id)
+
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: activeChatGPT.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: activeChatGPT.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true,
+                hasActiveSourceSession: true
+            ),
+            activeTabName: activeChatGPT.name
+        )
+        XCTAssertTrue(stopControl(in: zone).isStopActionVisible)
+        XCTAssertTrue(stopControl(in: zone).isActionEnabledForSpeechPresentationState)
+
+        let backgroundChatGPT = makeProfile(name: "ChatGPT A")
+        let otherChatGPT = makeProfile(name: "ChatGPT B")
+        zone.apply(profiles: [backgroundChatGPT, otherChatGPT], activeTabID: otherChatGPT.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: otherChatGPT.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: backgroundChatGPT.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true,
+                hasActiveSourceSession: true
+            ),
+            activeTabName: otherChatGPT.name
+        )
+        XCTAssertFalse(stopControl(in: zone).isStopActionVisible)
+        XCTAssertFalse(stopControl(in: zone).isActionEnabledForSpeechPresentationState)
+    }
+
+    func testBackgroundCalibreSpeechDoesNotExposeStopOnAnotherChatGPTTab() {
+        let calibre = makeProfile(name: "Book")
+        let chatGPT = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre, chatGPT], activeTabID: chatGPT.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: chatGPT.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: calibre.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: true,
+                labels: .chatGPT,
+                hasActiveSourceSession: true
+            ),
+            activeTabName: chatGPT.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertFalse(stop.isStopActionVisible)
+        XCTAssertFalse(stop.isActionEnabledForSpeechPresentationState)
+    }
+
+    func testBackgroundCalibreSpeechDoesNotExposeStopOnOrdinaryWebTab() {
+        let calibre = makeProfile(name: "Book")
+        let web = makeProfile(name: "Web")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre, web], activeTabID: web.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: web.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: calibre.id,
+                playbackState: .speaking,
+                activeSlotSupportsSpeech: false,
+                capabilities: .unsupported,
+                hasActiveSourceSession: true
+            ),
+            activeTabName: web.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertFalse(stop.isStopActionVisible)
+        XCTAssertFalse(stop.isActionEnabledForSpeechPresentationState)
+    }
+
+    func testActiveCalibreSourceSessionKeepsStopActionableWhenTransportIsIdle() {
+        let calibre = makeProfile(name: "Book")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre], activeTabID: calibre.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: calibre.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: calibre.id,
+                playbackState: .idle,
+                activeSlotSupportsSpeech: true,
+                capabilities: .calibreReader,
+                labels: .calibreReader,
+                hasActiveSourceSession: true
+            ),
+            activeTabName: calibre.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.isActionEnabledForSpeechPresentationState)
+    }
+
+    func testActiveCalibreYieldedResumableSpeechKeepsStopActionable() {
+        let calibre = makeProfile(name: "Book")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre], activeTabID: calibre.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: calibre.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: nil,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true,
+                capabilities: .calibreReader,
+                labels: .calibreReader,
+                resumableSlotID: calibre.id
+            ),
+            activeTabName: calibre.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.isActionEnabledForSpeechPresentationState)
+    }
+
+    func testActiveCalibreSuspendedResumableSpeechKeepsStopActionable() {
+        let calibre = makeProfile(name: "Book")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre], activeTabID: calibre.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: calibre.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: nil,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true,
+                capabilities: .calibreReader,
+                labels: .calibreReader,
+                resumableSlotID: calibre.id
+            ),
+            activeTabName: calibre.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.isActionEnabledForSpeechPresentationState)
+    }
+
+    func testActiveCalibreResumableStopRemainsValidWhileForeignChatGPTSpeaks() {
+        let calibre = makeProfile(name: "Book")
+        let chatGPT = makeProfile(name: "ChatGPT")
+        let (_, zone) = makeZoneHarness()
+        zone.apply(profiles: [calibre, chatGPT], activeTabID: calibre.id)
+        zone.setSpeechPresentation(
+            SpeechRailPresentation(
+                activeSlotID: calibre.id,
+                autoSpeakSlotIDs: [],
+                activeSlotAutoSpeakEnabled: false,
+                currentSpeakingSlotID: nil,
+                playbackState: .paused,
+                activeSlotSupportsSpeech: true,
+                capabilities: .calibreReader,
+                labels: .calibreReader,
+                resumableSlotID: calibre.id
+            ),
+            activeTabName: calibre.name
+        )
+
+        let stop = stopControl(in: zone)
+        XCTAssertTrue(stop.isStopActionVisible)
+        XCTAssertTrue(stop.isActionEnabledForSpeechPresentationState)
+    }
+
     func testSpeechBadgeDoesNotChangeTabHitGeometry() {
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.frame = NSRect(
@@ -996,6 +1180,13 @@ final class WebAttentionIndicatorTests: XCTestCase {
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)
+    }
+
+    private func stopControl(in zone: ExternalControlZoneView) -> SpeechRailControl {
+        try! XCTUnwrap(
+            zone.subviews.compactMap { $0 as? SpeechRailControl }
+                .first(where: { $0.kind == .stop })
+        )
     }
 
     private func railActionableViews(in zone: ExternalControlZoneView) -> [NSView] {

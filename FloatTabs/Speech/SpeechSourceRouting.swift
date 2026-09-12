@@ -10,6 +10,38 @@ struct SpeechSourcePresentation: Equatable, Sendable {
     let currentSpeakingSlotID: UUID?
     let playbackState: SpeechPlaybackState
     let activeSlotSupportsSpeech: Bool
+    let capabilities: SpeechCapabilities
+    let labels: SpeechPresentationLabels
+    let hasActiveSourceSession: Bool
+    /// A source-local resumable item can exist without owning the shared AV
+    /// transport. This is intentionally separate from currentSpeakingSlotID.
+    let resumableSlotID: UUID?
+
+    init(
+        sourceKind: SpeechSourceKind,
+        activeSlotID: UUID?,
+        autoSpeakSlotIDs: Set<UUID>,
+        activeSlotAutoSpeakEnabled: Bool,
+        currentSpeakingSlotID: UUID?,
+        playbackState: SpeechPlaybackState,
+        activeSlotSupportsSpeech: Bool,
+        capabilities: SpeechCapabilities = .chatGPT,
+        labels: SpeechPresentationLabels = .chatGPT,
+        hasActiveSourceSession: Bool = false,
+        resumableSlotID: UUID? = nil
+    ) {
+        self.sourceKind = sourceKind
+        self.activeSlotID = activeSlotID
+        self.autoSpeakSlotIDs = autoSpeakSlotIDs
+        self.activeSlotAutoSpeakEnabled = activeSlotAutoSpeakEnabled
+        self.currentSpeakingSlotID = currentSpeakingSlotID
+        self.playbackState = playbackState
+        self.activeSlotSupportsSpeech = activeSlotSupportsSpeech
+        self.capabilities = capabilities
+        self.labels = labels
+        self.hasActiveSourceSession = hasActiveSourceSession
+        self.resumableSlotID = resumableSlotID
+    }
 
     var railPresentation: SpeechRailPresentation {
         SpeechRailPresentation(
@@ -18,7 +50,11 @@ struct SpeechSourcePresentation: Equatable, Sendable {
             activeSlotAutoSpeakEnabled: activeSlotAutoSpeakEnabled,
             currentSpeakingSlotID: currentSpeakingSlotID,
             playbackState: playbackState,
-            activeSlotSupportsSpeech: activeSlotSupportsSpeech
+            activeSlotSupportsSpeech: activeSlotSupportsSpeech,
+            capabilities: capabilities,
+            labels: labels,
+            hasActiveSourceSession: hasActiveSourceSession,
+            resumableSlotID: resumableSlotID
         )
     }
 }
@@ -68,6 +104,7 @@ protocol SpeechSourceAdapter: AnyObject {
     var presentation: SpeechSourcePresentation { get }
 
     func supportsSpeech(slotID: UUID) -> Bool
+    func hasResumableState(slotID: UUID) -> Bool
     func isAutoSpeakArmed(slotID: UUID) -> Bool
     func readLatest(slotID: UUID) -> Bool
     func replayLatest(slotID: UUID) -> Bool
@@ -77,6 +114,10 @@ protocol SpeechSourceAdapter: AnyObject {
     func stopCurrentPlayback() -> Bool
     func toggleAutoSpeak(slotID: UUID) -> Bool
     func playPreview(_ requests: [SpeechUtteranceRequest])
+}
+
+extension SpeechSourceAdapter {
+    func hasResumableState(slotID: UUID) -> Bool { false }
 }
 
 /// Thin routing glue for the existing ChatGPT coordinator. ChatGPT response
@@ -117,7 +158,12 @@ final class ChatGPTSpeechSourceAdapter: SpeechSourceAdapter {
             playbackState: coordinator.playbackState,
             activeSlotSupportsSpeech: activeSlotID.map {
                 supportsSpeechQuery($0)
-            } ?? false
+            } ?? false,
+            capabilities: activeSlotID.map {
+                supportsSpeechQuery($0) ? .chatGPT : .unsupported
+            } ?? .unsupported,
+            labels: .chatGPT,
+            hasActiveSourceSession: coordinator.currentSpeakingSlotID != nil
         )
     }
 
@@ -201,7 +247,10 @@ final class SpeechCommandRouter {
            let source = resolveSource(for: slotID, allowingArmed: true) {
             return source.presentation
         }
-        guard let source = orderedSources.first else {
+        // Preserve the C1 ChatGPT presentation for a regular unsupported web
+        // Slot. A newly registered source must not become the fallback merely
+        // because it sorts first; source capability still has to be proven.
+        guard let source = sources[.chatGPT] ?? orderedSources.first else {
             fatalError("SpeechCommandRouter requires a registered source")
         }
         return source.presentation
@@ -216,6 +265,7 @@ final class SpeechCommandRouter {
         // Preserve the pre-router contract: an unavailable source/Slot is a
         // rejected command, while a source-side extraction failure is a
         // handled no-op and must not produce a UI beep.
+        _ = stopCurrentPlayback()
         guard source.readLatest(slotID: slotID) else { return .noOp }
         return .manualReadAccepted(sourceKind: source.kind, slotID: slotID)
     }
@@ -247,9 +297,31 @@ final class SpeechCommandRouter {
             }
         }
 
+        if let sourceKind = playbackSession.activeSourceSessionKind,
+           playbackSession.activeSourceSessionSlotID == slotID,
+           let source = sources[sourceKind] {
+            // Source-session ownership survives transport-idle extraction and
+            // relocation transactions. Resume must reach that source rather
+            // than silently starting a fresh page read.
+            return source.resume(slotID: slotID)
+                ? .resumed(sourceKind: source.kind, slotID: slotID)
+                : .noOp
+        }
+
         guard let source = resolveSource(for: slotID) else {
             return .rejected
         }
+        if source.hasResumableState(slotID: slotID) {
+            // A yielded Calibre source is source-local resumable state, not a
+            // global transport owner. Explicit Resume may preempt a foreign
+            // active source through the existing source-specific Stop path,
+            // but must never stop the target source itself.
+            stopForeignPlaybackIfNeeded(for: source)
+            return source.resume(slotID: slotID)
+                ? .resumed(sourceKind: source.kind, slotID: slotID)
+                : .noOp
+        }
+        _ = stopCurrentPlayback()
         guard source.readLatest(slotID: slotID) else { return .noOp }
         return .manualReadAccepted(sourceKind: source.kind, slotID: slotID)
     }
@@ -260,6 +332,7 @@ final class SpeechCommandRouter {
               let source = resolveSource(for: slotID) else {
             return .rejected
         }
+        _ = stopCurrentPlayback()
         guard source.replayLatest(slotID: slotID) else { return .noOp }
         return .replayAccepted(sourceKind: source.kind, slotID: slotID)
     }
@@ -281,11 +354,28 @@ final class SpeechCommandRouter {
 
     @discardableResult
     func stopForActiveSlot() -> SpeechCommandOutcome {
-        guard let slotID = activeSlotIDProvider(),
-              let activeContext = playbackSession.activeContext,
-              activeContext.slotID == slotID,
-              let source = sources[activeContext.sourceKind],
-              playbackSession.playbackState != .idle,
+        guard let slotID = activeSlotIDProvider() else {
+            return .noOp
+        }
+        if let activeContext = playbackSession.activeContext,
+           activeContext.slotID == slotID,
+           let source = sources[activeContext.sourceKind],
+           playbackSession.playbackState != .idle,
+           source.stop(slotID: slotID) {
+            return .stopped(sourceKind: source.kind, slotID: slotID)
+        }
+        if let sourceKind = playbackSession.activeSourceSessionKind,
+           playbackSession.activeSourceSessionSlotID == slotID,
+           let source = sources[sourceKind],
+           source.stop(slotID: slotID) {
+            return .stopped(sourceKind: source.kind, slotID: slotID)
+        }
+        // A source-local resumable item is deliberately independent from the
+        // shared transport and source-session lease. Stop must still reach
+        // that exact Slot, but it must not fall back to Global Stop and
+        // cancel a foreign source that currently owns the shared session.
+        guard let source = resolveSource(for: slotID),
+              source.hasResumableState(slotID: slotID),
               source.stop(slotID: slotID) else {
             return .noOp
         }
@@ -296,6 +386,9 @@ final class SpeechCommandRouter {
     func stopCurrentPlayback() -> SpeechCommandOutcome {
         let activeContext = playbackSession.activeContext
         let activeSourceKind = activeContext?.sourceKind
+            ?? playbackSession.activeSourceSessionKind
+        let activeSourceSlotID = activeContext?.slotID
+            ?? playbackSession.activeSourceSessionSlotID
         var targetSources = orderedSources
         if let activeSourceKind,
            let activeIndex = targetSources.firstIndex(where: {
@@ -318,7 +411,7 @@ final class SpeechCommandRouter {
         return .stopped(
             sourceKind: stoppedSource.kind,
             slotID: stoppedSource.kind == activeSourceKind
-                ? activeContext?.slotID
+                ? activeSourceSlotID
                 : nil
         )
     }
@@ -341,11 +434,24 @@ final class SpeechCommandRouter {
     func playPreview(_ requests: [SpeechUtteranceRequest]) {
         // Settings preview is an existing ChatGPT-only compatibility path in
         // C1. It is intentionally not generic Slot source resolution.
+        _ = stopCurrentPlayback()
         sources[.chatGPT]?.playPreview(requests)
     }
 
     private var orderedSources: [SpeechSourceAdapter] {
         sources.values.sorted { $0.kind.rawValue < $1.kind.rawValue }
+    }
+
+    private func stopForeignPlaybackIfNeeded(for target: SpeechSourceAdapter) {
+        if let activeContext = playbackSession.activeContext,
+           activeContext.sourceKind != target.kind
+                || activeContext.slotID != activeSlotIDProvider() {
+            _ = sources[activeContext.sourceKind]?.stopCurrentPlayback()
+        }
+        if let activeSourceKind = playbackSession.activeSourceSessionKind,
+           activeSourceKind != target.kind {
+            _ = sources[activeSourceKind]?.stopCurrentPlayback()
+        }
     }
 
     private func resolveSource(

@@ -109,6 +109,9 @@
 		A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000067 /* SpeechSourceRouting.swift */; };
 		A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */; };
 		A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000069 /* SpeechCommandRouterTests.swift */; };
+		A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006A /* CalibreSpeechCoordinator.swift */; };
+		A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006B /* CalibreReaderBridge.swift */; };
+		A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006C /* CalibreReaderSpeechTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -223,6 +226,9 @@
 		B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTUnreadResponseCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000065 /* UnreadResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000066 /* SpeechPlaybackSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionController.swift; sourceTree = "<group>"; };
+		B0000000000000000000006A /* CalibreSpeechCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreSpeechCoordinator.swift; sourceTree = "<group>"; };
+		B0000000000000000000006B /* CalibreReaderBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderBridge.swift; sourceTree = "<group>"; };
+		B0000000000000000000006C /* CalibreReaderSpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderSpeechTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
 		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
@@ -374,6 +380,7 @@
 				B0000000000000000000004C /* WebFocusRouter.swift */,
 				B00000000000000000000050 /* ChatGPTResponseBridge.swift */,
 				B00000000000000000000051 /* ChatGPTResponseExtraction.swift */,
+				B0000000000000000000006B /* CalibreReaderBridge.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -402,6 +409,7 @@
 				B0000000000000000000005E /* MathSpeechNormalizer.swift */,
 				B00000000000000000000056 /* SpeechSegmenter.swift */,
 				B00000000000000000000057 /* AssistantSpeechCoordinator.swift */,
+				B0000000000000000000006A /* CalibreSpeechCoordinator.swift */,
 			);
 			path = Speech;
 			sourceTree = "<group>";
@@ -456,6 +464,7 @@
 				B00000000000000000000065 /* UnreadResponseTests.swift */,
 				B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */,
 				B00000000000000000000069 /* SpeechCommandRouterTests.swift */,
+				B0000000000000000000006C /* CalibreReaderSpeechTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -635,6 +644,8 @@
 				A00000000000000000000057 /* AssistantSpeechCoordinator.swift in Sources */,
 				A00000000000000000000066 /* SpeechPlaybackSessionController.swift in Sources */,
 				A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */,
+				A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */,
+				A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -681,6 +692,7 @@
 				A00000000000000000000065 /* UnreadResponseTests.swift in Sources */,
 				A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */,
 				A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */,
+				A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

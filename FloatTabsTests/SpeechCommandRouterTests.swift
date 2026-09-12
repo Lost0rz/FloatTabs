@@ -23,12 +23,14 @@ private final class RouterSpeechService: SpeechSynthesizing {
 
 @MainActor
 private final class TestSpeechSourceAdapter: SpeechSourceAdapter {
-    let kind: SpeechSourceKind = .chatGPT
+    let kind: SpeechSourceKind
     let slotID: UUID
     weak var session: SpeechPlaybackSessionController?
     var supports = true
     var readSucceeds = true
     var replaySucceeds = true
+    var hasResumable = false
+    var resumeResult = true
     var armed = false
     var readCount = 0
     var replayCount = 0
@@ -38,7 +40,10 @@ private final class TestSpeechSourceAdapter: SpeechSourceAdapter {
     var globalStopCount = 0
     var toggleCount = 0
 
-    init(slotID: UUID) { self.slotID = slotID }
+    init(slotID: UUID, kind: SpeechSourceKind = .chatGPT) {
+        self.slotID = slotID
+        self.kind = kind
+    }
 
     var presentation: SpeechSourcePresentation {
         SpeechSourcePresentation(
@@ -53,6 +58,9 @@ private final class TestSpeechSourceAdapter: SpeechSourceAdapter {
     }
 
     func supportsSpeech(slotID: UUID) -> Bool { slotID == self.slotID && supports }
+    func hasResumableState(slotID: UUID) -> Bool {
+        slotID == self.slotID && hasResumable
+    }
     func isAutoSpeakArmed(slotID: UUID) -> Bool { slotID == self.slotID && armed }
     func readLatest(slotID: UUID) -> Bool {
         guard supportsSpeech(slotID: slotID) else { return false }
@@ -72,6 +80,7 @@ private final class TestSpeechSourceAdapter: SpeechSourceAdapter {
     func resume(slotID: UUID) -> Bool {
         guard slotID == self.slotID else { return false }
         resumeCount += 1
+        if hasResumable { return resumeResult }
         return session?.resume(sourceKind: kind, slotID: slotID) != .rejected
     }
     func stop(slotID: UUID) -> Bool {
@@ -231,6 +240,29 @@ final class SpeechCommandRouterTests: XCTestCase {
         XCTAssertEqual(session.playbackState, .paused)
     }
 
+    func testTransportIdleSourceSessionRoutesResumeWithoutFreshRead() {
+        let slotID = UUID()
+        let session = SpeechPlaybackSessionController(speechService: RouterSpeechService())
+        let adapter = TestSpeechSourceAdapter(slotID: slotID)
+        adapter.hasResumable = true
+        let router = SpeechCommandRouter(
+            sources: [adapter],
+            playbackSession: session,
+            activeSlotIDProvider: { slotID }
+        )
+        XCTAssertNotNil(session.acquireSourceSession(
+            sourceKind: .chatGPT,
+            slotID: slotID
+        ))
+
+        XCTAssertEqual(
+            router.readPauseResumeForActiveSlot(),
+            .resumed(sourceKind: .chatGPT, slotID: slotID)
+        )
+        XCTAssertEqual(adapter.resumeCount, 1)
+        XCTAssertEqual(adapter.readCount, 0)
+    }
+
     func testStopIsScopedToTheActiveSlotAndReturnsTypedOutcome() {
         let slotID = UUID()
         let service = RouterSpeechService()
@@ -258,6 +290,50 @@ final class SpeechCommandRouterTests: XCTestCase {
         )
         XCTAssertEqual(router.stopForActiveSlot(), .noOp)
         XCTAssertEqual(adapter.stopCount, 1)
+    }
+
+    func testStopRoutesYieldedResumableSlotWithoutStoppingForeignTransport() {
+        let targetSlot = UUID()
+        let foreignSlot = UUID()
+        let service = RouterSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let target = TestSpeechSourceAdapter(
+            slotID: targetSlot,
+            kind: .calibreReader
+        )
+        target.hasResumable = true
+        let foreign = TestSpeechSourceAdapter(
+            slotID: foreignSlot,
+            kind: .chatGPT
+        )
+        foreign.session = session
+        let router = SpeechCommandRouter(
+            sources: [target, foreign],
+            playbackSession: session,
+            activeSlotIDProvider: { targetSlot }
+        )
+
+        let context = SpeechPlaybackContext(
+            sourceKind: .chatGPT,
+            slotID: foreignSlot,
+            sourceSequence: 12,
+            origin: .automatic
+        )
+        XCTAssertTrue(session.speak(
+            context: context,
+            text: "Foreign speech.",
+            languageRole: .english
+        ))
+        service.emitStart(session.activeTransportToken!)
+
+        XCTAssertEqual(
+            router.stopForActiveSlot(),
+            .stopped(sourceKind: .calibreReader, slotID: targetSlot)
+        )
+        XCTAssertEqual(target.stopCount, 1)
+        XCTAssertEqual(foreign.globalStopCount, 0)
+        XCTAssertEqual(session.activeContext, context)
+        XCTAssertEqual(session.playbackState, .speaking)
     }
 
     func testGlobalStopRoutesEvenWhenSourceHasPendingWorkWithoutTransport() {

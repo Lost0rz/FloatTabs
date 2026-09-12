@@ -127,6 +127,7 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
     private var isCurrentActivePlayback = false
     private var playbackState: SpeechPlaybackState = .idle
     private var activeTabName: String?
+    private var presentationLabels: SpeechPresentationLabels = .chatGPT
 
     var preferredWidth: CGFloat {
         ExternalTabMetrics.systemControlWidth(dockInfluence: dockInfluence)
@@ -233,7 +234,8 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
         isAutoSpeakEnabled: Bool,
         playbackState: SpeechPlaybackState,
         isCurrentActivePlayback: Bool,
-        activeTabName: String?
+        activeTabName: String?,
+        labels: SpeechPresentationLabels = .chatGPT
     ) {
         self.isEnabledForPresentation = isEnabled
         self.isActionEnabledForPresentation = isActionEnabled ?? isEnabled
@@ -241,6 +243,7 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
         self.playbackState = playbackState
         self.isCurrentActivePlayback = isCurrentActivePlayback
         self.activeTabName = activeTabName
+        self.presentationLabels = labels
         updatePresentation()
     }
 
@@ -300,13 +303,15 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
         case .autoSpeak:
             symbol = isAutoSpeakEnabled ? "speaker.wave.2.fill" : "speaker"
             label = isAutoSpeakEnabled
-                ? "Auto Speak enabled for \(target)"
-                : "Auto Speak for \(target)"
+                ? "\(presentationLabels.autoSpeak) enabled for \(target)"
+                : "\(presentationLabels.autoSpeak) \(target)"
             tooltip = isEnabledForPresentation
                 ? (isAutoSpeakEnabled
                     ? "Disable Auto Speak This Tab · \(target)"
                     : "Auto Speak This Tab — speaks new responses after they finish · \(target)")
-                : "Speech is currently available for ChatGPT tabs."
+                : presentationLabels == .calibreReader
+                    ? "Auto Speak unavailable for Calibre Reader tabs."
+                    : "Speech is currently available for ChatGPT tabs."
         case .readLatest:
             switch (isCurrentActivePlayback, playbackState) {
             case (true, .speaking):
@@ -327,23 +332,33 @@ final class SpeechRailControl: NSView, RailHoverInteractionOwner {
                 tooltip = "Speech transition in progress · \(target)"
             default:
                 symbol = "play.fill"
-                label = "Read latest response from \(target)"
+                label = "\(presentationLabels.read) \(target)"
                 tooltip = isEnabledForPresentation
-                    ? "Read Latest Response From Current Active Tab · \(target)"
-                    : "Speech is currently available for ChatGPT tabs."
-            }
+                    ? (presentationLabels == .calibreReader
+                        ? "Read From Current Page · \(target)"
+                        : "Read Latest Response From Current Active Tab · \(target)")
+                    : presentationLabels == .calibreReader
+                        ? "Calibre Reader speech is unavailable for this tab."
+                        : "Speech is currently available for ChatGPT tabs."
+        }
         case .replay:
             symbol = "arrow.counterclockwise"
-            label = "Replay latest response from \(target)"
+            label = "\(presentationLabels.replay) \(target)"
             tooltip = isEnabledForPresentation
-                ? "Replay Latest Response From \(target)"
-                : "Speech is currently available for ChatGPT tabs."
+                ? (presentationLabels == .calibreReader
+                    ? "Replay Current Page · \(target)"
+                    : "Replay Latest Response From \(target)")
+                : presentationLabels == .calibreReader
+                    ? "Calibre Reader speech is unavailable for this tab."
+                    : "Speech is currently available for ChatGPT tabs."
         case .stop:
             symbol = "stop.fill"
             label = "Stop speech for \(target)"
             tooltip = isEnabledForPresentation
                 ? "Stop Speech · \(target)"
-                : "Speech is currently available for ChatGPT tabs."
+                : presentationLabels == .calibreReader
+                    ? "Calibre Reader speech is unavailable for this tab."
+                    : "Speech is currently available for ChatGPT tabs."
         }
 
         let hasActivePlayback = isCurrentActivePlayback
@@ -949,47 +964,65 @@ final class ExternalControlZoneView: NSView {
         activeTabName: String? = nil
     ) {
         let currentActive = presentation.activeSlotID
+        let resumableSlotID = presentation.currentSpeakingSlotID
+            ?? presentation.resumableSlotID
         let isAutoSpeakEnabled = presentation.activeSlotAutoSpeakEnabled
         let isCurrentActivePlayback = currentActive != nil
-            && currentActive == presentation.currentSpeakingSlotID
+            && currentActive == resumableSlotID
         let targetName = activeTabName ?? currentActive.map { $0.uuidString }
         autoSpeakControl.setSpeechState(
-            isEnabled: presentation.activeSlotSupportsSpeech || isAutoSpeakEnabled,
+            isEnabled: presentation.capabilities.canAutoSpeak
+                && (presentation.activeSlotSupportsSpeech || isAutoSpeakEnabled),
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
-            activeTabName: targetName
+            activeTabName: targetName,
+            labels: presentation.labels
         )
         readLatestControl.setSpeechState(
-            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isEnabled: (presentation.capabilities.canRead
+                && presentation.activeSlotSupportsSpeech) || isCurrentActivePlayback,
             isActionEnabled: isCurrentActivePlayback
                 ? ![.starting, .pausing, .resuming].contains(presentation.playbackState)
-                : presentation.activeSlotSupportsSpeech,
+                : presentation.capabilities.canRead
+                    && presentation.activeSlotSupportsSpeech,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
-            activeTabName: targetName
+            activeTabName: targetName,
+            labels: presentation.labels
         )
         replayControl.setSpeechState(
-            isEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
-            isActionEnabled: presentation.activeSlotSupportsSpeech || isCurrentActivePlayback,
+            isEnabled: (presentation.capabilities.canReplay
+                && presentation.activeSlotSupportsSpeech) || isCurrentActivePlayback,
+            isActionEnabled: (presentation.capabilities.canReplay
+                && presentation.activeSlotSupportsSpeech) || isCurrentActivePlayback,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
-            activeTabName: targetName
+            activeTabName: targetName,
+            labels: presentation.labels
         )
+        // Stop is scoped to the current active Slot. Source-session and
+        // resumable state can remain live for a background Slot, so neither
+        // may make the current rail control actionable on its own.
+        let hasCurrentActiveStopTarget = isCurrentActivePlayback
+            && (presentation.playbackState != .idle
+                || presentation.hasActiveSourceSession
+                || presentation.resumableSlotID != nil)
         stopControl.setSpeechState(
-            isEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
-            isActionEnabled: isCurrentActivePlayback && presentation.playbackState != .idle,
+            isEnabled: hasCurrentActiveStopTarget,
+            isActionEnabled: hasCurrentActiveStopTarget,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
-            activeTabName: targetName
+            activeTabName: targetName,
+            labels: presentation.labels
         )
         for tab in tabViews.values {
             tab.setSpeechState(
                 isAutoSpeakSource: presentation.autoSpeakSlotIDs.contains(tab.slotID),
-                playbackState: tab.slotID == presentation.currentSpeakingSlotID
+                playbackState: tab.slotID == resumableSlotID
                     ? presentation.playbackState
                     : .idle
             )
