@@ -1003,13 +1003,16 @@ final class ExternalControlZoneView: NSView {
             activeTabName: targetName,
             labels: presentation.labels
         )
+        // Stop is scoped to the current active Slot. Source-session and
+        // resumable state can remain live for a background Slot, so neither
+        // may make the current rail control actionable on its own.
+        let hasCurrentActiveStopTarget = isCurrentActivePlayback
+            && (presentation.playbackState != .idle
+                || presentation.hasActiveSourceSession
+                || presentation.resumableSlotID != nil)
         stopControl.setSpeechState(
-            isEnabled: (isCurrentActivePlayback && presentation.playbackState != .idle)
-                || presentation.hasActiveSourceSession
-                || presentation.resumableSlotID != nil,
-            isActionEnabled: (isCurrentActivePlayback && presentation.playbackState != .idle)
-                || presentation.hasActiveSourceSession
-                || presentation.resumableSlotID != nil,
+            isEnabled: hasCurrentActiveStopTarget,
+            isActionEnabled: hasCurrentActiveStopTarget,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
