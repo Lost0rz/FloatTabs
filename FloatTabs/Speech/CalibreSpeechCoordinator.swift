@@ -62,7 +62,7 @@ final class CalibreSpeechWatchdogScheduler: CalibreSpeechWatchdogScheduling {
 final class CalibreSpeechCoordinator {
     private struct OwnedSession {
         let slotID: UUID
-        let leaseToken: UInt64
+        var leaseToken: UInt64?
         let document: CalibreReaderDocumentIdentity
     }
 
@@ -121,8 +121,28 @@ final class CalibreSpeechCoordinator {
     }
 
     var hasActiveSourceSession: Bool {
-        ownedSession != nil
-            && playbackSession.ownsSourceSession(sourceKind: .calibreReader)
+        guard let leaseToken = ownedSession?.leaseToken else { return false }
+        return playbackSession.ownsSourceSession(
+            sourceKind: .calibreReader,
+            token: leaseToken
+        )
+    }
+
+    /// Source-local reading state can remain resumable after the shared
+    /// source-session lease and transport have been yielded to another source.
+    func hasResumableState(slotID: UUID) -> Bool {
+        guard ownedSession?.slotID == slotID else { return false }
+        switch state {
+        case .idle:
+            return false
+        case .extracting, .speakingUnit, .pausedAtBoundary, .suspended,
+             .awaitingAdvance, .awaitingRelocation:
+            return true
+        }
+    }
+
+    var isBackgroundSuspended: Bool {
+        state == .suspended
     }
 
     var currentSpeakingSlotID: UUID? {
@@ -188,10 +208,12 @@ final class CalibreSpeechCoordinator {
               state == .speakingUnit else {
             return false
         }
-        return playbackSession.pause(
+        let accepted = playbackSession.pause(
             sourceKind: .calibreReader,
             slotID: slotID
         )
+        notifyPresentationChange()
+        return accepted
     }
 
     func resume(slotID: UUID) -> Bool {
@@ -199,10 +221,12 @@ final class CalibreSpeechCoordinator {
 
         switch state {
         case .speakingUnit:
-            return playbackSession.resume(
+            let disposition = playbackSession.resume(
                 sourceKind: .calibreReader,
                 slotID: slotID
-            ) != .rejected
+            )
+            notifyPresentationChange()
+            return disposition != .rejected
         case .pausedAtBoundary:
             guard playbackSession.resume(
                 sourceKind: .calibreReader,
@@ -228,6 +252,50 @@ final class CalibreSpeechCoordinator {
             }
 
             let underlyingState = suspendedState ?? .speakingUnit
+            if !hasActiveSourceSession {
+                guard playbackSession.activeContext == nil,
+                      let leaseToken = playbackSession.acquireSourceSession(
+                          sourceKind: .calibreReader,
+                          slotID: slotID
+                      ) else {
+                    return false
+                }
+                guard var currentSession = self.ownedSession,
+                      currentSession.slotID == slotID else {
+                    playbackSession.releaseSourceSession(
+                        sourceKind: .calibreReader,
+                        token: leaseToken
+                    )
+                    return false
+                }
+                currentSession.leaseToken = leaseToken
+                self.ownedSession = currentSession
+
+                switch underlyingState {
+                case .speakingUnit, .pausedAtBoundary:
+                    suspendedState = nil
+                    state = .speakingUnit
+                    notifyPresentationChange()
+                    if nextSegmentIndex < segments.count {
+                        speakNextSegment(operation: operation)
+                    } else {
+                        finishCurrentUnit(operation: operation)
+                    }
+                    return true
+                case .extracting, .awaitingAdvance, .awaitingRelocation:
+                    suspendedState = nil
+                    state = underlyingState
+                    notifyPresentationChange()
+                    return true
+                case .idle, .suspended:
+                    playbackSession.releaseSourceSession(
+                        sourceKind: .calibreReader,
+                        token: leaseToken
+                    )
+                    self.ownedSession?.leaseToken = nil
+                    return false
+                }
+            }
             if underlyingState == .speakingUnit,
                playbackSession.playbackState == .starting {
                 suspendedState = nil
@@ -261,6 +329,18 @@ final class CalibreSpeechCoordinator {
                     guard playbackSession.playbackState == .idle else {
                         return false
                     }
+                    suspendedState = nil
+                    state = .speakingUnit
+                    notifyPresentationChange()
+                    if nextSegmentIndex < segments.count {
+                        speakNextSegment(operation: operation)
+                    } else {
+                        finishCurrentUnit(operation: operation)
+                    }
+                    return true
+                }
+                if underlyingState == .pausedAtBoundary,
+                   playbackSession.playbackState == .idle {
                     suspendedState = nil
                     state = .speakingUnit
                     notifyPresentationChange()
@@ -340,10 +420,12 @@ final class CalibreSpeechCoordinator {
             playbackSession.stop()
         }
         if let oldSession {
-            playbackSession.releaseSourceSession(
-                sourceKind: .calibreReader,
-                token: oldSession.leaseToken
-            )
+            if let leaseToken = oldSession.leaseToken {
+                playbackSession.releaseSourceSession(
+                    sourceKind: .calibreReader,
+                    token: leaseToken
+                )
+            }
         }
         notifyPresentationChange()
     }
@@ -361,9 +443,10 @@ final class CalibreSpeechCoordinator {
         guard let ownedSession,
               event.context.sourceKind == .calibreReader,
               event.context.slotID == ownedSession.slotID,
+              let leaseToken = ownedSession.leaseToken,
               playbackSession.ownsSourceSession(
                   sourceKind: .calibreReader,
-                  token: ownedSession.leaseToken
+                  token: leaseToken
               ) else {
             return
         }
@@ -420,8 +503,15 @@ final class CalibreSpeechCoordinator {
             return false
         }
         switch state {
-        case .extracting, .speakingUnit, .awaitingAdvance, .awaitingRelocation:
+        case .extracting, .awaitingAdvance, .awaitingRelocation:
             return true
+        case .speakingUnit:
+            switch playbackSession.playbackState {
+            case .starting, .speaking, .resuming:
+                return true
+            case .idle, .pausing, .paused:
+                return false
+            }
         case .idle, .pausedAtBoundary, .suspended:
             return false
         }
@@ -736,8 +826,11 @@ final class CalibreSpeechCoordinator {
         bridge: CalibreReaderAccess? = nil
     ) -> Bool {
         guard let ownedSession,
-              ownedSession.leaseToken == playbackSession.activeSourceSessionToken,
               operation == operationGeneration else {
+            return false
+        }
+        if let leaseToken = ownedSession.leaseToken,
+           leaseToken != playbackSession.activeSourceSessionToken {
             return false
         }
         if let bridge {
@@ -773,7 +866,41 @@ final class CalibreSpeechCoordinator {
                 slotID: slotID
             )
         }
+        yieldSharedSpeechAuthorityIfNeeded()
         notifyPresentationChange()
+    }
+
+    /// Background suspension is allowed to retain reader extraction state, but
+    /// it must not retain the global AV transport or source-session lease.
+    /// Mid-utterance transport is restarted from the current segment boundary
+    /// after an explicit Resume; a completed boundary keeps its next segment.
+    private func yieldSharedSpeechAuthorityIfNeeded() {
+        guard state == .suspended,
+              let ownedSession else { return }
+
+        if suspendedState == .speakingUnit {
+            if let currentSegmentIndex,
+               currentSegmentIndex < nextSegmentIndex {
+                nextSegmentIndex = currentSegmentIndex
+            }
+            self.currentSegmentIndex = nil
+        } else if suspendedState == .pausedAtBoundary {
+            self.currentSegmentIndex = nil
+        }
+
+        let ownsCalibreTransport = playbackSession.activeContext?.sourceKind
+                == .calibreReader
+            && playbackSession.activeContext?.slotID == ownedSession.slotID
+        if ownsCalibreTransport {
+            playbackSession.stop()
+        }
+        if let leaseToken = ownedSession.leaseToken {
+            playbackSession.releaseSourceSession(
+                sourceKind: .calibreReader,
+                token: leaseToken
+            )
+            self.ownedSession?.leaseToken = nil
+        }
     }
 
     private func notifyPresentationChange() {
@@ -824,13 +951,17 @@ final class CalibreSpeechSourceAdapter: SpeechSourceAdapter {
 
     var presentation: SpeechSourcePresentation {
         let activeSlotID = activeSlotIDProvider()
+        let isSuspended = coordinator.isBackgroundSuspended
+        let resumableSlotID = activeSlotID.flatMap {
+            coordinator.hasResumableState(slotID: $0) ? $0 : nil
+        }
         return SpeechSourcePresentation(
             sourceKind: kind,
             activeSlotID: activeSlotID,
             autoSpeakSlotIDs: [],
             activeSlotAutoSpeakEnabled: false,
             currentSpeakingSlotID: coordinator.currentSpeakingSlotID,
-            playbackState: playbackSession.playbackState,
+            playbackState: isSuspended ? .paused : playbackSession.playbackState,
             activeSlotSupportsSpeech: activeSlotID.map {
                 coordinator.supportsSpeech(slotID: $0)
             } ?? false,
@@ -840,12 +971,17 @@ final class CalibreSpeechSourceAdapter: SpeechSourceAdapter {
                     : .unsupported
             } ?? .unsupported,
             labels: .calibreReader,
-            hasActiveSourceSession: coordinator.hasActiveSourceSession
+            hasActiveSourceSession: coordinator.hasActiveSourceSession,
+            resumableSlotID: resumableSlotID
         )
     }
 
     func supportsSpeech(slotID: UUID) -> Bool {
         coordinator.supportsSpeech(slotID: slotID)
+    }
+
+    func hasResumableState(slotID: UUID) -> Bool {
+        coordinator.hasResumableState(slotID: slotID)
     }
 
     func isAutoSpeakArmed(slotID: UUID) -> Bool { false }
@@ -874,6 +1010,9 @@ final class CalibreSpeechSourceAdapter: SpeechSourceAdapter {
 
     func stopCurrentPlayback() -> Bool {
         let hadSession = coordinator.hasActiveSourceSession
+            || (coordinator.activeSlotID.map {
+                coordinator.hasResumableState(slotID: $0)
+            } ?? false)
         coordinator.stop()
         return hadSession
     }

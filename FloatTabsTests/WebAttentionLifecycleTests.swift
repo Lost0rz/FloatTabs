@@ -43,6 +43,31 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.reconcile(profiles: [profile])
     }
 
+    func testManualPausedSpeechProtectionEndsAndColdRuntimeReleases() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "ManualPausedCold", policy: .cold)
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = try pool.webView(for: profile)
+        var speechProtected = true
+        var prepared = false
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            prepareRuntimeForRelease: { _ in
+                prepared = true
+            },
+            speechProtectionQuery: { _ in speechProtected }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        speechProtected = false
+        lifecycle.restartAfterProtectionEnded(profile: profile)
+        try await wait(milliseconds: 70)
+
+        XCTAssertTrue(prepared)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
     func testIndependentSpeechProtectionBlocksWarmEvictionAndMemoryPressure() throws {
         let pool = makePool()
         let protected = makeProfile(name: "SpeechProtectedWarm", policy: .warm)
@@ -126,6 +151,32 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(wasResidentDuringPreparation)
         XCTAssertEqual(releasedProfile?.id, profile.id)
         XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testHidingPanelNotifiesBackgroundPolicyBeforeHiddenGraceRelease() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "HiddenSpeech", policy: .warm)
+        _ = try pool.webView(for: profile)
+        var becameInactiveCount = 0
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 60,
+            hiddenActiveGraceDelay: 0.06,
+            onSlotBecameInactive: { _ in
+                becameInactiveCount += 1
+            }
+        )
+
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.setPanelVisible(false, activeProfile: profile)
+
+        XCTAssertEqual(becameInactiveCount, 1)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertTrue(lifecycle.isHiddenActiveGracePending)
+
+        try await wait(milliseconds: 20)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
     func testInactiveWarmAttentionProtectedSurvivesWarmTTL() async throws {
@@ -615,6 +666,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         prepareRuntimeForRelease: @escaping SlotLifecycleCoordinator.RuntimeReleasePreparation = { _ in },
         onRuntimeReleased: @escaping SlotLifecycleCoordinator.RuntimeReleasedHandler = { _ in },
+        onSlotBecameInactive: @escaping SlotLifecycleCoordinator.SlotBecameInactiveHandler = { _ in },
         attentionProtectionQuery: @escaping SlotLifecycleCoordinator.AttentionProtectionQuery = { _ in false },
         speechProtectionQuery: @escaping SlotLifecycleCoordinator.SpeechProtectionQuery = { _ in false }
     ) -> SlotLifecycleCoordinator {
@@ -633,6 +685,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
             mediaPlayingQuery: mediaPlayingQuery,
             onRuntimeReleased: onRuntimeReleased,
             prepareRuntimeForRelease: prepareRuntimeForRelease,
+            onSlotBecameInactive: onSlotBecameInactive,
             attentionProtectionQuery: attentionProtectionQuery,
             speechProtectionQuery: speechProtectionQuery,
             installsMemoryPressureSource: false

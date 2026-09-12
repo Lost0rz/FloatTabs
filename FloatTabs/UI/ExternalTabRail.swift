@@ -964,9 +964,11 @@ final class ExternalControlZoneView: NSView {
         activeTabName: String? = nil
     ) {
         let currentActive = presentation.activeSlotID
+        let resumableSlotID = presentation.currentSpeakingSlotID
+            ?? presentation.resumableSlotID
         let isAutoSpeakEnabled = presentation.activeSlotAutoSpeakEnabled
         let isCurrentActivePlayback = currentActive != nil
-            && currentActive == presentation.currentSpeakingSlotID
+            && currentActive == resumableSlotID
         let targetName = activeTabName ?? currentActive.map { $0.uuidString }
         autoSpeakControl.setSpeechState(
             isEnabled: presentation.capabilities.canAutoSpeak
@@ -1003,9 +1005,11 @@ final class ExternalControlZoneView: NSView {
         )
         stopControl.setSpeechState(
             isEnabled: (isCurrentActivePlayback && presentation.playbackState != .idle)
-                || presentation.hasActiveSourceSession,
+                || presentation.hasActiveSourceSession
+                || presentation.resumableSlotID != nil,
             isActionEnabled: (isCurrentActivePlayback && presentation.playbackState != .idle)
-                || presentation.hasActiveSourceSession,
+                || presentation.hasActiveSourceSession
+                || presentation.resumableSlotID != nil,
             isAutoSpeakEnabled: isAutoSpeakEnabled,
             playbackState: presentation.playbackState,
             isCurrentActivePlayback: isCurrentActivePlayback,
@@ -1015,7 +1019,7 @@ final class ExternalControlZoneView: NSView {
         for tab in tabViews.values {
             tab.setSpeechState(
                 isAutoSpeakSource: presentation.autoSpeakSlotIDs.contains(tab.slotID),
-                playbackState: tab.slotID == presentation.currentSpeakingSlotID
+                playbackState: tab.slotID == resumableSlotID
                     ? presentation.playbackState
                     : .idle
             )

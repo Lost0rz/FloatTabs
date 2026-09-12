@@ -251,6 +251,30 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         }
     }
 
+    func testBackgroundMediaPolicyCannotEnableChatGPTAutoSpeakWhenOff() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let slotID = UUID()
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView()
+        )
+        var profile = WebAppProfile(
+            order: 0,
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.example.test")!
+        )
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+
+        coordinator.handle(.generationFinished, for: slotID)
+        bridge.resolve(makePayload(text: "Must remain silent."))
+
+        XCTAssertTrue(coordinator.autoSpeakSlotIDs.isEmpty)
+        XCTAssertTrue(service.spoken.isEmpty)
+        XCTAssertEqual(profile.backgroundMediaPolicy, .allowBackgroundAudio)
+    }
+
     func testStopSuppressesCurrentResponseAndClearsSpeech() {
         let service = TestSpeechService()
         let bridge = TestResponseBridge()

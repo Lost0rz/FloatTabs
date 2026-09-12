@@ -192,6 +192,9 @@ final class SlotLifecycleCoordinator {
             if activeProfile.backgroundMediaPolicy == .pauseWhenInactive {
                 mediaPauseAction(activeProfile.id)
             }
+            // Match webpage media's immediate background boundary. The
+            // hidden-active grace still controls WebView eviction below.
+            onSlotBecameInactive(activeProfile)
             scheduleHiddenActiveTransition(profile: activeProfile)
         }
     }

@@ -13,6 +13,9 @@ struct SpeechSourcePresentation: Equatable, Sendable {
     let capabilities: SpeechCapabilities
     let labels: SpeechPresentationLabels
     let hasActiveSourceSession: Bool
+    /// A source-local resumable item can exist without owning the shared AV
+    /// transport. This is intentionally separate from currentSpeakingSlotID.
+    let resumableSlotID: UUID?
 
     init(
         sourceKind: SpeechSourceKind,
@@ -24,7 +27,8 @@ struct SpeechSourcePresentation: Equatable, Sendable {
         activeSlotSupportsSpeech: Bool,
         capabilities: SpeechCapabilities = .chatGPT,
         labels: SpeechPresentationLabels = .chatGPT,
-        hasActiveSourceSession: Bool = false
+        hasActiveSourceSession: Bool = false,
+        resumableSlotID: UUID? = nil
     ) {
         self.sourceKind = sourceKind
         self.activeSlotID = activeSlotID
@@ -36,6 +40,7 @@ struct SpeechSourcePresentation: Equatable, Sendable {
         self.capabilities = capabilities
         self.labels = labels
         self.hasActiveSourceSession = hasActiveSourceSession
+        self.resumableSlotID = resumableSlotID
     }
 
     var railPresentation: SpeechRailPresentation {
@@ -48,7 +53,8 @@ struct SpeechSourcePresentation: Equatable, Sendable {
             activeSlotSupportsSpeech: activeSlotSupportsSpeech,
             capabilities: capabilities,
             labels: labels,
-            hasActiveSourceSession: hasActiveSourceSession
+            hasActiveSourceSession: hasActiveSourceSession,
+            resumableSlotID: resumableSlotID
         )
     }
 }
@@ -98,6 +104,7 @@ protocol SpeechSourceAdapter: AnyObject {
     var presentation: SpeechSourcePresentation { get }
 
     func supportsSpeech(slotID: UUID) -> Bool
+    func hasResumableState(slotID: UUID) -> Bool
     func isAutoSpeakArmed(slotID: UUID) -> Bool
     func readLatest(slotID: UUID) -> Bool
     func replayLatest(slotID: UUID) -> Bool
@@ -107,6 +114,10 @@ protocol SpeechSourceAdapter: AnyObject {
     func stopCurrentPlayback() -> Bool
     func toggleAutoSpeak(slotID: UUID) -> Bool
     func playPreview(_ requests: [SpeechUtteranceRequest])
+}
+
+extension SpeechSourceAdapter {
+    func hasResumableState(slotID: UUID) -> Bool { false }
 }
 
 /// Thin routing glue for the existing ChatGPT coordinator. ChatGPT response
@@ -286,8 +297,29 @@ final class SpeechCommandRouter {
             }
         }
 
+        if let sourceKind = playbackSession.activeSourceSessionKind,
+           playbackSession.activeSourceSessionSlotID == slotID,
+           let source = sources[sourceKind] {
+            // Source-session ownership survives transport-idle extraction and
+            // relocation transactions. Resume must reach that source rather
+            // than silently starting a fresh page read.
+            return source.resume(slotID: slotID)
+                ? .resumed(sourceKind: source.kind, slotID: slotID)
+                : .noOp
+        }
+
         guard let source = resolveSource(for: slotID) else {
             return .rejected
+        }
+        if source.hasResumableState(slotID: slotID) {
+            // A yielded Calibre source is source-local resumable state, not a
+            // global transport owner. Explicit Resume may preempt a foreign
+            // active source through the existing source-specific Stop path,
+            // but must never stop the target source itself.
+            stopForeignPlaybackIfNeeded(for: source)
+            return source.resume(slotID: slotID)
+                ? .resumed(sourceKind: source.kind, slotID: slotID)
+                : .noOp
         }
         _ = stopCurrentPlayback()
         guard source.readLatest(slotID: slotID) else { return .noOp }
@@ -399,6 +431,18 @@ final class SpeechCommandRouter {
 
     private var orderedSources: [SpeechSourceAdapter] {
         sources.values.sorted { $0.kind.rawValue < $1.kind.rawValue }
+    }
+
+    private func stopForeignPlaybackIfNeeded(for target: SpeechSourceAdapter) {
+        if let activeContext = playbackSession.activeContext,
+           activeContext.sourceKind != target.kind
+                || activeContext.slotID != activeSlotIDProvider() {
+            _ = sources[activeContext.sourceKind]?.stopCurrentPlayback()
+        }
+        if let activeSourceKind = playbackSession.activeSourceSessionKind,
+           activeSourceKind != target.kind {
+            _ = sources[activeSourceKind]?.stopCurrentPlayback()
+        }
     }
 
     private func resolveSource(

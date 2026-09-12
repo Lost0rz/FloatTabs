@@ -67,6 +67,9 @@ struct SpeechRailPresentation: Equatable, Sendable {
     let capabilities: SpeechCapabilities
     let labels: SpeechPresentationLabels
     let hasActiveSourceSession: Bool
+    /// A source-local resumable item may be presented as paused even after it
+    /// has yielded the shared transport and source-session lease.
+    let resumableSlotID: UUID?
 
     init(
         activeSlotID: UUID?,
@@ -77,7 +80,8 @@ struct SpeechRailPresentation: Equatable, Sendable {
         activeSlotSupportsSpeech: Bool,
         capabilities: SpeechCapabilities = .chatGPT,
         labels: SpeechPresentationLabels = .chatGPT,
-        hasActiveSourceSession: Bool = false
+        hasActiveSourceSession: Bool = false,
+        resumableSlotID: UUID? = nil
     ) {
         self.activeSlotID = activeSlotID
         self.autoSpeakSlotIDs = autoSpeakSlotIDs
@@ -88,6 +92,7 @@ struct SpeechRailPresentation: Equatable, Sendable {
         self.capabilities = capabilities
         self.labels = labels
         self.hasActiveSourceSession = hasActiveSourceSession
+        self.resumableSlotID = resumableSlotID
     }
 }
 
