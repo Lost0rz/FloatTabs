@@ -23,12 +23,32 @@ private final class CalibreTestSpeechService: SpeechSynthesizing {
 
     func emitStart() {
         guard let token = spokenRequests.last?.transportToken else { return }
-        onUtteranceStarted?(token)
+        emitStart(token: token)
     }
 
     func emitFinish() {
         guard let token = spokenRequests.last?.transportToken else { return }
+        emitFinish(token: token)
+    }
+
+    func emitStart(token: UInt64) {
+        onUtteranceStarted?(token)
+    }
+
+    func emitFinish(token: UInt64) {
         onUtteranceFinished?(token)
+    }
+
+    func emitPause(token: UInt64) {
+        onUtterancePaused?(token)
+    }
+
+    func emitContinue(token: UInt64) {
+        onUtteranceContinued?(token)
+    }
+
+    func emitCancel(token: UInt64) {
+        onUtteranceCancelled?(token)
     }
 }
 
@@ -1221,7 +1241,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertFalse(bridge.isReaderCandidate)
     }
 
-    func testPauseAtBoundaryResumesOnceIntoAdvance() {
+    func testSingleSegmentBoundaryResumeUsesNormalCompletionAuthority() {
         let doc = document()
         let first = page(document: doc, start: "a", end: "b", text: "Page.")
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
@@ -1238,6 +1258,243 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(coordinator.resume(slotID: slotID))
         XCTAssertEqual(coordinator.state, .awaitingRelocation)
         XCTAssertEqual(bridge.advanceCount, 1)
+        XCTAssertEqual(bridge.extractionCount, 2)
+    }
+
+    func testMultiSegmentBoundaryResumeContinuesSameReadingUnitWithoutAdvance() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+        let requests = SpeechLanguageRouter.utteranceRequests(for: first.text)
+        XCTAssertGreaterThanOrEqual(requests.count, 2)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        service.emitStart()
+        let sourceSequence = try! XCTUnwrap(session.activeContext?.sourceSequence)
+        let firstToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: firstToken)
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+        XCTAssertEqual(bridge.advanceCount, 0)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(service.spokenRequests[1].text, requests[1].text)
+        XCTAssertEqual(bridge.currentPage.identity, first.identity)
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertEqual(session.activeContext?.sourceSequence, sourceSequence)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+        XCTAssertEqual(session.activeSourceSessionSlotID, slotID)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+    }
+
+    func testMultiSegmentBoundaryResumeFinishesRemainingSegmentBeforeNormalAdvance() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let second = page(document: doc, start: "c", end: "d", text: "Next page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+        XCTAssertGreaterThanOrEqual(
+            SpeechLanguageRouter.utteranceRequests(for: first.text).count,
+            2
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        let firstToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        let sourceSequence = try! XCTUnwrap(session.activeContext?.sourceSequence)
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: firstToken)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertEqual(session.activeContext?.sourceSequence, sourceSequence)
+        let secondToken = try! XCTUnwrap(service.spokenRequests.last?.transportToken)
+        service.emitStart(token: secondToken)
+        service.emitFinish(token: secondToken)
+
+        XCTAssertEqual(session.activeContext?.sourceSequence, nil)
+        XCTAssertEqual(coordinator.state, .awaitingRelocation)
+        XCTAssertEqual(bridge.advanceCount, 1)
+        XCTAssertEqual(bridge.currentPage.identity, first.identity)
+        XCTAssertNotEqual(firstToken, secondToken)
+    }
+
+    func testBoundaryResumeAtEOFCompletesWithoutAdvanceOrResidue() {
+        let doc = document()
+        let last = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "Final page.",
+            atEnd: true
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [last])
+        let scheduler = CalibreTestWatchdogScheduler()
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(
+            bridge: bridge,
+            service: service,
+            watchdogScheduler: scheduler
+        )
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish()
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertEqual(session.playbackState, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertTrue(scheduler.tasks.isEmpty)
+    }
+
+    func testBoundaryResumeRejectsEveryStaleTransportCallback() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        let oldToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: oldToken)
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        let newToken = try! XCTUnwrap(service.spokenRequests.last?.transportToken)
+        XCTAssertNotEqual(oldToken, newToken)
+
+        service.emitStart(token: oldToken)
+        service.emitPause(token: oldToken)
+        service.emitContinue(token: oldToken)
+        service.emitFinish(token: oldToken)
+        service.emitCancel(token: oldToken)
+
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(session.playbackState, .starting)
+        XCTAssertEqual(session.activeTransportToken, newToken)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertEqual(bridge.advanceCount, 0)
+
+        service.emitStart(token: newToken)
+        XCTAssertEqual(session.playbackState, .speaking)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+    }
+
+    func testStopWhilePausedAtBoundaryPreventsRemainingSpeechAndAdvance() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let second = page(document: doc, start: "c", end: "d", text: "Next page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        let oldToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: oldToken)
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+
+        coordinator.stop()
+        service.emitStart(token: oldToken)
+        service.emitFinish(token: oldToken)
+        service.emitCancel(token: oldToken)
+
+        XCTAssertFalse(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+    }
+
+    func testRuntimeResetWhilePausedAtBoundaryPreventsDelayedContinuation() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        let oldToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: oldToken)
+
+        coordinator.resetRuntime(slotID: slotID)
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
+
+        service.emitStart(token: oldToken)
+        service.emitFinish(token: oldToken)
+        XCTAssertFalse(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(bridge.advanceCount, 0)
+    }
+
+    func testExternalRelocationWhilePausedAtBoundaryInvalidatesRemainingSegments() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let second = page(document: doc, start: "c", end: "d", text: "Manual page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
+        let service = CalibreTestSpeechService()
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        let oldToken = try! XCTUnwrap(service.spokenRequests.first?.transportToken)
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+        service.emitFinish(token: oldToken)
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+
+        bridge.emitRelocation(second, token: nil)
+        XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertEqual(service.spokenRequests.count, 1)
+        XCTAssertEqual(bridge.advanceCount, 0)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertFalse(coordinator.isSpeechProtectionActive)
     }
 
     func testManualCrossSourceReadStopsCalibreBeforeChatGPTAdmission() {

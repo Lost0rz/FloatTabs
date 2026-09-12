@@ -206,7 +206,7 @@ final class CalibreSpeechCoordinator {
                 playbackSession.finishBoundaryResumeWithoutSpeech()
                 return false
             }
-            advanceAfterBoundary(operation: operation)
+            continueAfterBoundary(operation: operation)
             return true
         case .idle, .extracting, .awaitingAdvance, .awaitingRelocation:
             return false
@@ -403,15 +403,28 @@ final class CalibreSpeechCoordinator {
         }
     }
 
-    private func advanceAfterBoundary(operation: UInt64) {
-        guard let unit = currentUnit,
-              let ownedSession,
-              let bridge = bridgeProvider(ownedSession.slotID) else {
+    private func continueAfterBoundary(operation: UInt64) {
+        guard isCurrent(operation: operation) else {
             playbackSession.finishBoundaryResumeWithoutSpeech()
-            failCurrentOperation(operation: operation)
             return
         }
-        requestAdvance(from: unit, operation: operation, bridge: bridge)
+
+        if nextSegmentIndex < segments.count {
+            // The ReadingUnit remains the source item during a boundary
+            // handoff. SpeechPlaybackSessionController mints the fresh
+            // transport callback token when this segment is admitted.
+            state = .speakingUnit
+            notifyPresentationChange()
+            speakNextSegment(operation: operation)
+            return
+        }
+
+        // A boundary pause on the final segment still needs the ordinary
+        // ReadingUnit completion/revalidation path. End the empty shared
+        // transport handoff first so an EOF or page advance never leaves the
+        // session in `.resuming` while no new utterance is pending.
+        playbackSession.finishBoundaryResumeWithoutSpeech()
+        finishCurrentUnit(operation: operation)
     }
 
     private func requestAdvance(
