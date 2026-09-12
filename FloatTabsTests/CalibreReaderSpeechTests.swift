@@ -8,6 +8,7 @@ private final class CalibreTestSpeechService: SpeechSynthesizing {
     private(set) var pauseCount = 0
     private(set) var resumeCount = 0
     private(set) var stopCount = 0
+    var finishDuringPause = false
 
     var onUtteranceStarted: ((UInt64) -> Void)?
     var onUtteranceFinished: ((UInt64) -> Void)?
@@ -21,6 +22,10 @@ private final class CalibreTestSpeechService: SpeechSynthesizing {
 
     func pause() -> Bool {
         pauseCount += 1
+        if finishDuringPause,
+           let token = spokenRequests.last?.transportToken {
+            onUtteranceFinished?(token)
+        }
         return true
     }
 
@@ -708,8 +713,9 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(coordinator.pause(slotID: slotID))
         service.emitFinish()
 
-        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
-        XCTAssertTrue(coordinator.hasActiveSourceSession)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+        XCTAssertFalse(coordinator.hasActiveSourceSession)
+        XCTAssertTrue(coordinator.hasResumableState(slotID: slotID))
         XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
     }
 
@@ -731,16 +737,191 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertTrue(coordinator.pause(slotID: slotID))
         service.emitPause(token: token)
 
-        XCTAssertEqual(session.playbackState, .paused)
+        XCTAssertEqual(session.playbackState, .idle)
         XCTAssertEqual(coordinator.state, .speakingUnit)
-        XCTAssertTrue(coordinator.hasActiveSourceSession)
+        XCTAssertFalse(coordinator.hasActiveSourceSession)
+        XCTAssertNil(session.activeContext)
+        XCTAssertTrue(coordinator.hasResumableState(slotID: slotID))
         XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(service.spokenRequests[1].text, service.spokenRequests[0].text)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
 
         coordinator.prepareForRuntimeRelease(slotID: slotID)
         XCTAssertEqual(coordinator.state, .idle)
         XCTAssertNil(session.activeSourceSessionKind)
         XCTAssertNil(bridge.onRelocation)
         XCTAssertGreaterThan(service.stopCount, 0)
+    }
+
+    func testManualPauseAtSegmentBoundaryYieldsAuthorityAndResumesNextSegment() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "English sentence. 中文句子。"
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
+        let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
+        let requests = SpeechLanguageRouter.utteranceRequests(for: first.text)
+        XCTAssertGreaterThanOrEqual(requests.count, 2)
+
+        XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        XCTAssertTrue(coordinator.pause(slotID: slotID))
+
+        XCTAssertEqual(coordinator.state, .pausedAtBoundary)
+        XCTAssertFalse(coordinator.hasActiveSourceSession)
+        XCTAssertNil(session.activeContext)
+        XCTAssertTrue(coordinator.hasResumableState(slotID: slotID))
+        XCTAssertFalse(coordinator.isSpeechRuntimeProtectionActive)
+
+        XCTAssertTrue(coordinator.resume(slotID: slotID))
+        XCTAssertEqual(service.spokenRequests.count, 2)
+        XCTAssertEqual(service.spokenRequests[1].text, requests[1].text)
+        XCTAssertEqual(session.activeSourceSessionKind, .calibreReader)
+        XCTAssertEqual(coordinator.state, .speakingUnit)
+    }
+
+    func testManualCalibrePauseYieldsToChatGPTAutoSpeakUnderBothBackgroundPolicies() {
+        for policy in [BackgroundMediaPolicy.allowBackgroundAudio,
+                       .pauseWhenInactive] {
+            let doc = document()
+            let first = page(
+                document: doc,
+                start: "a",
+                end: "b",
+                text: "Calibre sentence. 中文句子。"
+            )
+            let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+            let service = CalibreTestSpeechService()
+            let session = SpeechPlaybackSessionController(speechService: service)
+            let calibreCoordinator = CalibreSpeechCoordinator(
+                playbackSession: session,
+                bridgeProvider: { id in id == self.slotID ? bridge : nil }
+            )
+            let chatSlot = UUID()
+            var activeSlot = slotID
+            _ = CalibreSpeechSourceAdapter(
+                coordinator: calibreCoordinator,
+                playbackSession: session,
+                activeSlotIDProvider: { activeSlot }
+            )
+            let responseBridge = CalibreTestResponseBridge()
+            let chatWebView = WKWebView(frame: .zero)
+            let chatCoordinator = AssistantSpeechCoordinator(
+                playbackSession: session,
+                webViewProvider: { _ in chatWebView },
+                responseBridgeProvider: { _ in responseBridge },
+                automaticSpeechSuppressed: { _ in
+                    session.activeSourceSessionKind != nil
+                }
+            )
+            _ = ChatGPTSpeechSourceAdapter(
+                coordinator: chatCoordinator,
+                playbackSession: session,
+                activeSlotIDProvider: { activeSlot },
+                supportsSpeechQuery: { $0 == chatSlot }
+            )
+
+            chatCoordinator.toggleAutoSpeak(for: chatSlot)
+            XCTAssertTrue(calibreCoordinator.readCurrentPage(slotID: slotID))
+            service.emitStart()
+            XCTAssertTrue(calibreCoordinator.pause(slotID: slotID))
+            if policy == .pauseWhenInactive {
+                calibreCoordinator.handleBackgroundMediaPolicyChange(
+                    slotID: slotID,
+                    policy: policy,
+                    isInactive: true
+                )
+            }
+
+            XCTAssertNil(session.activeSourceSessionKind)
+            XCTAssertFalse(calibreCoordinator.isSpeechRuntimeProtectionActive)
+            XCTAssertTrue(calibreCoordinator.hasResumableState(slotID: slotID))
+
+            activeSlot = chatSlot
+            chatCoordinator.handle(.generationFinished, for: chatSlot)
+            responseBridge.resolve(
+                ChatGPTResponsePayload(
+                    version: ChatGPTResponsePayload.currentVersion,
+                    kind: .response,
+                    requestID: "request-chat-12345678",
+                    documentToken: "document-chat-12345678",
+                    responseID: "document-chat-12345678:response-chat",
+                    blocks: [SpeechContentBlock(
+                        kind: .paragraph,
+                        text: "ChatGPT automatic response.",
+                        level: nil
+                    )]
+                )
+            )
+
+            XCTAssertEqual(service.spokenRequests.count, 2)
+            XCTAssertEqual(service.spokenRequests.last?.text, "ChatGPT automatic response.")
+            XCTAssertEqual(session.activeContext?.sourceKind, .chatGPT)
+            XCTAssertEqual(session.activeContext?.slotID, chatSlot)
+            XCTAssertEqual(session.playbackState, .starting)
+        }
+    }
+
+    func testScopedStopClearsYieldedCalibreStateWithoutStoppingForeignChatGPT() {
+        let doc = document()
+        let first = page(document: doc, start: "a", end: "b", text: "Calibre page.")
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let calibreCoordinator = CalibreSpeechCoordinator(
+            playbackSession: session,
+            bridgeProvider: { id in id == self.slotID ? bridge : nil }
+        )
+        let chatSlot = UUID()
+        let calibreSource = CalibreSpeechSourceAdapter(
+            coordinator: calibreCoordinator,
+            playbackSession: session,
+            activeSlotIDProvider: { self.slotID }
+        )
+        let foreignSource = CalibreStubSpeechSource(slotID: chatSlot)
+        var activeSlot = slotID
+        let router = SpeechCommandRouter(
+            sources: [calibreSource, foreignSource],
+            playbackSession: session,
+            activeSlotIDProvider: { activeSlot }
+        )
+
+        XCTAssertTrue(calibreCoordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        XCTAssertTrue(calibreCoordinator.pause(slotID: slotID))
+        XCTAssertNil(session.activeContext)
+        XCTAssertNil(session.activeSourceSessionKind)
+
+        let foreignContext = SpeechPlaybackContext(
+            sourceKind: .chatGPT,
+            slotID: chatSlot,
+            sourceSequence: 1,
+            origin: .automatic
+        )
+        XCTAssertTrue(session.speak(
+            context: foreignContext,
+            text: "ChatGPT speech.",
+            languageRole: .english
+        ))
+        service.emitStart(token: session.activeTransportToken!)
+        activeSlot = slotID
+
+        XCTAssertEqual(
+            router.stopForActiveSlot(),
+            .stopped(sourceKind: .calibreReader, slotID: slotID)
+        )
+        XCTAssertEqual(calibreCoordinator.state, .idle)
+        XCTAssertEqual(session.activeContext, foreignContext)
+        XCTAssertEqual(session.playbackState, .speaking)
+        XCTAssertEqual(foreignSource.globalStopCount, 0)
     }
 
     func testRouterResumeContinuesSuspendedCalibreFromSafeSegmentBoundary() {
@@ -962,6 +1143,95 @@ final class CalibreReaderSpeechTests: XCTestCase {
         XCTAssertEqual(service.spokenRequests.filter {
             $0.text == "Calibre first sentence."
         }.count, 2)
+    }
+
+    func testSuspendedCalibreReacquiresAfterChatGPTFinishes() {
+        let doc = document()
+        let first = page(
+            document: doc,
+            start: "a",
+            end: "b",
+            text: "Calibre first sentence. 中文句子。"
+        )
+        let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
+        let service = CalibreTestSpeechService()
+        let session = SpeechPlaybackSessionController(speechService: service)
+        let calibreCoordinator = CalibreSpeechCoordinator(
+            playbackSession: session,
+            bridgeProvider: { id in id == self.slotID ? bridge : nil }
+        )
+        let chatSlot = UUID()
+        var activeSlot = slotID
+        let calibreSource = CalibreSpeechSourceAdapter(
+            coordinator: calibreCoordinator,
+            playbackSession: session,
+            activeSlotIDProvider: { activeSlot }
+        )
+        let responseBridge = CalibreTestResponseBridge()
+        let chatWebView = WKWebView(frame: .zero)
+        let chatCoordinator = AssistantSpeechCoordinator(
+            playbackSession: session,
+            webViewProvider: { _ in chatWebView },
+            responseBridgeProvider: { _ in responseBridge },
+            automaticSpeechSuppressed: { _ in
+                session.activeSourceSessionKind != nil
+            }
+        )
+        let chatSource = ChatGPTSpeechSourceAdapter(
+            coordinator: chatCoordinator,
+            playbackSession: session,
+            activeSlotIDProvider: { activeSlot },
+            supportsSpeechQuery: { $0 == chatSlot }
+        )
+        let router = SpeechCommandRouter(
+            sources: [calibreSource, chatSource],
+            playbackSession: session,
+            activeSlotIDProvider: { activeSlot }
+        )
+
+        chatCoordinator.toggleAutoSpeak(for: chatSlot)
+        XCTAssertTrue(calibreCoordinator.readCurrentPage(slotID: slotID))
+        service.emitStart()
+        calibreCoordinator.handleBackgroundMediaPolicyChange(
+            slotID: slotID,
+            policy: .pauseWhenInactive,
+            isInactive: true
+        )
+        XCTAssertNil(session.activeSourceSessionKind)
+
+        activeSlot = chatSlot
+        chatCoordinator.handle(.generationFinished, for: chatSlot)
+        responseBridge.resolve(
+            ChatGPTResponsePayload(
+                version: ChatGPTResponsePayload.currentVersion,
+                kind: .response,
+                requestID: "request-chat-finished-12345678",
+                documentToken: "document-chat-finished-12345678",
+                responseID: "document-chat-finished-12345678:response-chat",
+                blocks: [SpeechContentBlock(
+                    kind: .paragraph,
+                    text: "ChatGPT response.",
+                    level: nil
+                )]
+            )
+        )
+        let chatToken = try! XCTUnwrap(service.spokenRequests.last?.transportToken)
+        service.emitStart(token: chatToken)
+        XCTAssertEqual(session.activeContext?.sourceKind, .chatGPT)
+        service.emitFinish(token: chatToken)
+
+        XCTAssertNil(session.activeContext)
+        XCTAssertNil(session.activeSourceSessionKind)
+        XCTAssertEqual(session.playbackState, .idle)
+
+        activeSlot = slotID
+        XCTAssertEqual(
+            router.readPauseResumeForActiveSlot(),
+            .resumed(sourceKind: .calibreReader, slotID: slotID)
+        )
+        XCTAssertEqual(session.activeContext?.sourceKind, .calibreReader)
+        XCTAssertEqual(session.activeContext?.slotID, slotID)
+        XCTAssertEqual(service.spokenRequests.last?.text, "Calibre first sentence.")
     }
 
     func testPinnedBridgeScriptsUseRuntimeCFIAndRelocationWithoutWholeDocumentText() {
@@ -1648,6 +1918,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         let first = page(document: doc, start: "a", end: "b", text: "Page.")
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, _) = makeCoordinator(bridge: bridge, service: service)
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
@@ -1673,6 +1944,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         )
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
         let requests = SpeechLanguageRouter.utteranceRequests(for: first.text)
         XCTAssertGreaterThanOrEqual(requests.count, 2)
@@ -1710,6 +1982,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         let second = page(document: doc, start: "c", end: "d", text: "Next page.")
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
         XCTAssertGreaterThanOrEqual(
             SpeechLanguageRouter.utteranceRequests(for: first.text).count,
@@ -1749,6 +2022,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [last])
         let scheduler = CalibreTestWatchdogScheduler()
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(
             bridge: bridge,
             service: service,
@@ -1780,6 +2054,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         )
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
@@ -1819,6 +2094,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         let second = page(document: doc, start: "c", end: "d", text: "Next page.")
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
@@ -1851,6 +2127,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         )
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))
@@ -1882,6 +2159,7 @@ final class CalibreReaderSpeechTests: XCTestCase {
         let second = page(document: doc, start: "c", end: "d", text: "Manual page.")
         let bridge = CalibreTestReaderBridge(slotID: slotID, pages: [first, second])
         let service = CalibreTestSpeechService()
+        service.finishDuringPause = true
         let (coordinator, session) = makeCoordinator(bridge: bridge, service: service)
 
         XCTAssertTrue(coordinator.readCurrentPage(slotID: slotID))

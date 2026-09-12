@@ -370,7 +370,16 @@ final class SpeechCommandRouter {
            source.stop(slotID: slotID) {
             return .stopped(sourceKind: source.kind, slotID: slotID)
         }
-        return .noOp
+        // A source-local resumable item is deliberately independent from the
+        // shared transport and source-session lease. Stop must still reach
+        // that exact Slot, but it must not fall back to Global Stop and
+        // cancel a foreign source that currently owns the shared session.
+        guard let source = resolveSource(for: slotID),
+              source.hasResumableState(slotID: slotID),
+              source.stop(slotID: slotID) else {
+            return .noOp
+        }
+        return .stopped(sourceKind: source.kind, slotID: slotID)
     }
 
     @discardableResult

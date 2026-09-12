@@ -212,6 +212,14 @@ final class CalibreSpeechCoordinator {
             sourceKind: .calibreReader,
             slotID: slotID
         )
+        if accepted {
+            // Manual Pause is a source-local resumable checkpoint, not a
+            // claim on the app-global transport. Keep the current segment as
+            // the safe replay boundary, then yield both shared authorities so
+            // ChatGPT Auto Speak can be admitted under either background
+            // policy.
+            yieldSharedSpeechAuthorityForManualPause()
+        }
         notifyPresentationChange()
         return accepted
     }
@@ -221,6 +229,13 @@ final class CalibreSpeechCoordinator {
 
         switch state {
         case .speakingUnit:
+            if !hasActiveSourceSession {
+                guard let operation = currentOperation else { return false }
+                return reacquireAndResumeSpeakingUnit(
+                    slotID: slotID,
+                    operation: operation
+                )
+            }
             let disposition = playbackSession.resume(
                 sourceKind: .calibreReader,
                 slotID: slotID
@@ -228,6 +243,13 @@ final class CalibreSpeechCoordinator {
             notifyPresentationChange()
             return disposition != .rejected
         case .pausedAtBoundary:
+            if !hasActiveSourceSession {
+                guard let operation = currentOperation else { return false }
+                return reacquireAndResumePausedBoundary(
+                    slotID: slotID,
+                    operation: operation
+                )
+            }
             guard playbackSession.resume(
                 sourceKind: .calibreReader,
                 slotID: slotID
@@ -903,6 +925,114 @@ final class CalibreSpeechCoordinator {
         }
     }
 
+    /// Re-admits a manually paused reader after another source has used the
+    /// shared transport. The cursor has already been rewound by the manual
+    /// pause checkpoint, so this starts the same source unit at a known
+    /// segment boundary without extracting a new CFI.
+    private func reacquireAndResumeSpeakingUnit(
+        slotID: UUID,
+        operation: UInt64
+    ) -> Bool {
+        guard let bridge = bridgeProvider(slotID),
+              bridge.isReaderCandidate,
+              let ownedSession,
+              ownedSession.slotID == slotID,
+              bridge.currentDocumentIdentity == ownedSession.document,
+              isCurrent(operation: operation),
+              playbackSession.activeContext == nil,
+              let leaseToken = playbackSession.acquireSourceSession(
+                  sourceKind: .calibreReader,
+                  slotID: slotID
+              ) else {
+            return false
+        }
+
+        guard var currentSession = self.ownedSession,
+              currentSession.slotID == slotID else {
+            playbackSession.releaseSourceSession(
+                sourceKind: .calibreReader,
+                token: leaseToken
+            )
+            return false
+        }
+        currentSession.leaseToken = leaseToken
+        self.ownedSession = currentSession
+        state = .speakingUnit
+        notifyPresentationChange()
+        if nextSegmentIndex < segments.count {
+            speakNextSegment(operation: operation)
+        } else {
+            finishCurrentUnit(operation: operation)
+        }
+        return true
+    }
+
+    private func reacquireAndResumePausedBoundary(
+        slotID: UUID,
+        operation: UInt64
+    ) -> Bool {
+        guard let bridge = bridgeProvider(slotID),
+              bridge.isReaderCandidate,
+              let ownedSession,
+              ownedSession.slotID == slotID,
+              bridge.currentDocumentIdentity == ownedSession.document,
+              isCurrent(operation: operation),
+              playbackSession.activeContext == nil,
+              let leaseToken = playbackSession.acquireSourceSession(
+                  sourceKind: .calibreReader,
+                  slotID: slotID
+              ) else {
+            return false
+        }
+
+        guard var currentSession = self.ownedSession,
+              currentSession.slotID == slotID else {
+            playbackSession.releaseSourceSession(
+                sourceKind: .calibreReader,
+                token: leaseToken
+            )
+            return false
+        }
+        currentSession.leaseToken = leaseToken
+        self.ownedSession = currentSession
+        state = .speakingUnit
+        notifyPresentationChange()
+        if nextSegmentIndex < segments.count {
+            speakNextSegment(operation: operation)
+        } else {
+            finishCurrentUnit(operation: operation)
+        }
+        return true
+    }
+
+    private func yieldSharedSpeechAuthorityForManualPause() {
+        guard let ownedSession else { return }
+
+        if state == .speakingUnit {
+            if let currentSegmentIndex,
+               currentSegmentIndex < nextSegmentIndex {
+                nextSegmentIndex = currentSegmentIndex
+            }
+            currentSegmentIndex = nil
+        } else if state == .pausedAtBoundary {
+            currentSegmentIndex = nil
+        }
+
+        let ownsCalibreTransport = playbackSession.activeContext?.sourceKind
+                == .calibreReader
+            && playbackSession.activeContext?.slotID == ownedSession.slotID
+        if ownsCalibreTransport {
+            playbackSession.stop()
+        }
+        if let leaseToken = ownedSession.leaseToken {
+            playbackSession.releaseSourceSession(
+                sourceKind: .calibreReader,
+                token: leaseToken
+            )
+            self.ownedSession?.leaseToken = nil
+        }
+    }
+
     private func notifyPresentationChange() {
         onPresentationChange?()
         guard !suppressSpeechProtectionNotifications else {
@@ -955,13 +1085,17 @@ final class CalibreSpeechSourceAdapter: SpeechSourceAdapter {
         let resumableSlotID = activeSlotID.flatMap {
             coordinator.hasResumableState(slotID: $0) ? $0 : nil
         }
+        let isYieldedResumableState = resumableSlotID != nil
+            && !coordinator.hasActiveSourceSession
         return SpeechSourcePresentation(
             sourceKind: kind,
             activeSlotID: activeSlotID,
             autoSpeakSlotIDs: [],
             activeSlotAutoSpeakEnabled: false,
             currentSpeakingSlotID: coordinator.currentSpeakingSlotID,
-            playbackState: isSuspended ? .paused : playbackSession.playbackState,
+            playbackState: isSuspended || isYieldedResumableState
+                ? .paused
+                : playbackSession.playbackState,
             activeSlotSupportsSpeech: activeSlotID.map {
                 coordinator.supportsSpeech(slotID: $0)
             } ?? false,
