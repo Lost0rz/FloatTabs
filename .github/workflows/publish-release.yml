@@ -9,6 +9,12 @@ on:
       - 'docs/release/FloatTabs_v*.md'
       - '.github/workflows/publish-release.yml'
   workflow_dispatch:
+    inputs:
+      force_refresh:
+        description: Rebuild and replace the existing release assets in place
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -49,6 +55,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
           BUILD: ${{ steps.release.outputs.build }}
+          FORCE_REFRESH: ${{ inputs.force_refresh || false }}
         shell: bash
         run: |
           set -euo pipefail
@@ -64,7 +71,7 @@ jobs:
           echo "Existing release build: ${EXISTING_BUILD:-unknown}"
           echo "Current source build: $BUILD"
 
-          if [[ "$EXISTING_BUILD" != "$BUILD" ]]; then
+          if [[ "$FORCE_REFRESH" == "true" || "$EXISTING_BUILD" != "$BUILD" ]]; then
             echo "refresh=true" >> "$GITHUB_OUTPUT"
           else
             echo "refresh=false" >> "$GITHUB_OUTPUT"
