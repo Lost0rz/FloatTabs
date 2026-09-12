@@ -60,4 +60,4 @@ The release gate requires the final macOS XCTest suite, Debug and Release Apple 
 
 ## Distribution
 
-FloatTabs v0.4.0 Build 17 is distributed as an unsigned, unnotarized **Apple Silicon arm64-only** DMG.
+FloatTabs v0.4.0 Build 17 is distributed as an ad-hoc signed, unnotarized **Apple Silicon arm64-only** DMG. The ad-hoc signature seals the QA bundle for macOS integrity checks; a Developer ID/notarized package still requires the operator's Apple distribution credentials.
