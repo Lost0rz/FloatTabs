@@ -285,6 +285,65 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
+    func testReleasingResidentRuntimeRecordsReleasedAfterRemoval() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "DiagnosticRelease")
+
+        _ = try pool.webView(for: profile)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+
+        pool.release(slotID: profile.id)
+
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+        let released = writer.events.filter { $0.event == "web_runtime.released" }
+        XCTAssertEqual(released.count, 1)
+        XCTAssertEqual(released.first?.fields["slot_id"], .string(profile.id.uuidString))
+    }
+
+    func testNoOpReleaseDoesNotRecordReleased() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+
+        pool.release(slotID: UUID())
+        pool.remove(slotID: UUID())
+
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.released" }.count,
+            0
+        )
+    }
+
+    func testDoubleReleaseRecordsOnlyOneReleased() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "DiagnosticDoubleRelease")
+
+        _ = try pool.webView(for: profile)
+        pool.release(slotID: profile.id)
+        pool.release(slotID: profile.id)
+
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.released" }.count,
+            1
+        )
+    }
+
     func testColdReleaseAndRecreatePreservesCustomBrowserProfileIdentity() throws {
         let customID = UUID()
         let customStore = WKWebsiteDataStore.nonPersistent()

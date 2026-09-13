@@ -159,6 +159,11 @@ The initial taxonomy covers:
 
 Events record only facts visible at the observation point. Diagnostic observers never participate in selection, focus, attention, fullscreen, navigation, or lifecycle decisions.
 
+`web_runtime.released` is emitted only after a resident WebView/runtime is
+actually removed. A no-op release or remove emits no released event.
+`slot_lifecycle.deactivate` describes an accepted lifecycle deactivation; a
+fullscreen-protected no-op does not emit it.
+
 Attention transitions are recorded as `attention.transition` with `slot_id`,
 `cause`, `from`, and `to`. Generation completion and user acknowledgement also
 include `user_visible` when that visibility fact applies. Stable causes are

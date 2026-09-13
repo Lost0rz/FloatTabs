@@ -231,13 +231,13 @@ final class SlotLifecycleCoordinator {
     }
 
     func deactivate(profile: WebAppProfile) {
+        guard fullscreenSourceProfile?.id != profile.id else { return }
         diagnostics.record(
             event: "slot_lifecycle.deactivate",
             level: .debug,
             subsystem: "lifecycle",
             fields: ["slot_id": .string(profile.id.uuidString)]
         )
-        guard fullscreenSourceProfile?.id != profile.id else { return }
         if activeSlotID == profile.id {
             onSlotBecameInactive(profile)
             activeSlotID = nil

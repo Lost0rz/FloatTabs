@@ -249,12 +249,6 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
-        diagnostics.record(
-            event: "web_runtime.released",
-            level: .notice,
-            subsystem: "web",
-            fields: ["slot_id": .string(slotID.uuidString)]
-        )
         // The bridge dies with its WKWebView: invalidate it first so no stale
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
@@ -269,6 +263,12 @@ final class WebViewPool {
         let removed = webViews.removeValue(forKey: slotID)
         removed?.removeFromSuperview()
         if removed != nil {
+            diagnostics.record(
+                event: "web_runtime.released",
+                level: .notice,
+                subsystem: "web",
+                fields: ["slot_id": .string(slotID.uuidString)]
+            )
             onResidentSetChange?()
         }
     }
