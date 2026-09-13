@@ -401,7 +401,7 @@ final class FullscreenSourceHostController {
         window.orderFrontRegardless()
         diagnostics.record(
             event: "source.order_front",
-            level: .debug,
+            level: .info,
             subsystem: "fullscreen",
             fields: [
                 "window_number": .integer(Int64(window.windowNumber)),
@@ -424,7 +424,7 @@ final class FullscreenSourceHostController {
             let focused = WebViewFocus.focus(webView, in: window)
             diagnostics.record(
                 event: "source.focus.result",
-                level: focused ? .debug : .warning,
+                level: focused ? .info : .warning,
                 subsystem: "fullscreen",
                 fields: [
                     "success": .bool(focused),

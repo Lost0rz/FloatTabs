@@ -473,7 +473,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
             self.diagnostics.record(
                 event: "menubar.toggle.dispatch",
-                level: .debug,
+                level: .info,
                 subsystem: "menubar",
                 trace: trace
             )

@@ -133,13 +133,6 @@ final class AppCoordinator {
             trace: trace,
             fields: diagnostics.environmentFields()
         )
-        diagnostics.record(
-            event: "app.ready",
-            level: .notice,
-            subsystem: "app",
-            trace: trace,
-            fields: ["diagnostics_mode": .string(diagnostics.mode.rawValue)]
-        )
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
@@ -294,6 +287,13 @@ final class AppCoordinator {
         // waits 45 seconds on a first run, and then sleeps until the next
         // eligible interval instead of using a high-frequency timer.
         startWebsiteCacheAutomaticSchedule(initialDelay: WebsiteCacheAutomaticSchedulePolicy.initialDelay)
+        diagnostics.record(
+            event: "app.ready",
+            level: .notice,
+            subsystem: "app",
+            trace: trace,
+            fields: ["diagnostics_mode": .string(diagnostics.mode.rawValue)]
+        )
     }
 
     func prepareForTermination() {
@@ -713,7 +713,10 @@ final class AppCoordinator {
     /// This preserves the feel of a single click while preventing a burst of
     /// remote volume reports from synchronously activating and persisting every
     /// intermediate WebView.
-    private func enqueueExternalSlotSwitch(delta: Int) {
+    private func enqueueExternalSlotSwitch(
+        delta: Int,
+        trace: RuntimeDiagnosticTrace
+    ) {
         guard delta != 0 else { return }
         if externalSlotFlushScheduled {
             pendingExternalSlotDelta += delta
@@ -721,14 +724,14 @@ final class AppCoordinator {
         }
 
         externalSlotFlushScheduled = true
-        _ = panelController.selectSlot(relativeOffset: delta)
+        _ = panelController.selectSlot(relativeOffset: delta, trace: trace)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let pendingDelta = self.pendingExternalSlotDelta
             self.pendingExternalSlotDelta = 0
             self.externalSlotFlushScheduled = false
             guard pendingDelta != 0 else { return }
-            self.enqueueExternalSlotSwitch(delta: pendingDelta)
+            self.enqueueExternalSlotSwitch(delta: pendingDelta, trace: trace)
         }
     }
 
@@ -754,13 +757,13 @@ final class AppCoordinator {
         case .selectSlot:
             guard let index = (userInfo?["slotIndex"] as? NSNumber)?.intValue,
                   (1...9).contains(index) else { return }
-            panelController.handle(.selectSlot(index))
+            panelController.handle(.selectSlot(index), trace: trace)
 
         case .nextSlot:
-            enqueueExternalSlotSwitch(delta: 1)
+            enqueueExternalSlotSwitch(delta: 1, trace: trace)
 
         case .previousSlot:
-            enqueueExternalSlotSwitch(delta: -1)
+            enqueueExternalSlotSwitch(delta: -1, trace: trace)
 
         case .addWebApp:
             panelController.handle(.addWebApp)

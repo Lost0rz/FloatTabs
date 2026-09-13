@@ -68,9 +68,13 @@ Trace roots are created only for semantic transactions with a meaningful beginni
 - primary focus toggle;
 - active-tab selection;
 - external voice focus;
-- fullscreen session transition;
 - navigation/recovery transaction when a lifecycle boundary exists;
 - termination drain/flush boundary.
+
+Fullscreen observations use the fullscreen owner's `session_id` and
+`restoreGeneration`/state as the business correlation. `trace_id` may remain
+`null` there because diagnostics does not own or replace fullscreen session
+identity.
 
 The preferred presentation trace is:
 
@@ -92,7 +96,7 @@ Standard never records mouse movement, continuous dragging, animation frames, re
 
 ## Privacy contract
 
-All events pass through `RuntimeDiagnosticPrivacy` before they reach either JSONL or OSLog. No owner may write directly to the JSONL writer.
+All events pass through `RuntimeDiagnosticPrivacy` before they reach either JSONL or OSLog. No owner may write directly to the JSONL writer. V1 production call sites use only the documented semantic field categories; the sanitizer is defense in depth and is not a proof that arbitrary future field names are safe.
 
 Never persist:
 
@@ -123,7 +127,7 @@ Files use `runtime-YYYYMMDD-NNN.jsonl`. The writer uses a dedicated serial execu
 
 All writer errors are fail-soft. Business calls never receive a writer error, and logging failure never crashes or blocks FloatTabs. A writer failure may emit one OSLog fallback message and then disable the failed writer to avoid recursive diagnostics failure.
 
-`record()` constructs an event and enqueues it quickly. File creation, JSONL append, rotation, and flush run only on the writer queue. Termination records the termination boundary, requests a final drain/flush, and allows a bounded best-effort completion without MainActor disk waiting, indefinite await, `DispatchQueue.sync`, or changing AppKit termination ownership.
+`record()` constructs an event and enqueues it quickly. File creation, JSONL append, rotation, and flush run only on the writer queue. Low-volume events use one debounced writer-queue flush (1.5 seconds); warning/error/fault and the 64 KiB threshold flush immediately. Termination records the boundary, requests a bounded best-effort drain/flush, and returns immediately to AppKit. The completion is advisory; AppKit is not asked to wait, and diagnostics failure cannot affect the exit result. There is no indefinite await or `DispatchQueue.sync`, and AppKit termination ownership is unchanged.
 
 ## Instrumentation ownership
 

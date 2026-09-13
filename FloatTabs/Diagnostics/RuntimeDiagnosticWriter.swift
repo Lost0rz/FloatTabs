@@ -36,6 +36,7 @@ protocol RuntimeDiagnosticWriting: AnyObject {
 
 final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendable {
     typealias DateProvider = () -> Date
+    typealias FlushObserver = @Sendable () -> Void
 
     static var defaultDirectory: URL {
         let base = FileManager.default.urls(
@@ -54,6 +55,8 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private let maxSegments: Int
     private let retention: TimeInterval
     private let dateProvider: DateProvider
+    private let debounceInterval: TimeInterval
+    private let flushObserver: FlushObserver?
     private let queue = DispatchQueue(
         label: "com.lost0rz.FloatTabs.runtime-diagnostics-writer",
         qos: .utility
@@ -70,6 +73,8 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private var currentDateKey: String?
     private var bufferedLines: [Data] = []
     private var bufferedBytes = 0
+    private var delayedFlushGeneration: UInt64 = 0
+    private var delayedFlushWorkItem: DispatchWorkItem?
     private var isDisabled = false
     private var hasReportedFailure = false
 
@@ -79,7 +84,9 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         maxSegmentBytes: UInt64 = 10 * 1024 * 1024,
         maxSegments: Int = 10,
         retention: TimeInterval = 7 * 24 * 60 * 60,
-        dateProvider: @escaping DateProvider = Date.init
+        dateProvider: @escaping DateProvider = Date.init,
+        debounceInterval: TimeInterval = 1.5,
+        flushObserver: FlushObserver? = nil
     ) {
         self.directory = directory
         self.fileManager = fileManager
@@ -87,6 +94,8 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         self.maxSegments = max(1, maxSegments)
         self.retention = max(0, retention)
         self.dateProvider = dateProvider
+        self.debounceInterval = max(0, debounceInterval)
+        self.flushObserver = flushObserver
     }
 
     func exportRecent(
@@ -104,6 +113,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 return
             }
 
+            self.cancelDelayedFlush()
             self.flushBuffer()
             do {
                 let encoder = JSONEncoder()
@@ -165,11 +175,15 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 self.bufferedLines.append(line)
                 self.bufferedBytes += line.count
 
-                if self.bufferedBytes >= 64 * 1024
+                let requiresImmediateFlush = self.bufferedBytes >= 64 * 1024
                     || event.level == .warning
                     || event.level == .error
-                    || event.level == .fault {
+                    || event.level == .fault
+                if requiresImmediateFlush {
+                    self.cancelDelayedFlush()
                     self.flushBuffer()
+                } else {
+                    self.scheduleDelayedFlushIfNeeded()
                 }
             } catch {
                 self.disableAfterFailure("encode", error: error)
@@ -187,6 +201,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 gate.finish()
                 return
             }
+            self.cancelDelayedFlush()
             if !self.isDisabled {
                 self.flushBuffer()
                 self.pruneFiles(now: self.dateProvider())
@@ -213,9 +228,34 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             bufferedLines.removeAll(keepingCapacity: true)
             bufferedBytes = 0
             pruneFiles(now: dateProvider())
+            flushObserver?()
         } catch {
             disableAfterFailure("write", error: error)
         }
+    }
+
+    private func scheduleDelayedFlushIfNeeded() {
+        guard !isDisabled,
+              !bufferedLines.isEmpty,
+              delayedFlushWorkItem == nil else { return }
+
+        delayedFlushGeneration &+= 1
+        let generation = delayedFlushGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.delayedFlushGeneration == generation else { return }
+            self.delayedFlushWorkItem = nil
+            guard !self.isDisabled else { return }
+            self.flushBuffer()
+        }
+        delayedFlushWorkItem = workItem
+        queue.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
+    }
+
+    private func cancelDelayedFlush() {
+        delayedFlushGeneration &+= 1
+        delayedFlushWorkItem?.cancel()
+        delayedFlushWorkItem = nil
     }
 
     private func appendLine(_ line: Data) throws {
@@ -340,6 +380,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
 
     private func disableAfterFailure(_ operation: String, error: Error) {
         isDisabled = true
+        cancelDelayedFlush()
         closeCurrentFile()
         guard !hasReportedFailure else { return }
         hasReportedFailure = true

@@ -29,6 +29,24 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safeState"], .string("ready"))
     }
 
+    func testGenericLookingSensitiveKeysAreDroppedWithoutAnExactKeyDenylist() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "pageBodyText": .string("private page"),
+            "domHTMLSnapshot": .string("<input value='private'>"),
+            "formInputPayload": .string("private input"),
+            "messageContent": .string("private message"),
+            "requestAuthorizationHeader": .string("Bearer secret"),
+            "safeState": .string("ready")
+        ], mode: .verbose)
+
+        XCTAssertNil(fields["pageBodyText"])
+        XCTAssertNil(fields["domHTMLSnapshot"])
+        XCTAssertNil(fields["formInputPayload"])
+        XCTAssertNil(fields["messageContent"])
+        XCTAssertNil(fields["requestAuthorizationHeader"])
+        XCTAssertEqual(fields["safeState"], .string("ready"))
+    }
+
     func testWriterReappliesSanitizerAtPersistenceBoundary() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-privacy-" + UUID().uuidString)

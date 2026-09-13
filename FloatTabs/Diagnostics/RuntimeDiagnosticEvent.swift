@@ -90,6 +90,11 @@ struct RuntimeDiagnosticTrace: Equatable, Sendable {
     }
 }
 
+struct RuntimeDiagnosticPresentationFocusRequest: Equatable, Sendable {
+    let generation: UInt64
+    let trace: RuntimeDiagnosticTrace?
+}
+
 struct RuntimeDiagnosticEvent: Codable, Equatable, Sendable {
     static let schemaVersion = 1
 

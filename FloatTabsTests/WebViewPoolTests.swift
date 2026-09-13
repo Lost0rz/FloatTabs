@@ -5,6 +5,51 @@ import XCTest
 
 @MainActor
 final class WebViewPoolTests: XCTestCase {
+    func testWebRuntimeCreationRecordsSuccessOnlyAfterRuntimeIsCreated() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "DiagnosticCreateSuccess")
+
+        _ = try pool.webView(for: profile)
+
+        let eventNames = writer.events.map(\.event)
+        XCTAssertEqual(eventNames, ["web_runtime.create.begin", "web_runtime.created"])
+    }
+
+    func testWebRuntimeCreationRecordsSanitizedFailureWithoutCreatedEvent() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { false }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider,
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(
+            name: "DiagnosticCreateFailure",
+            browserProfileID: UUID()
+        )
+
+        XCTAssertThrowsError(try pool.webView(for: profile))
+
+        let events = writer.events
+        XCTAssertEqual(events.map(\.event), [
+            "web_runtime.create.begin",
+            "web_runtime.create.failed"
+        ])
+        XCTAssertNil(events.last?.fields["errorDescription"])
+        XCTAssertEqual(events.last?.fields["error_category"], .string("runtime"))
+        XCTAssertEqual(events.last?.fields["error_code"], .integer(0))
+    }
+
     func testDifferentSlotIDsReceiveDifferentWebViews() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")

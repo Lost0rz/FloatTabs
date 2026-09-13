@@ -54,6 +54,25 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(offWriter.events.isEmpty)
     }
 
+    func testStandardRetainsCriticalTransactionBoundariesAtInfoOrHigher() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let criticalEvents = [
+            "menubar.toggle.intent",
+            "menubar.toggle.dispatch",
+            "source.order_front",
+            "source.focus.result",
+            "previous_app.capture"
+        ]
+
+        for event in criticalEvents {
+            diagnostics.record(event: event, level: .info, subsystem: "tests")
+        }
+
+        XCTAssertEqual(writer.events.map(\.event), criticalEvents)
+        XCTAssertTrue(writer.events.allSatisfy { $0.level != .debug })
+    }
+
     func testExportAddsSanitizedHeaderBeforeRecentEvents() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

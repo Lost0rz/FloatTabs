@@ -485,15 +485,45 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true
     ) throws -> WKWebView {
+        let fields = [
+            "slot_id": RuntimeDiagnosticValue.string(profile.id.uuidString),
+            "browser_profile": RuntimeDiagnosticValue.string(
+                String(describing: BrowserProfileIdentity(browserProfileID: profile.browserProfileID))
+            )
+        ]
         diagnostics.record(
-            event: "web_runtime.created",
-            level: .notice,
+            event: "web_runtime.create.begin",
+            level: .info,
             subsystem: "web",
-            fields: [
-                "slot_id": .string(profile.id.uuidString),
-                "browser_profile": .string(String(describing: BrowserProfileIdentity(browserProfileID: profile.browserProfileID)))
-            ]
+            fields: fields
         )
+
+        do {
+            return try createWebViewAfterBegin(
+                for: profile,
+                navigationURL: navigationURL,
+                cachePolicy: cachePolicy,
+                notifyResidentSetChange: notifyResidentSetChange
+            )
+        } catch {
+            var failureFields = fields
+            failureFields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { _, new in new }
+            diagnostics.record(
+                event: "web_runtime.create.failed",
+                level: .warning,
+                subsystem: "web",
+                fields: failureFields
+            )
+            throw error
+        }
+    }
+
+    private func createWebViewAfterBegin(
+        for profile: WebAppProfile,
+        navigationURL: URL,
+        cachePolicy: URLRequest.CachePolicy,
+        notifyResidentSetChange: Bool = true
+    ) throws -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: rendering,
@@ -655,6 +685,15 @@ final class WebViewPool {
             timeoutInterval: 60
         )
         load(webView, request)
+        diagnostics.record(
+            event: "web_runtime.created",
+            level: .notice,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "browser_profile": .string(String(describing: browserProfileIdentity))
+            ]
+        )
         return webView
     }
 

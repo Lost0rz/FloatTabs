@@ -85,6 +85,27 @@ enum RuntimeDiagnosticPrivacy {
         ]
     }
 
+    static func safeErrorCategory(_ error: Error) -> String {
+        guard case let .string(category) = sanitizedErrorCategory(error)["error_category"] else {
+            return "runtime"
+        }
+        return category
+    }
+
+    static func safeErrorDomain(_ error: Error) -> String {
+        guard case let .string(domain) = sanitizedErrorCategory(error)["error_domain"] else {
+            return "unknown"
+        }
+        return domain
+    }
+
+    static func safeErrorCode(_ error: Error) -> Int64 {
+        guard case let .integer(code) = sanitizedErrorCategory(error)["error_code"] else {
+            return 0
+        }
+        return code
+    }
+
     static func safeBundleIdentifier(_ bundleIdentifier: String?) -> RuntimeDiagnosticValue? {
         guard let bundleIdentifier,
               bundleIdentifier.range(of: #"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"#, options: .regularExpression) != nil else {

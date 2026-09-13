@@ -113,7 +113,7 @@ final class WebFocusRouter: ObservableObject {
             return captured
         } catch {
             logger.error(
-                "voice focus target capture failed site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+                "voice focus target capture failed site=\(adapter.identifier, privacy: .public) category=\(RuntimeDiagnosticPrivacy.safeErrorCategory(error), privacy: .public) domain=\(RuntimeDiagnosticPrivacy.safeErrorDomain(error), privacy: .public) code=\(RuntimeDiagnosticPrivacy.safeErrorCode(error), privacy: .public)"
             )
             diagnostics.record(
                 event: "web_focus.failed",
@@ -161,7 +161,7 @@ final class WebFocusRouter: ObservableObject {
             return true
         } catch {
             logger.error(
-                "voice focus restore failed captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+                "voice focus restore failed captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public) category=\(RuntimeDiagnosticPrivacy.safeErrorCategory(error), privacy: .public) domain=\(RuntimeDiagnosticPrivacy.safeErrorDomain(error), privacy: .public) code=\(RuntimeDiagnosticPrivacy.safeErrorCode(error), privacy: .public)"
             )
             diagnostics.record(
                 event: "web_focus.failed",
