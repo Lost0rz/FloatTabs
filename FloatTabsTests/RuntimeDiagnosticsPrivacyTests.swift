@@ -173,20 +173,28 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
     func testExportCannotOverwriteActiveRuntimeSegment() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-export-active-" + UUID().uuidString)
-        let writer = RuntimeDiagnosticWriter(directory: directory)
+        let flushed = expectation(description: "debounced initial runtime flush")
+        flushed.assertForOverFulfill = false
+        let writer = RuntimeDiagnosticWriter(
+            directory: directory,
+            debounceInterval: 0.05,
+            flushObserver: { flushed.fulfill() }
+        )
         writer.enqueue(
             RuntimeDiagnosticEvent.exportFixture(
                 event: "managed.runtime.event",
                 sequence: 1
             )
         )
-        let initialFlush = expectation(description: "initial runtime flush")
-        writer.requestFinalFlush(timeout: 1) { initialFlush.fulfill() }
-        wait(for: [initialFlush], timeout: 2)
+        wait(for: [flushed], timeout: 2)
 
         let activeFile = try XCTUnwrap(
             FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 .first(where: { RuntimeDiagnosticWriter.isManagedRuntimeSegment($0) })
+        )
+        let activeFilename = activeFile.deletingPathExtension().lastPathComponent
+        let caseVariantDestination = directory.appendingPathComponent(
+            "R" + String(activeFilename.dropFirst()) + ".jsonl"
         )
         let exportResult = LockedExportResult()
         let exportCompleted = expectation(description: "active segment export rejected")
@@ -195,7 +203,7 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
                 event: "diagnostics.export.metadata",
                 sequence: 2
             ),
-            to: activeFile
+            to: caseVariantDestination
         ) {
             exportResult.set($0)
             exportCompleted.fulfill()
@@ -257,6 +265,39 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
+    func testExportRejectsASCIICaseVariantsOfManagedLookingDestinationInsideLogs() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-case-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let writer = RuntimeDiagnosticWriter(directory: directory)
+        let variants = [
+            "Runtime-20260913-001.jsonl",
+            "RUNTIME-20260913-001.jsonl",
+            "runtime-20260913-001.JSONL",
+            "Runtime-20260913-999.JSONL"
+        ]
+
+        for (index, filename) in variants.enumerated() {
+            let destination = directory.appendingPathComponent(filename)
+            let exported = expectation(description: "reserved case variant \(index)")
+            let result = LockedExportResult()
+            writer.exportRecent(
+                metadata: RuntimeDiagnosticEvent.exportFixture(
+                    event: "diagnostics.export.metadata",
+                    sequence: UInt64(index + 1)
+                ),
+                to: destination
+            ) {
+                result.set($0)
+                exported.fulfill()
+            }
+            wait(for: [exported], timeout: 2)
+
+            assertReservedDestination(result.value)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        }
+    }
+
     func testExportRejectsNonExistingManagedLookingDestinationInsideLogs() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-export-nonexisting-" + UUID().uuidString)
@@ -289,6 +330,13 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
 
         let managedFile = directory.appendingPathComponent("runtime-20260913-001.jsonl")
         try writeFixtureEvent(event: "managed.runtime.event", sequence: 1, to: managedFile)
+        let priorExport = directory.appendingPathComponent("FloatTabs-Diagnostics-old.jsonl")
+        XCTAssertTrue(
+            FileManager.default.createFile(
+                atPath: priorExport.path,
+                contents: Data("OLD_EXPORT_SENTINEL\n".utf8)
+            )
+        )
         let writer = RuntimeDiagnosticWriter(directory: directory)
         let metadata = RuntimeDiagnosticEvent.exportFixture(
             event: "diagnostics.export.metadata",
@@ -334,7 +382,7 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
 
         let managedFile = logsDirectory.appendingPathComponent("runtime-20260913-001.jsonl")
         try writeFixtureEvent(event: "managed.runtime.event", sequence: 1, to: managedFile)
-        let destination = outsideDirectory.appendingPathComponent("runtime-20260913-999.jsonl")
+        let destination = outsideDirectory.appendingPathComponent("Runtime-20260913-999.JSONL")
         let writer = RuntimeDiagnosticWriter(directory: logsDirectory)
         let exported = expectation(description: "outside Logs export")
         let result = LockedExportResult()
@@ -369,6 +417,36 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         let destination = logsAlias.appendingPathComponent("runtime-20260913-999.jsonl")
         let writer = RuntimeDiagnosticWriter(directory: logsDirectory)
         let exported = expectation(description: "symlink alias reserved destination rejected")
+        let result = LockedExportResult()
+        writer.exportRecent(
+            metadata: RuntimeDiagnosticEvent.exportFixture(
+                event: "diagnostics.export.metadata",
+                sequence: 1
+            ),
+            to: destination
+        ) {
+            result.set($0)
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+
+        assertReservedDestination(result.value)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testManagedLookingExportThroughCaseVariantLogsDirectoryUsesFilesystemIdentity() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-directory-case-" + UUID().uuidString)
+        let logsDirectory = root.appendingPathComponent("Logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        let caseVariantDirectory = root.appendingPathComponent("logs", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: caseVariantDirectory.path) else {
+            throw XCTSkip("temporary test volume is case-sensitive")
+        }
+
+        let destination = caseVariantDirectory.appendingPathComponent("runtime-20260913-999.jsonl")
+        let writer = RuntimeDiagnosticWriter(directory: logsDirectory)
+        let exported = expectation(description: "case-variant Logs destination rejected")
         let result = LockedExportResult()
         writer.exportRecent(
             metadata: RuntimeDiagnosticEvent.exportFixture(

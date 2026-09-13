@@ -434,6 +434,21 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             .standardizedFileURL
             .resolvingSymlinksInPath()
         return canonicalParent == canonicalDirectory
+            || hasSameFilesystemIdentity(canonicalParent, canonicalDirectory)
+    }
+
+    private func hasSameFilesystemIdentity(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard fileManager.fileExists(atPath: lhs.path),
+              fileManager.fileExists(atPath: rhs.path),
+              let lhsIdentifier = try? lhs.resourceValues(
+                forKeys: [.fileResourceIdentifierKey]
+              ).fileResourceIdentifier,
+              let rhsIdentifier = try? rhs.resourceValues(
+                forKeys: [.fileResourceIdentifierKey]
+              ).fileResourceIdentifier else {
+            return false
+        }
+        return lhsIdentifier.isEqual(rhsIdentifier)
     }
 
     static func isManagedRuntimeSegment(
@@ -472,6 +487,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private static func managedRuntimeSegmentFilenameComponents(
         for filename: String
     ) -> (dateKey: String, index: Int)? {
+        let filename = filename.lowercased(with: Locale(identifier: "en_US_POSIX"))
         let extensionLength = ".jsonl".count
         guard filename.hasPrefix("runtime-"),
               filename.hasSuffix(".jsonl"),

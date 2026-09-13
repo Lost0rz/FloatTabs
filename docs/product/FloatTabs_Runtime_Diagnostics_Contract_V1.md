@@ -192,11 +192,17 @@ are not subsequently re-ingested merely because they use `.jsonl`.
 
 The `runtime-YYYYMMDD-NNN.jsonl` namespace inside the Diagnostics Logs
 directory is reserved exclusively for `RuntimeDiagnosticWriter`-managed
-segments. Export rejects destinations in that reserved namespace, including
-destinations that do not yet exist or that reach the Logs directory through a
-symlink alias. An export may use `.jsonl` and may be saved inside Logs when its
-filename is outside the managed runtime namespace; managed-looking filenames
-outside Logs remain allowed.
+segments and is matched using filesystem-safe case-insensitive ASCII filename
+semantics, so `Runtime-...`, `RUNTIME-...`, and `.JSONL` variants cannot alias or
+overwrite Writer-owned segments on a case-insensitive macOS volume. Export
+rejects destinations in that reserved namespace, including destinations that
+do not yet exist or that reach the Logs directory through a symlink alias.
+Directory ownership uses standardized URLs with resolved symlinks, followed by
+filesystem resource identity when both existing directories have different
+canonical path spellings; it is not inferred by lowercasing arbitrary paths.
+An export may use `.jsonl` and may be saved inside Logs when its filename is
+outside the managed runtime namespace; managed-looking filenames outside Logs
+remain allowed.
 
 ## Acceptance criteria
 
