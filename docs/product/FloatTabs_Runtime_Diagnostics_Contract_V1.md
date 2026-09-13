@@ -159,6 +159,30 @@ The initial taxonomy covers:
 
 Events record only facts visible at the observation point. Diagnostic observers never participate in selection, focus, attention, fullscreen, navigation, or lifecycle decisions.
 
+Attention transitions are recorded as `attention.transition` with `slot_id`,
+`cause`, `from`, and `to`. Generation completion and user acknowledgement also
+include `user_visible` when that visibility fact applies. Stable causes are
+`generation_started`, `generation_finished`, `runtime_reset`, and
+`acknowledged`; no-op state transitions emit neither a state change nor an
+observation.
+
+Standard lifecycle output includes inactive-plan creation and cancellation,
+hidden-active grace scheduling and expiry, media/attention/speech protection,
+release, and memory-pressure boundaries. Protection observations include the
+existing `slot_id` and `boundary`; the composition boundary also supplies the
+existing `plan_token` when a plan exists, but the frozen privacy sanitizer drops
+token-like fields before persistence. No sanitizer bypass or token renaming is
+allowed. These observations do not create parallel protection state or
+participate in the release decision.
+
+Verbose navigation output includes `provisional_started`, `finished`,
+`instant_back.requested`, `instant_back.cancelled`, `instant_back.activated`,
+and `http_entry_fallback`. Standard navigation output includes `commit`,
+`failed`, and `web_content_process_terminated`. The navigation delegate's
+content-process event is intentionally separate from WebViewPool's existing
+`web_runtime.content_process_terminated` recovery event so the Observer → Pool
+boundary remains visible.
+
 ## Snapshots
 
 Snapshots are read-only and assembled on demand from current owner facts. They may include requested visibility, panel/source visibility and key state, app activity, display IDs, fullscreen state, active slot ID, resident count, attention-ready count, current WebFocus target, and presentation focus generation.

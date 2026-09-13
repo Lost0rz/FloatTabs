@@ -95,14 +95,18 @@ final class WebAttentionCoordinator {
         case .generationStarted:
             // A new generation supersedes both `idle` and a pending
             // unacknowledged `ready`.
-            return transition(slotID) { _ in .generating }
+            return transition(slotID, cause: "generation_started") { _ in .generating }
         case .generationFinished(let userVisible):
-            return transition(slotID) { current in
+            return transition(
+                slotID,
+                cause: "generation_finished",
+                userVisible: userVisible
+            ) { current in
                 guard current == .generating else { return current }
                 return userVisible ? .idle : .ready
             }
         case .runtimeReset:
-            return transition(slotID) { _ in .idle }
+            return transition(slotID, cause: "runtime_reset") { _ in .idle }
         }
     }
 
@@ -111,7 +115,11 @@ final class WebAttentionCoordinator {
     /// acknowledgement leaves the Slot `ready` and the dot lit.
     @discardableResult
     func acknowledge(slotID: UUID, userVisible: Bool) -> WebAttentionState {
-        transition(slotID) { current in
+        transition(
+            slotID,
+            cause: "acknowledged",
+            userVisible: userVisible
+        ) { current in
             guard current == .ready, userVisible else { return current }
             return .idle
         }
@@ -128,21 +136,28 @@ final class WebAttentionCoordinator {
     /// resolve to `idle` first, and a no-op transition writes nothing.
     private func transition(
         _ slotID: UUID,
+        cause: String,
+        userVisible: Bool? = nil,
         _ resolve: (WebAttentionState) -> WebAttentionState
     ) -> WebAttentionState {
         let current = state(for: slotID)
         let next = resolve(current)
         if next != current {
             states[slotID] = next
+            var fields: [String: RuntimeDiagnosticValue] = [
+                "slot_id": .string(slotID.uuidString),
+                "cause": .string(cause),
+                "from": .string(current.diagnosticName),
+                "to": .string(next.diagnosticName)
+            ]
+            if let userVisible {
+                fields["user_visible"] = .bool(userVisible)
+            }
             diagnostics.record(
                 event: "attention.transition",
                 level: .info,
                 subsystem: "attention",
-                fields: [
-                    "slot_id": .string(slotID.uuidString),
-                    "from": .string(current.diagnosticName),
-                    "to": .string(next.diagnosticName)
-                ]
+                fields: fields
             )
         }
         return next

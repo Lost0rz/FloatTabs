@@ -227,6 +227,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
+    private let instantBackURLSafetyCheck: (URL) -> Bool
     private let diagnostics: any RuntimeDiagnosticRecording
 
     private struct PendingInstantBack {
@@ -268,6 +269,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        instantBackURLSafetyCheck: @escaping (URL) -> Bool = WebAppURL.isSafe,
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
         }
@@ -285,6 +287,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
         self.diagnostics = diagnostics
+        self.instantBackURLSafetyCheck = instantBackURLSafetyCheck
         self.loadHandler = loadHandler
         super.init()
 
@@ -481,6 +484,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             error: error
         ) {
             pendingHTTPEntryFallback = nil
+            diagnostics.record(
+                event: "http_entry_fallback",
+                level: .debug,
+                subsystem: "navigation",
+                fields: ["slot_id": .string(slotID.uuidString)]
+            )
             loadHandler(webView, fallback)
         } else {
             pendingHTTPEntryFallback = nil
@@ -488,6 +497,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        diagnostics.record(
+            event: "web_content_process_terminated",
+            level: .warning,
+            subsystem: "navigation",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
         onContentProcessTermination(slotID)
     }
 
@@ -510,6 +525,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 targetItem: backForwardListItem,
                 targetURL: backForwardListItem.url
             )
+            diagnostics.record(
+                event: "instant_back.requested",
+                level: .debug,
+                subsystem: "navigation",
+                fields: ["slot_id": .string(slotID.uuidString)]
+            )
             onInstantBackRequest(slotID, backForwardListItem.url)
         }
 
@@ -525,13 +546,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         currentItemID: ObjectIdentifier?,
         expectedURL: URL?,
         currentItemURL: URL?,
-        observedURL: URL?
+        observedURL: URL?,
+        isSafeURL: (URL) -> Bool = WebAppURL.isSafe
     ) -> URL? {
         guard expectedItemID == currentItemID,
               let expectedURL,
               let currentItemURL,
               let observedURL,
-              WebAppURL.isSafe(currentItemURL),
+              isSafeURL(currentItemURL),
               expectedURL.absoluteString == currentItemURL.absoluteString,
               currentItemURL.absoluteString == observedURL.absoluteString else {
             return nil
@@ -614,7 +636,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             currentItemID: ObjectIdentifier(currentItem),
             expectedURL: pendingInstantBack.targetURL,
             currentItemURL: currentItem.url,
-            observedURL: observedURL
+            observedURL: observedURL,
+            isSafeURL: instantBackURLSafetyCheck
         ) != nil else {
             // A URL observation matching another current history item proves
             // that this request was superseded. If the observed URL is only a
@@ -628,12 +651,24 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
 
         self.pendingInstantBack = nil
+        diagnostics.record(
+            event: "instant_back.activated",
+            level: .debug,
+            subsystem: "navigation",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
         onInstantBackActivation(slotID)
     }
 
     private func cancelPendingInstantBack() {
         guard pendingInstantBack != nil else { return }
         pendingInstantBack = nil
+        diagnostics.record(
+            event: "instant_back.cancelled",
+            level: .debug,
+            subsystem: "navigation",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
         onInstantBackCancellation(slotID)
     }
 }

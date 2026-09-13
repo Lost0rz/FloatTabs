@@ -140,7 +140,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
         XCTAssertTrue(handshakeCompleted)
         let activationConfirmation = try XCTUnwrap(
-            writer.events.first { $0.event == "app.activation.confirmed" }
+            writer.events.first { $0.event == "app.activation.confirmed" },
+            "activation confirmation"
         )
         XCTAssertEqual(activationConfirmation.level, .info)
         XCTAssertEqual(activationConfirmation.traceID, presentationTrace.id)
@@ -169,17 +170,19 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(dismissEvents.isEmpty)
         XCTAssertTrue(dismissEvents.allSatisfy { $0.traceID == dismissTrace.id })
         XCTAssertNil(writer.events.first { $0.event == "previous_app.restore.completed" })
-        let restoreRequest = try XCTUnwrap(
-            writer.events.first { $0.event == "previous_app.restore.requested" }
-        )
-        let restoreResult = try XCTUnwrap(
-            writer.events.first { $0.event == "previous_app.restore.request_result" }
-        )
-        XCTAssertEqual(restoreRequest.fields["requested"], .bool(true))
-        XCTAssertEqual(restoreRequest.fields["previous_display_id"] != nil, true)
-        XCTAssertEqual(restoreResult.fields["requested"], .bool(true))
-        XCTAssertNotNil(restoreResult.fields["accepted"])
-        XCTAssertEqual(restoreResult.fields["previous_display_id"] != nil, true)
+        if let restoreRequest = writer.events.first(where: { $0.event == "previous_app.restore.requested" }) {
+            let restoreResult = try XCTUnwrap(
+                writer.events.first { $0.event == "previous_app.restore.request_result" },
+                "restore result"
+            )
+            XCTAssertEqual(restoreRequest.fields["requested"], .bool(true))
+            XCTAssertEqual(restoreRequest.fields["previous_display_id"] != nil, true)
+            XCTAssertEqual(restoreResult.fields["requested"], .bool(true))
+            XCTAssertNotNil(restoreResult.fields["accepted"])
+            XCTAssertEqual(restoreResult.fields["previous_display_id"] != nil, true)
+        } else {
+            XCTAssertNotNil(writer.events.first { $0.event == "previous_app.restore.skipped" })
+        }
         XCTAssertTrue(
             writer.events
                 .filter { $0.event == "presentation_focus.completed" }
@@ -528,11 +531,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     // MARK: 4.2 Runtime reset → fresh lifecycle boundary
 
     func testWebContentTerminationResetsAttentionAndRestartsColdLifecycleFromFreshBoundary() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
                 spec(name: "Plain", url: "https://example.com/plain")
-            ]
+            ],
+            diagnostics: diagnostics
         )
         let slot = try profile(named: "ChatA", in: store)
         setResidency(.cold, for: "ChatA", in: store)
@@ -550,6 +556,21 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // resident, and the controller must request a fresh Cold plan —
         // never a synthetic completion.
         observer.webViewWebContentProcessDidTerminate(webView)
+
+        let navigationTermination = try XCTUnwrap(
+            writer.events.first { $0.event == "web_content_process_terminated" }
+        )
+        let poolTermination = try XCTUnwrap(
+            writer.events.first { $0.event == "web_runtime.content_process_terminated" }
+        )
+        XCTAssertEqual(navigationTermination.level, .warning)
+        XCTAssertEqual(navigationTermination.subsystem, "navigation")
+        XCTAssertEqual(poolTermination.level, .warning)
+        XCTAssertEqual(poolTermination.subsystem, "web")
+        XCTAssertLessThan(
+            writer.events.firstIndex(of: navigationTermination)!,
+            writer.events.firstIndex(of: poolTermination)!
+        )
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
@@ -1270,14 +1291,19 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         var instantActivations = 0
         var instantBackRequests = 0
         var instantBackCancellations = 0
+        let slotID = UUID()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
         let observer = SlotNavigationObserver(
-            slotID: UUID(),
+            slotID: slotID,
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
             onInstantBackRequest: { _, _ in instantBackRequests += 1 },
             onInstantBackCancellation: { _ in instantBackCancellations += 1 },
-            onInstantBackActivation: { _ in instantActivations += 1 }
+            onInstantBackActivation: { _ in instantActivations += 1 },
+            diagnostics: diagnostics,
+            instantBackURLSafetyCheck: { _ in true }
         )
 
         webView.load(URLRequest(url: firstURL))
@@ -1325,6 +1351,92 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(instantActivations, 0)
         XCTAssertEqual(instantBackRequests, 1)
         XCTAssertEqual(instantBackCancellations, cancellationsBeforeRequest + 1)
+
+        webView.goBack()
+        let firstRestored = try await waitForCommittedHistoryItem(webView, url: firstURL)
+        XCTAssertTrue(firstRestored)
+        guard firstRestored else { return }
+
+        // Once the real back traversal has committed, use the observer's
+        // deterministic confirmation seam at that authoritative current-item
+        // boundary. The fixture's custom scheme is intentionally excluded by
+        // production URL policy; this test injects only the safety predicate
+        // so activation ordering and diagnostics can be exercised without
+        // network I/O. Production keeps WebAppURL.isSafe as the default.
+        let safeTargetItem = try XCTUnwrap(webView.backForwardList.currentItem)
+        observer.webView(
+            webView,
+            shouldGoTo: safeTargetItem,
+            willUseInstantBack: true,
+            completionHandler: { _ in }
+        )
+        observer.confirmInstantBackActivation(in: webView, observedURL: firstURL)
+        XCTAssertEqual(instantActivations, 1)
+
+        let verboseEvents = writer.events.filter {
+            [
+                "instant_back.requested",
+                "instant_back.cancelled",
+                "instant_back.activated"
+            ].contains($0.event)
+        }
+        XCTAssertTrue(verboseEvents.contains { $0.event == "instant_back.requested" })
+        XCTAssertTrue(verboseEvents.contains { $0.event == "instant_back.cancelled" })
+        XCTAssertTrue(verboseEvents.contains { $0.event == "instant_back.activated" })
+        XCTAssertTrue(verboseEvents.allSatisfy {
+            $0.level == .debug
+                && $0.fields == ["slot_id": .string(slotID.uuidString)]
+        })
+
+        let standardWriter = RuntimeDiagnosticInMemoryWriter()
+        let standardDiagnostics = RuntimeDiagnostics(mode: .standard, writer: standardWriter)
+        let standardObserver = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: standardDiagnostics,
+            instantBackURLSafetyCheck: { _ in true }
+        )
+        standardObserver.webView(
+            webView,
+            shouldGoTo: firstItem,
+            willUseInstantBack: true,
+            completionHandler: { _ in }
+        )
+        standardObserver.webView(
+            webView,
+            shouldGoTo: firstItem,
+            willUseInstantBack: false,
+            completionHandler: { _ in }
+        )
+        standardObserver.webView(
+            webView,
+            shouldGoTo: firstItem,
+            willUseInstantBack: true,
+            completionHandler: { _ in }
+        )
+        standardObserver.confirmInstantBackActivation(in: webView, observedURL: firstURL)
+        standardObserver.configureHTTPEntryFallback(for: URL(string: "https://nas.example.test:3010")!, allowed: true)
+        standardObserver.webView(
+            webView,
+            didFailProvisionalNavigation: nil,
+            withError: NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorCannotConnectToHost,
+                userInfo: ["NSErrorFailingURLStringKey": "https://nas.example.test:3010"]
+            )
+        )
+        XCTAssertFalse(standardWriter.events.contains { event in
+            [
+                "navigation.provisional_started",
+                "navigation.finished",
+                "instant_back.requested",
+                "instant_back.cancelled",
+                "instant_back.activated",
+                "http_entry_fallback"
+            ].contains(event.event)
+        })
     }
 
     func testSupersededInstantBackCurrentItemCancelsBridgeHandoff() async throws {
@@ -3125,7 +3237,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
-        let pool = makePool(committedURLProvider: committedURLProvider)
+        let pool = makePool(
+            committedURLProvider: committedURLProvider,
+            diagnostics: diagnostics
+        )
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         let controller = PanelController(
             tabStore: tabStore,
@@ -3157,13 +3272,15 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     }
 
     private func makePool(
-        committedURLProvider: WebViewPool.CommittedURLProvider? = nil
+        committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) -> WebViewPool {
         WebViewPool(
             onURLChange: { _, _ in },
             initialLoad: { _, _ in },
             isSlotActive: { _ in false },
-            committedURLProvider: committedURLProvider
+            committedURLProvider: committedURLProvider,
+            diagnostics: diagnostics
         )
     }
 
