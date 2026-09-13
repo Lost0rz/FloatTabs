@@ -126,7 +126,8 @@ final class WebFocusRouter: ObservableObject {
     }
 
     func focusInputForPresentation(
-        preservingCapturedTarget: Bool = false
+        preservingCapturedTarget: Bool = false,
+        trace: RuntimeDiagnosticTrace? = nil
     ) async -> Bool {
         guard let webView = currentWebView else { return false }
 
@@ -151,6 +152,7 @@ final class WebFocusRouter: ObservableObject {
                 event: "web_focus.presentation.completed",
                 level: .info,
                 subsystem: "focus",
+                trace: trace,
                 fields: [
                     "site": .string(adapter.identifier),
                     "preserved_capture": .bool(preservingCapturedTarget)
@@ -165,6 +167,7 @@ final class WebFocusRouter: ObservableObject {
                 event: "web_focus.failed",
                 level: .warning,
                 subsystem: "focus",
+                trace: trace,
                 fields: RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
             )
             return false

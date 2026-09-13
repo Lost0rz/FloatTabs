@@ -297,10 +297,12 @@ final class AppCoordinator {
     }
 
     func prepareForTermination() {
+        let trace = diagnostics.beginTrace(root: "app.termination")
         diagnostics.record(
             event: "app.termination.begin",
             level: .notice,
-            subsystem: "app"
+            subsystem: "app",
+            trace: trace
         )
         isTerminating = true
         externalVoiceFocusTask?.cancel()
@@ -312,7 +314,7 @@ final class AppCoordinator {
 #if DEBUG
         benchmarkControlServer?.stop()
 #endif
-        panelController.prepareForTermination()
+        panelController.prepareForTermination(trace: trace)
         // Recovery protection applies on exit too. If the user explicitly chose
         // Start Empty after a corrupt store, keep the previous automatic backup
         // until a new Web App configuration actually exists.
@@ -320,7 +322,8 @@ final class AppCoordinator {
         diagnostics.record(
             event: "app.termination.flush",
             level: .notice,
-            subsystem: "app"
+            subsystem: "app",
+            trace: trace
         )
         diagnostics.requestFinalFlush(timeout: 0.25) {}
     }

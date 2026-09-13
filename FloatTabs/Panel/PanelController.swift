@@ -197,6 +197,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var shouldClampAfterFullscreen = false
     private var presentationWebFocusTask: Task<Void, Never>?
     private var presentationFocusTask: Task<Void, Never>?
+    private var presentationTrace: RuntimeDiagnosticTrace?
     /// Presentation focus is an event-driven handshake. A new request makes
     /// every older async callback stale, so a slow WebKit response cannot
     /// refocus a page that is no longer the selected presentation.
@@ -250,6 +251,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// already visible must restore focus, not interpret the shortcut as a
     /// request to hide the shell.
     func presentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         if panel.isVisible {
             let presentationUptime = ProcessInfo.processInfo.systemUptime
             lastPresentationUptime = presentationUptime
@@ -257,7 +259,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             activateFloatTabs()
             panel.orderFrontRegardless()
             panel.makeKeyAndOrderFront(nil)
-            beginPresentationFocusHandshake()
+            beginPresentationFocusHandshake(trace: trace)
             diagnostics.record(
                 event: "panel.presentation.focus-requested",
                 level: .debug,
@@ -335,7 +337,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         // normal candidate scoring while ignoring WebKit's post-activation
         // activeElement history.
         let focused = await webFocusRouter.focusInputForPresentation(
-            preservingCapturedTarget: true
+            preservingCapturedTarget: true,
+            trace: trace
         )
         return focused ? .ready : .failed("dom-input-unavailable")
     }
@@ -784,6 +787,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func showFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         var presentationFields = runtimeDiagnosticSnapshot().fields
         presentationFields["requested_before"] = .bool(requestedVisibility)
         diagnostics.record(
@@ -834,7 +838,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // ordering the cross-Space shell left that context on the previously
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
-        beginPresentationFocusHandshake()
+        beginPresentationFocusHandshake(trace: trace)
         // The source host has now actually been ordered/presented/focused,
         // so a previously hidden selected Ready Slot can be acknowledged.
         acknowledgeActiveAttentionIfActuallyPresented()
@@ -852,6 +856,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func hideFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        let trace = trace ?? diagnostics.beginTrace(root: "panel.dismiss")
         let wasVisible = requestedVisibility
         var presentationFields = runtimeDiagnosticSnapshot().fields
         presentationFields["requested_before"] = .bool(wasVisible)
@@ -876,6 +881,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationFocusTask = nil
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
+        presentationTrace = nil
         presentationNativeFocusPending = false
         presentationWebFocusPending = false
         addressOverlayView.dismiss()
@@ -946,11 +952,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         _ = previousApplicationContext.application.activate(options: [])
     }
 
-    func prepareForTermination() {
+    func prepareForTermination(trace: RuntimeDiagnosticTrace? = nil) {
         diagnostics.record(
             event: "app.termination.panel-preparation",
             level: .notice,
-            subsystem: "app"
+            subsystem: "app",
+            trace: trace
         )
         _ = speechCommandRouter.stopCurrentPlayback()
         persistPanelFrame()
@@ -3149,8 +3156,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func beginPresentationFocusHandshake() {
+    private func beginPresentationFocusHandshake(trace: RuntimeDiagnosticTrace? = nil) {
         presentationFocusGeneration &+= 1
+        presentationTrace = trace
         presentationNativeFocusPending = true
         presentationWebFocusPending = true
 
@@ -3238,12 +3246,26 @@ final class PanelController: NSObject, NSWindowDelegate {
             if self.webFocusRouter.currentWebView !== webView {
                 self.webFocusRouter.setCurrentWebView(webView)
             }
-            let focused = await self.webFocusRouter.focusInputForPresentation()
+            let focused = await self.webFocusRouter.focusInputForPresentation(
+                trace: self.presentationTrace
+            )
             guard self.isCurrentPresentationFocusRequest(generation) else {
                 return
             }
             if focused {
                 self.presentationWebFocusPending = false
+                self.diagnostics.record(
+                    event: "panel.presentation.completed",
+                    level: .notice,
+                    subsystem: "panel",
+                    trace: self.presentationTrace,
+                    fields: [
+                        "focus_generation": .integer(Int64(generation)),
+                        "shell_key": .bool(self.panel.isKeyWindow),
+                        "source_key": .bool(self.sourceHostController.window.isKeyWindow),
+                        "active_slot_id": self.tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
+                    ]
+                )
             }
         }
     }

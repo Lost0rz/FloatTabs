@@ -69,7 +69,8 @@ Trace roots are created only for semantic transactions with a meaningful beginni
 - active-tab selection;
 - external voice focus;
 - fullscreen session transition;
-- navigation/recovery transaction when a lifecycle boundary exists.
+- navigation/recovery transaction when a lifecycle boundary exists;
+- termination drain/flush boundary.
 
 The preferred presentation trace is:
 
