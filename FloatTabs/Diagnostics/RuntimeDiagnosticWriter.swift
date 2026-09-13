@@ -4,6 +4,7 @@ import OSLog
 enum RuntimeDiagnosticExportError: Error, Equatable, Sendable {
     case writerUnavailable
     case writerDisabled
+    case reservedDestination
     case encode
     case write
     case io(String)
@@ -12,6 +13,7 @@ enum RuntimeDiagnosticExportError: Error, Equatable, Sendable {
         switch self {
         case .writerUnavailable: return "writer_unavailable"
         case .writerDisabled: return "writer_disabled"
+        case .reservedDestination: return "reserved_destination"
         case .encode: return "encode"
         case .write: return "write"
         case let .io(category): return category
@@ -116,6 +118,10 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             }
             guard !self.isDisabled else {
                 completion(.failure(.writerDisabled))
+                return
+            }
+            guard !self.isReservedExportDestination(destination) else {
+                completion(.failure(.reservedDestination))
                 return
             }
 
@@ -418,6 +424,18 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         return formatter.string(from: date)
     }
 
+    private func isReservedExportDestination(_ destination: URL) -> Bool {
+        guard Self.matchesManagedRuntimeSegmentFilename(destination.lastPathComponent) else {
+            return false
+        }
+        let canonicalDirectory = directory.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalParent = destination
+            .deletingLastPathComponent()
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        return canonicalParent == canonicalDirectory
+    }
+
     static func isManagedRuntimeSegment(
         _ url: URL,
         fileManager: FileManager = .default
@@ -430,6 +448,30 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         fileManager: FileManager
     ) -> ManagedRuntimeSegment? {
         let filename = url.lastPathComponent
+        guard let filenameComponents = managedRuntimeSegmentFilenameComponents(for: filename) else {
+            return nil
+        }
+
+        guard fileManager.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true else {
+            return nil
+        }
+
+        return ManagedRuntimeSegment(
+            url: url,
+            dateKey: filenameComponents.dateKey,
+            index: filenameComponents.index
+        )
+    }
+
+    private static func matchesManagedRuntimeSegmentFilename(_ filename: String) -> Bool {
+        managedRuntimeSegmentFilenameComponents(for: filename) != nil
+    }
+
+    private static func managedRuntimeSegmentFilenameComponents(
+        for filename: String
+    ) -> (dateKey: String, index: Int)? {
         let extensionLength = ".jsonl".count
         guard filename.hasPrefix("runtime-"),
               filename.hasSuffix(".jsonl"),
@@ -450,14 +492,10 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         }
 
         let dateComponent = String(components[1])
-        guard let date = dateFromKey(dateComponent), Self.dateKey(date) == dateComponent,
-              fileManager.fileExists(atPath: url.path),
-              let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-              values.isRegularFile == true else {
+        guard let date = dateFromKey(dateComponent), Self.dateKey(date) == dateComponent else {
             return nil
         }
-
-        return ManagedRuntimeSegment(url: url, dateKey: dateComponent, index: index)
+        return (dateKey: dateComponent, index: index)
     }
 
     private static func dateFromKey(_ key: String) -> Date? {

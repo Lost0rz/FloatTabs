@@ -190,6 +190,14 @@ Retention, rotation, and export source discovery never operate on arbitrary
 `.jsonl` files in the Logs directory. Export files are not runtime segments and
 are not subsequently re-ingested merely because they use `.jsonl`.
 
+The `runtime-YYYYMMDD-NNN.jsonl` namespace inside the Diagnostics Logs
+directory is reserved exclusively for `RuntimeDiagnosticWriter`-managed
+segments. Export rejects destinations in that reserved namespace, including
+destinations that do not yet exist or that reach the Logs directory through a
+symlink alias. An export may use `.jsonl` and may be saved inside Logs when its
+filename is outside the managed runtime namespace; managed-looking filenames
+outside Logs remain allowed.
+
 ## Acceptance criteria
 
 The implementation is accepted when:

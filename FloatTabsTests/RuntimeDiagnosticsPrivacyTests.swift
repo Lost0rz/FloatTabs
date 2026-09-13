@@ -170,7 +170,61 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: foreignFile.path))
     }
 
-    func testExportDoesNotReingestInDirectoryManagedLookingDestination() throws {
+    func testExportCannotOverwriteActiveRuntimeSegment() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-active-" + UUID().uuidString)
+        let writer = RuntimeDiagnosticWriter(directory: directory)
+        writer.enqueue(
+            RuntimeDiagnosticEvent.exportFixture(
+                event: "managed.runtime.event",
+                sequence: 1
+            )
+        )
+        let initialFlush = expectation(description: "initial runtime flush")
+        writer.requestFinalFlush(timeout: 1) { initialFlush.fulfill() }
+        wait(for: [initialFlush], timeout: 2)
+
+        let activeFile = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .first(where: { RuntimeDiagnosticWriter.isManagedRuntimeSegment($0) })
+        )
+        let exportResult = LockedExportResult()
+        let exportCompleted = expectation(description: "active segment export rejected")
+        writer.exportRecent(
+            metadata: RuntimeDiagnosticEvent.exportFixture(
+                event: "diagnostics.export.metadata",
+                sequence: 2
+            ),
+            to: activeFile
+        ) {
+            exportResult.set($0)
+            exportCompleted.fulfill()
+        }
+        wait(for: [exportCompleted], timeout: 2)
+        assertReservedDestination(exportResult.value)
+
+        writer.enqueue(
+            RuntimeDiagnosticEvent.exportFixture(
+                event: "managed.runtime.event",
+                sequence: 2
+            )
+        )
+        let finalFlush = expectation(description: "final runtime flush")
+        writer.requestFinalFlush(timeout: 1) { finalFlush.fulfill() }
+        wait(for: [finalFlush], timeout: 2)
+
+        let events = try decodeEvents(
+            from: String(contentsOf: activeFile, encoding: .utf8)
+        )
+        XCTAssertEqual(events.map { $0.event }, [
+            "managed.runtime.event",
+            "managed.runtime.event"
+        ])
+        XCTAssertEqual(events.map { $0.sequence }, [1, 2])
+        XCTAssertFalse(events.contains { $0.event == "diagnostics.export.metadata" })
+    }
+
+    func testExportRejectsManagedLookingDestinationInsideLogs() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-export-recursion-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -193,36 +247,175 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         )
 
         let firstExported = expectation(description: "first export")
+        let firstResult = LockedExportResult()
         writer.exportRecent(metadata: metadata, to: destination) { result in
-            if case .failure = result {
-                XCTFail("first diagnostics export failed: \(result)")
-            }
+            firstResult.set(result)
             firstExported.fulfill()
         }
         wait(for: [firstExported], timeout: 2)
-        let firstContents = try String(contentsOf: destination, encoding: .utf8)
-        XCTAssertFalse(firstContents.contains("OLD_EXPORT_SENTINEL"))
+        assertReservedDestination(firstResult.value)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
 
-        let secondExported = expectation(description: "second export")
-        writer.exportRecent(metadata: metadata, to: destination) { result in
-            if case .failure = result {
-                XCTFail("second diagnostics export failed: \(result)")
-            }
+    func testExportRejectsNonExistingManagedLookingDestinationInsideLogs() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-nonexisting-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let destination = directory.appendingPathComponent("runtime-20260913-999.jsonl")
+        let writer = RuntimeDiagnosticWriter(directory: directory)
+        let exported = expectation(description: "reserved destination rejected")
+        let result = LockedExportResult()
+        writer.exportRecent(
+            metadata: RuntimeDiagnosticEvent.exportFixture(
+                event: "diagnostics.export.metadata",
+                sequence: 1
+            ),
+            to: destination
+        ) {
+            result.set($0)
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+
+        assertReservedDestination(result.value)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testNormalLogsExportDoesNotReingestPriorExport() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-normal-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let managedFile = directory.appendingPathComponent("runtime-20260913-001.jsonl")
+        try writeFixtureEvent(event: "managed.runtime.event", sequence: 1, to: managedFile)
+        let writer = RuntimeDiagnosticWriter(directory: directory)
+        let metadata = RuntimeDiagnosticEvent.exportFixture(
+            event: "diagnostics.export.metadata",
+            sequence: 2
+        )
+
+        let firstDestination = directory.appendingPathComponent("FloatTabs-Diagnostics-20260913.jsonl")
+        let firstExported = expectation(description: "normal Logs export")
+        let firstResult = LockedExportResult()
+        writer.exportRecent(metadata: metadata, to: firstDestination) {
+            firstResult.set($0)
+            firstExported.fulfill()
+        }
+        wait(for: [firstExported], timeout: 2)
+        assertSuccessfulExport(firstResult.value)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstDestination.path))
+
+        let secondDestination = directory.appendingPathComponent("FloatTabs-Diagnostics-second.jsonl")
+        let secondExported = expectation(description: "second normal Logs export")
+        let secondResult = LockedExportResult()
+        writer.exportRecent(metadata: metadata, to: secondDestination) {
+            secondResult.set($0)
             secondExported.fulfill()
         }
         wait(for: [secondExported], timeout: 2)
-        let secondContents = try String(contentsOf: destination, encoding: .utf8)
+        assertSuccessfulExport(secondResult.value)
 
+        let secondContents = try String(contentsOf: secondDestination, encoding: .utf8)
         XCTAssertFalse(secondContents.contains("OLD_EXPORT_SENTINEL"))
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let secondEvents = try secondContents
-            .split(separator: "\n")
-            .map { try decoder.decode(RuntimeDiagnosticEvent.self, from: Data($0.utf8)) }
-        XCTAssertEqual(secondEvents.map(\.event), [
+        XCTAssertEqual(try decodeEvents(from: secondContents).map(\.event), [
             "managed.runtime.event",
             "diagnostics.export.metadata"
         ])
+    }
+
+    func testManagedLookingExportOutsideLogsRemainsAllowed() throws {
+        let logsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-outside-logs-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        let outsideDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-destination-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+
+        let managedFile = logsDirectory.appendingPathComponent("runtime-20260913-001.jsonl")
+        try writeFixtureEvent(event: "managed.runtime.event", sequence: 1, to: managedFile)
+        let destination = outsideDirectory.appendingPathComponent("runtime-20260913-999.jsonl")
+        let writer = RuntimeDiagnosticWriter(directory: logsDirectory)
+        let exported = expectation(description: "outside Logs export")
+        let result = LockedExportResult()
+        writer.exportRecent(
+            metadata: RuntimeDiagnosticEvent.exportFixture(
+                event: "diagnostics.export.metadata",
+                sequence: 2
+            ),
+            to: destination
+        ) {
+            result.set($0)
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+
+        assertSuccessfulExport(result.value)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(try decodeEvents(from: String(contentsOf: destination, encoding: .utf8)).map(\.event), [
+            "managed.runtime.event",
+            "diagnostics.export.metadata"
+        ])
+    }
+
+    func testManagedLookingExportThroughLogsSymlinkAliasIsRejected() throws {
+        let logsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-symlink-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        let logsAlias = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-export-symlink-alias-" + UUID().uuidString)
+        try FileManager.default.createSymbolicLink(at: logsAlias, withDestinationURL: logsDirectory)
+
+        let destination = logsAlias.appendingPathComponent("runtime-20260913-999.jsonl")
+        let writer = RuntimeDiagnosticWriter(directory: logsDirectory)
+        let exported = expectation(description: "symlink alias reserved destination rejected")
+        let result = LockedExportResult()
+        writer.exportRecent(
+            metadata: RuntimeDiagnosticEvent.exportFixture(
+                event: "diagnostics.export.metadata",
+                sequence: 1
+            ),
+            to: destination
+        ) {
+            result.set($0)
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+
+        assertReservedDestination(result.value)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    private func assertReservedDestination(
+        _ result: Result<Void, RuntimeDiagnosticExportError>?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case let .failure(error) = result else {
+            return XCTFail("expected reserved destination failure, got \(String(describing: result))", file: file, line: line)
+        }
+        guard case .reservedDestination = error else {
+            return XCTFail("expected reservedDestination, got \(error)", file: file, line: line)
+        }
+        XCTAssertEqual(error.diagnosticCategory, "reserved_destination", file: file, line: line)
+    }
+
+    private func assertSuccessfulExport(
+        _ result: Result<Void, RuntimeDiagnosticExportError>?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case .success = result else {
+            return XCTFail("expected successful export, got \(String(describing: result))", file: file, line: line)
+        }
+    }
+
+    private func decodeEvents(from contents: String) throws -> [RuntimeDiagnosticEvent] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try contents
+            .split(separator: "\n")
+            .map { try decoder.decode(RuntimeDiagnosticEvent.self, from: Data($0.utf8)) }
     }
 
     private func writeFixtureEvent(
