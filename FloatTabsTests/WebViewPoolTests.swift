@@ -5,6 +5,51 @@ import XCTest
 
 @MainActor
 final class WebViewPoolTests: XCTestCase {
+    func testWebRuntimeCreationRecordsSuccessOnlyAfterRuntimeIsCreated() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "DiagnosticCreateSuccess")
+
+        _ = try pool.webView(for: profile)
+
+        let eventNames = writer.events.map(\.event)
+        XCTAssertEqual(eventNames, ["web_runtime.create.begin", "web_runtime.created"])
+    }
+
+    func testWebRuntimeCreationRecordsSanitizedFailureWithoutCreatedEvent() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { false }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider,
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(
+            name: "DiagnosticCreateFailure",
+            browserProfileID: UUID()
+        )
+
+        XCTAssertThrowsError(try pool.webView(for: profile))
+
+        let events = writer.events
+        XCTAssertEqual(events.map(\.event), [
+            "web_runtime.create.begin",
+            "web_runtime.create.failed"
+        ])
+        XCTAssertNil(events.last?.fields["errorDescription"])
+        XCTAssertEqual(events.last?.fields["error_category"], .string("runtime"))
+        XCTAssertEqual(events.last?.fields["error_code"], .integer(0))
+    }
+
     func testDifferentSlotIDsReceiveDifferentWebViews() throws {
         let pool = makePool()
         let first = makeProfile(name: "A")
@@ -1122,18 +1167,27 @@ final class WebViewPoolTests: XCTestCase {
     func testSlotNavigationObserverSurfacesContentProcessTermination() throws {
         let webView = WebViewFactory.makeWebView()
         let slotID = UUID()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         var terminatedSlotID: UUID?
         let observer = SlotNavigationObserver(
             slotID: slotID,
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
-            onContentProcessTermination: { terminatedSlotID = $0 }
+            onContentProcessTermination: { terminatedSlotID = $0 },
+            diagnostics: diagnostics
         )
 
         observer.webViewWebContentProcessDidTerminate(webView)
 
         XCTAssertEqual(terminatedSlotID, slotID)
+        let event = try XCTUnwrap(
+            writer.events.first { $0.event == "web_content_process_terminated" }
+        )
+        XCTAssertEqual(event.level, .warning)
+        XCTAssertEqual(event.subsystem, "navigation")
+        XCTAssertEqual(event.fields["slot_id"], .string(slotID.uuidString))
     }
 
     func testNavigationCoordinatorKeepsSameSiteBlankInCurrentSlot() throws {
@@ -1478,11 +1532,15 @@ final class WebViewPoolTests: XCTestCase {
     func testObserverFallsBackToHTTPOnceOnlyWhenCallerAllowsInferredEntry() throws {
         let webView = WKWebView(frame: .zero)
         var loadedURLs: [URL] = []
+        let slotID = UUID()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
         let observer = SlotNavigationObserver(
-            slotID: UUID(),
+            slotID: slotID,
             webView: webView,
             websiteMode: .desktop,
             onURLChange: { _, _ in },
+            diagnostics: diagnostics,
             loadHandler: { _, url in loadedURLs.append(url) }
         )
 
@@ -1502,6 +1560,12 @@ final class WebViewPoolTests: XCTestCase {
 
         XCTAssertEqual(loadedURLs, [URL(string: "http://nas.example.com:3010")!])
         XCTAssertFalse(observer.isHTTPEntryFallbackPending)
+        let fallbackEvent = try XCTUnwrap(
+            writer.events.first { $0.event == "http_entry_fallback" }
+        )
+        XCTAssertEqual(fallbackEvent.level, .debug)
+        XCTAssertEqual(fallbackEvent.subsystem, "navigation")
+        XCTAssertEqual(fallbackEvent.fields, ["slot_id": .string(slotID.uuidString)])
 
         observer.webView(
             webView,

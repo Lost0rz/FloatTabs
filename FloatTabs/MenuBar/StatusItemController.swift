@@ -64,11 +64,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private let onToggle: () -> Void
     private let onWillShow: () -> Void
+    private let onWillShowWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
     private let isVisible: () -> Bool
     private let onSettings: () -> Void
     private let onQuit: () -> Void
     private let preferencesStore: AppPreferencesStore
     private let loadFavicon: FaviconLoadHandler
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private let onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)?
     private var selectedFaviconOriginKey: String?
     private var selectedFaviconImage: NSImage?
     private var latestActiveWebAppName: String?
@@ -111,18 +114,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     init(
         onToggle: @escaping () -> Void,
         onWillShow: @escaping () -> Void = {},
+        onWillShowWithTrace: ((RuntimeDiagnosticTrace) -> Void)? = nil,
         isVisible: @escaping () -> Bool,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void,
         preferencesStore: AppPreferencesStore = AppPreferencesStore(),
-        faviconLoader: FaviconLoadHandler? = nil
+        faviconLoader: FaviconLoadHandler? = nil,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        onToggleWithTrace: ((RuntimeDiagnosticTrace) -> Void)? = nil
     ) {
         self.onToggle = onToggle
         self.onWillShow = onWillShow
+        self.onWillShowWithTrace = onWillShowWithTrace
         self.isVisible = isVisible
         self.onSettings = onSettings
         self.onQuit = onQuit
         self.preferencesStore = preferencesStore
+        self.diagnostics = diagnostics
+        self.onToggleWithTrace = onToggleWithTrace
         self.loadFavicon = faviconLoader ?? { url, completion in
             WebsiteFaviconProvider.shared.load(for: url, completion: completion)
         }
@@ -441,8 +450,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// modes before AppKit performs its final window-order update.
     private func requestToggleAfterStatusItemTracking() {
         let shouldShow = !isVisible()
+        let trace = diagnostics.beginTrace(root: "menubar.toggle")
+        diagnostics.record(
+            event: "menubar.toggle.intent",
+            level: .info,
+            subsystem: "menubar",
+            trace: trace,
+            fields: ["should_show": .bool(shouldShow)]
+        )
         if shouldShow {
-            onWillShow()
+            if let onWillShowWithTrace {
+                onWillShowWithTrace(trace)
+            } else {
+                onWillShow()
+            }
         }
 
         Self.scheduleAfterStatusItemTracking { [weak self] in
@@ -450,7 +471,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                   self.isVisible() != shouldShow else {
                 return
             }
-            self.onToggle()
+            self.diagnostics.record(
+                event: "menubar.toggle.dispatch",
+                level: .info,
+                subsystem: "menubar",
+                trace: trace
+            )
+            if let onToggleWithTrace = self.onToggleWithTrace {
+                onToggleWithTrace(trace)
+            } else {
+                self.onToggle()
+            }
         }
     }
 

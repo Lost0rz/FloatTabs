@@ -4,18 +4,23 @@ import XCTest
 @MainActor
 final class WebAttentionCoordinatorTests: XCTestCase {
     private var coordinator: WebAttentionCoordinator!
+    private var writer: RuntimeDiagnosticInMemoryWriter!
     private var slotA: UUID!
     private var slotB: UUID!
 
     override func setUp() {
         super.setUp()
-        coordinator = WebAttentionCoordinator()
+        writer = RuntimeDiagnosticInMemoryWriter()
+        coordinator = WebAttentionCoordinator(
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer)
+        )
         slotA = UUID()
         slotB = UUID()
     }
 
     override func tearDown() {
         coordinator = nil
+        writer = nil
         slotA = nil
         slotB = nil
         super.tearDown()
@@ -177,6 +182,68 @@ final class WebAttentionCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(coordinator.isAttentionProtected(slotA))
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+    }
+
+    func testTransitionDiagnosticsIncludeSemanticContext() {
+        coordinator.apply(.generationStarted, for: slotA)
+        coordinator.apply(.generationFinished(userVisible: false), for: slotA)
+        coordinator.acknowledge(slotID: slotA, userVisible: true)
+        coordinator.apply(.generationStarted, for: slotA)
+        coordinator.apply(.generationFinished(userVisible: true), for: slotA)
+        coordinator.apply(.generationStarted, for: slotA)
+        coordinator.apply(.runtimeReset, for: slotA)
+
+        let events = writer.events.filter { $0.event == "attention.transition" }
+        XCTAssertEqual(events.count, 7)
+        XCTAssertEqual(
+            events.map { $0.fields["cause"] },
+            [
+                .string("generation_started"),
+                .string("generation_finished"),
+                .string("acknowledged"),
+                .string("generation_started"),
+                .string("generation_finished"),
+                .string("generation_started"),
+                .string("runtime_reset")
+            ]
+        )
+        XCTAssertEqual(
+            events.map { $0.fields["from"] },
+            [
+                .string("idle"),
+                .string("generating"),
+                .string("ready"),
+                .string("idle"),
+                .string("generating"),
+                .string("idle"),
+                .string("generating")
+            ]
+        )
+        XCTAssertEqual(
+            events.map { $0.fields["to"] },
+            [
+                .string("generating"),
+                .string("ready"),
+                .string("idle"),
+                .string("generating"),
+                .string("idle"),
+                .string("generating"),
+                .string("idle")
+            ]
+        )
+        XCTAssertNil(events[0].fields["user_visible"])
+        XCTAssertEqual(events[1].fields["user_visible"], .bool(false))
+        XCTAssertEqual(events[2].fields["user_visible"], .bool(true))
+        XCTAssertEqual(events[4].fields["user_visible"], .bool(true))
+        XCTAssertNil(events[6].fields["user_visible"])
+        XCTAssertTrue(events.allSatisfy { $0.fields["slot_id"] == .string(slotA.uuidString) })
+    }
+
+    func testNoOpAttentionTransitionStillDoesNotRecordDiagnostic() {
+        coordinator.apply(.generationFinished(userVisible: false), for: slotA)
+        coordinator.acknowledge(slotID: slotA, userVisible: false)
+
+        XCTAssertTrue(writer.events.isEmpty)
     }
 
     /// Drives a Slot through Idle -> Generating -> Ready.

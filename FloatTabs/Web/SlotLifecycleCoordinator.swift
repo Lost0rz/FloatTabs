@@ -32,6 +32,12 @@ final class SlotLifecycleCoordinator {
         let backgroundMediaPolicy: BackgroundMediaPolicy
     }
 
+    private struct ProtectionState {
+        let media: Bool
+        let attention: Bool
+        let speech: Bool
+    }
+
     private let webViewPool: WebViewPool
     private unowned let container: WebPanelContainerView
     private var coldReleaseDelay: TimeInterval
@@ -46,6 +52,7 @@ final class SlotLifecycleCoordinator {
     private let onSlotBecameInactive: SlotBecameInactiveHandler
     private let attentionProtectionQuery: AttentionProtectionQuery
     private let speechProtectionQuery: SpeechProtectionQuery
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
@@ -73,6 +80,7 @@ final class SlotLifecycleCoordinator {
         onSlotBecameInactive: @escaping SlotBecameInactiveHandler = { _ in },
         attentionProtectionQuery: @escaping AttentionProtectionQuery = { _ in false },
         speechProtectionQuery: @escaping SpeechProtectionQuery = { _ in false },
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         installsMemoryPressureSource: Bool = true
     ) {
         self.webViewPool = webViewPool
@@ -97,6 +105,7 @@ final class SlotLifecycleCoordinator {
         self.onSlotBecameInactive = onSlotBecameInactive
         self.attentionProtectionQuery = attentionProtectionQuery
         self.speechProtectionQuery = speechProtectionQuery
+        self.diagnostics = diagnostics
 
         if installsMemoryPressureSource {
             configureMemoryPressureSource()
@@ -178,6 +187,12 @@ final class SlotLifecycleCoordinator {
 
     func setPanelVisible(_ visible: Bool, activeProfile: WebAppProfile?) {
         panelIsVisible = visible
+        diagnostics.record(
+            event: visible ? "slot_lifecycle.panel_visible" : "slot_lifecycle.panel_hidden",
+            level: .debug,
+            subsystem: "lifecycle",
+            fields: ["active_slot_id": .string(activeProfile?.id.uuidString ?? "none")]
+        )
         hiddenActiveToken = nil
 
         guard let activeProfile else { return }
@@ -200,6 +215,12 @@ final class SlotLifecycleCoordinator {
     }
 
     func activate(profile: WebAppProfile) {
+        diagnostics.record(
+            event: "slot_lifecycle.activate",
+            level: .debug,
+            subsystem: "lifecycle",
+            fields: ["slot_id": .string(profile.id.uuidString)]
+        )
         activeSlotID = profile.id
         cancelInactivePlan(slotID: profile.id)
         hiddenActiveToken = nil
@@ -210,6 +231,12 @@ final class SlotLifecycleCoordinator {
     }
 
     func deactivate(profile: WebAppProfile) {
+        diagnostics.record(
+            event: "slot_lifecycle.deactivate",
+            level: .debug,
+            subsystem: "lifecycle",
+            fields: ["slot_id": .string(profile.id.uuidString)]
+        )
         guard fullscreenSourceProfile?.id != profile.id else { return }
         if activeSlotID == profile.id {
             onSlotBecameInactive(profile)
@@ -259,6 +286,12 @@ final class SlotLifecycleCoordinator {
     /// fullscreen. This is independent from shell visibility and active Tab
     /// selection so a hidden shell can never pause or evict visible content.
     func beginFullscreenSourceVisibility(profile: WebAppProfile) {
+        diagnostics.record(
+            event: "slot_lifecycle.fullscreen_protected",
+            level: .notice,
+            subsystem: "lifecycle",
+            fields: ["slot_id": .string(profile.id.uuidString)]
+        )
         fullscreenSourceProfile = profile
         cancelInactivePlan(slotID: profile.id)
         if hiddenActiveToken != nil, activeSlotID == profile.id {
@@ -268,6 +301,12 @@ final class SlotLifecycleCoordinator {
 
     func endFullscreenSourceVisibility(profile: WebAppProfile) {
         guard fullscreenSourceProfile?.id == profile.id else { return }
+        diagnostics.record(
+            event: "slot_lifecycle.fullscreen_released",
+            level: .notice,
+            subsystem: "lifecycle",
+            fields: ["slot_id": .string(profile.id.uuidString)]
+        )
         fullscreenSourceProfile = nil
     }
 
@@ -326,11 +365,23 @@ final class SlotLifecycleCoordinator {
     }
 
     func handleMemoryPressure(_ level: SlotMemoryPressureLevel) {
+        diagnostics.record(
+            event: "slot_lifecycle.memory_pressure",
+            level: .warning,
+            subsystem: "lifecycle",
+            fields: ["level": .string(level == .critical ? "critical" : "warning")]
+        )
         switch level {
         case .warning:
-            evictInactiveWarmUntilResidentLimit(min(1, warmResidentLimit))
+            evictInactiveWarmUntilResidentLimit(
+                min(1, warmResidentLimit),
+                protectionBoundary: "memory_pressure"
+            )
         case .critical:
-            evictInactiveWarmUntilResidentLimit(0)
+            evictInactiveWarmUntilResidentLimit(
+                0,
+                protectionBoundary: "memory_pressure"
+            )
         }
     }
 
@@ -422,6 +473,16 @@ final class SlotLifecycleCoordinator {
             backgroundMediaPolicy: profile.backgroundMediaPolicy
         )
         inactivePlans[profile.id] = plan
+        diagnostics.record(
+            event: "slot_lifecycle.inactive_plan.created",
+            level: .info,
+            subsystem: "lifecycle",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "plan_token": .string(plan.token.uuidString),
+                "residency": .string(profile.residencyPolicy.rawValue)
+            ]
+        )
 
         if profile.residencyPolicy == .warm {
             if resetWarmRecency || inactiveWarmRecency[profile.id] == nil {
@@ -451,7 +512,15 @@ final class SlotLifecycleCoordinator {
             }
 
             if isPlaying {
-                self.mediaProtectedSlotIDs.insert(profile.id)
+                let wasProtected = self.mediaProtectedSlotIDs.insert(profile.id).inserted
+                if wasProtected {
+                    self.diagnostics.record(
+                        event: "slot_lifecycle.media_protected",
+                        level: .notice,
+                        subsystem: "lifecycle",
+                        fields: ["slot_id": .string(profile.id.uuidString)]
+                    )
+                }
                 self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
             } else {
                 let wasProtected = self.mediaProtectedSlotIDs.remove(profile.id) != nil
@@ -459,6 +528,13 @@ final class SlotLifecycleCoordinator {
                     self.markWarmAsMostRecent(profile.id)
                 }
                 guard !self.isProactivelyProtected(slotID: profile.id) else {
+                    let protection = self.protectionState(slotID: profile.id)
+                    self.recordProtectionObservations(
+                        slotID: profile.id,
+                        boundary: "schedule_release",
+                        planToken: plan.token,
+                        protection: protection
+                    )
                     return
                 }
                 self.scheduleRelease(for: profile, plan: plan)
@@ -513,6 +589,13 @@ final class SlotLifecycleCoordinator {
             // This callback may have been queued before generation began.
             // Attention is a live protection condition, not a plan snapshot.
             guard !self.isProactivelyProtected(slotID: profile.id) else {
+                let protection = self.protectionState(slotID: profile.id)
+                self.recordProtectionObservations(
+                    slotID: profile.id,
+                    boundary: "release_timer",
+                    planToken: plan.token,
+                    protection: protection
+                )
                 return
             }
 
@@ -520,12 +603,32 @@ final class SlotLifecycleCoordinator {
                 self.mediaPlayingQuery(profile.id) { [weak self] isPlaying in
                     guard let self,
                           self.planMatches(plan, slotID: profile.id),
-                          !self.isVisibleSlot(profile.id),
-                          !self.isProactivelyProtected(slotID: profile.id) else {
+                          !self.isVisibleSlot(profile.id) else {
+                        return
+                    }
+                    guard !self.isProactivelyProtected(slotID: profile.id) else {
+                        let protection = self.protectionState(slotID: profile.id)
+                        self.recordProtectionObservations(
+                            slotID: profile.id,
+                            boundary: "release_timer",
+                            planToken: plan.token,
+                            protection: protection
+                        )
+                        return
+                    }
+                    guard self.webViewPool.contains(slotID: profile.id) else {
                         return
                     }
                     if isPlaying {
-                        self.mediaProtectedSlotIDs.insert(profile.id)
+                        let wasProtected = self.mediaProtectedSlotIDs.insert(profile.id).inserted
+                        if wasProtected {
+                            self.diagnostics.record(
+                                event: "slot_lifecycle.media_protected",
+                                level: .notice,
+                                subsystem: "lifecycle",
+                                fields: ["slot_id": .string(profile.id.uuidString)]
+                            )
+                        }
                         self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
                     } else {
                         self.releaseInactiveSlot(
@@ -546,6 +649,15 @@ final class SlotLifecycleCoordinator {
     private func scheduleHiddenActiveTransition(profile: WebAppProfile) {
         let token = UUID()
         hiddenActiveToken = token
+        diagnostics.record(
+            event: "slot_lifecycle.hidden_active_grace",
+            level: .info,
+            subsystem: "lifecycle",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "state": .string("scheduled")
+            ]
+        )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + hiddenActiveGraceDelay) { [weak self] in
             guard let self,
@@ -565,6 +677,15 @@ final class SlotLifecycleCoordinator {
             }
 
             self.hiddenActiveToken = nil
+            self.diagnostics.record(
+                event: "slot_lifecycle.hidden_active_grace",
+                level: .info,
+                subsystem: "lifecycle",
+                fields: [
+                    "slot_id": .string(profile.id.uuidString),
+                    "state": .string("expired")
+                ]
+            )
             self.activeSlotID = nil
             self.onSlotBecameInactive(profile)
             self.container.deactivate(
@@ -579,16 +700,34 @@ final class SlotLifecycleCoordinator {
         evictInactiveWarmUntilResidentLimit(warmResidentLimit)
     }
 
-    private func evictInactiveWarmUntilResidentLimit(_ targetLimit: Int) {
+    private func evictInactiveWarmUntilResidentLimit(
+        _ targetLimit: Int,
+        protectionBoundary: String? = nil
+    ) {
         let target = max(targetLimit, 0)
         let candidates = inactiveWarmRecency
             .filter { slotID, _ in
-                !isVisibleSlot(slotID)
-                    && !mediaProtectedSlotIDs.contains(slotID)
-                    && !attentionProtectionQuery(slotID)
-                    && !speechProtectionQuery(slotID)
-                    && webViewPool.contains(slotID: slotID)
-                    && inactivePlans[slotID]?.residencyPolicy == .warm
+                guard !isVisibleSlot(slotID) else {
+                    return false
+                }
+
+                guard !isProactivelyProtected(slotID: slotID) else {
+                    let protection = protectionState(slotID: slotID)
+                    if let protectionBoundary {
+                        recordProtectionObservations(
+                            slotID: slotID,
+                            boundary: protectionBoundary,
+                            planToken: inactivePlans[slotID]?.token,
+                            protection: protection
+                        )
+                    }
+                    return false
+                }
+                guard webViewPool.contains(slotID: slotID),
+                      inactivePlans[slotID]?.residencyPolicy == .warm else {
+                    return false
+                }
+                return true
             }
             .sorted { $0.value < $1.value }
 
@@ -614,11 +753,31 @@ final class SlotLifecycleCoordinator {
     ) {
         guard let currentPlan = inactivePlans[slotID],
               expectedPlan.map({ $0.token == currentPlan.token }) ?? true,
-              !isVisibleSlot(slotID),
-              !isProactivelyProtected(slotID: slotID),
-              webViewPool.contains(slotID: slotID) else {
+              !isVisibleSlot(slotID) else {
             return
         }
+        guard !isProactivelyProtected(slotID: slotID) else {
+            let protection = protectionState(slotID: slotID)
+            recordProtectionObservations(
+                slotID: slotID,
+                boundary: "final_release",
+                planToken: currentPlan.token,
+                protection: protection
+            )
+            return
+        }
+        guard webViewPool.contains(slotID: slotID) else {
+            return
+        }
+        diagnostics.record(
+            event: "slot_lifecycle.release",
+            level: .notice,
+            subsystem: "lifecycle",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "plan_token": .string(currentPlan.token.uuidString)
+            ]
+        )
         prepareRuntimeForRelease(slotID)
         container.removeSlot(slotID)
         webViewPool.release(slotID: slotID)
@@ -630,7 +789,17 @@ final class SlotLifecycleCoordinator {
         slotID: UUID,
         preservingMediaProtection: Bool = false
     ) {
-        inactivePlans.removeValue(forKey: slotID)
+        if let plan = inactivePlans.removeValue(forKey: slotID) {
+            diagnostics.record(
+                event: "slot_lifecycle.inactive_plan.cancelled",
+                level: .info,
+                subsystem: "lifecycle",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "plan_token": .string(plan.token.uuidString)
+                ]
+            )
+        }
         if !preservingMediaProtection {
             mediaProtectedSlotIDs.remove(slotID)
         }
@@ -654,5 +823,45 @@ final class SlotLifecycleCoordinator {
         mediaProtectedSlotIDs.contains(slotID)
             || attentionProtectionQuery(slotID)
             || speechProtectionQuery(slotID)
+    }
+
+    private func protectionState(slotID: UUID) -> ProtectionState {
+        ProtectionState(
+            media: mediaProtectedSlotIDs.contains(slotID),
+            attention: attentionProtectionQuery(slotID),
+            speech: speechProtectionQuery(slotID)
+        )
+    }
+
+    private func recordProtectionObservations(
+        slotID: UUID,
+        boundary: String,
+        planToken: UUID?,
+        protection: ProtectionState
+    ) {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "boundary": .string(boundary)
+        ]
+        if let planToken {
+            fields["plan_token"] = .string(planToken.uuidString)
+        }
+
+        if protection.attention {
+            diagnostics.record(
+                event: "slot_lifecycle.attention_protected",
+                level: .info,
+                subsystem: "lifecycle",
+                fields: fields
+            )
+        }
+        if protection.speech {
+            diagnostics.record(
+                event: "slot_lifecycle.speech_protected",
+                level: .info,
+                subsystem: "lifecycle",
+                fields: fields
+            )
+        }
     }
 }

@@ -112,6 +112,17 @@
 		A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006A /* CalibreSpeechCoordinator.swift */; };
 		A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006B /* CalibreReaderBridge.swift */; };
 		A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006C /* CalibreReaderSpeechTests.swift */; };
+		A0000000000000000000006D /* RuntimeDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */; };
+		A0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */; };
+		A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */; };
+		A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */; };
+		A00000000000000000000071 /* RuntimeDiagnosticEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000071 /* RuntimeDiagnosticEvent.swift */; };
+		A00000000000000000000072 /* RuntimeDiagnosticPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000072 /* RuntimeDiagnosticPrivacy.swift */; };
+		A00000000000000000000073 /* RuntimeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000073 /* RuntimeDiagnostics.swift */; };
+		A00000000000000000000074 /* RuntimeDiagnosticWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000074 /* RuntimeDiagnosticWriter.swift */; };
+		A00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */; };
+		A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */; };
+		A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -232,6 +243,17 @@
 		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
 		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsPrivacyTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTraceTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsRotationTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000071 /* RuntimeDiagnosticEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticEvent.swift; sourceTree = "<group>"; };
+		B00000000000000000000072 /* RuntimeDiagnosticPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticPrivacy.swift; sourceTree = "<group>"; };
+		B00000000000000000000073 /* RuntimeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnostics.swift; sourceTree = "<group>"; };
+		B00000000000000000000074 /* RuntimeDiagnosticWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticWriter.swift; sourceTree = "<group>"; };
+		B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticSnapshot.swift; sourceTree = "<group>"; };
+		B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticExporter.swift; sourceTree = "<group>"; };
+		B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsSettingsViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -266,6 +288,7 @@
 			isa = PBXGroup;
 			children = (
 				H00000000000000000000003 /* App */,
+				H00000000000000000000010 /* Diagnostics */,
 				H00000000000000000000004 /* Panel */,
 				H00000000000000000000005 /* MenuBar */,
 				H00000000000000000000006 /* Hotkeys */,
@@ -292,6 +315,19 @@
 				B00000000000000000000022 /* BenchmarkControlServer.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		H00000000000000000000010 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000071 /* RuntimeDiagnosticEvent.swift */,
+				B00000000000000000000072 /* RuntimeDiagnosticPrivacy.swift */,
+				B00000000000000000000073 /* RuntimeDiagnostics.swift */,
+				B00000000000000000000074 /* RuntimeDiagnosticWriter.swift */,
+				B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */,
+				B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */,
+			);
+			path = Diagnostics;
 			sourceTree = "<group>";
 		};
 		H00000000000000000000004 /* Panel */ = {
@@ -393,6 +429,7 @@
 				B00000000000000000000019 /* EmptyWebAppView.swift */,
 				B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */,
 				B00000000000000000000024 /* GlobalSettingsController.swift */,
+				B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -465,6 +502,10 @@
 				B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */,
 				B00000000000000000000069 /* SpeechCommandRouterTests.swift */,
 				B0000000000000000000006C /* CalibreReaderSpeechTests.swift */,
+				B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */,
+				B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */,
+				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
+				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -583,6 +624,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000071 /* RuntimeDiagnosticEvent.swift in Sources */,
+				A00000000000000000000072 /* RuntimeDiagnosticPrivacy.swift in Sources */,
+				A00000000000000000000073 /* RuntimeDiagnostics.swift in Sources */,
+				A00000000000000000000074 /* RuntimeDiagnosticWriter.swift in Sources */,
+				A00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift in Sources */,
+				A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */,
+				A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
@@ -693,6 +741,10 @@
 				A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */,
 				A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */,
 				A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */,
+				A0000000000000000000006D /* RuntimeDiagnosticsTests.swift in Sources */,
+				A0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift in Sources */,
+				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
+				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
