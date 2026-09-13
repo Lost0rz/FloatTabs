@@ -38,6 +38,12 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     typealias DateProvider = () -> Date
     typealias FlushObserver = @Sendable () -> Void
 
+    private struct ManagedRuntimeSegment {
+        let url: URL
+        let dateKey: String
+        let index: Int
+    }
+
     static var defaultDirectory: URL {
         let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -120,26 +126,32 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 encoder.dateEncodingStrategy = .iso8601
                 var output = Data()
 
-                let logFiles = (try? self.fileManager.contentsOfDirectory(
+                let files = (try? self.fileManager.contentsOfDirectory(
                     at: self.directory,
                     includingPropertiesForKeys: [.contentModificationDateKey]
                 )) ?? []
-                    .filter { $0.pathExtension == "jsonl" }
-                    .sorted { lhs, rhs in
-                        let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                let destinationURL = destination.standardizedFileURL
+                let logFiles = files.compactMap { file -> ManagedRuntimeSegment? in
+                    guard file.standardizedFileURL != destinationURL else { return nil }
+                    return Self.managedRuntimeSegment(
+                        for: file,
+                        fileManager: self.fileManager
+                    )
+                }.sorted { lhs, rhs in
+                        let lhsDate = (try? lhs.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                             ?? nil
-                        let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                        let rhsDate = (try? rhs.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                             ?? nil
                         let lhsDateValue = lhsDate ?? .distantPast
                         let rhsDateValue = rhsDate ?? .distantPast
                         if lhsDateValue != rhsDateValue {
                             return lhsDateValue < rhsDateValue
                         }
-                        return lhs.lastPathComponent < rhs.lastPathComponent
+                        return lhs.url.lastPathComponent < rhs.url.lastPathComponent
                     }
 
-                for file in logFiles {
-                    output.append(try Data(contentsOf: file))
+                for segment in logFiles {
+                    output.append(try Data(contentsOf: segment.url))
                 }
 
                 output.append(try encoder.encode(
@@ -318,57 +330,63 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     }
 
     private func nextSegmentIndex(for dateKey: String) -> Int {
-        let prefix = "runtime-\(dateKey)-"
-        let indices = (try? fileManager.contentsOfDirectory(
+        let segments = ((try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil
-        ))?.compactMap { url -> Int? in
-            let name = url.deletingPathExtension().lastPathComponent
-            guard name.hasPrefix(prefix) else { return nil }
-            return Int(name.dropFirst(prefix.count))
-        } ?? []
-        guard let latest = indices.max() else { return 1 }
+        )) ?? []).compactMap { url in
+            Self.managedRuntimeSegment(for: url, fileManager: fileManager)
+        }.filter { $0.dateKey == dateKey }
+        guard let latest = segments.sorted(by: { lhs, rhs in
+            if lhs.index != rhs.index {
+                return lhs.index > rhs.index
+            }
+            return lhs.url.lastPathComponent < rhs.url.lastPathComponent
+        }).first else { return 1 }
 
-        let latestURL = directory.appendingPathComponent(
-            String(format: "runtime-%@-%03d.jsonl", dateKey, latest)
-        )
-        let latestSize = (try? fileManager.attributesOfItem(atPath: latestURL.path))?[.size]
+        let latestSize = (try? fileManager.attributesOfItem(atPath: latest.url.path))?[.size]
             as? NSNumber
-        return latestSize?.uint64Value ?? 0 >= maxSegmentBytes ? latest + 1 : latest
+        return latestSize?.uint64Value ?? 0 >= maxSegmentBytes ? latest.index + 1 : latest.index
     }
 
     private func pruneFiles(now: Date) {
-        guard let files = try? fileManager.contentsOfDirectory(
+        let files = (try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey]
-        ) else { return }
+        )) ?? []
+        let managedFiles = files.compactMap { file in
+            Self.managedRuntimeSegment(for: file, fileManager: fileManager)
+        }
+        let currentURL = currentFileURL?.standardizedFileURL
 
-        let logs = files.filter { $0.pathExtension == "jsonl" }
         let cutoff = now.addingTimeInterval(-retention)
-        for file in logs {
-            let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+        for segment in managedFiles {
+            let date = (try? segment.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
                 ?? nil
-            if let date, date < cutoff, file != currentFileURL {
-                try? fileManager.removeItem(at: file)
+            if let date, date < cutoff, segment.url.standardizedFileURL != currentURL {
+                try? fileManager.removeItem(at: segment.url)
             }
         }
 
-        let remaining = (try? fileManager.contentsOfDirectory(
+        let remaining = ((try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey]
-        ))?.filter { $0.pathExtension == "jsonl" }.sorted {
-            let lhsDate = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
-            let rhsDate = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
+        )) ?? []).compactMap { file in
+            Self.managedRuntimeSegment(for: file, fileManager: fileManager)
+        }.sorted {
+            let lhsDate = (try? $0.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
+            let rhsDate = (try? $1.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
             let lhsDateValue = lhsDate ?? .distantPast
             let rhsDateValue = rhsDate ?? .distantPast
             if lhsDateValue != rhsDateValue {
                 return lhsDateValue < rhsDateValue
             }
-            return $0.lastPathComponent < $1.lastPathComponent
-        } ?? []
+            return $0.url.lastPathComponent < $1.url.lastPathComponent
+        }
         guard remaining.count > maxSegments else { return }
-        for file in remaining.prefix(remaining.count - maxSegments) where file != currentFileURL {
-            try? fileManager.removeItem(at: file)
+        let deleteCount = remaining.count - maxSegments
+        let deletable = remaining.filter({ $0.url.standardizedFileURL != currentURL })
+        for segment in deletable.prefix(deleteCount) {
+            try? fileManager.removeItem(at: segment.url)
         }
     }
 
@@ -398,6 +416,66 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyyMMdd"
         return formatter.string(from: date)
+    }
+
+    static func isManagedRuntimeSegment(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        managedRuntimeSegment(for: url, fileManager: fileManager) != nil
+    }
+
+    private static func managedRuntimeSegment(
+        for url: URL,
+        fileManager: FileManager
+    ) -> ManagedRuntimeSegment? {
+        let filename = url.lastPathComponent
+        let extensionLength = ".jsonl".count
+        guard filename.hasPrefix("runtime-"),
+              filename.hasSuffix(".jsonl"),
+              filename.count > extensionLength else {
+            return nil
+        }
+
+        let stem = String(filename.dropLast(extensionLength))
+        let components = stem.split(separator: "-", omittingEmptySubsequences: false)
+        guard components.count == 3,
+              components[0] == "runtime",
+              components[1].count == 8,
+              isASCIIDigits(String(components[1])),
+              components[2].count >= 3,
+              isASCIIDigits(String(components[2])),
+              let index = Int(components[2]) else {
+            return nil
+        }
+
+        let dateComponent = String(components[1])
+        guard let date = dateFromKey(dateComponent), Self.dateKey(date) == dateComponent,
+              fileManager.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true else {
+            return nil
+        }
+
+        return ManagedRuntimeSegment(url: url, dateKey: dateComponent, index: index)
+    }
+
+    private static func dateFromKey(_ key: String) -> Date? {
+        guard key.count == 8,
+              let year = Int(String(key.prefix(4))),
+              let month = Int(String(key.dropFirst(4).prefix(2))),
+              let day = Int(String(key.dropFirst(6))) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
+    }
+
+    private static func isASCIIDigits(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy { scalar in
+            (48...57).contains(scalar.value)
+        }
     }
 
     private static func errorCategory(_ error: Error) -> String {

@@ -173,15 +173,22 @@ Global Settings exposes a minimal Diagnostics section with:
 - Open Logs Folder;
 - Export Recent Diagnostics…
 
-Export creates one AI-friendly `FloatTabs-Diagnostics-<timestamp>.jsonl` file containing a sanitized environment/session header and recent retained runtime events. Export uses no ZIP dependency. File I/O runs outside MainActor; the save-panel interaction itself remains normal AppKit UI work.
+Export creates one AI-friendly `FloatTabs-Diagnostics-<timestamp>.jsonl` file containing a sanitized `diagnostics.export.metadata` envelope and recent retained runtime events. Export uses no ZIP dependency. File I/O runs outside MainActor; the save-panel interaction itself remains normal AppKit UI work.
 
-The environment/session header includes app version, build number, macOS version, process architecture, session ID, schema version, and diagnostics mode only.
+The `diagnostics.export.metadata` envelope includes app version, build number, macOS version, process architecture, session ID, schema version, and diagnostics mode only.
 
 Export writes retained historical JSONL records first and then appends one
 `diagnostics.export.metadata` envelope for the current process session. The
 metadata consumes the next sequence number; sequences are interpreted within
 each process `session_id`, so records from older sessions remain independently
 interpretable.
+
+`RuntimeDiagnosticWriter` only owns files matching the managed runtime segment
+naming contract: `runtime-YYYYMMDD-NNN.jsonl`, with a valid date component, a
+numeric segment component of at least three digits, and a regular-file entry.
+Retention, rotation, and export source discovery never operate on arbitrary
+`.jsonl` files in the Logs directory. Export files are not runtime segments and
+are not subsequently re-ingested merely because they use `.jsonl`.
 
 ## Acceptance criteria
 

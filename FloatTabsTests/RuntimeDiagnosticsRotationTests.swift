@@ -91,16 +91,18 @@ final class RuntimeDiagnosticsRotationTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-retention-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let oldFile = directory.appendingPathComponent("runtime-old-001.jsonl")
+        let now = ISO8601DateFormatter().date(from: "2026-09-13T12:00:00Z")!
+        let oldFile = directory.appendingPathComponent("runtime-20200101-001.jsonl")
         XCTAssertTrue(FileManager.default.createFile(atPath: oldFile.path, contents: Data("old\n".utf8)))
         try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(-8 * 24 * 60 * 60)],
+            [.modificationDate: now.addingTimeInterval(-8 * 24 * 60 * 60)],
             ofItemAtPath: oldFile.path
         )
 
         let writer = RuntimeDiagnosticWriter(
             directory: directory,
-            retention: 7 * 24 * 60 * 60
+            retention: 7 * 24 * 60 * 60,
+            dateProvider: { now }
         )
         writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 1))
         let flushed = expectation(description: "writer flushed")
@@ -108,6 +110,72 @@ final class RuntimeDiagnosticsRotationTests: XCTestCase {
         wait(for: [flushed], timeout: 2)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: oldFile.path))
+    }
+
+    func testRetentionOnlyOwnsManagedRuntimeSegments() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-retention-ownership-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let now = ISO8601DateFormatter().date(from: "2026-09-13T12:00:00Z")!
+        let managedFiles = (1...3).map { index in
+            directory.appendingPathComponent(
+                String(format: "runtime-20260913-%03d.jsonl", index)
+            )
+        }
+        for (index, file) in managedFiles.enumerated() {
+            XCTAssertTrue(
+                FileManager.default.createFile(
+                    atPath: file.path,
+                    contents: Data("managed-\(index + 1)\n".utf8)
+                )
+            )
+            try FileManager.default.setAttributes(
+                [.modificationDate: now.addingTimeInterval(-Double(3 - index) * 60)],
+                ofItemAtPath: file.path
+            )
+        }
+
+        let foreignFile = directory.appendingPathComponent("foreign.jsonl")
+        let exportFile = directory.appendingPathComponent("FloatTabs-Diagnostics-export.jsonl")
+        for file in [foreignFile, exportFile] {
+            XCTAssertTrue(
+                FileManager.default.createFile(
+                    atPath: file.path,
+                    contents: Data("foreign-or-export\n".utf8)
+                )
+            )
+            try FileManager.default.setAttributes(
+                [.modificationDate: now.addingTimeInterval(-8 * 24 * 60 * 60)],
+                ofItemAtPath: file.path
+            )
+        }
+
+        let writer = RuntimeDiagnosticWriter(
+            directory: directory,
+            maxSegments: 2,
+            retention: 7 * 24 * 60 * 60,
+            dateProvider: { now }
+        )
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 4))
+        let flushed = expectation(description: "writer flushed")
+        writer.requestFinalFlush(timeout: 1) { flushed.fulfill() }
+        wait(for: [flushed], timeout: 2)
+
+        let finalNames = ((try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []).map(\.lastPathComponent).sorted()
+        XCTAssertEqual(finalNames, [
+            "FloatTabs-Diagnostics-export.jsonl",
+            "foreign.jsonl",
+            "runtime-20260913-002.jsonl",
+            "runtime-20260913-003.jsonl"
+        ])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: managedFiles[0].path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: managedFiles[1].path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: managedFiles[2].path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreignFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: exportFile.path))
     }
 
     func testWriterPreservesEnqueueOrderWithinAFlushedSegment() throws {
