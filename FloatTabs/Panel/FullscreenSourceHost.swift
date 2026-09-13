@@ -331,6 +331,15 @@ final class FullscreenSourceHostController {
         sessionState.locksSourceHost
     }
 
+    /// Observation-only rule for the boundary where public restoration begins.
+    /// It never participates in the fullscreen state transition itself.
+    static func shouldRecordRestoreBegin(
+        previous: FullscreenSourceSessionState,
+        next: FullscreenSourceSessionState
+    ) -> Bool {
+        previous != .restoring && next == .restoring
+    }
+
     /// Read-only diagnostics projection of the existing fullscreen restore
     /// identity. Runtime diagnostics never advances or owns this generation.
     var diagnosticRestoreGeneration: Int {
@@ -628,15 +637,6 @@ final class FullscreenSourceHostController {
                 ]
             )
             diagnostics.record(
-                event: "fullscreen.restore.begin",
-                level: .notice,
-                subsystem: "fullscreen",
-                fields: [
-                    "restore_generation": .integer(Int64(restoreGeneration)),
-                    "source_window_number": .integer(Int64(window.windowNumber))
-                ]
-            )
-            diagnostics.record(
                 event: "fullscreen.restore-generation.advanced",
                 level: .debug,
                 subsystem: "fullscreen",
@@ -654,6 +654,17 @@ final class FullscreenSourceHostController {
         guard next == .restoring else { return }
         if previous != .restoring {
             restoreStartedAtUptime = ProcessInfo.processInfo.systemUptime
+            if Self.shouldRecordRestoreBegin(previous: previous, next: next) {
+                diagnostics.record(
+                    event: "fullscreen.restore.begin",
+                    level: .notice,
+                    subsystem: "fullscreen",
+                    fields: [
+                        "restore_generation": .integer(Int64(restoreGeneration)),
+                        "source_window_number": .integer(Int64(window.windowNumber))
+                    ]
+                )
+            }
         }
         waitForPublicSourceRestoration(
             of: webView,

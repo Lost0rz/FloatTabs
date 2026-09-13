@@ -389,6 +389,45 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
+    func testRestoreBeginObservationRuleMatchesRestoreTransitionBoundary() {
+        XCTAssertFalse(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .idle,
+                next: .entering
+            )
+        )
+        XCTAssertFalse(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .entering,
+                next: .fullscreen
+            )
+        )
+        XCTAssertFalse(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .fullscreen,
+                next: .exiting
+            )
+        )
+        XCTAssertTrue(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .exiting,
+                next: .restoring
+            )
+        )
+        XCTAssertFalse(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .restoring,
+                next: .restoring
+            )
+        )
+        XCTAssertFalse(
+            FullscreenSourceHostController.shouldRecordRestoreBegin(
+                previous: .restoring,
+                next: .entering
+            )
+        )
+    }
+
     func testSourceHostFrameMatchesOnlyTheWebViewport() {
         let shell = NSRect(x: 100, y: 200, width: 688, height: 844)
         let source = FullscreenSourceHostController.sourceFrame(forShellFrame: shell)
