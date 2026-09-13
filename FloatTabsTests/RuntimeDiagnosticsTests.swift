@@ -73,7 +73,7 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(writer.events.allSatisfy { $0.level != .debug })
     }
 
-    func testExportAddsSanitizedHeaderBeforeRecentEvents() throws {
+    func testExportAddsRecentEventsBeforeSanitizedMetadata() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         diagnostics.record(
@@ -106,11 +106,50 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         let events = try lines.map {
             try decoder.decode(RuntimeDiagnosticEvent.self, from: Data($0.utf8))
         }
-        XCTAssertEqual(events[0].event, "diagnostics.export.header")
-        XCTAssertEqual(events[0].fields["schema_version"], .integer(1))
-        XCTAssertNotNil(events[0].fields["app_version"])
-        XCTAssertEqual(events[1].fields["url"], .string("https://example.com"))
-        XCTAssertFalse(String(data: Data(lines[1].utf8), encoding: .utf8)?.contains("token") == true)
+        XCTAssertEqual(events[0].fields["url"], .string("https://example.com"))
+        XCTAssertFalse(String(data: Data(lines[0].utf8), encoding: .utf8)?.contains("token") == true)
+        XCTAssertEqual(events[1].event, "diagnostics.export.metadata")
+        XCTAssertEqual(events[1].fields["schema_version"], .integer(1))
+        XCTAssertNotNil(events[1].fields["app_version"])
+        try? FileManager.default.removeItem(at: destination)
+    }
+
+    func testExportMetadataConsumesSequenceAndNextRuntimeEventContinuesOrdering() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: writer,
+            sessionID: sessionID,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            uptime: { 42 }
+        )
+        diagnostics.record(event: "test.first", level: .notice, subsystem: "tests")
+        diagnostics.record(event: "test.second", level: .notice, subsystem: "tests")
+
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsExport-\(UUID().uuidString).jsonl")
+        let exported = expectation(description: "exported")
+        var result: Result<Void, RuntimeDiagnosticExportError>?
+        diagnostics.exportRecent(to: destination) {
+            result = $0
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+        guard case .success = result else {
+            return XCTFail("diagnostics export failed: \(String(describing: result))")
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let events = try String(contentsOf: destination, encoding: .utf8)
+            .split(separator: "\n")
+            .map { try decoder.decode(RuntimeDiagnosticEvent.self, from: Data($0.utf8)) }
+        XCTAssertEqual(events.map(\.sequence), [1, 2, 3])
+        XCTAssertEqual(events.last?.event, "diagnostics.export.metadata")
+
+        diagnostics.record(event: "test.after-export", level: .notice, subsystem: "tests")
+        XCTAssertEqual(writer.events.last?.sequence, 4)
         try? FileManager.default.removeItem(at: destination)
     }
 

@@ -60,6 +60,33 @@ private final class CrossFeatureSoundPlayer: AttentionSoundPlaying {
     }
 }
 
+@MainActor
+private final class DiagnosticsPresentationFocusAdapter: WebSiteAdapter {
+    let identifier = "diagnostics-focus-test"
+
+    func matches(url: URL?, webView: WKWebView) async -> Bool {
+        true
+    }
+
+    func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+
+    func focusInput(in webView: WKWebView) async throws {}
+
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
+        true
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws {}
+
+    func focusPage(in webView: WKWebView) async throws {}
+
+    func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+}
+
 /// Stage F — cross-feature closure.
 ///
 /// These tests prove the COMPOSITION of the attention feature across the
@@ -86,6 +113,113 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         repositoryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
         repositoryURLs.removeAll()
         super.tearDown()
+    }
+
+    // MARK: Runtime diagnostics trace isolation
+
+    func testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [DiagnosticsPresentationFocusAdapter()]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+        let presentationTrace = RuntimeDiagnosticTrace(root: "presentation-A")
+        let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-B")
+
+        controller.showFloatTabs(trace: presentationTrace)
+        let handshakeCompleted = try await waitUntil(timeoutMilliseconds: 5000) {
+            writer.events.contains(where: { $0.event == "presentation_focus.completed" })
+                && writer.events.contains(where: { $0.event == "app.activation.confirmed" })
+        }
+        XCTAssertTrue(handshakeCompleted)
+        let activationConfirmation = try XCTUnwrap(
+            writer.events.first { $0.event == "app.activation.confirmed" }
+        )
+        XCTAssertEqual(activationConfirmation.level, .info)
+        XCTAssertEqual(activationConfirmation.traceID, presentationTrace.id)
+        XCTAssertEqual(activationConfirmation.fields["app_active"], .bool(true))
+        XCTAssertEqual(
+            activationConfirmation.fields["source"],
+            .string("focus_handshake_precondition")
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "app.activation.confirmed" }.count,
+            1
+        )
+
+        controller.hideFloatTabs(trace: dismissTrace)
+
+        let dismissEvents = writer.events.filter {
+            [
+                "panel.dismiss.begin",
+                "previous_app.restore.decision",
+                "previous_app.restore.skipped",
+                "previous_app.restore.requested",
+                "previous_app.restore.request_result",
+                "panel.dismiss.completed"
+            ].contains($0.event)
+        }
+        XCTAssertFalse(dismissEvents.isEmpty)
+        XCTAssertTrue(dismissEvents.allSatisfy { $0.traceID == dismissTrace.id })
+        XCTAssertNil(writer.events.first { $0.event == "previous_app.restore.completed" })
+        let restoreRequest = try XCTUnwrap(
+            writer.events.first { $0.event == "previous_app.restore.requested" }
+        )
+        let restoreResult = try XCTUnwrap(
+            writer.events.first { $0.event == "previous_app.restore.request_result" }
+        )
+        XCTAssertEqual(restoreRequest.fields["requested"], .bool(true))
+        XCTAssertEqual(restoreRequest.fields["previous_display_id"] != nil, true)
+        XCTAssertEqual(restoreResult.fields["requested"], .bool(true))
+        XCTAssertNotNil(restoreResult.fields["accepted"])
+        XCTAssertEqual(restoreResult.fields["previous_display_id"] != nil, true)
+        XCTAssertTrue(
+            writer.events
+                .filter { $0.event == "presentation_focus.completed" }
+                .allSatisfy { $0.traceID == presentationTrace.id }
+        )
+    }
+
+    func testPendingPresentationCancellationUsesPresentationTraceOnlyForCancellation() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [DiagnosticsPresentationFocusAdapter()]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+        let presentationTrace = RuntimeDiagnosticTrace(root: "presentation-A")
+        let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-B")
+
+        controller.showFloatTabs(trace: presentationTrace)
+        controller.hideFloatTabs(trace: dismissTrace)
+
+        let eventsByName = Dictionary(grouping: writer.events, by: \.event)
+        XCTAssertEqual(eventsByName["presentation_focus.cancelled"]?.first?.traceID, presentationTrace.id)
+        let dismissEvents = writer.events.filter {
+            [
+                "panel.dismiss.begin",
+                "previous_app.restore.decision",
+                "previous_app.restore.skipped",
+                "previous_app.restore.requested",
+                "previous_app.restore.request_result",
+                "panel.dismiss.completed"
+            ].contains($0.event)
+        }
+        XCTAssertFalse(dismissEvents.isEmpty)
+        XCTAssertTrue(dismissEvents.allSatisfy { $0.traceID == dismissTrace.id })
     }
 
     // MARK: 4.1 Live observation → Attention + unread UI projection
@@ -2985,7 +3119,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
         speechService: SpeechSynthesizing? = nil,
         speechPlaybackSessionController: SpeechPlaybackSessionController? = nil,
-        preferencesStore: AppPreferencesStore? = nil
+        preferencesStore: AppPreferencesStore? = nil,
+        webFocusRouter: WebFocusRouter? = nil,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
         let pool = makePool(committedURLProvider: committedURLProvider)
@@ -2996,8 +3133,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             attentionCoordinator: attentionCoordinator,
             frameStore: PanelFrameStore(),
             preferencesStore: resolvedPreferencesStore,
+            webFocusRouter: webFocusRouter,
             speechService: speechService,
-            speechPlaybackSessionController: speechPlaybackSessionController
+            speechPlaybackSessionController: speechPlaybackSessionController,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: presentationFocusReadinessProvider
         )
         retainedControllers.append(controller)
         return (controller, attentionCoordinator, tabStore, pool)

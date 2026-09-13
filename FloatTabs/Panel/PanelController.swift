@@ -74,6 +74,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let diagnostics: any RuntimeDiagnosticRecording
     private let unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator
     private let webFocusRouter: WebFocusRouter
+    private let presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))?
     private let speechPlaybackSessionController: SpeechPlaybackSessionController
     private let speechPreferencesStore: SpeechPreferencesStore
     private let frameStore: PanelFrameStore
@@ -198,6 +199,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationWebFocusTask: Task<Void, Never>?
     private var presentationFocusTask: Task<Void, Never>?
     private var presentationTrace: RuntimeDiagnosticTrace?
+    private var presentationActivationConfirmedGeneration: UInt64?
     /// Presentation focus is an event-driven handshake. A new request makes
     /// every older async callback stale, so a slow WebKit response cannot
     /// refocus a page that is no longer the selected presentation.
@@ -574,12 +576,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         speechPreferencesStore: SpeechPreferencesStore? = nil,
         speechVoiceCatalog: SpeechVoiceCatalogProviding? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation,
-        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
         self.diagnostics = diagnostics
+        self.presentationFocusReadinessProvider = presentationFocusReadinessProvider
         self.unreadResponseCoordinator = unreadResponseCoordinator
             ?? ChatGPTUnreadResponseCoordinator(
                 store: unreadResponseStore ?? UnreadResponseStore()
@@ -867,13 +871,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             fields: presentationFields
         )
-        let presentationTraceForDismiss = self.presentationTrace ?? trace
+        let cancelledPresentationTrace = self.presentationTrace
         if presentationNativeFocusPending || presentationWebFocusPending {
             diagnostics.record(
                 event: "presentation_focus.cancelled",
                 level: .notice,
                 subsystem: "panel",
-                trace: presentationTraceForDismiss,
+                trace: cancelledPresentationTrace,
                 fields: [
                     "focus_generation": .integer(Int64(presentationFocusGeneration)),
                     "reason": .string("presentation_dismissed")
@@ -895,6 +899,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
         self.presentationTrace = nil
+        presentationActivationConfirmedGeneration = nil
         presentationNativeFocusPending = false
         presentationWebFocusPending = false
         addressOverlayView.dismiss()
@@ -921,14 +926,14 @@ final class PanelController: NSObject, NSWindowDelegate {
                 event: "previous_app.restore.decision",
                 level: .info,
                 subsystem: "panel",
-                trace: presentationTraceForDismiss,
+                trace: trace,
                 fields: ["has_context": .bool(false)]
             )
             diagnostics.record(
                 event: "previous_app.restore.skipped",
                 level: .notice,
                 subsystem: "panel",
-                trace: presentationTraceForDismiss,
+                trace: trace,
                 fields: ["reason": .string("no_context")]
             )
             NSApp.deactivate()
@@ -946,7 +951,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             event: "previous_app.restore.decision",
             level: .info,
             subsystem: "panel",
-            trace: presentationTraceForDismiss,
+            trace: trace,
             fields: [
                 "has_context": .bool(true),
                 "same_display": .bool(sameDisplay)
@@ -957,7 +962,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 event: "previous_app.restore.skipped",
                 level: .notice,
                 subsystem: "panel",
-                trace: presentationTraceForDismiss,
+                trace: trace,
                 fields: [
                     "reason": .string("cross_display"),
                     "previous_display_id": .integer(Int64(previousApplicationContext.displayID ?? 0)),
@@ -976,14 +981,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         ) {
             restoredFields["application_bundle_id"] = bundleIdentifier
         }
+        var restoreRequestFields = restoredFields
+        restoreRequestFields["requested"] = .bool(true)
         diagnostics.record(
-            event: "previous_app.restore.completed",
-            level: .notice,
+            event: "previous_app.restore.requested",
+            level: .info,
             subsystem: "panel",
-            trace: presentationTraceForDismiss,
-            fields: restoredFields
+            trace: trace,
+            fields: restoreRequestFields
         )
-        _ = previousApplicationContext.application.activate(options: [])
+        let activationAccepted = previousApplicationContext.application.activate(options: [])
+        restoreRequestFields["accepted"] = .bool(activationAccepted)
+        diagnostics.record(
+            event: "previous_app.restore.request_result",
+            level: activationAccepted ? .notice : .warning,
+            subsystem: "panel",
+            trace: trace,
+            fields: restoreRequestFields
+        )
         recordDismissCompleted(trace: trace, wasVisible: wasVisible)
     }
 
@@ -1784,6 +1799,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             previousApplicationContext = nil
             self.presentationTrace = nil
+            presentationActivationConfirmedGeneration = nil
             recordDismissCompleted(trace: trace, wasVisible: true)
             return
         }
@@ -1791,6 +1807,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.setPanelVisible(false, activeProfile: tabStore.activeProfile)
         previousApplicationContext = nil
         self.presentationTrace = nil
+        presentationActivationConfirmedGeneration = nil
         recordDismissCompleted(trace: trace, wasVisible: true)
     }
 
@@ -3270,6 +3287,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         presentationFocusGeneration &+= 1
         presentationTrace = trace
+        presentationActivationConfirmedGeneration = nil
         presentationNativeFocusPending = true
         presentationWebFocusPending = true
 
@@ -3311,8 +3329,26 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func completePresentationFocusIfReady() {
-        guard requestedVisibility, NSApp.isActive else { return }
-        guard panel.isKeyWindow || sourceHostController.window.isKeyWindow else {
+        let readiness = presentationFocusReadinessProvider?() ?? (
+            applicationActive: NSApp.isActive,
+            windowKey: panel.isKeyWindow || sourceHostController.window.isKeyWindow
+        )
+        guard requestedVisibility, readiness.applicationActive else { return }
+        if (presentationNativeFocusPending || presentationWebFocusPending),
+           presentationActivationConfirmedGeneration != presentationFocusGeneration {
+            presentationActivationConfirmedGeneration = presentationFocusGeneration
+            diagnostics.record(
+                event: "app.activation.confirmed",
+                level: .info,
+                subsystem: "app",
+                trace: presentationTrace,
+                fields: [
+                    "app_active": .bool(true),
+                    "source": .string("focus_handshake_precondition")
+                ]
+            )
+        }
+        guard readiness.windowKey else {
             return
         }
 
@@ -3447,6 +3483,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                         "active_slot_id": self.tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
                     ]
                 )
+                self.presentationTrace = nil
             } else {
                 self.diagnostics.record(
                     event: "presentation_focus.failed",

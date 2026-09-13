@@ -35,6 +35,7 @@ final class AppCoordinator {
     private var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private var websiteCacheAutomaticTask: Task<Void, Never>?
     private var pendingExternalSlotDelta = 0
+    private var externalSlotBatchTrace: RuntimeDiagnosticTrace?
     private var externalSlotFlushScheduled = false
     private var isTerminating = false
     private var preserveExistingAutomaticBackupAfterEmptyStartupRecovery = false
@@ -720,15 +721,29 @@ final class AppCoordinator {
         guard delta != 0 else { return }
         if externalSlotFlushScheduled {
             pendingExternalSlotDelta += delta
+            if let batchTrace = externalSlotBatchTrace {
+                diagnostics.record(
+                    event: "external.command.coalesced",
+                    level: .info,
+                    subsystem: "external",
+                    trace: trace,
+                    fields: [
+                        "batch_trace_id": .string(batchTrace.id.uuidString),
+                        "delta": .integer(Int64(delta))
+                    ]
+                )
+            }
             return
         }
 
         externalSlotFlushScheduled = true
+        externalSlotBatchTrace = trace
         _ = panelController.selectSlot(relativeOffset: delta, trace: trace)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let pendingDelta = self.pendingExternalSlotDelta
             self.pendingExternalSlotDelta = 0
+            self.externalSlotBatchTrace = nil
             self.externalSlotFlushScheduled = false
             guard pendingDelta != 0 else { return }
             self.enqueueExternalSlotSwitch(delta: pendingDelta, trace: trace)

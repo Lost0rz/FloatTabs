@@ -23,7 +23,7 @@ protocol RuntimeDiagnosticWriting: AnyObject {
     func enqueue(_ event: RuntimeDiagnosticEvent)
 
     func exportRecent(
-        header: RuntimeDiagnosticEvent,
+        metadata: RuntimeDiagnosticEvent,
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     )
@@ -99,7 +99,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     }
 
     func exportRecent(
-        header: RuntimeDiagnosticEvent,
+        metadata: RuntimeDiagnosticEvent,
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     ) {
@@ -118,10 +118,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             do {
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
-                var output = try encoder.encode(
-                    RuntimeDiagnosticPrivacy.sanitizedEvent(header)
-                )
-                output.append(0x0A)
+                var output = Data()
 
                 let logFiles = (try? self.fileManager.contentsOfDirectory(
                     at: self.directory,
@@ -144,6 +141,11 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
                 for file in logFiles {
                     output.append(try Data(contentsOf: file))
                 }
+
+                output.append(try encoder.encode(
+                    RuntimeDiagnosticPrivacy.sanitizedEvent(metadata)
+                ))
+                output.append(0x0A)
 
                 let parent = destination.deletingLastPathComponent()
                 try self.fileManager.createDirectory(
@@ -440,20 +442,22 @@ final class RuntimeDiagnosticInMemoryWriter: RuntimeDiagnosticWriting {
     }
 
     func exportRecent(
-        header: RuntimeDiagnosticEvent,
+        metadata: RuntimeDiagnosticEvent,
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     ) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard var output = try? encoder.encode(header) else {
-            completion(.failure(.encode))
-            return
-        }
-        output.append(0x0A)
+        var output = Data()
         for line in lines {
             output.append(line)
         }
+        guard let metadataLine = try? encoder.encode(metadata) else {
+            completion(.failure(.encode))
+            return
+        }
+        output.append(metadataLine)
+        output.append(0x0A)
         do {
             try output.write(to: destination, options: .atomic)
             completion(.success(()))
@@ -477,11 +481,11 @@ final class RuntimeDiagnosticNoopWriter: RuntimeDiagnosticWriting {
     }
 
     func exportRecent(
-        header: RuntimeDiagnosticEvent,
+        metadata: RuntimeDiagnosticEvent,
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     ) {
-        _ = (header, destination)
+        _ = (metadata, destination)
         DispatchQueue.global(qos: .utility).async {
             completion(.failure(.writerDisabled))
         }

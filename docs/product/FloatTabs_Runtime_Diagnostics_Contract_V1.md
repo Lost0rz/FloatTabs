@@ -51,7 +51,7 @@ Contract fields:
 - `schema_version` is always integer `1`.
 - `timestamp` is wall-clock time encoded using ISO 8601.
 - `uptime` is monotonic process/system uptime.
-- `sequence` is a process-local monotonically increasing integer. It is the ordering authority when timestamps collide.
+- `sequence` is a process-local monotonically increasing integer. Its ordering scope is the current `session_id`; it is the ordering authority when timestamps collide.
 - `session_id` is generated once per FloatTabs process launch.
 - `trace_id` is shared by observations belonging to one semantic transaction and may be `null` for independent background work.
 - `level` is one of `debug`, `info`, `notice`, `warning`, `error`, or `fault`.
@@ -71,14 +71,26 @@ Trace roots are created only for semantic transactions with a meaningful beginni
 - navigation/recovery transaction when a lifecycle boundary exists;
 - termination drain/flush boundary.
 
-Fullscreen observations use the fullscreen owner's `session_id` and
-`restoreGeneration`/state as the business correlation. `trace_id` may remain
-`null` there because diagnostics does not own or replace fullscreen session
-identity.
+When an external next/previous-slot command is folded into an already scheduled
+batch, `external.command.coalesced` is recorded on that command's trace with
+the existing batch trace ID and delta. This is correlation only; batching
+authority remains in the existing command path.
+
+Fullscreen observations may have `trace_id: null`. Their correlation contract
+is the process envelope `event.session_id` together with the existing
+`FullscreenSourceHostController.sessionState`, `restoreGeneration`, and source
+window identity where relevant. Diagnostics does not own or replace fullscreen
+session identity.
 
 The preferred presentation trace is:
 
 `hotkey/menu/external intent → panel presentation request → previous application capture → target screen resolve → app activation → shell key → source key/main → native WebView focus → DOM focus → presentation complete`.
+
+Previous-application restoration reports the observed decision, the activation
+request, and the request result (`accepted`) separately. `accepted` means the
+existing activation API accepted the request; it is not an observation that the
+target application became active. No `previous_app.restore.completed` event is
+emitted in V1.
 
 Trace propagation remains explicit and narrow. Existing public APIs are not broadly rewritten solely to carry correlation. Independent background events may have no trace.
 
@@ -164,6 +176,12 @@ Global Settings exposes a minimal Diagnostics section with:
 Export creates one AI-friendly `FloatTabs-Diagnostics-<timestamp>.jsonl` file containing a sanitized environment/session header and recent retained runtime events. Export uses no ZIP dependency. File I/O runs outside MainActor; the save-panel interaction itself remains normal AppKit UI work.
 
 The environment/session header includes app version, build number, macOS version, process architecture, session ID, schema version, and diagnostics mode only.
+
+Export writes retained historical JSONL records first and then appends one
+`diagnostics.export.metadata` envelope for the current process session. The
+metadata consumes the next sequence number; sequences are interpreted within
+each process `session_id`, so records from older sessions remain independently
+interpretable.
 
 ## Acceptance criteria
 

@@ -187,11 +187,11 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     ) {
-        let headerFields = RuntimeDiagnosticPrivacy.sanitize(
+        let metadataFields = RuntimeDiagnosticPrivacy.sanitize(
             fields: environmentFields(),
             mode: mode
         )
-        let header = RuntimeDiagnosticEvent(
+        let metadata = RuntimeDiagnosticEvent(
             timestamp: timestamp(),
             uptime: uptime(),
             sequence: nextSequence,
@@ -199,10 +199,11 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
             traceID: nil,
             level: .notice,
             subsystem: "diagnostics",
-            event: "diagnostics.export.header",
-            fields: headerFields
+            event: "diagnostics.export.metadata",
+            fields: metadataFields
         )
-        writer.exportRecent(header: header, to: destination, completion: completion)
+        nextSequence += 1
+        writer.exportRecent(metadata: metadata, to: destination, completion: completion)
     }
 
     private func log(_ event: RuntimeDiagnosticEvent) {

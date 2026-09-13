@@ -38,23 +38,32 @@ final class RuntimeDiagnosticsTraceTests: XCTestCase {
         ])
     }
 
-    func testFullscreenObservationCanUseOwnerSessionAndRestoreGenerationWithoutTrace() {
+    func testFullscreenObservationUsesProcessEnvelopeAndRealOwnerCorrelationFields() {
         let writer = RuntimeDiagnosticInMemoryWriter()
-        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: writer,
+            sessionID: sessionID
+        )
 
         diagnostics.record(
             event: "fullscreen.state",
             level: .info,
             subsystem: "fullscreen",
             fields: [
-                "session_id": .string("owner-session"),
-                "restore_generation": .integer(3)
+                "session_state": .string("restoring"),
+                "restore_generation": .integer(3),
+                "source_window_number": .integer(42)
             ]
         )
 
         XCTAssertEqual(writer.events.count, 1)
+        XCTAssertEqual(writer.events.first?.sessionID, sessionID)
         XCTAssertNil(writer.events.first?.traceID)
+        XCTAssertEqual(writer.events.first?.fields["session_state"], .string("restoring"))
         XCTAssertEqual(writer.events.first?.fields["restore_generation"], .integer(3))
+        XCTAssertEqual(writer.events.first?.fields["source_window_number"], .integer(42))
     }
 
     func testOneSemanticTraceIsSharedAndIndependentEventsMayHaveNoTrace() {
