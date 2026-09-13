@@ -17,6 +17,14 @@ enum WebAttentionState: Equatable, Sendable {
     var isAttentionProtected: Bool {
         self == .generating || self == .ready
     }
+
+    var diagnosticName: String {
+        switch self {
+        case .idle: return "idle"
+        case .generating: return "generating"
+        case .ready: return "ready"
+        }
+    }
 }
 
 /// Normalized runtime events that may drive attention-state transitions.
@@ -46,8 +54,13 @@ enum WebAttentionRuntimeEvent: Equatable, Sendable {
 @MainActor
 final class WebAttentionCoordinator {
     private var states: [UUID: WebAttentionState] = [:]
+    private let diagnostics: any RuntimeDiagnosticRecording
 
-    init() {}
+    init(
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+    ) {
+        self.diagnostics = diagnostics
+    }
 
     // MARK: Read-only projection
 
@@ -121,6 +134,16 @@ final class WebAttentionCoordinator {
         let next = resolve(current)
         if next != current {
             states[slotID] = next
+            diagnostics.record(
+                event: "attention.transition",
+                level: .info,
+                subsystem: "attention",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "from": .string(current.diagnosticName),
+                    "to": .string(next.diagnosticName)
+                ]
+            )
         }
         return next
     }

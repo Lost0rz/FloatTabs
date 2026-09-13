@@ -93,6 +93,7 @@ final class WebViewPool {
     private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
     private let browserProfileDataStoreProvider: BrowserProfileDataStoreProvider
+    private let diagnostics: any RuntimeDiagnosticRecording
     // Production leaves this nil and reads WKWebView history directly. The
     // optional seam lets tests model a committed history item without network
     // or WebKit process timing.
@@ -106,7 +107,8 @@ final class WebViewPool {
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
-        browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider()
+        browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider(),
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
@@ -114,6 +116,7 @@ final class WebViewPool {
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.committedURLProvider = committedURLProvider
         self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
+        self.diagnostics = diagnostics
     }
 
     func webView(for profile: WebAppProfile) throws -> WKWebView {
@@ -156,6 +159,12 @@ final class WebViewPool {
             WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
             appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
+            diagnostics.record(
+                event: "web_runtime.reused",
+                level: .debug,
+                subsystem: "web",
+                fields: ["slot_id": .string(profile.id.uuidString)]
+            )
             return existing
         }
 
@@ -240,6 +249,12 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
+        diagnostics.record(
+            event: "web_runtime.released",
+            level: .notice,
+            subsystem: "web",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
         // The bridge dies with its WKWebView: invalidate it first so no stale
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
@@ -347,6 +362,16 @@ final class WebViewPool {
     func handleContentProcessTermination(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
 
+        diagnostics.record(
+            event: "web_runtime.content_process_terminated",
+            level: .warning,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "is_active": .bool(isSlotActive(slotID))
+            ]
+        )
+
         // The terminated runtime is authoritatively replaced: reset its
         // attention runtime before the existing recovery policy proceeds. The
         // bridge installation itself stays usable for the recovered document.
@@ -363,9 +388,21 @@ final class WebViewPool {
             }
             lastKnownURLs[slotID] = recoveryURL
             load(webView, recoveryRequest(url: recoveryURL))
+            diagnostics.record(
+                event: "web_runtime.recovery.reload_now",
+                level: .notice,
+                subsystem: "web",
+                fields: diagnosticURLFields(recoveryURL, slotID: slotID)
+            )
 
         case .deferUntilActivation:
             deferredReloadSlotIDs.insert(slotID)
+            diagnostics.record(
+                event: "web_runtime.recovery.deferred",
+                level: .notice,
+                subsystem: "web",
+                fields: ["slot_id": .string(slotID.uuidString)]
+            )
         }
     }
 
@@ -387,6 +424,12 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL
     ) throws -> WKWebView {
+        diagnostics.record(
+            event: "web_runtime.rebuild.begin",
+            level: .notice,
+            subsystem: "web",
+            fields: ["slot_id": .string(profile.id.uuidString)]
+        )
         invalidateAttentionBridge(slotID: profile.id)
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
@@ -404,16 +447,34 @@ final class WebViewPool {
         // dictionary entry is recreated; callers observe residency identity, not
         // WKWebView object identity.
         do {
-            return try createWebView(
+            let webView = try createWebView(
                 for: profile,
                 navigationURL: navigationURL,
                 cachePolicy: .useProtocolCachePolicy,
                 notifyResidentSetChange: false
             )
+            diagnostics.record(
+                event: "web_runtime.rebuild.completed",
+                level: .notice,
+                subsystem: "web",
+                fields: ["slot_id": .string(profile.id.uuidString)]
+            )
+            return webView
         } catch {
             if replaced != nil {
                 onResidentSetChange?()
             }
+            var fields: [String: RuntimeDiagnosticValue] = [
+                "slot_id": .string(profile.id.uuidString),
+                "operation": .string("rebuild")
+            ]
+            fields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { _, new in new }
+            diagnostics.record(
+                event: "web_runtime.recovery.failed",
+                level: .warning,
+                subsystem: "web",
+                fields: fields
+            )
             throw error
         }
     }
@@ -424,6 +485,15 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true
     ) throws -> WKWebView {
+        diagnostics.record(
+            event: "web_runtime.created",
+            level: .notice,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "browser_profile": .string(String(describing: BrowserProfileIdentity(browserProfileID: profile.browserProfileID)))
+            ]
+        )
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: rendering,
@@ -542,7 +612,8 @@ final class WebViewPool {
                     return
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
-            }
+            },
+            diagnostics: diagnostics
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
@@ -585,6 +656,16 @@ final class WebViewPool {
         )
         load(webView, request)
         return webView
+    }
+
+    private func diagnosticURLFields(_ url: URL, slotID: UUID) -> [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString)
+        ]
+        if let safeURL = RuntimeDiagnosticPrivacy.safeURLString(url, mode: .standard) {
+            fields["url"] = .string(safeURL)
+        }
+        return fields
     }
 
     private func recoverDeferredContentProcessIfNeeded(

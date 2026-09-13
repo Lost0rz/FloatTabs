@@ -10,16 +10,27 @@ final class WebFocusRouter: ObservableObject {
     private(set) weak var currentWebView: WKWebView?
     private(set) var currentAdapter: (any WebSiteAdapter)?
     private let registry: WebSiteAdapterRegistry
+    private let diagnostics: any RuntimeDiagnosticRecording
     private let logger = Logger(subsystem: "com.lost0rz.FloatTabs", category: "WebFocus")
 
     var onTransition: ((WebFocusTransition) -> Void)?
 
-    init(registry: WebSiteAdapterRegistry = WebSiteAdapterRegistry()) {
+    init(
+        registry: WebSiteAdapterRegistry = WebSiteAdapterRegistry(),
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+    ) {
         self.registry = registry
+        self.diagnostics = diagnostics
     }
 
     func setCurrentWebView(_ webView: WKWebView?) {
         guard currentWebView !== webView else { return }
+        diagnostics.record(
+            event: "web_focus.webview_changed",
+            level: .debug,
+            subsystem: "focus",
+            fields: ["has_webview": .bool(webView != nil)]
+        )
         currentWebView = webView
         currentAdapter = nil
         currentWebsiteIdentifier = nil
@@ -52,8 +63,26 @@ final class WebFocusRouter: ObservableObject {
         currentWebsiteIdentifier = adapter.identifier
         do {
             currentTarget = try await adapter.currentFocus(in: webView)
+            diagnostics.record(
+                event: "web_focus.recognition",
+                level: .debug,
+                subsystem: "focus",
+                fields: [
+                    "site": .string(adapter.identifier),
+                    "target": .string(currentTarget.rawValue),
+                    "success": .bool(true)
+                ]
+            )
         } catch {
             currentTarget = .unavailable
+            var fields = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
+            fields["success"] = .bool(false)
+            diagnostics.record(
+                event: "web_focus.recognition",
+                level: .warning,
+                subsystem: "focus",
+                fields: fields
+            )
         }
     }
 
@@ -72,10 +101,25 @@ final class WebFocusRouter: ObservableObject {
             logger.debug(
                 "voice focus target captured=\(captured, privacy: .public) site=\(adapter.identifier, privacy: .public)"
             )
+            diagnostics.record(
+                event: "web_focus.capture_voice_target",
+                level: .info,
+                subsystem: "focus",
+                fields: [
+                    "site": .string(adapter.identifier),
+                    "captured": .bool(captured)
+                ]
+            )
             return captured
         } catch {
             logger.error(
                 "voice focus target capture failed site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+            )
+            diagnostics.record(
+                event: "web_focus.failed",
+                level: .warning,
+                subsystem: "focus",
+                fields: RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
             )
             return false
         }
@@ -103,10 +147,25 @@ final class WebFocusRouter: ObservableObject {
             logger.debug(
                 "voice focus restored captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public)"
             )
+            diagnostics.record(
+                event: "web_focus.presentation.completed",
+                level: .info,
+                subsystem: "focus",
+                fields: [
+                    "site": .string(adapter.identifier),
+                    "preserved_capture": .bool(preservingCapturedTarget)
+                ]
+            )
             return true
         } catch {
             logger.error(
                 "voice focus restore failed captured=\(preservingCapturedTarget, privacy: .public) site=\(adapter.identifier, privacy: .public) reason=\(error.localizedDescription, privacy: .public)"
+            )
+            diagnostics.record(
+                event: "web_focus.failed",
+                level: .warning,
+                subsystem: "focus",
+                fields: RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
             )
             return false
         }
@@ -131,13 +190,14 @@ final class WebFocusRouter: ObservableObject {
     }
 
     @discardableResult
-    func togglePrimaryFocus() async -> WebFocusTransition {
+    func togglePrimaryFocus(trace: RuntimeDiagnosticTrace? = nil) async -> WebFocusTransition {
         guard let webView = currentWebView else {
             return recordFailure(
                 websiteIdentifier: currentWebsiteIdentifier ?? "unavailable",
                 from: currentTarget,
                 to: .unavailable,
-                reason: WebFocusAdapterError.noWebView.localizedDescription
+                error: WebFocusAdapterError.noWebView,
+                trace: trace
             )
         }
 
@@ -162,7 +222,8 @@ final class WebFocusRouter: ObservableObject {
             return recordSuccess(
                 websiteIdentifier: adapter.identifier,
                 from: from,
-                to: focused
+                to: focused,
+                trace: trace
             )
         } catch {
             currentTarget = .unavailable
@@ -170,7 +231,8 @@ final class WebFocusRouter: ObservableObject {
                 websiteIdentifier: adapter.identifier,
                 from: from,
                 to: destination,
-                reason: error.localizedDescription
+                error: error,
+                trace: trace
             )
         }
     }
@@ -178,7 +240,8 @@ final class WebFocusRouter: ObservableObject {
     private func recordSuccess(
         websiteIdentifier: String,
         from: WebFocusTarget,
-        to: WebFocusTarget
+        to: WebFocusTarget,
+        trace: RuntimeDiagnosticTrace?
     ) -> WebFocusTransition {
         let transition = WebFocusTransition(
             websiteIdentifier: websiteIdentifier,
@@ -190,6 +253,18 @@ final class WebFocusRouter: ObservableObject {
         logger.info(
             "focus toggle site=\(websiteIdentifier, privacy: .public) from=\(from.rawValue, privacy: .public) to=\(to.rawValue, privacy: .public) success=true"
         )
+        diagnostics.record(
+            event: "web_focus.toggle",
+            level: .info,
+            subsystem: "focus",
+            trace: trace,
+            fields: [
+                "site": .string(websiteIdentifier),
+                "from": .string(from.rawValue),
+                "to": .string(to.rawValue),
+                "success": .bool(true)
+            ]
+        )
         onTransition?(transition)
         return transition
     }
@@ -198,19 +273,49 @@ final class WebFocusRouter: ObservableObject {
         websiteIdentifier: String,
         from: WebFocusTarget,
         to: WebFocusTarget,
-        reason: String
+        error: Error,
+        trace: RuntimeDiagnosticTrace?
     ) -> WebFocusTransition {
         let transition = WebFocusTransition(
             websiteIdentifier: websiteIdentifier,
             from: from,
             to: to,
             succeeded: false,
-            failureReason: reason
+            failureReason: error.localizedDescription
         )
         logger.error(
-            "focus toggle site=\(websiteIdentifier, privacy: .public) from=\(from.rawValue, privacy: .public) to=\(to.rawValue, privacy: .public) success=false reason=\(reason, privacy: .public)"
+            "focus toggle site=\(websiteIdentifier, privacy: .public) from=\(from.rawValue, privacy: .public) to=\(to.rawValue, privacy: .public) success=false category=\(Self.errorCategory(error), privacy: .public)"
+        )
+        var fields = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
+        fields["site"] = .string(websiteIdentifier)
+        fields["from"] = .string(from.rawValue)
+        fields["to"] = .string(to.rawValue)
+        fields["success"] = .bool(false)
+        diagnostics.record(
+            event: "web_focus.toggle",
+            level: .warning,
+            subsystem: "focus",
+            trace: trace,
+            fields: fields
+        )
+        diagnostics.record(
+            event: "web_focus.failed",
+            level: .warning,
+            subsystem: "focus",
+            trace: trace,
+            fields: fields
         )
         onTransition?(transition)
         return transition
+    }
+
+    private static func errorCategory(_ error: Error) -> String {
+        guard let value = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)["error_category"] else {
+            return "runtime"
+        }
+        if case let .string(category) = value {
+            return category
+        }
+        return "runtime"
     }
 }

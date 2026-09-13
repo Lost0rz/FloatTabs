@@ -227,6 +227,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     private struct PendingInstantBack {
         let targetItem: WKBackForwardListItem
@@ -266,6 +267,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
         }
@@ -282,6 +284,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onInstantBackRequest = onInstantBackRequest
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
+        self.diagnostics = diagnostics
         self.loadHandler = loadHandler
         super.init()
 
@@ -374,6 +377,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        diagnostics.record(
+            event: "navigation.provisional_started",
+            level: .debug,
+            subsystem: "navigation",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
         // If Instant Back falls back to normal loading, ordinary didCommit is
         // authoritative again. A new provisional navigation also invalidates
         // any older correlation marker.
@@ -387,6 +396,17 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
+        diagnostics.record(
+            event: "navigation.commit",
+            level: .info,
+            subsystem: "navigation",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "url": webView.url.flatMap {
+                    RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+                }.map(RuntimeDiagnosticValue.string) ?? .null
+            ]
+        )
         // At this delegate boundary WebKit's visible URL is the final
         // committed destination for this navigation. Pass it as a narrow,
         // transient commit fact; shared presentation lookup remains history
@@ -397,6 +417,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+
+        diagnostics.record(
+            event: "navigation.finished",
+            level: .debug,
+            subsystem: "navigation",
+            fields: ["slot_id": .string(slotID.uuidString)]
+        )
 
         onNavigationFinish(slotID, webView.url)
 
@@ -416,6 +443,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        diagnostics.record(
+            event: "navigation.failed",
+            level: .warning,
+            subsystem: "navigation",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "failure": .string("navigation"),
+                "provisional": .bool(false)
+            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+        )
     }
 
     func webView(
@@ -424,6 +461,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        diagnostics.record(
+            event: "navigation.failed",
+            level: .warning,
+            subsystem: "navigation",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "url": failingURLForDiagnostics(error: error, webView: webView),
+                "provisional": .bool(true)
+            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+        )
         cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
@@ -532,6 +579,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     private func restoreWebsiteMode(in webView: WKWebView) {
         (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
+    }
+
+    private func failingURLForDiagnostics(
+        error: Error,
+        webView: WKWebView
+    ) -> RuntimeDiagnosticValue {
+        let errorURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
+            .flatMap(URL.init(string:))
+        let url = errorURL ?? webView.url
+        return url.flatMap {
+            RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+        }.map(RuntimeDiagnosticValue.string) ?? .null
     }
 
     private func restoreHiddenScrollerPolicy(in webView: WKWebView) {

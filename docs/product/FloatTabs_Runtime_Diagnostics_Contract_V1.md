@@ -39,9 +39,9 @@ Every persisted event is one independently parseable JSON object on one JSONL li
   "subsystem": "panel",
   "event": "panel.presentation.completed",
   "fields": {
-    "requestedVisibility": true,
-    "panelKey": true,
-    "activeSlotID": "slot-uuid"
+    "requested_visibility": true,
+    "panel_key": true,
+    "active_slot_id": "slot-uuid"
   }
 }
 ```
@@ -79,7 +79,7 @@ Trace propagation remains explicit and narrow. Existing public APIs are not broa
 
 ## Logging modes
 
-`AppPreferencesStore.diagnosticsMode` has three persisted values:
+`AppPreferencesStore.runtimeDiagnosticsMode` has three persisted values:
 
 - `off`: no runtime JSONL or diagnostics OSLog event is emitted.
 - `standard`: key semantic events, state transitions, outcomes, warnings, and errors. High-frequency callbacks are excluded.
@@ -171,4 +171,3 @@ The implementation is accepted when:
 5. Critical paths emit the taxonomy above without altering business state transitions or authority ownership.
 6. Debug and Release arm64 builds and the complete XCTest suite pass where the environment permits.
 7. Real-Mac UI scenarios are either verified or explicitly reported as `MANUAL REAL-MAC REQUIRED`; no unavailable UI acceptance is claimed as PASS.
-

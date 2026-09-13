@@ -35,6 +35,7 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         let events = try lines.map {
             try decoder.decode(RuntimeDiagnosticEvent.self, from: $0)
         }
+        XCTAssertTrue(String(data: lines[0], encoding: .utf8)?.contains("\"schema_version\":1") == true)
         XCTAssertEqual(events.map(\.schemaVersion), [1, 1])
         XCTAssertEqual(Set(events.map(\.sessionID)).count, 1)
         XCTAssertEqual(events.map(\.sequence), [1, 2])
@@ -51,5 +52,61 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         let off = RuntimeDiagnostics(mode: .off, writer: offWriter)
         off.record(event: "test.notice", level: .notice, subsystem: "tests")
         XCTAssertTrue(offWriter.events.isEmpty)
+    }
+
+    func testExportAddsSanitizedHeaderBeforeRecentEvents() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        diagnostics.record(
+            event: "test.navigation",
+            level: .notice,
+            subsystem: "tests",
+            fields: [
+                "url": .string("https://example.com/c/private?token=secret")
+            ]
+        )
+
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsExport-\(UUID().uuidString).jsonl")
+        let exported = expectation(description: "exported")
+        var result: Result<Void, RuntimeDiagnosticExportError>?
+        diagnostics.exportRecent(to: destination) {
+            result = $0
+            exported.fulfill()
+        }
+        wait(for: [exported], timeout: 2)
+
+        guard case .success = result else {
+            return XCTFail("diagnostics export failed: \(String(describing: result))")
+        }
+        let lines = try String(contentsOf: destination, encoding: .utf8)
+            .split(separator: "\n")
+        XCTAssertEqual(lines.count, 2)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let events = try lines.map {
+            try decoder.decode(RuntimeDiagnosticEvent.self, from: Data($0.utf8))
+        }
+        XCTAssertEqual(events[0].event, "diagnostics.export.header")
+        XCTAssertEqual(events[0].fields["schema_version"], .integer(1))
+        XCTAssertNotNil(events[0].fields["app_version"])
+        XCTAssertEqual(events[1].fields["url"], .string("https://example.com"))
+        XCTAssertFalse(String(data: Data(lines[1].utf8), encoding: .utf8)?.contains("token") == true)
+        try? FileManager.default.removeItem(at: destination)
+    }
+
+    func testTraceRootIsPresentWithoutCreatingPerEventTraceIDs() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let trace = diagnostics.beginTrace(root: "panel.summon")
+
+        diagnostics.record(event: "panel.summon.received", subsystem: "panel", trace: trace)
+        diagnostics.record(event: "panel.presentation.begin", subsystem: "panel", trace: trace)
+
+        XCTAssertEqual(writer.events.map(\.traceID), [trace.id, trace.id])
+        XCTAssertEqual(
+            writer.events.map { $0.fields["trace_root"] },
+            [.string("panel.summon"), .string("panel.summon")]
+        )
     }
 }

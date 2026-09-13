@@ -156,6 +156,9 @@ extension Notification.Name {
     static let floatTabsSlotRetentionDidChange = Notification.Name(
         "FloatTabs.slotRetentionDidChange"
     )
+    static let floatTabsRuntimeDiagnosticsModeDidChange = Notification.Name(
+        "FloatTabs.runtimeDiagnosticsModeDidChange"
+    )
 }
 
 @MainActor
@@ -191,6 +194,7 @@ final class AppPreferencesStore {
         "FloatTabs.performance.warmWebViewRetentionDelay"
     static let coldWebViewReleaseDelayKey =
         "FloatTabs.performance.coldWebViewReleaseDelay"
+    static let runtimeDiagnosticsModeKey = "FloatTabs.runtimeDiagnostics.mode"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -212,6 +216,24 @@ final class AppPreferencesStore {
         set {
             defaults.set(newValue.rawValue, forKey: Self.appearanceKey)
             applyAppearance(newValue)
+        }
+    }
+
+    var runtimeDiagnosticsMode: RuntimeDiagnosticMode {
+        get {
+            guard let raw = defaults.string(forKey: Self.runtimeDiagnosticsModeKey),
+                  let mode = RuntimeDiagnosticMode(rawValue: raw) else {
+                return .standard
+            }
+            return mode
+        }
+        set {
+            guard newValue != runtimeDiagnosticsMode else { return }
+            defaults.set(newValue.rawValue, forKey: Self.runtimeDiagnosticsModeKey)
+            NotificationCenter.default.post(
+                name: .floatTabsRuntimeDiagnosticsModeDidChange,
+                object: self
+            )
         }
     }
 

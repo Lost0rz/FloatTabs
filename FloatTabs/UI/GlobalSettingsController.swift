@@ -133,6 +133,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let onRestoreBackup: RestoreBackupHandler
     private let browserProfileManager: BrowserProfileManagementClient
     private let websiteCacheManager: WebsiteCacheManagementClient
+    private let onExportDiagnostics: RuntimeDiagnosticsExportHandler
+    private let onOpenDiagnosticsLogs: () -> Void
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
@@ -145,7 +147,11 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         onExportBackup: @escaping ExportBackupHandler = { _ in },
         onRestoreBackup: @escaping RestoreBackupHandler = { _ in throw FloatTabsBackupError.restoreFailed },
         browserProfileManager: BrowserProfileManagementClient = .unavailable,
-        websiteCacheManager: WebsiteCacheManagementClient = .unavailable
+        websiteCacheManager: WebsiteCacheManagementClient = .unavailable,
+        onExportDiagnostics: @escaping RuntimeDiagnosticsExportHandler = { _, completion in
+            completion(.failure(.writerDisabled))
+        },
+        onOpenDiagnosticsLogs: @escaping () -> Void = {}
     ) {
         self.preferencesStore = preferencesStore
         self.speechPreferencesStore = speechPreferencesStore
@@ -157,6 +163,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         self.onRestoreBackup = onRestoreBackup
         self.browserProfileManager = browserProfileManager
         self.websiteCacheManager = websiteCacheManager
+        self.onExportDiagnostics = onExportDiagnostics
+        self.onOpenDiagnosticsLogs = onOpenDiagnosticsLogs
         super.init()
     }
 
@@ -216,6 +224,16 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
             title: "Shortcuts",
             symbol: "keyboard",
             controller: ShortcutsSettingsViewController(),
+            to: tabs
+        )
+        addTab(
+            title: "Diagnostics",
+            symbol: "waveform.path.ecg",
+            controller: RuntimeDiagnosticsSettingsViewController(
+                preferencesStore: preferencesStore,
+                exportHandler: onExportDiagnostics,
+                openLogsHandler: onOpenDiagnosticsLogs
+            ),
             to: tabs
         )
         addTab(

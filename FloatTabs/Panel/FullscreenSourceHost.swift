@@ -314,6 +314,7 @@ final class FullscreenSourceHostController {
     private var restoreGeneration = 0
     private var restoreStartedAtUptime: TimeInterval?
     private(set) var sessionState: FullscreenSourceSessionState = .idle
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     /// Rail collapse reclaims the rail's physical column without touching the
     /// shell frame: the source window shifts to the collapsed leading inset
@@ -330,14 +331,22 @@ final class FullscreenSourceHostController {
         sessionState.locksSourceHost
     }
 
+    /// Read-only diagnostics projection of the existing fullscreen restore
+    /// identity. Runtime diagnostics never advances or owns this generation.
+    var diagnosticRestoreGeneration: Int {
+        restoreGeneration
+    }
+
     init(
         container: WebPanelContainerView,
         resizeHandle: PanelResizeHandleView,
         resizeReadout: ResizeReadoutView,
-        shellWindow: NSWindow
+        shellWindow: NSWindow,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.container = container
         self.shellWindow = shellWindow
+        self.diagnostics = diagnostics
         window = Self.makeSourceWindow(
             frame: NSRect(x: 0, y: 0, width: 1, height: 1)
         )
@@ -390,6 +399,16 @@ final class FullscreenSourceHostController {
         // behind the previously active app, making the page appear present but
         // unable to receive clicks or keyboard focus.
         window.orderFrontRegardless()
+        diagnostics.record(
+            event: "source.order_front",
+            level: .debug,
+            subsystem: "fullscreen",
+            fields: [
+                "window_number": .integer(Int64(window.windowNumber)),
+                "source_visible": .bool(window.isVisible),
+                "source_key": .bool(window.isKeyWindow)
+            ]
+        )
         if let webView {
             observeFullscreenState(of: webView)
             window.makeKeyAndOrderFront(nil)
@@ -402,7 +421,16 @@ final class FullscreenSourceHostController {
                 // main-window transaction while WebKit tears down its Space.
                 window.makeMain()
             }
-            WebViewFocus.focus(webView, in: window)
+            let focused = WebViewFocus.focus(webView, in: window)
+            diagnostics.record(
+                event: "source.focus.result",
+                level: focused ? .debug : .warning,
+                subsystem: "fullscreen",
+                fields: [
+                    "success": .bool(focused),
+                    "window_number": .integer(Int64(window.windowNumber))
+                ]
+            )
         }
     }
 
@@ -433,6 +461,16 @@ final class FullscreenSourceHostController {
             "SPACE_RECONCILE shell=\(shellWindow.windowNumber) "
                 + "source=\(window.windowNumber) "
                 + "sourceScreen=\(fullscreenExperimentScreenID(window.screen))"
+        )
+        diagnostics.record(
+            event: "space.reconcile",
+            level: .debug,
+            subsystem: "fullscreen",
+            fields: [
+                "shell_window_number": .integer(Int64(shellWindow.windowNumber)),
+                "source_window_number": .integer(Int64(window.windowNumber)),
+                "source_visible": .bool(window.isVisible)
+            ]
         )
     }
 
@@ -550,6 +588,21 @@ final class FullscreenSourceHostController {
         )
         let wasLocked = isSessionLocked
         sessionState = next
+        if previous != next {
+            diagnostics.record(
+                event: "fullscreen.state.transition",
+                level: .notice,
+                subsystem: "fullscreen",
+                fields: [
+                    "from": .string(previous.rawValue),
+                    "to": .string(next.rawValue),
+                    "restore_generation": .integer(Int64(restoreGeneration)),
+                    "source_window_number": .integer(Int64(window.windowNumber)),
+                    "source_visible": .bool(window.isVisible),
+                    "source_key": .bool(window.isKeyWindow)
+                ]
+            )
+        }
         onSessionStateChange?(next)
 
         if !wasLocked, next.locksSourceHost {
@@ -565,6 +618,30 @@ final class FullscreenSourceHostController {
             window.alphaValue = 0
             window.ignoresMouseEvents = true
             restoreGeneration &+= 1
+            diagnostics.record(
+                event: "fullscreen.source.locked",
+                level: .notice,
+                subsystem: "fullscreen",
+                fields: [
+                    "restore_generation": .integer(Int64(restoreGeneration)),
+                    "source_window_number": .integer(Int64(window.windowNumber))
+                ]
+            )
+            diagnostics.record(
+                event: "fullscreen.restore.begin",
+                level: .notice,
+                subsystem: "fullscreen",
+                fields: [
+                    "restore_generation": .integer(Int64(restoreGeneration)),
+                    "source_window_number": .integer(Int64(window.windowNumber))
+                ]
+            )
+            diagnostics.record(
+                event: "fullscreen.restore-generation.advanced",
+                level: .debug,
+                subsystem: "fullscreen",
+                fields: ["restore_generation": .integer(Int64(restoreGeneration))]
+            )
             fullscreenExperimentLog(
                 "FULLSCREEN state=\(next.rawValue) source=\(window.windowNumber) "
                     + "screen=\(fullscreenExperimentScreenID(window.screen))"
@@ -635,6 +712,18 @@ final class FullscreenSourceHostController {
             return
 
         case .rebuildSource:
+            diagnostics.record(
+                event: "fullscreen.restore.timeout",
+                level: .warning,
+                subsystem: "fullscreen",
+                fields: ["restore_generation": .integer(Int64(generation))]
+            )
+            diagnostics.record(
+                event: "fullscreen.source.rebuild_required",
+                level: .warning,
+                subsystem: "fullscreen",
+                fields: ["restore_generation": .integer(Int64(generation))]
+            )
             fullscreenExperimentLog(
                 "FULLSCREEN_RESTORE_TIMEOUT source=\(window.windowNumber) "
                     + "screen=\(fullscreenExperimentScreenID(window.screen))"
@@ -642,6 +731,12 @@ final class FullscreenSourceHostController {
             finishRestoration(rebuildSource: true)
 
         case .restored:
+            diagnostics.record(
+                event: "fullscreen.restore.completed",
+                level: .notice,
+                subsystem: "fullscreen",
+                fields: ["restore_generation": .integer(Int64(generation))]
+            )
             finishRestoration(rebuildSource: false)
         }
     }
@@ -666,6 +761,17 @@ final class FullscreenSourceHostController {
         // reattaching it unconditionally afterwards can order that source above
         // the shell again and recreate a physical-visible/logical-hidden split.
         // Visible restores already reattach through orderFrontAndFocus().
+        diagnostics.record(
+            event: "fullscreen.source.unlocked",
+            level: .notice,
+            subsystem: "fullscreen",
+            fields: [
+                "restore_generation": .integer(Int64(restoreGeneration)),
+                "source_window_number": .integer(Int64(window.windowNumber)),
+                "source_visible": .bool(window.isVisible),
+                "source_key": .bool(window.isKeyWindow)
+            ]
+        )
         onSessionLockChange?(false)
     }
 

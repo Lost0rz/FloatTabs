@@ -13,6 +13,8 @@ final class AppCoordinator {
         category: "WebsiteCache"
     )
     private let panelController: PanelController
+    private let diagnostics: RuntimeDiagnostics
+    private let diagnosticExporter: RuntimeDiagnosticExporter
     private let speechPreferencesStore: SpeechPreferencesStore
     private let speechVoiceCatalog: SpeechVoiceCatalog
     private var statusItemController: StatusItemController?
@@ -61,12 +63,18 @@ final class AppCoordinator {
         let resolvedSpeechPreferencesStore = SpeechPreferencesStore()
         let resolvedSpeechVoiceCatalog = SpeechVoiceCatalog()
         let resolvedAttentionSoundAssetStore = attentionSoundAssetStore ?? AttentionSoundAssetStore()
+        let diagnostics = RuntimeDiagnostics(
+            writer: RuntimeDiagnosticWriter(directory: RuntimeDiagnosticWriter.defaultDirectory),
+            modeProvider: { resolvedPreferencesStore.runtimeDiagnosticsMode }
+        )
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
         // they are created. Apply the stored appearance before PanelController
         // builds any windows/views so a saved Dark choice cannot be cached as
         // Aqua white until the next appearance transition.
         resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
+        self.diagnostics = diagnostics
+        self.diagnosticExporter = RuntimeDiagnosticExporter(diagnostics: diagnostics)
         self.speechPreferencesStore = resolvedSpeechPreferencesStore
         self.speechVoiceCatalog = resolvedSpeechVoiceCatalog
         self.backupService = backupService
@@ -82,7 +90,7 @@ final class AppCoordinator {
         } else {
             let profileRepository = ProfileRepository()
             self.profileRepository = profileRepository
-            let tabStore = TabStore(repository: profileRepository)
+            let tabStore = TabStore(repository: profileRepository, diagnostics: diagnostics)
             tabStore.onPersistenceFailure = {
                 Self.presentConfigurationSaveFailure()
             }
@@ -92,12 +100,13 @@ final class AppCoordinator {
                 },
                 isSlotActive: { slotID in
                     tabStore.activeTabID == slotID
-                }
+                },
+                diagnostics: diagnostics
             )
             // Exactly one runtime attention authority for the whole app,
             // injected into the presentation owner. AppCoordinator itself
             // never routes provider observations.
-            let attentionCoordinator = WebAttentionCoordinator()
+            let attentionCoordinator = WebAttentionCoordinator(diagnostics: diagnostics)
             let speechService = SpeechService(
                 preferences: resolvedSpeechPreferencesStore,
                 voiceCatalog: resolvedSpeechVoiceCatalog
@@ -109,12 +118,28 @@ final class AppCoordinator {
                 preferencesStore: resolvedPreferencesStore,
                 speechService: speechService,
                 speechPreferencesStore: resolvedSpeechPreferencesStore,
-                speechVoiceCatalog: resolvedSpeechVoiceCatalog
+                speechVoiceCatalog: resolvedSpeechVoiceCatalog,
+                diagnostics: diagnostics
             )
         }
     }
 
     func start() {
+        let trace = diagnostics.beginTrace(root: "app.launch")
+        diagnostics.record(
+            event: "app.launch",
+            level: .info,
+            subsystem: "app",
+            trace: trace,
+            fields: diagnostics.environmentFields()
+        )
+        diagnostics.record(
+            event: "app.ready",
+            level: .notice,
+            subsystem: "app",
+            trace: trace,
+            fields: ["diagnostics_mode": .string(diagnostics.mode.rawValue)]
+        )
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
@@ -143,7 +168,14 @@ final class AppCoordinator {
             browserProfileManager: panelController.browserProfileManagementClient(
                 usageStore: websiteCacheUsageStore
             ),
-            websiteCacheManager: websiteCacheCoordinator.client
+            websiteCacheManager: websiteCacheCoordinator.client,
+            onExportDiagnostics: { [weak self] url, completion in
+                self?.diagnosticExporter.exportRecent(to: url, completion: completion)
+                    ?? completion(.failure(.writerUnavailable))
+            },
+            onOpenDiagnosticsLogs: {
+                NSWorkspace.shared.open(RuntimeDiagnosticWriter.defaultDirectory)
+            }
         )
         websiteCacheCoordinator.onPolicyChanged = { [weak self] in
             self?.restartWebsiteCacheAutomaticSchedule()
@@ -160,12 +192,19 @@ final class AppCoordinator {
             onWillShow: { [weak self] in
                 self?.panelController.prepareForStatusItemPresentation()
             },
+            onWillShowWithTrace: { [weak self] trace in
+                self?.panelController.prepareForStatusItemPresentation(trace: trace)
+            },
             isVisible: { [weak self] in
                 self?.panelController.isPresentationActuallyVisible ?? false
             },
             onSettings: { [weak self] in self?.showGlobalSettings() },
             onQuit: { NSApp.terminate(nil) },
-            preferencesStore: preferencesStore
+            preferencesStore: preferencesStore,
+            diagnostics: diagnostics,
+            onToggleWithTrace: { [weak self] trace in
+                self?.panelController.toggleFloatTabs(trace: trace)
+            }
         )
         statusItemController?.setActiveWebApp(
             name: panelController.selectedSlotName,
@@ -201,6 +240,13 @@ final class AppCoordinator {
             },
             onPrimaryFocus: { [weak self] in
                 self?.panelController.handle(.togglePrimaryFocus)
+            },
+            diagnostics: diagnostics,
+            onToggleWithTrace: { [weak self] trace in
+                self?.toggleOrPresentFloatTabs(trace: trace)
+            },
+            onPrimaryFocusWithTrace: { [weak self] trace in
+                self?.panelController.handle(.togglePrimaryFocus, trace: trace)
             }
         )
 
@@ -215,7 +261,8 @@ final class AppCoordinator {
                 } else {
                     self.panelController.handle(command)
                 }
-            }
+            },
+            diagnostics: diagnostics
         )
 
         // RemoteOrbit uses semantic commands instead of replaying FloatTabs'
@@ -250,6 +297,11 @@ final class AppCoordinator {
     }
 
     func prepareForTermination() {
+        diagnostics.record(
+            event: "app.termination.begin",
+            level: .notice,
+            subsystem: "app"
+        )
         isTerminating = true
         externalVoiceFocusTask?.cancel()
         externalVoiceFocusTask = nil
@@ -265,6 +317,12 @@ final class AppCoordinator {
         // Start Empty after a corrupt store, keep the previous automatic backup
         // until a new Web App configuration actually exists.
         writeAutomaticVersionSnapshotIfSafe()
+        diagnostics.record(
+            event: "app.termination.flush",
+            level: .notice,
+            subsystem: "app"
+        )
+        diagnostics.requestFinalFlush(timeout: 0.25) {}
     }
 
     private func startWebsiteCacheAutomaticSchedule(initialDelay: TimeInterval? = nil) {
@@ -635,16 +693,16 @@ final class AppCoordinator {
         globalSettingsController?.show()
     }
 
-    private func toggleFloatTabs() {
-        panelController.toggleFloatTabs()
+    private func toggleFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        panelController.toggleFloatTabs(trace: trace)
     }
 
     private func presentFloatTabs() {
         panelController.presentFloatTabs()
     }
 
-    private func toggleOrPresentFloatTabs() {
-        panelController.toggleOrPresentFloatTabs()
+    private func toggleOrPresentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        panelController.toggleOrPresentFloatTabs(trace: trace)
     }
 
     /// Apply the first external tab command immediately, then fold commands
@@ -675,12 +733,20 @@ final class AppCoordinator {
         _ command: FloatTabsExternalCommand,
         userInfo: [AnyHashable: Any]?
     ) {
+        let trace = diagnostics.beginTrace(root: "external.command")
+        diagnostics.record(
+            event: "external.command.received",
+            level: .info,
+            subsystem: "external",
+            trace: trace,
+            fields: ["command": .string(command.rawValue)]
+        )
         switch command {
         case .show:
-            panelController.showFloatTabs()
+            panelController.showFloatTabs(trace: trace)
 
         case .toggleVisibility:
-            panelController.toggleFloatTabs()
+            panelController.toggleFloatTabs(trace: trace)
 
         case .selectSlot:
             guard let index = (userInfo?["slotIndex"] as? NSNumber)?.intValue,
@@ -756,7 +822,7 @@ final class AppCoordinator {
             externalVoiceFocusTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 let result = await self.panelController
-                    .prepareInputFocusForExternalVoice()
+                    .prepareInputFocusForExternalVoice(trace: trace)
                 self.postExternalVoiceFocusResult(
                     requestID: requestID,
                     result: result
