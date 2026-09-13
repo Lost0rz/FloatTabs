@@ -479,7 +479,7 @@ final class SlotLifecycleCoordinator {
             subsystem: "lifecycle",
             fields: [
                 "slot_id": .string(profile.id.uuidString),
-                "plan_token": .string(plan.token.uuidString),
+                "inactive_plan_id": .string(plan.token.uuidString),
                 "residency": .string(profile.residencyPolicy.rawValue)
             ]
         )
@@ -518,7 +518,10 @@ final class SlotLifecycleCoordinator {
                         event: "slot_lifecycle.media_protected",
                         level: .notice,
                         subsystem: "lifecycle",
-                        fields: ["slot_id": .string(profile.id.uuidString)]
+                        fields: [
+                            "slot_id": .string(profile.id.uuidString),
+                            "inactive_plan_id": .string(plan.token.uuidString)
+                        ]
                     )
                 }
                 self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
@@ -616,9 +619,6 @@ final class SlotLifecycleCoordinator {
                         )
                         return
                     }
-                    guard self.webViewPool.contains(slotID: profile.id) else {
-                        return
-                    }
                     if isPlaying {
                         let wasProtected = self.mediaProtectedSlotIDs.insert(profile.id).inserted
                         if wasProtected {
@@ -626,7 +626,10 @@ final class SlotLifecycleCoordinator {
                                 event: "slot_lifecycle.media_protected",
                                 level: .notice,
                                 subsystem: "lifecycle",
-                                fields: ["slot_id": .string(profile.id.uuidString)]
+                                fields: [
+                                    "slot_id": .string(profile.id.uuidString),
+                                    "inactive_plan_id": .string(plan.token.uuidString)
+                                ]
                             )
                         }
                         self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
@@ -775,7 +778,7 @@ final class SlotLifecycleCoordinator {
             subsystem: "lifecycle",
             fields: [
                 "slot_id": .string(slotID.uuidString),
-                "plan_token": .string(currentPlan.token.uuidString)
+                "inactive_plan_id": .string(currentPlan.token.uuidString)
             ]
         )
         prepareRuntimeForRelease(slotID)
@@ -796,7 +799,7 @@ final class SlotLifecycleCoordinator {
                 subsystem: "lifecycle",
                 fields: [
                     "slot_id": .string(slotID.uuidString),
-                    "plan_token": .string(plan.token.uuidString)
+                    "inactive_plan_id": .string(plan.token.uuidString)
                 ]
             )
         }
@@ -844,7 +847,7 @@ final class SlotLifecycleCoordinator {
             "boundary": .string(boundary)
         ]
         if let planToken {
-            fields["plan_token"] = .string(planToken.uuidString)
+            fields["inactive_plan_id"] = .string(planToken.uuidString)
         }
 
         if protection.attention {

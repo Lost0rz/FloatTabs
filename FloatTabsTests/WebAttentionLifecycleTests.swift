@@ -132,6 +132,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let pool = makePool()
         let profile = makeProfile(name: "ReleaseOrder", policy: .cold)
         _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         var wasResidentDuringPreparation = false
         var releasedProfile: WebAppProfile?
         let lifecycle = makeLifecycle(
@@ -142,7 +144,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
             },
             onRuntimeReleased: { profile in
                 releasedProfile = profile
-            }
+            },
+            diagnostics: diagnostics
         )
 
         makeInactive(lifecycle, profile: profile)
@@ -151,6 +154,13 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(wasResidentDuringPreparation)
         XCTAssertEqual(releasedProfile?.id, profile.id)
         XCTAssertFalse(pool.contains(slotID: profile.id))
+        let release = try XCTUnwrap(writer.events.first { $0.event == "slot_lifecycle.release" })
+        let cancelled = try XCTUnwrap(
+            writer.events.first { $0.event == "slot_lifecycle.inactive_plan.cancelled" }
+        )
+        XCTAssertEqual(release.fields["inactive_plan_id"], cancelled.fields["inactive_plan_id"])
+        XCTAssertNil(release.fields["plan_token"])
+        XCTAssertNil(cancelled.fields["plan_token"])
     }
 
     func testHidingPanelNotifiesBackgroundPolicyBeforeHiddenGraceRelease() async throws {
@@ -352,6 +362,51 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(event.fields["boundary"], .string("release_timer"))
     }
 
+    func testStandardDiagnosticsPersistPlanIdentityAcrossProtectionAndCancellation() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "DiagnosticPlanIdentity", policy: .cold)
+        _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        var attentionProtected = true
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            attentionProtectionQuery: { _ in attentionProtected },
+            diagnostics: diagnostics
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 70)
+
+        let created = try XCTUnwrap(
+            writer.events.first { $0.event == "slot_lifecycle.inactive_plan.created" }
+        )
+        let protected = try XCTUnwrap(
+            writer.events.first { $0.event == "slot_lifecycle.attention_protected" }
+        )
+        let createdPlanID = try XCTUnwrap(created.fields["inactive_plan_id"])
+        XCTAssertEqual(protected.fields["inactive_plan_id"], createdPlanID)
+        XCTAssertNil(created.fields["plan_token"])
+        XCTAssertNil(protected.fields["plan_token"])
+
+        lifecycle.activate(profile: profile)
+        let cancelled = try XCTUnwrap(
+            writer.events.first { $0.event == "slot_lifecycle.inactive_plan.cancelled" }
+        )
+        XCTAssertEqual(cancelled.fields["inactive_plan_id"], createdPlanID)
+        XCTAssertNil(cancelled.fields["plan_token"])
+
+        // A later real lifecycle boundary creates a distinct plan identity.
+        attentionProtected = false
+        lifecycle.deactivate(profile: profile)
+        let createdPlans = writer.events.filter {
+            $0.event == "slot_lifecycle.inactive_plan.created"
+        }
+        XCTAssertEqual(createdPlans.count, 2)
+        XCTAssertNotEqual(createdPlans[1].fields["inactive_plan_id"], createdPlanID)
+    }
+
     func testStandardDiagnosticsExplainSpeechProtectionAtReleaseTimer() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "DiagnosticSpeechProtected", policy: .cold)
@@ -403,6 +458,24 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let events = writer.events
         XCTAssertTrue(events.contains { $0.event == "slot_lifecycle.inactive_plan.created" })
         XCTAssertTrue(events.contains { $0.event == "slot_lifecycle.inactive_plan.cancelled" })
+        let createdPlans = events.filter {
+            $0.event == "slot_lifecycle.inactive_plan.created"
+        }
+        let cancelledPlans = events.filter {
+            $0.event == "slot_lifecycle.inactive_plan.cancelled"
+        }
+        XCTAssertEqual(createdPlans.count, 2)
+        XCTAssertEqual(cancelledPlans.count, 1)
+        XCTAssertEqual(
+            createdPlans[0].fields["inactive_plan_id"],
+            cancelledPlans[0].fields["inactive_plan_id"]
+        )
+        XCTAssertNotEqual(
+            createdPlans[0].fields["inactive_plan_id"],
+            createdPlans[1].fields["inactive_plan_id"]
+        )
+        XCTAssertTrue(createdPlans.allSatisfy { $0.fields["plan_token"] == nil })
+        XCTAssertTrue(cancelledPlans.allSatisfy { $0.fields["plan_token"] == nil })
         let graceEvents = events.filter { $0.event == "slot_lifecycle.hidden_active_grace" }
         XCTAssertEqual(graceEvents.map { $0.fields["state"] }, [.string("scheduled"), .string("expired")])
         XCTAssertTrue(events.filter { $0.event == "slot_lifecycle.inactive_plan.created" }.allSatisfy {
@@ -427,17 +500,25 @@ final class WebAttentionLifecycleTests: XCTestCase {
         var profile = makeProfile(name: "MediaOnly", policy: .cold)
         profile.backgroundMediaPolicy = .allowBackgroundAudio
         _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         var mediaPlaying = true
         let lifecycle = makeLifecycle(
             pool: pool,
             coldReleaseDelay: 0.03,
             mediaProtectionPollDelay: 0.005,
-            mediaPlayingQuery: { _, completion in completion(mediaPlaying) }
+            mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
+            diagnostics: diagnostics
         )
 
         makeInactive(lifecycle, profile: profile)
         try await wait(milliseconds: 70)
         XCTAssertTrue(pool.contains(slotID: profile.id))
+        let mediaProtected = try XCTUnwrap(
+            writer.events.first { $0.event == "slot_lifecycle.media_protected" }
+        )
+        XCTAssertNotNil(mediaProtected.fields["inactive_plan_id"])
+        XCTAssertNil(mediaProtected.fields["plan_token"])
 
         mediaPlaying = false
         try await wait(milliseconds: 15)
@@ -748,6 +829,39 @@ final class WebAttentionLifecycleTests: XCTestCase {
         try await wait(milliseconds: 70)
 
         XCTAssertTrue(pool.contains(slotID: profile.id))
+    }
+
+    func testAsyncMediaResultKeepsOldPlanMatchingBehaviorAfterPoolRelease() async throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "ReleasedMedia", policy: .cold)
+        profile.backgroundMediaPolicy = .allowBackgroundAudio
+        _ = try pool.webView(for: profile)
+        var pendingMediaResults: [(Bool) -> Void] = []
+        var mediaQueryCount = 0
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            coldReleaseDelay: 0.02,
+            mediaProtectionPollDelay: 0.01,
+            mediaPlayingQuery: { _, completion in
+                mediaQueryCount += 1
+                pendingMediaResults.append(completion)
+            }
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        XCTAssertEqual(mediaQueryCount, 1)
+        pendingMediaResults.removeFirst()(false)
+        try await wait(milliseconds: 30)
+        XCTAssertEqual(mediaQueryCount, 2)
+
+        // This leaves the lifecycle plan intact while removing the runtime,
+        // which isolates the media callback's historical plan/visibility
+        // gating from the later release helper's pool eligibility check.
+        pool.release(slotID: profile.id)
+        pendingMediaResults.removeFirst()(true)
+        try await wait(milliseconds: 70)
+
+        XCTAssertGreaterThanOrEqual(mediaQueryCount, 3)
     }
 
     private func makePool() -> WebViewPool {

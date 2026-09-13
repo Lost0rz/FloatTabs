@@ -18,12 +18,18 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
     func testSensitiveFieldsAreDroppedBeforePersistence() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "token": .string("secret"),
+            "plan_token": .string("legacy-plan-token"),
+            "access_token": .string("access-secret"),
+            "auth_token": .string("auth-secret"),
             "Authorization": .string("Bearer secret"),
             "inputValue": .string("private text"),
             "safeState": .string("ready")
         ], mode: .verbose)
 
         XCTAssertNil(fields["token"])
+        XCTAssertNil(fields["plan_token"])
+        XCTAssertNil(fields["access_token"])
+        XCTAssertNil(fields["auth_token"])
         XCTAssertNil(fields["Authorization"])
         XCTAssertNil(fields["inputValue"])
         XCTAssertEqual(fields["safeState"], .string("ready"))

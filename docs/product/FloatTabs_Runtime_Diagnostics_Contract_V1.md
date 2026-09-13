@@ -169,11 +169,12 @@ observation.
 Standard lifecycle output includes inactive-plan creation and cancellation,
 hidden-active grace scheduling and expiry, media/attention/speech protection,
 release, and memory-pressure boundaries. Protection observations include the
-existing `slot_id` and `boundary`; the composition boundary also supplies the
-existing `plan_token` when a plan exists, but the frozen privacy sanitizer drops
-token-like fields before persistence. No sanitizer bypass or token renaming is
-allowed. These observations do not create parallel protection state or
-participate in the release decision.
+existing `slot_id` and `boundary`. `InactivePlan.token` remains the sole
+business plan identity; diagnostics may project that existing UUID as
+`"inactive_plan_id"` for correlation only. It never participates in lifecycle
+decisions. Global token/secret sanitizer rules remain unchanged, and no
+auth/session/token value is whitelisted. These observations do not create
+parallel protection state or participate in the release decision.
 
 Verbose navigation output includes `provisional_started`, `finished`,
 `instant_back.requested`, `instant_back.cancelled`, `instant_back.activated`,
