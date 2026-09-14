@@ -286,13 +286,13 @@ final class SlotLifecycleCoordinator {
     /// fullscreen. This is independent from shell visibility and active Tab
     /// selection so a hidden shell can never pause or evict visible content.
     func beginFullscreenSourceVisibility(profile: WebAppProfile) {
+        fullscreenSourceProfile = profile
         diagnostics.record(
             event: "slot_lifecycle.fullscreen_protected",
             level: .notice,
             subsystem: "lifecycle",
             fields: ["slot_id": .string(profile.id.uuidString)]
         )
-        fullscreenSourceProfile = profile
         cancelInactivePlan(slotID: profile.id)
         if hiddenActiveToken != nil, activeSlotID == profile.id {
             hiddenActiveToken = nil
@@ -301,13 +301,13 @@ final class SlotLifecycleCoordinator {
 
     func endFullscreenSourceVisibility(profile: WebAppProfile) {
         guard fullscreenSourceProfile?.id == profile.id else { return }
+        fullscreenSourceProfile = nil
         diagnostics.record(
             event: "slot_lifecycle.fullscreen_released",
             level: .notice,
             subsystem: "lifecycle",
             fields: ["slot_id": .string(profile.id.uuidString)]
         )
-        fullscreenSourceProfile = nil
     }
 
     /// Protects a second foreground WebView while WebKit exclusively owns the

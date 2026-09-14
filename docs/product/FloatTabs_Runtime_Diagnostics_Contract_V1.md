@@ -163,6 +163,9 @@ Events record only facts visible at the observation point. Diagnostic observers 
 actually removed. A no-op release or remove emits no released event.
 `slot_lifecycle.deactivate` describes an accepted lifecycle deactivation; a
 fullscreen-protected no-op does not emit it.
+`slot_lifecycle.fullscreen_protected` is emitted only after the fullscreen
+source authority is established, and `slot_lifecycle.fullscreen_released` only
+after that authority is cleared.
 
 Attention transitions are recorded as `attention.transition` with `slot_id`,
 `cause`, `from`, and `to`. Generation completion and user acknowledgement also

@@ -532,13 +532,17 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let profile = makeProfile(name: "FullscreenDeactivate", policy: .cold)
         _ = try pool.webView(for: profile)
         let writer = RuntimeDiagnosticInMemoryWriter()
-        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let lifecycle = makeLifecycle(
             pool: pool,
             diagnostics: diagnostics
         )
 
         lifecycle.beginFullscreenSourceVisibility(profile: profile)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "slot_lifecycle.fullscreen_protected" }.count,
+            1
+        )
         lifecycle.deactivate(profile: profile)
 
         XCTAssertTrue(pool.contains(slotID: profile.id))
@@ -547,13 +551,20 @@ final class WebAttentionLifecycleTests: XCTestCase {
             0
         )
 
-        lifecycle.endFullscreenSourceVisibility(profile: profile)
-        lifecycle.deactivate(profile: profile)
-
+        let otherProfile = makeProfile(name: "OtherFullscreenDeactivate", policy: .cold)
+        lifecycle.endFullscreenSourceVisibility(profile: otherProfile)
         XCTAssertEqual(
-            writer.events.filter { $0.event == "slot_lifecycle.deactivate" }.count,
+            writer.events.filter { $0.event == "slot_lifecycle.fullscreen_released" }.count,
+            0
+        )
+
+        lifecycle.endFullscreenSourceVisibility(profile: profile)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "slot_lifecycle.fullscreen_released" }.count,
             1
         )
+        lifecycle.deactivate(profile: profile)
+        XCTAssertEqual(lifecycle.pendingColdReleaseCount, 1)
     }
 
     func testRemovingAttentionAloneDoesNotBypassMediaProtection() async throws {
