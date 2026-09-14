@@ -56,6 +56,11 @@ struct WorkspaceAutoHideSuppression: Equatable {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
+    private enum PresentationWebFocusOwner: String {
+        case standardPresentation = "standard_presentation"
+        case externalVoice = "external_voice"
+    }
+
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
         let displayID: CGDirectDisplayID?
@@ -217,6 +222,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// every older async callback stale, so a slow WebKit response cannot
     /// refocus a page that is no longer the selected presentation.
     private var presentationFocusGeneration: UInt64 = 0
+    private var presentationWebFocusOwner: PresentationWebFocusOwner = .standardPresentation
     private var presentationNativeFocusPending = false
     private var presentationWebFocusPending = false
 #if DEBUG
@@ -269,6 +275,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// already visible must restore focus, not interpret the shortcut as a
     /// request to hide the shell.
     func presentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        presentFloatTabs(
+            trace: trace,
+            webFocusOwner: .standardPresentation
+        )
+    }
+
+    private func presentFloatTabs(
+        trace: RuntimeDiagnosticTrace? = nil,
+        webFocusOwner: PresentationWebFocusOwner
+    ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         invalidatePendingRestoreObservationForNewPresentation()
         if panel.isVisible {
@@ -278,7 +294,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             activateFloatTabs(trace: trace)
             panel.orderFrontRegardless()
             panel.makeKeyAndOrderFront(nil)
-            beginPresentationFocusHandshake(trace: trace)
+            beginPresentationFocusHandshake(
+                trace: trace,
+                webFocusOwner: webFocusOwner
+            )
             diagnostics.record(
                 event: "panel.presentation.focus-requested",
                 level: .debug,
@@ -288,7 +307,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        showFloatTabs(trace: trace)
+        showFloatTabs(trace: trace, webFocusOwner: webFocusOwner)
     }
 
     /// Completes the remote voice handoff without making audio wait on WebKit.
@@ -316,7 +335,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             _ = await webFocusRouter.captureInputTargetForExternalVoice()
         }
 
-        presentFloatTabs(trace: trace)
+        presentFloatTabs(
+            trace: trace,
+            webFocusOwner: .externalVoice
+        )
 
         guard requestedVisibility else {
             return .failed("panel-hidden")
@@ -327,6 +349,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard let webView = selectedPresentationWebView() else {
             return .failed("no-active-webview")
         }
+        let voiceGeneration = presentationFocusGeneration
 
         webFocusRouter.setCurrentWebView(webView)
         activateFloatTabs(trace: trace)
@@ -343,7 +366,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         await Task.yield()
         guard !Task.isCancelled,
-              requestedVisibility,
+              isCurrentPresentationFocusRequest(voiceGeneration),
+              presentationWebFocusOwner == .externalVoice,
               tabStore.activeTabID == targetTabID,
               selectedPresentationWebView() === webView else {
             return .failed("presentation-changed")
@@ -359,6 +383,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         let focused = await webFocusRouter.focusInputForPresentation(
             preservingCapturedTarget: true,
             trace: trace
+        )
+        guard !Task.isCancelled,
+              isCurrentPresentationFocusRequest(voiceGeneration),
+              presentationWebFocusOwner == .externalVoice,
+              tabStore.activeTabID == targetTabID,
+              selectedPresentationWebView() === webView else {
+            return .failed("presentation-changed")
+        }
+        settlePresentationWebFocus(
+            generation: voiceGeneration,
+            owner: .externalVoice,
+            trace: trace,
+            focused: focused
         )
         return focused ? .ready : .failed("dom-input-unavailable")
     }
@@ -817,6 +854,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func showFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        showFloatTabs(
+            trace: trace,
+            webFocusOwner: .standardPresentation
+        )
+    }
+
+    private func showFloatTabs(
+        trace: RuntimeDiagnosticTrace? = nil,
+        webFocusOwner: PresentationWebFocusOwner
+    ) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         invalidatePendingRestoreObservationForNewPresentation()
         var presentationFields = runtimeDiagnosticSnapshot().fields
@@ -869,7 +916,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         // ordering the cross-Space shell left that context on the previously
         // clicked display for the first fullscreen gesture.
         panel.makeKeyAndOrderFront(nil)
-        beginPresentationFocusHandshake(trace: trace)
+        beginPresentationFocusHandshake(
+            trace: trace,
+            webFocusOwner: webFocusOwner
+        )
         // The source host has now actually been ordered/presented/focused,
         // so a previously hidden selected Ready Slot can be acknowledged.
         acknowledgeActiveAttentionIfActuallyPresented()
@@ -911,6 +961,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trace: cancelledPresentationTrace,
                 fields: [
                     "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                    "focus_owner": .string(presentationWebFocusOwner.rawValue),
                     "reason": .string("presentation_dismissed")
                 ]
             )
@@ -930,6 +981,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
         self.presentationTrace = nil
+        presentationWebFocusOwner = .standardPresentation
         presentationActivationConfirmedGeneration = nil
         presentationNativeFocusPending = false
         presentationWebFocusPending = false
@@ -2024,6 +2076,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trace: trace,
                 fields: [
                     "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                    "focus_owner": .string(presentationWebFocusOwner.rawValue),
                     "reason": .string("application_deactivated")
                 ]
             )
@@ -2035,6 +2088,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusTask = nil
         presentationNativeFocusPending = false
         presentationWebFocusPending = false
+        presentationWebFocusOwner = .standardPresentation
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -2069,7 +2123,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     func benchmarkControlSnapshot() -> [String: Any] {
         let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
-            [
+            var snapshot: [String: Any] = [
                 "id": profile.id.uuidString,
                 "order": profile.order,
                 "name": profile.name,
@@ -2080,6 +2134,10 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "viewport_height": Double(profile.renderingProfile.viewportHeight),
                 "zoom": Double(profile.renderingProfile.zoom),
             ]
+            if let runtime = webViewPool.runtimeRenderingSnapshot(for: profile.id) {
+                snapshot["runtime"] = runtime
+            }
+            return snapshot
         }
         var snapshot: [String: Any] = [
             "visible": isVisible,
@@ -2332,6 +2390,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         addressOverlayView.onCopy = { [weak self] rawValue in
             self?.copyAddressToPasteboard(rawValue) ?? false
+        }
+        addressOverlayView.onSetHome = { [weak self] rawValue in
+            self?.setHomeAddress(rawValue) ?? false
         }
         addressOverlayView.onCreateWebApp = { [weak self] in
             self?.presentDerivedWebAppFromCurrentPage()
@@ -2794,7 +2855,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             // A committed navigation is the page-readiness signal needed by
             // presentation focus. This is one deferred attempt, not polling;
             // the current presentation generation still owns it.
-            if requestedVisibility, presentationWebFocusPending {
+            if requestedVisibility,
+               presentationWebFocusPending,
+               presentationWebFocusOwner == .standardPresentation {
                 schedulePresentationWebInputFocus(afterNanoseconds: 200_000_000)
             }
         }
@@ -3374,6 +3437,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
+    private func setHomeAddress(_ rawValue: String) -> Bool {
+        guard let id = tabStore.activeTabID,
+              let normalized = WebAppURL.normalizedEntry(from: rawValue),
+              tabStore.updateHomeURL(
+                  id: id,
+                  url: normalized.url,
+                  schemeWasInferred: normalized.schemeWasInferred
+              ) else {
+            NSSound.beep()
+            addressOverlayView.markInvalid()
+            return false
+        }
+
+        addressOverlayView.dismiss()
+        focusActiveWebViewIfAvailable()
+        return true
+    }
+
     private func copyAddressToPasteboard(_ rawValue: String) -> Bool {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return false }
@@ -3528,7 +3609,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func beginPresentationFocusHandshake(trace: RuntimeDiagnosticTrace? = nil) {
+    private func beginPresentationFocusHandshake(
+        trace: RuntimeDiagnosticTrace? = nil,
+        webFocusOwner: PresentationWebFocusOwner = .standardPresentation
+    ) {
         let previousGeneration = presentationFocusGeneration
         let previousTrace = presentationTrace
         if presentationNativeFocusPending || presentationWebFocusPending {
@@ -3546,6 +3630,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         presentationFocusGeneration &+= 1
         presentationTrace = trace
+        presentationWebFocusOwner = webFocusOwner
         presentationActivationConfirmedGeneration = nil
         presentationNativeFocusPending = true
         presentationWebFocusPending = true
@@ -3555,21 +3640,30 @@ final class PanelController: NSObject, NSWindowDelegate {
             level: .info,
             subsystem: "panel",
             trace: trace,
-            fields: ["focus_generation": .integer(Int64(presentationFocusGeneration))]
+            fields: [
+                "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                "focus_owner": .string(webFocusOwner.rawValue)
+            ]
         )
         diagnostics.record(
             event: "presentation_focus.native.pending",
             level: .info,
             subsystem: "panel",
             trace: trace,
-            fields: ["focus_generation": .integer(Int64(presentationFocusGeneration))]
+            fields: [
+                "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                "focus_owner": .string(webFocusOwner.rawValue)
+            ]
         )
         diagnostics.record(
             event: "presentation_focus.web.pending",
             level: .info,
             subsystem: "panel",
             trace: trace,
-            fields: ["focus_generation": .integer(Int64(presentationFocusGeneration))]
+            fields: [
+                "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                "focus_owner": .string(webFocusOwner.rawValue)
+            ]
         )
 
         presentationFocusTask?.cancel()
@@ -3630,7 +3724,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             schedulePresentationFocusSettle()
         }
 
-        if presentationWebFocusPending, presentationWebFocusTask == nil {
+        if presentationWebFocusPending,
+           presentationWebFocusOwner == .standardPresentation,
+           presentationWebFocusTask == nil {
             schedulePresentationWebInputFocus()
         }
         acknowledgeActiveAttentionIfActuallyPresented()
@@ -3655,10 +3751,95 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func settlePresentationWebFocus(
+        generation: UInt64,
+        owner: PresentationWebFocusOwner,
+        trace: RuntimeDiagnosticTrace?,
+        focused: Bool
+    ) {
+        guard isCurrentPresentationFocusRequest(generation),
+              presentationWebFocusOwner == owner else {
+            if requestedVisibility {
+                diagnostics.record(
+                    event: "presentation_focus.stale_generation",
+                    level: .notice,
+                    subsystem: "panel",
+                    trace: trace,
+                    fields: [
+                        "focus_generation": .integer(Int64(generation)),
+                        "replacement_generation": .integer(Int64(presentationFocusGeneration)),
+                        "focus_owner": .string(owner.rawValue),
+                        "reason": .string("async_result_replaced")
+                    ]
+                )
+            }
+            return
+        }
+
+        guard focused else {
+            if owner == .externalVoice {
+                presentationWebFocusPending = false
+            }
+            diagnostics.record(
+                event: "presentation_focus.failed",
+                level: .warning,
+                subsystem: "panel",
+                trace: trace,
+                fields: [
+                    "focus_generation": .integer(Int64(generation)),
+                    "focus_owner": .string(owner.rawValue),
+                    "reason": .string("dom_input_unavailable")
+                ]
+            )
+            return
+        }
+
+        presentationWebFocusPending = false
+        diagnostics.record(
+            event: "presentation_focus.web.ready",
+            level: .info,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "focus_generation": .integer(Int64(generation)),
+                "focus_owner": .string(owner.rawValue),
+                "active_slot_id": tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
+            ]
+        )
+        diagnostics.record(
+            event: "presentation_focus.completed",
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "focus_generation": .integer(Int64(generation)),
+                "focus_owner": .string(owner.rawValue),
+                "shell_key": .bool(panel.isKeyWindow),
+                "source_key": .bool(sourceHostController.window.isKeyWindow)
+            ]
+        )
+        diagnostics.record(
+            event: "panel.presentation.completed",
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "focus_generation": .integer(Int64(generation)),
+                "focus_owner": .string(owner.rawValue),
+                "shell_key": .bool(panel.isKeyWindow),
+                "source_key": .bool(sourceHostController.window.isKeyWindow),
+                "active_slot_id": tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
+            ]
+        )
+        presentationTrace = nil
+    }
+
     private func schedulePresentationWebInputFocus(
         afterNanoseconds delay: UInt64 = 0
     ) {
-        guard requestedVisibility, presentationWebFocusPending else { return }
+        guard requestedVisibility,
+              presentationWebFocusPending,
+              presentationWebFocusOwner == .standardPresentation else { return }
         presentationWebFocusTask?.cancel()
         let request = RuntimeDiagnosticPresentationFocusRequest(
             generation: presentationFocusGeneration,
@@ -3691,70 +3872,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             let focused = await self.webFocusRouter.focusInputForPresentation(
                 trace: request.trace
             )
-            guard self.isCurrentPresentationFocusRequest(request.generation) else {
-                if self.requestedVisibility {
-                    self.diagnostics.record(
-                        event: "presentation_focus.stale_generation",
-                        level: .notice,
-                        subsystem: "panel",
-                        trace: request.trace,
-                        fields: [
-                            "focus_generation": .integer(Int64(request.generation)),
-                            "replacement_generation": .integer(Int64(self.presentationFocusGeneration)),
-                            "reason": .string("async_result_replaced")
-                        ]
-                    )
-                }
-                return
-            }
-            if focused {
-                self.presentationWebFocusPending = false
-                self.diagnostics.record(
-                    event: "presentation_focus.web.ready",
-                    level: .info,
-                    subsystem: "panel",
-                    trace: request.trace,
-                    fields: [
-                        "focus_generation": .integer(Int64(request.generation)),
-                        "active_slot_id": self.tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
-                    ]
-                )
-                self.diagnostics.record(
-                    event: "presentation_focus.completed",
-                    level: .notice,
-                    subsystem: "panel",
-                    trace: request.trace,
-                    fields: [
-                        "focus_generation": .integer(Int64(request.generation)),
-                        "shell_key": .bool(self.panel.isKeyWindow),
-                        "source_key": .bool(self.sourceHostController.window.isKeyWindow)
-                    ]
-                )
-                self.diagnostics.record(
-                    event: "panel.presentation.completed",
-                    level: .notice,
-                    subsystem: "panel",
-                    trace: request.trace,
-                    fields: [
-                        "focus_generation": .integer(Int64(request.generation)),
-                        "shell_key": .bool(self.panel.isKeyWindow),
-                        "source_key": .bool(self.sourceHostController.window.isKeyWindow),
-                        "active_slot_id": self.tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
-                    ]
-                )
-                self.presentationTrace = nil
-            } else {
-                self.diagnostics.record(
-                    event: "presentation_focus.failed",
-                    level: .warning,
-                    subsystem: "panel",
-                    trace: request.trace,
-                    fields: [
-                        "focus_generation": .integer(Int64(request.generation)),
-                        "reason": .string("dom_input_unavailable")
-                    ]
-                )
-            }
+            self.settlePresentationWebFocus(
+                generation: request.generation,
+                owner: .standardPresentation,
+                trace: request.trace,
+                focused: focused
+            )
         }
     }
 
@@ -4495,11 +4618,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onCommit: ((String) -> Bool)?
     var onCopy: ((String) -> Bool)?
+    var onSetHome: ((String) -> Bool)?
     var onCreateWebApp: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     let field = NSTextField()
     private let copyButton = NSButton()
+    private let setHomeButton = NSButton()
     private let createButton = NSButton(title: "New App", target: nil, action: nil)
     private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
@@ -4530,6 +4655,17 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         copyButton.target = self
         copyButton.action = #selector(copyPressed(_:))
 
+        setHomeButton.image = NSImage(
+            systemSymbolName: "house",
+            accessibilityDescription: "Set as Home"
+        )
+        setHomeButton.toolTip = "Set as Home"
+        setHomeButton.bezelStyle = .inline
+        setHomeButton.isBordered = false
+        setHomeButton.translatesAutoresizingMaskIntoConstraints = false
+        setHomeButton.target = self
+        setHomeButton.action = #selector(setHomePressed(_:))
+
         createButton.toolTip = "Create a new Web App from the current page"
         createButton.bezelStyle = .rounded
         createButton.controlSize = .small
@@ -4539,6 +4675,7 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 
         addSubview(field)
         addSubview(copyButton)
+        addSubview(setHomeButton)
         addSubview(createButton)
         NSLayoutConstraint.activate([
             field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -4549,7 +4686,12 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
             copyButton.widthAnchor.constraint(equalToConstant: 26),
             copyButton.heightAnchor.constraint(equalToConstant: 26),
 
-            createButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            setHomeButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            setHomeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            setHomeButton.widthAnchor.constraint(equalToConstant: 26),
+            setHomeButton.heightAnchor.constraint(equalToConstant: 26),
+
+            createButton.leadingAnchor.constraint(equalTo: setHomeButton.trailingAnchor, constant: 6),
             createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             createButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 66),
@@ -4622,6 +4764,13 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         }
         copyFeedbackWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
+    }
+
+    @objc private func setHomePressed(_ sender: NSButton) {
+        guard onSetHome?(field.stringValue) == true else {
+            markInvalid()
+            return
+        }
     }
 
     @objc private func createPressed(_ sender: NSButton) {

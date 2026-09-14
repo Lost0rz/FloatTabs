@@ -211,6 +211,22 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safeState"], .string("ready"))
     }
 
+    func testVoiceFocusDiagnosticsKeepOnlyFixedClassifications() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "focus_owner": .string("external_voice"),
+            "voice_target_kind": .string("message_editor"),
+            "voice_target_source": .string("captured"),
+            "aria_label": .string("Message ChatGPT with private draft"),
+            "text_content": .string("private message content")
+        ], mode: .verbose)
+
+        XCTAssertEqual(fields["focus_owner"], .string("external_voice"))
+        XCTAssertEqual(fields["voice_target_kind"], .string("message_editor"))
+        XCTAssertEqual(fields["voice_target_source"], .string("captured"))
+        XCTAssertNil(fields["aria_label"])
+        XCTAssertNil(fields["text_content"])
+    }
+
     func testWriterReappliesSanitizerAtPersistenceBoundary() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("FloatTabsDiagnostics-privacy-" + UUID().uuidString)

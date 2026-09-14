@@ -74,11 +74,47 @@ private final class DiagnosticsPresentationFocusAdapter: WebSiteAdapter {
 
     func focusInput(in webView: WKWebView) async throws {}
 
-    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .captured(kind: .otherEditable)
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .fallback(kind: .otherEditable)
+    }
+
+    func focusPage(in webView: WKWebView) async throws {}
+
+    func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+}
+
+@MainActor
+private final class CountingPresentationFocusAdapter: WebSiteAdapter {
+    let identifier = "counting-focus-test"
+    private(set) var ordinaryFocusCount = 0
+    private(set) var voiceFocusCount = 0
+
+    func matches(url: URL?, webView: WKWebView) async -> Bool {
         true
     }
 
-    func focusInputForVoice(in webView: WKWebView) async throws {}
+    func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+
+    func focusInput(in webView: WKWebView) async throws {
+        ordinaryFocusCount += 1
+    }
+
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .captured(kind: .otherEditable)
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        voiceFocusCount += 1
+        return .captured(kind: .otherEditable)
+    }
 
     func focusPage(in webView: WKWebView) async throws {}
 
@@ -116,6 +152,37 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     }
 
     // MARK: Runtime diagnostics trace isolation
+
+    func testExternalVoiceOwnsPresentationWebFocusBeforeOrdinaryHandshake() async throws {
+        let adapter = CountingPresentationFocusAdapter()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [adapter]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+
+        let result = await controller.prepareInputFocusForExternalVoice()
+        XCTAssertEqual(result, .ready)
+        try await wait(milliseconds: 100)
+
+        XCTAssertEqual(adapter.voiceFocusCount, 1)
+        XCTAssertEqual(adapter.ordinaryFocusCount, 0)
+        let begin = try XCTUnwrap(
+            writer.events.first(where: { $0.event == "presentation_focus.begin" })
+        )
+        XCTAssertEqual(begin.fields["focus_owner"], .string("external_voice"))
+        let completed = try XCTUnwrap(
+            writer.events.first(where: { $0.event == "presentation_focus.completed" })
+        )
+        XCTAssertEqual(completed.fields["focus_owner"], .string("external_voice"))
+    }
 
     func testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()

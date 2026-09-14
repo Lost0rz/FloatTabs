@@ -26,6 +26,8 @@ enum RuntimeDiagnosticPrivacy {
         "ipaddress",
         "location",
         "dictionary",
+        "aria",
+        "label",
     ]
 
     private static let secretPatterns = [
