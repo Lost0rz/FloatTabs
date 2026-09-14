@@ -7,7 +7,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
     func testSettingsUsesFiveConsolidatedTopLevelPages() {
         XCTAssertEqual(
             GlobalSettingsPage.allCases.map(\.title),
-            ["General", "Browser & Performance", "Audio", "Shortcuts", "Advanced"]
+            ["General", "Browser", "Audio", "Shortcuts", "Advanced"]
         )
         XCTAssertFalse(
             GlobalSettingsPage.allCases.map(\.title).contains {
@@ -54,6 +54,17 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         }
     }
 
+    func testSettingsPageLoadsEmbeddedViewsWithValidConstraintHierarchy() {
+        let page = SettingsPageViewController(childViewControllers: [
+            StubSettingsChildViewController(),
+            StubSettingsChildViewController(),
+        ])
+
+        page.loadView()
+
+        XCTAssertTrue(page.view.subviews.contains(where: { $0 is NSScrollView }))
+    }
+
     func testSplitSettingsControllersKeepTheirExistingPresentationSeams() {
         let profile = BrowserProfile(
             id: UUID(),
@@ -88,8 +99,20 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         let aboutController = AboutSettingsViewController()
         aboutController.loadView()
         XCTAssertEqual(aboutController.displayedVersion, AppReleaseInfo.currentVersionDisplay)
-        for fix in AppReleaseInfo.latestFixes {
-            XCTAssertTrue(aboutController.displayedLatestFixes.contains(fix))
-        }
+        XCTAssertEqual(aboutController.displayedLatestFixes, "")
+    }
+
+    func testVersionDisplayOmitsBuildNumber() {
+        XCTAssertEqual(
+            AppReleaseInfo.displayVersion(shortVersion: "0.4.0", build: "17"),
+            "Version 0.4.0"
+        )
+    }
+}
+
+@MainActor
+private final class StubSettingsChildViewController: NSViewController {
+    override func loadView() {
+        view = NSView()
     }
 }

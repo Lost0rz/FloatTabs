@@ -40,7 +40,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         let title = NSTextField(labelWithString: "Runtime Diagnostics")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         let detail = NSTextField(
-            wrappingLabelWithString: "Diagnostics are observation-only and sanitized before persistence. Standard mode is the shipped default; export is a local JSONL file for support review."
+            wrappingLabelWithString: "Collect sanitized diagnostics for troubleshooting."
         )
         detail.textColor = .secondaryLabelColor
         detail.maximumNumberOfLines = 0

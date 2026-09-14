@@ -380,28 +380,18 @@ final class SpeechSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             Self.titleLabel("ChatGPT Speech"),
-            Self.detailLabel(
-                "Choose Apple voices and speaking rate for cleaned ChatGPT responses. "
-                    + "Auto Speak and Read Latest are controlled per Tab from the left rail."
-            ),
+            Self.detailLabel("Choose voices and speaking rate."),
             Self.spacer(8),
             makeRow(label: "Chinese Voice", control: chineseVoicePopup),
             makeRow(label: "English Voice", control: englishVoicePopup),
             makeRow(label: "Speech Rate", control: rateControls),
             makeRow(label: "Follow Speech on Page", control: followSpeechSwitch),
-            Self.detailLabel(
-                "When speech starts a paragraph, formula, or rich-text block, the active "
-                    + "ChatGPT page follows it. Manual scrolling temporarily suspends follow."
-            ),
+            Self.detailLabel("Follow spoken content on the active page."),
             Self.spacer(4),
             previewControls,
             Self.spacer(4),
             voiceActions,
-            Self.detailLabel(
-                "Manage High-Quality Voices opens macOS System Settings. "
-                    + "If a direct Read & Speak link is unavailable, use Accessibility → "
-                    + "Read & Speak → System Voice → Manage Voices."
-            ),
+            Self.detailLabel("Opens macOS voice settings."),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -655,9 +645,7 @@ final class NotificationsSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             Self.titleLabel("Ready Alerts"),
-            Self.detailLabel(
-                "Plays when a new ChatGPT completion enters Ready attention.\nNo sound is played when the completion is already being viewed."
-            ),
+            Self.detailLabel("Play a sound when ChatGPT is ready."),
             Self.spacer(8),
             enabledRow,
             soundRow,
@@ -1016,9 +1004,7 @@ private final class AppearanceSettingsViewController: NSViewController {
 
         fixedSizeSection.setViews([
             Self.titleLabel("Fixed Window Size"),
-            Self.detailLabel(
-                "This is the shared viewport used by every Tab in Fixed mode. Resizing the FloatTabs window outside Settings updates this same saved value."
-            ),
+            Self.detailLabel("Shared size used by every Tab in Fixed mode."),
             fixedSizeControl,
             customFixedSizeRow,
         ], in: .leading)
@@ -1028,27 +1014,19 @@ private final class AppearanceSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             Self.titleLabel("Interface Appearance"),
-            Self.detailLabel(
-                "Changes FloatTabs' native appearance. Websites keep their own CSS and may still respond to WebKit's effective light/dark appearance."
-            ),
+            Self.detailLabel("Choose FloatTabs' appearance."),
             appearanceControl,
             Self.spacer(6),
             Self.titleLabel("Menu Bar"),
-            Self.detailLabel(
-                "Choose whether the status item shows the current Web App name beside its favicon."
-            ),
+            Self.detailLabel("Show the current Web App name in the menu bar."),
             menuBarDisplayControl,
             Self.spacer(6),
             Self.titleLabel("Border Theme"),
-            Self.detailLabel(
-                "Choose the outline directly. Rainbow keeps the animated outline; the final swatch is your custom color."
-            ),
+            Self.detailLabel("Choose a border style or custom color."),
             borderPalette,
             Self.spacer(6),
             Self.titleLabel("Window Size Behavior"),
-            Self.detailLabel(
-                "Per Web App follows each Tab's saved size. Fixed uses one shared size without overwriting any saved individual Web App size."
-            ),
+            Self.detailLabel("Use each Web App's size or one shared size."),
             windowSizeControl,
             fixedSizeSection,
         ])
@@ -1327,9 +1305,7 @@ final class ShortcutsSettingsViewController: NSViewController {
 
         var views: [NSView] = [
             sectionTitle("Global"),
-            detailLabel(
-                "Show / Hide works from other apps. All remaining shortcuts below are app-local and only act while FloatTabs is active."
-            ),
+            detailLabel("Show / Hide works everywhere; other shortcuts work in FloatTabs."),
             shortcutRecorderRow("Show / Hide FloatTabs", name: .toggleFloatTabs),
             spacer(10),
             sectionTitle("Slots"),
@@ -1476,26 +1452,10 @@ final class ShortcutsSettingsViewController: NSViewController {
 }
 
 enum AppReleaseInfo {
-    static let latestFixes = [
-        "Fullscreen presentation now follows the display where FloatTabs is explicitly summoned, without changing the stable restore path.",
-        "Authentication-only popups preserve Google/OAuth login flows; ordinary pages and video links stay in the current Tab.",
-        "Hot, Warm, and Cold Tab residency controls are configurable, and Cold Tabs release their WebView and safe cache like bookmarks.",
-        "Website Storage moved to Performance settings with persisted Warm/Cold retention controls.",
-        "Browser Profiles: keep multiple independent logins for the same site without signing out and back in.",
-        "Each Profile is its own private login/session container; the built-in Default Profile keeps your existing sessions exactly as they are.",
-        "Create, rename, and color-code Profiles, and see the active Tab tinted with its Profile color.",
-        "Profile deletion is safer: it stays unavailable while Tabs still use the Profile, and tells you which ones.",
-        "Startup configuration recovery is hardened so an unreadable configuration can never be overwritten by an empty fallback.",
-    ]
-
-    static func displayVersion(shortVersion: String?, build: String?) -> String {
+    static func displayVersion(shortVersion: String?, build _: String?) -> String {
         let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let buildNumber = build?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedVersion = version.flatMap { $0.isEmpty ? nil : $0 } ?? "Unknown"
-        guard let buildNumber, !buildNumber.isEmpty else {
-            return "Version \(resolvedVersion)"
-        }
-        return "Version \(resolvedVersion) (Build \(buildNumber))"
+        return "Version \(resolvedVersion)"
     }
 
     static var currentVersionDisplay: String {
@@ -1505,9 +1465,6 @@ enum AppReleaseInfo {
         )
     }
 
-    static var latestFixesDisplay: String {
-        latestFixes.map { "• \($0)" }.joined(separator: "\n")
-    }
 }
 
 @MainActor
@@ -1649,19 +1606,13 @@ final class PerformanceSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             sectionTitle("Tab Residency"),
-            detailLabel(
-                "Residency controls how much runtime state a Tab keeps. Hot stays attached, Warm keeps its WebView for a configurable idle period, and Cold behaves like a bookmark: it releases the WebView and rebuilds the page when opened again."
-            ),
+            detailLabel("Hot keeps the page active; Warm and Cold release it after idle time."),
             websiteCacheSettingRow("Warm WebView retention", control: warmRetentionPopup),
             websiteCacheSettingRow("Cold release delay", control: coldReleasePopup),
-            detailLabel(
-                "Choose Hot, Warm, or Cold for each Tab from its Tab menu. A Browser Profile shared by multiple Tabs uses the most protective setting for cache decisions."
-            ),
+            detailLabel("Choose Hot, Warm, or Cold from each Tab's menu."),
             spacer(10),
             sectionTitle("Website Storage"),
-            detailLabel(
-                "FloatTabs only releases re-downloadable webpage caches. Cookies, login state, Local Storage, IndexedDB and other persistent website data are kept."
-            ),
+            detailLabel("Only re-downloadable webpage caches are removed."),
             websiteCacheSettingRow("Estimated cache usage", control: websiteCacheUsageLabel),
             websiteCacheSettingRow("Last cleanup", control: websiteCacheLastCleanupLabel),
             websiteCacheSettingRow("Automatically manage cache", control: websiteCacheAutomaticSwitch),
@@ -1670,9 +1621,7 @@ final class PerformanceSettingsViewController: NSViewController {
             releaseWebsiteCacheButton,
             websiteCacheResultLabel,
             spacer(8),
-            detailLabel(
-                "Cache size is an estimate of FloatTabs-owned WebKit cache directories. If the layout is unavailable or unsafe to identify, FloatTabs continues time-based cleanup and reports the size as Unavailable."
-            ),
+            detailLabel("Cache size is an estimate."),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
