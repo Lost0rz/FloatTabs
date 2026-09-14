@@ -2123,7 +2123,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     func benchmarkControlSnapshot() -> [String: Any] {
         let profiles: [[String: Any]] = tabStore.orderedProfiles.map { profile in
-            var snapshot: [String: Any] = [
+            [
                 "id": profile.id.uuidString,
                 "order": profile.order,
                 "name": profile.name,
@@ -2134,10 +2134,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "viewport_height": Double(profile.renderingProfile.viewportHeight),
                 "zoom": Double(profile.renderingProfile.zoom),
             ]
-            if let runtime = webViewPool.runtimeRenderingSnapshot(for: profile.id) {
-                snapshot["runtime"] = runtime
-            }
-            return snapshot
         }
         var snapshot: [String: Any] = [
             "visible": isVisible,
@@ -2390,9 +2386,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         addressOverlayView.onCopy = { [weak self] rawValue in
             self?.copyAddressToPasteboard(rawValue) ?? false
-        }
-        addressOverlayView.onSetHome = { [weak self] rawValue in
-            self?.setHomeAddress(rawValue) ?? false
         }
         addressOverlayView.onCreateWebApp = { [weak self] in
             self?.presentDerivedWebAppFromCurrentPage()
@@ -3437,24 +3430,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    private func setHomeAddress(_ rawValue: String) -> Bool {
-        guard let id = tabStore.activeTabID,
-              let normalized = WebAppURL.normalizedEntry(from: rawValue),
-              tabStore.updateHomeURL(
-                  id: id,
-                  url: normalized.url,
-                  schemeWasInferred: normalized.schemeWasInferred
-              ) else {
-            NSSound.beep()
-            addressOverlayView.markInvalid()
-            return false
-        }
-
-        addressOverlayView.dismiss()
-        focusActiveWebViewIfAvailable()
-        return true
-    }
-
     private func copyAddressToPasteboard(_ rawValue: String) -> Bool {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return false }
@@ -3717,6 +3692,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 trace: presentationTrace,
                 fields: [
                     "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                    "focus_owner": .string(presentationWebFocusOwner.rawValue),
                     "shell_key": .bool(panel.isKeyWindow),
                     "source_key": .bool(sourceHostController.window.isKeyWindow)
                 ]
@@ -3730,6 +3706,41 @@ final class PanelController: NSObject, NSWindowDelegate {
             schedulePresentationWebInputFocus()
         }
         acknowledgeActiveAttentionIfActuallyPresented()
+
+        guard !presentationNativeFocusPending,
+              !presentationWebFocusPending,
+              let trace = presentationTrace else {
+            return
+        }
+
+        let focusGeneration = presentationFocusGeneration
+        let focusOwner = presentationWebFocusOwner
+        diagnostics.record(
+            event: "presentation_focus.completed",
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "focus_generation": .integer(Int64(focusGeneration)),
+                "focus_owner": .string(focusOwner.rawValue),
+                "shell_key": .bool(panel.isKeyWindow),
+                "source_key": .bool(sourceHostController.window.isKeyWindow)
+            ]
+        )
+        diagnostics.record(
+            event: "panel.presentation.completed",
+            level: .notice,
+            subsystem: "panel",
+            trace: trace,
+            fields: [
+                "focus_generation": .integer(Int64(focusGeneration)),
+                "focus_owner": .string(focusOwner.rawValue),
+                "shell_key": .bool(panel.isKeyWindow),
+                "source_key": .bool(sourceHostController.window.isKeyWindow),
+                "active_slot_id": tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
+            ]
+        )
+        presentationTrace = nil
     }
 
     private func schedulePresentationFocusSettle() {
@@ -3806,32 +3817,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "active_slot_id": tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
             ]
         )
-        diagnostics.record(
-            event: "presentation_focus.completed",
-            level: .notice,
-            subsystem: "panel",
-            trace: trace,
-            fields: [
-                "focus_generation": .integer(Int64(generation)),
-                "focus_owner": .string(owner.rawValue),
-                "shell_key": .bool(panel.isKeyWindow),
-                "source_key": .bool(sourceHostController.window.isKeyWindow)
-            ]
-        )
-        diagnostics.record(
-            event: "panel.presentation.completed",
-            level: .notice,
-            subsystem: "panel",
-            trace: trace,
-            fields: [
-                "focus_generation": .integer(Int64(generation)),
-                "focus_owner": .string(owner.rawValue),
-                "shell_key": .bool(panel.isKeyWindow),
-                "source_key": .bool(sourceHostController.window.isKeyWindow),
-                "active_slot_id": tabStore.activeTabID.map { .string($0.uuidString) } ?? .null
-            ]
-        )
-        presentationTrace = nil
+        completePresentationFocusIfReady()
     }
 
     private func schedulePresentationWebInputFocus(
@@ -4618,13 +4604,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onCommit: ((String) -> Bool)?
     var onCopy: ((String) -> Bool)?
-    var onSetHome: ((String) -> Bool)?
     var onCreateWebApp: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     let field = NSTextField()
     private let copyButton = NSButton()
-    private let setHomeButton = NSButton()
     private let createButton = NSButton(title: "New App", target: nil, action: nil)
     private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
@@ -4655,17 +4639,6 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         copyButton.target = self
         copyButton.action = #selector(copyPressed(_:))
 
-        setHomeButton.image = NSImage(
-            systemSymbolName: "house",
-            accessibilityDescription: "Set as Home"
-        )
-        setHomeButton.toolTip = "Set as Home"
-        setHomeButton.bezelStyle = .inline
-        setHomeButton.isBordered = false
-        setHomeButton.translatesAutoresizingMaskIntoConstraints = false
-        setHomeButton.target = self
-        setHomeButton.action = #selector(setHomePressed(_:))
-
         createButton.toolTip = "Create a new Web App from the current page"
         createButton.bezelStyle = .rounded
         createButton.controlSize = .small
@@ -4675,7 +4648,6 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 
         addSubview(field)
         addSubview(copyButton)
-        addSubview(setHomeButton)
         addSubview(createButton)
         NSLayoutConstraint.activate([
             field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -4686,12 +4658,7 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
             copyButton.widthAnchor.constraint(equalToConstant: 26),
             copyButton.heightAnchor.constraint(equalToConstant: 26),
 
-            setHomeButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
-            setHomeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            setHomeButton.widthAnchor.constraint(equalToConstant: 26),
-            setHomeButton.heightAnchor.constraint(equalToConstant: 26),
-
-            createButton.leadingAnchor.constraint(equalTo: setHomeButton.trailingAnchor, constant: 6),
+            createButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
             createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             createButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 66),
@@ -4764,13 +4731,6 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         }
         copyFeedbackWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
-    }
-
-    @objc private func setHomePressed(_ sender: NSButton) {
-        guard onSetHome?(field.stringValue) == true else {
-            markInvalid()
-            return
-        }
     }
 
     @objc private func createPressed(_ sender: NSButton) {

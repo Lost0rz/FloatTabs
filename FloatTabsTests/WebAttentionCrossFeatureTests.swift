@@ -123,6 +123,45 @@ private final class CountingPresentationFocusAdapter: WebSiteAdapter {
     }
 }
 
+@MainActor
+private final class SuspendedPresentationFocusAdapter: WebSiteAdapter {
+    let identifier = "suspended-focus-test"
+    private(set) var voiceFocusStarted = false
+    private var pendingVoiceFocus: CheckedContinuation<WebFocusVoiceTarget, Never>?
+
+    func matches(url: URL?, webView: WKWebView) async -> Bool {
+        true
+    }
+
+    func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+
+    func focusInput(in webView: WKWebView) async throws {}
+
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .captured(kind: .otherEditable)
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        voiceFocusStarted = true
+        return await withCheckedContinuation { continuation in
+            pendingVoiceFocus = continuation
+        }
+    }
+
+    func completeSuspendedVoiceFocus() {
+        pendingVoiceFocus?.resume(returning: .captured(kind: .otherEditable))
+        pendingVoiceFocus = nil
+    }
+
+    func focusPage(in webView: WKWebView) async throws {}
+
+    func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+}
+
 /// Stage F — cross-feature closure.
 ///
 /// These tests prove the COMPOSITION of the attention feature across the
@@ -182,6 +221,125 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             writer.events.first(where: { $0.event == "presentation_focus.completed" })
         )
         XCTAssertEqual(completed.fields["focus_owner"], .string("external_voice"))
+    }
+
+    func testExternalVoiceCompletionWaitsForNativeReadinessAndSharesTrace() async throws {
+        var nativeReady = false
+        let trace = RuntimeDiagnosticTrace(root: "presentation-barrier")
+        let adapter = CountingPresentationFocusAdapter()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [adapter]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: {
+                (applicationActive: true, windowKey: nativeReady)
+            }
+        )
+
+        let result = await controller.prepareInputFocusForExternalVoice(trace: trace)
+        XCTAssertEqual(result, .ready)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "presentation_focus.completed" }.count,
+            0
+        )
+
+        nativeReady = true
+        NotificationCenter.default.post(
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        let completed = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains { $0.event == "presentation_focus.completed" }
+                && writer.events.contains { $0.event == "panel.presentation.completed" }
+                && writer.events.contains { $0.event == "presentation_focus.native.ready" }
+        }
+        XCTAssertTrue(completed)
+
+        let webReady = try XCTUnwrap(
+            writer.events.first { $0.event == "presentation_focus.web.ready" }
+        )
+        let focusCompleted = try XCTUnwrap(
+            writer.events.first { $0.event == "presentation_focus.completed" }
+        )
+        let panelCompleted = try XCTUnwrap(
+            writer.events.first { $0.event == "panel.presentation.completed" }
+        )
+        XCTAssertEqual(webReady.traceID, trace.id)
+        XCTAssertEqual(focusCompleted.traceID, trace.id)
+        XCTAssertEqual(panelCompleted.traceID, trace.id)
+        XCTAssertEqual(focusCompleted.fields["focus_owner"], .string("external_voice"))
+        XCTAssertEqual(panelCompleted.fields["focus_owner"], .string("external_voice"))
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "presentation_focus.completed" }.count,
+            1
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "panel.presentation.completed" }.count,
+            1
+        )
+    }
+
+    func testStaleExternalVoiceGenerationCannotCompleteReplacementPresentation() async throws {
+        let adapter = SuspendedPresentationFocusAdapter()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [adapter]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, store, _) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+        let voiceTrace = RuntimeDiagnosticTrace(root: "voice-generation-A")
+        let replacementTrace = RuntimeDiagnosticTrace(root: "presentation-generation-B")
+
+        let request = Task { @MainActor in
+            await controller.prepareInputFocusForExternalVoice(trace: voiceTrace)
+        }
+        let voiceFocusStarted = try await waitUntil(timeoutMilliseconds: 1000) {
+            adapter.voiceFocusStarted
+        }
+        XCTAssertTrue(voiceFocusStarted)
+
+        let replacement = try XCTUnwrap(store.profiles.first { $0.name == "ChatB" })
+        XCTAssertTrue(store.select(id: replacement.id))
+        controller.showFloatTabs(trace: replacementTrace)
+        adapter.completeSuspendedVoiceFocus()
+
+        let staleResult = await request.value
+        XCTAssertEqual(staleResult, .failed("presentation-changed"))
+        let replacementCompleted = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "presentation_focus.completed"
+                    && $0.traceID == replacementTrace.id
+            }
+        }
+        XCTAssertTrue(replacementCompleted)
+        XCTAssertFalse(
+            writer.events.contains {
+                ["presentation_focus.completed", "panel.presentation.completed"].contains($0.event)
+                    && $0.traceID == voiceTrace.id
+            }
+        )
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "presentation_focus.stale_generation"
+                    && $0.traceID == voiceTrace.id
+            }
+        )
     }
 
     func testCompletedPresentationTraceIsClearedBeforeIndependentDismissTrace() async throws {

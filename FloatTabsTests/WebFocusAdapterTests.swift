@@ -294,6 +294,72 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(markerCount, 0)
     }
 
+    func testVoiceFocusRestoresCapturedChatGPTMessageEditorAndSelection() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">bottom draft</textarea>
+                <article style="height: 800px;">
+                    <textarea aria-label="Edit message">edited response</textarea>
+                </article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let editorPrepared = await boolValue(
+            """
+            (() => {
+                const editor = document.querySelector('textarea[aria-label="Edit message"]');
+                window.__originalVoiceEditor = editor;
+                editor.focus();
+                editor.setSelectionRange(2, 5);
+                return document.activeElement === editor
+                    && editor.selectionStart === 2
+                    && editor.selectionEnd === 5;
+            })()
+            """,
+            in: webView
+        )
+        XCTAssertTrue(editorPrepared)
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        let captured = await router.captureInputTargetForExternalVoice()
+
+        XCTAssertTrue(captured.succeeded)
+        XCTAssertEqual(captured.kind, .messageEditor)
+        XCTAssertEqual(captured.source, .captured)
+
+        _ = await boolValue(
+            "document.querySelector('textarea[aria-label=\"Message ChatGPT\"]').focus(); true",
+            in: webView
+        )
+
+        let restored = await router.focusInputForPresentation(
+            preservingCapturedTarget: true
+        )
+        let restoredEditor = await boolValue(
+            "document.activeElement === window.__originalVoiceEditor",
+            in: webView
+        )
+        let selectionStart = await numberValue(
+            "document.activeElement.selectionStart",
+            in: webView
+        )
+        let selectionEnd = await numberValue(
+            "document.activeElement.selectionEnd",
+            in: webView
+        )
+
+        XCTAssertTrue(restored)
+        XCTAssertTrue(restoredEditor)
+        XCTAssertEqual(selectionStart, 2)
+        XCTAssertEqual(selectionEnd, 5)
+    }
+
     func testVoiceFocusFallsBackToChatGPTComposerWhenActivationChangedToMessageEditor() async throws {
         let webView = makeWebView()
         load(
