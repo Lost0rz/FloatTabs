@@ -10,6 +10,39 @@ enum WebFocusTarget: String, CaseIterable, Codable, Equatable {
     case unavailable
 }
 
+enum WebFocusVoiceTargetKind: String, CaseIterable, Codable, Equatable {
+    case composer
+    case messageEditor = "message_editor"
+    case otherEditable = "other_editable"
+    case none
+}
+
+enum WebFocusVoiceTargetSource: String, CaseIterable, Codable, Equatable {
+    case captured
+    case fallbackCandidate = "fallback_candidate"
+    case none
+}
+
+struct WebFocusVoiceTarget: Equatable {
+    let succeeded: Bool
+    let kind: WebFocusVoiceTargetKind
+    let source: WebFocusVoiceTargetSource
+
+    static let none = WebFocusVoiceTarget(
+        succeeded: false,
+        kind: .none,
+        source: .none
+    )
+
+    static func captured(kind: WebFocusVoiceTargetKind) -> Self {
+        Self(succeeded: true, kind: kind, source: .captured)
+    }
+
+    static func fallback(kind: WebFocusVoiceTargetKind) -> Self {
+        Self(succeeded: true, kind: kind, source: .fallbackCandidate)
+    }
+}
+
 enum WebFocusAdapterError: LocalizedError, Equatable {
     case inputUnavailable
     case pageUnavailable
@@ -51,8 +84,8 @@ protocol WebSiteAdapter: AnyObject {
     func matches(url: URL?, webView: WKWebView) async -> Bool
     func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget
     func focusInput(in webView: WKWebView) async throws
-    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool
-    func focusInputForVoice(in webView: WKWebView) async throws
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget
     func focusPage(in webView: WKWebView) async throws
     func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget
     func focusNext(in webView: WKWebView) async throws
@@ -60,12 +93,13 @@ protocol WebSiteAdapter: AnyObject {
 }
 
 extension WebSiteAdapter {
-    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
-        false
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .none
     }
 
-    func focusInputForVoice(in webView: WKWebView) async throws {
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
         try await focusInput(in: webView)
+        return .fallback(kind: .otherEditable)
     }
 
     func focusNext(in webView: WKWebView) async throws {
@@ -144,6 +178,18 @@ enum WebFocusDOM {
             element.getAttribute('type') || '',
             element.textContent || ''
         ].join(' ').toLowerCase();
+    }
+
+    function voiceTargetKind(element) {
+        if (!element) return 'none';
+        const context = inputContext(element);
+        if (/message chatgpt|ask anything|ask chatgpt/.test(context)) {
+            return 'composer';
+        }
+        if (/edit message|edit response/.test(context)) {
+            return 'message_editor';
+        }
+        return 'other_editable';
     }
 
     function isUtilityInput(element) {
@@ -375,8 +421,14 @@ enum WebFocusDOM {
         return pageCandidate() ? 'page' : 'unavailable';
     }
 
-    function result(success, target, reason) {
-        return { success: !!success, target: target || 'unavailable', reason: reason || null };
+    function result(success, target, reason, voiceTargetKind = 'none', voiceTargetSource = 'none') {
+        return {
+            success: !!success,
+            target: target || 'unavailable',
+            reason: reason || null,
+            voice_target_kind: voiceTargetKind,
+            voice_target_source: voiceTargetSource
+        };
     }
     """#
 
@@ -403,26 +455,49 @@ enum WebFocusDOM {
                 if (isUsableInput(captured) && !isUtilityInput(captured)) {
                     const capturedSuccess = focusInputElement(captured, true);
                     clearCapturedVoiceInput();
-                    if (capturedSuccess) return result(true, 'input', null);
+                    if (capturedSuccess) {
+                        return result(
+                            true,
+                            'input',
+                            null,
+                            voiceTargetKind(captured),
+                            'captured'
+                        );
+                    }
                 }
                 clearCapturedVoiceInput();
             }
 
-            // The active composer is the common fast path for voice input,
-            // including ChatGPT's message editor. Reusing it avoids a second
-            // WebKit round trip just to ask where focus currently is, and it
-            // prevents a focused edit box from being replaced by the bottom
-            // composer while the user is dictating an existing message.
-            const active = activeInputElement();
-            if (isUsableInput(active) && !isUtilityInput(active)) {
-                const activeSuccess = focusInputElement(active);
-                if (activeSuccess) return result(true, 'input', null);
+            // Once presentation activation has happened, document.activeElement
+            // may be WebKit's restored editor rather than the target captured
+            // before activation. Voice fallback must therefore use adapter
+            // scoring and never trust that post-activation focus history.
+            if (!preserveCapturedTarget) {
+                const active = activeInputElement();
+                if (isUsableInput(active) && !isUtilityInput(active)) {
+                    const activeSuccess = focusInputElement(active);
+                    if (activeSuccess) return result(true, 'input', null);
+                }
             }
 
             const input = findInput((element) => \(scoring));
-            if (!input) return result(false, 'unavailable', 'input_unavailable');
+            if (!input) {
+                return result(
+                    false,
+                    'unavailable',
+                    'input_unavailable',
+                    'none',
+                    'none'
+                );
+            }
             const success = focusInputElement(input);
-            return result(success, success ? 'input' : 'unavailable', success ? null : 'focus_failed');
+            return result(
+                success,
+                success ? 'input' : 'unavailable',
+                success ? null : 'focus_failed',
+                success ? voiceTargetKind(input) : 'none',
+                success ? 'fallback_candidate' : 'none'
+            );
         })()
         """
     }
@@ -434,13 +509,21 @@ enum WebFocusDOM {
             clearCapturedVoiceInput();
             const active = activeInputElement();
             if (!isUsableInput(active) || isUtilityInput(active)) {
-                return { captured: false };
+                return {
+                    captured: false,
+                    voice_target_kind: 'none',
+                    voice_target_source: 'none'
+                };
             }
             active.setAttribute(voiceInputTargetAttribute, 'true');
             try {
                 active[voiceInputSelectionProperty] = captureInputSelection(active);
             } catch (_) {}
-            return { captured: true };
+            return {
+                captured: true,
+                voice_target_kind: voiceTargetKind(active),
+                voice_target_source: 'captured'
+            };
         })()
         """
     }
@@ -502,5 +585,20 @@ enum WebFocusDOM {
 
     static func reason(from dictionary: [String: Any]) -> String? {
         dictionary["reason"] as? String
+    }
+
+    static func voiceTarget(from dictionary: [String: Any]) -> WebFocusVoiceTarget {
+        guard let rawKind = dictionary["voice_target_kind"] as? String,
+              let kind = WebFocusVoiceTargetKind(rawValue: rawKind),
+              let rawSource = dictionary["voice_target_source"] as? String,
+              let source = WebFocusVoiceTargetSource(rawValue: rawSource) else {
+            return .none
+        }
+        return WebFocusVoiceTarget(
+            succeeded: (dictionary["success"] as? Bool)
+                ?? ((dictionary["captured"] as? Bool) ?? false),
+            kind: kind,
+            source: source
+        )
     }
 }

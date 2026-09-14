@@ -31,6 +31,24 @@ final class ChatGPTAdapter: WebSiteAdapter {
         })()
         """
 
+    private let voiceInputScoring = """
+        (() => {
+            let score = 0;
+            const context = inputContext(element);
+            if (element.tagName.toLowerCase() === 'textarea') score += 100;
+            if (element.isContentEditable) score += 90;
+            if (element.getAttribute('role') === 'textbox') score += 45;
+            if (isInMainRegion(element)) score += 45;
+            if (/message chatgpt|ask anything|ask chatgpt/.test(context)) score += 220;
+            if (/prompt/.test(context)) score += 100;
+            if (/edit message|edit response/.test(context)) score -= 300;
+            if (/search|address|url|setting|find in page|navigate/.test(context)) score -= 1000;
+            if (element.getAttribute('type') === 'search') score -= 1000;
+            if (element.closest('header, nav, aside, [role="navigation"], [role="dialog"]')) score -= 160;
+            return score;
+        })()
+        """
+
     func matches(url: URL?, webView: WKWebView) async -> Bool {
         if let host = url?.host?.lowercased(), Self.supportedHosts.contains(host) {
             return true
@@ -95,18 +113,18 @@ final class ChatGPTAdapter: WebSiteAdapter {
         }
     }
 
-    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
         let result = try await WebFocusDOM.evaluate(
             WebFocusDOM.captureInputTargetForVoiceScript(),
             in: webView
         )
-        return (result["captured"] as? Bool) ?? false
+        return WebFocusDOM.voiceTarget(from: result)
     }
 
-    func focusInputForVoice(in webView: WKWebView) async throws {
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
         let result = try await WebFocusDOM.evaluate(
             WebFocusDOM.inputFocusScript(
-                scoring: inputScoring,
+                scoring: voiceInputScoring,
                 preservingCapturedTarget: true
             ),
             in: webView
@@ -114,6 +132,7 @@ final class ChatGPTAdapter: WebSiteAdapter {
         guard WebFocusDOM.succeeded(result) else {
             throw WebFocusAdapterError.inputUnavailable
         }
+        return WebFocusDOM.voiceTarget(from: result)
     }
 
     func focusPage(in webView: WKWebView) async throws {

@@ -322,13 +322,16 @@ final class AppCommandController {
     private var monitor: Any?
     private let isEnabled: () -> Bool
     private let onCommand: (AppCommand) -> Void
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     init(
         isEnabled: @escaping () -> Bool,
-        onCommand: @escaping (AppCommand) -> Void
+        onCommand: @escaping (AppCommand) -> Void,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.isEnabled = isEnabled
         self.onCommand = onCommand
+        self.diagnostics = diagnostics
 
         // Touch the catalog at launch so every initial binding is materialized
         // before the first local key event arrives.
@@ -366,11 +369,13 @@ final class AppCommandController {
             // app-local shortcut while FloatTabs is active even when the panel
             // itself is hidden.
             if command == .settings {
+                self.recordResolvedCommand(command)
                 self.onCommand(command)
                 return nil
             }
 
             guard self.isEnabled() else { return event }
+            self.recordResolvedCommand(command)
             self.onCommand(command)
             return nil
         }
@@ -382,6 +387,15 @@ final class AppCommandController {
                 NSEvent.removeMonitor(monitor)
             }
         }
+    }
+
+    private func recordResolvedCommand(_ command: AppCommand) {
+        diagnostics.record(
+            event: "app.command.received",
+            level: .info,
+            subsystem: "command",
+            fields: ["command": .string(command.diagnosticName)]
+        )
     }
 
     static func command(for event: NSEvent) -> AppCommand? {
@@ -439,5 +453,30 @@ final class AppCommandController {
             }
         }
         return nil
+    }
+}
+
+private extension AppCommand {
+    var diagnosticName: String {
+        switch self {
+        case .selectSlot: return "select_slot"
+        case .nextSlot: return "next_slot"
+        case .previousSlot: return "previous_slot"
+        case .addWebApp: return "add_web_app"
+        case .zoomIn: return "zoom_in"
+        case .zoomOut: return "zoom_out"
+        case .resetZoom: return "reset_zoom"
+        case .addressBar: return "address_bar"
+        case .returnHome: return "return_home"
+        case .reload: return "reload"
+        case .togglePrimaryFocus: return "toggle_primary_focus"
+        case .settings: return "settings"
+        case .togglePin: return "toggle_pin"
+        case .setResidency: return "set_residency"
+        case .readPauseResumeSpeechForActiveTab: return "read_pause_resume_speech"
+        case .replayLatestSpeechForActiveTab: return "replay_latest_speech"
+        case .stopSpeechForActiveTab: return "stop_speech"
+        case .toggleAutoSpeakForActiveTab: return "toggle_auto_speak"
+        }
     }
 }

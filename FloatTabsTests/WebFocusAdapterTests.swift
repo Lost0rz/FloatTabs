@@ -256,7 +256,7 @@ final class WebFocusAdapterTests: XCTestCase {
         let router = WebFocusRouter()
         router.setCurrentWebView(webView)
         let marked = await router.captureInputTargetForExternalVoice()
-        XCTAssertTrue(marked)
+        XCTAssertTrue(marked.succeeded)
 
         // Simulate WebKit restoring the other editor while the FloatTabs
         // window becomes key. The voice restore must use the pre-presentation
@@ -292,6 +292,161 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(focusedLabel, "Message ChatGPT")
         XCTAssertEqual(selectionStart, 3)
         XCTAssertEqual(markerCount, 0)
+    }
+
+    func testVoiceFocusRestoresCapturedChatGPTMessageEditorAndSelection() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">bottom draft</textarea>
+                <article style="height: 800px;">
+                    <textarea aria-label="Edit message">edited response</textarea>
+                </article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let editorPrepared = await boolValue(
+            """
+            (() => {
+                const editor = document.querySelector('textarea[aria-label="Edit message"]');
+                window.__originalVoiceEditor = editor;
+                editor.focus();
+                editor.setSelectionRange(2, 5);
+                return document.activeElement === editor
+                    && editor.selectionStart === 2
+                    && editor.selectionEnd === 5;
+            })()
+            """,
+            in: webView
+        )
+        XCTAssertTrue(editorPrepared)
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        let captured = await router.captureInputTargetForExternalVoice()
+
+        XCTAssertTrue(captured.succeeded)
+        XCTAssertEqual(captured.kind, .messageEditor)
+        XCTAssertEqual(captured.source, .captured)
+
+        _ = await boolValue(
+            "document.querySelector('textarea[aria-label=\"Message ChatGPT\"]').focus(); true",
+            in: webView
+        )
+
+        let restored = await router.focusInputForPresentation(
+            preservingCapturedTarget: true
+        )
+        let restoredEditor = await boolValue(
+            "document.activeElement === window.__originalVoiceEditor",
+            in: webView
+        )
+        let selectionStart = await numberValue(
+            "document.activeElement.selectionStart",
+            in: webView
+        )
+        let selectionEnd = await numberValue(
+            "document.activeElement.selectionEnd",
+            in: webView
+        )
+
+        XCTAssertTrue(restored)
+        XCTAssertTrue(restoredEditor)
+        XCTAssertEqual(selectionStart, 2)
+        XCTAssertEqual(selectionEnd, 5)
+    }
+
+    func testVoiceFocusFallsBackToChatGPTComposerWhenActivationChangedToMessageEditor() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">bottom draft</textarea>
+                <article style="height: 800px;">
+                    <textarea aria-label="Edit message">edited response</textarea>
+                </article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        let activationFocusedEditor = await boolValue(
+            """
+            (() => {
+                const editor = document.querySelector('textarea[aria-label="Edit message"]');
+                editor.focus();
+                return document.activeElement === editor;
+            })()
+            """,
+            in: webView
+        )
+        XCTAssertTrue(activationFocusedEditor)
+
+        let router = WebFocusRouter()
+        router.setCurrentWebView(webView)
+        let focused = await router.focusInputForPresentation(
+            preservingCapturedTarget: true
+        )
+        let focusedLabel = await stringValue(
+            "document.activeElement.getAttribute('aria-label')",
+            in: webView
+        )
+
+        XCTAssertTrue(focused)
+        XCTAssertEqual(focusedLabel, "Message ChatGPT")
+    }
+
+    func testVoiceFocusDiagnosticsUseFixedOwnerAndTargetClassifications() async throws {
+        let webView = makeWebView()
+        load(
+            """
+            <main style="min-height: 500px;">
+                <textarea aria-label="Message ChatGPT">bottom draft</textarea>
+                <article style="height: 800px;">
+                    <textarea aria-label="Edit message">edited response</textarea>
+                </article>
+            </main>
+            """,
+            in: webView
+        )
+        await settle(webView)
+
+        _ = await boolValue(
+            """
+            (() => {
+                const editor = document.querySelector('textarea[aria-label="Edit message"]');
+                editor.focus();
+                return document.activeElement === editor;
+            })()
+            """,
+            in: webView
+        )
+
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let router = WebFocusRouter(diagnostics: diagnostics)
+        router.setCurrentWebView(webView)
+        let trace = RuntimeDiagnosticTrace(root: "voice-focus-test")
+
+        let focused = await router.focusInputForPresentation(
+            preservingCapturedTarget: true,
+            trace: trace
+        )
+        XCTAssertTrue(focused)
+
+        let event = try XCTUnwrap(
+            writer.events.last(where: { $0.event == "web_focus.presentation.completed" })
+        )
+        XCTAssertEqual(event.fields["focus_owner"], .string("external_voice"))
+        XCTAssertEqual(event.fields["voice_target_kind"], .string("composer"))
+        XCTAssertEqual(event.fields["voice_target_source"], .string("fallback_candidate"))
+        XCTAssertFalse(event.fields.keys.contains("aria_label"))
+        XCTAssertFalse(event.fields.keys.contains("text_content"))
     }
 
     func testRouterOnlyReportsInputReadyForCurrentDOMInput() async throws {

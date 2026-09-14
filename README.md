@@ -45,7 +45,7 @@ FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快�
 | Single-click activation | Tab / Add / Pin / Settings respond on the first click even when FloatTabs is not the active app. |
 | ChatGPT Ready attention | Tracks ChatGPT generation at runtime and marks unseen completed work with a red Tab indicator. |
 | Menu-bar attention | Shows the unseen ChatGPT Ready count while FloatTabs is hidden and follows the selected Slot’s committed-site favicon. |
-| Configurable Ready alerts | Settings → Notifications can enable/disable Ready sounds, choose an available macOS system sound, set per-alert volume, and preview changes immediately. |
+| Configurable Ready alerts | Settings → Audio → Ready Alerts can enable/disable Ready sounds, choose an available macOS system sound, set per-alert volume, and preview changes immediately. |
 | Collapsible rail | Reclaims the 76 pt nominal rail reservation down to a 12 pt physical movement gutter without changing persisted viewport size. |
 | Drag-to-reorder | Reorder persistent Web Apps directly on the rail. |
 | Tab context menu | Home, Reload, Website Mode, Window Size, Zoom, Residency, Background Media, Edit, Remove. |
@@ -150,7 +150,7 @@ Use the Pin control or `⌘⇧P`.
 Browser Profiles give each Web App an independent, persistent login container — keep a personal and a work account on the same site without signing out and back in.
 
 - The built-in **Default** Profile preserves all of your existing WebKit website sessions. Nothing is migrated, copied, or reset when you upgrade.
-- Create, rename, and color custom Profiles in **Settings → Account & Language → Profiles**. Profile names are entirely your own; none are predefined.
+- Create, rename, and color custom Profiles in **Settings → Browser & Performance → Profiles**. Profile names are entirely your own; none are predefined.
 - **Add Web App** lets you pick the Profile before the first page load, so a site intended for a custom Profile never touches Default cookies.
 - Right-click a Tab → **Profile** to switch that Slot to another Profile in place. The page reloads with the chosen Profile's saved sessions; the previous Profile's logins stay intact on disk.
 - Right-click a Tab → **Open in New Tab with Profile** to run two accounts of the same site side by side in two Slots.

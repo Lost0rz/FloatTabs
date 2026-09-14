@@ -12,6 +12,7 @@ final class TabStore {
     var onUserProfileUse: ((UUID?, Date) -> Void)?
 
     private let repository: any ProfileRepositoryProtocol
+    private let diagnostics: any RuntimeDiagnosticRecording
 
     var orderedProfiles: [WebAppProfile] {
         profiles.sorted { lhs, rhs in
@@ -27,8 +28,12 @@ final class TabStore {
         return profiles.first(where: { $0.id == activeTabID })
     }
 
-    init(repository: any ProfileRepositoryProtocol = ProfileRepository()) {
+    init(
+        repository: any ProfileRepositoryProtocol = ProfileRepository(),
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+    ) {
         self.repository = repository
+        self.diagnostics = diagnostics
 
         let loadedState: StoredWebAppState
         let didLoadPersistedState: Bool
@@ -462,26 +467,62 @@ final class TabStore {
     }
 
     @discardableResult
-    func select(id: UUID, now: Date = Date()) -> Bool {
-        guard profiles.contains(where: { $0.id == id }) else { return false }
-        let didChangeActiveTab = activeTabID != id
+    func select(
+        id: UUID,
+        now: Date = Date(),
+        trace: RuntimeDiagnosticTrace? = nil
+    ) -> Bool {
+        let previousActiveTabID = activeTabID
+        diagnostics.record(
+            event: "tab.selection.requested",
+            level: .info,
+            subsystem: "tabs",
+            trace: trace,
+            fields: [
+                "from_slot_id": previousActiveTabID.map { .string($0.uuidString) } ?? .null,
+                "to_slot_id": .string(id.uuidString)
+            ]
+        )
+        guard profiles.contains(where: { $0.id == id }) else {
+            diagnostics.record(
+                event: "tab.selection.failed",
+                level: .warning,
+                subsystem: "tabs",
+                trace: trace,
+                fields: ["to_slot_id": .string(id.uuidString)]
+            )
+            return false
+        }
+        let didChangeActiveTab = previousActiveTabID != id
         activeTabID = id
         touchLastUsed(id: id, now: now)
         persistRuntimeAndNotify()
         if didChangeActiveTab {
             onUserProfileUse?(profiles.first(where: { $0.id == id })?.browserProfileID, now)
         }
+        if didChangeActiveTab {
+            diagnostics.record(
+                event: "tab.selection.changed",
+                level: .notice,
+                subsystem: "tabs",
+                trace: trace,
+                fields: [
+                    "from_slot_id": previousActiveTabID.map { .string($0.uuidString) } ?? .null,
+                    "to_slot_id": .string(id.uuidString)
+                ]
+            )
+        }
         return true
     }
 
     @discardableResult
-    func selectNext(now: Date = Date()) -> WebAppProfile? {
-        selectRelative(by: 1, now: now)
+    func selectNext(now: Date = Date(), trace: RuntimeDiagnosticTrace? = nil) -> WebAppProfile? {
+        selectRelative(by: 1, now: now, trace: trace)
     }
 
     @discardableResult
-    func selectPrevious(now: Date = Date()) -> WebAppProfile? {
-        selectRelative(by: -1, now: now)
+    func selectPrevious(now: Date = Date(), trace: RuntimeDiagnosticTrace? = nil) -> WebAppProfile? {
+        selectRelative(by: -1, now: now, trace: trace)
     }
 
     /// Select a slot relative to the current one in one model transaction.
@@ -489,7 +530,11 @@ final class TabStore {
     /// intermediate WebView, so a rapid remote sequence only performs one
     /// persistence and presentation update for the final destination.
     @discardableResult
-    func selectRelative(by offset: Int, now: Date = Date()) -> WebAppProfile? {
+    func selectRelative(
+        by offset: Int,
+        now: Date = Date(),
+        trace: RuntimeDiagnosticTrace? = nil
+    ) -> WebAppProfile? {
         let ordered = orderedProfiles
         guard !ordered.isEmpty else {
             activeTabID = nil
@@ -513,7 +558,7 @@ final class TabStore {
         let count = ordered.count
         let normalizedOffset = offset % count
         let targetIndex = (baseIndex + normalizedOffset + count) % count
-        _ = select(id: ordered[targetIndex].id, now: now)
+        _ = select(id: ordered[targetIndex].id, now: now, trace: trace)
         return activeProfile
     }
 

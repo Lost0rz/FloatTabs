@@ -30,6 +30,27 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(store.appearanceMode, .system)
     }
 
+    func testRuntimeDiagnosticsDefaultsToStandardAndPersists() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.runtimeDiagnosticsMode, .standard)
+
+        first.runtimeDiagnosticsMode = .verbose
+
+        XCTAssertEqual(
+            AppPreferencesStore(defaults: defaults).runtimeDiagnosticsMode,
+            .verbose
+        )
+    }
+
+    func testUnknownRuntimeDiagnosticsModeFallsBackToStandard() {
+        defaults.set("future-value", forKey: AppPreferencesStore.runtimeDiagnosticsModeKey)
+
+        XCTAssertEqual(
+            AppPreferencesStore(defaults: defaults).runtimeDiagnosticsMode,
+            .standard
+        )
+    }
+
     func testMenuBarDisplayModeDefaultsToIconAndName() {
         XCTAssertEqual(
             AppPreferencesStore(defaults: defaults).menuBarDisplayMode,

@@ -45,15 +45,15 @@ final class GenericWebAdapter: WebSiteAdapter {
         }
     }
 
-    func captureInputTargetForVoice(in webView: WKWebView) async throws -> Bool {
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
         let result = try await WebFocusDOM.evaluate(
             WebFocusDOM.captureInputTargetForVoiceScript(),
             in: webView
         )
-        return (result["captured"] as? Bool) ?? false
+        return WebFocusDOM.voiceTarget(from: result)
     }
 
-    func focusInputForVoice(in webView: WKWebView) async throws {
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
         let result = try await WebFocusDOM.evaluate(
             WebFocusDOM.inputFocusScript(
                 scoring: inputScoring,
@@ -64,6 +64,7 @@ final class GenericWebAdapter: WebSiteAdapter {
         guard WebFocusDOM.succeeded(result) else {
             throw WebFocusAdapterError.inputUnavailable
         }
+        return WebFocusDOM.voiceTarget(from: result)
     }
 
     func focusPage(in webView: WKWebView) async throws {
