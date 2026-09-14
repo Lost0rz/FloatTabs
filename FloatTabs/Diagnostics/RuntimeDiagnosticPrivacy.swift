@@ -25,6 +25,7 @@ enum RuntimeDiagnosticPrivacy {
         "hardwareuuid",
         "ipaddress",
         "location",
+        "dictionary",
     ]
 
     private static let secretPatterns = [

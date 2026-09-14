@@ -155,7 +155,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             1
         )
 
-        controller.hideFloatTabs(trace: dismissTrace)
+        controller.hideFloatTabs(trace: dismissTrace, dismissSource: .hotkey)
 
         let dismissEvents = writer.events.filter {
             [
@@ -169,6 +169,18 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
         XCTAssertFalse(dismissEvents.isEmpty)
         XCTAssertTrue(dismissEvents.allSatisfy { $0.traceID == dismissTrace.id })
+        let dismissBegin = try XCTUnwrap(
+            writer.events.first { $0.event == "panel.dismiss.begin" },
+            "dismiss begin"
+        )
+        XCTAssertEqual(dismissBegin.fields["dismiss_source"], .string("hotkey"))
+        XCTAssertEqual(dismissBegin.fields["dismiss_classification"], .string("explicit"))
+        let dismissCompleted = try XCTUnwrap(
+            writer.events.first { $0.event == "panel.dismiss.completed" },
+            "dismiss completed"
+        )
+        XCTAssertEqual(dismissCompleted.fields["dismiss_source"], .string("hotkey"))
+        XCTAssertEqual(dismissCompleted.fields["dismiss_classification"], .string("explicit"))
         XCTAssertNil(writer.events.first { $0.event == "previous_app.restore.completed" })
         if let restoreRequest = writer.events.first(where: { $0.event == "previous_app.restore.requested" }) {
             let restoreResult = try XCTUnwrap(
@@ -180,6 +192,20 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             XCTAssertEqual(restoreResult.fields["requested"], .bool(true))
             XCTAssertNotNil(restoreResult.fields["accepted"])
             XCTAssertEqual(restoreResult.fields["previous_display_id"] != nil, true)
+            let observationRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+                writer.events.contains { $0.event == "previous_app.restore.observed" }
+            }
+            XCTAssertTrue(observationRecorded)
+            let restoreObservation = try XCTUnwrap(
+                writer.events.first { $0.event == "previous_app.restore.observed" },
+                "restore observation"
+            )
+            XCTAssertNotNil(restoreObservation.fields["application_match"])
+            XCTAssertNotNil(restoreObservation.fields["window_match"])
+            XCTAssertNotEqual(
+                restoreObservation.fields["observation_state"],
+                .string("completed")
+            )
         } else {
             XCTAssertNotNil(writer.events.first { $0.event == "previous_app.restore.skipped" })
         }
@@ -187,6 +213,46 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             writer.events
                 .filter { $0.event == "presentation_focus.completed" }
                 .allSatisfy { $0.traceID == presentationTrace.id }
+        )
+    }
+
+    func testDuplicateDismissObservationsRetainTraceAndSourceEvidence() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let explicitTrace = RuntimeDiagnosticTrace(root: "dismiss-explicit")
+        let automaticTrace = RuntimeDiagnosticTrace(root: "dismiss-automatic")
+
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-A"))
+        controller.hideFloatTabs(trace: explicitTrace, dismissSource: .hotkey)
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-B"))
+        controller.hideFloatTabs(
+            trace: automaticTrace,
+            dismissSource: .workspaceActivation
+        )
+
+        let dismissBegins = writer.events.filter {
+            $0.event == "panel.dismiss.begin"
+                && ($0.traceID == explicitTrace.id || $0.traceID == automaticTrace.id)
+        }
+        XCTAssertEqual(dismissBegins.count, 2)
+        XCTAssertEqual(dismissBegins.map { $0.fields["dismiss_source"] }, [
+            .string("hotkey"),
+            .string("workspace_activation")
+        ])
+        XCTAssertEqual(dismissBegins.map { $0.fields["dismiss_classification"] }, [
+            .string("explicit"),
+            .string("automatic")
+        ])
+        XCTAssertEqual(dismissBegins.map(\.traceID), [explicitTrace.id, automaticTrace.id])
+        XCTAssertTrue(
+            dismissBegins.allSatisfy {
+                $0.fields["requested_visibility_before"] != nil
+                    && $0.fields["dismiss_already_hidden"] != nil
+            }
         )
     }
 

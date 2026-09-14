@@ -72,6 +72,80 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safe_host"], .string("example.com"))
     }
 
+    func testWindowObservationFieldsArePrivacySafeAndDropTitles() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "application_bundle_id": .string("md.obsidian"),
+            "process_identifier": .integer(42),
+            "window_number": .integer(1001),
+            "window_display_id": .integer(2),
+            "window_observation_quality": .string("frontmost_candidate"),
+            "bounds_x": .double(10),
+            "bounds_y": .double(20),
+            "bounds_width": .double(800),
+            "bounds_height": .double(600),
+            "window_title": .string("Private note title"),
+            "document_title": .string("Private document title"),
+            "safe_state": .string("ready")
+        ], mode: .standard)
+
+        XCTAssertEqual(fields["application_bundle_id"], .string("md.obsidian"))
+        XCTAssertEqual(fields["process_identifier"], .integer(42))
+        XCTAssertEqual(fields["window_number"], .integer(1001))
+        XCTAssertEqual(fields["window_display_id"], .integer(2))
+        XCTAssertEqual(fields["window_observation_quality"], .string("frontmost_candidate"))
+        XCTAssertNil(fields["window_title"])
+        XCTAssertNil(fields["document_title"])
+        XCTAssertEqual(fields["safe_state"], .string("ready"))
+    }
+
+    func testWindowMatchReportsTrueFalseAndUnknownWithoutFalseCertainty() {
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                capturedWindowNumber: 10,
+                observedWindowNumber: 10
+            ),
+            .matched
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                capturedWindowNumber: 10,
+                observedWindowNumber: 11
+            ),
+            .mismatched
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                capturedWindowNumber: nil,
+                observedWindowNumber: 11
+            ),
+            .unknown
+        )
+    }
+
+    @MainActor
+    func testNoWindowTitleOrRawWindowDictionaryCanBePersisted() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        diagnostics.record(
+            event: "previous_app.restore.observed",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "window_number": .integer(101),
+                "window_observation_quality": .string("frontmost_candidate"),
+                "window_title": .string("Private title"),
+                "raw_window_dictionary": .string("Private note content")
+            ]
+        )
+
+        let line = try XCTUnwrap(writer.lines.first)
+        let contents = try XCTUnwrap(String(data: line, encoding: .utf8))
+        XCTAssertTrue(contents.contains("window_number"))
+        XCTAssertTrue(contents.contains("frontmost_candidate"))
+        XCTAssertFalse(contents.contains("Private title"))
+        XCTAssertFalse(contents.contains("Private note content"))
+    }
+
     func testSensitiveFieldsAreDroppedBeforePersistence() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "token": .string("secret"),

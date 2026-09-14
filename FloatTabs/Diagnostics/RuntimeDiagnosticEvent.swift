@@ -90,6 +90,189 @@ struct RuntimeDiagnosticTrace: Equatable, Sendable {
     }
 }
 
+enum RuntimeDiagnosticDismissClassification: String, Codable, Equatable, Sendable {
+    case explicit
+    case automatic
+}
+
+enum RuntimeDiagnosticDismissSource: String, Codable, Equatable, Sendable {
+    case hotkey
+    case menubar
+    case externalCommand = "external_command"
+    case workspaceActivation = "workspace_activation"
+    case globalMouse = "global_mouse"
+    case fullscreen
+    case `internal`
+
+    var classification: RuntimeDiagnosticDismissClassification {
+        switch self {
+        case .workspaceActivation, .globalMouse:
+            return .automatic
+        case .hotkey, .menubar, .externalCommand, .fullscreen, .internal:
+            return .explicit
+        }
+    }
+}
+
+enum RuntimeDiagnosticAutoHideIgnoreReason: String, Codable, Equatable, Sendable {
+    case ownApplication = "own_application"
+    case suppressionGrace = "suppression_grace"
+    case presentationFocusPending = "presentation_focus_pending"
+    case frontmostMismatch = "frontmost_mismatch"
+    case panelNotVisible = "panel_not_visible"
+    case pinned
+    case insidePresentation = "inside_presentation"
+    case staleMouseEvent = "stale_mouse_event"
+    case missingApplication = "missing_application"
+}
+
+enum RuntimeDiagnosticAutoHideObservationDecision: Equatable, Sendable {
+    case hide
+    case ignore(reason: RuntimeDiagnosticAutoHideIgnoreReason)
+
+    static func workspace(
+        panelVisible: Bool,
+        pinned: Bool,
+        suppressionActive: Bool,
+        presentationFocusPending: Bool,
+        frontmostMatches: Bool,
+        activatedApplicationIsOwn: Bool = false
+    ) -> Self {
+        if activatedApplicationIsOwn {
+            return .ignore(reason: .ownApplication)
+        }
+        if suppressionActive {
+            return .ignore(reason: .suppressionGrace)
+        }
+        if presentationFocusPending {
+            return .ignore(reason: .presentationFocusPending)
+        }
+        if !frontmostMatches {
+            return .ignore(reason: .frontmostMismatch)
+        }
+        if !panelVisible {
+            return .ignore(reason: .panelNotVisible)
+        }
+        if pinned {
+            return .ignore(reason: .pinned)
+        }
+        return .hide
+    }
+
+    static func globalMouse(
+        panelVisible: Bool,
+        pinned: Bool,
+        insidePresentation: Bool,
+        staleEvent: Bool
+    ) -> Self {
+        if staleEvent {
+            return .ignore(reason: .staleMouseEvent)
+        }
+        if insidePresentation {
+            return .ignore(reason: .insidePresentation)
+        }
+        if !panelVisible {
+            return .ignore(reason: .panelNotVisible)
+        }
+        if pinned {
+            return .ignore(reason: .pinned)
+        }
+        return .hide
+    }
+
+    var result: String {
+        switch self {
+        case .hide:
+            return "hide"
+        case .ignore:
+            return "ignore"
+        }
+    }
+
+    var ignoreReason: RuntimeDiagnosticAutoHideIgnoreReason? {
+        guard case let .ignore(reason) = self else { return nil }
+        return reason
+    }
+}
+
+struct RuntimeDiagnosticWindowBounds: Equatable, Sendable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+enum RuntimeDiagnosticWindowObservationQuality: String, Codable, Equatable, Sendable {
+    case frontmostCandidate = "frontmost_candidate"
+    case orderedWindowCandidate = "ordered_window_candidate"
+    case unavailable
+}
+
+enum RuntimeDiagnosticWindowMatch: String, Codable, Equatable, Sendable {
+    case matched = "true"
+    case mismatched = "false"
+    case unknown
+}
+
+struct RuntimeDiagnosticExternalWindowObservation: Equatable, Sendable {
+    let processIdentifier: Int64
+    let windowNumber: Int64?
+    let displayID: Int64?
+    let bounds: RuntimeDiagnosticWindowBounds?
+    let quality: RuntimeDiagnosticWindowObservationQuality
+
+    static func windowMatch(
+        capturedWindowNumber: Int64?,
+        observedWindowNumber: Int64?
+    ) -> RuntimeDiagnosticWindowMatch {
+        guard let capturedWindowNumber, let observedWindowNumber else {
+            return .unknown
+        }
+        return capturedWindowNumber == observedWindowNumber ? .matched : .mismatched
+    }
+}
+
+struct RuntimeDiagnosticRestoreObservationTicket: Equatable, Sendable {
+    let generation: UInt64
+    let trace: RuntimeDiagnosticTrace
+}
+
+struct RuntimeDiagnosticRestoreObservationTracker: Sendable {
+    private var nextGeneration: UInt64 = 0
+    private var pendingTicket: RuntimeDiagnosticRestoreObservationTicket?
+
+    mutating func begin(trace: RuntimeDiagnosticTrace) -> RuntimeDiagnosticRestoreObservationTicket {
+        nextGeneration &+= 1
+        let ticket = RuntimeDiagnosticRestoreObservationTicket(
+            generation: nextGeneration,
+            trace: trace
+        )
+        pendingTicket = ticket
+        return ticket
+    }
+
+    mutating func invalidate() {
+        nextGeneration &+= 1
+        pendingTicket = nil
+    }
+
+    func accepts(_ ticket: RuntimeDiagnosticRestoreObservationTicket) -> Bool {
+        pendingTicket == ticket
+    }
+
+    func trace(for ticket: RuntimeDiagnosticRestoreObservationTicket) -> RuntimeDiagnosticTrace? {
+        accepts(ticket) ? ticket.trace : nil
+    }
+
+    mutating func consume(
+        _ ticket: RuntimeDiagnosticRestoreObservationTicket
+    ) -> RuntimeDiagnosticRestoreObservationTicket? {
+        guard accepts(ticket) else { return nil }
+        pendingTicket = nil
+        return ticket
+    }
+}
+
 struct RuntimeDiagnosticPresentationFocusRequest: Equatable, Sendable {
     let generation: UInt64
     let trace: RuntimeDiagnosticTrace?

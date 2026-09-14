@@ -167,4 +167,143 @@ final class RuntimeDiagnosticsTests: XCTestCase {
             [.string("panel.summon"), .string("panel.summon")]
         )
     }
+
+    func testStandardRetainsAllRestoreObservationEvents() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+
+        [
+            "previous_app.capture",
+            "previous_app.restore.decision",
+            "previous_app.restore.requested",
+            "previous_app.restore.request_result",
+            "previous_app.restore.observed",
+            "panel.auto_hide.decision"
+        ].forEach { event in
+            diagnostics.record(event: event, level: .info, subsystem: "panel")
+        }
+
+        XCTAssertEqual(
+            writer.events.map(\.event),
+            [
+                "previous_app.capture",
+                "previous_app.restore.decision",
+                "previous_app.restore.requested",
+                "previous_app.restore.request_result",
+                "previous_app.restore.observed",
+                "panel.auto_hide.decision"
+            ]
+        )
+    }
+
+    func testDismissSourceTaxonomyDistinguishesExplicitAndAutomaticHides() {
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.hotkey.classification, .explicit)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.menubar.classification, .explicit)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.externalCommand.classification, .explicit)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.workspaceActivation.classification, .automatic)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.globalMouse.classification, .automatic)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.fullscreen.classification, .explicit)
+        XCTAssertEqual(RuntimeDiagnosticDismissSource.internal.classification, .explicit)
+    }
+
+    func testAutoHideObservationDecisionReasonsAreStable() {
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: true,
+                pinned: false,
+                suppressionActive: true,
+                presentationFocusPending: false,
+                frontmostMatches: true
+            ),
+            .ignore(reason: .suppressionGrace)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: true,
+                pinned: false,
+                suppressionActive: false,
+                presentationFocusPending: true,
+                frontmostMatches: true
+            ),
+            .ignore(reason: .presentationFocusPending)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: true,
+                pinned: true,
+                suppressionActive: false,
+                presentationFocusPending: false,
+                frontmostMatches: true
+            ),
+            .ignore(reason: .pinned)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: true,
+                pinned: false,
+                suppressionActive: false,
+                presentationFocusPending: false,
+                frontmostMatches: false
+            ),
+            .ignore(reason: .frontmostMismatch)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: false,
+                pinned: false,
+                suppressionActive: false,
+                presentationFocusPending: false,
+                frontmostMatches: true
+            ),
+            .ignore(reason: .panelNotVisible)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.workspace(
+                panelVisible: true,
+                pinned: false,
+                suppressionActive: false,
+                presentationFocusPending: false,
+                frontmostMatches: true,
+                activatedApplicationIsOwn: true
+            ),
+            .ignore(reason: .ownApplication)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.globalMouse(
+                panelVisible: true,
+                pinned: false,
+                insidePresentation: false,
+                staleEvent: true
+            ),
+            .ignore(reason: .staleMouseEvent)
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.globalMouse(
+                panelVisible: true,
+                pinned: false,
+                insidePresentation: false,
+                staleEvent: false
+            ),
+            .hide
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticAutoHideObservationDecision.globalMouse(
+                panelVisible: true,
+                pinned: false,
+                insidePresentation: true,
+                staleEvent: false
+            ),
+            .ignore(reason: .insidePresentation)
+        )
+    }
+
+    func testRestoreObservationTrackerRejectsStaleTicket() {
+        var tracker = RuntimeDiagnosticRestoreObservationTracker()
+        let first = tracker.begin(trace: RuntimeDiagnosticTrace(root: "dismiss-A"))
+        let second = tracker.begin(trace: RuntimeDiagnosticTrace(root: "dismiss-B"))
+
+        XCTAssertFalse(tracker.accepts(first))
+        XCTAssertTrue(tracker.accepts(second))
+        XCTAssertEqual(tracker.trace(for: second)?.root, "dismiss-B")
+    }
 }

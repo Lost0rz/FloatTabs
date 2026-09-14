@@ -87,10 +87,31 @@ The preferred presentation trace is:
 `hotkey/menu/external intent → panel presentation request → previous application capture → target screen resolve → app activation → shell key → source key/main → native WebView focus → DOM focus → presentation complete`.
 
 Previous-application restoration reports the observed decision, the activation
-request, and the request result (`accepted`) separately. `accepted` means the
-existing activation API accepted the request; it is not an observation that the
-target application became active. No `previous_app.restore.completed` event is
-emitted in V1.
+request, the request result (`accepted`), and one bounded post-request
+observation separately. `accepted` means the existing activation API accepted
+the request; it is not an observation that the target application became active.
+`previous_app.restore.observed` records the later frontmost process/window
+comparison, including `application_match`, `window_match` (`true`, `false`, or
+`unknown`), observation attempt, and elapsed uptime. It is evidence only; it
+does not feed back into activation, retry, policy, or focus decisions. A stale
+observation ticket is discarded when a newer dismiss supersedes it. No
+`previous_app.restore.completed` event is emitted in V1.
+
+External window identity is captured as a privacy-safe CoreGraphics candidate:
+process ID, window number, display ID when derivable, bounds, and observation
+quality. CoreGraphics ordering is not an Accessibility key-window guarantee;
+window titles, document names, raw window dictionaries, and Accessibility
+permission are outside this contract.
+
+Dismissal events carry `dismiss_source` and `dismiss_classification`. Explicit
+sources include hotkey, menu-bar, external command, fullscreen, and internal
+paths; automatic sources include workspace activation and global mouse.
+`panel.auto_hide.observed` and `panel.auto_hide.decision` retain the candidate,
+frontmost match, suppression grace, focus-pending, pinned, stale-event, and
+inside-presentation facts. Decision reasons are stable taxonomy values such as
+`own_application`, `suppression_grace`, `presentation_focus_pending`,
+`frontmost_mismatch`, `panel_not_visible`, `pinned`, `inside_presentation`,
+`stale_mouse_event`, and `missing_application`.
 
 Trace propagation remains explicit and narrow. Existing public APIs are not broadly rewritten solely to carry correlation. Independent background events may have no trace.
 

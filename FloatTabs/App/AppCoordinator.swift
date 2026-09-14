@@ -197,7 +197,10 @@ final class AppCoordinator {
             preferencesStore: preferencesStore,
             diagnostics: diagnostics,
             onToggleWithTrace: { [weak self] trace in
-                self?.panelController.toggleFloatTabs(trace: trace)
+                self?.panelController.toggleFloatTabs(
+                    trace: trace,
+                    dismissSource: .menubar
+                )
             }
         )
         statusItemController?.setActiveWebApp(
@@ -698,7 +701,10 @@ final class AppCoordinator {
     }
 
     private func toggleFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
-        panelController.toggleFloatTabs(trace: trace)
+        panelController.toggleFloatTabs(
+            trace: trace,
+            dismissSource: .menubar
+        )
     }
 
     private func presentFloatTabs() {
@@ -767,7 +773,10 @@ final class AppCoordinator {
             panelController.showFloatTabs(trace: trace)
 
         case .toggleVisibility:
-            panelController.toggleFloatTabs(trace: trace)
+            panelController.toggleFloatTabs(
+                trace: trace,
+                dismissSource: .externalCommand
+            )
 
         case .selectSlot:
             guard let index = (userInfo?["slotIndex"] as? NSNumber)?.intValue,
