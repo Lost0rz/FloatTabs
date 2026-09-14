@@ -91,10 +91,20 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
     --timestamp \
     --sign "$SIGN_IDENTITY" \
     "$APP_PATH"
-  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 else
-  echo "Building unsigned QA app (no FLOATTABS_SIGN_IDENTITY supplied)."
+  # Xcode's arm64-only linker emits an incomplete ad-hoc signature when
+  # CODE_SIGNING_ALLOWED=NO. Safari/Gatekeeper reports that bundle as
+  # damaged once quarantine is applied. Re-sign the QA bundle as a complete
+  # ad-hoc bundle so its code and resource seal are internally consistent.
+  echo "Applying a sealed ad-hoc signature (no FLOATTABS_SIGN_IDENTITY supplied)."
+  codesign \
+    --force \
+    --deep \
+    --options runtime \
+    --sign - \
+    "$APP_PATH"
 fi
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 if [[ ! -d "$DSYM_PATH" ]]; then
   echo "error: Release dSYM not found at $DSYM_PATH" >&2
@@ -105,6 +115,7 @@ rm -f "$DSYM_ARCHIVE_PATH"
 
 /usr/bin/ditto "$APP_PATH" "$STAGE_DIR/FloatTabs.app"
 verify_arm64_app "$STAGE_DIR/FloatTabs.app"
+codesign --verify --deep --strict --verbose=2 "$STAGE_DIR/FloatTabs.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 rm -f "$DMG_PATH"
 
