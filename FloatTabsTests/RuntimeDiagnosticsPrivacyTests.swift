@@ -15,6 +15,63 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         )
     }
 
+    func testIPAddressLiteralURLHostsAreDroppedInEveryDiagnosticMode() {
+        let ipv4 = URL(string: "http://192.168.1.20:8080/private?token=x#fragment")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(ipv4, mode: .standard))
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(ipv4, mode: .verbose))
+
+        let loopback = URL(string: "http://127.0.0.1:3000/")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(loopback, mode: .standard))
+
+        let publicIPv4 = URL(string: "https://8.8.8.8/")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(publicIPv4, mode: .standard))
+
+        let ipv6 = URL(string: "http://[::1]/")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(ipv6, mode: .standard))
+
+        let nonLoopbackIPv6 = URL(string: "https://[2001:db8::1]/")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(nonLoopbackIPv6, mode: .standard))
+
+        let mappedIPv6 = URL(string: "https://[::ffff:192.0.2.1]/")!
+        XCTAssertNil(RuntimeDiagnosticPrivacy.safeURLString(mappedIPv6, mode: .standard))
+    }
+
+    func testNormalDNSURLHostsRemainAllowed() {
+        let url = URL(string: "https://example.com/private?x=1#fragment")!
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.safeURLString(url, mode: .standard),
+            "https://example.com"
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.safeURLString(url, mode: .verbose),
+            "https://example.com/private"
+        )
+
+        let numericDNSLabel = URL(string: "https://123.example.com/")!
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.safeURLString(numericDNSLabel, mode: .standard),
+            "https://123.example.com"
+        )
+    }
+
+    func testBareIPAddressStringsAreDroppedByValueLevelSanitization() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "host": .string("192.168.1.20"),
+            "peer": .string("2001:db8::1"),
+            "mapped_peer": .string("::ffff:192.0.2.1"),
+            "scoped_peer": .string("fe80::1%en0"),
+            "safe_state": .string("ready"),
+            "safe_host": .string("example.com")
+        ], mode: .verbose)
+
+        XCTAssertNil(fields["host"])
+        XCTAssertNil(fields["peer"])
+        XCTAssertNil(fields["mapped_peer"])
+        XCTAssertNil(fields["scoped_peer"])
+        XCTAssertEqual(fields["safe_state"], .string("ready"))
+        XCTAssertEqual(fields["safe_host"], .string("example.com"))
+    }
+
     func testSensitiveFieldsAreDroppedBeforePersistence() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "token": .string("secret"),
@@ -95,6 +152,51 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(persisted.fields["url"], .string("https://example.com/c/<redacted>"))
         XCTAssertNil(persisted.fields["body"])
         XCTAssertEqual(persisted.fields["safe_state"], .string("ready"))
+    }
+
+    func testWriterPersistenceDropsIPAddressURLAndBareHost() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-ip-privacy-" + UUID().uuidString)
+        let writer = RuntimeDiagnosticWriter(directory: directory)
+        let event = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            uptime: 1,
+            sequence: 1,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .notice,
+            subsystem: "tests",
+            event: "privacy.ip.boundary",
+            fields: [
+                "url": .string("http://10.0.0.5/private?token=secret"),
+                "host": .string("10.0.0.5"),
+                "safe_state": .string("ready"),
+                "safe_host": .string("example.com")
+            ]
+        )
+        writer.enqueue(event)
+
+        let flushed = expectation(description: "writer flushed")
+        writer.requestFinalFlush(timeout: 1) { flushed.fulfill() }
+        wait(for: [flushed], timeout: 2)
+
+        let file = try XCTUnwrap(
+            FileManager.default
+                .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .first(where: { $0.pathExtension == "jsonl" })
+        )
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertFalse(contents.contains("10.0.0.5"))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persisted = try decoder.decode(
+            RuntimeDiagnosticEvent.self,
+            from: Data(contents.utf8)
+        )
+        XCTAssertNil(persisted.fields["url"])
+        XCTAssertNil(persisted.fields["host"])
+        XCTAssertEqual(persisted.fields["safe_state"], .string("ready"))
+        XCTAssertEqual(persisted.fields["safe_host"], .string("example.com"))
     }
 
     func testExportReadsOnlyManagedRuntimeSegmentsAndLeavesForeignJSONL() throws {

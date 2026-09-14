@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import WebKit
 
 enum RuntimeDiagnosticPrivacy {
@@ -45,7 +46,8 @@ enum RuntimeDiagnosticPrivacy {
               scheme == "http" || scheme == "https",
               let host = url.host?.lowercased(),
               !host.isEmpty,
-              !host.contains("@") else {
+              !host.contains("@"),
+              !isIPAddressLiteral(host) else {
             return nil
         }
 
@@ -160,6 +162,33 @@ enum RuntimeDiagnosticPrivacy {
         return sensitiveKeyFragments.contains { normalized.contains($0) }
     }
 
+    private static func isIPAddressLiteral(_ value: String) -> Bool {
+        var normalized = value
+
+        if normalized.hasPrefix("["), normalized.hasSuffix("]") {
+            normalized.removeFirst()
+            normalized.removeLast()
+        }
+
+        if let percent = normalized.firstIndex(of: "%") {
+            normalized = String(normalized[..<percent])
+        }
+
+        if normalized.hasSuffix(".") {
+            normalized.removeLast()
+        }
+
+        return normalized.withCString { pointer in
+            var ipv4 = in_addr()
+            if inet_pton(AF_INET, pointer, &ipv4) == 1 {
+                return true
+            }
+
+            var ipv6 = in6_addr()
+            return inet_pton(AF_INET6, pointer, &ipv6) == 1
+        }
+    }
+
     private static func sanitizeString(
         _ string: String,
         key: String,
@@ -169,6 +198,10 @@ enum RuntimeDiagnosticPrivacy {
         guard !trimmed.isEmpty,
               !trimmed.contains("\0"),
               !containsSecretPattern(trimmed) else {
+            return nil
+        }
+
+        guard !isIPAddressLiteral(trimmed) else {
             return nil
         }
 

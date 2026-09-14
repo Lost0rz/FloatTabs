@@ -121,6 +121,8 @@ Never persist:
 
 Standard URL values are reduced to a safe origin/host representation. Verbose may retain a sanitized path, but query and fragment are always removed and conversation-like or secret-bearing path segments are redacted. Error values are reduced to a domain/code/category representation; `NSError.userInfo` is never serialized.
 
+IPv4 and IPv6 literal hosts are rejected from diagnostic URL projections. Bare IP-literal string values are also dropped by the sanitizer, while ordinary hostnames, including numeric DNS labels, remain permitted.
+
 Allowed examples include slot UUID, browser-profile UUID, safe host/origin, bundle identifier, display ID, window number, state enum, first-responder class/type, and boolean runtime facts. Slot display names are not correlation fields.
 
 ## Storage and rotation
