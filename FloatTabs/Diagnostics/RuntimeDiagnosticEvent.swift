@@ -222,9 +222,13 @@ struct RuntimeDiagnosticExternalWindowObservation: Equatable, Sendable {
     let quality: RuntimeDiagnosticWindowObservationQuality
 
     static func windowMatch(
+        applicationMatches: Bool,
         capturedWindowNumber: Int64?,
         observedWindowNumber: Int64?
     ) -> RuntimeDiagnosticWindowMatch {
+        guard applicationMatches else {
+            return .unknown
+        }
         guard let capturedWindowNumber, let observedWindowNumber else {
             return .unknown
         }

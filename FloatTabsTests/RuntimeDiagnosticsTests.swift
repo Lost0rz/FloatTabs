@@ -306,4 +306,16 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(tracker.accepts(second))
         XCTAssertEqual(tracker.trace(for: second)?.root, "dismiss-B")
     }
+
+    func testRestoreObservationTrackerInvalidationCannotConsumeLaterTicket() {
+        var tracker = RuntimeDiagnosticRestoreObservationTracker()
+        let first = tracker.begin(trace: RuntimeDiagnosticTrace(root: "dismiss-A"))
+
+        tracker.invalidate()
+        let later = tracker.begin(trace: RuntimeDiagnosticTrace(root: "dismiss-C"))
+
+        XCTAssertNil(tracker.consume(first))
+        XCTAssertTrue(tracker.accepts(later))
+        XCTAssertEqual(tracker.consume(later)?.trace.root, "dismiss-C")
+    }
 }

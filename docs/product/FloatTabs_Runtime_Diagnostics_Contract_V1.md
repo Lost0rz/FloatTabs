@@ -94,8 +94,14 @@ the request; it is not an observation that the target application became active.
 comparison, including `application_match`, `window_match` (`true`, `false`, or
 `unknown`), observation attempt, and elapsed uptime. It is evidence only; it
 does not feed back into activation, retry, policy, or focus decisions. A stale
-observation ticket is discarded when a newer dismiss supersedes it. No
+observation ticket is discarded when a newer presentation or dismiss supersedes
+it, before FloatTabs activation for that newer presentation. No
 `previous_app.restore.completed` event is emitted in V1.
+
+`window_match=false` is only emitted when the requested application is also the
+observed frontmost application and both window candidates are available but
+different. Any application mismatch or unavailable candidate yields
+`window_match=unknown`.
 
 External window identity is captured as a privacy-safe CoreGraphics candidate:
 process ID, window number, display ID when derivable, bounds, and observation

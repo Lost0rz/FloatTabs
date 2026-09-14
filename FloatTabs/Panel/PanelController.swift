@@ -270,6 +270,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// request to hide the shell.
     func presentFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
+        invalidatePendingRestoreObservationForNewPresentation()
         if panel.isVisible {
             let presentationUptime = ProcessInfo.processInfo.systemUptime
             lastPresentationUptime = presentationUptime
@@ -299,6 +300,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         trace: RuntimeDiagnosticTrace? = nil
     ) async -> ExternalVoiceFocusResult {
         let trace = trace ?? diagnostics.beginTrace(root: "external.voice-focus")
+        invalidatePendingRestoreObservationForNewPresentation()
         diagnostics.record(
             event: "external.voice-focus.received",
             level: .info,
@@ -802,12 +804,14 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// the actual window presentation is completed after tracking unwinds.
     func prepareForStatusItemPresentation(trace: RuntimeDiagnosticTrace? = nil) {
         guard !requestedVisibility else { return }
+        invalidatePendingRestoreObservationForNewPresentation()
         capturePreviousApplication(trace: trace)
         activateFloatTabs(trace: trace)
     }
 
     func showFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
+        invalidatePendingRestoreObservationForNewPresentation()
         var presentationFields = runtimeDiagnosticSnapshot().fields
         presentationFields["requested_before"] = .bool(requestedVisibility)
         diagnostics.record(
@@ -1050,6 +1054,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             wasVisible: wasVisible,
             source: dismissSource
         )
+    }
+
+    /// A new presentation supersedes only the diagnostics observation attached
+    /// to an older restore request. It deliberately does not touch the
+    /// previous-application context or any presentation business state.
+    private func invalidatePendingRestoreObservationForNewPresentation() {
+        guard pendingRestoreObservation != nil else { return }
+        pendingRestoreObservation = nil
+        restoreObservationTracker.invalidate()
     }
 
     private func recordDismissBegin(
@@ -3962,6 +3975,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             "application_match": .bool(applicationMatch),
             "window_match": .string(
                 RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                    applicationMatches: applicationMatch,
                     capturedWindowNumber: pending.capturedWindowObservation?.windowNumber,
                     observedWindowNumber: observedWindow?.windowNumber
                 ).rawValue
@@ -4302,6 +4316,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        invalidatePendingRestoreObservationForNewPresentation()
         capturePreviousApplication()
         panel.orderOut(nil)
         rootView.removeFullscreenCompanionContainer(

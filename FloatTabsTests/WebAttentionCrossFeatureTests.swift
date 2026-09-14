@@ -202,6 +202,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             )
             XCTAssertNotNil(restoreObservation.fields["application_match"])
             XCTAssertNotNil(restoreObservation.fields["window_match"])
+            if restoreObservation.fields["application_match"] == .bool(false) {
+                XCTAssertEqual(
+                    restoreObservation.fields["window_match"],
+                    .string("unknown")
+                )
+            }
             XCTAssertNotEqual(
                 restoreObservation.fields["observation_state"],
                 .string("completed")
@@ -252,6 +258,107 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             dismissBegins.allSatisfy {
                 $0.fields["requested_visibility_before"] != nil
                     && $0.fields["dismiss_already_hidden"] != nil
+            }
+        )
+    }
+
+    func testNewPresentationSupersedesPendingRestoreBeforeDelayedObservation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-A")
+        let presentationTrace = RuntimeDiagnosticTrace(root: "presentation-B")
+
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-A"))
+        controller.hideFloatTabs(trace: dismissTrace, dismissSource: .hotkey)
+        guard writer.events.contains(where: { $0.event == "previous_app.restore.requested" }) else {
+            throw XCTSkip("restore request unavailable in this AppKit test environment")
+        }
+
+        controller.showFloatTabs(trace: presentationTrace)
+
+        let callbackSettled = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "panel.presentation.begin" && $0.traceID == presentationTrace.id
+            }
+        }
+        XCTAssertTrue(callbackSettled)
+        try await wait(milliseconds: 100)
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "previous_app.restore.observed" && $0.traceID == dismissTrace.id
+            }
+        )
+    }
+
+    func testStatusItemPreparationSupersedesPendingRestoreBeforeActivation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-status-A")
+        let presentationTrace = RuntimeDiagnosticTrace(root: "presentation-status-B")
+
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-status-A"))
+        controller.hideFloatTabs(trace: dismissTrace, dismissSource: .hotkey)
+        guard writer.events.contains(where: { $0.event == "previous_app.restore.requested" }) else {
+            throw XCTSkip("restore request unavailable in this AppKit test environment")
+        }
+
+        controller.prepareForStatusItemPresentation(trace: presentationTrace)
+
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "app.activation.requested" && $0.traceID == presentationTrace.id
+            }
+        )
+        try await wait(milliseconds: 100)
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "previous_app.restore.observed" && $0.traceID == dismissTrace.id
+            }
+        )
+    }
+
+    func testRapidHideShowHideKeepsRestoreObservationTraceOwnership() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let dismissA = RuntimeDiagnosticTrace(root: "dismiss-A")
+        let presentationB = RuntimeDiagnosticTrace(root: "presentation-B")
+        let dismissC = RuntimeDiagnosticTrace(root: "dismiss-C")
+
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-initial"))
+        controller.hideFloatTabs(trace: dismissA, dismissSource: .hotkey)
+        guard writer.events.contains(where: { $0.event == "previous_app.restore.requested" }) else {
+            throw XCTSkip("restore request unavailable in this AppKit test environment")
+        }
+
+        controller.showFloatTabs(trace: presentationB)
+        controller.hideFloatTabs(trace: dismissC, dismissSource: .hotkey)
+
+        let observationRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "previous_app.restore.observed" && $0.traceID == dismissC.id
+            }
+        }
+        XCTAssertTrue(observationRecorded)
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "previous_app.restore.observed" && $0.traceID == dismissA.id
+            }
+        )
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "panel.presentation.begin" && $0.traceID == presentationB.id
             }
         )
     }

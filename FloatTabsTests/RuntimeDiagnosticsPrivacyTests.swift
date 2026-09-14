@@ -101,6 +101,23 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
     func testWindowMatchReportsTrueFalseAndUnknownWithoutFalseCertainty() {
         XCTAssertEqual(
             RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: false,
+                capturedWindowNumber: 10,
+                observedWindowNumber: 10
+            ),
+            .unknown
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: false,
+                capturedWindowNumber: 10,
+                observedWindowNumber: 11
+            ),
+            .unknown
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: true,
                 capturedWindowNumber: 10,
                 observedWindowNumber: 10
             ),
@@ -108,6 +125,7 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         )
         XCTAssertEqual(
             RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: true,
                 capturedWindowNumber: 10,
                 observedWindowNumber: 11
             ),
@@ -115,8 +133,17 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         )
         XCTAssertEqual(
             RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: true,
                 capturedWindowNumber: nil,
                 observedWindowNumber: 11
+            ),
+            .unknown
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticExternalWindowObservation.windowMatch(
+                applicationMatches: true,
+                capturedWindowNumber: 10,
+                observedWindowNumber: nil
             ),
             .unknown
         )
