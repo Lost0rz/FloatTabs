@@ -123,6 +123,8 @@
 		A00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */; };
 		A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */; };
 		A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */; };
+		A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000078 /* SettingsInformationArchitecture.swift */; };
+		A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -254,6 +256,8 @@
 		B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticSnapshot.swift; sourceTree = "<group>"; };
 		B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticExporter.swift; sourceTree = "<group>"; };
 		B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsSettingsViewController.swift; sourceTree = "<group>"; };
+		B00000000000000000000078 /* SettingsInformationArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitecture.swift; sourceTree = "<group>"; };
+		B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitectureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -429,6 +433,7 @@
 				B00000000000000000000019 /* EmptyWebAppView.swift */,
 				B0000000000000000000003F /* UnsupportedBrowserProfileView.swift */,
 				B00000000000000000000024 /* GlobalSettingsController.swift */,
+				B00000000000000000000078 /* SettingsInformationArchitecture.swift */,
 				B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */,
 			);
 			path = UI;
@@ -505,6 +510,7 @@
 				B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */,
 				B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */,
 				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
+				B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */,
 				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
 			);
 			path = FloatTabsTests;
@@ -631,6 +637,7 @@
 				A00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift in Sources */,
 				A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */,
 				A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */,
+				A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
@@ -745,6 +752,7 @@
 				A0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift in Sources */,
 				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
 				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
+				A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

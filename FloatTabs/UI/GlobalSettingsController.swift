@@ -1,6 +1,5 @@
 import AppKit
 import KeyboardShortcuts
-import UniformTypeIdentifiers
 
 enum BrowserProfileManagementError: LocalizedError, Equatable {
     case unsupported
@@ -185,67 +184,14 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         tabs.transitionOptions = []
         tabs.canPropagateSelectedChildViewControllerTitle = false
 
-        addTab(
-            title: "Appearance",
-            symbol: "circle.lefthalf.filled",
-            controller: AppearanceSettingsViewController(preferencesStore: preferencesStore),
-            to: tabs
-        )
-        addTab(
-            title: "Performance",
-            symbol: "gauge.with.dots.needle.67percent",
-            controller: PerformanceSettingsViewController(
-                preferencesStore: preferencesStore,
-                websiteCacheManager: websiteCacheManager
-            ),
-            to: tabs
-        )
-        addTab(
-            title: "Notifications",
-            symbol: "bell.badge",
-            controller: NotificationsSettingsViewController(
-                preferencesStore: preferencesStore,
-                attentionSoundPlayer: attentionSoundPlayer,
-                assetStore: attentionSoundAssetStore,
-            ),
-            to: tabs
-        )
-        addTab(
-            title: "Speech",
-            symbol: "speaker.wave.2",
-            controller: SpeechSettingsViewController(
-                preferencesStore: speechPreferencesStore,
-                voiceCatalog: speechVoiceCatalog,
-                previewHandler: speechPreviewHandler
-            ),
-            to: tabs
-        )
-        addTab(
-            title: "Shortcuts",
-            symbol: "keyboard",
-            controller: ShortcutsSettingsViewController(),
-            to: tabs
-        )
-        addTab(
-            title: "Diagnostics",
-            symbol: "waveform.path.ecg",
-            controller: RuntimeDiagnosticsSettingsViewController(
-                preferencesStore: preferencesStore,
-                exportHandler: onExportDiagnostics,
-                openLogsHandler: onOpenDiagnosticsLogs
-            ),
-            to: tabs
-        )
-        addTab(
-            title: "Account & Language",
-            symbol: "person.crop.circle",
-            controller: AccountLanguageSettingsViewController(
-                onExportBackup: onExportBackup,
-                onRestoreBackup: onRestoreBackup,
-                browserProfileManager: browserProfileManager
-            ),
-            to: tabs
-        )
+        for page in GlobalSettingsPage.allCases {
+            addTab(
+                title: page.title,
+                symbol: page.symbol,
+                controller: makeSettingsPage(for: page),
+                to: tabs
+            )
+        }
 
         let window = NSWindow(contentViewController: tabs)
         window.title = "FloatTabs Settings"
@@ -256,6 +202,59 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.center()
         return window
+    }
+
+    private func makeSettingsPage(for page: GlobalSettingsPage) -> NSViewController {
+        let children: [NSViewController]
+        switch page {
+        case .general:
+            children = [
+                AppearanceSettingsViewController(preferencesStore: preferencesStore)
+            ]
+        case .browserPerformance:
+            children = [
+                BrowserProfilesSettingsViewController(
+                    browserProfileManager: browserProfileManager,
+                    embedsInSettingsPage: true
+                ),
+                PerformanceSettingsViewController(
+                    preferencesStore: preferencesStore,
+                    websiteCacheManager: websiteCacheManager,
+                    embedsInSettingsPage: true
+                ),
+            ]
+        case .audio:
+            children = [
+                NotificationsSettingsViewController(
+                    preferencesStore: preferencesStore,
+                    attentionSoundPlayer: attentionSoundPlayer,
+                    assetStore: attentionSoundAssetStore
+                ),
+                SpeechSettingsViewController(
+                    preferencesStore: speechPreferencesStore,
+                    voiceCatalog: speechVoiceCatalog,
+                    previewHandler: speechPreviewHandler
+                ),
+            ]
+        case .shortcuts:
+            children = [
+                ShortcutsSettingsViewController(embedsInSettingsPage: true)
+            ]
+        case .advanced:
+            children = [
+                RuntimeDiagnosticsSettingsViewController(
+                    preferencesStore: preferencesStore,
+                    exportHandler: onExportDiagnostics,
+                    openLogsHandler: onOpenDiagnosticsLogs
+                ),
+                BackupRestoreSettingsViewController(
+                    onExportBackup: onExportBackup,
+                    onRestoreBackup: onRestoreBackup
+                ),
+                AboutSettingsViewController(),
+            ]
+        }
+        return SettingsPageViewController(childViewControllers: children)
     }
 
     private func addTab(
@@ -414,6 +413,7 @@ final class SpeechSettingsViewController: NSViewController {
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
         ])
 
         view = root
@@ -654,7 +654,7 @@ final class NotificationsSettingsViewController: NSViewController {
         let volumeRow = makeRow(label: "Volume", control: volumeControls)
 
         let stack = NSStackView(views: [
-            Self.titleLabel("ChatGPT Ready Alerts"),
+            Self.titleLabel("Ready Alerts"),
             Self.detailLabel(
                 "Plays when a new ChatGPT completion enters Ready attention.\nNo sound is played when the completion is already being viewed."
             ),
@@ -665,8 +665,6 @@ final class NotificationsSettingsViewController: NSViewController {
             volumeRow,
             Self.spacer(4),
             previewButton,
-            Self.spacer(14),
-            Self.detailLabel("ChatGPT speech controls are available on the active Tab rail."),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -678,6 +676,7 @@ final class NotificationsSettingsViewController: NSViewController {
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
         ])
 
         view = root
@@ -1063,6 +1062,7 @@ private final class AppearanceSettingsViewController: NSViewController {
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 22),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22),
         ])
         synchronizeControls()
         view = root
@@ -1307,19 +1307,23 @@ private final class SettingsDocumentView: NSView {
 }
 
 @MainActor
-private final class ShortcutsSettingsViewController: NSViewController {
-    override func loadView() {
-        let root = NSView()
-        let scrollView = NSScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.autohidesScrollers = true
+final class ShortcutsSettingsViewController: NSViewController {
+    private let embedsInSettingsPage: Bool
 
+    init(embedsInSettingsPage: Bool = false) {
+        self.embedsInSettingsPage = embedsInSettingsPage
+        super.init(nibName: nil, bundle: nil)
+        title = "Shortcuts"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
         let document = SettingsDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = document
 
         var views: [NSView] = [
             sectionTitle("Global"),
@@ -1356,6 +1360,27 @@ private final class ShortcutsSettingsViewController: NSViewController {
         stack.spacing = 7
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
+        ])
+
+        guard !embedsInSettingsPage else {
+            view = document
+            return
+        }
+
+        let root = NSView()
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = document
         root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
@@ -1368,11 +1393,6 @@ private final class ShortcutsSettingsViewController: NSViewController {
             document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
             document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
             document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
 
         view = root
@@ -1529,6 +1549,7 @@ private final class ProfileDeleteTooltipView: NSView {
 final class PerformanceSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
     private let websiteCacheManager: WebsiteCacheManagementClient
+    private let embedsInSettingsPage: Bool
 
     private let warmRetentionPopup = NSPopUpButton()
     private let coldReleasePopup = NSPopUpButton()
@@ -1553,10 +1574,12 @@ final class PerformanceSettingsViewController: NSViewController {
 
     init(
         preferencesStore: AppPreferencesStore,
-        websiteCacheManager: WebsiteCacheManagementClient = .unavailable
+        websiteCacheManager: WebsiteCacheManagementClient = .unavailable,
+        embedsInSettingsPage: Bool = false
     ) {
         self.preferencesStore = preferencesStore
         self.websiteCacheManager = websiteCacheManager
+        self.embedsInSettingsPage = embedsInSettingsPage
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1570,17 +1593,8 @@ final class PerformanceSettingsViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
-        let scrollView = NSScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.autohidesScrollers = true
-
         let document = SettingsDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = document
 
         warmRetentionPopup.addItems(withTitles: WarmWebViewRetentionOption.allCases.map(\.displayName))
         for (index, option) in WarmWebViewRetentionOption.allCases.enumerated() {
@@ -1665,25 +1679,42 @@ final class PerformanceSettingsViewController: NSViewController {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
-        root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
-        view = root
+
+        let contentView: NSView
+        if embedsInSettingsPage {
+            contentView = document
+        } else {
+            let root = NSView()
+            let scrollView = NSScrollView()
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+            scrollView.hasVerticalScroller = true
+            scrollView.drawsBackground = false
+            scrollView.borderType = .noBorder
+            scrollView.autohidesScrollers = true
+            scrollView.documentView = document
+            root.addSubview(scrollView)
+            NSLayoutConstraint.activate([
+                scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+                scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+                document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+                document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+                document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+                document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            ])
+            contentView = root
+        }
+
+        view = contentView
         refreshPerformanceSettings()
         refreshWebsiteCache()
         startWebsiteCacheMeasurement()
@@ -1899,10 +1930,9 @@ final class PerformanceSettingsViewController: NSViewController {
 }
 
 @MainActor
-final class AccountLanguageSettingsViewController: NSViewController {
-    private let onExportBackup: GlobalSettingsController.ExportBackupHandler
-    private let onRestoreBackup: GlobalSettingsController.RestoreBackupHandler
+class BrowserProfilesSettingsViewController: NSViewController {
     private let browserProfileManager: BrowserProfileManagementClient
+    private let embedsInSettingsPage: Bool
 
     private let profileRowsStack = NSStackView()
     private let newProfileButton = NSButton(title: "+ New Profile", target: nil, action: nil)
@@ -1919,13 +1949,11 @@ final class AccountLanguageSettingsViewController: NSViewController {
     private(set) var profileSupportDescription = ""
 
     init(
-        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
-        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
-        browserProfileManager: BrowserProfileManagementClient = .unavailable
+        browserProfileManager: BrowserProfileManagementClient = .unavailable,
+        embedsInSettingsPage: Bool = false
     ) {
-        self.onExportBackup = onExportBackup
-        self.onRestoreBackup = onRestoreBackup
         self.browserProfileManager = browserProfileManager
+        self.embedsInSettingsPage = embedsInSettingsPage
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1935,32 +1963,8 @@ final class AccountLanguageSettingsViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
-        let scrollView = NSScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.autohidesScrollers = true
-
         let document = SettingsDocumentView()
         document.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = document
-
-        let exportButton = NSButton(
-            title: "Export Backup…",
-            target: self,
-            action: #selector(exportBackup)
-        )
-        let restoreButton = NSButton(
-            title: "Restore Backup…",
-            target: self,
-            action: #selector(restoreBackup)
-        )
-        let actions = NSStackView(views: [exportButton, restoreButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 10
 
         profileRowsStack.orientation = .vertical
         profileRowsStack.alignment = .leading
@@ -1975,68 +1979,50 @@ final class AccountLanguageSettingsViewController: NSViewController {
         newProfileButton.action = #selector(createProfile)
         newProfileButton.bezelStyle = .rounded
 
-        let versionLabel = NSTextField(labelWithString: AppReleaseInfo.currentVersionDisplay)
-        versionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        versionLabel.textColor = .labelColor
-
         let stack = NSStackView(views: [
-            sectionTitle("Account"),
-            detailLabel(
-                "FloatTabs V1 is local-only. It does not require a FloatTabs cloud account or sync service."
-            ),
-            spacer(8),
             sectionTitle("Profiles"),
             profileRowsStack,
             profileSupportLabel,
             newProfileButton,
-            spacer(8),
-            sectionTitle("Backup & Restore"),
-            detailLabel(
-                "Backups include Profile definitions and each Web App’s selected Profile, along with Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
-            ),
-            detailLabel(
-                "Website passwords, cookies, OAuth/login sessions, WebKit website data/caches, and page runtime state are not exported. After restoring on another Mac, you may need to sign in again for each Profile."
-            ),
-            actions,
-            detailLabel(
-                "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
-            ),
-            spacer(10),
-            sectionTitle("Language"),
-            detailLabel(
-                "A per-app language override is not exposed in V1. No non-functional language selector is shown."
-            ),
-            spacer(14),
-            sectionTitle("About FloatTabs"),
-            versionLabel,
-            detailLabel("Latest fixes in this build:"),
-            detailLabel(AppReleaseInfo.latestFixesDisplay),
-            spacer(8),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
-        root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20),
         ])
-        view = root
+
+        if embedsInSettingsPage {
+            view = document
+        } else {
+            let root = NSView()
+            let scrollView = NSScrollView()
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+            scrollView.hasVerticalScroller = true
+            scrollView.drawsBackground = false
+            scrollView.borderType = .noBorder
+            scrollView.autohidesScrollers = true
+            scrollView.documentView = document
+            root.addSubview(scrollView)
+            NSLayoutConstraint.activate([
+                scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                scrollView.topAnchor.constraint(equalTo: root.topAnchor),
+                scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+                document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+                document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+                document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+                document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            ])
+            view = root
+        }
         refreshProfiles()
     }
 
@@ -2400,66 +2386,6 @@ final class AccountLanguageSettingsViewController: NSViewController {
         return UUID(uuidString: rawValue)
     }
 
-    @objc private func exportBackup() {
-        guard let window = view.window else { return }
-        let panel = NSSavePanel()
-        panel.title = "Export FloatTabs Backup"
-        panel.nameFieldStringValue = FloatTabsBackupService.suggestedExportFileName()
-        panel.canCreateDirectories = true
-        panel.allowedContentTypes = [backupContentType]
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            do {
-                try self.onExportBackup(url)
-                self.showMessage(
-                    title: "Backup Exported",
-                    detail: "Your FloatTabs configuration backup was saved successfully."
-                )
-            } catch {
-                self.showError(error)
-            }
-        }
-    }
-
-    @objc private func restoreBackup() {
-        guard let window = view.window else { return }
-        let panel = NSOpenPanel()
-        panel.title = "Restore FloatTabs Backup"
-        panel.allowedContentTypes = [backupContentType]
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            self.confirmRestore(url: url)
-        }
-    }
-
-    private var backupContentType: UTType {
-        UTType(filenameExtension: FloatTabsBackupService.fileExtension) ?? .json
-    }
-
-    private func confirmRestore(url: URL) {
-        guard let window = view.window else { return }
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Replace current FloatTabs configuration?"
-        alert.informativeText = "FloatTabs will create a local rollback backup first, then replace current Slot and global settings with the selected backup. Website login/session data is not changed or restored."
-        alert.addButton(withTitle: "Restore and Replace")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn, let self else { return }
-            do {
-                let rollbackURL = try self.onRestoreBackup(url)
-                self.showMessage(
-                    title: "Backup Restored",
-                    detail: "FloatTabs configuration was restored. A rollback backup was saved at:\n\(rollbackURL.path)"
-                )
-            } catch {
-                self.showError(error)
-            }
-        }
-    }
-
     private func showMessage(title: String, detail: String) {
         guard let window = view.window else { return }
         let alert = NSAlert()
@@ -2467,10 +2393,6 @@ final class AccountLanguageSettingsViewController: NSViewController {
         alert.informativeText = detail
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window)
-    }
-
-    private func showError(_ error: Error) {
-        showMessage(title: "Backup Operation Failed", detail: error.localizedDescription)
     }
 
     private func showProfileError(_ error: Error) {
@@ -2496,5 +2418,25 @@ final class AccountLanguageSettingsViewController: NSViewController {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
+    }
+}
+
+/// Compatibility name for existing Profile settings tests and callers. The
+/// consolidated Settings UI renders BrowserProfilesSettingsViewController;
+/// the legacy backup closures are intentionally ignored because Backup &
+/// Restore now has its own presentation controller.
+@MainActor
+final class AccountLanguageSettingsViewController: BrowserProfilesSettingsViewController {
+    init(
+        onExportBackup: @escaping GlobalSettingsController.ExportBackupHandler,
+        onRestoreBackup: @escaping GlobalSettingsController.RestoreBackupHandler,
+        browserProfileManager: BrowserProfileManagementClient = .unavailable
+    ) {
+        super.init(browserProfileManager: browserProfileManager)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }

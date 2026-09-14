@@ -1757,7 +1757,7 @@ final class RailFoldControl: NSView {
 
 @MainActor
 enum ExternalTabVisualPalette {
-    /// Single seam for the future Settings → Appearance accent picker.
+    /// Single seam for the future Settings → General accent picker.
     static var activeAccent: NSColor { .controlAccentColor }
 }
 
@@ -2459,7 +2459,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         windowSize.isEnabled = windowSizeEditingEnabled
         windowSize.toolTip = windowSizeEditingEnabled
             ? nil
-            : "Window size is fixed globally in Settings → Appearance."
+            : "Window size is fixed globally in Settings → General."
         menu.addItem(windowSize)
 
         let zoom = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "")

@@ -85,6 +85,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
         ])
         view = root
         synchronizeControls()
