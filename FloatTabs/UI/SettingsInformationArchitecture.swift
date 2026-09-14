@@ -25,7 +25,7 @@ enum GlobalSettingsPage: CaseIterable, Equatable {
         case .general:
             return "General"
         case .browserPerformance:
-            return "Browser & Performance"
+            return "Browser"
         case .audio:
             return "Audio"
         case .shortcuts:
@@ -99,6 +99,8 @@ final class SettingsPageViewController: NSViewController {
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
 
+        document.addSubview(stack)
+
         for childViewController in embeddedControllers {
             addChild(childViewController)
             let childView = childViewController.view
@@ -107,7 +109,6 @@ final class SettingsPageViewController: NSViewController {
             childView.widthAnchor.constraint(equalTo: document.widthAnchor).isActive = true
         }
 
-        document.addSubview(stack)
         root.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
@@ -172,16 +173,9 @@ final class BackupRestoreSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             Self.sectionTitle("Backup & Restore"),
-            Self.detailLabel(
-                "Backups include Profile definitions and each Web App’s selected Profile, along with Web App/Slot configuration, rendering and resource settings, global appearance, ChatGPT Ready notification settings, Fixed shared window size, window-size switching preference, and the global Show/Hide shortcut."
-            ),
-            Self.detailLabel(
-                "Website passwords, cookies, OAuth/login sessions, WebKit website data/caches, and page runtime state are not exported. After restoring on another Mac, you may need to sign in again for each Profile."
-            ),
+            Self.detailLabel("Exports settings and Profiles, not website logins or cookies."),
             actions,
-            Self.detailLabel(
-                "FloatTabs also keeps a local automatic snapshot for each app version/build and creates a rollback backup before every manual restore."
-            ),
+            Self.detailLabel("A rollback backup is created before restore."),
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -299,14 +293,11 @@ final class AboutSettingsViewController: NSViewController {
         versionLabel.textColor = .labelColor
         displayedVersion = versionLabel.stringValue
 
-        let latestFixesLabel = Self.detailLabel(AppReleaseInfo.latestFixesDisplay)
-        displayedLatestFixes = latestFixesLabel.stringValue
+        displayedLatestFixes = ""
 
         let stack = NSStackView(views: [
             Self.sectionTitle("About FloatTabs"),
             versionLabel,
-            Self.detailLabel("Latest fixes in this build:"),
-            latestFixesLabel,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
