@@ -19,6 +19,32 @@ final class WebViewPoolTests: XCTestCase {
 
         let eventNames = writer.events.map(\.event)
         XCTAssertEqual(eventNames, ["web_runtime.create.begin", "web_runtime.created"])
+        let created = try XCTUnwrap(writer.events.last)
+        XCTAssertEqual(created.fields["website_mode"], .string("desktop"))
+        XCTAssertEqual(created.fields["effective_browser_identity"], .string("macosSafari"))
+        XCTAssertEqual(created.fields["custom_user_agent_present"], .bool(false))
+        XCTAssertEqual(created.fields["viewport_width"], .double(600))
+        XCTAssertEqual(created.fields["viewport_height"], .double(820))
+    }
+
+    func testWebRuntimeCreationRecordsMobileRenderingDiagnostics() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        var profile = makeProfile(name: "DiagnosticMobile")
+        profile.renderingProfile = profile.renderingProfile.settingWebsiteMode(.mobile)
+
+        _ = try pool.webView(for: profile)
+
+        let created = try XCTUnwrap(writer.events.last)
+        XCTAssertEqual(created.event, "web_runtime.created")
+        XCTAssertEqual(created.fields["website_mode"], .string("mobile"))
+        XCTAssertEqual(created.fields["effective_browser_identity"], .string("iphoneSafari"))
+        XCTAssertEqual(created.fields["custom_user_agent_present"], .bool(true))
     }
 
     func testWebRuntimeCreationRecordsSanitizedFailureWithoutCreatedEvent() {

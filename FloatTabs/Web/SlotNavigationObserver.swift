@@ -384,7 +384,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             event: "navigation.provisional_started",
             level: .debug,
             subsystem: "navigation",
-            fields: ["slot_id": .string(slotID.uuidString)]
+            fields: runtimeFields(for: webView)
         )
         // If Instant Back falls back to normal loading, ordinary didCommit is
         // authoritative again. A new provisional navigation also invalidates
@@ -399,16 +399,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
+        var commitFields = runtimeFields(for: webView)
+        commitFields["url"] = webView.url.flatMap {
+            RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+        }.map(RuntimeDiagnosticValue.string) ?? .null
         diagnostics.record(
             event: "navigation.commit",
             level: .info,
             subsystem: "navigation",
-            fields: [
-                "slot_id": .string(slotID.uuidString),
-                "url": webView.url.flatMap {
-                    RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
-                }.map(RuntimeDiagnosticValue.string) ?? .null
-            ]
+            fields: commitFields
         )
         // At this delegate boundary WebKit's visible URL is the final
         // committed destination for this navigation. Pass it as a narrow,
@@ -425,8 +424,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             event: "navigation.finished",
             level: .debug,
             subsystem: "navigation",
-            fields: ["slot_id": .string(slotID.uuidString)]
+            fields: runtimeFields(for: webView)
         )
+        if diagnostics.capturesDebugEvents {
+            recordPageRuntimeProbe(in: webView)
+        }
 
         onNavigationFinish(slotID, webView.url)
 
@@ -601,6 +603,120 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     private func restoreWebsiteMode(in webView: WKWebView) {
         (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
+    }
+
+    private func recordPageRuntimeProbe(in webView: WKWebView) {
+        let script = """
+        (() => {
+          const video = document.querySelector('video');
+          return {
+            inner_width: window.innerWidth,
+            client_width: document.documentElement?.clientWidth || 0,
+            inner_height: window.innerHeight,
+            device_pixel_ratio: window.devicePixelRatio || 0,
+            user_agent_is_mobile: /iPhone|Android/i.test(navigator.userAgent),
+            video_width: video?.videoWidth || 0,
+            video_height: video?.videoHeight || 0,
+            video_ready_state: video?.readyState || 0,
+            video_network_state: video?.networkState || 0,
+            video_present: !!video
+          };
+        })()
+        """
+
+        webView.evaluateJavaScript(script) { [weak self, weak webView] value, error in
+            Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView, webView === self.webView, error == nil,
+                      let probe = value as? [String: Any] else {
+                    return
+                }
+
+                var fields = self.runtimeFields(for: webView)
+                Self.copyNumber(probe["inner_width"], to: "page_inner_width", fields: &fields)
+                Self.copyNumber(probe["client_width"], to: "page_client_width", fields: &fields)
+                Self.copyNumber(probe["inner_height"], to: "page_inner_height", fields: &fields)
+                Self.copyNumber(
+                    probe["device_pixel_ratio"],
+                    to: "page_device_pixel_ratio",
+                    fields: &fields
+                )
+                Self.copyNumber(probe["video_width"], to: "video_width", fields: &fields)
+                Self.copyNumber(probe["video_height"], to: "video_height", fields: &fields)
+                Self.copyInteger(
+                    probe["video_ready_state"],
+                    to: "video_ready_state",
+                    fields: &fields
+                )
+                Self.copyInteger(
+                    probe["video_network_state"],
+                    to: "video_network_state",
+                    fields: &fields
+                )
+                if let value = probe["user_agent_is_mobile"] as? Bool {
+                    fields["page_user_agent_is_mobile"] = .bool(value)
+                }
+                if let value = probe["video_present"] as? Bool {
+                    fields["video_present"] = .bool(value)
+                }
+                self.diagnostics.record(
+                    event: "navigation.page_runtime_probe",
+                    level: .debug,
+                    subsystem: "navigation",
+                    fields: fields
+                )
+            }
+        }
+    }
+
+    private static func copyNumber(
+        _ value: Any?,
+        to key: String,
+        fields: inout [String: RuntimeDiagnosticValue]
+    ) {
+        if let value = value as? NSNumber {
+            fields[key] = .double(value.doubleValue)
+        } else if let value = value as? Double {
+            fields[key] = .double(value)
+        }
+    }
+
+    private static func copyInteger(
+        _ value: Any?,
+        to key: String,
+        fields: inout [String: RuntimeDiagnosticValue]
+    ) {
+        if let value = value as? NSNumber {
+            fields[key] = .integer(value.int64Value)
+        } else if let value = value as? Int {
+            fields[key] = .integer(Int64(value))
+        }
+    }
+
+    private func runtimeFields(for webView: WKWebView) -> [String: RuntimeDiagnosticValue] {
+        let contentMode: String = switch webView.configuration.defaultWebpagePreferences.preferredContentMode {
+        case .desktop: "desktop"
+        case .mobile: "mobile"
+        case .recommended: "recommended"
+        @unknown default: "unknown"
+        }
+        let websiteMode = (webView as? FloatTabsWebView)?.websiteMode.rawValue
+            ?? contentMode
+        let customUserAgent = webView.customUserAgent
+        return [
+            "slot_id": .string(slotID.uuidString),
+            "website_mode": .string(websiteMode),
+            "preferred_content_mode": .string(contentMode),
+            "custom_user_agent_present": .bool(customUserAgent?.isEmpty == false),
+            "custom_user_agent_is_mobile": .bool(
+                customUserAgent?.localizedCaseInsensitiveContains("iPhone") == true
+                    || customUserAgent?.localizedCaseInsensitiveContains("Android") == true
+            ),
+            "frame_width": .double(Double(webView.frame.width)),
+            "frame_height": .double(Double(webView.frame.height)),
+            "bounds_width": .double(Double(webView.bounds.width)),
+            "bounds_height": .double(Double(webView.bounds.height)),
+            "page_zoom": .double(Double(webView.pageZoom))
+        ]
     }
 
     private func failingURLForDiagnostics(

@@ -159,11 +159,13 @@ final class WebViewPool {
             WebViewFactory.applyRuntimeRendering(desiredRuntimeRendering, to: existing)
             appliedRenderingProfiles[profile.id] = desiredRuntimeRendering
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
+            var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
+            reuseFields["slot_id"] = .string(profile.id.uuidString)
             diagnostics.record(
                 event: "web_runtime.reused",
                 level: .debug,
                 subsystem: "web",
-                fields: ["slot_id": .string(profile.id.uuidString)]
+                fields: reuseFields
             )
             return existing
         }
@@ -424,11 +426,17 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL
     ) throws -> WKWebView {
+        let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
+            for: profile.renderingProfile.normalized(),
+            navigationURL: navigationURL
+        )
+        var rebuildFields = renderingDiagnosticFields(for: runtimeRendering)
+        rebuildFields["slot_id"] = .string(profile.id.uuidString)
         diagnostics.record(
             event: "web_runtime.rebuild.begin",
             level: .notice,
             subsystem: "web",
-            fields: ["slot_id": .string(profile.id.uuidString)]
+            fields: rebuildFields
         )
         invalidateAttentionBridge(slotID: profile.id)
         invalidateResponseBridge(slotID: profile.id)
@@ -457,7 +465,7 @@ final class WebViewPool {
                 event: "web_runtime.rebuild.completed",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(profile.id.uuidString)]
+                fields: rebuildFields
             )
             return webView
         } catch {
@@ -529,6 +537,7 @@ final class WebViewPool {
             for: rendering,
             navigationURL: navigationURL
         )
+        let runtimeFields = renderingDiagnosticFields(for: runtimeRendering)
         let browserProfileIdentity = BrowserProfileIdentity(
             browserProfileID: profile.browserProfileID
         )
@@ -684,17 +693,43 @@ final class WebViewPool {
             cachePolicy: cachePolicy,
             timeoutInterval: 60
         )
+        var createdFields = runtimeFields
+        createdFields["slot_id"] = .string(profile.id.uuidString)
+        createdFields["browser_profile"] = .string(String(describing: browserProfileIdentity))
+        createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
+        createdFields["initial_frame_height"] = .double(Double(webView.frame.height))
+        createdFields["initial_attached_to_window"] = .bool(webView.window != nil)
         load(webView, request)
         diagnostics.record(
             event: "web_runtime.created",
             level: .notice,
             subsystem: "web",
-            fields: [
-                "slot_id": .string(profile.id.uuidString),
-                "browser_profile": .string(String(describing: browserProfileIdentity))
-            ]
+            fields: createdFields
         )
         return webView
+    }
+
+    private func renderingDiagnosticFields(
+        for rendering: WebRenderingProfile
+    ) -> [String: RuntimeDiagnosticValue] {
+        let normalized = rendering.normalized()
+        let customUserAgent = UserAgentProvider.customUserAgent(for: normalized)
+        return [
+            "website_mode": .string(normalized.effectiveWebsiteMode.rawValue),
+            "browser_identity": .string(normalized.browserIdentity.rawValue),
+            "effective_browser_identity": .string(normalized.effectiveBrowserIdentity.rawValue),
+            "custom_user_agent_present": .bool(customUserAgent?.isEmpty == false),
+            "custom_user_agent_is_mobile": .bool(Self.isMobileUserAgent(customUserAgent)),
+            "viewport_width": .double(Double(normalized.viewportWidth)),
+            "viewport_height": .double(Double(normalized.viewportHeight)),
+            "zoom": .double(Double(normalized.zoom))
+        ]
+    }
+
+    private static func isMobileUserAgent(_ userAgent: String?) -> Bool {
+        guard let userAgent else { return false }
+        return userAgent.localizedCaseInsensitiveContains("iPhone")
+            || userAgent.localizedCaseInsensitiveContains("Android")
     }
 
     private func diagnosticURLFields(_ url: URL, slotID: UUID) -> [String: RuntimeDiagnosticValue] {
