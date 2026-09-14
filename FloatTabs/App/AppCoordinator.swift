@@ -472,6 +472,7 @@ final class AppCoordinator {
             return
         }
 
+        panelController.prepareForExplicitActivation()
         NSApp.activate(ignoringOtherApps: true)
 
         while profileRepository.startupRecoveryRequired {
@@ -697,6 +698,7 @@ final class AppCoordinator {
     }
 
     private func showGlobalSettings() {
+        panelController.prepareForExplicitActivation()
         globalSettingsController?.show()
     }
 

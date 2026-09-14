@@ -363,6 +363,37 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
+    func testExplicitPrimaryFocusActivationSupersedesPendingRestoreObservation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let dismissTrace = RuntimeDiagnosticTrace(root: "dismiss-focus-A")
+        let activationTrace = RuntimeDiagnosticTrace(root: "focus-activation-B")
+
+        controller.showFloatTabs(trace: RuntimeDiagnosticTrace(root: "presentation-focus-A"))
+        controller.hideFloatTabs(trace: dismissTrace, dismissSource: .hotkey)
+        guard writer.events.contains(where: { $0.event == "previous_app.restore.requested" }) else {
+            throw XCTSkip("restore request unavailable in this AppKit test environment")
+        }
+
+        controller.handle(.togglePrimaryFocus, trace: activationTrace)
+
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "app.activation.requested" && $0.traceID == activationTrace.id
+            }
+        )
+        try await wait(milliseconds: 100)
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "previous_app.restore.observed" && $0.traceID == dismissTrace.id
+            }
+        )
+    }
+
     func testPendingPresentationCancellationUsesPresentationTraceOnlyForCancellation() {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

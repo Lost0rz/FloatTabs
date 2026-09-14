@@ -809,6 +809,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         activateFloatTabs(trace: trace)
     }
 
+    /// Application-level windows such as Settings use their own AppKit
+    /// activation path. Keep their explicit activation inside the same
+    /// diagnostics-only observation supersession boundary.
+    func prepareForExplicitActivation() {
+        invalidatePendingRestoreObservationForNewPresentation()
+    }
+
     func showFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
         let trace = trace ?? diagnostics.beginTrace(root: "panel.summon")
         invalidatePendingRestoreObservationForNewPresentation()
@@ -1057,8 +1064,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     /// A new presentation supersedes only the diagnostics observation attached
-    /// to an older restore request. It deliberately does not touch the
-    /// previous-application context or any presentation business state.
+    /// to an older restore request. Explicit activation/focus uses the same
+    /// boundary. It deliberately does not touch the previous-application
+    /// context or any presentation business state.
     private func invalidatePendingRestoreObservationForNewPresentation() {
         guard pendingRestoreObservation != nil else { return }
         pendingRestoreObservation = nil
@@ -3497,6 +3505,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func activateFloatTabs(trace: RuntimeDiagnosticTrace? = nil) {
+        // Final diagnostics-only safety gate: every FloatTabs activation,
+        // including explicit focus activation while hidden, supersedes an
+        // older delayed previous-app observation before touching AppKit.
+        invalidatePendingRestoreObservationForNewPresentation()
         // This path only runs for an explicit user presentation. Current macOS
         // treats activation as contextual, while older releases require the
         // explicit override for an LSUIElement accessory application.

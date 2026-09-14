@@ -94,8 +94,11 @@ the request; it is not an observation that the target application became active.
 comparison, including `application_match`, `window_match` (`true`, `false`, or
 `unknown`), observation attempt, and elapsed uptime. It is evidence only; it
 does not feed back into activation, retry, policy, or focus decisions. A stale
-observation ticket is discarded when a newer presentation or dismiss supersedes
-it, before FloatTabs activation for that newer presentation. No
+observation ticket is discarded when a newer presentation, explicit
+activation/focus request, or newer dismiss supersedes it. The final activation
+boundary also invalidates it immediately before FloatTabs calls AppKit
+activation, so an explicit focus activation while hidden cannot inherit an old
+restore observation. No
 `previous_app.restore.completed` event is emitted in V1.
 
 `window_match=false` is only emitted when the requested application is also the
