@@ -3,6 +3,8 @@ import OSLog
 
 @MainActor
 protocol RuntimeDiagnosticRecording: AnyObject {
+    var capturesDebugEvents: Bool { get }
+
     func beginTrace(
         root: String,
         fields: [String: RuntimeDiagnosticValue]
@@ -85,6 +87,10 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
 
     var mode: RuntimeDiagnosticMode {
         modeProvider()
+    }
+
+    var capturesDebugEvents: Bool {
+        mode.allows(.debug)
     }
 
     func environmentFields() -> [String: RuntimeDiagnosticValue] {
@@ -247,6 +253,8 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
 
 @MainActor
 final class RuntimeDiagnosticNoopRecorder: RuntimeDiagnosticRecording {
+    let capturesDebugEvents = false
+
     func beginTrace(
         root: String,
         fields: [String: RuntimeDiagnosticValue] = [:]
