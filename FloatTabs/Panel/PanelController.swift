@@ -3340,19 +3340,15 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func currentActualPageURL() -> URL? {
         guard let id = tabStore.activeTabID else { return nil }
-        if let committedURL = webViewPool.committedURL(for: id),
-           WebAppURL.isSafe(committedURL) {
-            return committedURL
-        }
-        if let webURL = selectedPresentationWebView()?.url,
-           WebAppURL.isSafe(webURL) {
-            return webURL
-        }
-        return nil
+        return webViewPool.committedURL(for: id)
     }
 
     private func currentAddressURL() -> URL? {
         if let actualURL = currentActualPageURL() { return actualURL }
+        if let webURL = selectedPresentationWebView()?.url,
+           WebAppURL.isSafe(webURL) {
+            return webURL
+        }
         guard let profile = tabStore.activeProfile else { return nil }
         if let currentURL = profile.currentURL, WebAppURL.isSafe(currentURL) {
             return currentURL

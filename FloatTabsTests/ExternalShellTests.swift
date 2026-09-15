@@ -620,15 +620,19 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertEqual(requestedURLs.last, currentURL)
     }
 
-    func testSetCurrentPageAsHomeDoesNothingWithoutCommittedPage() throws {
+    func testSetCurrentPageAsHomeRejectsRequestedWebViewURLWithoutCommittedHistory() throws {
         let repository = MemoryProfileRepository()
         let store = TabStore(repository: repository)
-        _ = try XCTUnwrap(
+        let profile = try XCTUnwrap(
             store.add(name: "A", homeURL: URL(string: "https://old.example.com")!)
         )
+        let requestedURL = URL(string: "https://requested.example.com/provisional")!
+        store.updateCurrentURL(id: profile.id, url: requestedURL)
         let pool = WebViewPool(
             onURLChange: { _, _ in },
-            initialLoad: { _, _ in }
+            initialLoad: { webView, request in
+                webView.load(request)
+            }
         )
         let controller = PanelController(
             tabStore: store,
@@ -637,10 +641,17 @@ final class ExternalShellTests: XCTestCase {
             frameStore: PanelFrameStore(),
             preferencesStore: AppPreferencesStore()
         )
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let requestedWebViewURL = try XCTUnwrap(webView.url)
+        XCTAssertEqual(requestedWebViewURL, requestedURL)
+        XCTAssertNil(pool.committedURL(for: profile.id))
+
         let before = store.storedStateSnapshot()
+        let savedStateCountBefore = repository.savedStates.count
 
         XCTAssertFalse(controller.debugSetCurrentPageAsHome())
         XCTAssertEqual(store.storedStateSnapshot(), before)
+        XCTAssertEqual(repository.savedStates.count, savedStateCountBefore)
     }
 
     func testTabHomeOriginChangeRefreshesExistingTabFaviconSource() throws {
