@@ -2226,6 +2226,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         return debugInvokeOverflowSelection(slotID: slotID)
     }
 
+    @discardableResult
+    func debugSetCurrentPageAsHome() -> Bool {
+        setCurrentPageAsHome()
+    }
+
     var debugOverflowSlotIDs: [UUID] {
         rootView.externalControlZoneView.layoutSubtreeIfNeeded()
         return rootView.externalControlZoneView.overflowTabIDs
@@ -2386,6 +2391,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         addressOverlayView.onCopy = { [weak self] rawValue in
             self?.copyAddressToPasteboard(rawValue) ?? false
+        }
+        addressOverlayView.onSetHome = { [weak self] in
+            self?.setCurrentPageAsHome() ?? false
         }
         addressOverlayView.onCreateWebApp = { [weak self] in
             self?.presentDerivedWebAppFromCurrentPage()
@@ -3330,16 +3338,40 @@ final class PanelController: NSObject, NSWindowDelegate {
         addressOverlayView.present(url: url, in: hostWindow)
     }
 
-    private func currentAddressURL() -> URL? {
+    private func currentActualPageURL() -> URL? {
+        guard let id = tabStore.activeTabID else { return nil }
+        if let committedURL = webViewPool.committedURL(for: id),
+           WebAppURL.isSafe(committedURL) {
+            return committedURL
+        }
         if let webURL = selectedPresentationWebView()?.url,
            WebAppURL.isSafe(webURL) {
             return webURL
         }
+        return nil
+    }
+
+    private func currentAddressURL() -> URL? {
+        if let actualURL = currentActualPageURL() { return actualURL }
         guard let profile = tabStore.activeProfile else { return nil }
         if let currentURL = profile.currentURL, WebAppURL.isSafe(currentURL) {
             return currentURL
         }
         return WebAppURL.isSafe(profile.homeURL) ? profile.homeURL : nil
+    }
+
+    private func setCurrentPageAsHome() -> Bool {
+        guard let id = tabStore.activeTabID,
+              let currentURL = currentActualPageURL() else {
+            return false
+        }
+        guard tabStore.updateHomeURL(id: id, homeURL: currentURL) else {
+            return false
+        }
+
+        addressOverlayView.dismiss()
+        focusActiveWebViewIfAvailable()
+        return true
     }
 
     private func selectedPresentationWebView() -> WKWebView? {
@@ -4604,11 +4636,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
     var onCommit: ((String) -> Bool)?
     var onCopy: ((String) -> Bool)?
+    var onSetHome: (() -> Bool)?
     var onCreateWebApp: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     let field = NSTextField()
     private let copyButton = NSButton()
+    private let setHomeButton = NSButton(title: "Set Home", target: nil, action: nil)
     private let createButton = NSButton(title: "New App", target: nil, action: nil)
     private var copyFeedbackWorkItem: DispatchWorkItem?
     private(set) var isPresented = false
@@ -4639,6 +4673,13 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         copyButton.target = self
         copyButton.action = #selector(copyPressed(_:))
 
+        setHomeButton.toolTip = "Set the current page as this Tab's Home"
+        setHomeButton.bezelStyle = .rounded
+        setHomeButton.controlSize = .small
+        setHomeButton.translatesAutoresizingMaskIntoConstraints = false
+        setHomeButton.target = self
+        setHomeButton.action = #selector(setHomePressed(_:))
+
         createButton.toolTip = "Create a new Web App from the current page"
         createButton.bezelStyle = .rounded
         createButton.controlSize = .small
@@ -4648,6 +4689,7 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
 
         addSubview(field)
         addSubview(copyButton)
+        addSubview(setHomeButton)
         addSubview(createButton)
         NSLayoutConstraint.activate([
             field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -4658,7 +4700,11 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
             copyButton.widthAnchor.constraint(equalToConstant: 26),
             copyButton.heightAnchor.constraint(equalToConstant: 26),
 
-            createButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            setHomeButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 6),
+            setHomeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            setHomeButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 70),
+
+            createButton.leadingAnchor.constraint(equalTo: setHomeButton.trailingAnchor, constant: 6),
             createButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             createButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 66),
@@ -4731,6 +4777,10 @@ final class AddressOverlayView: NSVisualEffectView, NSTextFieldDelegate {
         }
         copyFeedbackWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
+    }
+
+    @objc private func setHomePressed(_ sender: NSButton) {
+        _ = onSetHome?()
     }
 
     @objc private func createPressed(_ sender: NSButton) {

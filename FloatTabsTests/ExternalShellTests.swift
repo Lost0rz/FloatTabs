@@ -534,6 +534,131 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(zone.hitTest(pointInZone) === tab)
     }
 
+    func testAddressOverlayExposesSetHomeAndDoesNotUseEditedText() throws {
+        let overlay = AddressOverlayView()
+        let actualPageURL = URL(string: "https://example.com/actual")!
+        overlay.field.stringValue = "https://example.com/typed-but-not-navigated"
+        var savedURL: URL?
+        overlay.onSetHome = {
+            savedURL = actualPageURL
+            return true
+        }
+
+        let setHomeButton = try XCTUnwrap(
+            overlay.subviews
+                .compactMap { $0 as? NSButton }
+                .first(where: { $0.title == "Set Home" })
+        )
+        setHomeButton.performClick(nil)
+
+        XCTAssertEqual(savedURL, actualPageURL)
+        XCTAssertNotEqual(savedURL?.absoluteString, overlay.field.stringValue)
+    }
+
+    func testAddressOverlayKeepsCopyAndNewAppActions() throws {
+        let overlay = AddressOverlayView()
+        let address = "https://example.com/current"
+        overlay.field.stringValue = address
+        var copiedAddress: String?
+        var createCount = 0
+        overlay.onCopy = { value in
+            copiedAddress = value
+            return true
+        }
+        overlay.onCreateWebApp = {
+            createCount += 1
+        }
+
+        let buttons = overlay.subviews.compactMap { $0 as? NSButton }
+        let copyButton = try XCTUnwrap(buttons.first(where: { $0.toolTip == "Copy URL" }))
+        let createButton = try XCTUnwrap(buttons.first(where: { $0.title == "New App" }))
+
+        copyButton.performClick(nil)
+        createButton.performClick(nil)
+
+        XCTAssertEqual(copiedAddress, address)
+        XCTAssertEqual(createCount, 1)
+    }
+
+    func testSetCurrentPageAsHomeUsesCommittedPageAndReturnHomeUsesNewTarget() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(
+            store.add(name: "A", homeURL: URL(string: "https://old.example.com")!)
+        )
+        let currentURL = URL(string: "https://current.example.com/path")!
+        let returnURL = URL(string: "https://later.example.com")!
+        store.updateCurrentURL(id: profile.id, url: returnURL)
+        var requestedURLs: [URL] = []
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in
+                if let url = request.url {
+                    requestedURLs.append(url)
+                }
+            },
+            committedURLProvider: { _ in currentURL }
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            attentionCoordinator: WebAttentionCoordinator(),
+            frameStore: PanelFrameStore(),
+            preferencesStore: AppPreferencesStore()
+        )
+        let originalWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+
+        XCTAssertTrue(controller.debugSetCurrentPageAsHome())
+
+        let updated = try XCTUnwrap(store.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(updated.homeURL, currentURL)
+        XCTAssertEqual(updated.currentURL, returnURL)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === originalWebView)
+
+        controller.handle(.returnHome)
+
+        XCTAssertEqual(requestedURLs.last, currentURL)
+    }
+
+    func testSetCurrentPageAsHomeDoesNothingWithoutCommittedPage() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        _ = try XCTUnwrap(
+            store.add(name: "A", homeURL: URL(string: "https://old.example.com")!)
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            attentionCoordinator: WebAttentionCoordinator(),
+            frameStore: PanelFrameStore(),
+            preferencesStore: AppPreferencesStore()
+        )
+        let before = store.storedStateSnapshot()
+
+        XCTAssertFalse(controller.debugSetCurrentPageAsHome())
+        XCTAssertEqual(store.storedStateSnapshot(), before)
+    }
+
+    func testTabHomeOriginChangeRefreshesExistingTabFaviconSource() throws {
+        let (_, zone) = makeZoneHarness()
+        let oldHome = makeProfile(order: 0, name: "Old")
+        zone.apply(profiles: [oldHome], activeTabID: oldHome.id)
+        zone.setResidentSlotIDs([oldHome.id])
+        zone.layoutSubtreeIfNeeded()
+        let tab = try XCTUnwrap(zone.tabView(for: oldHome.id))
+        let oldIcon = try XCTUnwrap(tab.displayedIcon)
+
+        var newHome = oldHome
+        newHome.homeURL = URL(string: "https://github.com/new-home")!
+        zone.apply(profiles: [newHome], activeTabID: newHome.id)
+
+        XCTAssertFalse(tab.displayedIcon === oldIcon)
+    }
+
     func testBlankZoneDoesNotBecomeFullWidthInvisibleControl() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
