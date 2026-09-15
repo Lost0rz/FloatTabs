@@ -34,7 +34,12 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
         XCTAssertFalse(tab.isShowingUnreadResponse)
 
-        coordinator.handle(.generationStarted, for: profile.id)
+        coordinator.handle(
+            .generationStarted,
+            for: profile.id,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
         synchronizeUnread(zone, from: coordinator)
         XCTAssertFalse(tab.isShowingUnreadResponse)
     }
@@ -45,13 +50,23 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
 
-        coordinator.handle(.generationFinished, for: profile.id)
+        coordinator.handle(
+            .generationFinished,
+            for: profile.id,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
         synchronizeUnread(zone, from: coordinator)
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
         XCTAssertTrue(tab.isShowingUnreadResponse)
 
-        coordinator.handle(.generationStarted, for: profile.id)
+        coordinator.handle(
+            .generationStarted,
+            for: profile.id,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
         synchronizeUnread(zone, from: coordinator)
         XCTAssertTrue(tab.isShowingUnreadResponse)
     }
@@ -394,7 +409,12 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.apply(profiles: [profile], activeTabID: profile.id)
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
 
-        coordinator.handle(.generationFinished, for: profile.id)
+        coordinator.handle(
+            .generationFinished,
+            for: profile.id,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
         synchronizeUnread(zone, from: coordinator)
         XCTAssertTrue(tab.isShowingUnreadResponse)
 
@@ -402,8 +422,18 @@ final class WebAttentionIndicatorTests: XCTestCase {
         synchronizeUnread(zone, from: coordinator)
         XCTAssertFalse(tab.isShowingUnreadResponse)
 
-        coordinator.handle(.generationFinished, for: profile.id)
-        coordinator.handle(.runtimeReset, for: profile.id)
+        coordinator.handle(
+            .generationFinished,
+            for: profile.id,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        coordinator.handle(
+            .runtimeReset,
+            for: profile.id,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
         synchronizeUnread(zone, from: coordinator)
         XCTAssertTrue(tab.isShowingUnreadResponse)
     }

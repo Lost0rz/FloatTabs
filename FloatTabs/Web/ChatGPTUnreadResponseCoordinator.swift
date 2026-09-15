@@ -33,19 +33,24 @@ final class ChatGPTUnreadResponseCoordinator {
         unreadSlotIDs = store.unreadSlotIDs
     }
 
-    /// A completed generation is unread regardless of where the user was and
-    /// whether the panel happened to be visible. Starts and runtime resets are
+    /// Only a valid completion that was not actually visible to the user
+    /// becomes persistent unread state. Starts and runtime resets are
     /// deliberately no-ops, including for a Slot that already has unread
-    /// output.
+    /// output. The validity and visibility facts come from the PanelController
+    /// boundary so this coordinator remains independent of transient
+    /// attention state.
     func handle(
         _ observation: ChatGPTAttentionObservation,
-        for slotID: UUID
+        for slotID: UUID,
+        isValidGenerationCompletion: Bool,
+        userVisible: Bool
     ) {
-        switch observation {
-        case .generationFinished:
-            markUnread(slotID: slotID)
-        case .generationStarted, .runtimeReset:
-            break
+        guard observation == .generationFinished,
+              isValidGenerationCompletion,
+              !userVisible else {
+            return
         }
+
+        markUnread(slotID: slotID)
     }
 }

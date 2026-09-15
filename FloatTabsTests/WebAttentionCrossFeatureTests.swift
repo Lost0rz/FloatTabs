@@ -2316,7 +2316,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.8 Provisional navigation completion visibility
 
-    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleBeforeFailure() throws {
+    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleWithoutUnreadBeforeFailure() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -2345,7 +2345,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             acceptState(generating: false, bridge: bridge, webView: webView)
             XCTAssertEqual(coordinator.state(for: slot.id), .idle)
             XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-            XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+            XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         }
 
         // Hiding before the provisional failure must not retroactively change
@@ -2366,7 +2366,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testHiddenCompletionDuringProvisionalNavigationRemainsReadyBeforeAndAfterFailure() throws {
@@ -2736,7 +2736,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
         XCTAssertEqual(player.calls.count, 1)
     }
 
@@ -2770,6 +2770,45 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
         XCTAssertEqual(player.calls.count, 1)
+    }
+
+    func testVisibleCompletionAfterAcknowledgementStaysUnreadClear() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "acknowledged-before-visible-completion"
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .ready)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        XCTAssertTrue(
+            controller.debugInvokeRailSelection(
+                slotID: slot.id,
+                presentationFact: true
+            )
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
+        controller.debugWithPresentationFact(
+            slotID: slot.id,
+            presentationFact: true
+        ) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "visible-completion-after-acknowledgement"
+            )
+        }
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
     }
 
     func testDuplicateFinishDoesNotReplayCompletionSound() throws {
@@ -3582,7 +3621,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testNextCompletionMarksUnreadAgainAfterVisibleGenerationStart() throws {
+    func testNextVisibleCompletionStaysUnreadClearAfterVisibleGenerationStart() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -3623,7 +3662,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
     // MARK: 4.12 Factory user-content seam
