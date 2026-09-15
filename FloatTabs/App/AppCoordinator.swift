@@ -127,12 +127,22 @@ final class AppCoordinator {
 
     func start() {
         let trace = diagnostics.beginTrace(root: "app.launch")
+        let instanceFields = RuntimeInstanceDiagnosticMetadata.primaryFields()
+        diagnostics.record(
+            event: "app.instance.primary_claimed",
+            level: .notice,
+            subsystem: "app",
+            trace: trace,
+            fields: instanceFields
+        )
+        var launchFields = diagnostics.environmentFields()
+        launchFields.merge(instanceFields) { _, current in current }
         diagnostics.record(
             event: "app.launch",
             level: .info,
             subsystem: "app",
             trace: trace,
-            fields: diagnostics.environmentFields()
+            fields: launchFields
         )
         resolveStartupConfigurationRecoveryIfNeeded()
 
@@ -296,8 +306,32 @@ final class AppCoordinator {
             level: .notice,
             subsystem: "app",
             trace: trace,
-            fields: ["diagnostics_mode": .string(diagnostics.mode.rawValue)]
+            fields: [
+                "diagnostics_mode": .string(diagnostics.mode.rawValue),
+                "process_id": .integer(Int64(ProcessInfo.processInfo.processIdentifier)),
+                "instance_role": .string("primary")
+            ]
         )
+    }
+
+    func handleSecondaryLaunch() {
+        let trace = diagnostics.beginTrace(root: "app.secondary-launch")
+        let fields = RuntimeInstanceDiagnosticMetadata.primaryFields()
+        diagnostics.record(
+            event: "app.instance.secondary_launch_received",
+            level: .notice,
+            subsystem: "app",
+            trace: trace,
+            fields: fields
+        )
+        diagnostics.record(
+            event: "app.instance.presentation_requested",
+            level: .info,
+            subsystem: "app",
+            trace: trace,
+            fields: fields
+        )
+        panelController.presentFloatTabs(trace: trace)
     }
 
     func prepareForTermination() {

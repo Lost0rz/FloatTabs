@@ -101,7 +101,9 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
             "architecture": .string(Self.processArchitecture),
             "session_id": .string(sessionID.uuidString),
             "schema_version": .integer(Int64(RuntimeDiagnosticEvent.schemaVersion)),
-            "diagnostics_mode": .string(mode.rawValue)
+            "diagnostics_mode": .string(mode.rawValue),
+            "process_id": .integer(Int64(ProcessInfo.processInfo.processIdentifier)),
+            "instance_role": .string("primary")
         ]
     }
 
