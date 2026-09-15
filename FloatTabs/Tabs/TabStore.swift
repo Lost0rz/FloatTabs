@@ -348,6 +348,26 @@ final class TabStore {
     }
 
     @discardableResult
+    func updateHomeURL(id: UUID, homeURL: URL) -> Bool {
+        guard WebAppURL.isSafe(homeURL),
+              let index = profiles.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        guard profiles[index].homeURL != homeURL
+            || profiles[index].homeURLSchemeWasInferred else {
+            return true
+        }
+
+        return persistConfigurationMutation {
+            profiles[index].homeURL = homeURL
+            // This home came from an already committed page, so it has
+            // explicit URL provenance and must not receive entry fallback.
+            profiles[index].homeURLSchemeWasInferred = false
+            return true
+        }
+    }
+
+    @discardableResult
     func updateRenderingProfile(id: UUID, renderingProfile: WebRenderingProfile) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
         let normalized = renderingProfile.normalized()

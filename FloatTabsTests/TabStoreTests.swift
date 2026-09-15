@@ -6,6 +6,7 @@ final class MemoryProfileRepository: ProfileRepositoryProtocol {
     var state: StoredWebAppState
     var savedStates: [StoredWebAppState] = []
     var loadError: Error?
+    var shouldFailSaves = false
 
     init(state: StoredWebAppState = .empty) {
         self.state = state
@@ -17,6 +18,9 @@ final class MemoryProfileRepository: ProfileRepositoryProtocol {
     }
 
     func save(_ state: StoredWebAppState) throws {
+        if shouldFailSaves {
+            throw NSError(domain: "MemoryProfileRepository", code: 1)
+        }
         self.state = state
         savedStates.append(state)
     }
@@ -112,6 +116,95 @@ final class TabStoreTests: XCTestCase {
         let restored = try! XCTUnwrap(relaunched.profiles.first(where: { $0.id == profile.id }))
         XCTAssertEqual(restored.homeURL, urlA)
         XCTAssertEqual(restored.currentURL, urlB)
+    }
+
+    func testUpdateHomeURLChangesOnlyHomeAndPreservesProfileMetadata() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let browserProfile = try XCTUnwrap(store.createBrowserProfile(name: "Work"))
+        let rendering = WebRenderingProfile.canonicalDefault
+            .settingWebsiteMode(.mobile)
+            .settingZoom(1.25)
+        let profile = try XCTUnwrap(
+            store.add(
+                name: "A",
+                homeURL: urlA,
+                homeURLSchemeWasInferred: true,
+                renderingProfile: rendering,
+                browserProfileID: browserProfile.id
+            )
+        )
+        XCTAssertTrue(
+            store.updateResourcePolicy(
+                id: profile.id,
+                residencyPolicy: .hot,
+                backgroundMediaPolicy: .allowBackgroundAudio
+            )
+        )
+        store.updateCurrentURL(id: profile.id, url: urlC)
+        var changeCount = 0
+        store.onChange = { changeCount += 1 }
+
+        XCTAssertTrue(store.updateHomeURL(id: profile.id, homeURL: urlB))
+
+        let updated = try XCTUnwrap(store.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(updated.homeURL, urlB)
+        XCTAssertEqual(updated.currentURL, urlC)
+        XCTAssertEqual(updated.name, "A")
+        XCTAssertEqual(updated.browserProfileID, browserProfile.id)
+        XCTAssertEqual(updated.renderingProfile, rendering.normalized())
+        XCTAssertEqual(updated.residencyPolicy, .hot)
+        XCTAssertEqual(updated.backgroundMediaPolicy, .allowBackgroundAudio)
+        XCTAssertFalse(updated.homeURLSchemeWasInferred)
+        XCTAssertEqual(changeCount, 1)
+    }
+
+    func testUpdateHomeURLPersistsWithoutChangingCurrentURL() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        store.updateCurrentURL(id: profile.id, url: urlC)
+
+        XCTAssertTrue(store.updateHomeURL(id: profile.id, homeURL: urlB))
+
+        let relaunched = TabStore(repository: repository)
+        let restored = try XCTUnwrap(relaunched.profiles.first(where: { $0.id == profile.id }))
+        XCTAssertEqual(restored.homeURL, urlB)
+        XCTAssertEqual(restored.currentURL, urlC)
+    }
+
+    func testUpdateHomeURLRejectsUnsafeURLWithoutMutation() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        store.updateCurrentURL(id: profile.id, url: urlC)
+        let before = store.storedStateSnapshot()
+
+        XCTAssertFalse(
+            store.updateHomeURL(
+                id: profile.id,
+                homeURL: URL(string: "file:///tmp/not-safe")!
+            )
+        )
+
+        XCTAssertEqual(store.storedStateSnapshot(), before)
+    }
+
+    func testUpdateHomeURLRollsBackWhenPersistenceFails() throws {
+        let repository = MemoryProfileRepository()
+        let store = TabStore(repository: repository)
+        let profile = try XCTUnwrap(store.add(name: "A", homeURL: urlA))
+        store.updateCurrentURL(id: profile.id, url: urlC)
+        let before = store.storedStateSnapshot()
+        var failureCount = 0
+        store.onPersistenceFailure = { failureCount += 1 }
+        repository.shouldFailSaves = true
+
+        XCTAssertFalse(store.updateHomeURL(id: profile.id, homeURL: urlB))
+
+        XCTAssertEqual(store.storedStateSnapshot(), before)
+        XCTAssertEqual(repository.state, before)
+        XCTAssertEqual(failureCount, 1)
     }
 
     func testDerivedWebAppCopiesSourceConfigurationAndUsesCurrentPageAsHome() {
