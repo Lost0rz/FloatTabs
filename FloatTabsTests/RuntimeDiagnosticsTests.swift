@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testEnvironmentFieldsIncludePrimaryProcessProvenanceAfterPrivacySanitization() {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let fields = diagnostics.environmentFields()
+        let sanitizedFields = RuntimeDiagnosticPrivacy.sanitize(
+            fields: fields,
+            mode: .standard
+        )
+        let processID = Int64(ProcessInfo.processInfo.processIdentifier)
+
+        XCTAssertEqual(fields["process_id"], .integer(processID))
+        XCTAssertEqual(fields["instance_role"], .string("primary"))
+        XCTAssertEqual(sanitizedFields["process_id"], .integer(processID))
+        XCTAssertEqual(sanitizedFields["instance_role"], .string("primary"))
+    }
+
     func testEventsEncodeAsIndependentJSONLObjectsWithSessionAndMonotonicSequence() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
@@ -111,6 +129,11 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertEqual(events[1].event, "diagnostics.export.metadata")
         XCTAssertEqual(events[1].fields["schema_version"], .integer(1))
         XCTAssertNotNil(events[1].fields["app_version"])
+        XCTAssertEqual(
+            events[1].fields["process_id"],
+            .integer(Int64(ProcessInfo.processInfo.processIdentifier))
+        )
+        XCTAssertEqual(events[1].fields["instance_role"], .string("primary"))
         try? FileManager.default.removeItem(at: destination)
     }
 
