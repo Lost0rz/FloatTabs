@@ -2779,11 +2779,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
+        let documentToken = "acknowledged-before-visible-completion"
 
         completeGeneration(
             bridge: bridge,
             webView: webView,
-            token: "acknowledged-before-visible-completion"
+            token: documentToken
         )
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
@@ -2796,14 +2797,24 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
         XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
 
+        acceptState(
+            generating: true,
+            bridge: bridge,
+            webView: webView,
+            token: documentToken
+        )
+        XCTAssertEqual(coordinator.state(for: slot.id), .generating)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
         controller.debugWithPresentationFact(
             slotID: slot.id,
             presentationFact: true
         ) {
-            completeGeneration(
+            acceptState(
+                generating: false,
                 bridge: bridge,
                 webView: webView,
-                token: "visible-completion-after-acknowledgement"
+                token: documentToken
             )
         }
 
