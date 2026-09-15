@@ -2919,11 +2919,19 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) {
         let isValidGenerationCompletion = observation == .generationFinished
             && attentionCoordinator.state(for: slotID) == .generating
+        let userVisibleAtCompletion = isValidGenerationCompletion
+            ? isAttentionUserVisible(slotID: slotID)
+            : false
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
         assistantSpeechCoordinator.handle(observation, for: slotID)
         attentionRouter.handle(observation, for: slotID)
-        unreadResponseCoordinator.handle(observation, for: slotID)
+        unreadResponseCoordinator.handle(
+            observation,
+            for: slotID,
+            isValidGenerationCompletion: isValidGenerationCompletion,
+            userVisible: userVisibleAtCompletion
+        )
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
 

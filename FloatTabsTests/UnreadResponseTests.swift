@@ -76,21 +76,58 @@ final class UnreadResponseTests: XCTestCase {
         )
     }
 
-    func testCoordinatorGenerationFinishedAlwaysMarksUnread() {
+    func testValidInvisibleCompletionMarksUnread() {
         let coordinator = ChatGPTUnreadResponseCoordinator(
             store: UnreadResponseStore(defaults: defaults)
         )
 
-        coordinator.handle(.generationFinished, for: slotA)
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
 
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+    }
+
+    func testValidVisibleCompletionDoesNotMarkOrPersistUnread() {
+        let coordinator = makeCoordinator()
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: true
+        )
+
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+        XCTAssertTrue(UnreadResponseStore(defaults: defaults).unreadSlotIDs.isEmpty)
+    }
+
+    func testStrayGenerationFinishDoesNotMarkUnread() {
+        let coordinator = makeCoordinator()
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
+
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
     }
 
     func testGenerationStartedDoesNotClearExistingUnread() {
         let coordinator = makeCoordinator()
         coordinator.markUnread(slotID: slotA)
 
-        coordinator.handle(.generationStarted, for: slotA)
+        coordinator.handle(
+            .generationStarted,
+            for: slotA,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
 
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
     }
@@ -99,18 +136,64 @@ final class UnreadResponseTests: XCTestCase {
         let coordinator = makeCoordinator()
         coordinator.markUnread(slotID: slotA)
 
-        coordinator.handle(.runtimeReset, for: slotA)
+        coordinator.handle(
+            .runtimeReset,
+            for: slotA,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
 
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
     }
 
     func testNewGenerationDoesNotClearPreviousUnreadResponse() {
         let coordinator = makeCoordinator()
-        coordinator.handle(.generationFinished, for: slotA)
-        coordinator.handle(.generationStarted, for: slotA)
-        coordinator.handle(.generationFinished, for: slotA)
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        coordinator.handle(
+            .generationStarted,
+            for: slotA,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
 
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+    }
+
+    func testLaterUnseenCompletionReMarksAfterAcknowledgement() {
+        let coordinator = makeCoordinator()
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        coordinator.acknowledge(slotID: slotA)
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+        XCTAssertEqual(
+            UnreadResponseStore(defaults: defaults).unreadSlotIDs,
+            [slotA]
+        )
     }
 
     func testAcknowledgeAndRemoveAreIdempotent() {
