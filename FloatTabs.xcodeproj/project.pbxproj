@@ -125,6 +125,8 @@
 		A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */; };
 		A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000078 /* SettingsInformationArchitecture.swift */; };
 		A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */; };
+		A0000000000000000000007A /* RuntimeInstanceOwnership.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000007A /* RuntimeInstanceOwnership.swift */; };
+		A0000000000000000000007B /* RuntimeOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000007B /* RuntimeOwnershipTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,6 +143,7 @@
 		B00000000000000000000001 /* FloatTabsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatTabsApp.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B00000000000000000000003 /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		B0000000000000000000007A /* RuntimeInstanceOwnership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeInstanceOwnership.swift; sourceTree = "<group>"; };
 		B00000000000000000000022 /* BenchmarkControlServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarkControlServer.swift; sourceTree = "<group>"; };
 		B00000000000000000000004 /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
@@ -258,6 +261,7 @@
 		B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsSettingsViewController.swift; sourceTree = "<group>"; };
 		B00000000000000000000078 /* SettingsInformationArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitecture.swift; sourceTree = "<group>"; };
 		B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitectureTests.swift; sourceTree = "<group>"; };
+		B0000000000000000000007B /* RuntimeOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeOwnershipTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -314,6 +318,7 @@
 				B0000000000000000000AB /* Info.plist */,
 				B00000000000000000000002 /* AppDelegate.swift */,
 				B00000000000000000000003 /* AppCoordinator.swift */,
+				B0000000000000000000007A /* RuntimeInstanceOwnership.swift */,
 				B00000000000000000000060 /* AttentionSoundAssetStore.swift */,
 				B00000000000000000000035 /* AttentionSoundPlayer.swift */,
 				B00000000000000000000022 /* BenchmarkControlServer.swift */,
@@ -512,6 +517,7 @@
 				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
 				B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */,
 				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
+				B0000000000000000000007B /* RuntimeOwnershipTests.swift */,
 			);
 			path = FloatTabsTests;
 			sourceTree = "<group>";
@@ -701,6 +707,7 @@
 				A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */,
 				A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */,
 				A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */,
+				A0000000000000000000007A /* RuntimeInstanceOwnership.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -753,6 +760,7 @@
 				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
 				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
 				A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */,
+				A0000000000000000000007B /* RuntimeOwnershipTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
