@@ -272,6 +272,142 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
+    func testExternalVoiceSourceAlreadyKeyIssuesZeroTransfers() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+
+        let action = state.action(sourceWindowIsKey: true)
+
+        XCTAssertEqual(action, .sourceAlreadyKey)
+        XCTAssertFalse(state.transferIssued)
+        XCTAssertFalse(state.nativeFocusPending)
+    }
+
+    func testExternalVoiceSourceNotKeyIssuesExactlyOneTransfer() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: false),
+            .issueSourceKeyTransfer
+        )
+        XCTAssertTrue(state.transferIssued)
+        XCTAssertTrue(state.nativeFocusPending)
+    }
+
+    func testExternalVoiceRepeatedCallbacksWhileSourceNotKeyIssueOneTransfer() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+        var transferCount = 0
+
+        for _ in 0..<4 {
+            if state.action(sourceWindowIsKey: false) == .issueSourceKeyTransfer {
+                transferCount += 1
+            }
+        }
+
+        XCTAssertEqual(transferCount, 1)
+        XCTAssertTrue(state.transferIssued)
+        XCTAssertTrue(state.nativeFocusPending)
+    }
+
+    func testExternalVoiceSourceDidBecomeKeyConsumesPendingWithoutSecondTransfer() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: false),
+            .issueSourceKeyTransfer
+        )
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: true),
+            .sourceAlreadyKey
+        )
+        XCTAssertFalse(state.nativeFocusPending)
+        XCTAssertTrue(state.transferIssued)
+        XCTAssertEqual(state.action(sourceWindowIsKey: true), .alreadyConsumed)
+    }
+
+    func testExternalVoiceNewGenerationResetsTransferIssuedState() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: false),
+            .issueSourceKeyTransfer
+        )
+
+        state.beginGeneration()
+
+        XCTAssertFalse(state.transferIssued)
+        XCTAssertTrue(state.nativeFocusPending)
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: false),
+            .issueSourceKeyTransfer
+        )
+    }
+
+    func testExternalVoiceCancelOrHideResetsTransferState() {
+        var state = PresentationNativeFocusTransferState()
+        state.beginGeneration()
+        XCTAssertEqual(
+            state.action(sourceWindowIsKey: false),
+            .issueSourceKeyTransfer
+        )
+
+        state.reset()
+
+        XCTAssertFalse(state.transferIssued)
+        XCTAssertFalse(state.nativeFocusPending)
+        XCTAssertEqual(state.action(sourceWindowIsKey: false), .alreadyConsumed)
+    }
+
+    func testExternalVoiceHiddenSourceNotKeyUsesProductionNativeOwner() async throws {
+        let adapter = CountingPresentationFocusAdapter()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [adapter]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, _, _) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: {
+                // Only application activation is supplied by this test seam.
+                // External voice source-key readiness comes from the real
+                // source window and must be advanced by the production owner.
+                (applicationActive: true, windowKey: false)
+            }
+        )
+
+        let result = await controller.prepareInputFocusForExternalVoice()
+        XCTAssertEqual(result, .ready)
+
+        let transferIssued = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "presentation_focus.native.transfer_issued"
+            }
+        }
+        XCTAssertTrue(transferIssued)
+
+        let transferEvents = writer.events.filter {
+            $0.event == "presentation_focus.native.transfer_issued"
+        }
+        XCTAssertEqual(transferEvents.count, 1)
+        XCTAssertEqual(
+            transferEvents.first?.fields["make_source_window_main"],
+            .bool(false)
+        )
+
+        let sourceFocus = try XCTUnwrap(
+            writer.events.first { $0.event == "source.focus.result" }
+        )
+        XCTAssertEqual(sourceFocus.fields["source_key_before"], .bool(false))
+        XCTAssertEqual(sourceFocus.fields["made_key"], .bool(true))
+        XCTAssertEqual(sourceFocus.fields["made_main"], .bool(false))
+    }
+
     // MARK: Runtime diagnostics trace isolation
 
     func testExternalVoiceOwnsPresentationWebFocusBeforeOrdinaryHandshake() async throws {
@@ -305,8 +441,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(completed.fields["focus_owner"], .string("external_voice"))
     }
 
-    func testExternalVoiceCompletionWaitsForNativeReadinessAndSharesTrace() async throws {
-        var nativeReady = false
+    func testExternalVoiceNativeTransferAndWebFocusShareTrace() async throws {
         let trace = RuntimeDiagnosticTrace(root: "presentation-barrier")
         let adapter = CountingPresentationFocusAdapter()
         let writer = RuntimeDiagnosticInMemoryWriter()
@@ -320,52 +455,32 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             webFocusRouter: focusRouter,
             diagnostics: diagnostics,
             presentationFocusReadinessProvider: {
-                (applicationActive: true, windowKey: nativeReady)
+                // Do not inject native window readiness. The external voice
+                // path must use the actual source window's key transition.
+                (applicationActive: true, windowKey: false)
             }
         )
 
         let result = await controller.prepareInputFocusForExternalVoice(trace: trace)
         XCTAssertEqual(result, .ready)
-        XCTAssertEqual(
-            writer.events.filter { $0.event == "presentation_focus.completed" }.count,
-            0
-        )
 
-        nativeReady = true
-        NotificationCenter.default.post(
-            name: NSApplication.didBecomeActiveNotification,
-            object: nil
-        )
-
-        let completed = try await waitUntil(timeoutMilliseconds: 1000) {
-            writer.events.contains { $0.event == "presentation_focus.completed" }
-                && writer.events.contains { $0.event == "panel.presentation.completed" }
-                && writer.events.contains { $0.event == "presentation_focus.native.ready" }
+        let transferIssued = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains { $0.event == "presentation_focus.native.transfer_issued" }
         }
-        XCTAssertTrue(completed)
+        XCTAssertTrue(transferIssued)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "presentation_focus.native.transfer_issued" }.count,
+            1
+        )
 
+        let webReadyRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains { $0.event == "presentation_focus.web.ready" }
+        }
+        XCTAssertTrue(webReadyRecorded)
         let webReady = try XCTUnwrap(
             writer.events.first { $0.event == "presentation_focus.web.ready" }
         )
-        let focusCompleted = try XCTUnwrap(
-            writer.events.first { $0.event == "presentation_focus.completed" }
-        )
-        let panelCompleted = try XCTUnwrap(
-            writer.events.first { $0.event == "panel.presentation.completed" }
-        )
         XCTAssertEqual(webReady.traceID, trace.id)
-        XCTAssertEqual(focusCompleted.traceID, trace.id)
-        XCTAssertEqual(panelCompleted.traceID, trace.id)
-        XCTAssertEqual(focusCompleted.fields["focus_owner"], .string("external_voice"))
-        XCTAssertEqual(panelCompleted.fields["focus_owner"], .string("external_voice"))
-        XCTAssertEqual(
-            writer.events.filter { $0.event == "presentation_focus.completed" }.count,
-            1
-        )
-        XCTAssertEqual(
-            writer.events.filter { $0.event == "panel.presentation.completed" }.count,
-            1
-        )
     }
 
     func testStaleExternalVoiceGenerationCannotCompleteReplacementPresentation() async throws {

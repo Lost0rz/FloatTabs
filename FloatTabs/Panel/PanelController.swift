@@ -54,6 +54,39 @@ enum PresentationWebFocusOwner: String, Equatable {
     case externalVoice = "external_voice"
 }
 
+enum PresentationNativeFocusTransferAction: Equatable {
+    case sourceAlreadyKey
+    case issueSourceKeyTransfer
+    case waitForSourceKey
+    case alreadyConsumed
+}
+
+struct PresentationNativeFocusTransferState: Equatable {
+    private(set) var transferIssued = false
+    private(set) var nativeFocusPending = false
+
+    mutating func beginGeneration() {
+        transferIssued = false
+        nativeFocusPending = true
+    }
+
+    mutating func reset() {
+        transferIssued = false
+        nativeFocusPending = false
+    }
+
+    mutating func action(sourceWindowIsKey: Bool) -> PresentationNativeFocusTransferAction {
+        guard nativeFocusPending else { return .alreadyConsumed }
+        if sourceWindowIsKey {
+            nativeFocusPending = false
+            return .sourceAlreadyKey
+        }
+        guard !transferIssued else { return .waitForSourceKey }
+        transferIssued = true
+        return .issueSourceKeyTransfer
+    }
+}
+
 /// Keeps native-window focus decisions pure and owner-specific. The actual
 /// AppKit calls remain in the presentation owner; this policy only decides
 /// which transition is allowed for the current presentation generation.
@@ -275,6 +308,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationFocusGeneration: UInt64 = 0
     private var presentationWebFocusOwner: PresentationWebFocusOwner = .standardPresentation
     private var presentationNativeFocusPending = false
+    private var presentationNativeFocusTransferState = PresentationNativeFocusTransferState()
     private var presentationWebFocusPending = false
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
@@ -1032,6 +1066,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusOwner = .standardPresentation
         presentationActivationConfirmedGeneration = nil
         presentationNativeFocusPending = false
+        presentationNativeFocusTransferState.reset()
         presentationWebFocusPending = false
         addressOverlayView.dismiss()
         persistPanelFrame()
@@ -2135,6 +2170,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationWebFocusTask?.cancel()
         presentationWebFocusTask = nil
         presentationNativeFocusPending = false
+        presentationNativeFocusTransferState.reset()
         presentationWebFocusPending = false
         presentationWebFocusOwner = .standardPresentation
         addressOverlayView.dismiss()
@@ -3691,6 +3727,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationTrace = trace
         presentationWebFocusOwner = webFocusOwner
         presentationActivationConfirmedGeneration = nil
+        presentationNativeFocusTransferState.beginGeneration()
         presentationNativeFocusPending = true
         presentationWebFocusPending = true
 
@@ -3766,9 +3803,41 @@ final class PanelController: NSObject, NSWindowDelegate {
                 ]
             )
         }
-        guard readiness.windowKey else {
-            return
+        var nativeWindowReady = readiness.windowKey
+        if presentationWebFocusOwner == .externalVoice,
+           !sourceHostController.isSessionLocked {
+            switch presentationNativeFocusTransferState.action(
+                sourceWindowIsKey: sourceHostController.window.isKeyWindow
+            ) {
+            case .sourceAlreadyKey:
+                presentationNativeFocusPending = false
+                nativeWindowReady = true
+            case .issueSourceKeyTransfer:
+                diagnostics.record(
+                    event: "presentation_focus.native.transfer_issued",
+                    level: .info,
+                    subsystem: "panel",
+                    trace: presentationTrace,
+                    fields: [
+                        "focus_generation": .integer(Int64(presentationFocusGeneration)),
+                        "focus_owner": .string(presentationWebFocusOwner.rawValue),
+                        "source_key_before": .bool(false),
+                        "make_source_window_main": .bool(false)
+                    ]
+                )
+                // Keep the native pending bit set. The source window's
+                // windowDidBecomeKey notification is the only completion
+                // that may consume it; repeated readiness callbacks merely
+                // observe the issued transfer and return.
+                focusActiveWebViewIfAvailable(makeSourceWindowMain: false)
+                return
+            case .waitForSourceKey:
+                return
+            case .alreadyConsumed:
+                nativeWindowReady = true
+            }
         }
+        guard nativeWindowReady else { return }
 
         if presentationNativeFocusPending {
             // Mark consumed before handing control to AppKit/WebKit. A nested
