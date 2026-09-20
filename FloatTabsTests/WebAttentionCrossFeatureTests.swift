@@ -190,6 +190,88 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: FloatTabs native focus ownership
+
+    func testExternalVoiceDoesNotRequireSourceMain() {
+        XCTAssertFalse(
+            PresentationNativeFocusPolicy.shouldMakeSourceWindowMain(
+                owner: .externalVoice,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
+    func testStandardPresentationKeepsExistingMainBehavior() {
+        XCTAssertTrue(
+            PresentationNativeFocusPolicy.shouldMakeSourceWindowMain(
+                owner: .standardPresentation,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
+    func testExternalVoiceAlreadySourceKeyDoesNotBounceShellKey() {
+        XCTAssertFalse(
+            PresentationNativeFocusPolicy.shouldMakeShellKey(
+                owner: .externalVoice,
+                presentationAlreadyVisible: true,
+                sourceWindowIsVisible: true,
+                sourceWindowIsKey: true,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
+    func testExternalVoiceNeedsAtMostOneSourceKeyTransfer() {
+        XCTAssertTrue(
+            PresentationNativeFocusPolicy.shouldMakeSourceWindowKey(
+                sourceWindowIsKey: false
+            )
+        )
+        XCTAssertFalse(
+            PresentationNativeFocusPolicy.shouldMakeSourceWindowKey(
+                sourceWindowIsKey: true
+            )
+        )
+    }
+
+    func testExternalVoiceReadinessUsesSourceWindowOnly() {
+        XCTAssertFalse(
+            PresentationNativeFocusPolicy.isNativeWindowReady(
+                owner: .externalVoice,
+                applicationActive: true,
+                shellWindowIsKey: true,
+                sourceWindowIsKey: false,
+                sourceSessionLocked: false
+            )
+        )
+        XCTAssertTrue(
+            PresentationNativeFocusPolicy.isNativeWindowReady(
+                owner: .externalVoice,
+                applicationActive: true,
+                shellWindowIsKey: false,
+                sourceWindowIsKey: true,
+                sourceSessionLocked: false
+            )
+        )
+    }
+
+    func testExternalVoiceSettleDoesNotRefocusNativeWindow() {
+        XCTAssertFalse(
+            PresentationNativeFocusPolicy.shouldRefocusDuringSettle(
+                owner: .externalVoice
+            )
+        )
+    }
+
+    func testStandardPresentationSettleUnaffected() {
+        XCTAssertTrue(
+            PresentationNativeFocusPolicy.shouldRefocusDuringSettle(
+                owner: .standardPresentation
+            )
+        )
+    }
+
     // MARK: Runtime diagnostics trace isolation
 
     func testExternalVoiceOwnsPresentationWebFocusBeforeOrdinaryHandshake() async throws {

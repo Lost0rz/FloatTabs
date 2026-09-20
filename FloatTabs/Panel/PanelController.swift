@@ -49,6 +49,62 @@ struct WorkspaceAutoHideSuppression: Equatable {
     }
 }
 
+enum PresentationWebFocusOwner: String, Equatable {
+    case standardPresentation = "standard_presentation"
+    case externalVoice = "external_voice"
+}
+
+/// Keeps native-window focus decisions pure and owner-specific. The actual
+/// AppKit calls remain in the presentation owner; this policy only decides
+/// which transition is allowed for the current presentation generation.
+enum PresentationNativeFocusPolicy {
+    static func isNativeWindowReady(
+        owner: PresentationWebFocusOwner,
+        applicationActive: Bool,
+        shellWindowIsKey: Bool,
+        sourceWindowIsKey: Bool,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        guard applicationActive else { return false }
+        if owner == .externalVoice, !sourceSessionLocked {
+            return sourceWindowIsKey
+        }
+        return shellWindowIsKey || sourceWindowIsKey
+    }
+
+    static func shouldMakeShellKey(
+        owner: PresentationWebFocusOwner,
+        presentationAlreadyVisible: Bool,
+        sourceWindowIsVisible: Bool,
+        sourceWindowIsKey: Bool,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        guard owner == .externalVoice,
+              presentationAlreadyVisible,
+              sourceWindowIsVisible,
+              sourceWindowIsKey,
+              !sourceSessionLocked else {
+            return true
+        }
+        return false
+    }
+
+    static func shouldMakeSourceWindowKey(sourceWindowIsKey: Bool) -> Bool {
+        !sourceWindowIsKey
+    }
+
+    static func shouldMakeSourceWindowMain(
+        owner: PresentationWebFocusOwner,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        owner == .standardPresentation && !sourceSessionLocked
+    }
+
+    static func shouldRefocusDuringSettle(owner: PresentationWebFocusOwner) -> Bool {
+        owner == .standardPresentation
+    }
+}
+
 /// The RemoteOrbit bridge sends one semantic scroll command per physical edge.
 /// Keep delivery direct and bounded: if the WebView is not present yet, the
 /// command is reported as unavailable instead of starting a retry stream that
@@ -56,11 +112,6 @@ struct WorkspaceAutoHideSuppression: Equatable {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
-    private enum PresentationWebFocusOwner: String {
-        case standardPresentation = "standard_presentation"
-        case externalVoice = "external_voice"
-    }
-
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
         let displayID: CGDirectDisplayID?
@@ -293,7 +344,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
             activateFloatTabs(trace: trace)
             panel.orderFrontRegardless()
-            panel.makeKeyAndOrderFront(nil)
+            if PresentationNativeFocusPolicy.shouldMakeShellKey(
+                owner: webFocusOwner,
+                presentationAlreadyVisible: true,
+                sourceWindowIsVisible: sourceHostController.window.isVisible,
+                sourceWindowIsKey: sourceHostController.window.isKeyWindow,
+                sourceSessionLocked: sourceHostController.isSessionLocked
+            ) {
+                panel.makeKeyAndOrderFront(nil)
+            }
             beginPresentationFocusHandshake(
                 trace: trace,
                 webFocusOwner: webFocusOwner
@@ -352,17 +411,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         let voiceGeneration = presentationFocusGeneration
 
         webFocusRouter.setCurrentWebView(webView)
-        activateFloatTabs(trace: trace)
-        panel.orderFrontRegardless()
-        if sourceHostController.isSessionLocked {
-            panel.makeKeyAndOrderFront(nil)
-            WebViewFocus.focus(webView, in: panel)
-        } else {
-            sourceHostController.orderFrontAndFocus(
-                webView,
-                makeSourceWindowMain: true
-            )
-        }
 
         await Task.yield()
         guard !Task.isCancelled,
@@ -3695,7 +3743,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func completePresentationFocusIfReady() {
         let readiness = presentationFocusReadinessProvider?() ?? (
             applicationActive: NSApp.isActive,
-            windowKey: panel.isKeyWindow || sourceHostController.window.isKeyWindow
+            windowKey: PresentationNativeFocusPolicy.isNativeWindowReady(
+                owner: presentationWebFocusOwner,
+                applicationActive: NSApp.isActive,
+                shellWindowIsKey: panel.isKeyWindow,
+                sourceWindowIsKey: sourceHostController.window.isKeyWindow,
+                sourceSessionLocked: sourceHostController.isSessionLocked
+            )
         )
         guard requestedVisibility, readiness.applicationActive else { return }
         if (presentationNativeFocusPending || presentationWebFocusPending),
@@ -3720,7 +3774,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             // Mark consumed before handing control to AppKit/WebKit. A nested
             // window notification must not enter the focus path twice.
             presentationNativeFocusPending = false
-            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+            focusActiveWebViewIfAvailable(
+                makeSourceWindowMain: PresentationNativeFocusPolicy.shouldMakeSourceWindowMain(
+                    owner: presentationWebFocusOwner,
+                    sourceSessionLocked: sourceHostController.isSessionLocked
+                )
+            )
             diagnostics.record(
                 event: "presentation_focus.native.ready",
                 level: .info,
@@ -3791,7 +3850,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             // turn after the shell becomes key. Allow exactly one settle pass;
             // unlike the former 30-iteration retry loop, this has a fixed and
             // very small cost and cannot keep WebKit focus churn alive.
-            if !self.sourceHostController.window.isKeyWindow {
+            if PresentationNativeFocusPolicy.shouldRefocusDuringSettle(
+                owner: self.presentationWebFocusOwner
+            ),
+               !self.sourceHostController.window.isKeyWindow {
                 self.focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
             }
             self.completePresentationFocusIfReady()
