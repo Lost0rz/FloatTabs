@@ -390,4 +390,3 @@ gh pr checks <PR_NUMBER> --watch --interval 10
 \`\`\`
 
 Expected: \`Build & Test (Apple Silicon arm64)\` and \`QA DMG\` pass. Do not mark ready or merge.
-
