@@ -8,6 +8,11 @@ enum ChatGPTResponseMessageKind: String, Equatable, Sendable {
     case empty
 }
 
+enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
+    case manualScroll
+    case assistantPointer
+}
+
 struct ChatGPTResponsePayload: Equatable, Sendable {
     static let currentVersion = 3
     static let responseKind = ChatGPTResponseMessageKind.response.rawValue
@@ -139,6 +144,18 @@ enum ChatGPTResponseExtraction {
 
     private static func makeScriptSource() -> String {
         let hostGate = ChatGPTAttentionBridge.hostGateExpression()
+#if DEBUG
+        let debugAssistantPointerClassifier = """
+          globalThis.__floatTabsDebugClassifyAssistantPointerTargetV3 = (selector) => {
+            const target = typeof selector === 'string'
+              ? document.querySelector(selector)
+              : null;
+            return assistantResponseRootFor(target) ? 'assistantPointer' : null;
+          };
+        """
+#else
+        let debugAssistantPointerClassifier = ""
+#endif
         return """
         (() => {
           "use strict";
@@ -227,6 +244,30 @@ enum ChatGPTResponseExtraction {
                   ?.getAttribute('data-message-author-role');
               return role === 'assistant' && isRendered(article);
             });
+          };
+
+          const assistantResponseRootFor = (eventTarget) => {
+            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+              ? eventTarget
+              : eventTarget?.parentElement;
+            while (element) {
+              if (element.matches
+                  && element.matches(
+                    '[data-message-author-role="assistant"],'
+                      + '[data-message-role="assistant"]'
+                  )) {
+                return element;
+              }
+              if (element.matches
+                  && element.matches('article[data-testid*="conversation-turn"]')) {
+                const role = element.getAttribute('data-message-author-role')
+                  || element.querySelector('[data-message-author-role]')
+                    ?.getAttribute('data-message-author-role');
+                return role === 'assistant' ? element : null;
+              }
+              element = element.parentElement;
+            }
+            return null;
           };
 
           const semanticSelector = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table';
@@ -754,6 +795,17 @@ enum ChatGPTResponseExtraction {
             });
           };
 
+          const postTrustedAssistantPointer = () => {
+            const target = handler();
+            if (!target) return;
+            target.postMessage({
+              version: 3,
+              event: "trustedInteraction",
+              documentToken: documentToken,
+              interactionKind: "assistantPointer"
+            });
+          };
+
           const postDocumentReady = () => {
             const target = handler();
             if (!target) return;
@@ -816,6 +868,9 @@ enum ChatGPTResponseExtraction {
           }, true);
           document.addEventListener('pointerdown', (event) => {
             if (!event.isTrusted) return;
+            if (assistantResponseRootFor(event.target)) {
+              postTrustedAssistantPointer();
+            }
             const root = document.documentElement;
             const likelyScrollbar = event.clientX >= root.clientWidth
               || event.clientY >= root.clientHeight;
@@ -918,6 +973,8 @@ enum ChatGPTResponseExtraction {
             });
             return true;
           };
+
+          \(debugAssistantPointerClassifier)
         })();
         """
     }

@@ -270,4 +270,25 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         )
         XCTAssertEqual(manualScrollTokens, ["document-b-12345678"])
     }
+
+    func testTrustedAssistantPointerProtocolUsesFixedContentFreeContract() {
+        XCTAssertEqual(
+            ChatGPTTrustedPageInteractionKind.assistantPointer.rawValue,
+            "assistantPointer"
+        )
+        let source = ChatGPTResponseExtraction.scriptSource
+        XCTAssertTrue(source.contains("event: \"trustedInteraction\""))
+        XCTAssertTrue(source.contains("interactionKind: \"assistantPointer\""))
+        XCTAssertTrue(source.contains("pointerdown"))
+        XCTAssertTrue(source.contains("event.isTrusted"))
+        XCTAssertTrue(source.contains("data-message-author-role=\"assistant\""))
+        XCTAssertTrue(source.contains("data-message-role=\"assistant\""))
+        XCTAssertTrue(source.contains("article[data-testid*=\"conversation-turn\"]"))
+        XCTAssertFalse(source.contains("buttonText"))
+        XCTAssertFalse(source.contains("ariaLabel"))
+        XCTAssertFalse(source.contains("responseContent"))
+        XCTAssertFalse(source.contains("domPath"))
+        XCTAssertFalse(source.contains("clipboard"))
+        XCTAssertFalse(source.contains("selectionText"))
+    }
 }

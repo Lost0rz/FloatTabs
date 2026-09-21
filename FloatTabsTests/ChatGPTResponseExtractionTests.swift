@@ -92,10 +92,66 @@ private final class ChatGPTResponsePageHarness {
             }
         }
     }
+
+    func classifyTrustedAssistantPointerTarget(selector: String) async -> String? {
+        guard let data = try? JSONEncoder().encode(selector),
+              let selectorJSON = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                "globalThis.__floatTabsDebugClassifyAssistantPointerTargetV3?.(\(selectorJSON)) ?? null",
+                in: nil,
+                in: ChatGPTResponseExtraction.contentWorld,
+                completionHandler: { result in
+                    switch result {
+                    case let .success(value):
+                        continuation.resume(returning: value as? String)
+                    case .failure:
+                        continuation.resume(returning: nil)
+                    }
+                }
+            )
+        }
+    }
 }
 
 @MainActor
 final class ChatGPTResponseExtractionTests: XCTestCase {
+    func testTrustedPointerClassifierUsesAssistantStructureNotControlLabels() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <section data-message-author-role="assistant" data-message-id="reply-pointer">
+          <p id="response-body">Assistant body.</p>
+          <div role="toolbar"><button id="copy">Copy</button></div>
+          <a id="response-link" href="/details">Open response details</a>
+        </section>
+        <aside><button id="sidebar">Copy</button></aside>
+        <div><textarea id="composer"></textarea><button id="send">Send</button></div>
+        """)
+        await page.settle()
+
+        let responseBodyClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#response-body")
+        let copyClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#copy")
+        let responseLinkClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#response-link")
+        let sidebarClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#sidebar")
+        let composerClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#composer")
+        let sendClassification =
+            await page.classifyTrustedAssistantPointerTarget(selector: "#send")
+
+        XCTAssertEqual(responseBodyClassification, "assistantPointer")
+        XCTAssertEqual(copyClassification, "assistantPointer")
+        XCTAssertEqual(responseLinkClassification, "assistantPointer")
+        XCTAssertNil(sidebarClassification)
+        XCTAssertNil(composerClassification)
+        XCTAssertNil(sendClassification)
+    }
+
     func testAssistantAndUserMessagesExtractAssistantOnly() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
