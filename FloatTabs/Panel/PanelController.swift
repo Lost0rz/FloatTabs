@@ -161,6 +161,39 @@ final class PanelController: NSObject, NSWindowDelegate {
         var requestAccepted: Bool?
     }
 
+    private enum UnreadDiagnosticSource: String {
+        case explicitSelection = "explicit_selection"
+        case explicitSelectionDeferred = "explicit_selection_deferred"
+        case manualSpeech = "manual_speech"
+        case trustedManualScroll = "trusted_manual_scroll"
+        case generationStarted = "generation_started"
+    }
+
+    private enum UnreadDiagnosticSkipReason: String {
+        case visibleCompletion = "visible_completion"
+        case invalidCompletion = "invalid_completion"
+        case alreadyUnread = "already_unread"
+        case notActuallyPresented = "not_actually_presented"
+        case notActiveSlot = "not_active_slot"
+        case presentationNotReady = "presentation_not_ready"
+        case stateUnchanged = "state_unchanged"
+    }
+
+    private struct UnreadPresentationFacts {
+        let presentationVisible: Bool
+        let webWindowKey: Bool
+        let activeSlotMatches: Bool
+        let sessionLocked: Bool
+        let panelVisible: Bool
+    }
+
+    private struct UnreadAcknowledgementAttempt {
+        let slotID: UUID
+        let source: UnreadDiagnosticSource
+        let facts: UnreadPresentationFacts
+        let trace: RuntimeDiagnosticTrace
+    }
+
     private let externalCommandLogger = Logger(
         subsystem: "com.lost0rz.FloatTabs",
         category: "ExternalCommand"
@@ -292,6 +325,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var externalMouseMonitor: Any?
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
+    private var unreadPruneDiagnosticSuppressionIDs: Set<UUID> = []
     private var lastPresentationUptime: TimeInterval = -.infinity
     private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
     private var fullscreenProfile: WebAppProfile?
@@ -754,6 +788,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
 
         super.init()
+
+        for slotID in self.unreadResponseCoordinator.unreadSlotIDs {
+            recordUnreadDiagnostic(event: "unread.state_restored", fields: [
+                "slot_id": .string(slotID.uuidString)
+            ])
+        }
 
         panel.delegate = self
         panel.contentView = rootView
@@ -1823,6 +1863,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
+        let unreadBeforeReplacement = unreadResponseCoordinator.unreadSlotIDs
         for slotID in existingIDs {
             assistantSpeechCoordinator.removeSlot(slotID: slotID)
             calibreSpeechCoordinator.removeSlot(slotID: slotID)
@@ -1831,6 +1872,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             // bookkeeping starts fresh rather than being restored.
             attentionCoordinator.removeSlot(slotID)
             unreadResponseCoordinator.removeSlot(slotID: slotID)
+            if unreadBeforeReplacement.contains(slotID),
+               !unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
+                recordUnreadDiagnostic(event: "unread.removed", fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "reason": .string("stored_state_replaced")
+                ])
+            }
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
@@ -2252,6 +2300,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             .tabView(for: slotID)?.isShowingUnreadResponse ?? false
     }
 
+    /// Test-only persistent presentation fact control for a single deferred
+    /// main-queue turn. It does not participate in production builds.
+    func debugSetPresentationFactOverride(
+        slotID: UUID,
+        presentationFact: Bool
+    ) {
+        debugPresentationFactOverrides[slotID] = presentationFact
+    }
+
+    func debugClearPresentationFactOverride(slotID: UUID) {
+        debugPresentationFactOverrides.removeValue(forKey: slotID)
+    }
+
+    @discardableResult
+    func debugRemoveConfirmedSlot(slotID: UUID) -> Bool {
+        removeConfirmedSlot(slotID: slotID)
+    }
+
     /// Test-only scoped presentation fact for deterministic observation
     /// routing. The operation still enters through the real pool/bridge
     /// callback; only WindowServer-owned topology is replaced for the scope.
@@ -2391,7 +2457,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard let selected = tabStore.selectRelative(by: relativeOffset, trace: trace) else {
             return false
         }
-        acknowledgeUnreadAfterExplicitSelection(slotID: selected.id)
+        acknowledgeUnreadAfterExplicitSelection(slotID: selected.id, trace: trace)
         return true
     }
 
@@ -2781,9 +2847,19 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeSpeechPresentation()
         let orderedProfiles = tabStore.orderedProfiles
         synchronizeCalibreBackgroundMediaPolicy(for: orderedProfiles)
+        let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
         unreadResponseCoordinator.prune(
             validSlotIDs: Set(orderedProfiles.map(\.id))
         )
+        let suppressedIDs = unreadPruneDiagnosticSuppressionIDs
+        for slotID in unreadBeforePrune.subtracting(
+            unreadResponseCoordinator.unreadSlotIDs
+        ).subtracting(suppressedIDs) {
+            recordUnreadDiagnostic(event: "unread.pruned", fields: [
+                "slot_id": .string(slotID.uuidString),
+                "reason": .string("invalid_slot_identity")
+            ])
+        }
         synchronizeUnreadIndicators()
         guard !sourceHostController.isSessionLocked else {
             pendingSlotSynchronization = true
@@ -3001,11 +3077,33 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         observation: ChatGPTAttentionObservation
     ) {
+        let attentionStateBefore = attentionCoordinator.state(for: slotID)
         let isValidGenerationCompletion = observation == .generationFinished
-            && attentionCoordinator.state(for: slotID) == .generating
+            && attentionStateBefore == .generating
         let userVisibleAtCompletion = isValidGenerationCompletion
             ? isAttentionUserVisible(slotID: slotID)
             : false
+        let completionTrace = observation == .generationFinished
+            ? diagnostics.beginTrace(root: "unread.completion")
+            : nil
+        let completionFacts = unreadPresentationFacts(slotID: slotID)
+        let unreadBefore = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+        if observation == .generationFinished {
+            recordUnreadDiagnostic(
+                event: "unread.completion_observed",
+                trace: completionTrace,
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "completion_valid": .bool(isValidGenerationCompletion),
+                    "presentation_visible": .bool(completionFacts.presentationVisible),
+                    "web_window_key": .bool(completionFacts.webWindowKey),
+                    "unread_before": .bool(unreadBefore),
+                    "attention_state_before": .string(attentionStateBefore.diagnosticName),
+                    "session_locked": .bool(completionFacts.sessionLocked),
+                    "panel_visible": .bool(completionFacts.panelVisible)
+                ]
+            )
+        }
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
         assistantSpeechCoordinator.handle(observation, for: slotID)
@@ -3019,8 +3117,46 @@ final class PanelController: NSObject, NSWindowDelegate {
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
 
+        if observation == .generationFinished {
+            let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+            let reason: UnreadDiagnosticSkipReason?
+            if !isValidGenerationCompletion {
+                reason = .invalidCompletion
+            } else if userVisibleAtCompletion {
+                reason = .visibleCompletion
+            } else {
+                reason = unreadBefore ? .alreadyUnread : nil
+            }
+            if let reason {
+                recordUnreadDiagnostic(
+                    event: "unread.mark_skipped",
+                    trace: completionTrace,
+                    fields: [
+                        "slot_id": .string(slotID.uuidString),
+                        "reason": .string(reason.rawValue),
+                        "presentation_visible": .bool(completionFacts.presentationVisible),
+                        "web_window_key": .bool(completionFacts.webWindowKey)
+                    ]
+                )
+            } else if !unreadBefore && unreadAfter {
+                recordUnreadDiagnostic(
+                    event: "unread.marked",
+                    trace: completionTrace,
+                    fields: [
+                        "slot_id": .string(slotID.uuidString),
+                        "reason": .string("completion_unseen"),
+                        "presentation_visible": .bool(completionFacts.presentationVisible),
+                        "web_window_key": .bool(completionFacts.webWindowKey)
+                    ]
+                )
+            }
+        }
+
         if observation == .generationStarted {
-            acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
+            acknowledgeUnreadAfterTrustedPageInteraction(
+                slotID: slotID,
+                source: .generationStarted
+            )
         }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
@@ -3110,22 +3246,36 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) -> Bool {
         let trace = trace ?? diagnostics.beginTrace(root: "tab.selection")
         guard tabStore.select(id: slotID, trace: trace) else { return false }
-        acknowledgeUnreadAfterExplicitSelection(slotID: slotID)
+        acknowledgeUnreadAfterExplicitSelection(slotID: slotID, trace: trace)
         return true
     }
 
     /// A rail/menu/keyboard selection is the only selection-driven unread
     /// acknowledgement. It is allowed only after the selected Slot is the
     /// actual current presentation, including a re-click of the active Tab.
-    private func acknowledgeUnreadAfterExplicitSelection(slotID: UUID) {
-        guard tabStore.activeTabID == slotID,
-              unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+    private func acknowledgeUnreadAfterExplicitSelection(
+        slotID: UUID,
+        trace: RuntimeDiagnosticTrace? = nil
+    ) {
+        guard let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: .explicitSelection,
+            trace: trace
+        ) else {
+            return
+        }
+        guard attempt.facts.activeSlotMatches else {
+            finishUnreadAcknowledgement(
+                attempt,
+                skippedReason: .notActiveSlot
+            )
             return
         }
 
-        if isSlotActuallyPresented(slotID: slotID) {
+        if attempt.facts.presentationVisible {
             unreadResponseCoordinator.acknowledge(slotID: slotID)
             synchronizeUnreadIndicators()
+            finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
             return
         }
 
@@ -3134,34 +3284,172 @@ final class PanelController: NSObject, NSWindowDelegate {
         // polling or focus state machine.
         DispatchQueue.main.async { [weak self] in
             guard let self,
-                  self.tabStore.activeTabID == slotID,
-                  self.isSlotActuallyPresented(slotID: slotID) else {
+                  self.unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+                return
+            }
+            guard let deferredAttempt = self.beginUnreadAcknowledgement(
+                slotID: slotID,
+                source: .explicitSelectionDeferred,
+                trace: trace
+            ) else {
+                return
+            }
+            guard deferredAttempt.facts.activeSlotMatches else {
+                self.finishUnreadAcknowledgement(
+                    deferredAttempt,
+                    skippedReason: .notActiveSlot
+                )
+                return
+            }
+            guard deferredAttempt.facts.presentationVisible else {
+                self.finishUnreadAcknowledgement(
+                    deferredAttempt,
+                    skippedReason: .presentationNotReady
+                )
                 return
             }
             self.unreadResponseCoordinator.acknowledge(slotID: slotID)
             self.synchronizeUnreadIndicators()
+            self.finishUnreadAcknowledgement(
+                deferredAttempt,
+                skippedReason: .stateUnchanged
+            )
         }
     }
 
     /// Manual Read Latest and Replay Latest acknowledge only after the speech
     /// coordinator accepted an extraction request for the active ChatGPT Slot.
     private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
-        guard tabStore.activeTabID == slotID else { return }
+        guard let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: .manualSpeech
+        ) else {
+            return
+        }
+        guard attempt.facts.activeSlotMatches else {
+            finishUnreadAcknowledgement(
+                attempt,
+                skippedReason: .notActiveSlot
+            )
+            return
+        }
         unreadResponseCoordinator.acknowledge(slotID: slotID)
         synchronizeUnreadIndicators()
+        finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
 
     /// A trusted page interaction means the user has started processing the
     /// response in the WebView itself. The bridge validates the event's trust,
     /// document, host, frame, and WebView identity before reaching this route;
     /// this method adds the physical presentation/active-interaction gate.
-    private func acknowledgeUnreadAfterTrustedPageInteraction(slotID: UUID) {
-        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID),
-              isSlotActuallyPresented(slotID: slotID) else {
+    private func acknowledgeUnreadAfterTrustedPageInteraction(
+        slotID: UUID,
+        source: UnreadDiagnosticSource = .trustedManualScroll
+    ) {
+        guard let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: source
+        ) else {
+            return
+        }
+        guard attempt.facts.presentationVisible else {
+            finishUnreadAcknowledgement(
+                attempt,
+                skippedReason: .notActuallyPresented
+            )
             return
         }
         unreadResponseCoordinator.acknowledge(slotID: slotID)
         synchronizeUnreadIndicators()
+        finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
+    }
+
+    private func unreadPresentationFacts(slotID: UUID) -> UnreadPresentationFacts {
+        let webView = webViewPool.existingWebView(for: slotID)
+        return UnreadPresentationFacts(
+            presentationVisible: isSlotActuallyPresented(slotID: slotID),
+            webWindowKey: webView?.window?.isKeyWindow == true,
+            activeSlotMatches: tabStore.activeTabID == slotID,
+            sessionLocked: sourceHostController.isSessionLocked,
+            panelVisible: panel.isVisible
+        )
+    }
+
+    private func beginUnreadAcknowledgement(
+        slotID: UUID,
+        source: UnreadDiagnosticSource,
+        trace: RuntimeDiagnosticTrace? = nil
+    ) -> UnreadAcknowledgementAttempt? {
+        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+            return nil
+        }
+        let facts = unreadPresentationFacts(slotID: slotID)
+        let attempt = UnreadAcknowledgementAttempt(
+            slotID: slotID,
+            source: source,
+            facts: facts,
+            trace: trace ?? diagnostics.beginTrace(root: "unread.interaction")
+        )
+        recordUnreadDiagnostic(
+            event: "unread.acknowledge_attempt",
+            trace: attempt.trace,
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "source": .string(source.rawValue),
+                "presentation_visible": .bool(facts.presentationVisible),
+                "web_window_key": .bool(facts.webWindowKey),
+                "active_slot_matches": .bool(facts.activeSlotMatches),
+                "unread_before": .bool(true)
+            ]
+        )
+        return attempt
+    }
+
+    private func finishUnreadAcknowledgement(
+        _ attempt: UnreadAcknowledgementAttempt,
+        skippedReason: UnreadDiagnosticSkipReason
+    ) {
+        let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(attempt.slotID)
+        guard !unreadAfter else {
+            recordUnreadDiagnostic(
+                event: "unread.acknowledge_skipped",
+                trace: attempt.trace,
+                fields: [
+                    "slot_id": .string(attempt.slotID.uuidString),
+                    "source": .string(attempt.source.rawValue),
+                    "reason": .string(skippedReason.rawValue),
+                    "presentation_visible": .bool(attempt.facts.presentationVisible),
+                    "web_window_key": .bool(attempt.facts.webWindowKey),
+                    "unread_before": .bool(true),
+                    "unread_after": .bool(true)
+                ]
+            )
+            return
+        }
+        recordUnreadDiagnostic(
+            event: "unread.acknowledged",
+            trace: attempt.trace,
+            fields: [
+                "slot_id": .string(attempt.slotID.uuidString),
+                "source": .string(attempt.source.rawValue),
+                "presentation_visible": .bool(attempt.facts.presentationVisible),
+                "web_window_key": .bool(attempt.facts.webWindowKey)
+            ]
+        )
+    }
+
+    private func recordUnreadDiagnostic(
+        event: String,
+        trace: RuntimeDiagnosticTrace? = nil,
+        fields: [String: RuntimeDiagnosticValue]
+    ) {
+        diagnostics.record(
+            event: event,
+            level: .info,
+            subsystem: "unread",
+            trace: trace,
+            fields: fields
+        )
     }
 
     private func focusActiveWebViewIfAvailable(makeSourceWindowMain: Bool = false) {
@@ -3340,6 +3628,34 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+
+    @discardableResult
+    private func removeConfirmedSlot(slotID id: UUID) -> Bool {
+        let wasUnread = unreadResponseCoordinator.unreadSlotIDs.contains(id)
+        if wasUnread {
+            unreadPruneDiagnosticSuppressionIDs.insert(id)
+        }
+        guard tabStore.remove(id: id) else {
+            unreadPruneDiagnosticSuppressionIDs.remove(id)
+            return false
+        }
+        assistantSpeechCoordinator.removeSlot(slotID: id)
+        calibreSpeechCoordinator.removeSlot(slotID: id)
+        slotLifecycleCoordinator.remove(slotID: id)
+        webViewPool.remove(slotID: id)
+        // Pool removal already routed the bridge's final runtimeReset;
+        // dropping the bookkeeping fully forgets the deleted Slot.
+        attentionCoordinator.removeSlot(id)
+        unreadResponseCoordinator.removeSlot(slotID: id)
+        if wasUnread {
+            recordUnreadDiagnostic(event: "unread.removed", fields: [
+                "slot_id": .string(id.uuidString),
+                "reason": .string("slot_deleted")
+            ])
+        }
+        unreadPruneDiagnosticSuppressionIDs.remove(id)
+        return true
+    }
     private func presentRemoveConfirmation(id: UUID) {
         guard Self.canRemoveSlotDuringFullscreen(
             slotID: id,
@@ -3360,16 +3676,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.endRailModalInteraction()
-                guard confirmed,
-                      self.tabStore.remove(id: id) else { return }
-                self.assistantSpeechCoordinator.removeSlot(slotID: id)
-                self.calibreSpeechCoordinator.removeSlot(slotID: id)
-                self.slotLifecycleCoordinator.remove(slotID: id)
-                self.webViewPool.remove(slotID: id)
-                // Pool removal already routed the bridge's final runtimeReset;
-                // dropping the bookkeeping fully forgets the deleted Slot.
-                self.attentionCoordinator.removeSlot(id)
-                self.unreadResponseCoordinator.removeSlot(slotID: id)
+                guard confirmed else { return }
+                _ = self.removeConfirmedSlot(slotID: id)
             }
         }
         if modalHost.attachedSheet == nil {

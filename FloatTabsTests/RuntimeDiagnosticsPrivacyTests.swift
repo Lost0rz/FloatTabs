@@ -193,6 +193,46 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safeState"], .string("ready"))
     }
 
+    func testUnreadDiagnosticFieldsRemainAllowedWhileSensitiveLookalikesAreDropped() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "slot_id": .string(UUID().uuidString),
+            "source": .string("trusted_manual_scroll"),
+            "reason": .string("not_actually_presented"),
+            "completion_valid": .bool(true),
+            "presentation_visible": .bool(false),
+            "web_window_key": .bool(false),
+            "unread_before": .bool(true),
+            "unread_after": .bool(true),
+            "active_slot_matches": .bool(true),
+            "attention_state_before": .string("ready"),
+            "session_locked": .bool(false),
+            "panel_visible": .bool(false),
+            "document_token": .string("private-document"),
+            "response_content": .string("private response"),
+            "page_title": .string("private title"),
+            "input_value": .string("private input"),
+            "clipboard_content": .string("private clipboard")
+        ], mode: .verbose)
+
+        XCTAssertNotNil(fields["slot_id"])
+        XCTAssertEqual(fields["source"], .string("trusted_manual_scroll"))
+        XCTAssertEqual(fields["reason"], .string("not_actually_presented"))
+        XCTAssertEqual(fields["completion_valid"], .bool(true))
+        XCTAssertEqual(fields["presentation_visible"], .bool(false))
+        XCTAssertEqual(fields["web_window_key"], .bool(false))
+        XCTAssertEqual(fields["unread_before"], .bool(true))
+        XCTAssertEqual(fields["unread_after"], .bool(true))
+        XCTAssertEqual(fields["active_slot_matches"], .bool(true))
+        XCTAssertEqual(fields["attention_state_before"], .string("ready"))
+        XCTAssertEqual(fields["session_locked"], .bool(false))
+        XCTAssertEqual(fields["panel_visible"], .bool(false))
+        XCTAssertNil(fields["document_token"])
+        XCTAssertNil(fields["response_content"])
+        XCTAssertNil(fields["page_title"])
+        XCTAssertNil(fields["input_value"])
+        XCTAssertNil(fields["clipboard_content"])
+    }
+
     func testGenericLookingSensitiveKeysAreDroppedWithoutAnExactKeyDenylist() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "pageBodyText": .string("private page"),
