@@ -54,6 +54,21 @@ enum AttentionPresentation {
         return isNormalPresentation(facts)
     }
 
+    /// A trusted event already proves that the attached WebView received real
+    /// user input, so physical presentation is sufficient without requiring
+    /// the WebView's window to own key interaction.
+    static func isInteractionSurfacePresented(_ facts: Facts) -> Bool {
+        if facts.sessionIsLocked {
+            return facts.fullscreenSourceSlotID == facts.slotID
+                || (facts.panelIsVisible
+                    && facts.companionSlotID == facts.slotID
+                    && facts.companionCurrentWebViewIsSlotWebView)
+        }
+        return facts.pooledWebViewExists
+            && facts.normalCurrentWebViewIsSlotWebView
+            && facts.sourceWindowIsVisible
+    }
+
     /// A. Normal visible Web source: a live pooled runtime that is exactly
     /// the current presentation in a physically visible source window.
     /// `activeTabID`-style logical activity alone is never sufficient, and an

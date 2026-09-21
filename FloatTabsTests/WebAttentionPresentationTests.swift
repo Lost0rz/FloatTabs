@@ -100,6 +100,92 @@ final class WebAttentionPresentationTests: XCTestCase {
 
     // MARK: - Visibility decision (production facts + decision)
 
+    func testInteractionSurfaceNormalPresentationDoesNotRequireKeyWindow() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true
+        )
+
+        XCTAssertTrue(AttentionPresentation.isInteractionSurfacePresented(facts))
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
+    }
+
+    func testInteractionSurfaceRejectsNonCurrentHotWebView() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            sourceWindowIsVisible: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isInteractionSurfacePresented(facts))
+    }
+
+    func testInteractionSurfaceRejectsHiddenNormalSource() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            pooledWebViewExists: true,
+            normalCurrentWebViewIsSlotWebView: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isInteractionSurfacePresented(facts))
+    }
+
+    func testInteractionSurfaceRejectsMissingPooledWebView() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            normalCurrentWebViewIsSlotWebView: true,
+            sourceWindowIsVisible: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isInteractionSurfacePresented(facts))
+    }
+
+    func testInteractionSurfaceAcceptsFullscreenSourceWithoutKeyWindow() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            fullscreenSourceSlotID: slotA
+        )
+
+        XCTAssertTrue(AttentionPresentation.isInteractionSurfacePresented(facts))
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
+    }
+
+    func testInteractionSurfaceAcceptsVisibleFullscreenCompanionWithoutKeyWindow() {
+        let facts = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            panelIsVisible: true,
+            companionSlotID: slotA,
+            companionCurrentWebViewIsSlotWebView: true
+        )
+
+        XCTAssertTrue(AttentionPresentation.isInteractionSurfacePresented(facts))
+        XCTAssertFalse(AttentionPresentation.isUserVisible(facts))
+    }
+
+    func testInteractionSurfaceRejectsHiddenOrWrongFullscreenCompanion() {
+        let hidden = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            panelIsVisible: false,
+            companionSlotID: slotA,
+            companionCurrentWebViewIsSlotWebView: true
+        )
+        let wrongSlot = AttentionPresentation.Facts(
+            slotID: slotA,
+            sessionIsLocked: true,
+            panelIsVisible: true,
+            companionSlotID: slotB,
+            companionCurrentWebViewIsSlotWebView: true
+        )
+
+        XCTAssertFalse(AttentionPresentation.isInteractionSurfacePresented(hidden))
+        XCTAssertFalse(AttentionPresentation.isInteractionSurfacePresented(wrongSlot))
+    }
+
     func testSelectedButHiddenPresentationIsNotVisible() {
         // Logically current and identity-matched, but the source window is
         // not physically visible.
