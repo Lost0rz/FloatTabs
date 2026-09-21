@@ -21,6 +21,7 @@ protocol ChatGPTResponseFollowing: AnyObject {
 final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseExtracting, ChatGPTResponseFollowing {
     typealias ResultHandler = @MainActor (ChatGPTResponsePayload?) -> Void
     typealias ManualScrollHandler = @MainActor (UUID, String) -> Void
+    typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
 
     private struct PendingRequest {
         let webViewIdentity: ObjectIdentifier
@@ -30,6 +31,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     let slotID: UUID
     private let onRuntimeReset: @MainActor (UUID) -> Void
     private let onManualScroll: ManualScrollHandler
+    private let onTrustedInteraction: TrustedInteractionHandler
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var pendingRequests: [String: PendingRequest] = [:]
@@ -39,11 +41,13 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     init(
         slotID: UUID,
         onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },
-        onManualScroll: @escaping ManualScrollHandler = { _, _ in }
+        onManualScroll: @escaping ManualScrollHandler = { _, _ in },
+        onTrustedInteraction: @escaping TrustedInteractionHandler = { _, _, _ in }
     ) {
         self.slotID = slotID
         self.onRuntimeReset = onRuntimeReset
         self.onManualScroll = onManualScroll
+        self.onTrustedInteraction = onTrustedInteraction
         super.init()
     }
 
@@ -176,6 +180,21 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         onManualScroll(slotID, documentToken)
         return true
     }
+
+    /// Test-only forwarding for a trust-admitted normalized interaction. The
+    /// helper models only the post-content-world event and still validates the
+    /// live document identity used by the production route.
+    @discardableResult
+    func debugInvokeTrustedInteraction(
+        kind: ChatGPTTrustedPageInteractionKind,
+        documentToken: String
+    ) -> Bool {
+        guard !isInvalidated, documentToken == currentDocumentToken else {
+            return false
+        }
+        onTrustedInteraction(slotID, kind, documentToken)
+        return true
+    }
 #endif
 
     func handleRuntimeReplacement() {
@@ -229,6 +248,17 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
            let documentToken = body["documentToken"] as? String,
            documentToken == currentDocumentToken {
             onManualScroll(slotID, documentToken)
+            return
+        }
+        if body["event"] as? String == "trustedInteraction" {
+            guard body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+                  let documentToken = body["documentToken"] as? String,
+                  documentToken == currentDocumentToken,
+                  let rawKind = body["interactionKind"] as? String,
+                  let kind = ChatGPTTrustedPageInteractionKind(rawValue: rawKind) else {
+                return
+            }
+            onTrustedInteraction(slotID, kind, documentToken)
             return
         }
 

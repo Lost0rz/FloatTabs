@@ -47,6 +47,7 @@ final class WebViewPool {
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias SpeechManualScrollHandler = @MainActor (UUID, String) -> Void
+    typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CalibreReaderCandidateChangeHandler = @MainActor (UUID) -> Void
     typealias CalibreReaderRuntimeResetHandler = @MainActor (UUID) -> Void
@@ -77,6 +78,10 @@ final class WebViewPool {
     /// currently spoken response. This is a transient presentation signal;
     /// the pool does not retain scroll or response state.
     var onSpeechManualScroll: SpeechManualScrollHandler?
+
+    /// Trusted page interactions are forwarded without retaining input or
+    /// assigning unread policy in the pool.
+    var onTrustedInteraction: TrustedInteractionHandler?
 
     /// Transient presentation seam for the selected Slot's committed
     /// top-level URL. Persistence continues to use `onURLChange`; this route
@@ -557,6 +562,9 @@ final class WebViewPool {
             },
             onManualScroll: { [weak self] slotID, documentToken in
                 self?.onSpeechManualScroll?(slotID, documentToken)
+            },
+            onTrustedInteraction: { [weak self] slotID, kind, documentToken in
+                self?.onTrustedInteraction?(slotID, kind, documentToken)
             }
         )
         let calibreReaderBridge = CalibreReaderBridge(
