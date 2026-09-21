@@ -166,6 +166,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         case explicitSelectionDeferred = "explicit_selection_deferred"
         case manualSpeech = "manual_speech"
         case trustedManualScroll = "trusted_manual_scroll"
+        case trustedAssistantPointer = "trusted_assistant_pointer"
         case generationStarted = "generation_started"
     }
 
@@ -181,6 +182,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private struct UnreadPresentationFacts {
         let presentationVisible: Bool
+        let interactionSurfacePresented: Bool
         let webWindowKey: Bool
         let activeSlotMatches: Bool
         let sessionLocked: Bool
@@ -346,6 +348,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationWebFocusPending = false
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
+    private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
     private(set) var debugSpeechPresentationSynchronizationCount = 0
 #endif
 
@@ -915,6 +918,13 @@ final class PanelController: NSObject, NSWindowDelegate {
                 documentToken: documentToken
             )
             self.acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
+        }
+        webViewPool.onTrustedInteraction = { [weak self] slotID, kind, _ in
+            guard kind == .assistantPointer else { return }
+            self?.acknowledgeUnreadAfterTrustedPageInteraction(
+                slotID: slotID,
+                source: .trustedAssistantPointer
+            )
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -2332,6 +2342,25 @@ final class PanelController: NSObject, NSWindowDelegate {
         return operation()
     }
 
+    /// Test-only scoped override for the trusted interaction surface. It is
+    /// separate from strict user visibility so hover interaction can be tested
+    /// without weakening completion or attention semantics.
+    @discardableResult
+    func debugWithPresentationFacts<Result>(
+        slotID: UUID,
+        presentationFact: Bool,
+        interactionSurfacePresented: Bool,
+        operation: () -> Result
+    ) -> Result {
+        debugPresentationFactOverrides[slotID] = presentationFact
+        debugInteractionSurfaceFactOverrides[slotID] = interactionSurfacePresented
+        defer {
+            debugPresentationFactOverrides.removeValue(forKey: slotID)
+            debugInteractionSurfaceFactOverrides.removeValue(forKey: slotID)
+        }
+        return operation()
+    }
+
     /// Test-only forwarding to the actual rail selection callback configured
     /// by `configureSlotInteractions()`. Keeping this seam here lets
     /// production-path tests exercise PanelController acknowledgement wiring
@@ -3186,14 +3215,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// Returns the physical presentation fact shared by the two independent
     /// acknowledgement policies. This helper only observes topology; it does
     /// not read or mutate either attention authority.
-    private func isSlotActuallyPresented(slotID: UUID) -> Bool {
-#if DEBUG
-        if let override = debugPresentationFactOverrides[slotID] {
-            return override
-        }
-#endif
+    private func attentionPresentationFacts(slotID: UUID) -> AttentionPresentation.Facts {
         let pooledWebView = webViewPool.existingWebView(for: slotID)
-        let facts = AttentionPresentation.Facts(
+        return AttentionPresentation.Facts(
             slotID: slotID,
             sessionIsLocked: sourceHostController.isSessionLocked,
             pooledWebViewExists: pooledWebView != nil,
@@ -3211,7 +3235,47 @@ final class PanelController: NSObject, NSWindowDelegate {
                 sourceHostController.companionContainer.currentWebView === webView
             } ?? false
         )
+    }
+
+    private func isSlotActuallyPresented(slotID: UUID) -> Bool {
+        userVisiblePresentation(
+            slotID: slotID,
+            facts: attentionPresentationFacts(slotID: slotID)
+        )
+    }
+
+    private func isInteractionSurfacePresented(slotID: UUID) -> Bool {
+        interactionSurfacePresentation(
+            slotID: slotID,
+            facts: attentionPresentationFacts(slotID: slotID)
+        )
+    }
+
+    private func userVisiblePresentation(
+        slotID: UUID,
+        facts: AttentionPresentation.Facts
+    ) -> Bool {
+#if DEBUG
+        if let override = debugPresentationFactOverrides[slotID] {
+            return override
+        }
+#endif
         return AttentionPresentation.isUserVisible(facts)
+    }
+
+    private func interactionSurfacePresentation(
+        slotID: UUID,
+        facts: AttentionPresentation.Facts
+    ) -> Bool {
+#if DEBUG
+        if let override = debugInteractionSurfaceFactOverrides[slotID] {
+            return override
+        }
+        if let override = debugPresentationFactOverrides[slotID] {
+            return override
+        }
+#endif
+        return AttentionPresentation.isInteractionSurfacePresented(facts)
     }
 
     /// Reads the current WebView/window topology at the moment the attention
@@ -3352,7 +3416,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         ) else {
             return
         }
-        guard attempt.facts.presentationVisible else {
+        let interactionPresented: Bool
+        switch source {
+        case .generationStarted:
+            interactionPresented = attempt.facts.presentationVisible
+        default:
+            interactionPresented = attempt.facts.interactionSurfacePresented
+        }
+        guard interactionPresented else {
             finishUnreadAcknowledgement(
                 attempt,
                 skippedReason: .notActuallyPresented
@@ -3366,8 +3437,16 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func unreadPresentationFacts(slotID: UUID) -> UnreadPresentationFacts {
         let webView = webViewPool.existingWebView(for: slotID)
+        let presentationFacts = attentionPresentationFacts(slotID: slotID)
         return UnreadPresentationFacts(
-            presentationVisible: isSlotActuallyPresented(slotID: slotID),
+            presentationVisible: userVisiblePresentation(
+                slotID: slotID,
+                facts: presentationFacts
+            ),
+            interactionSurfacePresented: interactionSurfacePresentation(
+                slotID: slotID,
+                facts: presentationFacts
+            ),
             webWindowKey: webView?.window?.isKeyWindow == true,
             activeSlotMatches: tabStore.activeTabID == slotID,
             sessionLocked: sourceHostController.isSessionLocked,
@@ -3398,6 +3477,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "source": .string(source.rawValue),
                 "presentation_visible": .bool(facts.presentationVisible),
                 "web_window_key": .bool(facts.webWindowKey),
+                "interaction_surface_presented": .bool(facts.interactionSurfacePresented),
                 "active_slot_matches": .bool(facts.activeSlotMatches),
                 "unread_before": .bool(true)
             ]
@@ -3420,6 +3500,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     "reason": .string(skippedReason.rawValue),
                     "presentation_visible": .bool(attempt.facts.presentationVisible),
                     "web_window_key": .bool(attempt.facts.webWindowKey),
+                    "interaction_surface_presented": .bool(attempt.facts.interactionSurfacePresented),
                     "unread_before": .bool(true),
                     "unread_after": .bool(true)
                 ]
@@ -3433,7 +3514,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "slot_id": .string(attempt.slotID.uuidString),
                 "source": .string(attempt.source.rawValue),
                 "presentation_visible": .bool(attempt.facts.presentationVisible),
-                "web_window_key": .bool(attempt.facts.webWindowKey)
+                "web_window_key": .bool(attempt.facts.webWindowKey),
+                "interaction_surface_presented": .bool(attempt.facts.interactionSurfacePresented)
             ]
         )
     }
