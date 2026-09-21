@@ -8,7 +8,7 @@
 
 **Branch:** `fix/unread-diagnostics-u0`; keep PR #87 (`fix/single-instance-runtime-ownership`) untouched.
 
-**Spec:** `/Users/jack7788/.codex/attachments/d2d40175-b4a6-4feb-bad5-5a616b574d4c/Pasted text.txt`.
+**Spec:** Phase U0 frozen unread-diagnostics contract from independent audit.
 
 **Architecture:** `ChatGPTUnreadResponseCoordinator`, `WebAttentionCoordinator`, and `PanelController` remain the authorities. Diagnostics are emitted only at `PanelController` observation boundaries using the existing `RuntimeDiagnostics.record` path and privacy sanitizer. No direct JSONL writes and no document, response, DOM, URL, token, or title content.
 

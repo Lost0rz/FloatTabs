@@ -2300,6 +2300,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             .tabView(for: slotID)?.isShowingUnreadResponse ?? false
     }
 
+    /// Test-only persistent presentation fact control for a single deferred
+    /// main-queue turn. It does not participate in production builds.
+    func debugSetPresentationFactOverride(
+        slotID: UUID,
+        presentationFact: Bool
+    ) {
+        debugPresentationFactOverrides[slotID] = presentationFact
+    }
+
+    func debugClearPresentationFactOverride(slotID: UUID) {
+        debugPresentationFactOverrides.removeValue(forKey: slotID)
+    }
+
+    @discardableResult
+    func debugRemoveConfirmedSlot(slotID: UUID) -> Bool {
+        removeConfirmedSlot(slotID: slotID)
+    }
+
     /// Test-only scoped presentation fact for deterministic observation
     /// routing. The operation still enters through the real pool/bridge
     /// callback; only WindowServer-owned topology is replaced for the scope.
@@ -3077,7 +3095,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 fields: [
                     "slot_id": .string(slotID.uuidString),
                     "completion_valid": .bool(isValidGenerationCompletion),
-                    "presentation_visible": .bool(userVisibleAtCompletion),
+                    "presentation_visible": .bool(completionFacts.presentationVisible),
                     "web_window_key": .bool(completionFacts.webWindowKey),
                     "unread_before": .bool(unreadBefore),
                     "attention_state_before": .string(attentionStateBefore.diagnosticName),
@@ -3116,7 +3134,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     fields: [
                         "slot_id": .string(slotID.uuidString),
                         "reason": .string(reason.rawValue),
-                        "presentation_visible": .bool(userVisibleAtCompletion),
+                        "presentation_visible": .bool(completionFacts.presentationVisible),
                         "web_window_key": .bool(completionFacts.webWindowKey)
                     ]
                 )
@@ -3127,7 +3145,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                     fields: [
                         "slot_id": .string(slotID.uuidString),
                         "reason": .string("completion_unseen"),
-                        "presentation_visible": .bool(userVisibleAtCompletion),
+                        "presentation_visible": .bool(completionFacts.presentationVisible),
                         "web_window_key": .bool(completionFacts.webWindowKey)
                     ]
                 )
@@ -3610,6 +3628,34 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
+
+    @discardableResult
+    private func removeConfirmedSlot(slotID id: UUID) -> Bool {
+        let wasUnread = unreadResponseCoordinator.unreadSlotIDs.contains(id)
+        if wasUnread {
+            unreadPruneDiagnosticSuppressionIDs.insert(id)
+        }
+        guard tabStore.remove(id: id) else {
+            unreadPruneDiagnosticSuppressionIDs.remove(id)
+            return false
+        }
+        assistantSpeechCoordinator.removeSlot(slotID: id)
+        calibreSpeechCoordinator.removeSlot(slotID: id)
+        slotLifecycleCoordinator.remove(slotID: id)
+        webViewPool.remove(slotID: id)
+        // Pool removal already routed the bridge's final runtimeReset;
+        // dropping the bookkeeping fully forgets the deleted Slot.
+        attentionCoordinator.removeSlot(id)
+        unreadResponseCoordinator.removeSlot(slotID: id)
+        if wasUnread {
+            recordUnreadDiagnostic(event: "unread.removed", fields: [
+                "slot_id": .string(id.uuidString),
+                "reason": .string("slot_deleted")
+            ])
+        }
+        unreadPruneDiagnosticSuppressionIDs.remove(id)
+        return true
+    }
     private func presentRemoveConfirmation(id: UUID) {
         guard Self.canRemoveSlotDuringFullscreen(
             slotID: id,
@@ -3631,29 +3677,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 self.endRailModalInteraction()
                 guard confirmed else { return }
-                let wasUnread = self.unreadResponseCoordinator.unreadSlotIDs.contains(id)
-                if wasUnread {
-                    self.unreadPruneDiagnosticSuppressionIDs.insert(id)
-                }
-                guard self.tabStore.remove(id: id) else {
-                    self.unreadPruneDiagnosticSuppressionIDs.remove(id)
-                    return
-                }
-                self.assistantSpeechCoordinator.removeSlot(slotID: id)
-                self.calibreSpeechCoordinator.removeSlot(slotID: id)
-                self.slotLifecycleCoordinator.remove(slotID: id)
-                self.webViewPool.remove(slotID: id)
-                // Pool removal already routed the bridge's final runtimeReset;
-                // dropping the bookkeeping fully forgets the deleted Slot.
-                self.attentionCoordinator.removeSlot(id)
-                self.unreadResponseCoordinator.removeSlot(slotID: id)
-                if wasUnread {
-                    self.recordUnreadDiagnostic(event: "unread.removed", fields: [
-                        "slot_id": .string(id.uuidString),
-                        "reason": .string("slot_deleted")
-                    ])
-                }
-                self.unreadPruneDiagnosticSuppressionIDs.remove(id)
+                _ = self.removeConfirmedSlot(slotID: id)
             }
         }
         if modalHost.attachedSheet == nil {

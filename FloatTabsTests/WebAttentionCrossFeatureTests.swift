@@ -854,8 +854,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     // MARK: 4.1 Live observation → Attention + unread UI projection
 
     func testLiveBridgeChainProjectsUnreadDotAndNewGenerationKeepsIt() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
         )
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -885,6 +888,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertEqual(controller.attentionReadyCount, 1)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.mark_skipped" }?
+                .fields["reason"],
+            .string("already_unread")
+        )
+        XCTAssertEqual(writer.events.filter { $0.event == "unread.marked" }.count, 1)
     }
 
     func testPanelOwnsGlobalSpeechPresentationSynchronization() {
@@ -3820,8 +3829,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     }
 
     func testVisibleGenerationStartedAcknowledgesExistingUnread() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
         )
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -3848,11 +3860,24 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledge_attempt" }?
+                .fields["source"],
+            .string("generation_started")
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledged" }?
+                .fields["source"],
+            .string("generation_started")
+        )
     }
 
     func testBackgroundGenerationStartedPreservesUnread() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
         )
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -3872,6 +3897,21 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledge_attempt" }?
+                .fields["source"],
+            .string("generation_started")
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledge_skipped" }?
+                .fields["source"],
+            .string("generation_started")
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledge_skipped" }?
+                .fields["reason"],
+            .string("not_actually_presented")
+        )
     }
 
     func testNextVisibleCompletionStaysUnreadClearAfterVisibleGenerationStart() throws {
@@ -4399,19 +4439,21 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
 
-        acceptBaseline(
-            generating: true,
-            bridge: bridge,
-            webView: webView,
-            token: "unread-diagnostics-stray"
-        )
-        coordinator.apply(.runtimeReset, for: slot.id)
-        acceptState(
-            generating: false,
-            bridge: bridge,
-            webView: webView,
-            token: "unread-diagnostics-stray"
-        )
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            acceptBaseline(
+                generating: true,
+                bridge: bridge,
+                webView: webView,
+                token: "unread-diagnostics-stray"
+            )
+            coordinator.apply(.runtimeReset, for: slot.id)
+            acceptState(
+                generating: false,
+                bridge: bridge,
+                webView: webView,
+                token: "unread-diagnostics-stray"
+            )
+        }
 
         XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
         XCTAssertEqual(
@@ -4420,9 +4462,19 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             .bool(false)
         )
         XCTAssertEqual(
+            writer.events.last { $0.event == "unread.completion_observed" }?
+                .fields["presentation_visible"],
+            .bool(true)
+        )
+        XCTAssertEqual(
             writer.events.last { $0.event == "unread.mark_skipped" }?
                 .fields["reason"],
             .string("invalid_completion")
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.mark_skipped" }?
+                .fields["presentation_visible"],
+            .bool(true)
         )
         XCTAssertFalse(writer.events.contains { $0.event == "unread.marked" })
     }
@@ -4466,6 +4518,97 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             writer.events.last { $0.event == "unread.acknowledge_skipped" }?
                 .fields["reason"],
             .string("presentation_not_ready")
+        )
+    }
+
+    func testUnreadDiagnosticsRecordDeferredSelectionAcknowledgement() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "unread-diagnostics-deferred-success"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        defer { controller.debugClearPresentationFactOverride(slotID: slot.id) }
+        controller.debugSetPresentationFactOverride(
+            slotID: slot.id,
+            presentationFact: false
+        )
+        XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slot.id))
+        controller.debugSetPresentationFactOverride(
+            slotID: slot.id,
+            presentationFact: true
+        )
+
+        let acknowledged = try await waitUntil {
+            !controller.unreadResponseSlotIDs.contains(slot.id)
+        }
+        XCTAssertTrue(acknowledged)
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "unread.acknowledge_attempt"
+                    && $0.fields["source"] == .string("explicit_selection")
+            }
+        )
+        XCTAssertTrue(
+            writer.events.contains {
+                $0.event == "unread.acknowledge_attempt"
+                    && $0.fields["source"] == .string("explicit_selection_deferred")
+            }
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledged" }?
+                .fields["source"],
+            .string("explicit_selection_deferred")
+        )
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "unread.acknowledge_skipped"
+                    && $0.fields["reason"] == .string("presentation_not_ready")
+            }
+        )
+    }
+
+    func testUnreadDiagnosticsRecordConfirmedSlotDeletion() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        completeGeneration(
+            bridge: bridge,
+            webView: webView,
+            token: "unread-diagnostics-delete"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        XCTAssertTrue(controller.debugRemoveConfirmedSlot(slotID: slot.id))
+        XCTAssertNil(store.profiles.first { $0.id == slot.id })
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        let removedEvents = writer.events.filter { $0.event == "unread.removed" }
+        XCTAssertEqual(removedEvents.count, 1)
+        XCTAssertEqual(removedEvents.first?.fields["slot_id"], .string(slot.id.uuidString))
+        XCTAssertEqual(removedEvents.first?.fields["reason"], .string("slot_deleted"))
+        XCTAssertFalse(
+            writer.events.contains {
+                $0.event == "unread.pruned"
+                    && $0.fields["slot_id"] == .string(slot.id.uuidString)
+                    && $0.fields["reason"] == .string("invalid_slot_identity")
+            }
         )
     }
 
