@@ -75,6 +75,14 @@ private final class ChatGPTResponsePageHarness {
         }
     }
 
+    func snapshotStatus() async -> ChatGPTResponseStatusSnapshot? {
+        await withCheckedContinuation { continuation in
+            bridge.snapshotLatestResponseStatus { snapshot in
+                continuation.resume(returning: snapshot)
+            }
+        }
+    }
+
     func replaceLatestAssistantNode(id: String = "reply-latest") async -> Bool {
         await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(
@@ -303,6 +311,78 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
             second?.blocks.map { $0.sourceLocator?.blockID }
         )
         XCTAssertEqual(first?.blocks.first?.sourceLocator?.responseID, first?.responseID)
+    }
+
+    func testCANONICAL_IDENTITY_STABLE_RERENDER() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="canonical-rerender">
+          <p>Latest response.</p>
+        </div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let firstStatus = await page.snapshotStatus()
+        let first = try XCTUnwrap(firstStatus)
+        XCTAssertEqual(first.responseIdentity?.rawValue, "message:canonical-rerender")
+        let replaced = await page.replaceLatestAssistantNode(id: "canonical-rerender")
+        XCTAssertTrue(replaced)
+        let secondStatus = await page.snapshotStatus()
+        let second = try XCTUnwrap(secondStatus)
+        XCTAssertEqual(second.responseIdentity, first.responseIdentity)
+    }
+
+    func testCANONICAL_IDENTITY_STABLE_RELOAD() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="canonical-reload">
+          <p>First document.</p>
+        </div>
+        """)
+        let firstReady = await page.waitForDocumentReady()
+        XCTAssertTrue(firstReady)
+        let firstSnapshotValue = await page.snapshotStatus()
+        let firstSnapshot = try XCTUnwrap(firstSnapshotValue)
+        let firstPayloadValue = await page.extract()
+        let firstPayload = try XCTUnwrap(firstPayloadValue)
+
+        page.load("""
+        <div data-message-author-role="assistant" data-message-id="canonical-reload">
+          <p>Reloaded document.</p>
+        </div>
+        """)
+        let secondReady = await page.waitForDocumentReady()
+        XCTAssertTrue(secondReady)
+        let secondSnapshotValue = await page.snapshotStatus()
+        let secondSnapshot = try XCTUnwrap(secondSnapshotValue)
+        let secondPayloadValue = await page.extract()
+        let secondPayload = try XCTUnwrap(secondPayloadValue)
+
+        XCTAssertEqual(
+            firstSnapshot.responseIdentity?.rawValue,
+            "message:canonical-reload"
+        )
+        XCTAssertEqual(secondSnapshot.responseIdentity, firstSnapshot.responseIdentity)
+        XCTAssertTrue(firstPayload.responseID?.hasSuffix(":canonical-reload") == true)
+        XCTAssertTrue(secondPayload.responseID?.hasSuffix(":canonical-reload") == true)
+    }
+
+    func testNO_STABLE_ID_FAILS_CLOSED() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant">
+          <p>No canonical stable attribute.</p>
+        </div>
+        """)
+        let ready = await page.waitForDocumentReady()
+        XCTAssertTrue(ready)
+
+        let snapshotValue = await page.snapshotStatus()
+        let snapshot = try XCTUnwrap(snapshotValue)
+        XCTAssertNil(snapshot.responseIdentity)
+        let payload = await page.extract()
+        XCTAssertNotNil(payload?.responseID)
     }
 
     func testEveryEmittedLogicalBlockHasAnOpaqueLocatorInDocumentOrder() async {

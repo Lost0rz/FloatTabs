@@ -4320,6 +4320,309 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
+    func testACK_BEFORE_FINISH_NO_REAPPEAR() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:late-r1")
+        )
+        let documentToken = "late-status-document"
+
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: documentToken
+        )
+        responseBridge.debugSetLatestResponseStatusOverride(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: documentToken,
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        acceptBaseline(
+            generating: true,
+            bridge: attentionBridge,
+            webView: webView,
+            token: "late-attention-document"
+        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slot.id))
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            acceptState(
+                generating: false,
+                bridge: attentionBridge,
+                webView: webView,
+                token: "late-attention-document",
+                responseIdentity: identity
+            )
+        }
+
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.mark_skipped" }?.fields["reason"],
+            .string("already_handled_response")
+        )
+    }
+
+    func testSELECTION_WHILE_GENERATING_STILL_UNREADS_LATER() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:still-streaming")
+        )
+        let documentToken = "streaming-status-document"
+
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: documentToken
+        )
+        responseBridge.debugSetLatestResponseStatusOverride(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: documentToken,
+                responseIdentity: identity,
+                generating: true
+            )
+        )
+        acceptBaseline(
+            generating: true,
+            bridge: attentionBridge,
+            webView: webView,
+            token: "streaming-attention-document"
+        )
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(controller.debugInvokeRailSelection(slotID: slot.id))
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            acceptState(
+                generating: false,
+                bridge: attentionBridge,
+                webView: webView,
+                token: "streaming-attention-document",
+                responseIdentity: identity
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testNEW_RESPONSE_AFTER_HANDLED_MARKS() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let first = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:handled-r1"))
+        let second = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:new-r2"))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "handled-r1-document",
+                responseIdentity: first
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "handled-r1-document",
+                responseIdentity: second
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testALREADY_UNREAD_IDENTITY_ADVANCES() throws {
+        let suiteName = "FloatTabsTests.U3.Advance.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            unreadResponseCoordinator: unreadCoordinator
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let bridge = try attentionBridge(pool: pool, slot: slot)
+        let first = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:unread-r1"))
+        let second = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:unread-r2"))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "unread-r1-document",
+                responseIdentity: first
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: bridge,
+                webView: webView,
+                token: "unread-r1-document",
+                responseIdentity: second
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        XCTAssertEqual(
+            unreadCoordinator.unreadResponseIdentity(for: slot.id),
+            second
+        )
+    }
+
+    func testOLD_RESPONSE_POINTER_PRESERVES_NEW_UNREAD() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attention = try attentionBridge(pool: pool, slot: slot)
+        let response = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let first = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:pointer-r1"))
+        let second = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:pointer-r2"))
+        let documentToken = "pointer-identity-document"
+        primeResponseDocument(responseBridge: response, documentToken: documentToken)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: attention,
+                webView: webView,
+                token: "pointer-r1-attention",
+                responseIdentity: first
+            )
+            completeGeneration(
+                bridge: attention,
+                webView: webView,
+                token: "pointer-r1-attention",
+                responseIdentity: second
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                response.debugInvokeTrustedInteraction(
+                    kind: .assistantPointer,
+                    documentToken: documentToken,
+                    responseIdentity: first,
+                    responseComplete: true
+                )
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                response.debugInvokeTrustedInteraction(
+                    kind: .assistantPointer,
+                    documentToken: documentToken,
+                    responseIdentity: second,
+                    responseComplete: true
+                )
+            )
+        }
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testLATEST_RESPONSE_POINTER_CLEARS() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attention = try attentionBridge(pool: pool, slot: slot)
+        let response = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:pointer-latest"))
+        let documentToken = "pointer-latest-document"
+        primeResponseDocument(responseBridge: response, documentToken: documentToken)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: attention,
+                webView: webView,
+                token: "pointer-latest-attention",
+                responseIdentity: identity
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                response.debugInvokeTrustedInteraction(
+                    kind: .assistantPointer,
+                    documentToken: documentToken,
+                    responseIdentity: identity,
+                    responseComplete: true
+                )
+            )
+        }
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
+    func testMANUAL_SCROLL_CURRENT_LATEST() throws {
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attention = try attentionBridge(pool: pool, slot: slot)
+        let response = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:scroll-latest"))
+        let documentToken = "scroll-latest-document"
+        primeResponseDocument(responseBridge: response, documentToken: documentToken)
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
+            completeGeneration(
+                bridge: attention,
+                webView: webView,
+                token: "scroll-latest-attention",
+                responseIdentity: identity
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                response.debugInvokeTrustedManualScroll(
+                    documentToken: documentToken,
+                    latestResponseIdentity: identity,
+                    latestResponseComplete: true
+                )
+            )
+        }
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+    }
+
     // MARK: - Harness
 
     private func spec(name: String, url: String) -> (name: String, url: URL) {
@@ -4515,14 +4818,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         generating: Bool,
         bridge: ChatGPTAttentionBridge,
         webView: WKWebView,
-        token: String = "cross-feature-document-token"
+        token: String = "cross-feature-document-token",
+        responseIdentity: ChatGPTResponseIdentity? = nil
     ) {
         bridge.accept(
             payload: ChatGPTBridgePayload(
                 version: ChatGPTBridgePayload.currentVersion,
                 kind: ChatGPTBridgePayload.baselineKind,
                 token: token,
-                generating: generating
+                generating: generating,
+                responseIdentity: responseIdentity
             ),
             messageWebView: webView,
             isMainFrame: true,
@@ -4535,14 +4840,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         generating: Bool,
         bridge: ChatGPTAttentionBridge,
         webView: WKWebView,
-        token: String = "cross-feature-document-token"
+        token: String = "cross-feature-document-token",
+        responseIdentity: ChatGPTResponseIdentity? = nil
     ) {
         bridge.accept(
             payload: ChatGPTBridgePayload(
                 version: ChatGPTBridgePayload.currentVersion,
                 kind: ChatGPTBridgePayload.stateKind,
                 token: token,
-                generating: generating
+                generating: generating,
+                responseIdentity: responseIdentity
             ),
             messageWebView: webView,
             isMainFrame: true,
@@ -4554,7 +4861,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private func completeGeneration(
         bridge: ChatGPTAttentionBridge,
         webView: WKWebView,
-        token: String
+        token: String,
+        responseIdentity: ChatGPTResponseIdentity? = nil
     ) {
         acceptBaseline(
             generating: true,
@@ -4566,7 +4874,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             generating: false,
             bridge: bridge,
             webView: webView,
-            token: token
+            token: token,
+            responseIdentity: responseIdentity
         )
     }
 

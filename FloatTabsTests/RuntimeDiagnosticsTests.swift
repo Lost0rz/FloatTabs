@@ -54,6 +54,30 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(offWriter.events.isEmpty)
     }
 
+    func testRAW_IDENTITY_NOT_DIAGNOSTIC() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        diagnostics.record(
+            event: "unread.test",
+            level: .info,
+            subsystem: "unread",
+            fields: [
+                "response_identity": .string("message:secret-response"),
+                "response_id": .string("document:response"),
+                "document_token": .string("document-secret"),
+                "responseidentity_class": .string("already_handled_response"),
+                "safe_flag": .bool(true)
+            ]
+        )
+
+        let fields = writer.events.first?.fields ?? [:]
+        XCTAssertNil(fields["response_identity"])
+        XCTAssertNil(fields["response_id"])
+        XCTAssertNil(fields["document_token"])
+        XCTAssertNil(fields["responseidentity_class"])
+        XCTAssertEqual(fields["safe_flag"], .bool(true))
+    }
+
     func testStandardRetainsCriticalTransactionBoundariesAtInfoOrHigher() {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

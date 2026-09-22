@@ -1,6 +1,141 @@
 import Foundation
 import WebKit
 
+/// Stable identity for unread ownership. This is deliberately independent
+/// from SpeechResponseIdentity, whose document-scoped locator semantics are
+/// part of the speech protocol.
+struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
+    static let prefix = "message:"
+    static let stableAttributeNames = ["data-message-id", "data-message-uuid"]
+    static let suffixLengthRange = 1...160
+    static let canonicalLengthRange = 9...168
+
+    let rawValue: String
+
+    init?(rawValue: String) {
+        guard Self.isValid(rawValue) else { return nil }
+        self.rawValue = rawValue
+    }
+
+    init?(stableValue: String) {
+        self.init(rawValue: Self.prefix + stableValue)
+    }
+
+    static func parse(_ value: String?) -> ChatGPTResponseIdentity? {
+        guard let value else { return nil }
+        return ChatGPTResponseIdentity(rawValue: value)
+    }
+
+    static func isValid(_ value: String) -> Bool {
+        guard canonicalLengthRange.contains(value.count),
+              value.hasPrefix(prefix) else {
+            return false
+        }
+        let suffix = String(value.dropFirst(prefix.count))
+        return suffixLengthRange.contains(suffix.count)
+            && suffix.range(
+                of: #"^[A-Za-z0-9._:-]+$"#,
+                options: .regularExpression
+            ) != nil
+    }
+
+    /// Shared JS policy used by both the attention and response scripts.
+    /// `isRendered` is intentionally supplied by the host script so both
+    /// scripts keep their existing rendering semantics.
+    static let sharedDOMHelperSource = """
+          const RESPONSE_STABLE_ATTRIBUTE_NAMES = ["data-message-id", "data-message-uuid"];
+          const STOP_SELECTORS = [
+            '[data-testid="stop-button"]',
+            '[data-testid="fruitjuice-stop-button"]'
+          ];
+
+          const safeCanonicalStableValue = (value) => {
+            if (!value || value.length > 160) return null;
+            return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+          };
+
+          const canonicalResponseIdentityFor = (element) => {
+            if (!element || typeof element.getAttribute !== 'function') return null;
+            for (const attributeName of RESPONSE_STABLE_ATTRIBUTE_NAMES) {
+              const stable = safeCanonicalStableValue(
+                element.getAttribute(attributeName)
+              );
+              if (stable) return 'message:' + stable;
+            }
+            return null;
+          };
+
+          const assistantResponseRoots = () => {
+            const explicit = Array.from(document.querySelectorAll(
+              '[data-message-author-role="assistant"],'
+              + '[data-message-role="assistant"]'
+            ));
+            if (explicit.length) return explicit.filter(isRendered);
+
+            return Array.from(document.querySelectorAll(
+              'article[data-testid*="conversation-turn"]'
+            )).filter((article) => {
+              const role = article.getAttribute('data-message-author-role')
+                || article.querySelector('[data-message-author-role]')
+                  ?.getAttribute('data-message-author-role');
+              return role === 'assistant' && isRendered(article);
+            });
+          };
+
+          const assistantResponseRootFor = (eventTarget) => {
+            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+              ? eventTarget
+              : eventTarget?.parentElement;
+            while (element) {
+              if (element.matches
+                  && element.matches(
+                    '[data-message-author-role="assistant"],'
+                      + '[data-message-role="assistant"]'
+                  )) {
+                return element;
+              }
+              if (element.matches
+                  && element.matches('article[data-testid*="conversation-turn"]')) {
+                const role = element.getAttribute('data-message-author-role')
+                  || element.querySelector('[data-message-author-role]')
+                    ?.getAttribute('data-message-author-role');
+                return role === 'assistant' ? element : null;
+              }
+              element = element.parentElement;
+            }
+            return null;
+          };
+
+          const latestAssistantResponseRoot = () => {
+            const roots = assistantResponseRoots();
+            return roots.length ? roots[roots.length - 1] : null;
+          };
+
+          const isGenerating = () => {
+            for (const selector of STOP_SELECTORS) {
+              const elements = document.querySelectorAll(selector);
+              for (const element of elements) {
+                if (isRendered(element)) return true;
+              }
+            }
+            return false;
+          };
+"""
+}
+
+struct ChatGPTResponseStatusSnapshot: Equatable, Sendable {
+    let documentToken: String
+    let responseIdentity: ChatGPTResponseIdentity?
+    let generating: Bool
+}
+
+struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
+    let kind: ChatGPTTrustedPageInteractionKind
+    let documentToken: String
+    let responseIdentity: ChatGPTResponseIdentity?
+    let responseComplete: Bool
+}
+
 /// Swift-owned protocol model for the independent one-shot ChatGPT response
 /// bridge. It contains only structured response blocks in transient memory.
 enum ChatGPTResponseMessageKind: String, Equatable, Sendable {
@@ -211,14 +346,17 @@ enum ChatGPTResponseExtraction {
               && style.visibility !== 'collapse';
           };
 
+          \(ChatGPTResponseIdentity.sharedDOMHelperSource)
+
           const safeStableID = (value) => {
             if (!value || value.length > 160) return null;
             return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
           };
 
           const responseIDFor = (element) => {
-            const stable = safeStableID(element.getAttribute('data-message-id'))
-              || safeStableID(element.getAttribute('data-message-uuid'))
+            const stable = RESPONSE_STABLE_ATTRIBUTE_NAMES
+              .map((attributeName) => safeStableID(element.getAttribute(attributeName)))
+              .find(Boolean)
               || safeStableID(element.id);
             if (stable) return documentToken + ':' + stable;
             const existing = responseKeys.get(element);
@@ -227,47 +365,6 @@ enum ChatGPTResponseExtraction {
             const generated = documentToken + ':response-' + nextOpaqueKey;
             responseKeys.set(element, generated);
             return generated;
-          };
-
-          const assistantRoots = () => {
-            const explicit = Array.from(document.querySelectorAll(
-              '[data-message-author-role="assistant"],'
-              + '[data-message-role="assistant"]'
-            ));
-            if (explicit.length) return explicit.filter(isRendered);
-
-            return Array.from(document.querySelectorAll(
-              'article[data-testid*="conversation-turn"]'
-            )).filter((article) => {
-              const role = article.getAttribute('data-message-author-role')
-                || article.querySelector('[data-message-author-role]')
-                  ?.getAttribute('data-message-author-role');
-              return role === 'assistant' && isRendered(article);
-            });
-          };
-
-          const assistantResponseRootFor = (eventTarget) => {
-            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
-              ? eventTarget
-              : eventTarget?.parentElement;
-            while (element) {
-              if (element.matches
-                  && element.matches(
-                    '[data-message-author-role="assistant"],'
-                      + '[data-message-role="assistant"]'
-                  )) {
-                return element;
-              }
-              if (element.matches
-                  && element.matches('article[data-testid*="conversation-turn"]')) {
-                const role = element.getAttribute('data-message-author-role')
-                  || element.querySelector('[data-message-author-role]')
-                    ?.getAttribute('data-message-author-role');
-                return role === 'assistant' ? element : null;
-              }
-              element = element.parentElement;
-            }
-            return null;
           };
 
           const semanticSelector = 'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table';
@@ -788,21 +885,29 @@ enum ChatGPTResponseExtraction {
           const postManualScroll = () => {
             const target = handler();
             if (!target) return;
+            const latestRoot = latestAssistantResponseRoot();
+            const generating = isGenerating();
             target.postMessage({
               version: 3,
               event: "manualScroll",
-              documentToken: documentToken
+              documentToken: documentToken,
+              latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
+              latestResponseComplete: Boolean(latestRoot) && !generating
             });
           };
 
-          const postTrustedAssistantPointer = () => {
+          const postTrustedAssistantPointer = (root) => {
             const target = handler();
             if (!target) return;
+            const latestRoot = latestAssistantResponseRoot();
+            const generating = isGenerating();
             target.postMessage({
               version: 3,
               event: "trustedInteraction",
               documentToken: documentToken,
-              interactionKind: "assistantPointer"
+              interactionKind: "assistantPointer",
+              responseIdentity: canonicalResponseIdentityFor(root),
+              responseComplete: root !== latestRoot || !generating
             });
           };
 
@@ -868,8 +973,9 @@ enum ChatGPTResponseExtraction {
           }, true);
           document.addEventListener('pointerdown', (event) => {
             if (!event.isTrusted) return;
-            if (assistantResponseRootFor(event.target)) {
-              postTrustedAssistantPointer();
+            const assistantRoot = assistantResponseRootFor(event.target);
+            if (assistantRoot) {
+              postTrustedAssistantPointer(assistantRoot);
             }
             const root = document.documentElement;
             const likelyScrollbar = event.clientX >= root.clientWidth
@@ -915,8 +1021,7 @@ enum ChatGPTResponseExtraction {
           globalThis.__floatTabsChatGPTResponseRequestLatestV3 = (requestID) => {
             const target = handler();
             if (!target || typeof requestID !== 'string') return false;
-            const roots = assistantRoots();
-            const root = roots[roots.length - 1];
+            const root = latestAssistantResponseRoot();
             if (!root) {
               postEmpty(target, requestID);
               return true;
@@ -972,6 +1077,16 @@ enum ChatGPTResponseExtraction {
               blocks: wireBlocks
             });
             return true;
+          };
+
+          globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1 = () => {
+            const latestRoot = latestAssistantResponseRoot();
+            return {
+              version: 1,
+              documentToken: documentToken,
+              responseIdentity: canonicalResponseIdentityFor(latestRoot),
+              generating: isGenerating()
+            };
           };
 
           \(debugAssistantPointerClassifier)

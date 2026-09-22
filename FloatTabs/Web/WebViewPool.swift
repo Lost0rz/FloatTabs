@@ -45,9 +45,11 @@ final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    typealias AttentionEventHandler = @MainActor (UUID, ChatGPTAttentionEvent) -> Void
     typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias SpeechManualScrollHandler = @MainActor (UUID, String) -> Void
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
+    typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
     typealias CalibreReaderCandidateChangeHandler = @MainActor (UUID) -> Void
     typealias CalibreReaderRuntimeResetHandler = @MainActor (UUID) -> Void
@@ -69,6 +71,7 @@ final class WebViewPool {
     /// Transient normalized-observation seam for later stages. The pool keeps
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
+    var onAttentionEvent: AttentionEventHandler?
 
     /// Response extraction has its own lifecycle channel. It is intentionally
     /// separate from the metadata-only attention observation route.
@@ -82,6 +85,7 @@ final class WebViewPool {
     /// Trusted page interactions are forwarded without retaining input or
     /// assigning unread policy in the pool.
     var onTrustedInteraction: TrustedInteractionHandler?
+    var onTrustedInteractionEvent: TrustedInteractionEventHandler?
 
     /// Transient presentation seam for the selected Slot's committed
     /// top-level URL. Persistence continues to use `onURLChange`; this route
@@ -557,7 +561,14 @@ final class WebViewPool {
             onObservation: { [weak self] slotID, observation in
                 self?.onAttentionObservation?(slotID, observation)
             },
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            onAttentionEvent: { [weak self] slotID, event in
+                if let onAttentionEvent = self?.onAttentionEvent {
+                    onAttentionEvent(slotID, event)
+                } else {
+                    self?.onAttentionObservation?(slotID, event.observation)
+                }
+            }
         )
         let responseBridge = ChatGPTResponseBridge(
             slotID: profile.id,
@@ -569,6 +580,9 @@ final class WebViewPool {
             },
             onTrustedInteraction: { [weak self] slotID, kind, documentToken in
                 self?.onTrustedInteraction?(slotID, kind, documentToken)
+            },
+            onTrustedInteractionEvent: { [weak self] slotID, event in
+                self?.onTrustedInteractionEvent?(slotID, event)
             }
         )
         let calibreReaderBridge = CalibreReaderBridge(

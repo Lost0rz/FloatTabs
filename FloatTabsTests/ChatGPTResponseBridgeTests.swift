@@ -138,6 +138,43 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(payload?.blocks.isEmpty == true)
     }
 
+    func testResponseStatusSnapshotValidatesDocumentIdentityAndCompletionState() throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:snapshot-latest")
+        )
+        let snapshot = ChatGPTResponseBridge.parseResponseStatusSnapshot([
+            "version": 1,
+            "documentToken": "document-snapshot-12345678",
+            "responseIdentity": identity.rawValue,
+            "generating": false
+        ])
+
+        XCTAssertEqual(
+            snapshot,
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "document-snapshot-12345678",
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponseStatusSnapshot([
+                "version": 1,
+                "documentToken": "document-snapshot-12345678",
+                "responseIdentity": "message:bad identity",
+                "generating": false
+            ])
+        )
+        XCTAssertNil(
+            ChatGPTResponseBridge.parseResponseStatusSnapshot([
+                "version": 1,
+                "documentToken": "document-snapshot-12345678",
+                "responseIdentity": identity.rawValue,
+                "generating": "false"
+            ])
+        )
+    }
+
     func testBridgeUsesIndependentNamedWorldAndNoPersistentMutationObserver() {
         XCTAssertEqual(
             ChatGPTResponseExtraction.contentWorld.name,
@@ -180,6 +217,21 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains(".focus()"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setInterval"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setTimeout"))
+    }
+
+    func testResponseIdentityPolicyIsSharedWithSpeechExtractionWithoutChangingSpeechIDs() throws {
+        let source = ChatGPTResponseExtraction.scriptSource
+        XCTAssertTrue(source.contains("RESPONSE_STABLE_ATTRIBUTE_NAMES"))
+        XCTAssertTrue(source.contains("data-message-id"))
+        XCTAssertTrue(source.contains("data-message-uuid"))
+        XCTAssertTrue(source.contains("canonicalResponseIdentityFor"))
+        XCTAssertTrue(source.contains("latestResponseIdentity"))
+        XCTAssertTrue(source.contains("latestResponseComplete"))
+        XCTAssertTrue(source.contains("responseIDFor"))
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(stableValue: "speech-independent-id")
+        )
+        XCTAssertEqual(identity.rawValue, "message:speech-independent-id")
     }
 
     func testBridgeLifecycleResetRejectsOldPendingCallback() {
@@ -315,6 +367,95 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertEqual(interactions[0].1, .assistantPointer)
         XCTAssertEqual(interactions[0].2, "trusted-interaction-document")
         XCTAssertEqual(interactions[1].1, .manualScroll)
+    }
+
+    func testTrustedInteractionEventCarriesIdentityAndCompletionAtomically() throws {
+        let slotID = UUID()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:pointer-response")
+        )
+        var events: [ChatGPTTrustedInteractionEvent] = []
+        let bridge = ChatGPTResponseBridge(
+            slotID: slotID,
+            onTrustedInteractionEvent: { _, event in
+                events.append(event)
+            }
+        )
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        let token = "trusted-event-document"
+        XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: token))
+
+        XCTAssertTrue(
+            bridge.acceptTrustedInteraction(
+                body: [
+                    "version": ChatGPTResponsePayload.currentVersion,
+                    "event": "trustedInteraction",
+                    "documentToken": token,
+                    "interactionKind": "assistantPointer",
+                    "responseIdentity": identity.rawValue,
+                    "responseComplete": true
+                ],
+                messageWebView: webView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(
+            events,
+            [
+                ChatGPTTrustedInteractionEvent(
+                    kind: .assistantPointer,
+                    documentToken: token,
+                    responseIdentity: identity,
+                    responseComplete: true
+                )
+            ]
+        )
+    }
+
+    func testTrustedInteractionRejectsMalformedIdentityAndCompletionFlag() throws {
+        let bridge = ChatGPTResponseBridge(slotID: UUID())
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        let token = "trusted-event-validation"
+        XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: token))
+
+        let base: [String: Any] = [
+            "version": ChatGPTResponsePayload.currentVersion,
+            "event": "trustedInteraction",
+            "documentToken": token,
+            "interactionKind": "assistantPointer"
+        ]
+        XCTAssertFalse(
+            bridge.acceptTrustedInteraction(
+                body: base.merging([
+                    "responseIdentity": "not-canonical"
+                ]) { _, new in new },
+                messageWebView: webView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertFalse(
+            bridge.acceptTrustedInteraction(
+                body: base.merging([
+                    "responseComplete": "true"
+                ]) { _, new in new },
+                messageWebView: webView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
     }
 
     func testPoolForwardsTrustedInteractionWithoutRetainingIt() throws {

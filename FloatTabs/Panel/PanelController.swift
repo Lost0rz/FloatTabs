@@ -174,6 +174,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         case visibleCompletion = "visible_completion"
         case invalidCompletion = "invalid_completion"
         case alreadyUnread = "already_unread"
+        case alreadyHandledResponse = "already_handled_response"
+        case responseIdentityMismatch = "response_identity_mismatch"
         case notActuallyPresented = "not_actually_presented"
         case notActiveSlot = "not_active_slot"
         case presentationNotReady = "presentation_not_ready"
@@ -899,8 +901,20 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onResidentSetChange = { [weak self] in
             self?.synchronizeResidentIndicators()
         }
+        webViewPool.onAttentionEvent = { [weak self] slotID, event in
+            self?.handleAttentionEvent(slotID: slotID, event: event)
+        }
+        // Keep the observation-only seam alive for deterministic recovery and
+        // older bridge instances. Production U3 bridges prefer the event
+        // callback above, so they do not deliver this fallback a second time.
         webViewPool.onAttentionObservation = { [weak self] slotID, observation in
-            self?.handleAttentionObservation(slotID: slotID, observation: observation)
+            self?.handleAttentionEvent(
+                slotID: slotID,
+                event: ChatGPTAttentionEvent(
+                    observation: observation,
+                    responseIdentity: nil
+                )
+            )
         }
         webViewPool.onResponseRuntimeReset = { [weak self] slotID in
             self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
@@ -917,14 +931,9 @@ final class PanelController: NSObject, NSWindowDelegate {
                 for: slotID,
                 documentToken: documentToken
             )
-            self.acknowledgeUnreadAfterTrustedPageInteraction(slotID: slotID)
         }
-        webViewPool.onTrustedInteraction = { [weak self] slotID, kind, _ in
-            guard kind == .assistantPointer else { return }
-            self?.acknowledgeUnreadAfterTrustedPageInteraction(
-                slotID: slotID,
-                source: .trustedAssistantPointer
-            )
+        webViewPool.onTrustedInteractionEvent = { [weak self] slotID, event in
+            self?.handleTrustedInteraction(slotID: slotID, event: event)
         }
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
@@ -3102,10 +3111,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// same authority on both sides of the observation. A protection-ending
     /// runtime reset may arrive after an old inactive timer was skipped, so an
     /// already-inactive Warm/Cold Slot gets a fresh lifecycle boundary here.
-    private func handleAttentionObservation(
+    private func handleAttentionEvent(
         slotID: UUID,
-        observation: ChatGPTAttentionObservation
+        event: ChatGPTAttentionEvent
     ) {
+        let observation = event.observation
         let attentionStateBefore = attentionCoordinator.state(for: slotID)
         let isValidGenerationCompletion = observation == .generationFinished
             && attentionStateBefore == .generating
@@ -3137,8 +3147,8 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         assistantSpeechCoordinator.handle(observation, for: slotID)
         attentionRouter.handle(observation, for: slotID)
-        unreadResponseCoordinator.handle(
-            observation,
+        let completionResult = unreadResponseCoordinator.handle(
+            event,
             for: slotID,
             isValidGenerationCompletion: isValidGenerationCompletion,
             userVisible: userVisibleAtCompletion
@@ -3154,7 +3164,14 @@ final class PanelController: NSObject, NSWindowDelegate {
             } else if userVisibleAtCompletion {
                 reason = .visibleCompletion
             } else {
-                reason = unreadBefore ? .alreadyUnread : nil
+                switch completionResult {
+                case .alreadyHandled:
+                    reason = .alreadyHandledResponse
+                case .marked, .visibleHandled:
+                    reason = userVisibleAtCompletion ? .visibleCompletion : (unreadBefore ? .alreadyUnread : nil)
+                case .ignored:
+                    reason = nil
+                }
             }
             if let reason {
                 recordUnreadDiagnostic(
@@ -3321,6 +3338,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
     ) {
+        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+            requestLatestResponseHandledSnapshot(slotID: slotID)
+            return
+        }
         guard let attempt = beginUnreadAcknowledgement(
             slotID: slotID,
             source: .explicitSelection,
@@ -3339,6 +3360,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         if attempt.facts.presentationVisible {
             unreadResponseCoordinator.acknowledge(slotID: slotID)
             synchronizeUnreadIndicators()
+            requestLatestResponseHandledSnapshot(slotID: slotID)
             finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
             return
         }
@@ -3347,8 +3369,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         // model selection. Re-check once, without turning selection into a
         // polling or focus state machine.
         DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  self.unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+            guard let self else {
+                return
+            }
+            guard self.unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+                self.requestLatestResponseHandledSnapshot(slotID: slotID)
                 return
             }
             guard let deferredAttempt = self.beginUnreadAcknowledgement(
@@ -3374,6 +3399,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
             self.unreadResponseCoordinator.acknowledge(slotID: slotID)
             self.synchronizeUnreadIndicators()
+            self.requestLatestResponseHandledSnapshot(slotID: slotID)
             self.finishUnreadAcknowledgement(
                 deferredAttempt,
                 skippedReason: .stateUnchanged
@@ -3384,6 +3410,10 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// Manual Read Latest and Replay Latest acknowledge only after the speech
     /// coordinator accepted an extraction request for the active ChatGPT Slot.
     private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
+        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
+            requestLatestResponseHandledSnapshot(slotID: slotID)
+            return
+        }
         guard let attempt = beginUnreadAcknowledgement(
             slotID: slotID,
             source: .manualSpeech
@@ -3399,6 +3429,56 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         unreadResponseCoordinator.acknowledge(slotID: slotID)
         synchronizeUnreadIndicators()
+        requestLatestResponseHandledSnapshot(slotID: slotID)
+        finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
+    }
+
+    private func handleTrustedInteraction(
+        slotID: UUID,
+        event: ChatGPTTrustedInteractionEvent
+    ) {
+        let source: UnreadDiagnosticSource = event.kind == .assistantPointer
+            ? .trustedAssistantPointer
+            : .trustedManualScroll
+        guard let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: source
+        ) else {
+            return
+        }
+        let interactionPresented = attempt.facts.interactionSurfacePresented
+        guard interactionPresented else {
+            finishUnreadAcknowledgement(
+                attempt,
+                skippedReason: .notActuallyPresented
+            )
+            return
+        }
+
+        if let responseIdentity = event.responseIdentity,
+           event.responseComplete {
+            unreadResponseCoordinator.recordHandled(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
+            let result = unreadResponseCoordinator.acknowledge(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
+            if result == .preservedIdentityMismatch {
+                finishUnreadAcknowledgement(
+                    attempt,
+                    skippedReason: .responseIdentityMismatch
+                )
+                return
+            }
+        } else {
+            // Identity-unavailable and streaming interactions retain the U1
+            // Slot-level fallback semantics. A streaming latest response is
+            // deliberately not added to handled history.
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+        }
+        synchronizeUnreadIndicators()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
 
@@ -3408,7 +3488,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// this method adds the physical presentation/active-interaction gate.
     private func acknowledgeUnreadAfterTrustedPageInteraction(
         slotID: UUID,
-        source: UnreadDiagnosticSource = .trustedManualScroll
+        source: UnreadDiagnosticSource = .trustedManualScroll,
+        responseIdentity: ChatGPTResponseIdentity? = nil,
+        responseComplete: Bool = false
     ) {
         guard let attempt = beginUnreadAcknowledgement(
             slotID: slotID,
@@ -3430,7 +3512,25 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             return
         }
-        unreadResponseCoordinator.acknowledge(slotID: slotID)
+        if let responseIdentity, responseComplete {
+            unreadResponseCoordinator.recordHandled(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
+            let result = unreadResponseCoordinator.acknowledge(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
+            if result == .preservedIdentityMismatch {
+                finishUnreadAcknowledgement(
+                    attempt,
+                    skippedReason: .responseIdentityMismatch
+                )
+                return
+            }
+        } else {
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+        }
         synchronizeUnreadIndicators()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
@@ -3479,10 +3579,28 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "web_window_key": .bool(facts.webWindowKey),
                 "interaction_surface_presented": .bool(facts.interactionSurfacePresented),
                 "active_slot_matches": .bool(facts.activeSlotMatches),
-                "unread_before": .bool(true)
+                "unread_before": .bool(unreadResponseCoordinator.unreadSlotIDs.contains(slotID))
             ]
         )
         return attempt
+    }
+
+    private func requestLatestResponseHandledSnapshot(slotID: UUID) {
+        guard let responseBridge = webViewPool.responseBridge(for: slotID) else {
+            return
+        }
+        responseBridge.snapshotLatestResponseStatus { [weak self] snapshot in
+            guard let self,
+                  let snapshot,
+                  !snapshot.generating,
+                  let responseIdentity = snapshot.responseIdentity else {
+                return
+            }
+            self.unreadResponseCoordinator.recordHandled(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
+        }
     }
 
     private func finishUnreadAcknowledgement(

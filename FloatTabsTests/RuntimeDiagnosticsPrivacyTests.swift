@@ -233,6 +233,22 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertNil(fields["clipboard_content"])
     }
 
+    func testResponseIdentityFragmentsAreNeverDiagnosticData() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "response_identity": .string("message:private"),
+            "response_id": .string("private-response"),
+            "document_token": .string("private-document"),
+            "responseidentity_class": .string("already_handled_response"),
+            "safe_reason": .string("already_handled_response")
+        ], mode: .verbose)
+
+        XCTAssertNil(fields["response_identity"])
+        XCTAssertNil(fields["response_id"])
+        XCTAssertNil(fields["document_token"])
+        XCTAssertNil(fields["responseidentity_class"])
+        XCTAssertEqual(fields["safe_reason"], .string("already_handled_response"))
+    }
+
     func testGenericLookingSensitiveKeysAreDroppedWithoutAnExactKeyDenylist() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "pageBodyText": .string("private page"),

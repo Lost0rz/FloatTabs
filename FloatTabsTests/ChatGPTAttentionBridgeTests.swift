@@ -312,6 +312,18 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(probe.contains("MutationObserver"))
     }
 
+    func testAttentionScriptUsesSharedResponseIdentityAndStopButtonPolicy() {
+        let source = ChatGPTAttentionBridge.scriptSource
+        XCTAssertTrue(source.contains("RESPONSE_STABLE_ATTRIBUTE_NAMES"))
+        XCTAssertTrue(source.contains("data-message-id"))
+        XCTAssertTrue(source.contains("data-message-uuid"))
+        XCTAssertTrue(source.contains("canonicalResponseIdentityFor"))
+        XCTAssertTrue(source.contains("responseIdentity: generating"))
+        XCTAssertTrue(source.contains("latestAssistantResponseRoot"))
+        XCTAssertTrue(source.contains("STOP_SELECTORS"))
+        XCTAssertTrue(source.contains("fruitjuice-stop-button"))
+    }
+
     func testBridgeConfiguredBeforeInitialLoad() throws {
         var hadBridgeScriptAtFirstLoad = false
         let pool = WebViewPool(
@@ -372,6 +384,33 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
                 version: 1, kind: "state", token: "12345678", generating: false
             )
         )
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:attention-response")
+        )
+        XCTAssertEqual(
+            ChatGPTBridgePayload.parse([
+                "version": 1,
+                "kind": "state",
+                "token": "12345678",
+                "generating": false,
+                "responseIdentity": identity.rawValue
+            ])?.responseIdentity,
+            identity
+        )
+        XCTAssertNil(ChatGPTBridgePayload.parse([
+            "version": 1,
+            "kind": "state",
+            "token": "12345678",
+            "generating": false,
+            "responseIdentity": "response-without-prefix"
+        ]))
+        XCTAssertNil(ChatGPTBridgePayload.parse([
+            "version": 1,
+            "kind": "state",
+            "token": "12345678",
+            "generating": false,
+            "responseIdentity": 7
+        ]))
     }
 
     func testMessageFromOtherWebViewIsRejected() throws {
@@ -490,6 +529,53 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
         XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
         XCTAssertEqual(harness.probeCount(), 2)
+    }
+
+    func testWATCHDOG_COMPLETION_IDENTITY() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:watchdog-r1")
+        )
+        let falseProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false,
+            "responseIdentity": identity.rawValue
+        ]
+        var events: [ChatGPTAttentionEvent] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            livenessProbe: { _ in falseProbe },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            onAttentionEvent: { _, event in
+                events.append(event)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        await bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(events[0].observation, .generationStarted)
+        XCTAssertNil(events[0].responseIdentity)
+        XCTAssertEqual(events[1].observation, .generationFinished)
+        XCTAssertEqual(events[1].responseIdentity, identity)
     }
 
     func testFalseThenTrueLivenessProbeDoesNotFinishOrStopWatchdog() async throws {
@@ -1215,6 +1301,84 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertNil(tracker.observe(true))
         XCTAssertEqual(tracker.observe(false), .generationFinished)
         XCTAssertNil(tracker.observe(false))
+    }
+
+    func testCOMPLETION_IDENTITY_ATOMIC() throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:atomic-finish")
+        )
+        var tracker = ChatGPTDocumentGenerationTracker()
+
+        XCTAssertNil(tracker.observeEvent(false, responseIdentity: nil))
+        XCTAssertEqual(
+            tracker.observeEvent(true, responseIdentity: identity)?.observation,
+            .generationStarted
+        )
+        XCTAssertNil(
+            tracker.observeEvent(true, responseIdentity: nil)
+        )
+        let finish = try XCTUnwrap(
+            tracker.observeEvent(false, responseIdentity: identity)
+        )
+        XCTAssertEqual(finish.observation, .generationFinished)
+        XCTAssertEqual(finish.responseIdentity, identity)
+        XCTAssertNil(tracker.observeEvent(false, responseIdentity: nil))
+    }
+
+    func testAttentionEventCallbackCarriesFinishIdentityButNeverStartIdentity() throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:event-finish")
+        )
+        let webView = WKWebView()
+        var events: [ChatGPTAttentionEvent] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            onAttentionEvent: { _, event in
+                events.append(event)
+            }
+        )
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true,
+                responseIdentity: identity
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.stateKind,
+                token: tokenA,
+                generating: false,
+                responseIdentity: identity
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        XCTAssertEqual(
+            events,
+            [
+                ChatGPTAttentionEvent(
+                    observation: .generationStarted,
+                    responseIdentity: nil
+                ),
+                ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: identity
+                )
+            ]
+        )
     }
 
     // MARK: - Navigation lifecycle
