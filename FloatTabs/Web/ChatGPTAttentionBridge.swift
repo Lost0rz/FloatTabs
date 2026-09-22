@@ -384,7 +384,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessWatchdogTask: Task<Void, Never>?
     private var livenessWatchdogGeneration: UInt64 = 0
     private var livenessGeneration: UInt64 = 0
-    private var livenessCycleInFlight = false
+    private var livenessCycleOwnerGeneration: UInt64?
     private var livenessIdleCandidate = false
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
@@ -688,6 +688,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func stopLivenessWatchdog() {
         let wasActive = livenessWatchdogTask != nil
+        let stoppedGeneration = livenessWatchdogGeneration
+        if livenessCycleOwnerGeneration == stoppedGeneration {
+            livenessCycleOwnerGeneration = nil
+        }
         livenessWatchdogGeneration &+= 1
         livenessWatchdogTask?.cancel()
         livenessWatchdogTask = nil
@@ -708,13 +712,17 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func recordLivenessProbeFailure() {
-        diagnostics.record(event: "attention.liveness_probe.failed", level: .warning, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
+        diagnostics.record(event: "attention.liveness_probe.failed", level: .debug, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
     }
 
     private func performLivenessCycle(watchdogGeneration: UInt64, documentEpoch: UInt64, webView: WKWebView, webViewIdentity: ObjectIdentifier, token: String) async {
-        guard !livenessCycleInFlight, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else { return }
-        livenessCycleInFlight = true
-        defer { livenessCycleInFlight = false }
+        guard livenessCycleOwnerGeneration == nil, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else { return }
+        livenessCycleOwnerGeneration = watchdogGeneration
+        defer {
+            if livenessCycleOwnerGeneration == watchdogGeneration {
+                livenessCycleOwnerGeneration = nil
+            }
+        }
         let generation = livenessGeneration
         guard let firstValue = await livenessProbe(webView), let firstProbe = parseLivenessProbe(firstValue), isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token), firstProbe.token == token else {
             if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }

@@ -988,6 +988,90 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         })
     }
 
+    func testNativeRecoveredVisibleCompletionKeepsUnreadClearThroughPanelRoute() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let suite = "FloatTabsU2VisibleRecovered-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            unreadResponseCoordinator: unreadCoordinator,
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        var completionCallbackCount = 0
+        controller.onChatGPTGenerationCompleted = { _ in
+            completionCallbackCount += 1
+        }
+        controller.debugSetPresentationFactOverride(
+            slotID: slot.id,
+            presentationFact: true
+        )
+        defer { controller.debugClearPresentationFactOverride(slotID: slot.id) }
+        let probes = CrossFeatureLivenessProbeSequence([
+            [
+                "version": 1,
+                "kind": "baseline",
+                "token": "u2-visible-cross-feature-token",
+                "generating": false
+            ],
+            [
+                "version": 1,
+                "kind": "baseline",
+                "token": "u2-visible-cross-feature-token",
+                "generating": false
+            ]
+        ])
+        let bridge = ChatGPTAttentionBridge(
+            slotID: slot.id,
+            onObservation: { [weak pool] slotID, observation in
+                pool?.onAttentionObservation?(slotID, observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "u2-visible-cross-feature-token",
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        await bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(coordinator.state(for: slot.id), .idle)
+        XCTAssertEqual(controller.attentionReadyCount, 0)
+        XCTAssertEqual(completionCallbackCount, 1)
+        XCTAssertTrue(unreadCoordinator.unreadSlotIDs.isEmpty)
+        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertTrue(writer.events.contains { $0.event == "attention.liveness_probe.recovered_completion" })
+        XCTAssertTrue(writer.events.contains {
+            $0.event == "unread.completion_observed"
+                && $0.fields["completion_valid"] == .bool(true)
+                && $0.fields["presentation_visible"] == .bool(true)
+        })
+        XCTAssertTrue(writer.events.contains {
+            $0.event == "unread.mark_skipped"
+                && $0.fields["reason"] == .string("visible_completion")
+        })
+        XCTAssertFalse(writer.events.contains { $0.event == "unread.marked" })
+    }
+
     func testPanelOwnsGlobalSpeechPresentationSynchronization() {
         let service = CrossFeatureSpeechService()
         let session = SpeechPlaybackSessionController(speechService: service)
