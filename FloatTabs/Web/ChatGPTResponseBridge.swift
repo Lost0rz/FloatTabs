@@ -131,6 +131,37 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
     }
 
+    /// Validates and admits one normalized trusted page interaction. This is
+    /// the shared native boundary used by the real script-message route and
+    /// by deterministic tests; admission never changes unread state itself.
+    @discardableResult
+    func acceptTrustedInteraction(
+        body: [String: Any],
+        messageWebView: WKWebView?,
+        isMainFrame: Bool,
+        originHost: String?,
+        originProtocol: String?
+    ) -> Bool {
+        guard !isInvalidated,
+              let attachedWebView = webView,
+              messageWebView === attachedWebView,
+              isMainFrame,
+              let originHost,
+              ChatGPTSitePolicy.isSupportedHost(originHost),
+              let originProtocol,
+              ["http", "https"].contains(originProtocol.lowercased()),
+              body["event"] as? String == "trustedInteraction",
+              body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+              let documentToken = body["documentToken"] as? String,
+              documentToken == currentDocumentToken,
+              let rawKind = body["interactionKind"] as? String,
+              let kind = ChatGPTTrustedPageInteractionKind(rawValue: rawKind) else {
+            return false
+        }
+        onTrustedInteraction(slotID, kind, documentToken)
+        return true
+    }
+
 #if DEBUG
     /// Test-only delivery of the post-commit document identity. The helper
     /// shares the native validation used by the real script-message route and
@@ -251,14 +282,13 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             return
         }
         if body["event"] as? String == "trustedInteraction" {
-            guard body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
-                  let documentToken = body["documentToken"] as? String,
-                  documentToken == currentDocumentToken,
-                  let rawKind = body["interactionKind"] as? String,
-                  let kind = ChatGPTTrustedPageInteractionKind(rawValue: rawKind) else {
-                return
-            }
-            onTrustedInteraction(slotID, kind, documentToken)
+            _ = acceptTrustedInteraction(
+                body: body,
+                messageWebView: message.webView,
+                isMainFrame: message.frameInfo.isMainFrame,
+                originHost: message.frameInfo.securityOrigin.host,
+                originProtocol: message.frameInfo.securityOrigin.`protocol`
+            )
             return
         }
 
