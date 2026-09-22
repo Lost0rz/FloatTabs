@@ -114,6 +114,39 @@ struct ChatGPTDocumentGenerationTracker {
 final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let contentWorldName = "FloatTabsChatGPTAttention"
     static let messageHandlerName = "floatTabsChatGPTAttention"
+    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+    static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
+    static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
+
+    typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
+    typealias LivenessSleeper = @MainActor (UInt64) async -> Bool
+
+    private static let productionLivenessSleeper: LivenessSleeper = { nanoseconds in
+        guard !Task.isCancelled else { return false }
+        do {
+            try await Task.sleep(nanoseconds: nanoseconds)
+            return !Task.isCancelled
+        } catch {
+            return false
+        }
+    }
+
+    private static let productionLivenessProbe: LivenessProbeProvider = { webView in
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                ChatGPTAttentionBridge.livenessProbeScript,
+                in: nil,
+                in: ChatGPTAttentionBridge.contentWorld
+            ) { result in
+                switch result {
+                case let .success(value):
+                    continuation.resume(returning: value)
+                case .failure:
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
 
     /// The single shared world instance used for both the injected script and
     /// the message handler. One instance is required: worlds with equal names
@@ -265,6 +298,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
           document.addEventListener("DOMContentLoaded", schedule, { once: true });
 
+          globalThis.__floatTabsAttentionProbeV1 = () => {
+            const generating = isGenerating();
+            return {
+              version: 1,
+              kind: "baseline",
+              token: TOKEN,
+              generating: generating
+            };
+          };
+
           // BFCache/history restoration does not rerun document-start injection.
           // A restored document re-reports its current state; the native side
           // also exposes a narrow same-world resync entry for the confirmed
@@ -294,6 +337,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private struct DocumentSession {
         let token: String
+        let epoch: UInt64
         var tracker = ChatGPTDocumentGenerationTracker()
     }
 
@@ -323,6 +367,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     let slotID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private let livenessProbe: LivenessProbeProvider
+    private let livenessSleeper: LivenessSleeper
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var document: DocumentSession?
@@ -333,6 +380,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var pendingInstantBackHandoff: PendingInstantBackHandoff?
     private var pendingCurrentDocumentResync: PendingCurrentDocumentResync?
     private var nextResyncGeneration: UInt64 = 0
+    private var nextDocumentEpoch: UInt64 = 0
+    private var livenessWatchdogTask: Task<Void, Never>?
+    private var livenessWatchdogGeneration: UInt64 = 0
+    private var livenessGeneration: UInt64 = 0
+    private var livenessCycleOwnerGeneration: UInt64?
+    private var livenessIdleCandidateOwnerGeneration: UInt64?
+#if DEBUG
+    private(set) var debugLivenessWatchdogStartCount = 0
+#endif
     private(set) var isInvalidated = false
 
     /// Whether a transient Instant Back baseline handoff is awaiting either
@@ -343,10 +399,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     init(
         slotID: UUID,
-        onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+        onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        livenessProbe: LivenessProbeProvider? = nil,
+        livenessSleeper: LivenessSleeper? = nil
     ) {
         self.slotID = slotID
         self.onObservation = onObservation
+        self.diagnostics = diagnostics
+        self.livenessProbe = livenessProbe ?? Self.productionLivenessProbe
+        self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
         super.init()
     }
 
@@ -444,9 +506,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             guard document?.token == payload.token else {
                 return
             }
-            if let observation = document?.tracker.observe(payload.generating) {
-                emit(observation)
-            }
+            observeGeneration(payload.generating)
             return
         }
 
@@ -457,17 +517,19 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             // Ordinary supported didCommit uses authorized current-document
             // resync instead, so a stale baseline cannot claim the new epoch.
             guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
-            document = DocumentSession(token: payload.token)
+            document = makeDocumentSession(token: payload.token)
             documentAdmission = .activeSupportedDocument
         case .activeSupportedDocument:
             guard document?.token == payload.token else { return }
         case .unsupportedCurrentDocument, .awaitingAuthorizedResync:
             return
         }
-        guard let observation = document?.tracker.observe(payload.generating) else {
-            return
-        }
-        emit(observation)
+        observeGeneration(payload.generating)
+    }
+
+    private func makeDocumentSession(token: String) -> DocumentSession {
+        nextDocumentEpoch &+= 1
+        return DocumentSession(token: token, epoch: nextDocumentEpoch)
     }
 
     // MARK: Navigation / runtime lifecycle
@@ -547,6 +609,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func resetRuntime(admission: DocumentAdmission) {
+        stopLivenessWatchdog()
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
@@ -564,6 +627,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     func invalidate() {
         guard !isInvalidated else { return }
         isInvalidated = true
+        stopLivenessWatchdog()
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
@@ -580,9 +644,130 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    private func observeGeneration(_ generating: Bool) -> ChatGPTAttentionObservation? {
+        guard let observation = document?.tracker.observe(generating) else { return nil }
+        emit(observation)
+        return observation
+    }
+
     private func emit(_ observation: ChatGPTAttentionObservation) {
+        switch observation {
+        case .generationStarted:
+            livenessGeneration &+= 1
+            startLivenessWatchdog()
+        case .generationFinished, .runtimeReset:
+            stopLivenessWatchdog()
+        }
         onObservation(slotID, observation)
     }
+
+    private func startLivenessWatchdog() {
+        guard !isInvalidated, livenessWatchdogTask == nil, documentAdmission == .activeSupportedDocument, let document, let webView else { return }
+        livenessWatchdogGeneration &+= 1
+        let watchdogGeneration = livenessWatchdogGeneration
+        let documentEpoch = document.epoch
+        let token = document.token
+        let webViewIdentity = ObjectIdentifier(webView)
+#if DEBUG
+        debugLivenessWatchdogStartCount += 1
+#endif
+        diagnostics.record(event: "attention.liveness_watchdog.started", level: .info, subsystem: "attention", fields: [
+            "slot_id": .string(slotID.uuidString),
+            "watchdog_interval_ms": .integer(2_000)
+        ])
+        livenessWatchdogTask = Task { [weak self, weak webView] in
+            guard let self, let webView else { return }
+            while !Task.isCancelled {
+                guard await self.livenessSleeper(Self.livenessWatchdogIntervalNanoseconds) else { return }
+                guard !Task.isCancelled else { return }
+                await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
+            }
+        }
+    }
+
+    private func stopLivenessWatchdog() {
+        let wasActive = livenessWatchdogTask != nil
+        let stoppedGeneration = livenessWatchdogGeneration
+        if livenessCycleOwnerGeneration == stoppedGeneration {
+            livenessCycleOwnerGeneration = nil
+        }
+        livenessWatchdogGeneration &+= 1
+        livenessWatchdogTask?.cancel()
+        livenessWatchdogTask = nil
+        clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
+        if wasActive {
+            diagnostics.record(event: "attention.liveness_watchdog.stopped", level: .info, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
+        }
+    }
+
+    private func clearLivenessIdleCandidate(ownedBy watchdogGeneration: UInt64) {
+        guard livenessIdleCandidateOwnerGeneration == watchdogGeneration else { return }
+        livenessIdleCandidateOwnerGeneration = nil
+    }
+
+    private func isCurrentLivenessContext(watchdogGeneration: UInt64, documentEpoch: UInt64, webView: WKWebView, webViewIdentity: ObjectIdentifier, token: String) -> Bool {
+        guard !isInvalidated, documentAdmission == .activeSupportedDocument, livenessWatchdogTask != nil, livenessWatchdogGeneration == watchdogGeneration, let attachedWebView = self.webView, attachedWebView === webView, ObjectIdentifier(attachedWebView) == webViewIdentity, let document, document.epoch == documentEpoch, document.token == token else { return false }
+        return true
+    }
+
+    private func parseLivenessProbe(_ value: Any?) -> ChatGPTBridgePayload? {
+        guard let body = value as? [String: Any], let payload = ChatGPTBridgePayload.parse(body), payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
+        return payload
+    }
+
+    private func recordLivenessProbeFailure() {
+        diagnostics.record(event: "attention.liveness_probe.failed", level: .debug, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
+    }
+
+    private func performLivenessCycle(watchdogGeneration: UInt64, documentEpoch: UInt64, webView: WKWebView, webViewIdentity: ObjectIdentifier, token: String) async {
+        guard livenessCycleOwnerGeneration == nil, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else { return }
+        livenessCycleOwnerGeneration = watchdogGeneration
+        defer {
+            if livenessCycleOwnerGeneration == watchdogGeneration {
+                livenessCycleOwnerGeneration = nil
+            }
+        }
+        let generation = livenessGeneration
+        guard let firstValue = await livenessProbe(webView), let firstProbe = parseLivenessProbe(firstValue), isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token), firstProbe.token == token else {
+            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
+            return
+        }
+        if firstProbe.generating {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        livenessIdleCandidateOwnerGeneration = watchdogGeneration
+        guard await livenessSleeper(Self.livenessConfirmationDelayNanoseconds), livenessIdleCandidateOwnerGeneration == watchdogGeneration, livenessGeneration == generation, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        guard let secondValue = await livenessProbe(webView), let secondProbe = parseLivenessProbe(secondValue), secondProbe.token == token, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
+            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        guard !secondProbe.generating, livenessGeneration == generation else {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+        guard observeGeneration(false) == .generationFinished else { return }
+        diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
+            "slot_id": .string(slotID.uuidString),
+            "confirmation_count": .integer(2),
+            "watchdog_interval_ms": .integer(2_000),
+            "confirmation_delay_ms": .integer(250)
+        ])
+    }
+
+#if DEBUG
+    var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
+
+    func debugRunLivenessCycle() async {
+        guard let document, let webView, livenessWatchdogTask != nil else { return }
+        await performLivenessCycle(watchdogGeneration: livenessWatchdogGeneration, documentEpoch: document.epoch, webView: webView, webViewIdentity: ObjectIdentifier(webView), token: document.token)
+    }
+#endif
 
     private func requestCurrentDocumentResync() {
         documentAdmission = .awaitingAuthorizedResync
@@ -663,11 +848,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         _ payload: ChatGPTBridgePayload
     ) {
         guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
-        document = DocumentSession(token: payload.token)
+        document = makeDocumentSession(token: payload.token)
         documentAdmission = .activeSupportedDocument
-        if let observation = document?.tracker.observe(payload.generating) {
-            emit(observation)
-        }
+        observeGeneration(payload.generating)
     }
 
     private func invalidatePendingCurrentDocumentResync() {

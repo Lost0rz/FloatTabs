@@ -6,6 +6,21 @@ import XCTest
 /// exact production acceptance pipeline without a live page.
 @MainActor
 private final class ChatGPTAttentionBridgeHarness {
+    private final class ProbeSequence {
+        var values: [Any?]
+        private(set) var count = 0
+
+        init(values: [Any?]) {
+            self.values = values
+        }
+
+        func next() -> Any? {
+            count += 1
+            guard !values.isEmpty else { return nil }
+            return values.removeFirst()
+        }
+    }
+
     private final class ObservationLog {
         private(set) var entries: [ChatGPTAttentionObservation] = []
 
@@ -21,15 +36,28 @@ private final class ChatGPTAttentionBridgeHarness {
 
     var observations: [ChatGPTAttentionObservation] { log.entries }
 
-    init() {
+    init(probeValues: [Any?] = []) {
         // The observation callback must not capture the harness itself before
         // initialization completes; the log reference it captures is enough.
         let log = self.log
-        bridge = ChatGPTAttentionBridge(slotID: slotID) { _, observation in
-            log.record(observation)
-        }
+        let probes = ProbeSequence(values: probeValues)
+        bridge = ChatGPTAttentionBridge(
+            slotID: slotID,
+            onObservation: { _, observation in
+                log.record(observation)
+            },
+            livenessProbe: { _ in
+                probes.next()
+            },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
         bridge.attach(to: webView)
+        probeCount = { probes.count }
     }
+
+    private(set) var probeCount: () -> Int = { 0 }
 
     func accept(
         _ generating: Bool,
@@ -52,6 +80,84 @@ private final class ChatGPTAttentionBridgeHarness {
             originHost: host,
             originProtocol: originProtocol
         )
+    }
+}
+
+@MainActor
+private final class LivenessProbeGate {
+    private var queuedValues: [Any?] = []
+    private var suspendedContinuations: [CheckedContinuation<Any?, Never>] = []
+    private var callWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private(set) var callCount = 0
+
+    func next() async -> Any? {
+        callCount += 1
+        let readyWaiters = callWaiters.filter { $0.0 <= callCount }
+        callWaiters.removeAll { $0.0 <= callCount }
+        readyWaiters.forEach { $0.1.resume() }
+
+        if !queuedValues.isEmpty {
+            return queuedValues.removeFirst()
+        }
+        return await withCheckedContinuation { continuation in
+            suspendedContinuations.append(continuation)
+        }
+    }
+
+    func enqueue(_ values: [Any?]) {
+        queuedValues.append(contentsOf: values)
+    }
+
+    func waitForCall(_ expectedCallCount: Int) async {
+        guard callCount < expectedCallCount else { return }
+        await withCheckedContinuation { continuation in
+            callWaiters.append((expectedCallCount, continuation))
+        }
+    }
+
+    func resumeSuspended(_ value: Any?) {
+        precondition(!suspendedContinuations.isEmpty)
+        suspendedContinuations.removeFirst().resume(returning: value)
+    }
+}
+
+@MainActor
+private final class LivenessConfirmationGate {
+    private var continuations: [Int: CheckedContinuation<Bool, Never>] = [:]
+    private var callWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private(set) var callCount = 0
+
+    var isWaiting: Bool { !continuations.isEmpty }
+
+    func sleep(_ nanoseconds: UInt64) async -> Bool {
+        guard nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds else {
+            return false
+        }
+        callCount += 1
+        let callIndex = callCount
+        let readyWaiters = callWaiters.filter { $0.0 <= callCount }
+        callWaiters.removeAll { $0.0 <= callCount }
+        readyWaiters.forEach { $0.1.resume() }
+        return await withCheckedContinuation { continuation in
+            continuations[callIndex] = continuation
+        }
+    }
+
+    func waitForCall(_ expectedCallCount: Int) async {
+        guard callCount < expectedCallCount else { return }
+        await withCheckedContinuation { continuation in
+            callWaiters.append((expectedCallCount, continuation))
+        }
+    }
+
+    func resume(call callIndex: Int) {
+        guard let continuation = continuations.removeValue(forKey: callIndex) else { return }
+        continuation.resume(returning: true)
+    }
+
+    func resume() {
+        guard let callIndex = continuations.keys.min() else { return }
+        resume(call: callIndex)
     }
 }
 
@@ -188,6 +294,24 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
     }
 
+    func testInstalledScriptExposesReadOnlyLivenessProbeContract() throws {
+        let source = ChatGPTAttentionBridge.scriptSource
+        let marker = "globalThis.__floatTabsAttentionProbeV1 = () => {"
+        let start = try XCTUnwrap(source.range(of: marker)?.lowerBound)
+        let end = try XCTUnwrap(source.range(of: "};", range: start..<source.endIndex)?.upperBound)
+        let probe = String(source[start..<end])
+
+        XCTAssertTrue(probe.contains("version: 1"))
+        XCTAssertTrue(probe.contains("kind: \"baseline\""))
+        XCTAssertTrue(probe.contains("token: TOKEN"))
+        XCTAssertTrue(probe.contains("generating: generating"))
+        XCTAssertTrue(probe.contains("isGenerating()"))
+        XCTAssertFalse(probe.contains("lastSent"))
+        XCTAssertFalse(probe.contains("postMessage"))
+        XCTAssertFalse(probe.contains("setTimeout"))
+        XCTAssertFalse(probe.contains("MutationObserver"))
+    }
+
     func testBridgeConfiguredBeforeInitialLoad() throws {
         var hadBridgeScriptAtFirstLoad = false
         let pool = WebViewPool(
@@ -313,6 +437,755 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         harness.accept(true, token: tokenA)
 
         XCTAssertEqual(harness.observations, [.generationStarted])
+    }
+
+    func testIdleBaselineDoesNotActivateLivenessWatchdog() throws {
+        let harness = ChatGPTAttentionBridgeHarness()
+
+        harness.accept(false, token: tokenA)
+
+        XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
+        XCTAssertEqual(harness.bridge.debugLivenessWatchdogStartCount, 0)
+    }
+
+    func testGeneratingBaselineActivatesOneLivenessWatchdogAndDuplicateStartDoesNotDuplicateIt() throws {
+        let harness = ChatGPTAttentionBridgeHarness()
+
+        harness.accept(true, token: tokenA)
+        harness.accept(true, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
+
+        XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+        XCTAssertEqual(harness.bridge.debugLivenessWatchdogStartCount, 1)
+    }
+
+    func testTrueLivenessProbeKeepsGenerationActiveWithoutDuplicateStart() async throws {
+        let trueProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": true
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [trueProbe])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(harness.observations, [.generationStarted])
+        XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+        XCTAssertEqual(harness.probeCount(), 1)
+    }
+
+    func testFalseFalseLivenessProbeEmitsOneFinishAndStopsWatchdog() async throws {
+        let falseProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [falseProbe, falseProbe])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
+        XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
+        XCTAssertEqual(harness.probeCount(), 2)
+    }
+
+    func testFalseThenTrueLivenessProbeDoesNotFinishOrStopWatchdog() async throws {
+        let falseProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ]
+        let trueProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": true
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [falseProbe, trueProbe])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(harness.observations, [.generationStarted])
+        XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+        XCTAssertEqual(harness.probeCount(), 2)
+    }
+
+    func testNaturalFinishBeforeManualCycleRemainsSingleEmission() async throws {
+        let falseProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [falseProbe, falseProbe])
+
+        harness.accept(true, token: tokenA)
+        harness.accept(false, token: tokenA, kind: ChatGPTBridgePayload.stateKind)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
+        XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
+    }
+
+    func testOldProbeDoesNotBlockNewEpochLivenessCycle() async throws {
+        let probes = LivenessProbeGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        await bridge.debugRunLivenessCycle()
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+
+        probes.resumeSuspended([
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ])
+        await oldCycle.value
+        XCTAssertEqual(observations.filter { $0 == .generationFinished }.count, 1)
+    }
+
+    func testStaleProbeCannotClearNewCycleOwnerDuringConfirmation() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        let newCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        for _ in 0..<32 where !confirmation.isWaiting {
+            await Task.yield()
+        }
+        XCTAssertTrue(confirmation.isWaiting)
+
+        probes.resumeSuspended([
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ])
+        confirmation.resume()
+        await newCycle.value
+        await oldCycle.value
+
+        XCTAssertEqual(observations.filter { $0 == .generationFinished }.count, 1)
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+    }
+
+    func testStaleConfirmationFirstThenNewFinish() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([["version": 1, "kind": "baseline", "token": tokenA!, "generating": false]])
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        let newCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(2)
+
+        confirmation.resume(call: 1)
+        await oldCycle.value
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted]
+        )
+
+        confirmation.resume(call: 2)
+        await newCycle.value
+
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertFalse(bridge.debugLivenessWatchdogActive)
+    }
+
+    func testNewFinishFirstThenStaleCallback() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([["version": 1, "kind": "baseline", "token": tokenA!, "generating": false]])
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        let newCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(2)
+
+        confirmation.resume(call: 2)
+        await newCycle.value
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertFalse(bridge.debugLivenessWatchdogActive)
+
+        confirmation.resume(call: 1)
+        await oldCycle.value
+
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "attention.liveness_probe.recovered_completion" }.count,
+            1
+        )
+    }
+
+    func testNaturalFinishWinsWatchdogRaceWithSingleEmission() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var observations: [ChatGPTAttentionObservation] = []
+        var completionCallbackCount = 0
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+                if observation == .generationFinished {
+                    completionCallbackCount += 1
+                }
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenA!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenA!, "generating": false]
+        ])
+
+        let cycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        for _ in 0..<32 where !confirmation.isWaiting {
+            await Task.yield()
+        }
+        XCTAssertTrue(confirmation.isWaiting)
+
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.stateKind,
+                token: tokenA,
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        confirmation.resume()
+        await cycle.value
+
+        XCTAssertEqual(observations, [.generationStarted, .generationFinished])
+        XCTAssertEqual(completionCallbackCount, 1)
+        XCTAssertFalse(bridge.debugLivenessWatchdogActive)
+        XCTAssertFalse(writer.events.contains { $0.event == "attention.liveness_probe.recovered_completion" })
+    }
+
+    func testAttachmentReplacementRejectsStaleProbeBeforeNewDocumentCompletes() async throws {
+        let probes = LivenessProbeGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webViewA = WKWebView()
+        let webViewB = WKWebView()
+        bridge.attach(to: webViewA)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webViewA,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+
+        bridge.attach(to: webViewB)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webViewB,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+        await bridge.debugRunLivenessCycle()
+        probes.resumeSuspended([
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ])
+        await oldCycle.value
+
+        XCTAssertEqual(observations.filter { $0 == .generationFinished }.count, 1)
+        XCTAssertEqual(observations.last, .generationFinished)
+    }
+
+    func testStaleNavigationProbeRejectedAfterCommittedBoundary() async throws {
+        let probes = LivenessProbeGate()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        let staleCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+
+        bridge.handleRuntimeReplacement(
+            committedURL: URL(string: "https://chatgpt.com/new")
+        )
+        probes.resumeSuspended([
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ])
+        await staleCycle.value
+
+        XCTAssertEqual(observations, [.generationStarted, .runtimeReset])
+        XCTAssertFalse(writer.events.contains { $0.event == "attention.liveness_probe.recovered_completion" })
+    }
+
+    func testContentProcessBoundaryRejectsStaleProbeWithoutSyntheticFinish() async throws {
+        let probes = LivenessProbeGate()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        let staleCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        probes.resumeSuspended([
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ])
+        await staleCycle.value
+
+        XCTAssertEqual(observations, [.generationStarted, .runtimeReset])
+        XCTAssertFalse(writer.events.contains { $0.event == "attention.liveness_probe.recovered_completion" })
+    }
+
+    func testProbeFailureIsDebugOnlyAndLeavesWatchdogRecoverable() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let harness = ChatGPTAttentionBridgeHarness()
+        let bridge = ChatGPTAttentionBridge(
+            slotID: harness.slotID,
+            onObservation: { _, _ in },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in nil },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        bridge.attach(to: harness.webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: harness.webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        await bridge.debugRunLivenessCycle()
+
+        let failure = try XCTUnwrap(
+            writer.events.last { $0.event == "attention.liveness_probe.failed" }
+        )
+        XCTAssertEqual(failure.level, .debug)
+        XCTAssertTrue(bridge.debugLivenessWatchdogActive)
+    }
+
+    func testPendingInstantBackKeepsCurrentDocumentWatchdogAuthoritative() async throws {
+        let falseProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": false
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [falseProbe, falseProbe])
+
+        harness.accept(true, token: tokenA)
+        harness.bridge.beginInstantBackHandoff()
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertTrue(harness.bridge.isInstantBackHandoffPending)
+        XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
+    }
+
+    func testRuntimeReplacementAndInvalidationCancelLivenessWatchdog() throws {
+        let harness = ChatGPTAttentionBridgeHarness()
+        harness.accept(true, token: tokenA)
+        harness.bridge.handleRuntimeReplacement()
+        XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
+
+        harness.accept(true, token: tokenB)
+        XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+        harness.bridge.invalidate()
+        XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
+    }
+
+    func testRecoveredVisibleCompletionUsesExistingAttentionRouterAsIdle() async throws {
+        let coordinator = WebAttentionCoordinator()
+        let slotID = UUID()
+        let router = WebAttentionObservationRouter(
+            attentionCoordinator: coordinator,
+            isUserVisible: { _ in true }
+        )
+        let probes = [
+            [
+                "version": 1,
+                "kind": "baseline",
+                "token": tokenA!,
+                "generating": false
+            ],
+            [
+                "version": 1,
+                "kind": "baseline",
+                "token": tokenA!,
+                "generating": false
+            ]
+        ]
+        var remaining = probes
+        var completionCallbackCount = 0
+        let bridge = ChatGPTAttentionBridge(
+            slotID: slotID,
+            onObservation: { _, observation in
+                router.handle(observation, for: slotID)
+                if observation == .generationFinished {
+                    completionCallbackCount += 1
+                }
+            },
+            livenessProbe: { _ in
+                guard !remaining.isEmpty else { return nil }
+                return remaining.removeFirst()
+            },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        await bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(coordinator.state(for: slotID), .idle)
+        XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+        XCTAssertEqual(completionCallbackCount, 1)
     }
 
     func testGeneratingToIdleEmitsOneFinish() throws {
