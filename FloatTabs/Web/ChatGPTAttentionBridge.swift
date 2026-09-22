@@ -385,7 +385,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessWatchdogGeneration: UInt64 = 0
     private var livenessGeneration: UInt64 = 0
     private var livenessCycleOwnerGeneration: UInt64?
-    private var livenessIdleCandidate = false
+    private var livenessIdleCandidateOwnerGeneration: UInt64?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -654,7 +654,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         switch observation {
         case .generationStarted:
             livenessGeneration &+= 1
-            livenessIdleCandidate = false
             startLivenessWatchdog()
         case .generationFinished, .runtimeReset:
             stopLivenessWatchdog()
@@ -695,10 +694,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         livenessWatchdogGeneration &+= 1
         livenessWatchdogTask?.cancel()
         livenessWatchdogTask = nil
-        livenessIdleCandidate = false
+        clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
         if wasActive {
             diagnostics.record(event: "attention.liveness_watchdog.stopped", level: .info, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
         }
+    }
+
+    private func clearLivenessIdleCandidate(ownedBy watchdogGeneration: UInt64) {
+        guard livenessIdleCandidateOwnerGeneration == watchdogGeneration else { return }
+        livenessIdleCandidateOwnerGeneration = nil
     }
 
     private func isCurrentLivenessContext(watchdogGeneration: UInt64, documentEpoch: UInt64, webView: WKWebView, webViewIdentity: ObjectIdentifier, token: String) -> Bool {
@@ -728,16 +732,25 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
             return
         }
-        if firstProbe.generating { livenessIdleCandidate = false; return }
-        livenessIdleCandidate = true
-        guard await livenessSleeper(Self.livenessConfirmationDelayNanoseconds), livenessIdleCandidate, livenessGeneration == generation, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else { livenessIdleCandidate = false; return }
-        guard let secondValue = await livenessProbe(webView), let secondProbe = parseLivenessProbe(secondValue), secondProbe.token == token, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
-            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
-            livenessIdleCandidate = false
+        if firstProbe.generating {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
         }
-        guard !secondProbe.generating, livenessGeneration == generation else { livenessIdleCandidate = false; return }
-        livenessIdleCandidate = false
+        livenessIdleCandidateOwnerGeneration = watchdogGeneration
+        guard await livenessSleeper(Self.livenessConfirmationDelayNanoseconds), livenessIdleCandidateOwnerGeneration == watchdogGeneration, livenessGeneration == generation, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        guard let secondValue = await livenessProbe(webView), let secondProbe = parseLivenessProbe(secondValue), secondProbe.token == token, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
+            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        guard !secondProbe.generating, livenessGeneration == generation else {
+            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+            return
+        }
+        clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
         guard observeGeneration(false) == .generationFinished else { return }
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),

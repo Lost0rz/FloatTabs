@@ -123,25 +123,41 @@ private final class LivenessProbeGate {
 
 @MainActor
 private final class LivenessConfirmationGate {
-    private var continuation: CheckedContinuation<Bool, Never>?
-    private(set) var isWaiting = false
+    private var continuations: [Int: CheckedContinuation<Bool, Never>] = [:]
+    private var callWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private(set) var callCount = 0
+
+    var isWaiting: Bool { !continuations.isEmpty }
 
     func sleep(_ nanoseconds: UInt64) async -> Bool {
         guard nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds else {
             return false
         }
-        isWaiting = true
-        let result = await withCheckedContinuation { continuation in
-            self.continuation = continuation
+        callCount += 1
+        let callIndex = callCount
+        let readyWaiters = callWaiters.filter { $0.0 <= callCount }
+        callWaiters.removeAll { $0.0 <= callCount }
+        readyWaiters.forEach { $0.1.resume() }
+        return await withCheckedContinuation { continuation in
+            continuations[callIndex] = continuation
         }
-        isWaiting = false
-        return result
+    }
+
+    func waitForCall(_ expectedCallCount: Int) async {
+        guard callCount < expectedCallCount else { return }
+        await withCheckedContinuation { continuation in
+            callWaiters.append((expectedCallCount, continuation))
+        }
+    }
+
+    func resume(call callIndex: Int) {
+        guard let continuation = continuations.removeValue(forKey: callIndex) else { return }
+        continuation.resume(returning: true)
     }
 
     func resume() {
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(returning: true)
+        guard let callIndex = continuations.keys.min() else { return }
+        resume(call: callIndex)
     }
 }
 
@@ -656,6 +672,163 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(
             observations,
             [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+    }
+
+    func testStaleConfirmationFirstThenNewFinish() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([["version": 1, "kind": "baseline", "token": tokenA!, "generating": false]])
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        let newCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(2)
+
+        confirmation.resume(call: 1)
+        await oldCycle.value
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted]
+        )
+
+        confirmation.resume(call: 2)
+        await newCycle.value
+
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertFalse(bridge.debugLivenessWatchdogActive)
+    }
+
+    func testNewFinishFirstThenStaleCallback() async throws {
+        let probes = LivenessProbeGate()
+        let confirmation = LivenessConfirmationGate()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                await confirmation.sleep(nanoseconds)
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([["version": 1, "kind": "baseline", "token": tokenA!, "generating": false]])
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(1)
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        let newCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await confirmation.waitForCall(2)
+
+        confirmation.resume(call: 2)
+        await newCycle.value
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertFalse(bridge.debugLivenessWatchdogActive)
+
+        confirmation.resume(call: 1)
+        await oldCycle.value
+
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "attention.liveness_probe.recovered_completion" }.count,
+            1
         )
     }
 
