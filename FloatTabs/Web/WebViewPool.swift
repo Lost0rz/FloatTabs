@@ -552,9 +552,13 @@ final class WebViewPool {
         // The bridge exists before its WKWebView: the Factory invokes
         // `install(into:)` on the pre-creation user content controller so the
         // document-start script is present for the very first load.
-        let attentionBridge = ChatGPTAttentionBridge(slotID: profile.id) { [weak self] slotID, observation in
-            self?.onAttentionObservation?(slotID, observation)
-        }
+        let attentionBridge = ChatGPTAttentionBridge(
+            slotID: profile.id,
+            onObservation: { [weak self] slotID, observation in
+                self?.onAttentionObservation?(slotID, observation)
+            },
+            diagnostics: diagnostics
+        )
         let responseBridge = ChatGPTResponseBridge(
             slotID: profile.id,
             onRuntimeReset: { [weak self] slotID in
