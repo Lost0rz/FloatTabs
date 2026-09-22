@@ -196,6 +196,365 @@ final class UnreadResponseTests: XCTestCase {
         )
     }
 
+    func testResponseIdentityOwnershipPersistsAndAdvancesForNewCompletion() throws {
+        let coordinator = makeCoordinator()
+        let first = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:response-a"))
+        let second = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:response-b"))
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: first),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), first)
+        XCTAssertEqual(
+            UnreadResponseStore(defaults: defaults).unreadResponseIdentityBySlot[slotA],
+            first
+        )
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: second),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), second)
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+    }
+
+    func testALREADY_HANDLED_COMPLETION_SKIPPED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:visible"))
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: identity),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: true
+            ),
+            .visibleHandled(identityAvailable: true)
+        )
+        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: identity),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .alreadyHandled
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testHIDDEN_COMPLETION_NOT_HANDLED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:hidden-not-handled")
+        )
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: identity
+                ),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.contains(slotA))
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testHIDDEN_DUPLICATE_BEFORE_ACK_STAYS_UNREAD() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:hidden-duplicate")
+        )
+        let event = ChatGPTAttentionEvent(
+            observation: .generationFinished,
+            responseIdentity: identity
+        )
+
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), identity)
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testDUPLICATE_AFTER_ACK_SKIPPED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:duplicate-after-ack")
+        )
+        let event = ChatGPTAttentionEvent(
+            observation: .generationFinished,
+            responseIdentity: identity
+        )
+
+        _ = coordinator.handle(
+            event,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: identity),
+            .cleared(responseIdentity: identity)
+        )
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .alreadyHandled
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testSNAPSHOT_LEGACY_UNREAD_IDENTITY_IS_PRESERVED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:legacy-snapshot")
+        )
+        coordinator.markUnread(slotID: slotA)
+
+        XCTAssertEqual(
+            coordinator.reconcileHandledSnapshot(
+                slotID: slotA,
+                responseIdentity: identity
+            ),
+            .preservedLegacyIdentity
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.contains(slotA))
+        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testHIDDEN_COMPLETIONS_DO_NOT_POLLUTE_HANDLED_HISTORY() throws {
+        let coordinator = makeCoordinator()
+        let handled = try (0..<16).map { index in
+            try XCTUnwrap(
+                ChatGPTResponseIdentity(rawValue: "message:handled-history-\(index)")
+            )
+        }
+        let hidden = try (0..<3).map { index in
+            try XCTUnwrap(
+                ChatGPTResponseIdentity(rawValue: "message:hidden-history-\(index)")
+            )
+        }
+
+        for identity in handled {
+            coordinator.recordHandled(slotID: slotA, responseIdentity: identity)
+        }
+        for identity in hidden {
+            _ = coordinator.handle(
+                ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: identity
+                ),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            )
+        }
+
+        XCTAssertTrue(
+            handled.allSatisfy {
+                coordinator.isHandled(slotID: slotA, responseIdentity: $0)
+            }
+        )
+        XCTAssertTrue(
+            hidden.allSatisfy {
+                !coordinator.isHandled(slotID: slotA, responseIdentity: $0)
+            }
+        )
+    }
+
+    func testLEGACY_STORE_COMPAT() {
+        defaults.set([slotA.uuidString], forKey: UnreadResponseStore.slotIDsKey)
+        let coordinator = makeCoordinator()
+
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+        XCTAssertNil(coordinator.unreadResponseIdentity(for: slotA))
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: nil),
+            .cleared(responseIdentity: nil)
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testSIDE_CAR_CORRUPTION_FAILS_SAFE() {
+        defaults.set([slotA.uuidString], forKey: UnreadResponseStore.slotIDsKey)
+        defaults.set(
+            [
+                slotA.uuidString: "message:not valid",
+                "not-a-uuid": "message:orphan",
+                slotB.uuidString: NSNumber(value: 7)
+            ],
+            forKey: UnreadResponseStore.responseIdentityBySlotKey
+        )
+        let coordinator = makeCoordinator()
+
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+        XCTAssertNil(coordinator.unreadResponseIdentity(for: slotA))
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: nil),
+            .cleared(responseIdentity: nil)
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testPruneAndRemoveClearSidecarAndHandledHistory() throws {
+        let coordinator = makeCoordinator()
+        let identityA = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:prune-a")
+        )
+        let identityB = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:remove-b")
+        )
+        coordinator.markUnread(slotID: slotA, responseIdentity: identityA)
+        coordinator.markUnread(slotID: slotB, responseIdentity: identityB)
+        coordinator.recordHandled(slotID: slotA, responseIdentity: identityA)
+
+        coordinator.prune(validSlotIDs: [slotB])
+        XCTAssertNil(coordinator.unreadResponseIdentity(for: slotA))
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identityA))
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotB), identityB)
+
+        coordinator.removeSlot(slotID: slotB)
+        XCTAssertNil(coordinator.unreadResponseIdentity(for: slotB))
+        XCTAssertTrue(
+            UnreadResponseStore(defaults: defaults)
+                .unreadResponseIdentityBySlot
+                .isEmpty
+        )
+    }
+
+    func testROLLBACK_SLOT_KEY_COMPAT() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:rollback-compatible")
+        )
+
+        coordinator.markUnread(slotID: slotA, responseIdentity: identity)
+
+        let legacySlotIDs = defaults.array(forKey: UnreadResponseStore.slotIDsKey)
+        XCTAssertEqual(legacySlotIDs as? [String], [slotA.uuidString])
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), identity)
+    }
+
+    func testU1_REGRESSION() {
+        let coordinator = makeCoordinator()
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+
+        coordinator.acknowledge(slotID: slotA)
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testU2_REGRESSION() {
+        let coordinator = makeCoordinator()
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: false,
+            userVisible: false
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+
+        coordinator.handle(
+            .generationFinished,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+    }
+
+    func testMismatchedOldPointerDoesNotClearNewerUnreadOwnership() throws {
+        let coordinator = makeCoordinator()
+        let current = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:new"))
+        let old = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:old"))
+        coordinator.markUnread(slotID: slotA, responseIdentity: current)
+
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: old),
+            .preservedIdentityMismatch
+        )
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), current)
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: current),
+            .cleared(responseIdentity: current)
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testIdentityUnavailableUsesLegacySlotLevelFallback() {
+        let coordinator = makeCoordinator()
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: nil),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: false)
+        )
+        XCTAssertNil(coordinator.unreadResponseIdentity(for: slotA))
+    }
+
+    func testHandledIdentityHistoryIsBoundedToRecentSixteen() throws {
+        let coordinator = makeCoordinator()
+        let identities = try (0..<17).map { index in
+            try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:history-\(index)"))
+        }
+
+        for identity in identities {
+            coordinator.recordHandled(slotID: slotA, responseIdentity: identity)
+        }
+
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identities[0]))
+        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identities[1]))
+        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identities[16]))
+    }
+
     func testAcknowledgeAndRemoveAreIdempotent() {
         let coordinator = makeCoordinator()
         coordinator.markUnread(slotID: slotA)

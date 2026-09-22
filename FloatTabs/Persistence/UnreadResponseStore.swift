@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 final class UnreadResponseStore {
     static let slotIDsKey = "FloatTabs.chatGPTUnreadResponseSlotIDs"
+    static let responseIdentityBySlotKey = "FloatTabs.chatGPTUnreadResponseIdentityBySlotV1"
 
     private let defaults: UserDefaults
 
@@ -26,16 +27,42 @@ final class UnreadResponseStore {
         })
     }
 
-    func markUnread(_ slotID: UUID) {
+    var unreadResponseIdentityBySlot: [UUID: ChatGPTResponseIdentity] {
+        guard let values = defaults.dictionary(forKey: Self.responseIdentityBySlotKey) else {
+            return [:]
+        }
+        return values.reduce(into: [:]) { result, entry in
+            guard let slotID = UUID(uuidString: entry.key),
+                  let rawIdentity = entry.value as? String,
+                  let identity = ChatGPTResponseIdentity(rawValue: rawIdentity) else {
+                return
+            }
+            result[slotID] = identity
+        }
+    }
+
+    func markUnread(
+        _ slotID: UUID,
+        responseIdentity: ChatGPTResponseIdentity? = nil
+    ) {
         var slotIDs = unreadSlotIDs
-        guard slotIDs.insert(slotID).inserted else { return }
-        persist(slotIDs)
+        slotIDs.insert(slotID)
+        var identities = unreadResponseIdentityBySlot
+        if let responseIdentity {
+            identities[slotID] = responseIdentity
+        } else {
+            identities.removeValue(forKey: slotID)
+        }
+        persist(slotIDs, identities: identities)
     }
 
     func acknowledge(_ slotID: UUID) {
         var slotIDs = unreadSlotIDs
-        guard slotIDs.remove(slotID) != nil else { return }
-        persist(slotIDs)
+        let removed = slotIDs.remove(slotID) != nil
+        var identities = unreadResponseIdentityBySlot
+        let removedIdentity = identities.removeValue(forKey: slotID) != nil
+        guard removed || removedIdentity else { return }
+        persist(slotIDs, identities: identities)
     }
 
     func removeSlot(_ slotID: UUID) {
@@ -43,15 +70,25 @@ final class UnreadResponseStore {
     }
 
     func prune(validSlotIDs: Set<UUID>) {
-        let pruned = unreadSlotIDs.intersection(validSlotIDs)
-        guard pruned != unreadSlotIDs else { return }
-        persist(pruned)
+        let existing = unreadSlotIDs
+        let pruned = existing.intersection(validSlotIDs)
+        var identities = unreadResponseIdentityBySlot
+        identities = identities.filter { validSlotIDs.contains($0.key) && pruned.contains($0.key) }
+        guard pruned != existing || identities != unreadResponseIdentityBySlot else { return }
+        persist(pruned, identities: identities)
     }
 
-    private func persist(_ slotIDs: Set<UUID>) {
+    private func persist(
+        _ slotIDs: Set<UUID>,
+        identities: [UUID: ChatGPTResponseIdentity]
+    ) {
         defaults.set(
             slotIDs.map(\.uuidString).sorted(),
             forKey: Self.slotIDsKey
+        )
+        defaults.set(
+            Dictionary(uniqueKeysWithValues: identities.map { ($0.key.uuidString, $0.value.rawValue) }),
+            forKey: Self.responseIdentityBySlotKey
         )
     }
 }

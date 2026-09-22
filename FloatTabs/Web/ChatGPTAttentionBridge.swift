@@ -34,6 +34,11 @@ enum ChatGPTAttentionObservation: Equatable, Sendable {
     case runtimeReset
 }
 
+struct ChatGPTAttentionEvent: Equatable, Sendable {
+    let observation: ChatGPTAttentionObservation
+    let responseIdentity: ChatGPTResponseIdentity?
+}
+
 /// Minimal bridge payload. Metadata only: prompt text, response text, and any
 /// other page content must never appear in this protocol.
 struct ChatGPTBridgePayload: Equatable {
@@ -49,17 +54,20 @@ struct ChatGPTBridgePayload: Equatable {
     /// page content.
     let token: String
     let generating: Bool
+    let responseIdentity: ChatGPTResponseIdentity?
 
     init(
         version: Int,
         kind: String,
         token: String,
-        generating: Bool
+        generating: Bool,
+        responseIdentity: ChatGPTResponseIdentity? = nil
     ) {
         self.version = version
         self.kind = kind
         self.token = token
         self.generating = generating
+        self.responseIdentity = responseIdentity
     }
 
     static func parse(_ body: [String: Any]) -> ChatGPTBridgePayload? {
@@ -72,11 +80,23 @@ struct ChatGPTBridgePayload: Equatable {
               let generating = body["generating"] as? Bool else {
             return nil
         }
+        let responseIdentity: ChatGPTResponseIdentity?
+        if let rawIdentity = body["responseIdentity"] as? String {
+            guard let parsedIdentity = ChatGPTResponseIdentity(rawValue: rawIdentity) else {
+                return nil
+            }
+            responseIdentity = parsedIdentity
+        } else if body["responseIdentity"] == nil || body["responseIdentity"] is NSNull {
+            responseIdentity = nil
+        } else {
+            return nil
+        }
         return ChatGPTBridgePayload(
             version: version,
             kind: kind,
             token: token,
-            generating: generating
+            generating: generating,
+            responseIdentity: responseIdentity
         )
     }
 }
@@ -90,14 +110,29 @@ struct ChatGPTDocumentGenerationTracker {
     private var isGenerating = false
 
     mutating func observe(_ generating: Bool) -> ChatGPTAttentionObservation? {
+        observeEvent(generating, responseIdentity: nil)?.observation
+    }
+
+    mutating func observeEvent(
+        _ generating: Bool,
+        responseIdentity: ChatGPTResponseIdentity?
+    ) -> ChatGPTAttentionEvent? {
         guard hasBaseline else {
             hasBaseline = true
             isGenerating = generating
-            return generating ? .generationStarted : nil
+            return generating
+                ? ChatGPTAttentionEvent(
+                    observation: .generationStarted,
+                    responseIdentity: nil
+                )
+                : nil
         }
         guard generating != isGenerating else { return nil }
         isGenerating = generating
-        return generating ? .generationStarted : .generationFinished
+        return ChatGPTAttentionEvent(
+            observation: generating ? .generationStarted : .generationFinished,
+            responseIdentity: generating ? nil : responseIdentity
+        )
     }
 }
 
@@ -188,10 +223,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           };
           if (!handler()) { return; }
 
-          const STOP_SELECTORS = [
-            '[data-testid="stop-button"]',
-            '[data-testid="fruitjuice-stop-button"]'
-          ];
           const COALESCE_MS = 250;
           const TOKEN = (window.crypto && crypto.randomUUID)
             ? crypto.randomUUID()
@@ -206,11 +237,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           const post = (generating) => {
             const target = handler();
             if (!target) { return; }
+            const latestRoot = latestAssistantResponseRoot();
             target.postMessage({
               version: 1,
               kind: lastSent === null ? "baseline" : "state",
               token: TOKEN,
-              generating: generating
+              generating: generating,
+              responseIdentity: generating
+                ? null
+                : canonicalResponseIdentityFor(latestRoot)
             });
           };
 
@@ -230,17 +265,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return true;
           };
 
-          // Every element matching an exact selector is inspected: a hidden
-          // or stale first match must never mask a later legitimate control.
-          const isGenerating = () => {
-            for (const selector of STOP_SELECTORS) {
-              const elements = document.querySelectorAll(selector);
-              for (const element of elements) {
-                if (isRendered(element)) { return true; }
-              }
-            }
-            return false;
-          };
+          \(ChatGPTResponseIdentity.sharedDOMHelperSource)
 
           const evaluate = () => {
             const generating = isGenerating();
@@ -304,7 +329,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               version: 1,
               kind: "baseline",
               token: TOKEN,
-              generating: generating
+              generating: generating,
+              responseIdentity: canonicalResponseIdentityFor(
+                latestAssistantResponseRoot()
+              )
             };
           };
 
@@ -328,7 +356,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               version: 1,
               kind: "baseline",
               token: TOKEN,
-              generating: generating
+              generating: generating,
+              responseIdentity: canonicalResponseIdentityFor(
+                latestAssistantResponseRoot()
+              )
             };
           };
         })();
@@ -367,6 +398,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     let slotID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
+    private let onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)?
     private let diagnostics: any RuntimeDiagnosticRecording
     private let livenessProbe: LivenessProbeProvider
     private let livenessSleeper: LivenessSleeper
@@ -402,10 +434,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         livenessProbe: LivenessProbeProvider? = nil,
-        livenessSleeper: LivenessSleeper? = nil
+        livenessSleeper: LivenessSleeper? = nil,
+        onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
     ) {
         self.slotID = slotID
         self.onObservation = onObservation
+        self.onAttentionEvent = onAttentionEvent
         self.diagnostics = diagnostics
         self.livenessProbe = livenessProbe ?? Self.productionLivenessProbe
         self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
@@ -506,7 +540,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             guard document?.token == payload.token else {
                 return
             }
-            observeGeneration(payload.generating)
+            observeGeneration(
+                payload.generating,
+                responseIdentity: payload.responseIdentity
+            )
             return
         }
 
@@ -524,7 +561,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         case .unsupportedCurrentDocument, .awaitingAuthorizedResync:
             return
         }
-        observeGeneration(payload.generating)
+        observeGeneration(
+            payload.generating,
+            responseIdentity: payload.responseIdentity
+        )
     }
 
     private func makeDocumentSession(token: String) -> DocumentSession {
@@ -616,7 +656,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         document = nil
         documentAdmission = admission
         if hadActiveDocument {
-            emit(.runtimeReset)
+            emit(ChatGPTAttentionEvent(observation: .runtimeReset, responseIdentity: nil))
         }
     }
 
@@ -640,17 +680,24 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         userContentController = nil
         webView = nil
         if hadActiveDocument {
-            emit(.runtimeReset)
+            emit(ChatGPTAttentionEvent(observation: .runtimeReset, responseIdentity: nil))
         }
     }
 
-    private func observeGeneration(_ generating: Bool) -> ChatGPTAttentionObservation? {
-        guard let observation = document?.tracker.observe(generating) else { return nil }
-        emit(observation)
-        return observation
+    private func observeGeneration(
+        _ generating: Bool,
+        responseIdentity: ChatGPTResponseIdentity? = nil
+    ) -> ChatGPTAttentionObservation? {
+        guard let event = document?.tracker.observeEvent(
+            generating,
+            responseIdentity: responseIdentity
+        ) else { return nil }
+        emit(event)
+        return event.observation
     }
 
-    private func emit(_ observation: ChatGPTAttentionObservation) {
+    private func emit(_ event: ChatGPTAttentionEvent) {
+        let observation = event.observation
         switch observation {
         case .generationStarted:
             livenessGeneration &+= 1
@@ -658,7 +705,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         case .generationFinished, .runtimeReset:
             stopLivenessWatchdog()
         }
-        onObservation(slotID, observation)
+        if let onAttentionEvent {
+            onAttentionEvent(slotID, event)
+        } else {
+            onObservation(slotID, observation)
+        }
     }
 
     private func startLivenessWatchdog() {
@@ -751,7 +802,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
         clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
-        guard observeGeneration(false) == .generationFinished else { return }
+        guard observeGeneration(
+            false,
+            responseIdentity: secondProbe.responseIdentity
+        ) == .generationFinished else { return }
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
             "confirmation_count": .integer(2),
@@ -850,7 +904,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         guard payload.kind == ChatGPTBridgePayload.baselineKind else { return }
         document = makeDocumentSession(token: payload.token)
         documentAdmission = .activeSupportedDocument
-        observeGeneration(payload.generating)
+        observeGeneration(
+            payload.generating,
+            responseIdentity: payload.responseIdentity
+        )
     }
 
     private func invalidatePendingCurrentDocumentResync() {
