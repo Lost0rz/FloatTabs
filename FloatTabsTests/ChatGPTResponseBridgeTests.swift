@@ -8,6 +8,29 @@ private final class TrustedInteractionAdmissionProbe {
 }
 
 @MainActor
+private final class ResponseStatusSnapshotProviderProbe {
+    private var pending: CheckedContinuation<ChatGPTResponseStatusSnapshot?, Never>?
+    private(set) var requestCount = 0
+    private(set) var lastScript: String?
+
+    func provide(
+        _ webView: WKWebView,
+        _ script: String
+    ) async -> ChatGPTResponseStatusSnapshot? {
+        requestCount += 1
+        lastScript = script
+        return await withCheckedContinuation { continuation in
+            pending = continuation
+        }
+    }
+
+    func resolve(_ snapshot: ChatGPTResponseStatusSnapshot?) {
+        pending?.resume(returning: snapshot)
+        pending = nil
+    }
+}
+
+@MainActor
 final class ChatGPTResponseBridgeTests: XCTestCase {
     func testPayloadParsingAcceptsStructuredResponseOnly() {
         let payload = ChatGPTResponsePayload.parse([
@@ -173,6 +196,67 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
                 "generating": "false"
             ])
         )
+    }
+
+    func testAsyncResponseStatusProviderIsProductionSharedAndRespectsBridgeIdentity() async throws {
+        let probe = ResponseStatusSnapshotProviderProbe()
+        let bridge = ChatGPTResponseBridge(
+            slotID: UUID(),
+            responseStatusSnapshotProvider: { webView, script in
+                await probe.provide(webView, script)
+            }
+        )
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        let documentToken = "async-status-document"
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:async-status")
+        )
+        XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: documentToken))
+
+        var result: ChatGPTResponseStatusSnapshot?
+        bridge.snapshotLatestResponseStatus { result = $0 }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(probe.requestCount, 1)
+        XCTAssertEqual(
+            probe.lastScript,
+            "globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1?.()"
+        )
+
+        probe.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: documentToken,
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        try await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(
+            result,
+            ChatGPTResponseStatusSnapshot(
+                documentToken: documentToken,
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+
+        result = ChatGPTResponseStatusSnapshot(
+            documentToken: documentToken,
+            responseIdentity: identity,
+            generating: false
+        )
+        bridge.snapshotLatestResponseStatus { result = $0 }
+        for _ in 0..<100 where probe.requestCount < 2 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(probe.requestCount, 2)
+        bridge.handleRuntimeReplacement()
+        probe.resolve(nil)
+        try await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertNil(result)
     }
 
     func testBridgeUsesIndependentNamedWorldAndNoPersistentMutationObserver() {

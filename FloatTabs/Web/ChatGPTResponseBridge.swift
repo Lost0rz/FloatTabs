@@ -30,6 +30,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     typealias ManualScrollHandler = @MainActor (UUID, String) -> Void
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
+    typealias ResponseStatusSnapshotProvider = @MainActor (WKWebView, String) async -> ChatGPTResponseStatusSnapshot?
 
     private struct PendingRequest {
         let webViewIdentity: ObjectIdentifier
@@ -45,6 +46,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     private weak var userContentController: WKUserContentController?
     private var pendingRequests: [String: PendingRequest] = [:]
     private var currentDocumentToken: String?
+    private var responseStatusSnapshotProvider: ResponseStatusSnapshotProvider
 #if DEBUG
     private var debugLatestResponseStatusOverride: ChatGPTResponseStatusSnapshot?
 #endif
@@ -55,13 +57,20 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },
         onManualScroll: @escaping ManualScrollHandler = { _, _ in },
         onTrustedInteraction: @escaping TrustedInteractionHandler = { _, _, _ in },
-        onTrustedInteractionEvent: TrustedInteractionEventHandler? = nil
+        onTrustedInteractionEvent: TrustedInteractionEventHandler? = nil,
+        responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil
     ) {
         self.slotID = slotID
         self.onRuntimeReset = onRuntimeReset
         self.onManualScroll = onManualScroll
         self.onTrustedInteraction = onTrustedInteraction
         self.onTrustedInteractionEvent = onTrustedInteractionEvent
+        self.responseStatusSnapshotProvider = responseStatusSnapshotProvider ?? { webView, script in
+            await Self.evaluateResponseStatusSnapshot(
+                in: webView,
+                script: script
+            )
+        }
         super.init()
     }
 
@@ -168,26 +177,27 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
 #endif
         let webViewIdentity = ObjectIdentifier(webView)
-        webView.evaluateJavaScript(
-            Self.snapshotLatestResponseStatusScript,
-            in: nil,
-            in: ChatGPTResponseExtraction.contentWorld
-        ) { [weak self, weak webView] result in
-            Task { @MainActor in
-                guard let self,
-                      let webView,
-                      !self.isInvalidated,
-                      self.webView === webView,
-                      ObjectIdentifier(webView) == webViewIdentity,
-                      self.currentDocumentToken == documentToken,
-                      case let .success(value) = result,
-                      let snapshot = Self.parseResponseStatusSnapshot(value),
-                      snapshot.documentToken == documentToken else {
-                    completion(nil)
-                    return
-                }
-                completion(snapshot)
+        let provider = responseStatusSnapshotProvider
+        Task { @MainActor [weak self, weak webView] in
+            guard let webView else {
+                completion(nil)
+                return
             }
+            let snapshot = await provider(
+                webView,
+                Self.snapshotLatestResponseStatusScript
+            )
+            guard let self,
+                  !self.isInvalidated,
+                  self.webView === webView,
+                  ObjectIdentifier(webView) == webViewIdentity,
+                  self.currentDocumentToken == documentToken,
+                  let snapshot,
+                  snapshot.documentToken == documentToken else {
+                completion(nil)
+                return
+            }
+            completion(snapshot)
         }
     }
 
@@ -352,6 +362,12 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     ) {
         debugLatestResponseStatusOverride = snapshot
     }
+
+    func debugSetResponseStatusSnapshotProvider(
+        _ provider: @escaping ResponseStatusSnapshotProvider
+    ) {
+        responseStatusSnapshotProvider = provider
+    }
 #endif
 
     func handleRuntimeReplacement() {
@@ -513,6 +529,27 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             responseIdentity: responseIdentity,
             generating: generating
         )
+    }
+
+    private static func evaluateResponseStatusSnapshot(
+        in webView: WKWebView,
+        script: String
+    ) async -> ChatGPTResponseStatusSnapshot? {
+        await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                script,
+                in: nil,
+                in: ChatGPTResponseExtraction.contentWorld
+            ) { result in
+                guard case let .success(value) = result else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(
+                    returning: parseResponseStatusSnapshot(value)
+                )
+            }
+        }
     }
 
     private static func scrollScript(locator: SpeechSourceLocator) -> String {

@@ -18,6 +18,29 @@ private final class CrossFeatureLivenessProbeSequence {
 }
 
 @MainActor
+private final class CrossFeatureResponseStatusSnapshotProbe {
+    private var pending: CheckedContinuation<ChatGPTResponseStatusSnapshot?, Never>?
+    private(set) var requestCount = 0
+    private(set) var resolutionCount = 0
+
+    func provide(
+        _ webView: WKWebView,
+        _ script: String
+    ) async -> ChatGPTResponseStatusSnapshot? {
+        requestCount += 1
+        return await withCheckedContinuation { continuation in
+            pending = continuation
+        }
+    }
+
+    func resolve(_ snapshot: ChatGPTResponseStatusSnapshot?) {
+        resolutionCount += 1
+        pending?.resume(returning: snapshot)
+        pending = nil
+    }
+}
+
+@MainActor
 private final class CrossFeatureSpeechService: SpeechSynthesizing {
     private(set) var lastTransportToken: UInt64?
     private(set) var pauseCount = 0
@@ -4623,7 +4646,379 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testREAL_ACK_BEFORE_FINISH_ASYNC_RACE() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:async-race-r1")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: true
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        let snapshotRequested = try await waitUntil {
+            fixture.provider.requestCount == 1
+        }
+        XCTAssertTrue(snapshotRequested)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        acceptState(
+            generating: false,
+            bridge: fixture.attentionBridge,
+            webView: fixture.webView,
+            token: "async-attention-document",
+            responseIdentity: identity
+        )
+        XCTAssertEqual(
+            fixture.coordinator.unreadResponseIdentity(for: fixture.slot.id),
+            identity
+        )
+
+        fixture.provider.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "async-status-document",
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        let reconciled = try await waitUntil {
+            !fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id)
+                && fixture.coordinator.isHandled(
+                    slotID: fixture.slot.id,
+                    responseIdentity: identity
+                )
+        }
+        XCTAssertTrue(reconciled)
+        XCTAssertTrue(
+            fixture.writer.events.contains {
+                $0.event == "unread.late_completion_reconciled"
+                    && $0.fields["identity_match"] == .bool(true)
+                    && $0.fields["unread_before"] == .bool(true)
+                    && $0.fields["unread_after"] == .bool(false)
+            }
+        )
+    }
+
+    func testSNAPSHOT_PENDING_COMPLETION_FIRST_RECONCILES() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:pending-reconciles")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: true
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        let snapshotRequested = try await waitUntil {
+            fixture.provider.requestCount == 1
+        }
+        XCTAssertTrue(snapshotRequested)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        acceptState(
+            generating: false,
+            bridge: fixture.attentionBridge,
+            webView: fixture.webView,
+            token: "async-attention-document",
+            responseIdentity: identity
+        )
+        XCTAssertTrue(fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id))
+
+        fixture.provider.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "async-status-document",
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        let reconciled = try await waitUntil {
+            !fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id)
+        }
+        XCTAssertTrue(reconciled)
+    }
+
+    func testSNAPSHOT_R1_CANNOT_CLEAR_UNREAD_R2() async throws {
+        let r1 = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:async-mismatch-r1")
+        )
+        let r2 = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:async-mismatch-r2")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: r1)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: true
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        let snapshotRequested = try await waitUntil {
+            fixture.provider.requestCount == 1
+        }
+        XCTAssertTrue(snapshotRequested)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        acceptState(
+            generating: false,
+            bridge: fixture.attentionBridge,
+            webView: fixture.webView,
+            token: "async-attention-document",
+            responseIdentity: r2
+        )
+        XCTAssertEqual(fixture.coordinator.unreadResponseIdentity(for: fixture.slot.id), r2)
+
+        fixture.provider.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "async-status-document",
+                responseIdentity: r1,
+                generating: false
+            )
+        )
+        let snapshotHandled = try await waitUntil {
+            fixture.coordinator.isHandled(
+                slotID: fixture.slot.id,
+                responseIdentity: r1
+            )
+        }
+        XCTAssertTrue(snapshotHandled)
+        XCTAssertTrue(fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id))
+        XCTAssertEqual(fixture.coordinator.unreadResponseIdentity(for: fixture.slot.id), r2)
+    }
+
+    func testNO_UNREAD_SELECTION_REQUIRES_PRESENTATION() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:no-unread-presentation")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        try await wait(milliseconds: 50)
+        XCTAssertEqual(fixture.provider.requestCount, 0)
+    }
+
+    func testNO_UNREAD_DEFERRED_NOT_READY_NO_HANDLED() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:no-unread-deferred-not-ready")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        try await wait(milliseconds: 50)
+        XCTAssertEqual(fixture.provider.requestCount, 0)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        acceptState(
+            generating: false,
+            bridge: fixture.attentionBridge,
+            webView: fixture.webView,
+            token: "async-attention-document",
+            responseIdentity: identity
+        )
+        XCTAssertTrue(fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id))
+        XCTAssertFalse(
+            fixture.coordinator.isHandled(
+                slotID: fixture.slot.id,
+                responseIdentity: identity
+            )
+        )
+    }
+
+    func testNO_UNREAD_DEFERRED_READY_HANDLED() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:no-unread-deferred-ready")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: true
+        )
+        let snapshotRequested = try await waitUntil {
+            fixture.provider.requestCount == 1
+        }
+        XCTAssertTrue(snapshotRequested)
+
+        fixture.provider.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "async-status-document",
+                responseIdentity: identity,
+                generating: false
+            )
+        )
+        let snapshotHandled = try await waitUntil {
+            fixture.coordinator.isHandled(
+                slotID: fixture.slot.id,
+                responseIdentity: identity
+            )
+        }
+        XCTAssertTrue(snapshotHandled)
+        XCTAssertTrue(fixture.controller.unreadResponseSlotIDs.isEmpty)
+    }
+
+    func testASYNC_SELECTION_WHILE_GENERATING_STILL_UNREADS() async throws {
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:async-streaming")
+        )
+        let fixture = try makeAsyncSnapshotFixture(identity: identity)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: true
+        )
+        defer {
+            fixture.controller.debugClearPresentationFactOverride(
+                slotID: fixture.slot.id
+            )
+        }
+        XCTAssertTrue(fixture.controller.debugInvokeRailSelection(slotID: fixture.slot.id))
+        let snapshotRequested = try await waitUntil {
+            fixture.provider.requestCount == 1
+        }
+        XCTAssertTrue(snapshotRequested)
+        fixture.provider.resolve(
+            ChatGPTResponseStatusSnapshot(
+                documentToken: "async-status-document",
+                responseIdentity: identity,
+                generating: true
+            )
+        )
+        let snapshotResolved = try await waitUntil {
+            fixture.provider.resolutionCount == 1
+        }
+        XCTAssertTrue(snapshotResolved)
+
+        fixture.controller.debugSetPresentationFactOverride(
+            slotID: fixture.slot.id,
+            presentationFact: false
+        )
+        acceptState(
+            generating: false,
+            bridge: fixture.attentionBridge,
+            webView: fixture.webView,
+            token: "async-attention-document",
+            responseIdentity: identity
+        )
+        XCTAssertTrue(fixture.controller.unreadResponseSlotIDs.contains(fixture.slot.id))
+        XCTAssertFalse(
+            fixture.coordinator.isHandled(
+                slotID: fixture.slot.id,
+                responseIdentity: identity
+            )
+        )
+    }
+
     // MARK: - Harness
+
+    private func makeAsyncSnapshotFixture(
+        identity: ChatGPTResponseIdentity
+    ) throws -> (
+        controller: PanelController,
+        coordinator: ChatGPTUnreadResponseCoordinator,
+        slot: WebAppProfile,
+        webView: WKWebView,
+        attentionBridge: ChatGPTAttentionBridge,
+        responseBridge: ChatGPTResponseBridge,
+        provider: CrossFeatureResponseStatusSnapshotProbe,
+        writer: RuntimeDiagnosticInMemoryWriter
+    ) {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator()
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            unreadResponseCoordinator: unreadCoordinator,
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(
+            pool: pool,
+            store: store,
+            slotName: "ChatA"
+        )
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let provider = CrossFeatureResponseStatusSnapshotProbe()
+        responseBridge.debugSetResponseStatusSnapshotProvider { webView, script in
+            await provider.provide(webView, script)
+        }
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: "async-status-document"
+        )
+        acceptBaseline(
+            generating: true,
+            bridge: attentionBridge,
+            webView: webView,
+            token: "async-attention-document"
+        )
+
+        return (
+            controller,
+            unreadCoordinator,
+            slot,
+            webView,
+            attentionBridge,
+            responseBridge,
+            provider,
+            writer
+        )
+    }
 
     private func spec(name: String, url: String) -> (name: String, url: URL) {
         (name, URL(string: url)!)

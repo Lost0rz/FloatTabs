@@ -255,6 +255,150 @@ final class UnreadResponseTests: XCTestCase {
         XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
     }
 
+    func testHIDDEN_COMPLETION_NOT_HANDLED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:hidden-not-handled")
+        )
+
+        XCTAssertEqual(
+            coordinator.handle(
+                ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: identity
+                ),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.contains(slotA))
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testHIDDEN_DUPLICATE_BEFORE_ACK_STAYS_UNREAD() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:hidden-duplicate")
+        )
+        let event = ChatGPTAttentionEvent(
+            observation: .generationFinished,
+            responseIdentity: identity
+        )
+
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .marked(identityAvailable: true)
+        )
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), identity)
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testDUPLICATE_AFTER_ACK_SKIPPED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:duplicate-after-ack")
+        )
+        let event = ChatGPTAttentionEvent(
+            observation: .generationFinished,
+            responseIdentity: identity
+        )
+
+        _ = coordinator.handle(
+            event,
+            for: slotA,
+            isValidGenerationCompletion: true,
+            userVisible: false
+        )
+        XCTAssertEqual(
+            coordinator.acknowledge(slotID: slotA, responseIdentity: identity),
+            .cleared(responseIdentity: identity)
+        )
+        XCTAssertEqual(
+            coordinator.handle(
+                event,
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            ),
+            .alreadyHandled
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
+    }
+
+    func testSNAPSHOT_LEGACY_UNREAD_IDENTITY_IS_PRESERVED() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:legacy-snapshot")
+        )
+        coordinator.markUnread(slotID: slotA)
+
+        XCTAssertEqual(
+            coordinator.reconcileHandledSnapshot(
+                slotID: slotA,
+                responseIdentity: identity
+            ),
+            .preservedLegacyIdentity
+        )
+        XCTAssertTrue(coordinator.unreadSlotIDs.contains(slotA))
+        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+    }
+
+    func testHIDDEN_COMPLETIONS_DO_NOT_POLLUTE_HANDLED_HISTORY() throws {
+        let coordinator = makeCoordinator()
+        let handled = try (0..<16).map { index in
+            try XCTUnwrap(
+                ChatGPTResponseIdentity(rawValue: "message:handled-history-\(index)")
+            )
+        }
+        let hidden = try (0..<3).map { index in
+            try XCTUnwrap(
+                ChatGPTResponseIdentity(rawValue: "message:hidden-history-\(index)")
+            )
+        }
+
+        for identity in handled {
+            coordinator.recordHandled(slotID: slotA, responseIdentity: identity)
+        }
+        for identity in hidden {
+            _ = coordinator.handle(
+                ChatGPTAttentionEvent(
+                    observation: .generationFinished,
+                    responseIdentity: identity
+                ),
+                for: slotA,
+                isValidGenerationCompletion: true,
+                userVisible: false
+            )
+        }
+
+        XCTAssertTrue(
+            handled.allSatisfy {
+                coordinator.isHandled(slotID: slotA, responseIdentity: $0)
+            }
+        )
+        XCTAssertTrue(
+            hidden.allSatisfy {
+                !coordinator.isHandled(slotID: slotA, responseIdentity: $0)
+            }
+        )
+    }
+
     func testLEGACY_STORE_COMPAT() {
         defaults.set([slotA.uuidString], forKey: UnreadResponseStore.slotIDsKey)
         let coordinator = makeCoordinator()

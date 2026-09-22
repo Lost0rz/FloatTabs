@@ -3338,99 +3338,145 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         trace: RuntimeDiagnosticTrace? = nil
     ) {
-        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
-            requestLatestResponseHandledSnapshot(slotID: slotID)
-            return
-        }
-        guard let attempt = beginUnreadAcknowledgement(
-            slotID: slotID,
-            source: .explicitSelection,
-            trace: trace
-        ) else {
-            return
-        }
-        guard attempt.facts.activeSlotMatches else {
-            finishUnreadAcknowledgement(
-                attempt,
+        let facts = unreadPresentationFacts(slotID: slotID)
+        guard facts.activeSlotMatches else {
+            finishUnreadSelectionAttemptIfNeeded(
+                slotID: slotID,
+                source: .explicitSelection,
+                trace: trace,
                 skippedReason: .notActiveSlot
             )
             return
         }
-
-        if attempt.facts.presentationVisible {
-            unreadResponseCoordinator.acknowledge(slotID: slotID)
-            synchronizeUnreadIndicators()
-            requestLatestResponseHandledSnapshot(slotID: slotID)
-            finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
+        guard facts.presentationVisible else {
+            // Preserve the existing unread acknowledgement trace for the
+            // first selection attempt, but defer the actual acknowledgement
+            // and snapshot until the presentation gate is satisfied.
+            if unreadResponseCoordinator.unreadSlotIDs.contains(slotID) {
+                _ = beginUnreadAcknowledgement(
+                    slotID: slotID,
+                    source: .explicitSelection,
+                    trace: trace
+                )
+            }
+            // WebView/window ordering can finish one main-queue turn after the
+            // model selection. Re-check once, without turning selection into a
+            // polling or focus state machine. This path is intentionally also
+            // scheduled when no unread marker exists, so presentation remains
+            // the gate for the snapshot request.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let deferredFacts = self.unreadPresentationFacts(slotID: slotID)
+                guard deferredFacts.activeSlotMatches else {
+                    self.finishUnreadSelectionAttemptIfNeeded(
+                        slotID: slotID,
+                        source: .explicitSelectionDeferred,
+                        trace: trace,
+                        skippedReason: .notActiveSlot
+                    )
+                    return
+                }
+                guard deferredFacts.presentationVisible else {
+                    self.finishUnreadSelectionAttemptIfNeeded(
+                        slotID: slotID,
+                        source: .explicitSelectionDeferred,
+                        trace: trace,
+                        skippedReason: .presentationNotReady
+                    )
+                    return
+                }
+                self.acknowledgePresentedSelectionIfNeeded(
+                    slotID: slotID,
+                    source: .explicitSelectionDeferred,
+                    trace: trace
+                )
+            }
             return
         }
 
-        // WebView/window ordering can finish one main-queue turn after the
-        // model selection. Re-check once, without turning selection into a
-        // polling or focus state machine.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else {
-                return
-            }
-            guard self.unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
-                self.requestLatestResponseHandledSnapshot(slotID: slotID)
-                return
-            }
-            guard let deferredAttempt = self.beginUnreadAcknowledgement(
-                slotID: slotID,
-                source: .explicitSelectionDeferred,
-                trace: trace
-            ) else {
-                return
-            }
-            guard deferredAttempt.facts.activeSlotMatches else {
-                self.finishUnreadAcknowledgement(
-                    deferredAttempt,
+        acknowledgePresentedSelectionIfNeeded(
+            slotID: slotID,
+            source: .explicitSelection,
+            trace: trace
+        )
+    }
+
+    private func acknowledgePresentedSelectionIfNeeded(
+        slotID: UUID,
+        source: UnreadDiagnosticSource,
+        trace: RuntimeDiagnosticTrace?
+    ) {
+        if let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: source,
+            trace: trace
+        ) {
+            guard attempt.facts.activeSlotMatches else {
+                finishUnreadAcknowledgement(
+                    attempt,
                     skippedReason: .notActiveSlot
                 )
                 return
             }
-            guard deferredAttempt.facts.presentationVisible else {
-                self.finishUnreadAcknowledgement(
-                    deferredAttempt,
+            guard attempt.facts.presentationVisible else {
+                finishUnreadAcknowledgement(
+                    attempt,
                     skippedReason: .presentationNotReady
                 )
                 return
             }
-            self.unreadResponseCoordinator.acknowledge(slotID: slotID)
-            self.synchronizeUnreadIndicators()
-            self.requestLatestResponseHandledSnapshot(slotID: slotID)
-            self.finishUnreadAcknowledgement(
-                deferredAttempt,
-                skippedReason: .stateUnchanged
-            )
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+            synchronizeUnreadIndicators()
+            finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
         }
+        requestLatestResponseHandledSnapshot(slotID: slotID, source: source)
+    }
+
+    private func finishUnreadSelectionAttemptIfNeeded(
+        slotID: UUID,
+        source: UnreadDiagnosticSource,
+        trace: RuntimeDiagnosticTrace?,
+        skippedReason: UnreadDiagnosticSkipReason
+    ) {
+        guard let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: source,
+            trace: trace
+        ) else {
+            return
+        }
+        finishUnreadAcknowledgement(attempt, skippedReason: skippedReason)
     }
 
     /// Manual Read Latest and Replay Latest acknowledge only after the speech
     /// coordinator accepted an extraction request for the active ChatGPT Slot.
     private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
-        guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
-            requestLatestResponseHandledSnapshot(slotID: slotID)
-            return
-        }
-        guard let attempt = beginUnreadAcknowledgement(
-            slotID: slotID,
-            source: .manualSpeech
-        ) else {
-            return
-        }
-        guard attempt.facts.activeSlotMatches else {
-            finishUnreadAcknowledgement(
-                attempt,
+        let facts = unreadPresentationFacts(slotID: slotID)
+        guard facts.activeSlotMatches else {
+            finishUnreadSelectionAttemptIfNeeded(
+                slotID: slotID,
+                source: .manualSpeech,
+                trace: nil,
                 skippedReason: .notActiveSlot
             )
             return
         }
-        unreadResponseCoordinator.acknowledge(slotID: slotID)
-        synchronizeUnreadIndicators()
-        requestLatestResponseHandledSnapshot(slotID: slotID)
-        finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
+        if let attempt = beginUnreadAcknowledgement(
+            slotID: slotID,
+            source: .manualSpeech
+        ) {
+            guard attempt.facts.activeSlotMatches else {
+                finishUnreadAcknowledgement(
+                    attempt,
+                    skippedReason: .notActiveSlot
+                )
+                return
+            }
+            unreadResponseCoordinator.acknowledge(slotID: slotID)
+            synchronizeUnreadIndicators()
+            finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
+        }
+        requestLatestResponseHandledSnapshot(slotID: slotID, source: .manualSpeech)
     }
 
     private func handleTrustedInteraction(
@@ -3585,7 +3631,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         return attempt
     }
 
-    private func requestLatestResponseHandledSnapshot(slotID: UUID) {
+    private func requestLatestResponseHandledSnapshot(
+        slotID: UUID,
+        source: UnreadDiagnosticSource
+    ) {
         guard let responseBridge = webViewPool.responseBridge(for: slotID) else {
             return
         }
@@ -3596,9 +3645,21 @@ final class PanelController: NSObject, NSWindowDelegate {
                   let responseIdentity = snapshot.responseIdentity else {
                 return
             }
-            self.unreadResponseCoordinator.recordHandled(
+            let reconciliation = self.unreadResponseCoordinator.reconcileHandledSnapshot(
                 slotID: slotID,
                 responseIdentity: responseIdentity
+            )
+            guard reconciliation == .cleared else { return }
+            self.synchronizeUnreadIndicators()
+            self.recordUnreadDiagnostic(
+                event: "unread.late_completion_reconciled",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "source": .string(source.rawValue),
+                    "identity_match": .bool(true),
+                    "unread_before": .bool(true),
+                    "unread_after": .bool(false)
+                ]
             )
         }
     }

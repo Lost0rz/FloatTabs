@@ -13,6 +13,13 @@ enum ChatGPTUnreadAcknowledgementResult: Equatable {
     case noUnread
 }
 
+enum ChatGPTUnreadSnapshotReconciliationResult: Equatable {
+    case cleared
+    case preservedIdentityMismatch
+    case preservedLegacyIdentity
+    case noUnread
+}
+
 /// The independent authority for persistent unread ChatGPT response badges.
 /// It consumes normalized bridge events but never reads or mutates the
 /// transient WebAttentionCoordinator.
@@ -88,6 +95,28 @@ final class ChatGPTUnreadResponseCoordinator {
         return .cleared(responseIdentity: currentIdentity)
     }
 
+    /// Records a completed response as handled, then clears only an unread
+    /// sidecar owned by that exact response. A newer response or legacy
+    /// identity-unknown unread marker is never cleared by this reconciliation.
+    @discardableResult
+    func reconcileHandledSnapshot(
+        slotID: UUID,
+        responseIdentity: ChatGPTResponseIdentity
+    ) -> ChatGPTUnreadSnapshotReconciliationResult {
+        recordHandled(slotID: slotID, responseIdentity: responseIdentity)
+
+        guard unreadSlotIDs.contains(slotID) else { return .noUnread }
+        guard let currentIdentity = unreadResponseIdentity(for: slotID) else {
+            return .preservedLegacyIdentity
+        }
+        guard currentIdentity == responseIdentity else {
+            return .preservedIdentityMismatch
+        }
+
+        _ = acknowledge(slotID: slotID, responseIdentity: responseIdentity)
+        return .cleared
+    }
+
     func removeSlot(slotID: UUID) {
         handledResponseIdentities.removeValue(forKey: slotID)
         store.removeSlot(slotID)
@@ -121,8 +150,8 @@ final class ChatGPTUnreadResponseCoordinator {
             if isHandled(slotID: slotID, responseIdentity: responseIdentity) {
                 return .alreadyHandled
             }
-            recordHandled(slotID: slotID, responseIdentity: responseIdentity)
             guard !userVisible else {
+                recordHandled(slotID: slotID, responseIdentity: responseIdentity)
                 return .visibleHandled(identityAvailable: true)
             }
             markUnread(slotID: slotID, responseIdentity: responseIdentity)
