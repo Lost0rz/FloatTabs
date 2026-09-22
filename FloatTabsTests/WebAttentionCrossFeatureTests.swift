@@ -3669,6 +3669,172 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
+    func testTrustedManualScrollAcknowledgesVisibleHoverSurfaceWithInteractionFact() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "trusted-scroll-hover"
+        )
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: "trusted-scroll-hover-document"
+        )
+
+        controller.debugWithPresentationFacts(
+            slotID: slot.id,
+            presentationFact: false,
+            interactionSurfacePresented: true
+        ) {
+            XCTAssertTrue(
+                responseBridge.debugInvokeTrustedManualScroll(
+                    documentToken: "trusted-scroll-hover-document"
+                )
+            )
+        }
+
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        let attempt = try XCTUnwrap(
+            writer.events.last { $0.event == "unread.acknowledge_attempt" }
+        )
+        XCTAssertEqual(attempt.fields["source"], .string("trusted_manual_scroll"))
+        XCTAssertEqual(attempt.fields["presentation_visible"], .bool(false))
+        XCTAssertEqual(attempt.fields["web_window_key"], .bool(false))
+        XCTAssertEqual(attempt.fields["interaction_surface_presented"], .bool(true))
+        let acknowledged = try XCTUnwrap(
+            writer.events.last { $0.event == "unread.acknowledged" }
+        )
+        XCTAssertEqual(
+            acknowledged.fields["interaction_surface_presented"],
+            .bool(true)
+        )
+    }
+
+    func testTrustedAssistantPointerAcknowledgesUnreadWithDedicatedSource() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            diagnostics: diagnostics
+        )
+        let slot = try profile(named: "ChatA", in: store)
+        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
+        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
+
+        completeGeneration(
+            bridge: attentionBridge,
+            webView: webView,
+            token: "trusted-pointer"
+        )
+        primeResponseDocument(
+            responseBridge: responseBridge,
+            documentToken: "trusted-pointer-document"
+        )
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                responseBridge.debugInvokeTrustedInteraction(
+                    kind: .assistantPointer,
+                    documentToken: "trusted-pointer-document"
+                )
+            )
+        }
+
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        let acknowledged = try XCTUnwrap(
+            writer.events.last { $0.event == "unread.acknowledged" }
+        )
+        XCTAssertEqual(
+            acknowledged.fields["source"],
+            .string("trusted_assistant_pointer")
+        )
+        XCTAssertFalse(acknowledged.fields.keys.contains("buttonText"))
+        XCTAssertFalse(acknowledged.fields.keys.contains("responseContent"))
+    }
+
+    func testInactiveHotWebViewTrustedPointerPreservesUnreadAndSkipsAcknowledgement() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
+            ],
+            diagnostics: diagnostics
+        )
+        let currentSlot = try profile(named: "ChatA", in: store)
+        let inactiveSlot = try profile(named: "ChatB", in: store)
+        _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
+        let inactiveRuntime = try materializeRuntime(
+            pool: pool,
+            store: store,
+            slotName: "ChatB"
+        )
+        let inactiveAttentionBridge = try attentionBridge(
+            pool: pool,
+            slot: inactiveSlot
+        )
+        let inactiveResponseBridge = try XCTUnwrap(
+            pool.responseBridge(for: inactiveSlot.id)
+        )
+
+        completeGeneration(
+            bridge: inactiveAttentionBridge,
+            webView: inactiveRuntime.webView,
+            token: "inactive-hot-generation"
+        )
+        primeResponseDocument(
+            responseBridge: inactiveResponseBridge,
+            documentToken: "inactive-hot-document-12345678"
+        )
+
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(inactiveSlot.id))
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(currentSlot.id))
+        XCTAssertTrue(
+            inactiveResponseBridge.debugInvokeTrustedInteraction(
+                kind: .assistantPointer,
+                documentToken: "inactive-hot-document-12345678"
+            )
+        )
+
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(inactiveSlot.id))
+        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(currentSlot.id))
+        let slotID = inactiveSlot.id.uuidString
+        let attempt = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "unread.acknowledge_attempt"
+                    && $0.fields["slot_id"] == .string(slotID)
+            }
+        )
+        XCTAssertEqual(attempt.fields["source"], .string("trusted_assistant_pointer"))
+        XCTAssertEqual(attempt.fields["interaction_surface_presented"], .bool(false))
+        let skipped = try XCTUnwrap(
+            writer.events.last {
+                $0.event == "unread.acknowledge_skipped"
+                    && $0.fields["slot_id"] == .string(slotID)
+            }
+        )
+        XCTAssertEqual(skipped.fields["reason"], .string("not_actually_presented"))
+        XCTAssertEqual(skipped.fields["interaction_surface_presented"], .bool(false))
+        XCTAssertNil(
+            writer.events.last {
+                $0.event == "unread.acknowledged"
+                    && $0.fields["slot_id"] == .string(slotID)
+            }
+        )
+    }
+
     func testBackgroundManualScrollDoesNotAcknowledgeUnread() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
@@ -3705,6 +3871,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(
             writer.events.last { $0.event == "unread.acknowledge_skipped" }?.fields["reason"],
             .string("not_actually_presented")
+        )
+        XCTAssertEqual(
+            writer.events.last { $0.event == "unread.acknowledge_skipped" }?.fields["interaction_surface_presented"],
+            .bool(false)
         )
     }
 

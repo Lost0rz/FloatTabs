@@ -3,6 +3,11 @@ import XCTest
 @testable import FloatTabs
 
 @MainActor
+private final class TrustedInteractionAdmissionProbe {
+    var count = 0
+}
+
+@MainActor
 final class ChatGPTResponseBridgeTests: XCTestCase {
     func testPayloadParsingAcceptsStructuredResponseOnly() {
         let payload = ChatGPTResponsePayload.parse([
@@ -269,5 +274,264 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             bridge.debugInvokeTrustedManualScroll(documentToken: "document-b-12345678")
         )
         XCTAssertEqual(manualScrollTokens, ["document-b-12345678"])
+    }
+
+    func testDebugTrustedInteractionForwardsOnlyCurrentDocumentAndFixedKind() {
+        let slotID = UUID()
+        var interactions: [(UUID, ChatGPTTrustedPageInteractionKind, String)] = []
+        let bridge = ChatGPTResponseBridge(
+            slotID: slotID,
+            onTrustedInteraction: { slotID, kind, documentToken in
+                interactions.append((slotID, kind, documentToken))
+            }
+        )
+
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(
+                documentToken: "trusted-interaction-document"
+            )
+        )
+        XCTAssertTrue(
+            bridge.debugInvokeTrustedInteraction(
+                kind: .assistantPointer,
+                documentToken: "trusted-interaction-document"
+            )
+        )
+        XCTAssertTrue(
+            bridge.debugInvokeTrustedInteraction(
+                kind: .manualScroll,
+                documentToken: "trusted-interaction-document"
+            )
+        )
+        XCTAssertFalse(
+            bridge.debugInvokeTrustedInteraction(
+                kind: .assistantPointer,
+                documentToken: "old-interaction-document"
+            )
+        )
+
+        XCTAssertEqual(interactions.count, 2)
+        XCTAssertEqual(interactions[0].0, slotID)
+        XCTAssertEqual(interactions[0].1, .assistantPointer)
+        XCTAssertEqual(interactions[0].2, "trusted-interaction-document")
+        XCTAssertEqual(interactions[1].1, .manualScroll)
+    }
+
+    func testPoolForwardsTrustedInteractionWithoutRetainingIt() throws {
+        let slotID = UUID()
+        let profile = WebAppProfile(
+            id: slotID,
+            order: 0,
+            name: "ChatGPT",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        var interactions: [(UUID, ChatGPTTrustedPageInteractionKind, String)] = []
+        let pool = WebViewPool(onURLChange: { _, _ in })
+        pool.onTrustedInteraction = { slotID, kind, documentToken in
+            interactions.append((slotID, kind, documentToken))
+        }
+
+        _ = try pool.webView(for: profile)
+        let bridge = try XCTUnwrap(pool.responseBridge(for: slotID))
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(documentToken: "pool-interaction-document")
+        )
+        XCTAssertTrue(
+            bridge.debugInvokeTrustedInteraction(
+                kind: .assistantPointer,
+                documentToken: "pool-interaction-document"
+            )
+        )
+
+        XCTAssertEqual(interactions.count, 1)
+        XCTAssertEqual(interactions.first?.0, slotID)
+        XCTAssertEqual(interactions.first?.1, .assistantPointer)
+        XCTAssertEqual(interactions.first?.2, "pool-interaction-document")
+    }
+
+    func testTrustedAssistantPointerProtocolUsesFixedContentFreeContract() {
+        XCTAssertEqual(
+            ChatGPTTrustedPageInteractionKind.assistantPointer.rawValue,
+            "assistantPointer"
+        )
+        let source = ChatGPTResponseExtraction.scriptSource
+        XCTAssertTrue(source.contains("event: \"trustedInteraction\""))
+        XCTAssertTrue(source.contains("interactionKind: \"assistantPointer\""))
+        XCTAssertTrue(source.contains("pointerdown"))
+        XCTAssertTrue(source.contains("event.isTrusted"))
+        XCTAssertTrue(source.contains("data-message-author-role=\"assistant\""))
+        XCTAssertTrue(source.contains("data-message-role=\"assistant\""))
+        XCTAssertTrue(source.contains("article[data-testid*=\"conversation-turn\"]"))
+        XCTAssertFalse(source.contains("buttonText"))
+        XCTAssertFalse(source.contains("ariaLabel"))
+        XCTAssertFalse(source.contains("responseContent"))
+        XCTAssertFalse(source.contains("domPath"))
+        XCTAssertFalse(source.contains("clipboard"))
+        XCTAssertFalse(source.contains("selectionText"))
+    }
+
+    func testTrustedInteractionAdmissionAcceptsValidEnvelope() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertTrue(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "HTTPS"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 1)
+    }
+
+    func testTrustedInteractionAdmissionRejectsWrongWebView() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(),
+                messageWebView: fixture.otherWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsNonMainFrame() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: false,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsUnsupportedHost() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "example.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsInvalidProtocol() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "file"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsWrongVersion() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(
+                    version: ChatGPTResponsePayload.currentVersion + 1
+                ),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsInvalidKind() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(kind: "assistantClick"),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    func testTrustedInteractionAdmissionRejectsStaleDocumentToken() {
+        let fixture = makeTrustedInteractionAdmissionFixture()
+
+        XCTAssertFalse(
+            fixture.bridge.acceptTrustedInteraction(
+                body: trustedInteractionBody(token: "stale-document-12345678"),
+                messageWebView: fixture.attachedWebView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        XCTAssertEqual(fixture.probe.count, 0)
+    }
+
+    private func makeTrustedInteractionAdmissionFixture() -> (
+        bridge: ChatGPTResponseBridge,
+        attachedWebView: WKWebView,
+        otherWebView: WKWebView,
+        probe: TrustedInteractionAdmissionProbe
+    ) {
+        let probe = TrustedInteractionAdmissionProbe()
+        let bridge = ChatGPTResponseBridge(
+            slotID: UUID(),
+            onTrustedInteraction: { _, _, _ in
+                probe.count += 1
+            }
+        )
+        let attachedWebView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        let otherWebView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: attachedWebView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(
+                documentToken: "trusted-admission-document-12345678"
+            )
+        )
+        return (bridge, attachedWebView, otherWebView, probe)
+    }
+
+    private func trustedInteractionBody(
+        version: Int = ChatGPTResponsePayload.currentVersion,
+        token: String = "trusted-admission-document-12345678",
+        kind: String = "assistantPointer"
+    ) -> [String: Any] {
+        [
+            "version": version,
+            "event": "trustedInteraction",
+            "documentToken": token,
+            "interactionKind": kind,
+        ]
     }
 }
