@@ -19,7 +19,12 @@ private final class CrossFeatureLivenessProbeSequence {
 
 @MainActor
 private final class CrossFeatureResponseStatusSnapshotProbe {
+    private enum Resolution {
+        case snapshot(ChatGPTResponseStatusSnapshot?)
+    }
+
     private var pending: CheckedContinuation<ChatGPTResponseStatusSnapshot?, Never>?
+    private var queuedResolution: Resolution?
     private(set) var requestCount = 0
     private(set) var resolutionCount = 0
 
@@ -29,14 +34,26 @@ private final class CrossFeatureResponseStatusSnapshotProbe {
     ) async -> ChatGPTResponseStatusSnapshot? {
         requestCount += 1
         return await withCheckedContinuation { continuation in
-            pending = continuation
+            if let queuedResolution {
+                self.queuedResolution = nil
+                switch queuedResolution {
+                case let .snapshot(snapshot):
+                    continuation.resume(returning: snapshot)
+                }
+            } else {
+                pending = continuation
+            }
         }
     }
 
     func resolve(_ snapshot: ChatGPTResponseStatusSnapshot?) {
         resolutionCount += 1
-        pending?.resume(returning: snapshot)
-        pending = nil
+        if let pending {
+            self.pending = nil
+            pending.resume(returning: snapshot)
+        } else {
+            queuedResolution = .snapshot(snapshot)
+        }
     }
 }
 

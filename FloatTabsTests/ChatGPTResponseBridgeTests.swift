@@ -9,7 +9,12 @@ private final class TrustedInteractionAdmissionProbe {
 
 @MainActor
 private final class ResponseStatusSnapshotProviderProbe {
+    private enum Resolution {
+        case snapshot(ChatGPTResponseStatusSnapshot?)
+    }
+
     private var pending: CheckedContinuation<ChatGPTResponseStatusSnapshot?, Never>?
+    private var queuedResolution: Resolution?
     private(set) var requestCount = 0
     private(set) var lastScript: String?
 
@@ -20,13 +25,25 @@ private final class ResponseStatusSnapshotProviderProbe {
         requestCount += 1
         lastScript = script
         return await withCheckedContinuation { continuation in
-            pending = continuation
+            if let queuedResolution {
+                self.queuedResolution = nil
+                switch queuedResolution {
+                case let .snapshot(snapshot):
+                    continuation.resume(returning: snapshot)
+                }
+            } else {
+                pending = continuation
+            }
         }
     }
 
     func resolve(_ snapshot: ChatGPTResponseStatusSnapshot?) {
-        pending?.resume(returning: snapshot)
-        pending = nil
+        if let pending {
+            self.pending = nil
+            pending.resume(returning: snapshot)
+        } else {
+            queuedResolution = .snapshot(snapshot)
+        }
     }
 }
 
@@ -219,7 +236,9 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
 
         var result: ChatGPTResponseStatusSnapshot?
         bridge.snapshotLatestResponseStatus { result = $0 }
-        try await Task.sleep(nanoseconds: 10_000_000)
+        for _ in 0..<1_000 where probe.requestCount < 1 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
         XCTAssertEqual(probe.requestCount, 1)
         XCTAssertEqual(
             probe.lastScript,
@@ -233,7 +252,9 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
                 generating: false
             )
         )
-        try await Task.sleep(nanoseconds: 10_000_000)
+        for _ in 0..<1_000 where result == nil {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
         XCTAssertEqual(
             result,
             ChatGPTResponseStatusSnapshot(
@@ -249,13 +270,15 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             generating: false
         )
         bridge.snapshotLatestResponseStatus { result = $0 }
-        for _ in 0..<100 where probe.requestCount < 2 {
+        for _ in 0..<1_000 where probe.requestCount < 2 {
             try await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTAssertEqual(probe.requestCount, 2)
         bridge.handleRuntimeReplacement()
         probe.resolve(nil)
-        try await Task.sleep(nanoseconds: 10_000_000)
+        for _ in 0..<1_000 where result != nil {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
         XCTAssertNil(result)
     }
 
