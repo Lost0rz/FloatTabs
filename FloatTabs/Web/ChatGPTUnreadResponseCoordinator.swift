@@ -4,7 +4,6 @@ enum ChatGPTUnreadCompletionResult: Equatable {
     case ignored
     case marked(identityAvailable: Bool)
     case alreadyHandled
-    case visibleHandled(identityAvailable: Bool)
 }
 
 enum ChatGPTUnreadAcknowledgementResult: Equatable {
@@ -134,12 +133,14 @@ final class ChatGPTUnreadResponseCoordinator {
     /// Only a valid completion that was not actually visible to the user
     /// becomes persistent unread state. A stable identity suppresses a late
     /// completion after the user has already processed that exact response.
+    // `userVisible` is retained for compatibility and diagnostics callers; a
+    // presentation fact alone is never an unread acknowledgement.
     @discardableResult
     func handle(
         _ event: ChatGPTAttentionEvent,
         for slotID: UUID,
         isValidGenerationCompletion: Bool,
-        userVisible: Bool
+        userVisible _: Bool
     ) -> ChatGPTUnreadCompletionResult {
         guard event.observation == .generationFinished,
               isValidGenerationCompletion else {
@@ -150,15 +151,10 @@ final class ChatGPTUnreadResponseCoordinator {
             if isHandled(slotID: slotID, responseIdentity: responseIdentity) {
                 return .alreadyHandled
             }
-            guard !userVisible else {
-                recordHandled(slotID: slotID, responseIdentity: responseIdentity)
-                return .visibleHandled(identityAvailable: true)
-            }
             markUnread(slotID: slotID, responseIdentity: responseIdentity)
             return .marked(identityAvailable: true)
         }
 
-        guard !userVisible else { return .visibleHandled(identityAvailable: false) }
         markUnread(slotID: slotID)
         return .marked(identityAvailable: false)
     }

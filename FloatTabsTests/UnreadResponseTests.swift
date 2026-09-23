@@ -91,18 +91,18 @@ final class UnreadResponseTests: XCTestCase {
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
     }
 
-    func testValidVisibleCompletionDoesNotMarkOrPersistUnread() {
+    func testValidVisibleCompletionMarksAndPersistsUnread() {
         let coordinator = makeCoordinator()
 
-        coordinator.handle(
+        XCTAssertEqual(coordinator.handle(
             .generationFinished,
             for: slotA,
             isValidGenerationCompletion: true,
             userVisible: true
-        )
+        ), .marked(identityAvailable: false))
 
-        XCTAssertTrue(coordinator.unreadSlotIDs.isEmpty)
-        XCTAssertTrue(UnreadResponseStore(defaults: defaults).unreadSlotIDs.isEmpty)
+        XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
+        XCTAssertEqual(UnreadResponseStore(defaults: defaults).unreadSlotIDs, [slotA])
     }
 
     func testStrayGenerationFinishDoesNotMarkUnread() {
@@ -229,7 +229,7 @@ final class UnreadResponseTests: XCTestCase {
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
     }
 
-    func testALREADY_HANDLED_COMPLETION_SKIPPED() throws {
+    func testVisibleCompletionIsNotRecordedAsHandled() throws {
         let coordinator = makeCoordinator()
         let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:visible"))
 
@@ -240,9 +240,13 @@ final class UnreadResponseTests: XCTestCase {
                 isValidGenerationCompletion: true,
                 userVisible: true
             ),
-            .visibleHandled(identityAvailable: true)
+            .marked(identityAvailable: true)
         )
-        XCTAssertTrue(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+        XCTAssertFalse(coordinator.isHandled(slotID: slotA, responseIdentity: identity))
+        XCTAssertEqual(coordinator.unreadResponseIdentity(for: slotA), identity)
+
+        coordinator.recordHandled(slotID: slotA, responseIdentity: identity)
+        coordinator.acknowledge(slotID: slotA, responseIdentity: identity)
         XCTAssertEqual(
             coordinator.handle(
                 ChatGPTAttentionEvent(observation: .generationFinished, responseIdentity: identity),
@@ -615,9 +619,19 @@ final class UnreadResponseTests: XCTestCase {
         XCTAssertTrue(item.isUnread)
         XCTAssertEqual(item.title, profiles.last!.name)
         XCTAssertTrue(overflow.isShowingUnreadResponse)
+        XCTAssertEqual(overflow.unreadResponseFrame.width, 9, accuracy: 0.001)
+        XCTAssertEqual(overflow.unreadResponseFrame.height, 9, accuracy: 0.001)
+        XCTAssertTrue(overflow.bounds.contains(overflow.unreadResponseFrame))
+        let unreadCenter = NSPoint(
+            x: overflow.unreadResponseFrame.midX,
+            y: overflow.unreadResponseFrame.midY
+        )
+        XCTAssertTrue(overflow.hitTest(unreadCenter) === overflow)
         let menuItem = overflow.makeMenu().items.last
         XCTAssertEqual(menuItem?.title, item.title)
         XCTAssertNotNil(menuItem?.image)
+        XCTAssertEqual(menuItem?.image?.size, NSSize(width: 12, height: 12))
+        XCTAssertEqual(menuItem?.image?.isTemplate, false)
     }
 
     func testOverflowUnreadProjectionRefreshesWithoutRelayout() throws {
