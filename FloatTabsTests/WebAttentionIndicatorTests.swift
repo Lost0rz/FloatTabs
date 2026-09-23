@@ -512,6 +512,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let restingIconFrame = tab.iconFrame
         let restingDotFrame = tab.unreadResponseFrame
         XCTAssertEqual(restingWidth, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
+        XCTAssertEqual(restingDotFrame.width, 9, accuracy: 0.001)
+        XCTAssertEqual(restingDotFrame.height, 9, accuracy: 0.001)
         assertUnreadDot(
             restingDotFrame,
             isAttachedTo: restingIconFrame,
@@ -1290,8 +1292,20 @@ final class WebAttentionIndicatorTests: XCTestCase {
         file: StaticString,
         line: UInt
     ) {
-        XCTAssertEqual(dot.width, 6, accuracy: 0.001, file: file, line: line)
-        XCTAssertEqual(dot.height, 6, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(
+            dot.width,
+            ExternalTabMetrics.unreadResponseDiameter,
+            accuracy: 0.001,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            dot.height,
+            ExternalTabMetrics.unreadResponseDiameter,
+            accuracy: 0.001,
+            file: file,
+            line: line
+        )
         XCTAssertGreaterThan(dot.minX, icon.minX, file: file, line: line)
         XCTAssertGreaterThan(dot.minY, icon.minY, file: file, line: line)
         XCTAssertGreaterThanOrEqual(dot.maxX, icon.maxX, file: file, line: line)

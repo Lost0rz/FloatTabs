@@ -167,13 +167,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         case manualSpeech = "manual_speech"
         case trustedManualScroll = "trusted_manual_scroll"
         case trustedAssistantPointer = "trusted_assistant_pointer"
-        case generationStarted = "generation_started"
     }
 
     private enum UnreadDiagnosticSkipReason: String {
-        case visibleCompletion = "visible_completion"
         case invalidCompletion = "invalid_completion"
-        case alreadyUnread = "already_unread"
         case alreadyHandledResponse = "already_handled_response"
         case responseIdentityMismatch = "response_identity_mismatch"
         case notActuallyPresented = "not_actually_presented"
@@ -3119,9 +3116,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         let attentionStateBefore = attentionCoordinator.state(for: slotID)
         let isValidGenerationCompletion = observation == .generationFinished
             && attentionStateBefore == .generating
-        let userVisibleAtCompletion = isValidGenerationCompletion
-            ? isAttentionUserVisible(slotID: slotID)
-            : false
         let completionTrace = observation == .generationFinished
             ? diagnostics.beginTrace(root: "unread.completion")
             : nil
@@ -3151,24 +3145,21 @@ final class PanelController: NSObject, NSWindowDelegate {
             event,
             for: slotID,
             isValidGenerationCompletion: isValidGenerationCompletion,
-            userVisible: userVisibleAtCompletion
+            userVisible: completionFacts.presentationVisible
         )
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
 
         if observation == .generationFinished {
-            let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
             let reason: UnreadDiagnosticSkipReason?
             if !isValidGenerationCompletion {
                 reason = .invalidCompletion
-            } else if userVisibleAtCompletion {
-                reason = .visibleCompletion
             } else {
                 switch completionResult {
                 case .alreadyHandled:
                     reason = .alreadyHandledResponse
-                case .marked, .visibleHandled:
-                    reason = userVisibleAtCompletion ? .visibleCompletion : (unreadBefore ? .alreadyUnread : nil)
+                case .marked:
+                    reason = nil
                 case .ignored:
                     reason = nil
                 }
@@ -3184,13 +3175,14 @@ final class PanelController: NSObject, NSWindowDelegate {
                         "web_window_key": .bool(completionFacts.webWindowKey)
                     ]
                 )
-            } else if !unreadBefore && unreadAfter {
+            } else if case .marked = completionResult {
                 recordUnreadDiagnostic(
                     event: "unread.marked",
                     trace: completionTrace,
                     fields: [
                         "slot_id": .string(slotID.uuidString),
-                        "reason": .string("completion_unseen"),
+                        "reason": .string("completion_unacknowledged"),
+                        "unread_before": .bool(unreadBefore),
                         "presentation_visible": .bool(completionFacts.presentationVisible),
                         "web_window_key": .bool(completionFacts.webWindowKey)
                     ]
@@ -3198,12 +3190,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
-        if observation == .generationStarted {
-            acknowledgeUnreadAfterTrustedPageInteraction(
-                slotID: slotID,
-                source: .generationStarted
-            )
-        }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
         }
@@ -3522,59 +3508,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             // Identity-unavailable and streaming interactions retain the U1
             // Slot-level fallback semantics. A streaming latest response is
             // deliberately not added to handled history.
-            unreadResponseCoordinator.acknowledge(slotID: slotID)
-        }
-        synchronizeUnreadIndicators()
-        finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
-    }
-
-    /// A trusted page interaction means the user has started processing the
-    /// response in the WebView itself. The bridge validates the event's trust,
-    /// document, host, frame, and WebView identity before reaching this route;
-    /// this method adds the physical presentation/active-interaction gate.
-    private func acknowledgeUnreadAfterTrustedPageInteraction(
-        slotID: UUID,
-        source: UnreadDiagnosticSource = .trustedManualScroll,
-        responseIdentity: ChatGPTResponseIdentity? = nil,
-        responseComplete: Bool = false
-    ) {
-        guard let attempt = beginUnreadAcknowledgement(
-            slotID: slotID,
-            source: source
-        ) else {
-            return
-        }
-        let interactionPresented: Bool
-        switch source {
-        case .generationStarted:
-            interactionPresented = attempt.facts.presentationVisible
-        default:
-            interactionPresented = attempt.facts.interactionSurfacePresented
-        }
-        guard interactionPresented else {
-            finishUnreadAcknowledgement(
-                attempt,
-                skippedReason: .notActuallyPresented
-            )
-            return
-        }
-        if let responseIdentity, responseComplete {
-            unreadResponseCoordinator.recordHandled(
-                slotID: slotID,
-                responseIdentity: responseIdentity
-            )
-            let result = unreadResponseCoordinator.acknowledge(
-                slotID: slotID,
-                responseIdentity: responseIdentity
-            )
-            if result == .preservedIdentityMismatch {
-                finishUnreadAcknowledgement(
-                    attempt,
-                    skippedReason: .responseIdentityMismatch
-                )
-                return
-            }
-        } else {
             unreadResponseCoordinator.acknowledge(slotID: slotID)
         }
         synchronizeUnreadIndicators()

@@ -36,6 +36,7 @@ struct BrowserProfileMenuOption: Equatable {
 }
 
 struct ExternalTabMetrics {
+    static let unreadResponseDiameter: CGFloat = 9
     static let tabHeight: CGFloat = 32
     static let tabRadius: CGFloat = 8
     static let collapsedWidth: CGFloat = 40
@@ -422,8 +423,6 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     private var trackingAreaReference: NSTrackingArea?
     private var isHoverInteractionSuspended = false
 
-    private static let unreadResponseDiameter: CGFloat = 6
-
     var menuItems: [RailOverflowItem] { items }
     var isShowingUnreadResponse: Bool { !unreadResponseLayer.isHidden }
     var unreadResponseFrame: NSRect { unreadResponseLayer.frame }
@@ -591,7 +590,7 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     private func updateUnreadResponseGeometry() {
         guard layer != nil else { return }
         let imageFrame = imageView.convert(imageView.bounds, to: self)
-        let diameter = Self.unreadResponseDiameter
+        let diameter = ExternalTabMetrics.unreadResponseDiameter
         let frame = NSRect(
             x: imageFrame.maxX - diameter * 0.75,
             y: imageFrame.maxY - diameter * 0.75,
@@ -606,10 +605,19 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     }
 
     private static func unreadMarkerImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 8, height: 8))
+        let canvasSize: CGFloat = 12
+        let diameter = ExternalTabMetrics.unreadResponseDiameter
+        let image = NSImage(size: NSSize(width: canvasSize, height: canvasSize))
         image.lockFocus()
         NSColor.systemRed.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 6, height: 6)).fill()
+        NSBezierPath(
+            ovalIn: NSRect(
+                x: (canvasSize - diameter) / 2,
+                y: (canvasSize - diameter) / 2,
+                width: diameter,
+                height: diameter
+            )
+        ).fill()
         image.unlockFocus()
         image.isTemplate = false
         return image
@@ -2105,8 +2113,6 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var speechPlaybackState: SpeechPlaybackState = .idle
 
     private static let grayscaleContext = CIContext(options: nil)
-    private static let unreadResponseDiameter: CGFloat = 6
-
     var preferredWidth: CGFloat {
         // Resting tabs are icon-only. Only the hovered row fully expands;
         // nearby Dock influence is intentionally capped so labels do not leak.
@@ -2894,7 +2900,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private func updateUnreadResponseGeometry() {
         guard layer != nil else { return }
         let iconFrame = iconView.convert(iconView.bounds, to: self)
-        let diameter = Self.unreadResponseDiameter
+        let diameter = ExternalTabMetrics.unreadResponseDiameter
         let frame = NSRect(
             x: iconFrame.maxX - diameter * 0.75,
             y: iconFrame.maxY - diameter * 0.75,

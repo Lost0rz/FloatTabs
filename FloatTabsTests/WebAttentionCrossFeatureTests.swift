@@ -943,11 +943,11 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.attentionReadyCount, 1)
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertEqual(
-            writer.events.last { $0.event == "unread.mark_skipped" }?
+            writer.events.last { $0.event == "unread.marked" }?
                 .fields["reason"],
-            .string("already_unread")
+            .string("completion_unacknowledged")
         )
-        XCTAssertEqual(writer.events.filter { $0.event == "unread.marked" }.count, 1)
+        XCTAssertEqual(writer.events.filter { $0.event == "unread.marked" }.count, 2)
     }
 
     func testNativeRecoveredCompletionUsesExistingHiddenUnreadRoute() async throws {
@@ -1023,12 +1023,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         })
         XCTAssertTrue(writer.events.contains {
             $0.event == "unread.marked"
-                && $0.fields["reason"] == .string("completion_unseen")
+                && $0.fields["reason"] == .string("completion_unacknowledged")
                 && $0.fields["presentation_visible"] == .bool(false)
         })
     }
 
-    func testNativeRecoveredVisibleCompletionKeepsUnreadClearThroughPanelRoute() async throws {
+    func testNativeRecoveredVisibleCompletionRemainsUnreadThroughPanelRoute() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let suite = "FloatTabsU2VisibleRecovered-\(UUID().uuidString)"
@@ -1097,8 +1097,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertEqual(controller.attentionReadyCount, 0)
         XCTAssertEqual(completionCallbackCount, 1)
-        XCTAssertTrue(unreadCoordinator.unreadSlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertEqual(unreadCoordinator.unreadSlotIDs, [slot.id])
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         XCTAssertTrue(writer.events.contains { $0.event == "attention.liveness_probe.recovered_completion" })
         XCTAssertTrue(writer.events.contains {
             $0.event == "unread.completion_observed"
@@ -1106,10 +1106,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 && $0.fields["presentation_visible"] == .bool(true)
         })
         XCTAssertTrue(writer.events.contains {
+            $0.event == "unread.marked"
+                && $0.fields["reason"] == .string("completion_unacknowledged")
+                && $0.fields["presentation_visible"] == .bool(true)
+        })
+        XCTAssertFalse(writer.events.contains {
             $0.event == "unread.mark_skipped"
                 && $0.fields["reason"] == .string("visible_completion")
         })
-        XCTAssertFalse(writer.events.contains { $0.event == "unread.marked" })
     }
 
     func testPanelOwnsGlobalSpeechPresentationSynchronization() {
@@ -1626,9 +1630,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
-    func testWebPresentationKeyNotificationAcknowledgesAlreadySelectedReadySlot() throws {
+    func testForegroundKeyWindowWithoutTrustedInteractionPreservesUnread() throws {
+        let suite = "FloatTabsKeyOnlyUnread-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
         let (controller, coordinator, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            unreadResponseCoordinator: unreadCoordinator
         )
         let slot = try profile(named: "ChatA", in: store)
         _ = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -1640,6 +1651,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // notification below is the acknowledgement boundary under test.
         coordinator.apply(.generationStarted, for: slot.id)
         coordinator.apply(.generationFinished(userVisible: false), for: slot.id)
+        unreadCoordinator.markUnread(slotID: slot.id)
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
 
         controller.debugWithPresentationFact(
@@ -1653,6 +1665,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
             XCTAssertEqual(coordinator.state(for: slot.id), .idle)
             XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
+            XCTAssertEqual(unreadCoordinator.unreadSlotIDs, [slot.id])
         }
     }
 
@@ -2738,7 +2751,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.8 Provisional navigation completion visibility
 
-    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleWithoutUnreadBeforeFailure() throws {
+    func testVisibleCompletionDuringProvisionalNavigationResolvesIdleAndMarksUnread() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -2767,7 +2780,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             acceptState(generating: false, bridge: bridge, webView: webView)
             XCTAssertEqual(coordinator.state(for: slot.id), .idle)
             XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-            XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+            XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
         }
 
         // Hiding before the provisional failure must not retroactively change
@@ -2788,7 +2801,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
-        XCTAssertFalse(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
+        XCTAssertTrue(controller.debugIsProjectingUnreadResponse(slotID: slot.id))
     }
 
     func testHiddenCompletionDuringProvisionalNavigationRemainsReadyBeforeAndAfterFailure() throws {
@@ -3125,7 +3138,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.13 Production acknowledgement wiring
 
-    func testVisibleValidCompletionPlaysSoundOnceWithoutMakingAttentionReady() throws {
+    func testVisibleValidCompletionPlaysSoundAndPreservesUnread() throws {
         let preferences = AppPreferencesStore()
         let player = CrossFeatureSoundPlayer()
         let assetStore = AttentionSoundAssetStore(
@@ -3158,7 +3171,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
         XCTAssertEqual(player.calls.count, 1)
     }
 
@@ -3194,29 +3207,39 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(player.calls.count, 1)
     }
 
-    func testVisibleCompletionAfterAcknowledgementStaysUnreadClear() throws {
+    func testVisibleCompletionAfterExactResponseAcknowledgementStaysUnreadClear() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
         let bridge = try attentionBridge(pool: pool, slot: slot)
+        let response = try XCTUnwrap(pool.responseBridge(for: slot.id))
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:explicitly-acknowledged")
+        )
         let documentToken = "acknowledged-before-visible-completion"
+        primeResponseDocument(responseBridge: response, documentToken: documentToken)
 
         completeGeneration(
             bridge: bridge,
             webView: webView,
-            token: documentToken
+            token: documentToken,
+            responseIdentity: identity
         )
         XCTAssertEqual(coordinator.state(for: slot.id), .ready)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
 
-        XCTAssertTrue(
-            controller.debugInvokeRailSelection(
-                slotID: slot.id,
-                presentationFact: true
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            XCTAssertTrue(
+                response.debugInvokeTrustedInteraction(
+                    kind: .assistantPointer,
+                    documentToken: documentToken,
+                    responseIdentity: identity,
+                    responseComplete: true
+                )
             )
-        )
+        }
         XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
 
         acceptState(
@@ -3236,7 +3259,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 generating: false,
                 bridge: bridge,
                 webView: webView,
-                token: documentToken
+                token: documentToken,
+                responseIdentity: identity
             )
         }
 
@@ -4214,7 +4238,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testVisibleGenerationStartedAcknowledgesExistingUnread() throws {
+    func testVisibleGenerationStartedPreservesExistingUnread() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(
@@ -4245,17 +4269,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
 
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
-        XCTAssertEqual(
-            writer.events.last { $0.event == "unread.acknowledge_attempt" }?
-                .fields["source"],
-            .string("generation_started")
-        )
-        XCTAssertEqual(
-            writer.events.last { $0.event == "unread.acknowledged" }?
-                .fields["source"],
-            .string("generation_started")
-        )
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertFalse(writer.events.contains { $0.event == "unread.acknowledge_attempt" })
     }
 
     func testBackgroundGenerationStartedPreservesUnread() throws {
@@ -4283,24 +4298,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state(for: slot.id), .generating)
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-        XCTAssertEqual(
-            writer.events.last { $0.event == "unread.acknowledge_attempt" }?
-                .fields["source"],
-            .string("generation_started")
-        )
-        XCTAssertEqual(
-            writer.events.last { $0.event == "unread.acknowledge_skipped" }?
-                .fields["source"],
-            .string("generation_started")
-        )
-        XCTAssertEqual(
-            writer.events.last { $0.event == "unread.acknowledge_skipped" }?
-                .fields["reason"],
-            .string("not_actually_presented")
-        )
+        XCTAssertFalse(writer.events.contains { $0.event == "unread.acknowledge_attempt" })
     }
 
-    func testNextVisibleCompletionStaysUnreadClearAfterVisibleGenerationStart() throws {
+    func testVisibleGenerationStartAndCompletionPreserveUnreadOwnership() throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4326,7 +4327,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 token: "next-completion"
             )
         }
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
 
         controller.debugWithPresentationFact(
             slotID: slot.id,
@@ -4341,7 +4342,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         }
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
     // MARK: 4.12 Factory user-content seam
@@ -4465,9 +4466,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testNEW_RESPONSE_AFTER_HANDLED_MARKS() throws {
+    func testVisibleCompletionThenNewResponseAdvancesOwnership() throws {
+        let suiteName = "FloatTabsTests.U3.VisibleThenNew.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let unreadCoordinator = ChatGPTUnreadResponseCoordinator(
+            store: UnreadResponseStore(defaults: defaults)
+        )
         let (controller, _, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
+            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
+            unreadResponseCoordinator: unreadCoordinator
         )
         let slot = try profile(named: "ChatA", in: store)
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
@@ -4483,7 +4491,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 responseIdentity: first
             )
         }
-        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(unreadCoordinator.unreadResponseIdentity(for: slot.id), first)
 
         controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
             completeGeneration(
@@ -4494,9 +4503,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             )
         }
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(unreadCoordinator.unreadResponseIdentity(for: slot.id), second)
     }
 
-    func testALREADY_UNREAD_IDENTITY_ADVANCES() throws {
+    func testVisibleGenerationStartPreservesR1UntilR2CompletionAdvancesOwner() throws {
         let suiteName = "FloatTabsTests.U3.Advance.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
@@ -4523,9 +4533,29 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             )
         }
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(
+            unreadCoordinator.unreadResponseIdentity(for: slot.id),
+            first
+        )
+
+        controller.debugWithPresentationFact(slotID: slot.id, presentationFact: true) {
+            acceptState(
+                generating: true,
+                bridge: bridge,
+                webView: webView,
+                token: "unread-r1-document",
+                responseIdentity: second
+            )
+        }
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
+        XCTAssertEqual(
+            unreadCoordinator.unreadResponseIdentity(for: slot.id),
+            first
+        )
 
         controller.debugWithPresentationFact(slotID: slot.id, presentationFact: false) {
-            completeGeneration(
+            acceptState(
+                generating: false,
                 bridge: bridge,
                 webView: webView,
                 token: "unread-r1-document",
@@ -5447,7 +5477,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let marked = try XCTUnwrap(
             writer.events.last { $0.event == "unread.marked" }
         )
-        XCTAssertEqual(marked.fields["reason"], .string("completion_unseen"))
+        XCTAssertEqual(marked.fields["reason"], .string("completion_unacknowledged"))
         XCTAssertEqual(marked.fields["slot_id"], .string(slot.id.uuidString))
         XCTAssertFalse(
             writer.events.contains {
@@ -5457,7 +5487,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
-    func testUnreadDiagnosticsRecordVisibleCompletionAsSkipped() throws {
+    func testUnreadDiagnosticsRecordVisibleCompletionAsMarked() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, _, store, pool) = makeController(
@@ -5476,7 +5506,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             )
         }
 
-        XCTAssertTrue(controller.unreadResponseSlotIDs.isEmpty)
+        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
         XCTAssertEqual(
             writer.events.last { $0.event == "unread.completion_observed" }?
                 .fields["completion_valid"],
@@ -5488,11 +5518,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             .bool(true)
         )
         XCTAssertEqual(
-            writer.events.last { $0.event == "unread.mark_skipped" }?
+            writer.events.last { $0.event == "unread.marked" }?
                 .fields["reason"],
-            .string("visible_completion")
+            .string("completion_unacknowledged")
         )
-        XCTAssertFalse(writer.events.contains { $0.event == "unread.marked" })
+        XCTAssertFalse(writer.events.contains {
+            $0.event == "unread.mark_skipped"
+                && $0.fields["reason"] == .string("visible_completion")
+        })
     }
 
     func testUnreadDiagnosticsRecordStrayFinishAsInvalidCompletion() throws {
