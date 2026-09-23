@@ -31,11 +31,14 @@ final class WebViewFactoryTests: XCTestCase {
             .settingZoom(1.50)
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
         let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
+        let currentSafariVersion = BrowserVersionCatalog.current.safari
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
         XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
-        XCTAssertTrue(webView.customUserAgent?.contains("Version/26.") == true)
+        XCTAssertTrue(
+            webView.customUserAgent?.contains("Version/\(currentSafariVersion)") == true
+        )
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
         )
@@ -326,7 +329,7 @@ final class WebViewFactoryTests: XCTestCase {
         delegate.onFinish = { loaded.fulfill() }
         webView.loadHTMLString(offlineCenteredLinkHTML(href: destination.absoluteString, target: nil), baseURL: nil)
         wait(for: [loaded], timeout: 5)
-        clickWebViewCenter(webView, in: window)
+        XCTAssertTrue(activateLinkViaDOM(in: webView))
         waitForURL(webView, toBecome: destination, timeout: 3)
 
         XCTAssertEqual(webView.url, destination)
@@ -742,6 +745,22 @@ final class WebViewFactoryTests: XCTestCase {
 
         webView.mouseDown(with: down)
         webView.mouseUp(with: up)
+    }
+
+    private func activateLinkViaDOM(in webView: WKWebView) -> Bool {
+        let expectation = expectation(description: "DOM link activation evaluated")
+        var result: Bool?
+        var evaluationError: Error?
+        webView.evaluateJavaScript(
+            "document.getElementById('link')?.click(); true"
+        ) { value, error in
+            result = value as? Bool
+            evaluationError = error
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 5)
+        XCTAssertNil(evaluationError)
+        return result == true
     }
 
     private func evaluateNumber(_ script: String, in webView: WKWebView) -> Double {

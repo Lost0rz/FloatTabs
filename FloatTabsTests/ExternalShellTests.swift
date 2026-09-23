@@ -2098,6 +2098,9 @@ final class ExternalShellTests: XCTestCase {
 
         let tab = try! XCTUnwrap(root.externalControlZoneView.tabView(for: profile.id))
         tab.setHovered(true)
+        // The real pointer route lays out the rail after updating hover state.
+        // This test sets hover directly, so request that same geometry pass.
+        root.externalControlZoneView.needsLayout = true
         root.externalControlZoneView.layoutSubtreeIfNeeded()
         root.layoutSubtreeIfNeeded()
 

@@ -59,6 +59,28 @@ private final class ChatGPTResponsePageHarness {
         return false
     }
 
+    func waitForDocumentChange(
+        after documentToken: String,
+        timeout: TimeInterval = 5
+    ) async -> ChatGPTResponseStatusSnapshot? {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if let snapshot = await snapshotStatus(),
+               snapshot.documentToken != documentToken {
+                return snapshot
+            }
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                return nil
+            }
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch {
+                return nil
+            }
+        }
+        return nil
+    }
+
     func evaluatePageWorldReturningBool(_ script: String) async -> Bool {
         await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(script) { result, _ in
@@ -352,13 +374,14 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
           <p>Reloaded document.</p>
         </div>
         """)
-        let secondReady = await page.waitForDocumentReady()
-        XCTAssertTrue(secondReady)
-        let secondSnapshotValue = await page.snapshotStatus()
+        let secondSnapshotValue = await page.waitForDocumentChange(
+            after: firstSnapshot.documentToken
+        )
         let secondSnapshot = try XCTUnwrap(secondSnapshotValue)
         let secondPayloadValue = await page.extract()
         let secondPayload = try XCTUnwrap(secondPayloadValue)
 
+        XCTAssertNotEqual(secondSnapshot.documentToken, firstSnapshot.documentToken)
         XCTAssertEqual(
             firstSnapshot.responseIdentity?.rawValue,
             "message:canonical-reload"
