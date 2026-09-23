@@ -31,11 +31,14 @@ final class WebViewFactoryTests: XCTestCase {
             .settingZoom(1.50)
         let webView = WebViewFactory.makeWebView(renderingProfile: rendering)
         let floatTabsWebView = tryUnwrapFloatTabsWebView(webView)
+        let currentSafariVersion = BrowserVersionCatalog.current.safari
 
         XCTAssertTrue(webView.configuration.websiteDataStore.isPersistent)
         XCTAssertEqual(webView.configuration.defaultWebpagePreferences.preferredContentMode, .mobile)
         XCTAssertTrue(webView.customUserAgent?.contains("iPhone") == true)
-        XCTAssertTrue(webView.customUserAgent?.contains("Version/26.") == true)
+        XCTAssertTrue(
+            webView.customUserAgent?.contains("Version/\(currentSafariVersion)") == true
+        )
         XCTAssertTrue(
             webView.configuration.applicationNameForUserAgent?.contains("Version/") == true
         )
