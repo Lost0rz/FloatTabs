@@ -170,6 +170,8 @@ final class WebViewPool {
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
             var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
             reuseFields["slot_id"] = .string(profile.id.uuidString)
+            reuseFields["bridge_instance_id"] = attentionBridges[profile.id]
+                .map { .string($0.bridgeInstanceID.uuidString) } ?? .null
             diagnostics.record(
                 event: "web_runtime.reused",
                 level: .debug,
@@ -260,6 +262,7 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
+        let runtimeInstanceID = attentionBridges[slotID]?.bridgeInstanceID
         // The bridge dies with its WKWebView: invalidate it first so no stale
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
@@ -278,7 +281,10 @@ final class WebViewPool {
                 event: "web_runtime.released",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "bridge_instance_id": runtimeInstanceID.map { .string($0.uuidString) } ?? .null
+                ]
             )
             onResidentSetChange?()
         }
@@ -541,6 +547,7 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true
     ) throws -> WKWebView {
+        let runtimeInstanceID = UUID()
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: rendering,
@@ -568,7 +575,8 @@ final class WebViewPool {
                 } else {
                     self?.onAttentionObservation?(slotID, event.observation)
                 }
-            }
+            },
+            bridgeInstanceID: runtimeInstanceID
         )
         let responseBridge = ChatGPTResponseBridge(
             slotID: profile.id,
@@ -583,7 +591,9 @@ final class WebViewPool {
             },
             onTrustedInteractionEvent: { [weak self] slotID, event in
                 self?.onTrustedInteractionEvent?(slotID, event)
-            }
+            },
+            diagnostics: diagnostics,
+            bridgeInstanceID: runtimeInstanceID
         )
         let calibreReaderBridge = CalibreReaderBridge(
             slotID: profile.id,
@@ -721,6 +731,7 @@ final class WebViewPool {
         )
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
+        createdFields["bridge_instance_id"] = .string(runtimeInstanceID.uuidString)
         createdFields["browser_profile"] = .string(String(describing: browserProfileIdentity))
         createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
         createdFields["initial_frame_height"] = .double(Double(webView.frame.height))

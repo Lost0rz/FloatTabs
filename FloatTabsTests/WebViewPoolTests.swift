@@ -17,7 +17,9 @@ final class WebViewPoolTests: XCTestCase {
 
         _ = try pool.webView(for: profile)
 
-        let eventNames = writer.events.map(\.event)
+        let eventNames = writer.events
+            .filter { $0.event.hasPrefix("web_runtime.") }
+            .map(\.event)
         XCTAssertEqual(eventNames, ["web_runtime.create.begin", "web_runtime.created"])
         let created = try XCTUnwrap(writer.events.last)
         XCTAssertEqual(created.fields["website_mode"], .string("desktop"))

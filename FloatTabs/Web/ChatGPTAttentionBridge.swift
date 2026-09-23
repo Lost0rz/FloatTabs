@@ -37,6 +37,37 @@ enum ChatGPTAttentionObservation: Equatable, Sendable {
 struct ChatGPTAttentionEvent: Equatable, Sendable {
     let observation: ChatGPTAttentionObservation
     let responseIdentity: ChatGPTResponseIdentity?
+    let responseRootCount: Int?
+    let latestResponseComplete: Bool?
+    let completionProducer: UnreadRuntimeDiagnosticCompletionProducer
+    let generationEpoch: UInt64?
+    let documentToken: String?
+    let bridgeInstanceID: UUID?
+
+    init(
+        observation: ChatGPTAttentionObservation,
+        responseIdentity: ChatGPTResponseIdentity?,
+        responseRootCount: Int? = nil,
+        latestResponseComplete: Bool? = nil,
+        completionProducer: UnreadRuntimeDiagnosticCompletionProducer = .unknown,
+        generationEpoch: UInt64? = nil,
+        documentToken: String? = nil,
+        bridgeInstanceID: UUID? = nil
+    ) {
+        self.observation = observation
+        self.responseIdentity = responseIdentity
+        self.responseRootCount = responseRootCount
+        self.latestResponseComplete = latestResponseComplete
+        self.completionProducer = completionProducer
+        self.generationEpoch = generationEpoch
+        self.documentToken = documentToken
+        self.bridgeInstanceID = bridgeInstanceID
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.observation == rhs.observation
+            && lhs.responseIdentity == rhs.responseIdentity
+    }
 }
 
 /// Minimal bridge payload. Metadata only: prompt text, response text, and any
@@ -55,19 +86,28 @@ struct ChatGPTBridgePayload: Equatable {
     let token: String
     let generating: Bool
     let responseIdentity: ChatGPTResponseIdentity?
+    let responseRootCount: Int?
+    let latestResponseComplete: Bool?
+    let producer: UnreadRuntimeDiagnosticCompletionProducer
 
     init(
         version: Int,
         kind: String,
         token: String,
         generating: Bool,
-        responseIdentity: ChatGPTResponseIdentity? = nil
+        responseIdentity: ChatGPTResponseIdentity? = nil,
+        responseRootCount: Int? = nil,
+        latestResponseComplete: Bool? = nil,
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
     ) {
         self.version = version
         self.kind = kind
         self.token = token
         self.generating = generating
         self.responseIdentity = responseIdentity
+        self.responseRootCount = responseRootCount
+        self.latestResponseComplete = latestResponseComplete
+        self.producer = producer
     }
 
     static func parse(_ body: [String: Any]) -> ChatGPTBridgePayload? {
@@ -91,12 +131,32 @@ struct ChatGPTBridgePayload: Equatable {
         } else {
             return nil
         }
+        let responseRootCount: Int?
+        if let rawRootCount = body["responseRootCount"] {
+            guard let parsedRootCount = rawRootCount as? Int,
+                  parsedRootCount >= 0 else {
+                return nil
+            }
+            responseRootCount = parsedRootCount
+        } else {
+            responseRootCount = nil
+        }
+        let latestResponseComplete = body["latestResponseComplete"] as? Bool
+        let producer: UnreadRuntimeDiagnosticCompletionProducer
+        if let rawProducer = body["producer"] as? String {
+            producer = UnreadRuntimeDiagnosticCompletionProducer(rawValue: rawProducer) ?? .unknown
+        } else {
+            producer = .unknown
+        }
         return ChatGPTBridgePayload(
             version: version,
             kind: kind,
             token: token,
             generating: generating,
-            responseIdentity: responseIdentity
+            responseIdentity: responseIdentity,
+            responseRootCount: responseRootCount,
+            latestResponseComplete: latestResponseComplete,
+            producer: producer
         )
     }
 }
@@ -115,7 +175,10 @@ struct ChatGPTDocumentGenerationTracker {
 
     mutating func observeEvent(
         _ generating: Bool,
-        responseIdentity: ChatGPTResponseIdentity?
+        responseIdentity: ChatGPTResponseIdentity?,
+        responseRootCount: Int? = nil,
+        latestResponseComplete: Bool? = nil,
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
     ) -> ChatGPTAttentionEvent? {
         guard hasBaseline else {
             hasBaseline = true
@@ -123,7 +186,10 @@ struct ChatGPTDocumentGenerationTracker {
             return generating
                 ? ChatGPTAttentionEvent(
                     observation: .generationStarted,
-                    responseIdentity: nil
+                    responseIdentity: nil,
+                    responseRootCount: responseRootCount,
+                    latestResponseComplete: latestResponseComplete,
+                    completionProducer: producer
                 )
                 : nil
         }
@@ -131,7 +197,10 @@ struct ChatGPTDocumentGenerationTracker {
         isGenerating = generating
         return ChatGPTAttentionEvent(
             observation: generating ? .generationStarted : .generationFinished,
-            responseIdentity: generating ? nil : responseIdentity
+            responseIdentity: generating ? nil : responseIdentity,
+            responseRootCount: responseRootCount,
+            latestResponseComplete: latestResponseComplete,
+            completionProducer: producer
         )
     }
 }
@@ -245,7 +314,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               generating: generating,
               responseIdentity: generating
                 ? null
-                : canonicalResponseIdentityFor(latestRoot)
+                : canonicalResponseIdentityFor(latestRoot),
+              responseRootCount: assistantResponseRoots().length,
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              producer: "mutation_observer"
             });
           };
 
@@ -332,7 +404,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               generating: generating,
               responseIdentity: canonicalResponseIdentityFor(
                 latestAssistantResponseRoot()
-              )
+              ),
+              responseRootCount: assistantResponseRoots().length,
+              latestResponseComplete: Boolean(latestAssistantResponseRoot()) && !generating,
+              producer: "liveness_probe"
             };
           };
 
@@ -359,7 +434,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               generating: generating,
               responseIdentity: canonicalResponseIdentityFor(
                 latestAssistantResponseRoot()
-              )
+              ),
+              responseRootCount: assistantResponseRoots().length,
+              latestResponseComplete: Boolean(latestAssistantResponseRoot()) && !generating,
+              producer: "resync"
             };
           };
         })();
@@ -397,9 +475,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private static let resyncAttemptLimit = 2
 
     let slotID: UUID
+    let bridgeInstanceID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     private let onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)?
     private let diagnostics: any RuntimeDiagnosticRecording
+    private let diagnosticContext: UnreadRuntimeDiagnosticContext
     private let livenessProbe: LivenessProbeProvider
     private let livenessSleeper: LivenessSleeper
     private weak var webView: WKWebView?
@@ -418,6 +498,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessGeneration: UInt64 = 0
     private var livenessCycleOwnerGeneration: UInt64?
     private var livenessIdleCandidateOwnerGeneration: UInt64?
+    private var nextGenerationEpoch: UInt64 = 0
+    private var currentGenerationEpoch: UInt64?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -435,15 +517,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         livenessProbe: LivenessProbeProvider? = nil,
         livenessSleeper: LivenessSleeper? = nil,
-        onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
+        onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil,
+        bridgeInstanceID: UUID = UUID(),
+        diagnosticContext: UnreadRuntimeDiagnosticContext = .shared
     ) {
         self.slotID = slotID
+        self.bridgeInstanceID = bridgeInstanceID
         self.onObservation = onObservation
         self.onAttentionEvent = onAttentionEvent
         self.diagnostics = diagnostics
+        self.diagnosticContext = diagnosticContext
         self.livenessProbe = livenessProbe ?? Self.productionLivenessProbe
         self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
         super.init()
+        recordBridgeDiagnostic(event: "bridge.created")
     }
 
     // MARK: Installation
@@ -542,7 +629,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
             observeGeneration(
                 payload.generating,
-                responseIdentity: payload.responseIdentity
+                responseIdentity: payload.responseIdentity,
+                responseRootCount: payload.responseRootCount,
+                latestResponseComplete: payload.latestResponseComplete,
+                producer: payload.producer
             )
             return
         }
@@ -563,12 +653,22 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
         observeGeneration(
             payload.generating,
-            responseIdentity: payload.responseIdentity
+            responseIdentity: payload.responseIdentity,
+            responseRootCount: payload.responseRootCount,
+            latestResponseComplete: payload.latestResponseComplete,
+            producer: payload.producer
         )
     }
 
     private func makeDocumentSession(token: String) -> DocumentSession {
         nextDocumentEpoch &+= 1
+        recordBridgeDiagnostic(
+            event: "bridge.document_ready",
+            documentToken: token,
+            fields: [
+                "document_epoch": .integer(Int64(nextDocumentEpoch))
+            ]
+        )
         return DocumentSession(token: token, epoch: nextDocumentEpoch)
     }
 
@@ -653,8 +753,18 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
+        if hadActiveDocument {
+            recordBridgeDiagnostic(
+                event: "bridge.document_changed",
+                documentToken: document?.token,
+                fields: [
+                    "document_epoch": .integer(Int64(document?.epoch ?? 0))
+                ]
+            )
+        }
         document = nil
         documentAdmission = admission
+        currentGenerationEpoch = nil
         if hadActiveDocument {
             emit(ChatGPTAttentionEvent(observation: .runtimeReset, responseIdentity: nil))
         }
@@ -671,8 +781,18 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
+        if hadActiveDocument {
+            recordBridgeDiagnostic(
+                event: "bridge.destroyed",
+                documentToken: document?.token,
+                fields: [
+                    "document_epoch": .integer(Int64(document?.epoch ?? 0))
+                ]
+            )
+        }
         document = nil
         documentAdmission = .unsupportedCurrentDocument
+        currentGenerationEpoch = nil
         userContentController?.removeScriptMessageHandler(
             forName: Self.messageHandlerName,
             contentWorld: Self.contentWorld
@@ -686,11 +806,17 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func observeGeneration(
         _ generating: Bool,
-        responseIdentity: ChatGPTResponseIdentity? = nil
+        responseIdentity: ChatGPTResponseIdentity? = nil,
+        responseRootCount: Int? = nil,
+        latestResponseComplete: Bool? = nil,
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
     ) -> ChatGPTAttentionObservation? {
         guard let event = document?.tracker.observeEvent(
             generating,
-            responseIdentity: responseIdentity
+            responseIdentity: responseIdentity,
+            responseRootCount: responseRootCount,
+            latestResponseComplete: latestResponseComplete,
+            producer: producer
         ) else { return nil }
         emit(event)
         return event.observation
@@ -698,18 +824,51 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func emit(_ event: ChatGPTAttentionEvent) {
         let observation = event.observation
+        var diagnosticEvent = event
         switch observation {
         case .generationStarted:
+            nextGenerationEpoch &+= 1
+            currentGenerationEpoch = nextGenerationEpoch
             livenessGeneration &+= 1
             startLivenessWatchdog()
         case .generationFinished, .runtimeReset:
             stopLivenessWatchdog()
         }
+        diagnosticEvent = ChatGPTAttentionEvent(
+            observation: event.observation,
+            responseIdentity: event.responseIdentity,
+            responseRootCount: event.responseRootCount,
+            latestResponseComplete: event.latestResponseComplete,
+            completionProducer: event.completionProducer,
+            generationEpoch: currentGenerationEpoch,
+            documentToken: document?.token,
+            bridgeInstanceID: bridgeInstanceID
+        )
+        if observation == .runtimeReset {
+            currentGenerationEpoch = nil
+        }
         if let onAttentionEvent {
-            onAttentionEvent(slotID, event)
+            onAttentionEvent(slotID, diagnosticEvent)
         } else {
             onObservation(slotID, observation)
         }
+    }
+
+    private func recordBridgeDiagnostic(
+        event: String,
+        documentToken: String? = nil,
+        fields: [String: RuntimeDiagnosticValue] = [:]
+    ) {
+        var enriched = fields
+        enriched["slot_id"] = .string(slotID.uuidString)
+        enriched["bridge_instance_id"] = .string(bridgeInstanceID.uuidString)
+        enriched["document_token_tag"] = diagnosticContext.documentTokenTag(documentToken)
+        diagnostics.record(
+            event: event,
+            level: .info,
+            subsystem: "unread",
+            fields: diagnosticContext.fields(enriched)
+        )
     }
 
     private func startLivenessWatchdog() {
@@ -804,7 +963,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
         guard observeGeneration(
             false,
-            responseIdentity: secondProbe.responseIdentity
+            responseIdentity: secondProbe.responseIdentity,
+            responseRootCount: secondProbe.responseRootCount,
+            latestResponseComplete: secondProbe.latestResponseComplete,
+            producer: .livenessProbe
         ) == .generationFinished else { return }
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
@@ -906,7 +1068,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         documentAdmission = .activeSupportedDocument
         observeGeneration(
             payload.generating,
-            responseIdentity: payload.responseIdentity
+            responseIdentity: payload.responseIdentity,
+            responseRootCount: payload.responseRootCount,
+            latestResponseComplete: payload.latestResponseComplete,
+            producer: .resync
         )
     }
 

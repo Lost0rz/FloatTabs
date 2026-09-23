@@ -239,6 +239,9 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
             "response_id": .string("private-response"),
             "document_token": .string("private-document"),
             "responseidentity_class": .string("already_handled_response"),
+            "response_identity_tag": .string("0123456789abcdef"),
+            "ack_identity_tag": .string("abcdef0123456789"),
+            "document_token_tag": .string("fedcba9876543210"),
             "safe_reason": .string("already_handled_response")
         ], mode: .verbose)
 
@@ -246,6 +249,9 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertNil(fields["response_id"])
         XCTAssertNil(fields["document_token"])
         XCTAssertNil(fields["responseidentity_class"])
+        XCTAssertEqual(fields["response_identity_tag"], .string("0123456789abcdef"))
+        XCTAssertEqual(fields["ack_identity_tag"], .string("abcdef0123456789"))
+        XCTAssertEqual(fields["document_token_tag"], .string("fedcba9876543210"))
         XCTAssertEqual(fields["safe_reason"], .string("already_handled_response"))
     }
 

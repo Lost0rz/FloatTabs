@@ -26,13 +26,33 @@ enum ChatGPTUnreadSnapshotReconciliationResult: Equatable {
 final class ChatGPTUnreadResponseCoordinator {
     private static let handledHistoryLimit = 16
 
+    let coordinatorInstanceID: UUID
     private let store: UnreadResponseStore
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private let diagnosticContext: UnreadRuntimeDiagnosticContext
     private(set) var unreadSlotIDs: Set<UUID>
     private var handledResponseIdentities: [UUID: [ChatGPTResponseIdentity]] = [:]
 
-    init(store: UnreadResponseStore = UnreadResponseStore()) {
+    init(
+        store: UnreadResponseStore = UnreadResponseStore(),
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        coordinatorInstanceID: UUID = UUID(),
+        diagnosticContext: UnreadRuntimeDiagnosticContext = .shared
+    ) {
+        self.coordinatorInstanceID = coordinatorInstanceID
         self.store = store
+        self.diagnostics = diagnostics
+        self.diagnosticContext = diagnosticContext
         unreadSlotIDs = store.unreadSlotIDs
+        diagnostics.record(
+            event: "unread.coordinator.created",
+            level: .info,
+            subsystem: "unread",
+            fields: diagnosticContext.fields([
+                "coordinator_instance_id": .string(coordinatorInstanceID.uuidString),
+                "unread_count": .integer(Int64(unreadSlotIDs.count))
+            ])
+        )
     }
 
     var unreadResponseIdentityBySlot: [UUID: ChatGPTResponseIdentity] {
@@ -69,6 +89,16 @@ final class ChatGPTUnreadResponseCoordinator {
         responseIdentity: ChatGPTResponseIdentity
     ) -> Bool {
         handledResponseIdentities[slotID]?.contains(responseIdentity) == true
+    }
+
+    func diagnosticHandledLookup(
+        slotID: UUID,
+        responseIdentity: ChatGPTResponseIdentity?
+    ) -> UnreadRuntimeDiagnosticHandledLookup {
+        guard let responseIdentity else { return .unavailable }
+        return isHandled(slotID: slotID, responseIdentity: responseIdentity)
+            ? .hit
+            : .miss
     }
 
     func acknowledge(slotID: UUID) {

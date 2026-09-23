@@ -127,6 +127,22 @@ struct ChatGPTResponseStatusSnapshot: Equatable, Sendable {
     let documentToken: String
     let responseIdentity: ChatGPTResponseIdentity?
     let generating: Bool
+    let responseRootCount: Int
+    let responseComplete: Bool
+
+    init(
+        documentToken: String,
+        responseIdentity: ChatGPTResponseIdentity?,
+        generating: Bool,
+        responseRootCount: Int = 0,
+        responseComplete: Bool? = nil
+    ) {
+        self.documentToken = documentToken
+        self.responseIdentity = responseIdentity
+        self.generating = generating
+        self.responseRootCount = responseRootCount
+        self.responseComplete = responseComplete ?? (responseIdentity != nil && !generating)
+    }
 }
 
 struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
@@ -134,6 +150,37 @@ struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
     let documentToken: String
     let responseIdentity: ChatGPTResponseIdentity?
     let responseComplete: Bool
+    let latestResponseIdentity: ChatGPTResponseIdentity?
+    let latestResponseComplete: Bool
+    let responseRootCount: Int
+    let bridgeInstanceID: UUID?
+
+    init(
+        kind: ChatGPTTrustedPageInteractionKind,
+        documentToken: String,
+        responseIdentity: ChatGPTResponseIdentity?,
+        responseComplete: Bool,
+        latestResponseIdentity: ChatGPTResponseIdentity? = nil,
+        latestResponseComplete: Bool? = nil,
+        responseRootCount: Int = 0,
+        bridgeInstanceID: UUID? = nil
+    ) {
+        self.kind = kind
+        self.documentToken = documentToken
+        self.responseIdentity = responseIdentity
+        self.responseComplete = responseComplete
+        self.latestResponseIdentity = latestResponseIdentity ?? responseIdentity
+        self.latestResponseComplete = latestResponseComplete ?? responseComplete
+        self.responseRootCount = responseRootCount
+        self.bridgeInstanceID = bridgeInstanceID
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind
+            && lhs.documentToken == rhs.documentToken
+            && lhs.responseIdentity == rhs.responseIdentity
+            && lhs.responseComplete == rhs.responseComplete
+    }
 }
 
 /// Swift-owned protocol model for the independent one-shot ChatGPT response
@@ -892,7 +939,8 @@ enum ChatGPTResponseExtraction {
               event: "manualScroll",
               documentToken: documentToken,
               latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
-              latestResponseComplete: Boolean(latestRoot) && !generating
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              responseRootCount: assistantResponseRoots().length
             });
           };
 
@@ -907,7 +955,10 @@ enum ChatGPTResponseExtraction {
               documentToken: documentToken,
               interactionKind: "assistantPointer",
               responseIdentity: canonicalResponseIdentityFor(root),
-              responseComplete: root !== latestRoot || !generating
+              responseComplete: root !== latestRoot || !generating,
+              latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              responseRootCount: assistantResponseRoots().length
             });
           };
 
@@ -1085,7 +1136,9 @@ enum ChatGPTResponseExtraction {
               version: 1,
               documentToken: documentToken,
               responseIdentity: canonicalResponseIdentityFor(latestRoot),
-              generating: isGenerating()
+              generating: isGenerating(),
+              responseRootCount: assistantResponseRoots().length,
+              responseComplete: Boolean(latestRoot) && !isGenerating()
             };
           };
 

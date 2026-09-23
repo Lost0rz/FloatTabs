@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum RuntimeDiagnosticMode: String, CaseIterable, Codable, Equatable, Sendable {
     case off
@@ -331,5 +332,75 @@ struct RuntimeDiagnosticEvent: Codable, Equatable, Sendable {
         self.subsystem = subsystem
         self.event = event
         self.fields = fields
+    }
+}
+
+enum UnreadRuntimeDiagnosticIdentitySource: String, Equatable, Sendable {
+    case stableAttribute = "stable_attribute"
+    case unavailable
+
+    init(identity: ChatGPTResponseIdentity?) {
+        self = identity == nil ? .unavailable : .stableAttribute
+    }
+}
+
+enum UnreadRuntimeDiagnosticCompletionProducer: String, Equatable, Sendable {
+    case mutationObserver = "mutation_observer"
+    case livenessProbe = "liveness_probe"
+    case resync
+    case snapshot
+    case unknown
+}
+
+enum UnreadRuntimeDiagnosticHandledLookup: String, Equatable, Sendable {
+    case hit
+    case miss
+    case unavailable
+}
+
+/// Process-local privacy-safe metadata for tracing unread response ownership.
+/// The nonce is intentionally never serialized or exposed to diagnostics.
+@MainActor
+final class UnreadRuntimeDiagnosticContext {
+    static let shared = UnreadRuntimeDiagnosticContext()
+
+    let sessionID: UUID
+    private let processNonce: Data
+    private var nextSequence: UInt64 = 1
+
+    init(sessionID: UUID = UUID(), processNonce: Data? = nil) {
+        self.sessionID = sessionID
+        self.processNonce = processNonce ?? Data((0..<32).map { _ in
+            UInt8.random(in: UInt8.min...UInt8.max)
+        })
+    }
+
+    func fields(
+        _ fields: [String: RuntimeDiagnosticValue] = [:]
+    ) -> [String: RuntimeDiagnosticValue] {
+        var enriched = fields
+        enriched["diagnostic_session_id"] = .string(sessionID.uuidString)
+        enriched["diagnostic_sequence"] = .integer(Int64(nextSequence))
+        nextSequence &+= 1
+        return enriched
+    }
+
+    func identityTag(
+        _ identity: ChatGPTResponseIdentity?
+    ) -> RuntimeDiagnosticValue {
+        tag(identity?.rawValue)
+    }
+
+    func documentTokenTag(
+        _ token: String?
+    ) -> RuntimeDiagnosticValue {
+        tag(token)
+    }
+
+    func tag(_ rawValue: String?) -> RuntimeDiagnosticValue {
+        guard let rawValue else { return .null }
+        let digest = SHA256.hash(data: processNonce + Data(rawValue.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return .string(String(hex.prefix(16)))
     }
 }

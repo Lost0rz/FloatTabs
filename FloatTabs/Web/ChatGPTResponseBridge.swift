@@ -38,10 +38,13 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 
     let slotID: UUID
+    let bridgeInstanceID: UUID
     private let onRuntimeReset: @MainActor (UUID) -> Void
     private let onManualScroll: ManualScrollHandler
     private let onTrustedInteraction: TrustedInteractionHandler
     private let onTrustedInteractionEvent: TrustedInteractionEventHandler?
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private let diagnosticContext: UnreadRuntimeDiagnosticContext
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var pendingRequests: [String: PendingRequest] = [:]
@@ -58,13 +61,19 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         onManualScroll: @escaping ManualScrollHandler = { _, _ in },
         onTrustedInteraction: @escaping TrustedInteractionHandler = { _, _, _ in },
         onTrustedInteractionEvent: TrustedInteractionEventHandler? = nil,
-        responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil
+        responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil,
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        bridgeInstanceID: UUID = UUID(),
+        diagnosticContext: UnreadRuntimeDiagnosticContext = .shared
     ) {
         self.slotID = slotID
+        self.bridgeInstanceID = bridgeInstanceID
         self.onRuntimeReset = onRuntimeReset
         self.onManualScroll = onManualScroll
         self.onTrustedInteraction = onTrustedInteraction
         self.onTrustedInteractionEvent = onTrustedInteractionEvent
+        self.diagnostics = diagnostics
+        self.diagnosticContext = diagnosticContext
         self.responseStatusSnapshotProvider = responseStatusSnapshotProvider ?? { webView, script in
             await Self.evaluateResponseStatusSnapshot(
                 in: webView,
@@ -72,6 +81,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             )
         }
         super.init()
+        recordBridgeDiagnostic(event: "bridge.created")
     }
 
     func install(into userContentController: WKUserContentController) {
@@ -252,7 +262,12 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             kind: kind,
             documentToken: documentToken,
             responseIdentity: responseIdentity,
-            responseComplete: responseComplete
+            responseComplete: responseComplete,
+            latestResponseIdentity: (body["latestResponseIdentity"] as? String)
+                .flatMap { ChatGPTResponseIdentity(rawValue: $0) },
+            latestResponseComplete: body["latestResponseComplete"] as? Bool ?? responseComplete,
+            responseRootCount: body["responseRootCount"] as? Int ?? 0,
+            bridgeInstanceID: bridgeInstanceID
         )
         onTrustedInteractionEvent?(slotID, event)
         onTrustedInteraction(slotID, kind, documentToken)
@@ -325,7 +340,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 kind: .manualScroll,
                 documentToken: documentToken,
                 responseIdentity: latestResponseIdentity,
-                responseComplete: latestResponseComplete
+                responseComplete: latestResponseComplete,
+                latestResponseIdentity: latestResponseIdentity,
+                latestResponseComplete: latestResponseComplete,
+                bridgeInstanceID: bridgeInstanceID
             )
         )
         return true
@@ -351,7 +369,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 kind: kind,
                 documentToken: documentToken,
                 responseIdentity: responseIdentity,
-                responseComplete: responseComplete
+                responseComplete: responseComplete,
+                latestResponseIdentity: responseIdentity,
+                latestResponseComplete: responseComplete,
+                bridgeInstanceID: bridgeInstanceID
             )
         )
         return true
@@ -371,6 +392,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 #endif
 
     func handleRuntimeReplacement() {
+        recordBridgeDiagnostic(
+            event: "bridge.document_changed",
+            documentToken: currentDocumentToken
+        )
         currentDocumentToken = nil
         finishPendingRequests()
         onRuntimeReset(slotID)
@@ -378,6 +403,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 
     func invalidate() {
         guard !isInvalidated else { return }
+        recordBridgeDiagnostic(
+            event: "bridge.destroyed",
+            documentToken: currentDocumentToken
+        )
         isInvalidated = true
         finishPendingRequests()
         currentDocumentToken = nil
@@ -445,7 +474,11 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 kind: .manualScroll,
                 documentToken: documentToken,
                 responseIdentity: responseIdentity,
-                responseComplete: responseComplete
+                responseComplete: responseComplete,
+                latestResponseIdentity: responseIdentity,
+                latestResponseComplete: responseComplete,
+                responseRootCount: body["responseRootCount"] as? Int ?? 0,
+                bridgeInstanceID: bridgeInstanceID
             )
             onManualScroll(slotID, documentToken)
             onTrustedInteractionEvent?(slotID, event)
@@ -482,7 +515,28 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             return false
         }
         currentDocumentToken = documentToken
+        recordBridgeDiagnostic(
+            event: "bridge.document_ready",
+            documentToken: documentToken
+        )
         return true
+    }
+
+    private func recordBridgeDiagnostic(
+        event: String,
+        documentToken: String? = nil,
+        fields: [String: RuntimeDiagnosticValue] = [:]
+    ) {
+        var enriched = fields
+        enriched["slot_id"] = .string(slotID.uuidString)
+        enriched["bridge_instance_id"] = .string(bridgeInstanceID.uuidString)
+        enriched["document_token_tag"] = diagnosticContext.documentTokenTag(documentToken)
+        diagnostics.record(
+            event: "unread.\(event)",
+            level: .info,
+            subsystem: "unread",
+            fields: diagnosticContext.fields(enriched)
+        )
     }
 
     private func finishPendingRequests() {
@@ -527,7 +581,9 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         return ChatGPTResponseStatusSnapshot(
             documentToken: documentToken,
             responseIdentity: responseIdentity,
-            generating: generating
+            generating: generating,
+            responseRootCount: body["responseRootCount"] as? Int ?? 0,
+            responseComplete: body["responseComplete"] as? Bool
         )
     }
 
