@@ -99,6 +99,11 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             contentWorld: ChatGPTResponseExtraction.contentWorld,
             name: ChatGPTResponseExtraction.messageHandlerName
         )
+        userContentController.add(
+            self,
+            contentWorld: ChatGPTResponseExtraction.contentWorld,
+            name: ChatGPTResponseExtraction.diagnosticsMessageHandlerName
+        )
         self.userContentController = userContentController
     }
 
@@ -259,7 +264,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
         guard let originProtocol,
               ["http", "https"].contains(originProtocol.lowercased()) else {
-            return reject("unsupported_protocol")
+            return reject("unsupported_scheme")
         }
         guard body["event"] as? String == "manualScroll" else {
             return reject("event_mismatch")
@@ -277,20 +282,20 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         let responseIdentity: ChatGPTResponseIdentity?
         if let rawIdentity = body["latestResponseIdentity"] as? String {
             guard let parsedIdentity = ChatGPTResponseIdentity(rawValue: rawIdentity) else {
-                return reject("latest_response_identity_invalid")
+                return reject("identity_parse_failed")
             }
             responseIdentity = parsedIdentity
         } else if body["latestResponseIdentity"] == nil
                     || body["latestResponseIdentity"] is NSNull {
             responseIdentity = nil
         } else {
-            return reject("latest_response_identity_type_invalid")
+            return reject("identity_parse_failed")
         }
 
         let responseComplete: Bool
         if let rawResponseComplete = body["latestResponseComplete"] {
             guard let parsedResponseComplete = rawResponseComplete as? Bool else {
-                return reject("latest_response_complete_type_invalid")
+                return reject("response_complete_parse_failed")
             }
             responseComplete = parsedResponseComplete
         } else {
@@ -351,6 +356,15 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         originProtocol: String?
     ) -> Bool {
         let messageDocumentToken = body["documentToken"] as? String
+        recordBridgeDiagnostic(
+            event: "trusted_scroll.native_received",
+            documentToken: messageDocumentToken,
+            fields: [
+                "event_kind": .string(body["eventKind"] as? String ?? "scroll_diagnostic"),
+                "phase": .string(body["phase"] as? String ?? "unknown"),
+                "native_message_received": .bool(true)
+            ]
+        )
 
         func reject(_ reason: String) -> Bool {
             recordBridgeDiagnostic(
@@ -446,15 +460,19 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             "native_message_received": .bool(true),
             "native_message_accepted": .bool(true)
         ]
+        var enrichedFields = fields
+        if let dropReason = body["dropReason"] as? String {
+            enrichedFields["drop_reason"] = .string(dropReason)
+        }
         recordBridgeDiagnostic(
             event: "trusted_scroll.native_accepted",
             documentToken: documentToken,
-            fields: fields
+            fields: enrichedFields
         )
         recordBridgeDiagnostic(
             event: "trusted_scroll.\(phase)",
             documentToken: documentToken,
-            fields: fields
+            fields: enrichedFields
         )
         return true
     }
@@ -659,6 +677,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             forName: ChatGPTResponseExtraction.messageHandlerName,
             contentWorld: ChatGPTResponseExtraction.contentWorld
         )
+        userContentController?.removeScriptMessageHandler(
+            forName: ChatGPTResponseExtraction.diagnosticsMessageHandlerName,
+            contentWorld: ChatGPTResponseExtraction.contentWorld
+        )
         userContentController = nil
         webView = nil
         onRuntimeReset(slotID)
@@ -671,6 +693,14 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         didReceive message: WKScriptMessage
     ) {
         guard let body = message.body as? [String: Any] else {
+            recordBridgeDiagnostic(
+                event: "trusted_scroll.native_rejected",
+                fields: [
+                    "event_kind": .string("unknown"),
+                    "drop_reason": .string("body_not_dictionary"),
+                    "native_message_accepted": .bool(false)
+                ]
+            )
             return
         }
         if body["event"] as? String == "manualScroll" {

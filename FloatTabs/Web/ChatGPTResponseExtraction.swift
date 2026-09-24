@@ -320,6 +320,7 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
 enum ChatGPTResponseExtraction {
     static let contentWorldName = "FloatTabsChatGPTResponse"
     static let messageHandlerName = "floatTabsChatGPTResponse"
+    static let diagnosticsMessageHandlerName = "floatTabsChatGPTScrollDiagnostics"
     static let contentWorld = WKContentWorld.world(name: contentWorldName)
 
     static let scriptSource = makeScriptSource()
@@ -354,7 +355,14 @@ enum ChatGPTResponseExtraction {
               return undefined;
             }
           };
-          if (!handler()) { return; }
+          const diagnosticHandler = () => {
+            try {
+              return window.webkit && window.webkit.messageHandlers
+                && window.webkit.messageHandlers["floatTabsChatGPTScrollDiagnostics"];
+            } catch (_) {
+              return undefined;
+            }
+          };
 
           const documentToken = (window.crypto && crypto.randomUUID)
             ? crypto.randomUUID()
@@ -943,17 +951,19 @@ enum ChatGPTResponseExtraction {
             inputEvent,
             blockedByEditableTarget = false
           ) => {
-            if (!target) return;
+            const diagnosticTarget = target || diagnosticHandler();
+            if (!diagnosticTarget) return;
             const latestRoot = latestAssistantResponseRoot();
             const generating = isGenerating();
-            target.postMessage({
+            diagnosticTarget.postMessage({
               version: 3,
               event: "scrollDiagnostic",
               phase: phase,
               eventKind: eventKind,
               documentToken: documentToken,
               isTrusted: Boolean(inputEvent && inputEvent.isTrusted),
-              handlerAvailable: true,
+              handlerAvailable: Boolean(target),
+              dropReason: target ? null : "handler_unavailable",
               deltaXSign: eventKind === "wheel"
                 ? signOf(inputEvent && inputEvent.deltaX)
                 : "zero",
@@ -980,7 +990,6 @@ enum ChatGPTResponseExtraction {
             blockedByEditableTarget = false
           ) => {
             const target = handler();
-            if (!target) return;
             postScrollDiagnostic(
               target,
               "post_attempt",
@@ -988,6 +997,7 @@ enum ChatGPTResponseExtraction {
               inputEvent,
               blockedByEditableTarget
             );
+            if (!target) return;
             const latestRoot = latestAssistantResponseRoot();
             const generating = isGenerating();
             target.postMessage({
