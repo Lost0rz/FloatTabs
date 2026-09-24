@@ -229,6 +229,27 @@ final class UnreadResponseTests: XCTestCase {
         XCTAssertEqual(coordinator.unreadSlotIDs, [slotA])
     }
 
+    func testDiagnosticHandledLookupDistinguishesHitMissAndUnavailable() throws {
+        let coordinator = makeCoordinator()
+        let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:lookup"))
+
+        XCTAssertEqual(
+            coordinator.diagnosticHandledLookup(slotID: slotA, responseIdentity: nil),
+            .unavailable
+        )
+        XCTAssertEqual(
+            coordinator.diagnosticHandledLookup(slotID: slotA, responseIdentity: identity),
+            .miss
+        )
+
+        coordinator.recordHandled(slotID: slotA, responseIdentity: identity)
+
+        XCTAssertEqual(
+            coordinator.diagnosticHandledLookup(slotID: slotA, responseIdentity: identity),
+            .hit
+        )
+    }
+
     func testVisibleCompletionIsNotRecordedAsHandled() throws {
         let coordinator = makeCoordinator()
         let identity = try XCTUnwrap(ChatGPTResponseIdentity(rawValue: "message:visible"))

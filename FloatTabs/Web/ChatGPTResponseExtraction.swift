@@ -127,6 +127,22 @@ struct ChatGPTResponseStatusSnapshot: Equatable, Sendable {
     let documentToken: String
     let responseIdentity: ChatGPTResponseIdentity?
     let generating: Bool
+    let responseRootCount: Int
+    let responseComplete: Bool
+
+    init(
+        documentToken: String,
+        responseIdentity: ChatGPTResponseIdentity?,
+        generating: Bool,
+        responseRootCount: Int = 0,
+        responseComplete: Bool? = nil
+    ) {
+        self.documentToken = documentToken
+        self.responseIdentity = responseIdentity
+        self.generating = generating
+        self.responseRootCount = responseRootCount
+        self.responseComplete = responseComplete ?? (responseIdentity != nil && !generating)
+    }
 }
 
 struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
@@ -134,6 +150,37 @@ struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
     let documentToken: String
     let responseIdentity: ChatGPTResponseIdentity?
     let responseComplete: Bool
+    let latestResponseIdentity: ChatGPTResponseIdentity?
+    let latestResponseComplete: Bool
+    let responseRootCount: Int
+    let bridgeInstanceID: UUID?
+
+    init(
+        kind: ChatGPTTrustedPageInteractionKind,
+        documentToken: String,
+        responseIdentity: ChatGPTResponseIdentity?,
+        responseComplete: Bool,
+        latestResponseIdentity: ChatGPTResponseIdentity? = nil,
+        latestResponseComplete: Bool? = nil,
+        responseRootCount: Int = 0,
+        bridgeInstanceID: UUID? = nil
+    ) {
+        self.kind = kind
+        self.documentToken = documentToken
+        self.responseIdentity = responseIdentity
+        self.responseComplete = responseComplete
+        self.latestResponseIdentity = latestResponseIdentity ?? responseIdentity
+        self.latestResponseComplete = latestResponseComplete ?? responseComplete
+        self.responseRootCount = responseRootCount
+        self.bridgeInstanceID = bridgeInstanceID
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind
+            && lhs.documentToken == rhs.documentToken
+            && lhs.responseIdentity == rhs.responseIdentity
+            && lhs.responseComplete == rhs.responseComplete
+    }
 }
 
 /// Swift-owned protocol model for the independent one-shot ChatGPT response
@@ -273,6 +320,7 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
 enum ChatGPTResponseExtraction {
     static let contentWorldName = "FloatTabsChatGPTResponse"
     static let messageHandlerName = "floatTabsChatGPTResponse"
+    static let diagnosticsMessageHandlerName = "floatTabsChatGPTScrollDiagnostics"
     static let contentWorld = WKContentWorld.world(name: contentWorldName)
 
     static let scriptSource = makeScriptSource()
@@ -307,7 +355,14 @@ enum ChatGPTResponseExtraction {
               return undefined;
             }
           };
-          if (!handler()) { return; }
+          const diagnosticHandler = () => {
+            try {
+              return window.webkit && window.webkit.messageHandlers
+                && window.webkit.messageHandlers["floatTabsChatGPTScrollDiagnostics"];
+            } catch (_) {
+              return undefined;
+            }
+          };
 
           const documentToken = (window.crypto && crypto.randomUUID)
             ? crypto.randomUUID()
@@ -882,8 +937,66 @@ enum ChatGPTResponseExtraction {
             });
           };
 
-          const postManualScroll = () => {
+          const signOf = (value) => {
+            if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) {
+              return "zero";
+            }
+            return value < 0 ? "negative" : "positive";
+          };
+
+          const postScrollDiagnostic = (
+            target,
+            phase,
+            eventKind,
+            inputEvent,
+            blockedByEditableTarget = false
+          ) => {
+            const diagnosticTarget = target || diagnosticHandler();
+            if (!diagnosticTarget) return;
+            const latestRoot = latestAssistantResponseRoot();
+            const generating = isGenerating();
+            diagnosticTarget.postMessage({
+              version: 3,
+              event: "scrollDiagnostic",
+              phase: phase,
+              eventKind: eventKind,
+              documentToken: documentToken,
+              isTrusted: Boolean(inputEvent && inputEvent.isTrusted),
+              handlerAvailable: Boolean(target),
+              dropReason: target ? null : "handler_unavailable",
+              deltaXSign: eventKind === "wheel"
+                ? signOf(inputEvent && inputEvent.deltaX)
+                : "zero",
+              deltaYSign: eventKind === "wheel"
+                ? signOf(inputEvent && inputEvent.deltaY)
+                : "zero",
+              deltaMode: eventKind === "wheel"
+                && inputEvent
+                && typeof inputEvent.deltaMode === 'number'
+                ? inputEvent.deltaMode
+                : 0,
+              blockedByEditableTarget: Boolean(blockedByEditableTarget),
+              programmaticScrollGuardActive:
+                performance.now() < programmaticScrollGuardUntil,
+              latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              responseRootCount: assistantResponseRoots().length
+            });
+          };
+
+          const postManualScroll = (
+            eventKind = "unknown",
+            inputEvent = null,
+            blockedByEditableTarget = false
+          ) => {
             const target = handler();
+            postScrollDiagnostic(
+              target,
+              "post_attempt",
+              eventKind,
+              inputEvent,
+              blockedByEditableTarget
+            );
             if (!target) return;
             const latestRoot = latestAssistantResponseRoot();
             const generating = isGenerating();
@@ -892,7 +1005,8 @@ enum ChatGPTResponseExtraction {
               event: "manualScroll",
               documentToken: documentToken,
               latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
-              latestResponseComplete: Boolean(latestRoot) && !generating
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              responseRootCount: assistantResponseRoots().length
             });
           };
 
@@ -907,7 +1021,10 @@ enum ChatGPTResponseExtraction {
               documentToken: documentToken,
               interactionKind: "assistantPointer",
               responseIdentity: canonicalResponseIdentityFor(root),
-              responseComplete: root !== latestRoot || !generating
+              responseComplete: root !== latestRoot || !generating,
+              latestResponseIdentity: canonicalResponseIdentityFor(latestRoot),
+              latestResponseComplete: Boolean(latestRoot) && !generating,
+              responseRootCount: assistantResponseRoots().length
             });
           };
 
@@ -962,13 +1079,25 @@ enum ChatGPTResponseExtraction {
           };
 
           document.addEventListener('wheel', (event) => {
-            if (event.isTrusted) postManualScroll();
+            const target = handler();
+            if (!target) return;
+            postScrollDiagnostic(target, "dom_input", "wheel", event);
+            if (event.isTrusted) postManualScroll("wheel", event);
           }, true);
           document.addEventListener('keydown', (event) => {
-            if (event.isTrusted
-                && isScrollKey(event)
-                && !isEditableTarget(event.target)) {
-              postManualScroll();
+            if (!isScrollKey(event)) return;
+            const blockedByEditableTarget = isEditableTarget(event.target);
+            const target = handler();
+            if (!target) return;
+            postScrollDiagnostic(
+              target,
+              "dom_input",
+              "keydown_scroll",
+              event,
+              blockedByEditableTarget
+            );
+            if (event.isTrusted && !blockedByEditableTarget) {
+              postManualScroll("keydown_scroll", event);
             }
           }, true);
           document.addEventListener('pointerdown', (event) => {
@@ -980,13 +1109,26 @@ enum ChatGPTResponseExtraction {
             const root = document.documentElement;
             const likelyScrollbar = event.clientX >= root.clientWidth
               || event.clientY >= root.clientHeight;
-            if (likelyScrollbar) postManualScroll();
+            if (likelyScrollbar) {
+              const target = handler();
+              if (target) {
+                postScrollDiagnostic(
+                  target,
+                  "dom_input",
+                  "scrollbar_pointer",
+                  event
+                );
+                postManualScroll("scrollbar_pointer", event);
+              }
+            }
           }, true);
-          document.addEventListener('scroll', () => {
+          document.addEventListener('scroll', (event) => {
             // Scroll events generated by our own smooth scroll are deliberately
-            // ignored. User intent is reported by trusted wheel/keyboard/
-            // scrollbar input events above; no timer or position polling is used.
-            if (performance.now() < programmaticScrollGuardUntil) return;
+            // ignored for acknowledgement. They are logged only to show
+            // whether the DOM moved and whether the programmatic guard was set.
+            const target = handler();
+            if (!target) return;
+            postScrollDiagnostic(target, "dom_scroll", "scroll", event);
           }, true);
 
           globalThis.__floatTabsScrollToSpeechBlockV3 = (
@@ -1085,7 +1227,9 @@ enum ChatGPTResponseExtraction {
               version: 1,
               documentToken: documentToken,
               responseIdentity: canonicalResponseIdentityFor(latestRoot),
-              generating: isGenerating()
+              generating: isGenerating(),
+              responseRootCount: assistantResponseRoots().length,
+              responseComplete: Boolean(latestRoot) && !isGenerating()
             };
           };
 

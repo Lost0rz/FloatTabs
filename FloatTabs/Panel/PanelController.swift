@@ -206,6 +206,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let webViewPool: WebViewPool
     private let attentionCoordinator: WebAttentionCoordinator
     private let diagnostics: any RuntimeDiagnosticRecording
+    private let unreadDiagnosticContext: UnreadRuntimeDiagnosticContext
     private let unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator
     private let webFocusRouter: WebFocusRouter
     private let presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))?
@@ -327,6 +328,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var requestedVisibility = false
     private var pendingSlotSynchronization = false
     private var unreadPruneDiagnosticSuppressionIDs: Set<UUID> = []
+    private var unreadDiagnosticGenerationEpochs: [UUID: UInt64] = [:]
     private var lastPresentationUptime: TimeInterval = -.infinity
     private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
     private var fullscreenProfile: WebAppProfile?
@@ -756,10 +758,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         self.webViewPool = webViewPool
         self.attentionCoordinator = attentionCoordinator
         self.diagnostics = diagnostics
+        self.unreadDiagnosticContext = .shared
         self.presentationFocusReadinessProvider = presentationFocusReadinessProvider
         self.unreadResponseCoordinator = unreadResponseCoordinator
             ?? ChatGPTUnreadResponseCoordinator(
-                store: unreadResponseStore ?? UnreadResponseStore()
+                store: unreadResponseStore ?? UnreadResponseStore(),
+                diagnostics: diagnostics,
+                diagnosticContext: unreadDiagnosticContext
             )
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter(diagnostics: diagnostics)
         let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
@@ -3112,6 +3117,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotID: UUID,
         event: ChatGPTAttentionEvent
     ) {
+        if event.observation == .runtimeReset {
+            unreadDiagnosticGenerationEpochs.removeValue(forKey: slotID)
+        } else if let generationEpoch = event.generationEpoch {
+            unreadDiagnosticGenerationEpochs[slotID] = generationEpoch
+        }
         let observation = event.observation
         let attentionStateBefore = attentionCoordinator.state(for: slotID)
         let isValidGenerationCompletion = observation == .generationFinished
@@ -3121,6 +3131,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             : nil
         let completionFacts = unreadPresentationFacts(slotID: slotID)
         let unreadBefore = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+        let unreadIdentityBefore = unreadResponseCoordinator.unreadResponseIdentity(for: slotID)
+        let handledLookup = unreadResponseCoordinator.diagnosticHandledLookup(
+            slotID: slotID,
+            responseIdentity: event.responseIdentity
+        )
         if observation == .generationFinished {
             recordUnreadDiagnostic(
                 event: "unread.completion_observed",
@@ -3131,6 +3146,18 @@ final class PanelController: NSObject, NSWindowDelegate {
                     "presentation_visible": .bool(completionFacts.presentationVisible),
                     "web_window_key": .bool(completionFacts.webWindowKey),
                     "unread_before": .bool(unreadBefore),
+                    "unread_identity_tag_before": unreadDiagnosticContext.identityTag(unreadIdentityBefore),
+                    "response_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                    "identity_source": .string(UnreadRuntimeDiagnosticIdentitySource(identity: event.responseIdentity).rawValue),
+                    "latest_response_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                    "latest_response_complete": .bool(event.latestResponseComplete ?? false),
+                    "response_root_count": .integer(Int64(event.responseRootCount ?? 0)),
+                    "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+                    "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+                    "generation_epoch": event.generationEpoch.map { .integer(Int64($0)) } ?? .null,
+                    "completion_producer": .string(event.completionProducer.rawValue),
+                    "handled_lookup": .string(handledLookup.rawValue),
+                    "coordinator_instance_id": .string(unreadResponseCoordinator.coordinatorInstanceID.uuidString),
                     "attention_state_before": .string(attentionStateBefore.diagnosticName),
                     "session_locked": .bool(completionFacts.sessionLocked),
                     "panel_visible": .bool(completionFacts.panelVisible)
@@ -3149,6 +3176,47 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
+
+        if observation == .generationFinished {
+            let handleResult: String
+            switch completionResult {
+            case .ignored:
+                handleResult = "ignored"
+            case let .marked(identityAvailable):
+                handleResult = identityAvailable
+                    ? "marked_identity"
+                    : "marked_identity_unavailable"
+            case .alreadyHandled:
+                handleResult = "already_handled"
+            }
+            let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+            recordUnreadDiagnostic(
+                event: "unread.completion_decision",
+                trace: completionTrace,
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "coordinator_instance_id": .string(unreadResponseCoordinator.coordinatorInstanceID.uuidString),
+                    "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+                    "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+                    "generation_epoch": event.generationEpoch.map { .integer(Int64($0)) } ?? .null,
+                    "completion_producer": .string(event.completionProducer.rawValue),
+                    "completion_valid": .bool(isValidGenerationCompletion),
+                    "response_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                    "identity_source": .string(UnreadRuntimeDiagnosticIdentitySource(identity: event.responseIdentity).rawValue),
+                    "latest_response_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                    "latest_response_complete": .bool(event.latestResponseComplete ?? false),
+                    "response_root_count": .integer(Int64(event.responseRootCount ?? 0)),
+                    "handled_lookup": .string(handledLookup.rawValue),
+                    "handle_result": .string(handleResult),
+                    "unread_before": .bool(unreadBefore),
+                    "unread_after": .bool(unreadAfter),
+                    "unread_identity_tag_before": unreadDiagnosticContext.identityTag(unreadIdentityBefore),
+                    "unread_identity_tag_after": unreadDiagnosticContext.identityTag(
+                        unreadResponseCoordinator.unreadResponseIdentity(for: slotID)
+                    )
+                ]
+            )
+        }
 
         if observation == .generationFinished {
             let reason: UnreadDiagnosticSkipReason?
@@ -3472,14 +3540,71 @@ final class PanelController: NSObject, NSWindowDelegate {
         let source: UnreadDiagnosticSource = event.kind == .assistantPointer
             ? .trustedAssistantPointer
             : .trustedManualScroll
+        let presentationFacts = unreadPresentationFacts(slotID: slotID)
+        let unreadBefore = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+        let pipelineFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "event_kind": .string(event.kind.rawValue),
+            "source": .string(source.rawValue),
+            "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+            "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+            "ack_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+            "latest_response_identity_tag": unreadDiagnosticContext.identityTag(
+                event.latestResponseIdentity
+            ),
+            "latest_response_complete": .bool(event.latestResponseComplete),
+            "response_root_count": .integer(Int64(event.responseRootCount)),
+            "interaction_surface_presented": .bool(presentationFacts.interactionSurfacePresented),
+            "active_slot_matches": .bool(presentationFacts.activeSlotMatches),
+            "web_window_key": .bool(presentationFacts.webWindowKey),
+            "unread_before": .bool(unreadBefore)
+        ]
+        recordUnreadDiagnostic(
+            event: "trusted_scroll.panel_received",
+            fields: pipelineFields
+        )
         guard let attempt = beginUnreadAcknowledgement(
             slotID: slotID,
-            source: source
+            source: source,
+            diagnosticFields: [
+                "generation_epoch": unreadDiagnosticGenerationEpochs[slotID]
+                    .map { .integer(Int64($0)) } ?? .null,
+                "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+                "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+                "ack_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                "ack_identity_source": .string(
+                    UnreadRuntimeDiagnosticIdentitySource(identity: event.responseIdentity).rawValue
+                ),
+                "latest_response_identity_tag": unreadDiagnosticContext.identityTag(
+                    event.latestResponseIdentity
+                ),
+                "latest_response_complete": .bool(event.latestResponseComplete),
+                "response_root_count": .integer(Int64(event.responseRootCount)),
+                "ack_mode": .string(
+                    event.responseIdentity != nil && event.responseComplete
+                        ? "identity_bound"
+                        : "slot_level"
+                ),
+                "handled_recorded": .bool(event.responseIdentity != nil && event.responseComplete)
+            ]
         ) else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("no_unread")
+                ]) { _, new in new }
+            )
             return
         }
         let interactionPresented = attempt.facts.interactionSurfacePresented
         guard interactionPresented else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("not_actually_presented")
+                ]) { _, new in new }
+            )
             finishUnreadAcknowledgement(
                 attempt,
                 skippedReason: .notActuallyPresented
@@ -3487,6 +3612,11 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
+        let ackMode = event.responseIdentity != nil && event.responseComplete
+            ? "identity_bound"
+            : "slot_level"
+        let handledRecorded = event.responseIdentity != nil && event.responseComplete
+        var ackResult = "other"
         if let responseIdentity = event.responseIdentity,
            event.responseComplete {
             unreadResponseCoordinator.recordHandled(
@@ -3498,17 +3628,79 @@ final class PanelController: NSObject, NSWindowDelegate {
                 responseIdentity: responseIdentity
             )
             if result == .preservedIdentityMismatch {
+                ackResult = "identity_mismatch"
+                recordUnreadDiagnostic(
+                    event: "trusted_scroll.panel_rejected",
+                    trace: attempt.trace,
+                    fields: pipelineFields.merging([
+                        "drop_reason": .string("identity_mismatch")
+                    ]) { _, new in new }
+                )
                 finishUnreadAcknowledgement(
                     attempt,
                     skippedReason: .responseIdentityMismatch
                 )
                 return
             }
+            ackResult = result == .noUnread ? "no_unread" : "cleared"
         } else {
             // Identity-unavailable and streaming interactions retain the U1
             // Slot-level fallback semantics. A streaming latest response is
             // deliberately not added to handled history.
             unreadResponseCoordinator.acknowledge(slotID: slotID)
+            ackResult = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+                ? "other"
+                : "cleared"
+        }
+        let unreadAfter = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+        recordUnreadDiagnostic(
+            event: "unread.ack_result",
+            trace: attempt.trace,
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "coordinator_instance_id": .string(unreadResponseCoordinator.coordinatorInstanceID.uuidString),
+                "generation_epoch": unreadDiagnosticGenerationEpochs[slotID]
+                    .map { .integer(Int64($0)) } ?? .null,
+                "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+                "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+                "ack_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+                "ack_identity_source": .string(
+                    UnreadRuntimeDiagnosticIdentitySource(identity: event.responseIdentity).rawValue
+                ),
+                "latest_response_identity_tag": unreadDiagnosticContext.identityTag(
+                    event.latestResponseIdentity
+                ),
+                "latest_response_complete": .bool(event.latestResponseComplete),
+                "response_root_count": .integer(Int64(event.responseRootCount)),
+                "ack_mode": .string(ackMode),
+                "ack_result": .string(ackResult),
+                "handled_recorded": .bool(handledRecorded),
+                "unread_before": .bool(true),
+                "unread_after": .bool(unreadAfter),
+                "unread_identity_tag_after": unreadDiagnosticContext.identityTag(
+                    unreadResponseCoordinator.unreadResponseIdentity(for: slotID)
+                )
+            ]
+        )
+        if ackResult == "cleared" {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.acknowledged",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "ack_result": .string(ackResult),
+                    "unread_after": .bool(unreadAfter)
+                ]) { _, new in new }
+            )
+        } else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("ack_\(ackResult)"),
+                    "ack_result": .string(ackResult),
+                    "unread_after": .bool(unreadAfter)
+                ]) { _, new in new }
+            )
         }
         synchronizeUnreadIndicators()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
@@ -3536,7 +3728,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func beginUnreadAcknowledgement(
         slotID: UUID,
         source: UnreadDiagnosticSource,
-        trace: RuntimeDiagnosticTrace? = nil
+        trace: RuntimeDiagnosticTrace? = nil,
+        diagnosticFields: [String: RuntimeDiagnosticValue] = [:]
     ) -> UnreadAcknowledgementAttempt? {
         guard unreadResponseCoordinator.unreadSlotIDs.contains(slotID) else {
             return nil
@@ -3548,18 +3741,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             facts: facts,
             trace: trace ?? diagnostics.beginTrace(root: "unread.interaction")
         )
+        var attemptFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "source": .string(source.rawValue),
+            "presentation_visible": .bool(facts.presentationVisible),
+            "web_window_key": .bool(facts.webWindowKey),
+            "interaction_surface_presented": .bool(facts.interactionSurfacePresented),
+            "active_slot_matches": .bool(facts.activeSlotMatches),
+            "unread_before": .bool(unreadResponseCoordinator.unreadSlotIDs.contains(slotID)),
+            "unread_identity_tag_before": unreadDiagnosticContext.identityTag(
+                unreadResponseCoordinator.unreadResponseIdentity(for: slotID)
+            ),
+            "coordinator_instance_id": .string(unreadResponseCoordinator.coordinatorInstanceID.uuidString)
+        ]
+        attemptFields.merge(diagnosticFields) { _, new in new }
         recordUnreadDiagnostic(
             event: "unread.acknowledge_attempt",
             trace: attempt.trace,
-            fields: [
-                "slot_id": .string(slotID.uuidString),
-                "source": .string(source.rawValue),
-                "presentation_visible": .bool(facts.presentationVisible),
-                "web_window_key": .bool(facts.webWindowKey),
-                "interaction_surface_presented": .bool(facts.interactionSurfacePresented),
-                "active_slot_matches": .bool(facts.activeSlotMatches),
-                "unread_before": .bool(unreadResponseCoordinator.unreadSlotIDs.contains(slotID))
-            ]
+            fields: attemptFields
         )
         return attempt
     }
@@ -3578,6 +3777,11 @@ final class PanelController: NSObject, NSWindowDelegate {
                   let responseIdentity = snapshot.responseIdentity else {
                 return
             }
+            let unreadIdentityBefore = self.unreadResponseCoordinator.unreadResponseIdentity(for: slotID)
+            let handledLookup = self.unreadResponseCoordinator.diagnosticHandledLookup(
+                slotID: slotID,
+                responseIdentity: responseIdentity
+            )
             let reconciliation = self.unreadResponseCoordinator.reconcileHandledSnapshot(
                 slotID: slotID,
                 responseIdentity: responseIdentity
@@ -3590,8 +3794,24 @@ final class PanelController: NSObject, NSWindowDelegate {
                     "slot_id": .string(slotID.uuidString),
                     "source": .string(source.rawValue),
                     "identity_match": .bool(true),
+                    "coordinator_instance_id": .string(self.unreadResponseCoordinator.coordinatorInstanceID.uuidString),
+                    "bridge_instance_id": .string(responseBridge.bridgeInstanceID.uuidString),
+                    "document_token_tag": self.unreadDiagnosticContext.documentTokenTag(snapshot.documentToken),
+                    "generation_epoch": self.unreadDiagnosticGenerationEpochs[slotID]
+                        .map { .integer(Int64($0)) } ?? .null,
+                    "completion_producer": .string(UnreadRuntimeDiagnosticCompletionProducer.snapshot.rawValue),
+                    "response_identity_tag": self.unreadDiagnosticContext.identityTag(responseIdentity),
+                    "identity_source": .string(
+                        UnreadRuntimeDiagnosticIdentitySource(identity: responseIdentity).rawValue
+                    ),
+                    "latest_response_identity_tag": self.unreadDiagnosticContext.identityTag(responseIdentity),
+                    "latest_response_complete": .bool(snapshot.responseComplete),
+                    "response_root_count": .integer(Int64(snapshot.responseRootCount)),
+                    "handled_lookup": .string(handledLookup.rawValue),
+                    "unread_identity_tag_before": self.unreadDiagnosticContext.identityTag(unreadIdentityBefore),
                     "unread_before": .bool(true),
-                    "unread_after": .bool(false)
+                    "unread_after": .bool(false),
+                    "unread_identity_tag_after": self.unreadDiagnosticContext.identityTag(nil)
                 ]
             )
         }
@@ -3642,7 +3862,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             level: .info,
             subsystem: "unread",
             trace: trace,
-            fields: fields
+            fields: unreadDiagnosticContext.fields(fields)
         )
     }
 

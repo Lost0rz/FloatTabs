@@ -342,4 +342,81 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(tracker.accepts(later))
         XCTAssertEqual(tracker.consume(later)?.trace.root, "dismiss-C")
     }
+
+    @MainActor
+    func testUnreadRuntimeFingerprintIsStableOnlyWithinTheDiagnosticSession() {
+        let context = UnreadRuntimeDiagnosticContext(
+            sessionID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            processNonce: Data(repeating: 7, count: 32)
+        )
+        let first = context.tag("message:response-a")
+        let same = context.tag("message:response-a")
+        let different = context.tag("message:response-b")
+
+        XCTAssertEqual(first, same)
+        XCTAssertNotEqual(first, different)
+        if case let .string(tag) = first {
+            XCTAssertFalse(tag.contains("message:response-a"))
+            XCTAssertEqual(tag.count, 16)
+        } else {
+            XCTFail("expected a privacy-safe fingerprint")
+        }
+    }
+
+    @MainActor
+    func testUnreadRuntimeDiagnosticFieldsHaveMonotonicLocalOrdering() {
+        let context = UnreadRuntimeDiagnosticContext(
+            sessionID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            processNonce: Data(repeating: 3, count: 32)
+        )
+        let first = context.fields(["event_kind": .string("ack")])
+        let second = context.fields(["event_kind": .string("completion")])
+
+        XCTAssertEqual(first["diagnostic_session_id"], .string("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
+        XCTAssertEqual(first["diagnostic_sequence"], .integer(1))
+        XCTAssertEqual(second["diagnostic_sequence"], .integer(2))
+    }
+
+    @MainActor
+    func testUnreadRuntimeDiagnosticFieldsUseOnlyPrivacySafeTags() throws {
+        let context = UnreadRuntimeDiagnosticContext(
+            processNonce: Data(repeating: 9, count: 32)
+        )
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        diagnostics.record(
+            event: "unread.completion_decision",
+            subsystem: "unread",
+            fields: context.fields([
+                "response_identity_tag": context.tag("message:private"),
+                "document_token_tag": context.tag("document-private"),
+                "raw_response_identity": .string("message:private"),
+                "raw_document_token": .string("document-private"),
+                "response_root_count": .integer(2)
+            ])
+        )
+
+        let line = try XCTUnwrap(writer.lines.first)
+        let contents = try XCTUnwrap(String(data: line, encoding: .utf8))
+        XCTAssertTrue(contents.contains("response_identity_tag"))
+        XCTAssertTrue(contents.contains("document_token_tag"))
+        XCTAssertFalse(contents.contains("message:private"))
+        XCTAssertFalse(contents.contains("document-private"))
+        XCTAssertFalse(contents.contains("raw_response_identity"))
+        XCTAssertFalse(contents.contains("raw_document_token"))
+    }
+
+    func testUnreadCompletionProducerAndHandledLookupAreExplicitEnums() {
+        XCTAssertEqual(
+            UnreadRuntimeDiagnosticCompletionProducer.livenessProbe.rawValue,
+            "liveness_probe"
+        )
+        XCTAssertEqual(
+            UnreadRuntimeDiagnosticCompletionProducer.snapshot.rawValue,
+            "snapshot"
+        )
+        XCTAssertEqual(UnreadRuntimeDiagnosticHandledLookup.hit.rawValue, "hit")
+        XCTAssertEqual(UnreadRuntimeDiagnosticHandledLookup.miss.rawValue, "miss")
+        XCTAssertEqual(UnreadRuntimeDiagnosticHandledLookup.unavailable.rawValue, "unavailable")
+    }
 }

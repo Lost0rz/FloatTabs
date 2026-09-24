@@ -3,6 +3,46 @@ import Darwin
 import WebKit
 
 enum RuntimeDiagnosticPrivacy {
+    private static let safeUnreadTraceKeys: Set<String> = [
+        "diagnostic_session_id",
+        "diagnostic_sequence",
+        "response_identity_tag",
+        "latest_response_identity_tag",
+        "unread_identity_tag_before",
+        "unread_identity_tag_after",
+        "document_token_tag",
+        "bridge_instance_id",
+        "coordinator_instance_id",
+        "generation_epoch",
+        "response_root_count",
+        "latest_response_complete",
+        "completion_producer",
+        "handled_lookup",
+        "ack_identity_tag",
+        "ack_identity_source",
+        "identity_source",
+        "ack_mode",
+        "ack_result",
+        "handled_recorded",
+        "handle_result",
+        "event_kind",
+        "phase",
+        "is_trusted",
+        "handler_available",
+        "delta_x_sign",
+        "delta_y_sign",
+        "delta_mode",
+        "programmatic_scroll_guard_active",
+        "blocked_by_editable_target",
+        "native_message_accepted",
+        "native_message_received",
+        "callback_kind",
+        "drop_reason",
+        "interaction_surface_presented",
+        "active_slot_matches",
+        "web_window_key"
+    ]
+
     private static let sensitiveKeyFragments = [
         "authorization",
         "cookie",
@@ -165,6 +205,9 @@ enum RuntimeDiagnosticPrivacy {
 
     private static func isSensitiveKey(_ key: String) -> Bool {
         let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
+        if safeUnreadTraceKeys.contains(key.lowercased()) {
+            return false
+        }
         return sensitiveKeyFragments.contains { normalized.contains($0) }
     }
 

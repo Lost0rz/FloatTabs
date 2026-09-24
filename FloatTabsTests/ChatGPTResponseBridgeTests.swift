@@ -306,9 +306,16 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'End'"))
         XCTAssertTrue(
             ChatGPTResponseExtraction.scriptSource.contains(
-                "if (event.isTrusted) postManualScroll();"
+                "if (event.isTrusted) postManualScroll(\"wheel\", event);"
             )
         )
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("scrollDiagnostic"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("postScrollDiagnostic"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("dom_input"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("post_attempt"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("dom_scroll"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("deltaXSign"))
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("programmaticScrollGuardActive"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("DOMContentLoaded"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event: \"documentReady\""))
         XCTAssertTrue(
@@ -433,6 +440,95 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             bridge.debugInvokeTrustedManualScroll(documentToken: "document-b-12345678")
         )
         XCTAssertEqual(manualScrollTokens, ["document-b-12345678"])
+    }
+
+    func testManualScrollAdmissionTracesNativeBoundaryAndCallbacks() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let slotID = UUID()
+        var manualScrollCount = 0
+        var trustedEvents: [ChatGPTTrustedInteractionEvent] = []
+        let bridge = ChatGPTResponseBridge(
+            slotID: slotID,
+            onManualScroll: { _, _ in manualScrollCount += 1 },
+            onTrustedInteractionEvent: { _, event in trustedEvents.append(event) },
+            diagnostics: diagnostics
+        )
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        let token = "scroll-admission-document"
+        XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: token))
+
+        XCTAssertTrue(
+            bridge.acceptManualScroll(
+                body: [
+                    "version": ChatGPTResponsePayload.currentVersion,
+                    "event": "manualScroll",
+                    "documentToken": token,
+                    "latestResponseIdentity": "message:scroll-response",
+                    "latestResponseComplete": true,
+                    "responseRootCount": 3
+                ],
+                messageWebView: webView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "HTTPS"
+            )
+        )
+
+        XCTAssertEqual(manualScrollCount, 1)
+        XCTAssertEqual(trustedEvents.count, 1)
+        XCTAssertEqual(trustedEvents.first?.kind, .manualScroll)
+        XCTAssertEqual(
+            writer.events.map(\.event),
+            [
+                "unread.bridge.created",
+                "unread.bridge.document_ready",
+                "unread.trusted_scroll.native_received",
+                "unread.trusted_scroll.native_accepted",
+                "unread.trusted_scroll.manual_scroll_callback_emitted",
+                "unread.trusted_scroll.trusted_event_callback_emitted"
+            ]
+        )
+    }
+
+    func testManualScrollAdmissionRecordsNativeDropReason() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let bridge = ChatGPTResponseBridge(
+            slotID: UUID(),
+            diagnostics: diagnostics
+        )
+        let webView = WKWebView(
+            frame: .zero,
+            configuration: WKWebViewConfiguration()
+        )
+        bridge.attach(to: webView)
+        XCTAssertTrue(
+            bridge.debugReceiveDocumentReady(
+                documentToken: "scroll-rejection-document"
+            )
+        )
+
+        XCTAssertFalse(
+            bridge.acceptManualScroll(
+                body: [
+                    "version": ChatGPTResponsePayload.currentVersion,
+                    "event": "manualScroll",
+                    "documentToken": "stale-scroll-document"
+                ],
+                messageWebView: webView,
+                isMainFrame: true,
+                originHost: "chatgpt.com",
+                originProtocol: "https"
+            )
+        )
+        let rejection = writer.events.last
+        XCTAssertEqual(rejection?.event, "unread.trusted_scroll.native_rejected")
+        XCTAssertEqual(rejection?.fields["drop_reason"], .string("document_token_mismatch"))
     }
 
     func testDebugTrustedInteractionForwardsOnlyCurrentDocumentAndFixedKind() {
