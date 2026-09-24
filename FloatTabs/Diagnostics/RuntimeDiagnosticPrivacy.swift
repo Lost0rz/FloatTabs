@@ -24,7 +24,23 @@ enum RuntimeDiagnosticPrivacy {
         "ack_mode",
         "ack_result",
         "handled_recorded",
-        "handle_result"
+        "handle_result",
+        "event_kind",
+        "phase",
+        "is_trusted",
+        "handler_available",
+        "delta_x_sign",
+        "delta_y_sign",
+        "delta_mode",
+        "programmatic_scroll_guard_active",
+        "blocked_by_editable_target",
+        "native_message_accepted",
+        "native_message_received",
+        "callback_kind",
+        "drop_reason",
+        "interaction_surface_presented",
+        "active_slot_matches",
+        "web_window_key"
     ]
 
     private static let sensitiveKeyFragments = [

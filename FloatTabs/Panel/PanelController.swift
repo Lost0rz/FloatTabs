@@ -3540,6 +3540,29 @@ final class PanelController: NSObject, NSWindowDelegate {
         let source: UnreadDiagnosticSource = event.kind == .assistantPointer
             ? .trustedAssistantPointer
             : .trustedManualScroll
+        let presentationFacts = unreadPresentationFacts(slotID: slotID)
+        let unreadBefore = unreadResponseCoordinator.unreadSlotIDs.contains(slotID)
+        let pipelineFields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "event_kind": .string(event.kind.rawValue),
+            "source": .string(source.rawValue),
+            "bridge_instance_id": event.bridgeInstanceID.map { .string($0.uuidString) } ?? .null,
+            "document_token_tag": unreadDiagnosticContext.documentTokenTag(event.documentToken),
+            "ack_identity_tag": unreadDiagnosticContext.identityTag(event.responseIdentity),
+            "latest_response_identity_tag": unreadDiagnosticContext.identityTag(
+                event.latestResponseIdentity
+            ),
+            "latest_response_complete": .bool(event.latestResponseComplete),
+            "response_root_count": .integer(Int64(event.responseRootCount)),
+            "interaction_surface_presented": .bool(presentationFacts.interactionSurfacePresented),
+            "active_slot_matches": .bool(presentationFacts.activeSlotMatches),
+            "web_window_key": .bool(presentationFacts.webWindowKey),
+            "unread_before": .bool(unreadBefore)
+        ]
+        recordUnreadDiagnostic(
+            event: "trusted_scroll.panel_received",
+            fields: pipelineFields
+        )
         guard let attempt = beginUnreadAcknowledgement(
             slotID: slotID,
             source: source,
@@ -3565,10 +3588,23 @@ final class PanelController: NSObject, NSWindowDelegate {
                 "handled_recorded": .bool(event.responseIdentity != nil && event.responseComplete)
             ]
         ) else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("no_unread")
+                ]) { _, new in new }
+            )
             return
         }
         let interactionPresented = attempt.facts.interactionSurfacePresented
         guard interactionPresented else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("not_actually_presented")
+                ]) { _, new in new }
+            )
             finishUnreadAcknowledgement(
                 attempt,
                 skippedReason: .notActuallyPresented
@@ -3593,6 +3629,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             )
             if result == .preservedIdentityMismatch {
                 ackResult = "identity_mismatch"
+                recordUnreadDiagnostic(
+                    event: "trusted_scroll.panel_rejected",
+                    trace: attempt.trace,
+                    fields: pipelineFields.merging([
+                        "drop_reason": .string("identity_mismatch")
+                    ]) { _, new in new }
+                )
                 finishUnreadAcknowledgement(
                     attempt,
                     skippedReason: .responseIdentityMismatch
@@ -3639,6 +3682,26 @@ final class PanelController: NSObject, NSWindowDelegate {
                 )
             ]
         )
+        if ackResult == "cleared" {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.acknowledged",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "ack_result": .string(ackResult),
+                    "unread_after": .bool(unreadAfter)
+                ]) { _, new in new }
+            )
+        } else {
+            recordUnreadDiagnostic(
+                event: "trusted_scroll.panel_rejected",
+                trace: attempt.trace,
+                fields: pipelineFields.merging([
+                    "drop_reason": .string("ack_\(ackResult)"),
+                    "ack_result": .string(ackResult),
+                    "unread_after": .bool(unreadAfter)
+                ]) { _, new in new }
+            )
+        }
         synchronizeUnreadIndicators()
         finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
     }
