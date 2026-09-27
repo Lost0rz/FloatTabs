@@ -34,6 +34,129 @@ enum ChatGPTAttentionObservation: Equatable, Sendable {
     case runtimeReset
 }
 
+enum ChatGPTGenerationEdge: String, Equatable, Sendable {
+    case trueToFalse = "true_to_false"
+    case falseToTrue = "false_to_true"
+}
+
+/// Privacy-safe facts sampled at a generation edge. This type deliberately
+/// retains counts and booleans only; raw `data-testid` values and DOM content
+/// never cross the page/native boundary.
+struct ChatGPTGenerationSignalSnapshot: Equatable, Sendable {
+    static let candidateTestIDCategories = [
+        "stop", "cancel", "interrupt", "tool", "agent", "activity", "task",
+        "run", "progress", "load", "think", "reason", "busy", "status"
+    ]
+
+    let stopPrimaryExistsCount: Int
+    let stopPrimaryRenderedCount: Int
+    let stopFruitjuiceExistsCount: Int
+    let stopFruitjuiceRenderedCount: Int
+    let ariaBusyCount: Int
+    let progressbarCount: Int
+    let statusCount: Int
+    let stateLoadingCount: Int
+    let stateRunningCount: Int
+    let statePendingCount: Int
+    let buttonCount: Int
+    let disabledButtonCount: Int
+    let hasInterruptLikeControl: Bool
+    let hasToolLikeControl: Bool
+    let hasProgressLikeControl: Bool
+    let assistantRootCount: Int
+    let latestAssistantRootExists: Bool
+    let latestAssistantRootRendered: Bool
+    let candidateTestIDCategoryCounts: [String: Int]
+
+    init?(_ body: [String: Any]) {
+        func nonNegativeInt(_ key: String) -> Int? {
+            guard let value = body[key] as? Int, value >= 0 else { return nil }
+            return value
+        }
+
+        guard let stopPrimaryExistsCount = nonNegativeInt("stopPrimaryExistsCount"),
+              let stopPrimaryRenderedCount = nonNegativeInt("stopPrimaryRenderedCount"),
+              let stopFruitjuiceExistsCount = nonNegativeInt("stopFruitjuiceExistsCount"),
+              let stopFruitjuiceRenderedCount = nonNegativeInt("stopFruitjuiceRenderedCount"),
+              let ariaBusyCount = nonNegativeInt("ariaBusyCount"),
+              let progressbarCount = nonNegativeInt("progressbarCount"),
+              let statusCount = nonNegativeInt("statusCount"),
+              let stateLoadingCount = nonNegativeInt("stateLoadingCount"),
+              let stateRunningCount = nonNegativeInt("stateRunningCount"),
+              let statePendingCount = nonNegativeInt("statePendingCount"),
+              let buttonCount = nonNegativeInt("buttonCount"),
+              let disabledButtonCount = nonNegativeInt("disabledButtonCount"),
+              let hasInterruptLikeControl = body["hasInterruptLikeControl"] as? Bool,
+              let hasToolLikeControl = body["hasToolLikeControl"] as? Bool,
+              let hasProgressLikeControl = body["hasProgressLikeControl"] as? Bool,
+              let assistantRootCount = nonNegativeInt("assistantRootCount"),
+              let latestAssistantRootExists = body["latestAssistantRootExists"] as? Bool,
+              let latestAssistantRootRendered = body["latestAssistantRootRendered"] as? Bool,
+              let rawCategoryCounts = body["candidateTestIDCategoryCounts"] as? [String: Any] else {
+            return nil
+        }
+
+        var categoryCounts: [String: Int] = [:]
+        for category in Self.candidateTestIDCategories {
+            guard let count = rawCategoryCounts[category] as? Int, count >= 0 else {
+                return nil
+            }
+            categoryCounts[category] = count
+        }
+
+        self.stopPrimaryExistsCount = stopPrimaryExistsCount
+        self.stopPrimaryRenderedCount = stopPrimaryRenderedCount
+        self.stopFruitjuiceExistsCount = stopFruitjuiceExistsCount
+        self.stopFruitjuiceRenderedCount = stopFruitjuiceRenderedCount
+        self.ariaBusyCount = ariaBusyCount
+        self.progressbarCount = progressbarCount
+        self.statusCount = statusCount
+        self.stateLoadingCount = stateLoadingCount
+        self.stateRunningCount = stateRunningCount
+        self.statePendingCount = statePendingCount
+        self.buttonCount = buttonCount
+        self.disabledButtonCount = disabledButtonCount
+        self.hasInterruptLikeControl = hasInterruptLikeControl
+        self.hasToolLikeControl = hasToolLikeControl
+        self.hasProgressLikeControl = hasProgressLikeControl
+        self.assistantRootCount = assistantRootCount
+        self.latestAssistantRootExists = latestAssistantRootExists
+        self.latestAssistantRootRendered = latestAssistantRootRendered
+        self.candidateTestIDCategoryCounts = categoryCounts
+    }
+
+    func diagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "stop_primary_exists_count": .integer(Int64(stopPrimaryExistsCount)),
+            "stop_primary_rendered_count": .integer(Int64(stopPrimaryRenderedCount)),
+            "stop_fruitjuice_exists_count": .integer(Int64(stopFruitjuiceExistsCount)),
+            "stop_fruitjuice_rendered_count": .integer(Int64(stopFruitjuiceRenderedCount)),
+            "stop_total_exists_count": .integer(Int64(stopPrimaryExistsCount + stopFruitjuiceExistsCount)),
+            "stop_total_rendered_count": .integer(Int64(stopPrimaryRenderedCount + stopFruitjuiceRenderedCount)),
+            "aria_busy_count": .integer(Int64(ariaBusyCount)),
+            "progressbar_count": .integer(Int64(progressbarCount)),
+            "status_count": .integer(Int64(statusCount)),
+            "state_loading_count": .integer(Int64(stateLoadingCount)),
+            "state_running_count": .integer(Int64(stateRunningCount)),
+            "state_pending_count": .integer(Int64(statePendingCount)),
+            "button_count": .integer(Int64(buttonCount)),
+            "disabled_button_count": .integer(Int64(disabledButtonCount)),
+            "has_interrupt_like_control": .bool(hasInterruptLikeControl),
+            "has_tool_like_control": .bool(hasToolLikeControl),
+            "has_progress_like_control": .bool(hasProgressLikeControl),
+            "assistant_root_count": .integer(Int64(assistantRootCount)),
+            "latest_assistant_root_exists": .bool(latestAssistantRootExists),
+            "latest_assistant_root_rendered": .bool(latestAssistantRootRendered)
+        ]
+        for category in Self.candidateTestIDCategories {
+            fields["candidate_testid_\(category)_count"] = .integer(
+                Int64(candidateTestIDCategoryCounts[category] ?? 0)
+            )
+        }
+        return fields
+    }
+}
+
 struct ChatGPTAttentionEvent: Equatable, Sendable {
     let observation: ChatGPTAttentionObservation
     let responseIdentity: ChatGPTResponseIdentity?
@@ -43,6 +166,8 @@ struct ChatGPTAttentionEvent: Equatable, Sendable {
     let generationEpoch: UInt64?
     let documentToken: String?
     let bridgeInstanceID: UUID?
+    let generationEdge: ChatGPTGenerationEdge?
+    let generationSignalSnapshot: ChatGPTGenerationSignalSnapshot?
 
     init(
         observation: ChatGPTAttentionObservation,
@@ -52,7 +177,9 @@ struct ChatGPTAttentionEvent: Equatable, Sendable {
         completionProducer: UnreadRuntimeDiagnosticCompletionProducer = .unknown,
         generationEpoch: UInt64? = nil,
         documentToken: String? = nil,
-        bridgeInstanceID: UUID? = nil
+        bridgeInstanceID: UUID? = nil,
+        generationEdge: ChatGPTGenerationEdge? = nil,
+        generationSignalSnapshot: ChatGPTGenerationSignalSnapshot? = nil
     ) {
         self.observation = observation
         self.responseIdentity = responseIdentity
@@ -62,6 +189,8 @@ struct ChatGPTAttentionEvent: Equatable, Sendable {
         self.generationEpoch = generationEpoch
         self.documentToken = documentToken
         self.bridgeInstanceID = bridgeInstanceID
+        self.generationEdge = generationEdge
+        self.generationSignalSnapshot = generationSignalSnapshot
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -89,6 +218,8 @@ struct ChatGPTBridgePayload: Equatable {
     let responseRootCount: Int?
     let latestResponseComplete: Bool?
     let producer: UnreadRuntimeDiagnosticCompletionProducer
+    let generationEdge: ChatGPTGenerationEdge?
+    let generationSignalSnapshot: ChatGPTGenerationSignalSnapshot?
 
     init(
         version: Int,
@@ -98,7 +229,9 @@ struct ChatGPTBridgePayload: Equatable {
         responseIdentity: ChatGPTResponseIdentity? = nil,
         responseRootCount: Int? = nil,
         latestResponseComplete: Bool? = nil,
-        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown,
+        generationEdge: ChatGPTGenerationEdge? = nil,
+        generationSignalSnapshot: ChatGPTGenerationSignalSnapshot? = nil
     ) {
         self.version = version
         self.kind = kind
@@ -108,6 +241,8 @@ struct ChatGPTBridgePayload: Equatable {
         self.responseRootCount = responseRootCount
         self.latestResponseComplete = latestResponseComplete
         self.producer = producer
+        self.generationEdge = generationEdge
+        self.generationSignalSnapshot = generationSignalSnapshot
     }
 
     static func parse(_ body: [String: Any]) -> ChatGPTBridgePayload? {
@@ -142,6 +277,18 @@ struct ChatGPTBridgePayload: Equatable {
             responseRootCount = nil
         }
         let latestResponseComplete = body["latestResponseComplete"] as? Bool
+        let generationEdge: ChatGPTGenerationEdge?
+        if let rawEdge = body["generationEdge"] as? String {
+            generationEdge = ChatGPTGenerationEdge(rawValue: rawEdge)
+        } else {
+            generationEdge = nil
+        }
+        let generationSignalSnapshot: ChatGPTGenerationSignalSnapshot?
+        if let rawSnapshot = body["generationSignalSnapshot"] as? [String: Any] {
+            generationSignalSnapshot = ChatGPTGenerationSignalSnapshot(rawSnapshot)
+        } else {
+            generationSignalSnapshot = nil
+        }
         let producer: UnreadRuntimeDiagnosticCompletionProducer
         if let rawProducer = body["producer"] as? String {
             producer = UnreadRuntimeDiagnosticCompletionProducer(rawValue: rawProducer) ?? .unknown
@@ -156,7 +303,9 @@ struct ChatGPTBridgePayload: Equatable {
             responseIdentity: responseIdentity,
             responseRootCount: responseRootCount,
             latestResponseComplete: latestResponseComplete,
-            producer: producer
+            producer: producer,
+            generationEdge: generationEdge,
+            generationSignalSnapshot: generationSignalSnapshot
         )
     }
 }
@@ -178,7 +327,9 @@ struct ChatGPTDocumentGenerationTracker {
         responseIdentity: ChatGPTResponseIdentity?,
         responseRootCount: Int? = nil,
         latestResponseComplete: Bool? = nil,
-        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown,
+        generationEdge: ChatGPTGenerationEdge? = nil,
+        generationSignalSnapshot: ChatGPTGenerationSignalSnapshot? = nil
     ) -> ChatGPTAttentionEvent? {
         guard hasBaseline else {
             hasBaseline = true
@@ -189,7 +340,9 @@ struct ChatGPTDocumentGenerationTracker {
                     responseIdentity: nil,
                     responseRootCount: responseRootCount,
                     latestResponseComplete: latestResponseComplete,
-                    completionProducer: producer
+                    completionProducer: producer,
+                    generationEdge: generationEdge,
+                    generationSignalSnapshot: generationSignalSnapshot
                 )
                 : nil
         }
@@ -200,7 +353,9 @@ struct ChatGPTDocumentGenerationTracker {
             responseIdentity: generating ? nil : responseIdentity,
             responseRootCount: responseRootCount,
             latestResponseComplete: latestResponseComplete,
-            completionProducer: producer
+            completionProducer: producer,
+            generationEdge: generationEdge,
+            generationSignalSnapshot: generationSignalSnapshot
         )
     }
 }
@@ -307,11 +462,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             const target = handler();
             if (!target) { return; }
             const latestRoot = latestAssistantResponseRoot();
+            const generationEdge = lastSent === true && !generating
+              ? "true_to_false"
+              : (lastSent === false && generating ? "false_to_true" : null);
             target.postMessage({
               version: 1,
               kind: lastSent === null ? "baseline" : "state",
               token: TOKEN,
               generating: generating,
+              generationEdge: generationEdge,
+              generationSignalSnapshot: generationSignalSnapshot(),
               responseIdentity: generating
                 ? null
                 : canonicalResponseIdentityFor(latestRoot),
@@ -338,6 +498,98 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           };
 
           \(ChatGPTResponseIdentity.sharedDOMHelperSource)
+
+          const assistantResponseRootElements = () => {
+            const explicit = Array.from(document.querySelectorAll(
+              '[data-message-author-role="assistant"],'
+              + '[data-message-role="assistant"]'
+            ));
+            if (explicit.length) return explicit;
+
+            return Array.from(document.querySelectorAll(
+              'article[data-testid*="conversation-turn"]'
+            )).filter((article) => {
+              const role = article.getAttribute('data-message-author-role')
+                || article.querySelector('[data-message-author-role]')
+                  ?.getAttribute('data-message-author-role');
+              return role === 'assistant';
+            });
+          };
+
+          const STRUCTURAL_TESTID_CATEGORIES = [
+            "stop", "cancel", "interrupt", "tool", "agent", "activity", "task",
+            "run", "progress", "load", "think", "reason", "busy", "status"
+          ];
+
+          // Discovery is intentionally category-only. The value itself is
+          // never included in the payload, logs, or native diagnostics.
+          const candidateTestIDCategoryCounts = () => {
+            const counts = {};
+            STRUCTURAL_TESTID_CATEGORIES.forEach((category) => {
+              counts[category] = 0;
+            });
+            document.querySelectorAll("[data-testid]").forEach((element) => {
+              const value = element.getAttribute("data-testid");
+              if (typeof value !== "string" ||
+                  !/^[A-Za-z0-9._:-]{1,80}$/.test(value)) {
+                return;
+              }
+              const lowerValue = value.toLowerCase();
+              STRUCTURAL_TESTID_CATEGORIES.forEach((category) => {
+                if (lowerValue.includes(category)) {
+                  counts[category] += 1;
+                }
+              });
+            });
+            return counts;
+          };
+
+          const generationSignalSnapshot = () => {
+            const primaryStopControls = Array.from(
+              document.querySelectorAll('[data-testid="stop-button"]')
+            );
+            const fruitjuiceStopControls = Array.from(
+              document.querySelectorAll('[data-testid="fruitjuice-stop-button"]')
+            );
+            const latestRoot = latestAssistantResponseRoot();
+            const rootElements = assistantResponseRootElements();
+            const latestRootElement = rootElements.length
+              ? rootElements[rootElements.length - 1]
+              : null;
+            const categoryCounts = candidateTestIDCategoryCounts();
+            const interruptLikeCount = categoryCounts.stop +
+              categoryCounts.cancel + categoryCounts.interrupt;
+            const toolLikeCount = categoryCounts.tool + categoryCounts.agent +
+              categoryCounts.activity + categoryCounts.task + categoryCounts.run;
+            const progressLikeCount = categoryCounts.progress + categoryCounts.load +
+              categoryCounts.think + categoryCounts.reason;
+            const progressbarCount = document.querySelectorAll(
+              '[role="progressbar"]'
+            ).length;
+            return {
+              stopPrimaryExistsCount: primaryStopControls.length,
+              stopPrimaryRenderedCount: primaryStopControls.filter(isRendered).length,
+              stopFruitjuiceExistsCount: fruitjuiceStopControls.length,
+              stopFruitjuiceRenderedCount: fruitjuiceStopControls.filter(isRendered).length,
+              ariaBusyCount: document.querySelectorAll('[aria-busy="true"]').length,
+              progressbarCount: progressbarCount,
+              statusCount: document.querySelectorAll('[role="status"]').length,
+              stateLoadingCount: document.querySelectorAll('[data-state="loading"]').length,
+              stateRunningCount: document.querySelectorAll('[data-state="running"]').length,
+              statePendingCount: document.querySelectorAll('[data-state="pending"]').length,
+              buttonCount: document.querySelectorAll("button").length,
+              disabledButtonCount: document.querySelectorAll("button:disabled").length,
+              hasInterruptLikeControl: interruptLikeCount > 0,
+              hasToolLikeControl: toolLikeCount > 0,
+              hasProgressLikeControl: progressLikeCount > 0 || progressbarCount > 0,
+              assistantRootCount: rootElements.length,
+              latestAssistantRootExists: Boolean(latestRootElement),
+              latestAssistantRootRendered: Boolean(
+                latestRootElement && isRendered(latestRootElement)
+              ),
+              candidateTestIDCategoryCounts: categoryCounts
+            };
+          };
 
           const evaluate = () => {
             const generating = isGenerating();
@@ -402,6 +654,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               kind: "baseline",
               token: TOKEN,
               generating: generating,
+              generationEdge: null,
+              generationSignalSnapshot: generationSignalSnapshot(),
               responseIdentity: canonicalResponseIdentityFor(
                 latestAssistantResponseRoot()
               ),
@@ -432,6 +686,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               kind: "baseline",
               token: TOKEN,
               generating: generating,
+              generationEdge: null,
+              generationSignalSnapshot: generationSignalSnapshot(),
               responseIdentity: canonicalResponseIdentityFor(
                 latestAssistantResponseRoot()
               ),
@@ -500,6 +756,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessIdleCandidateOwnerGeneration: UInt64?
     private var nextGenerationEpoch: UInt64 = 0
     private var currentGenerationEpoch: UInt64?
+    private var pendingFalseCandidateEpoch: UInt64?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -632,7 +889,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 responseIdentity: payload.responseIdentity,
                 responseRootCount: payload.responseRootCount,
                 latestResponseComplete: payload.latestResponseComplete,
-                producer: payload.producer
+                producer: payload.producer,
+                generationEdge: payload.generationEdge,
+                generationSignalSnapshot: payload.generationSignalSnapshot
             )
             return
         }
@@ -656,7 +915,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             responseIdentity: payload.responseIdentity,
             responseRootCount: payload.responseRootCount,
             latestResponseComplete: payload.latestResponseComplete,
-            producer: payload.producer
+            producer: payload.producer,
+            generationEdge: payload.generationEdge,
+            generationSignalSnapshot: payload.generationSignalSnapshot
         )
     }
 
@@ -765,6 +1026,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         document = nil
         documentAdmission = admission
         currentGenerationEpoch = nil
+        pendingFalseCandidateEpoch = nil
         if hadActiveDocument {
             emit(ChatGPTAttentionEvent(observation: .runtimeReset, responseIdentity: nil))
         }
@@ -793,6 +1055,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         document = nil
         documentAdmission = .unsupportedCurrentDocument
         currentGenerationEpoch = nil
+        pendingFalseCandidateEpoch = nil
         userContentController?.removeScriptMessageHandler(
             forName: Self.messageHandlerName,
             contentWorld: Self.contentWorld
@@ -809,14 +1072,18 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         responseIdentity: ChatGPTResponseIdentity? = nil,
         responseRootCount: Int? = nil,
         latestResponseComplete: Bool? = nil,
-        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown
+        producer: UnreadRuntimeDiagnosticCompletionProducer = .unknown,
+        generationEdge: ChatGPTGenerationEdge? = nil,
+        generationSignalSnapshot: ChatGPTGenerationSignalSnapshot? = nil
     ) -> ChatGPTAttentionObservation? {
         guard let event = document?.tracker.observeEvent(
             generating,
             responseIdentity: responseIdentity,
             responseRootCount: responseRootCount,
             latestResponseComplete: latestResponseComplete,
-            producer: producer
+            producer: producer,
+            generationEdge: generationEdge,
+            generationSignalSnapshot: generationSignalSnapshot
         ) else { return nil }
         emit(event)
         return event.observation
@@ -842,8 +1109,44 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             completionProducer: event.completionProducer,
             generationEpoch: currentGenerationEpoch,
             documentToken: document?.token,
-            bridgeInstanceID: bridgeInstanceID
+            bridgeInstanceID: bridgeInstanceID,
+            generationEdge: event.generationEdge,
+            generationSignalSnapshot: event.generationSignalSnapshot
         )
+        switch observation {
+        case .generationStarted:
+            if let previousGenerationEpoch = pendingFalseCandidateEpoch {
+                recordGenerationDiagnostic(
+                    event: "attention.generation_restarted",
+                    attentionEvent: diagnosticEvent,
+                    additionalFields: [
+                        "previous_generation_epoch": .integer(Int64(previousGenerationEpoch))
+                    ]
+                )
+            }
+            pendingFalseCandidateEpoch = nil
+            recordGenerationDiagnostic(
+                event: "attention.generation_started_snapshot",
+                attentionEvent: diagnosticEvent
+            )
+        case .generationFinished:
+            if diagnosticEvent.completionProducer == .mutationObserver,
+               diagnosticEvent.generationEdge == .trueToFalse {
+                pendingFalseCandidateEpoch = currentGenerationEpoch
+                recordGenerationDiagnostic(
+                    event: "attention.generation_false_candidate",
+                    attentionEvent: diagnosticEvent
+                )
+            } else {
+                pendingFalseCandidateEpoch = nil
+                recordGenerationDiagnostic(
+                    event: "attention.final_idle_snapshot",
+                    attentionEvent: diagnosticEvent
+                )
+            }
+        case .runtimeReset:
+            pendingFalseCandidateEpoch = nil
+        }
         if observation == .runtimeReset {
             currentGenerationEpoch = nil
         }
@@ -852,6 +1155,38 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         } else {
             onObservation(slotID, observation)
         }
+    }
+
+    private func recordGenerationDiagnostic(
+        event: String,
+        attentionEvent: ChatGPTAttentionEvent,
+        additionalFields: [String: RuntimeDiagnosticValue] = [:]
+    ) {
+        var fields = attentionEvent.generationSignalSnapshot?.diagnosticFields() ?? [:]
+        if let generationEpoch = attentionEvent.generationEpoch {
+            fields["generation_epoch"] = .integer(Int64(generationEpoch))
+        }
+        if let generationEdge = attentionEvent.generationEdge {
+            fields["generation_edge"] = .string(generationEdge.rawValue)
+        }
+        fields["completion_producer"] = .string(attentionEvent.completionProducer.rawValue)
+        if let responseRootCount = attentionEvent.responseRootCount {
+            fields["response_root_count"] = .integer(Int64(responseRootCount))
+        }
+        if let latestResponseComplete = attentionEvent.latestResponseComplete {
+            fields["latest_response_complete"] = .bool(latestResponseComplete)
+        }
+        fields["latest_response_identity_tag"] = diagnosticContext.identityTag(
+            attentionEvent.responseIdentity
+        )
+        for (key, value) in additionalFields {
+            fields[key] = value
+        }
+        recordBridgeDiagnostic(
+            event: event,
+            documentToken: attentionEvent.documentToken,
+            fields: fields
+        )
     }
 
     private func recordBridgeDiagnostic(
@@ -966,7 +1301,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             responseIdentity: secondProbe.responseIdentity,
             responseRootCount: secondProbe.responseRootCount,
             latestResponseComplete: secondProbe.latestResponseComplete,
-            producer: .livenessProbe
+            producer: .livenessProbe,
+            generationEdge: secondProbe.generationEdge,
+            generationSignalSnapshot: secondProbe.generationSignalSnapshot
         ) == .generationFinished else { return }
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
@@ -1071,7 +1408,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             responseIdentity: payload.responseIdentity,
             responseRootCount: payload.responseRootCount,
             latestResponseComplete: payload.latestResponseComplete,
-            producer: .resync
+            producer: .resync,
+            generationEdge: payload.generationEdge,
+            generationSignalSnapshot: payload.generationSignalSnapshot
         )
     }
 

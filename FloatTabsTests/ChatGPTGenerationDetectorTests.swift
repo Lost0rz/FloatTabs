@@ -19,6 +19,7 @@ private final class ChatGPTDetectorPage {
     let slotID: UUID
     let webView: WKWebView
     let bridge: ChatGPTAttentionBridge
+    let writer: RuntimeDiagnosticInMemoryWriter
     private let log: ObservationLog
 
     var observations: [ChatGPTAttentionObservation] { log.entries }
@@ -26,9 +27,15 @@ private final class ChatGPTDetectorPage {
     init() {
         let log = ObservationLog()
         let slotID = UUID()
-        let bridge = ChatGPTAttentionBridge(slotID: slotID) { _, observation in
-            log.record(observation)
-        }
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let bridge = ChatGPTAttentionBridge(
+            slotID: slotID,
+            onObservation: { _, observation in
+                log.record(observation)
+            },
+            diagnostics: diagnostics
+        )
         let configuration = WKWebViewConfiguration()
         bridge.install(into: configuration.userContentController)
         let webView = WKWebView(
@@ -40,6 +47,7 @@ private final class ChatGPTDetectorPage {
         self.slotID = slotID
         self.bridge = bridge
         self.webView = webView
+        self.writer = writer
     }
 
     func load(bodyHTML: String, baseURL: URL = URL(string: "https://chatgpt.com/")!) {
@@ -206,6 +214,80 @@ final class ChatGPTGenerationDetectorTests: XCTestCase {
         let finished = await page.waitFor { page.observations.contains(.generationFinished) }
         XCTAssertTrue(finished, "hidden-attribute mutation must re-evaluate to idle")
         XCTAssertEqual(page.observations, [.generationStarted, .generationFinished])
+    }
+
+    func testMutationFalseEdgeCapturesSafeStructuralSnapshotAndRestart() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: """
+        <article data-message-author-role="assistant" data-message-id="message-safe">
+          <p>private assistant content</p>
+        </article>
+        <button data-testid="stop-button">Stop</button>
+        """)
+
+        let started = await page.waitFor {
+            page.observations == [.generationStarted]
+        }
+        XCTAssertTrue(started)
+        guard started else { return }
+
+        page.run("document.querySelector('[data-testid=\"stop-button\"]').hidden = true")
+        let firstFinished = await page.waitFor {
+            page.observations == [.generationStarted, .generationFinished]
+        }
+        XCTAssertTrue(firstFinished)
+        guard firstFinished else { return }
+
+        page.run("document.querySelector('[data-testid=\"stop-button\"]').hidden = false")
+        let restarted = await page.waitFor {
+            page.observations.count == 3
+        }
+        XCTAssertTrue(restarted)
+        guard restarted else { return }
+
+        page.run("document.querySelector('[data-testid=\"stop-button\"]').hidden = true")
+        let secondFinished = await page.waitFor {
+            page.observations.count == 4
+        }
+        XCTAssertTrue(secondFinished)
+        XCTAssertEqual(
+            page.observations,
+            [.generationStarted, .generationFinished, .generationStarted, .generationFinished]
+        )
+
+        let falseCandidates = page.writer.events.filter {
+            $0.event == "attention.generation_false_candidate"
+        }
+        XCTAssertEqual(falseCandidates.count, 2)
+        guard let candidate = falseCandidates.first else { return }
+        XCTAssertEqual(candidate.fields["stop_primary_exists_count"], .integer(1))
+        XCTAssertEqual(candidate.fields["stop_primary_rendered_count"], .integer(0))
+        XCTAssertEqual(candidate.fields["stop_total_exists_count"], .integer(1))
+        XCTAssertEqual(candidate.fields["candidate_testid_stop_count"], .integer(1))
+        XCTAssertEqual(candidate.fields["assistant_root_count"], .integer(1))
+        XCTAssertEqual(candidate.fields["latest_assistant_root_exists"], .bool(true))
+        if case let .string(identityTag)? = candidate.fields["latest_response_identity_tag"] {
+            XCTAssertEqual(identityTag.count, 16)
+            XCTAssertNotEqual(identityTag, "message-safe")
+        } else {
+            XCTFail("expected a privacy-safe assistant identity tag")
+        }
+        XCTAssertEqual(candidate.fields["has_tool_like_control"], .bool(false))
+        XCTAssertEqual(candidate.fields["generation_edge"], .string("true_to_false"))
+
+        XCTAssertEqual(
+            page.writer.events.filter { $0.event == "attention.generation_restarted" }.count,
+            1
+        )
+        let serializedDiagnostics = page.writer.lines.map {
+            String(decoding: $0, as: UTF8.self)
+        }.joined()
+        XCTAssertFalse(serializedDiagnostics.contains("private assistant content"))
+        XCTAssertFalse(serializedDiagnostics.contains("message-safe"))
+        XCTAssertFalse(serializedDiagnostics.contains("data-message-id"))
+        XCTAssertFalse(serializedDiagnostics.contains("data-testid"))
+        XCTAssertFalse(serializedDiagnostics.contains("textContent"))
+        XCTAssertFalse(serializedDiagnostics.contains("innerHTML"))
     }
 
     func testNoStopControlMeansIdleUntilOneIsInserted() async {

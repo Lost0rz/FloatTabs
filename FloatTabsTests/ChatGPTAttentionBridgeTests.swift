@@ -384,6 +384,22 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
                 version: 1, kind: "state", token: "12345678", generating: false
             )
         )
+        XCTAssertEqual(
+            ChatGPTBridgePayload.parse([
+                "version": 1,
+                "kind": "state",
+                "token": "12345678",
+                "generating": false,
+                "generationEdge": "unexpected",
+                "generationSignalSnapshot": [
+                    "stopPrimaryExistsCount": "raw"
+                ]
+            ]),
+            ChatGPTBridgePayload(
+                version: 1, kind: "state", token: "12345678", generating: false
+            ),
+            "diagnostic-only metadata must never make the production payload disappear"
+        )
         let identity = try XCTUnwrap(
             ChatGPTResponseIdentity(rawValue: "message:attention-response")
         )
