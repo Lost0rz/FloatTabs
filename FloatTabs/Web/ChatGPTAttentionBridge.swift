@@ -304,7 +304,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 "class",
                 "style",
                 "hidden",
-                "aria-hidden"
+                "aria-hidden",
+                "aria-label",
+                "title",
+                "disabled",
+                "aria-disabled"
               ]
             });
           };

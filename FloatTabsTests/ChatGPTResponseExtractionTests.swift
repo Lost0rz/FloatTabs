@@ -408,6 +408,123 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertNotNil(payload?.responseID)
     }
 
+    func testCurrentSemanticResponseRootUsesRegenerateOwnedContainer() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div class="response-container" data-state="completed">
+          <div class="MarkdownRoot-abc123"><p>Current semantic response.</p></div>
+          <div role="toolbar">
+            <button aria-label="Copy">Copy</button>
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.kind, .response)
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Current semantic response."])
+    }
+
+    func testRegenerateFallbackSelectsLatestAmongMultipleHistoricalContainers() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <main class="conversation">
+          <div class="response-container" data-state="completed">
+            <div class="MarkdownRoot-old"><p>Historical response.</p></div>
+            <div role="toolbar">
+              <button aria-label="Copy">Copy</button>
+              <button aria-label="Regenerate response">Regenerate</button>
+            </div>
+          </div>
+          <div class="response-container" data-state="completed">
+            <div class="MarkdownRoot-latest"><p>Latest semantic response.</p></div>
+            <div role="toolbar">
+              <button aria-label="Copy">Copy</button>
+              <button aria-label="Regenerate response">Regenerate</button>
+            </div>
+          </div>
+        </main>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Latest semantic response."])
+    }
+
+    func testSemanticResponseRootIgnoresUnrelatedRegenerateControl() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div contenteditable="true" role="textbox">
+          <button aria-label="Regenerate">Regenerate</button>
+        </div>
+        <div class="utility-toolbar">
+          <button title="Copy">Copy</button>
+          <button title="Regenerate">Regenerate</button>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertNil(payload)
+    }
+
+    func testHiddenSemanticResponseRootIsIgnored() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div class="response-container" style="display:none">
+          <div class="MarkdownRoot-hidden"><p>Hidden response.</p></div>
+          <div role="toolbar">
+            <button aria-label="Copy">Copy</button>
+            <button aria-label="Regenerate">Regenerate</button>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertNil(payload)
+    }
+
+    func testSemanticResponseRootWithoutBlocksIsEmpty() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div class="response-container" data-state="completed">
+          <div class="MarkdownRoot-empty"></div>
+          <div role="toolbar">
+            <button aria-label="Copy">Copy</button>
+            <button aria-label="Regenerate">Regenerate</button>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertNil(payload)
+    }
+
+    func testRegenerateFallbackDoesNotSelectWholeConversationOrComposer() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <main class="conversation">
+          <div contenteditable="true" role="textbox">
+            <button aria-label="Regenerate">Regenerate</button>
+          </div>
+          <div class="response-container" data-state="completed">
+            <div class="MarkdownRoot-latest"><p>Only latest response.</p></div>
+            <div role="toolbar">
+              <button aria-label="Copy">Copy</button>
+              <button aria-label="Regenerate response">Regenerate</button>
+            </div>
+          </div>
+        </main>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Only latest response."])
+    }
+
     func testEveryEmittedLogicalBlockHasAnOpaqueLocatorInDocumentOrder() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
