@@ -229,6 +229,101 @@ final class ChatGPTGenerationDetectorTests: XCTestCase {
         XCTAssertEqual(page.observations, [.generationStarted])
     }
 
+    func testFruitjuiceStopControlMeansGenerating() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button data-testid=\"fruitjuice-stop-button\">Stop</button>")
+
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+    }
+
+    func testEnabledSemanticStopButtonMeansGenerating() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\" Stop   generating \" title=\"unrelated\">Stop</button>")
+
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+    }
+
+    func testSemanticStopTitleMeansGenerating() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<div role=\"button\" title=\"Stop streaming\">Stop</div>")
+
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+    }
+
+    func testDisabledSemanticStopButtonIsIdle() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Stop generating\" disabled>Stop</button>")
+        await page.settleBaseline()
+
+        XCTAssertTrue(page.observations.isEmpty)
+    }
+
+    func testAriaDisabledSemanticStopButtonIsIdle() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Stop generating\" aria-disabled=\"true\">Stop</button>")
+        await page.settleBaseline()
+
+        XCTAssertTrue(page.observations.isEmpty)
+    }
+
+    func testUnrelatedButtonIsIdle() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Copy\">Stop</button>")
+        await page.settleBaseline()
+
+        XCTAssertTrue(page.observations.isEmpty)
+    }
+
+    func testArbitraryStopTextDoesNotMatchSemanticControl() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Please stop this unrelated task\">Stop</button>")
+        await page.settleBaseline()
+
+        XCTAssertTrue(page.observations.isEmpty)
+    }
+
+    func testSemanticStopReplacementProducesOneStartAndOneFinish() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Stop generating\">Stop</button>")
+
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+        page.run("document.querySelector('button').replaceWith(Object.assign(document.createElement('button'), { ariaLabel: 'unused' }))")
+        page.run("document.querySelector('button').setAttribute('aria-label', 'Stop generating')")
+        page.run("document.querySelector('button').setAttribute('aria-label', 'Regenerate')")
+
+        let finished = await page.waitFor { page.observations == [.generationStarted, .generationFinished] }
+        XCTAssertTrue(finished)
+        XCTAssertEqual(page.observations, [.generationStarted, .generationFinished])
+    }
+
+    func testSemanticStopCanStartAfterIdle() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Send\">Send</button>")
+        await page.settleBaseline()
+
+        XCTAssertTrue(page.observations.isEmpty)
+        page.run("document.querySelector('button').setAttribute('aria-label', 'Stop generating')")
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+    }
+
+    func testSemanticStopDisabledTransitionFinishesOnce() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<button aria-label=\"Stop generating\">Stop</button>")
+        let started = await page.waitFor { page.observations == [.generationStarted] }
+        XCTAssertTrue(started)
+
+        page.run("document.querySelector('button').disabled = true")
+        let finished = await page.waitFor { page.observations == [.generationStarted, .generationFinished] }
+        XCTAssertTrue(finished)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(page.observations, [.generationStarted, .generationFinished])
+    }
+
     func testConfirmedInstantBackResyncExecutesInNamedWorldAndReestablishesBaseline() async {
         let page = ChatGPTDetectorPage()
         page.load(bodyHTML: """

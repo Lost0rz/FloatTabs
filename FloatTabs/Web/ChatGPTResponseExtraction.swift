@@ -48,10 +48,102 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             '[data-testid="stop-button"]',
             '[data-testid="fruitjuice-stop-button"]'
           ];
+          const STOP_SEMANTIC_LABELS = new Set([
+            "stop",
+            "stop generating",
+            "stop generating response",
+            "stop streaming"
+          ]);
+          const RESPONSE_ACTION_LABELS = new Set([
+            "regenerate",
+            "regenerate response",
+            "regenerate answer"
+          ]);
+          const RESPONSE_CONTENT_SELECTOR =
+            'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,' +
+            'math,.katex-display,.katex,mjx-container,' +
+            '[data-math],[data-latex],[data-tex],[role="math"]';
+          const RESPONSE_EXCLUDED_SELECTOR =
+            'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
 
           const safeCanonicalStableValue = (value) => {
             if (!value || value.length > 160) return null;
             return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+          };
+
+          const normalizedSemanticLabel = (value) => {
+            if (typeof value !== "string") return "";
+            return value.trim().toLocaleLowerCase().replace(/\\s+/g, " ");
+          };
+
+          const hasStopSemanticLabel = (element) => {
+            return ["aria-label", "title"].some((attribute) =>
+              STOP_SEMANTIC_LABELS.has(
+                normalizedSemanticLabel(element.getAttribute(attribute))
+              )
+            );
+          };
+
+          const isEnabled = (element) =>
+            !element.disabled && element.getAttribute("aria-disabled") !== "true";
+
+          const isResponseAction = (element) => {
+            if (!element
+                || !element.matches
+                || !element.matches('button,[role="button"]')
+                || !isRendered(element)
+                || !isEnabled(element)) {
+              return false;
+            }
+            return ["aria-label", "title"].some((attribute) =>
+              RESPONSE_ACTION_LABELS.has(
+                normalizedSemanticLabel(element.getAttribute(attribute))
+              )
+            );
+          };
+
+          const responseActions = (root) => {
+            const controls = [root].concat(
+              Array.from(root.querySelectorAll('button,[role="button"]'))
+            );
+            return controls.filter(isResponseAction);
+          };
+
+          const isComposerContainer = (root) =>
+            Boolean(root && root.matches && root.matches(
+              'input,textarea,[contenteditable="true"],[role="textbox"]'
+            ));
+
+          const hasResponseContent = (root) =>
+            Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)).some(
+              (element) => isRendered(element)
+                && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+            );
+
+          // Current ChatGPT keeps completed-response controls semantic but may
+          // omit assistant-role attributes. Bound ownership to the smallest
+          // rendered ancestor with one Regenerate control and response content.
+          const latestRegenerateOwnedResponse = () => {
+            const controls = Array.from(
+              document.querySelectorAll('button,[role="button"]')
+            ).filter((element) => isResponseAction(element));
+            for (let index = controls.length - 1; index >= 0; index -= 1) {
+              const control = controls[index];
+              let ancestor = control.parentElement;
+              while (ancestor
+                     && ancestor !== document.body
+                     && ancestor !== document.documentElement) {
+                if (isRendered(ancestor)
+                    && !isComposerContainer(ancestor)
+                    && responseActions(ancestor).length === 1
+                    && hasResponseContent(ancestor)) {
+                  return ancestor;
+                }
+                ancestor = ancestor.parentElement;
+              }
+            }
+            return null;
           };
 
           const canonicalResponseIdentityFor = (element) => {
@@ -72,7 +164,7 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             ));
             if (explicit.length) return explicit.filter(isRendered);
 
-            return Array.from(document.querySelectorAll(
+            const articles = Array.from(document.querySelectorAll(
               'article[data-testid*="conversation-turn"]'
             )).filter((article) => {
               const role = article.getAttribute('data-message-author-role')
@@ -80,6 +172,10 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                   ?.getAttribute('data-message-author-role');
               return role === 'assistant' && isRendered(article);
             });
+            if (articles.length) return articles;
+
+            const fallback = latestRegenerateOwnedResponse();
+            return fallback ? [fallback] : [];
           };
 
           const assistantResponseRootFor = (eventTarget) => {
@@ -116,6 +212,16 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
               const elements = document.querySelectorAll(selector);
               for (const element of elements) {
                 if (isRendered(element)) return true;
+              }
+            }
+            const semanticControls = document.querySelectorAll(
+              'button,[role="button"]'
+            );
+            for (const element of semanticControls) {
+              if (isRendered(element)
+                  && isEnabled(element)
+                  && hasStopSemanticLabel(element)) {
+                return true;
               }
             }
             return false;
