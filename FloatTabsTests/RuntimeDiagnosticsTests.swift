@@ -441,6 +441,30 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         XCTAssertNil(lifecycle.complete(ticket, as: .success))
     }
 
+    func testRendererProbeSnapshotCopiesOnlySafeStateIntoSendableValue() {
+        let snapshot = RendererProbeSnapshot(
+            value: [
+                "ready_state": "complete",
+                "visibility_state": "visible",
+                "page_text": "must not cross the callback boundary"
+            ],
+            error: nil
+        )
+
+        XCTAssertEqual(snapshot.result, .success)
+        XCTAssertEqual(snapshot.readyState, "complete")
+        XCTAssertEqual(snapshot.visibilityState, "visible")
+        XCTAssertNil(snapshot.errorCategory)
+
+        let invalid = RendererProbeSnapshot(
+            value: ["ready_state": "unexpected", "visibility_state": "visible"],
+            error: nil
+        )
+        XCTAssertEqual(invalid.result, .failed)
+        XCTAssertNil(invalid.readyState)
+        XCTAssertNil(invalid.visibilityState)
+    }
+
     @MainActor
     func testIncidentSnapshotKeepsWebViewWindowAndSourceHostWindowSeparate() {
         let slotID = UUID()

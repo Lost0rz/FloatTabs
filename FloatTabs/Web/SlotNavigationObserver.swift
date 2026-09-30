@@ -309,6 +309,40 @@ enum WebRuntimeRendererProbeResult: Equatable, Sendable {
     case timeout
 }
 
+/// Copies only the probe's two bounded string values before its callback hops
+/// to the main actor. WebKit returns `Any`, so that value must not cross a task
+/// boundary unnormalized.
+struct RendererProbeSnapshot: Equatable, Sendable {
+    let result: WebRuntimeRendererProbeResult
+    let readyState: String?
+    let visibilityState: String?
+    let errorCategory: String?
+
+    init(value: Any?, error: Error?) {
+        let probe = value as? [String: Any]
+        let candidateReadyState = probe?["ready_state"] as? String
+        let candidateVisibilityState = probe?["visibility_state"] as? String
+        let isValid = error == nil
+            && Self.isSafeReadyState(candidateReadyState)
+            && Self.isSafeVisibilityState(candidateVisibilityState)
+
+        result = isValid ? .success : .failed
+        readyState = isValid ? candidateReadyState : nil
+        visibilityState = isValid ? candidateVisibilityState : nil
+        errorCategory = error.map { RuntimeDiagnosticPrivacy.safeErrorCategory($0) }
+    }
+
+    private static func isSafeReadyState(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return ["loading", "interactive", "complete"].contains(value)
+    }
+
+    private static func isSafeVisibilityState(_ value: String?) -> Bool {
+        guard let value else { return false }
+        return ["visible", "hidden", "prerender", "unloaded"].contains(value)
+    }
+}
+
 struct RendererProbeTicket: Equatable, Sendable {
     let runtimeGeneration: UInt64
     let navigationGeneration: UInt64
@@ -1001,20 +1035,17 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }))()
         """
         javaScriptEvaluator(webView, script) { [weak self, weak webView] value, error in
+            let snapshot = RendererProbeSnapshot(value: value, error: error)
             Task { @MainActor [weak self, weak webView] in
                 guard let self,
                       let webView,
                       self.webView === webView else {
                     return
                 }
-                let probe = value as? [String: Any]
-                let readyState = probe?["ready_state"] as? String
-                let visibilityState = probe?["visibility_state"] as? String
-                let isValidResult = error == nil
-                    && Self.isSafeReadyState(readyState)
-                    && Self.isSafeVisibilityState(visibilityState)
-                let outcome: WebRuntimeRendererProbeResult = isValidResult ? .success : .failed
-                guard let result = self.rendererProbeLifecycle.complete(ticket, as: outcome) else {
+                guard let result = self.rendererProbeLifecycle.complete(
+                    ticket,
+                    as: snapshot.result
+                ) else {
                     return
                 }
                 self.cancelRendererProbeTimeout()
@@ -1022,9 +1053,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                     result,
                     ticket: ticket,
                     latencyMilliseconds: self.probeLatencyMilliseconds(since: startedAt),
-                    readyState: isValidResult ? readyState : nil,
-                    visibilityState: isValidResult ? visibilityState : nil,
-                    error: error
+                    readyState: snapshot.readyState,
+                    visibilityState: snapshot.visibilityState,
+                    errorCategory: snapshot.errorCategory
                 )
             }
         }
@@ -1045,7 +1076,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         latencyMilliseconds: Double,
         readyState: String? = nil,
         visibilityState: String? = nil,
-        error: Error? = nil
+        errorCategory: String? = nil
     ) {
         let event: String
         let level: RuntimeDiagnosticLevel
@@ -1069,8 +1100,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         ]
         if let readyState { fields["document_ready_state"] = .string(readyState) }
         if let visibilityState { fields["visibility_state"] = .string(visibilityState) }
-        if let error {
-            fields["error_category"] = .string(RuntimeDiagnosticPrivacy.safeErrorCategory(error))
+        if let errorCategory {
+            fields["error_category"] = .string(errorCategory)
         }
         diagnostics.record(
             event: event,
@@ -1078,16 +1109,6 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "web",
             fields: fields
         )
-    }
-
-    private static func isSafeReadyState(_ value: String?) -> Bool {
-        guard let value else { return false }
-        return ["loading", "interactive", "complete"].contains(value)
-    }
-
-    private static func isSafeVisibilityState(_ value: String?) -> Bool {
-        guard let value else { return false }
-        return ["visible", "hidden", "prerender", "unloaded"].contains(value)
     }
 
     private static func fullscreenStateName(_ state: WKWebView.FullscreenState) -> String {
