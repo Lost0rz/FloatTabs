@@ -264,11 +264,14 @@ struct WebRuntimeHealthTracker {
         return true
     }
 
+    func isCommitted(_ ticket: WebRuntimeNavigationTicket) -> Bool {
+        activeTicket == ticket && committedTicket == ticket
+    }
+
     @discardableResult
     mutating func markStalled(_ ticket: WebRuntimeNavigationTicket) -> Bool {
         guard ticket.runtimeGeneration == runtimeGeneration,
               activeTicket == ticket,
-              committedTicket != ticket,
               lastStalledNavigationGeneration != ticket.navigationGeneration else {
             return false
         }
@@ -662,6 +665,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let ticket, healthTracker.didCommit(ticket) {
             cancelWatchdog()
             lastCommitUptime = ProcessInfo.processInfo.systemUptime
+            // Commit proves the provisional phase made progress, but it is not
+            // a terminal navigation state. Re-arm one bounded diagnostic
+            // watchdog so a committed page that never finishes can still be
+            // distinguished from a healthy completed load.
+            scheduleWatchdog(target: .navigation(ticket), after: Self.navigationStallTimeout)
         }
         cancelPendingInstantBack()
         // Once an https entry commits, later in-page failures can never inherit
@@ -849,12 +857,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private func handleWatchdog(_ target: WatchdogTarget, in webView: WKWebView) {
         switch target {
         case let .navigation(ticket):
+            let navigationCommitted = healthTracker.isCommitted(ticket)
             guard healthTracker.markStalled(ticket) else { return }
             recordNavigationStall(
                 in: webView,
                 ticket: ticket,
                 source: "navigation",
-                userActionGeneration: nil
+                userActionGeneration: nil,
+                navigationCommitted: navigationCommitted
             )
 
         case let .userAction(generation, action, navigationGenerationBefore):
@@ -870,7 +880,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 in: webView,
                 ticket: ticket,
                 source: action == .reload ? "reload" : "home",
-                userActionGeneration: generation
+                userActionGeneration: generation,
+                navigationCommitted: nil
             )
         }
     }
@@ -879,10 +890,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         in webView: WKWebView,
         ticket: WebRuntimeNavigationTicket,
         source: String,
-        userActionGeneration: UInt64?
+        userActionGeneration: UInt64?,
+        navigationCommitted: Bool?
     ) {
         var fields = runtimeFields(for: webView, ticket: ticket)
         fields["watchdog_source"] = .string(source)
+        if let navigationCommitted {
+            fields["navigation_committed"] = .bool(navigationCommitted)
+        }
         fields["navigation_start_uptime"] = navigationStartUptime.map {
             .double($0)
         } ?? .null
@@ -919,19 +934,19 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         reason: String
     ) {
         var fields = runtimeFields(for: webView, ticket: ticket)
-        let sourceWindow = webView.window
+        let webViewWindow = webView.window
         fields["webview_exists"] = .bool(true)
         fields["is_loading"] = .bool(webView.isLoading)
         fields["estimated_progress"] = .double(webView.estimatedProgress)
         fields["webview_attached_to_superview"] = .bool(webView.superview != nil)
-        fields["webview_attached_to_window"] = .bool(sourceWindow != nil)
+        fields["webview_attached_to_window"] = .bool(webViewWindow != nil)
         fields["webview_hidden"] = .bool(webView.isHidden)
         fields["frame_width"] = .double(Double(webView.frame.width))
         fields["frame_height"] = .double(Double(webView.frame.height))
         fields["bounds_width"] = .double(Double(webView.bounds.width))
         fields["bounds_height"] = .double(Double(webView.bounds.height))
-        fields["source_window_visible"] = .bool(sourceWindow?.isVisible ?? false)
-        fields["source_window_key"] = .bool(sourceWindow?.isKeyWindow ?? false)
+        fields["webview_window_visible"] = .bool(webViewWindow?.isVisible ?? false)
+        fields["webview_window_key"] = .bool(webViewWindow?.isKeyWindow ?? false)
         fields["fullscreen_state"] = .string(Self.fullscreenStateName(webView.fullscreenState))
         fields["slot_active"] = .bool(isSlotActive(slotID))
         fields["residency_policy"] = .null
