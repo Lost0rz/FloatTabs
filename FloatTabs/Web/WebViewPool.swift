@@ -57,6 +57,8 @@ final class WebViewPool {
 
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
+    private var runtimeGenerations: [UUID: UInt64] = [:]
+    private var nextRuntimeGeneration: UInt64 = 0
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
     private var responseBridges: [UUID: ChatGPTResponseBridge] = [:]
@@ -67,6 +69,10 @@ final class WebViewPool {
     private var deferredReloadSlotIDs = Set<UUID>()
 
     var onResidentSetChange: (() -> Void)?
+
+    /// One-shot diagnostic context supplied by the existing presentation and
+    /// lifecycle owners. The pool does not retain or make decisions from it.
+    var incidentDiagnosticContextProvider: @MainActor (UUID) -> [String: RuntimeDiagnosticValue] = { _ in [:] }
 
     /// Transient normalized-observation seam for later stages. The pool keeps
     /// no attention state here and assigns no visibility meaning.
@@ -170,6 +176,9 @@ final class WebViewPool {
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
             var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
             reuseFields["slot_id"] = .string(profile.id.uuidString)
+            reuseFields["runtime_generation"] = runtimeGenerations[profile.id].map {
+                .integer(Int64($0))
+            } ?? .null
             diagnostics.record(
                 event: "web_runtime.reused",
                 level: .debug,
@@ -201,6 +210,31 @@ final class WebViewPool {
 
     func existingWebView(for slotID: UUID) -> WKWebView? {
         webViews[slotID]
+    }
+
+    func diagnosticRuntimeGeneration(for slotID: UUID) -> UInt64? {
+        runtimeGenerations[slotID]
+    }
+
+    func recordUserAction(_ action: WebRuntimeUserAction, slotID: UUID) {
+        let observer = navigationObservers[slotID]
+        let webView = webViews[slotID]
+        let generation = runtimeGenerations[slotID]
+        diagnostics.record(
+            event: action.diagnosticEvent,
+            level: .info,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "runtime_generation": generation.map { .integer(Int64($0)) } ?? .null,
+                "navigation_generation_before": observer.map {
+                    .integer(Int64($0.diagnosticNavigationGeneration))
+                } ?? .null,
+                "is_active": .bool(isSlotActive(slotID)),
+                "is_loading": webView.map { .bool($0.isLoading) } ?? .null
+            ]
+        )
+        observer?.observeUserAction(action)
     }
 
     func calibreReaderBridge(for slotID: UUID) -> CalibreReaderBridge? {
@@ -248,6 +282,7 @@ final class WebViewPool {
     @discardableResult
     func reload(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
+        recordUserAction(.reload, slotID: slotID)
         webView.reload()
         return true
     }
@@ -266,7 +301,10 @@ final class WebViewPool {
         invalidateResponseBridge(slotID: slotID)
         invalidateCalibreReaderBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
-        navigationObservers.removeValue(forKey: slotID)
+        let observer = navigationObservers.removeValue(forKey: slotID)
+        let runtimeGeneration = runtimeGenerations.removeValue(forKey: slotID)
+        let navigationGeneration = observer?.diagnosticNavigationGeneration
+        observer?.invalidate()
         appliedRenderingProfiles.removeValue(forKey: slotID)
         appliedBrowserProfileIdentities.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
@@ -278,7 +316,11 @@ final class WebViewPool {
                 event: "web_runtime.released",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "runtime_generation": runtimeGeneration.map { .integer(Int64($0)) } ?? .null,
+                    "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null
+                ]
             )
             onResidentSetChange?()
         }
@@ -379,6 +421,10 @@ final class WebViewPool {
             subsystem: "web",
             fields: [
                 "slot_id": .string(slotID.uuidString),
+                "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+                "navigation_generation": navigationObservers[slotID].map {
+                    .integer(Int64($0.diagnosticNavigationGeneration))
+                } ?? .null,
                 "is_active": .bool(isSlotActive(slotID))
             ]
         )
@@ -403,7 +449,12 @@ final class WebViewPool {
                 event: "web_runtime.recovery.reload_now",
                 level: .notice,
                 subsystem: "web",
-                fields: diagnosticURLFields(recoveryURL, slotID: slotID)
+                fields: diagnosticURLFields(recoveryURL, slotID: slotID).merging([
+                    "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+                    "navigation_generation_before": navigationObservers[slotID].map {
+                        .integer(Int64($0.diagnosticNavigationGeneration))
+                    } ?? .null
+                ]) { _, new in new }
             )
 
         case .deferUntilActivation:
@@ -412,7 +463,13 @@ final class WebViewPool {
                 event: "web_runtime.recovery.deferred",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+                    "navigation_generation": navigationObservers[slotID].map {
+                        .integer(Int64($0.diagnosticNavigationGeneration))
+                    } ?? .null
+                ]
             )
         }
     }
@@ -441,6 +498,12 @@ final class WebViewPool {
         )
         var rebuildFields = renderingDiagnosticFields(for: runtimeRendering)
         rebuildFields["slot_id"] = .string(profile.id.uuidString)
+        rebuildFields["runtime_generation_before"] = runtimeGenerations[profile.id].map {
+            .integer(Int64($0))
+        } ?? .null
+        rebuildFields["navigation_generation_before"] = navigationObservers[profile.id].map {
+            .integer(Int64($0.diagnosticNavigationGeneration))
+        } ?? .null
         diagnostics.record(
             event: "web_runtime.rebuild.begin",
             level: .notice,
@@ -451,7 +514,7 @@ final class WebViewPool {
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
-        navigationObservers.removeValue(forKey: profile.id)
+        navigationObservers.removeValue(forKey: profile.id)?.invalidate()
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
@@ -474,7 +537,9 @@ final class WebViewPool {
                 event: "web_runtime.rebuild.completed",
                 level: .notice,
                 subsystem: "web",
-                fields: rebuildFields
+                fields: rebuildFields.merging([
+                    "runtime_generation": runtimeGenerations[profile.id].map { .integer(Int64($0)) } ?? .null
+                ]) { _, new in new }
             )
             return webView
         } catch {
@@ -603,6 +668,9 @@ final class WebViewPool {
                 calibreReaderBridge.install(into: userContentController)
             }
         )
+        nextRuntimeGeneration &+= 1
+        let runtimeGeneration = nextRuntimeGeneration
+        runtimeGenerations[profile.id] = runtimeGeneration
         attentionBridge.attach(to: webView)
         responseBridge.attach(to: webView)
         calibreReaderBridge.attach(to: webView)
@@ -678,7 +746,12 @@ final class WebViewPool {
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
             },
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            runtimeGeneration: runtimeGeneration,
+            isSlotActive: isSlotActive,
+            incidentDiagnosticContextProvider: { [weak self] slotID in
+                self?.incidentDiagnosticContextProvider(slotID) ?? [:]
+            }
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
@@ -721,6 +794,7 @@ final class WebViewPool {
         )
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
+        createdFields["runtime_generation"] = .integer(Int64(runtimeGeneration))
         createdFields["browser_profile"] = .string(String(describing: browserProfileIdentity))
         createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
         createdFields["initial_frame_height"] = .double(Double(webView.frame.height))
@@ -777,6 +851,17 @@ final class WebViewPool {
             ?? profile.homeURL
         lastKnownURLs[profile.id] = navigationURL
         load(webView, recoveryRequest(url: navigationURL))
+        diagnostics.record(
+            event: "web_runtime.recovery.deferred_reload",
+            level: .notice,
+            subsystem: "web",
+            fields: diagnosticURLFields(navigationURL, slotID: profile.id).merging([
+                "runtime_generation": runtimeGenerations[profile.id].map { .integer(Int64($0)) } ?? .null,
+                "navigation_generation_before": navigationObservers[profile.id].map {
+                    .integer(Int64($0.diagnosticNavigationGeneration))
+                } ?? .null
+            ]) { _, new in new }
+        )
     }
 
     private func recoveryURL(slotID: UUID, webView: WKWebView) -> URL? {

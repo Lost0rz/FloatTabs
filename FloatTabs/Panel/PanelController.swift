@@ -794,6 +794,28 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         super.init()
 
+        webViewPool.incidentDiagnosticContextProvider = { [weak self] slotID in
+            guard let self else { return [:] }
+            let profile = self.tabStore.profiles.first { $0.id == slotID }
+            let releaseState = self.slotLifecycleCoordinator.diagnosticReleaseState(
+                slotID: slotID
+            )
+            let sourceWindow = self.sourceHostController.window
+            return [
+                "residency_policy": profile.map {
+                    .string($0.residencyPolicy.rawValue)
+                } ?? .null,
+                "slot_active": .bool(self.tabStore.activeTabID == slotID),
+                "pending_cold_release": .bool(releaseState.pendingColdRelease),
+                "pending_warm_release": .bool(releaseState.pendingWarmRelease),
+                "panel_visible": .bool(self.panel.isVisible),
+                "panel_requested_visibility": .bool(self.requestedVisibility),
+                "source_window_visible": .bool(sourceWindow.isVisible),
+                "source_window_key": .bool(sourceWindow.isKeyWindow),
+                "source_session_state": .string(self.sourceHostController.sessionState.rawValue)
+            ]
+        }
+
         for slotID in self.unreadResponseCoordinator.unreadSlotIDs {
             recordUnreadDiagnostic(event: "unread.state_restored", fields: [
                 "slot_id": .string(slotID.uuidString)
@@ -3784,6 +3806,8 @@ final class PanelController: NSObject, NSWindowDelegate {
               WebAppURL.isSafe(profile.homeURL) else {
             return
         }
+
+        webViewPool.recordUserAction(.home, slotID: id)
 
         // `homeURL` is stable Slot identity; only `currentURL` moves. Updating
         // currentURL before load also makes Return to Home deterministic for a

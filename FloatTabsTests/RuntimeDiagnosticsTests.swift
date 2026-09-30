@@ -343,3 +343,178 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertEqual(tracker.consume(later)?.trace.root, "dismiss-C")
     }
 }
+
+@MainActor
+private final class RendererProbeJavaScriptEvaluatorCapture {
+    var completion: (@Sendable (Any?, Error?) -> Void)?
+}
+
+final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
+    func testNavigationCommitFinishAndFailurePreventAStall() {
+        for terminal in ["commit", "finish", "failure"] {
+            var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
+            let ticket = tracker.provisionalStarted()
+
+            switch terminal {
+            case "commit": XCTAssertTrue(tracker.didCommit(ticket))
+            case "finish": XCTAssertTrue(tracker.didFinish(ticket))
+            default: XCTAssertTrue(tracker.didFail(ticket))
+            }
+
+            XCTAssertFalse(tracker.markStalled(ticket), "\(terminal) must cancel its watchdog")
+        }
+    }
+
+    func testNavigationWatchdogReportsExactlyOneStall() {
+        var tracker = WebRuntimeHealthTracker(runtimeGeneration: 3)
+        let ticket = tracker.provisionalStarted()
+
+        XCTAssertTrue(tracker.markStalled(ticket))
+        XCTAssertFalse(tracker.markStalled(ticket))
+    }
+
+    func testNewNavigationMakesTheOldWatchdogStale() {
+        var tracker = WebRuntimeHealthTracker(runtimeGeneration: 3)
+        let first = tracker.provisionalStarted()
+        let second = tracker.provisionalStarted()
+
+        XCTAssertFalse(tracker.markStalled(first))
+        XCTAssertTrue(tracker.markStalled(second))
+    }
+
+    func testRuntimeReplacementInvalidatesOldNavigationWatchdog() {
+        var tracker = WebRuntimeHealthTracker(runtimeGeneration: 11)
+        let oldRuntime = tracker.provisionalStarted()
+
+        tracker.replaceRuntime(with: 12)
+
+        XCTAssertFalse(tracker.markStalled(oldRuntime))
+        let newRuntime = tracker.provisionalStarted()
+        XCTAssertEqual(newRuntime.runtimeGeneration, 12)
+        XCTAssertNotEqual(newRuntime.runtimeGeneration, oldRuntime.runtimeGeneration)
+    }
+
+    func testRendererProbeSuccessFailureAndTimeoutAreSingleCompletion() {
+        var success = RendererProbeLifecycle(runtimeGeneration: 4)
+        let successfulProbe = success.begin(for: WebRuntimeNavigationTicket(
+            runtimeGeneration: 4,
+            navigationGeneration: 8
+        ))
+        XCTAssertEqual(success.complete(successfulProbe, as: .success), .success)
+        XCTAssertNil(success.complete(successfulProbe, as: .failed))
+        XCTAssertNil(success.timeout(successfulProbe), "late timeout must not follow success")
+
+        var failure = RendererProbeLifecycle(runtimeGeneration: 4)
+        let failedProbe = failure.begin(for: WebRuntimeNavigationTicket(
+            runtimeGeneration: 4,
+            navigationGeneration: 9
+        ))
+        XCTAssertEqual(failure.complete(failedProbe, as: .failed), .failed)
+
+        var timeout = RendererProbeLifecycle(runtimeGeneration: 4)
+        let timedOutProbe = timeout.begin(for: WebRuntimeNavigationTicket(
+            runtimeGeneration: 4,
+            navigationGeneration: 10
+        ))
+        XCTAssertEqual(timeout.timeout(timedOutProbe), .timeout)
+        XCTAssertNil(timeout.complete(timedOutProbe, as: .success), "late JS callback must be ignored")
+    }
+
+    func testRendererProbeCallbackFromReplacedRuntimeIsIgnored() {
+        var lifecycle = RendererProbeLifecycle(runtimeGeneration: 20)
+        let ticket = lifecycle.begin(for: WebRuntimeNavigationTicket(
+            runtimeGeneration: 20,
+            navigationGeneration: 1
+        ))
+
+        lifecycle.replaceRuntime(with: 21)
+
+        XCTAssertNil(lifecycle.complete(ticket, as: .success))
+    }
+
+    @MainActor
+    func testNewNavigationInvalidatesPendingRendererProbe() async {
+        for lateResult in [WebRuntimeRendererProbeResult.success, .failed] {
+            let slotID = UUID()
+            let webView = WebViewFactory.makeWebView()
+            let writer = RuntimeDiagnosticInMemoryWriter()
+            let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+            let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+            let observer = SlotNavigationObserver(
+                slotID: slotID,
+                webView: webView,
+                websiteMode: .desktop,
+                onURLChange: { _, _ in },
+                diagnostics: diagnostics,
+                runtimeGeneration: 4,
+                javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                    evaluatorCapture?.completion = completion
+                }
+            )
+
+            observer.webView(webView, didStartProvisionalNavigation: nil)
+            observer.startRendererProbe(
+                in: webView,
+                for: WebRuntimeNavigationTicket(runtimeGeneration: 4, navigationGeneration: 1)
+            )
+            observer.webView(webView, didStartProvisionalNavigation: nil)
+
+            guard let javaScriptCompletion = evaluatorCapture.completion else {
+                XCTFail("expected the test evaluator to retain the probe callback")
+                observer.invalidate()
+                continue
+            }
+            let error: Error? = lateResult == .failed
+                ? NSError(domain: "probe-test", code: 1)
+                : nil
+            let value: Any? = lateResult == .success
+                ? ["ready_state": "complete", "visibility_state": "visible"]
+                : nil
+            javaScriptCompletion(value, error)
+            try? await Task.sleep(nanoseconds: 100_000_000)
+
+            XCTAssertFalse(
+                writer.events.contains {
+                    ["renderer_probe.success", "renderer_probe.failed", "renderer_probe.timeout"]
+                        .contains($0.event)
+                },
+                "a late \(lateResult) callback from navigation A must be ignored after B starts"
+            )
+            observer.invalidate()
+        }
+    }
+
+    @MainActor
+    func testNewNavigationCancelsAndInvalidatesPendingRendererProbeTimeout() async {
+        let slotID = UUID()
+        let webView = WebViewFactory.makeWebView()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            runtimeGeneration: 4,
+            javaScriptEvaluator: { _, _, _ in }
+        )
+
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 4, navigationGeneration: 1)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        let waitNanoseconds = UInt64(
+            (SlotNavigationObserver.rendererProbeTimeout + 0.25) * 1_000_000_000
+        )
+        try? await Task.sleep(nanoseconds: waitNanoseconds)
+
+        XCTAssertFalse(
+            writer.events.contains { $0.event == "renderer_probe.timeout" },
+            "navigation A's pending timeout must be ignored after navigation B starts"
+        )
+        observer.invalidate()
+    }
+}

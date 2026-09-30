@@ -99,6 +99,61 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(pool.count, 1)
     }
 
+    func testRuntimeGenerationIsStableOnReuseAndAdvancesOnRebuildAndRelease() throws {
+        let pool = makePool()
+        var profile = makeProfile(name: "RuntimeGeneration")
+
+        let first = try pool.webView(for: profile)
+        let firstGeneration = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+        let reused = try pool.webView(for: profile)
+        XCTAssertTrue(first === reused)
+        XCTAssertEqual(pool.diagnosticRuntimeGeneration(for: profile.id), firstGeneration)
+
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
+        let rebuilt = try pool.webView(for: profile)
+        let rebuiltGeneration = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+        XCTAssertFalse(first === rebuilt)
+        XCTAssertGreaterThan(rebuiltGeneration, firstGeneration)
+
+        pool.release(slotID: profile.id)
+        let recreated = try pool.webView(for: profile)
+        let recreatedGeneration = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+        XCTAssertFalse(rebuilt === recreated)
+        XCTAssertGreaterThan(recreatedGeneration, rebuiltGeneration)
+    }
+
+    func testReloadAndHomeRequestsAreVisibleInStandardDiagnostics() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let profile = makeProfile(name: "ActionDiagnostics")
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            isSlotActive: { $0 == profile.id },
+            diagnostics: diagnostics
+        )
+        _ = try pool.webView(for: profile)
+
+        XCTAssertTrue(pool.reload(slotID: profile.id))
+        pool.recordUserAction(.home, slotID: profile.id)
+
+        let requests = writer.events.filter {
+            $0.event == "web_runtime.reload.requested" || $0.event == "web_runtime.home.requested"
+        }
+        XCTAssertEqual(requests.map(\.event), [
+            "web_runtime.reload.requested",
+            "web_runtime.home.requested"
+        ])
+        for event in requests {
+            XCTAssertEqual(event.level, .info)
+            XCTAssertEqual(event.fields["slot_id"], .string(profile.id.uuidString))
+            XCTAssertNotNil(event.fields["runtime_generation"])
+            XCTAssertNotNil(event.fields["navigation_generation_before"])
+            XCTAssertEqual(event.fields["is_active"], .bool(true))
+            XCTAssertNotNil(event.fields["is_loading"])
+        }
+    }
+
     func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() throws {
         let pool = makePool()
         var profile = makeProfile(name: "A")

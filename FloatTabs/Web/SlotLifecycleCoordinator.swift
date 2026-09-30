@@ -393,6 +393,20 @@ final class SlotLifecycleCoordinator {
         inactivePlans.values.filter { $0.residencyPolicy == .warm }.count
     }
 
+    /// Read-only projection of the existing inactive plan for incident
+    /// diagnostics. This does not create, replace, or advance a plan.
+    func diagnosticReleaseState(
+        slotID: UUID
+    ) -> (pendingColdRelease: Bool, pendingWarmRelease: Bool) {
+        guard let plan = inactivePlans[slotID] else {
+            return (false, false)
+        }
+        return (
+            pendingColdRelease: plan.residencyPolicy == .cold,
+            pendingWarmRelease: plan.residencyPolicy == .warm
+        )
+    }
+
     var mediaProtectedIDs: Set<UUID> {
         mediaProtectedSlotIDs
     }
