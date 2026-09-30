@@ -515,6 +515,10 @@ final class WebViewPool {
         invalidateCalibreReaderBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
         navigationObservers.removeValue(forKey: profile.id)?.invalidate()
+        // The old runtime no longer exists after this boundary. Clear its
+        // diagnostic identity before attempting replacement so a failed
+        // rebuild cannot leave a phantom generation attached to the Slot.
+        runtimeGenerations.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
