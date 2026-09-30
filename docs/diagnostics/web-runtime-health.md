@@ -19,9 +19,12 @@ residency policy, fullscreen recovery, or content-process recovery.
 
 ## Stall observation
 
-- A single one-shot watchdog is armed for a provisional navigation. If no commit,
-  finish, failure, process termination, newer navigation, release, or rebuild is
-  observed for 120 seconds, record one `navigation.stalled` event.
+- A one-shot watchdog is armed for the provisional phase. A commit cancels that
+  timer and immediately arms one bounded post-commit watchdog waiting for finish
+  or failure. If either phase makes no further progress for 120 seconds before a
+  process termination, newer navigation, release, or rebuild, record one
+  `navigation.stalled` event. The event includes whether the tracked navigation
+  had already committed.
 - Reload and Home also arm a one-shot 120-second no-progress check. A subsequent
   provisional start replaces that check with the navigation watchdog. A newer
   user action replaces the previous action check.
@@ -30,9 +33,10 @@ residency policy, fullscreen recovery, or content-process recovery.
   watchdog callbacks stale.
 - A stall and a content-process termination each produce one compact,
   observation-only `web_runtime.incident_snapshot` containing runtime/navigation
-  identity, load/progress state, view attachment/geometry, source-window
-  visibility/key state, fullscreen state, residency, active state, and pending
-  Warm/Cold release flags. Geometry is sampled only for these incidents.
+  identity, load/progress state, view attachment/geometry, the actual
+  `webView.window` visibility/key state, the source-host window visibility/key
+  state, fullscreen state, residency, active state, and pending Warm/Cold release
+  flags. Geometry is sampled only for these incidents.
 
 ## Renderer probe
 
@@ -42,8 +46,9 @@ residency policy, fullscreen recovery, or content-process recovery.
 - The probe has a five-second timeout and emits `renderer_probe.success`,
   `renderer_probe.failed`, or `renderer_probe.timeout` with runtime/navigation
   generations, latency, and the two safe state values when available.
-- Completion, timeout, and runtime-replacement callbacks are token-guarded. A
-  late callback after timeout or replacement is ignored.
+- Completion, timeout, newer-navigation invalidation, and runtime-replacement
+  callbacks are token-guarded. A late callback after timeout, replacement, or a
+  newer navigation is ignored.
 
 ## Logging and privacy
 
