@@ -350,19 +350,28 @@ private final class RendererProbeJavaScriptEvaluatorCapture {
 }
 
 final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
-    func testNavigationCommitFinishAndFailurePreventAStall() {
-        for terminal in ["commit", "finish", "failure"] {
+    func testNavigationFinishAndFailurePreventAStall() {
+        for terminal in ["finish", "failure"] {
             var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
             let ticket = tracker.provisionalStarted()
 
             switch terminal {
-            case "commit": XCTAssertTrue(tracker.didCommit(ticket))
             case "finish": XCTAssertTrue(tracker.didFinish(ticket))
             default: XCTAssertTrue(tracker.didFail(ticket))
             }
 
-            XCTAssertFalse(tracker.markStalled(ticket), "\(terminal) must cancel its watchdog")
+            XCTAssertFalse(tracker.markStalled(ticket), "\(terminal) must terminate stall observation")
         }
+    }
+
+    func testCommittedNavigationCanStillBeClassifiedStalledUntilFinish() {
+        var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
+        let ticket = tracker.provisionalStarted()
+
+        XCTAssertTrue(tracker.didCommit(ticket))
+        XCTAssertTrue(tracker.isCommitted(ticket))
+        XCTAssertTrue(tracker.markStalled(ticket), "commit is progress, not a terminal navigation state")
+        XCTAssertFalse(tracker.markStalled(ticket), "one generation must emit at most one stall")
     }
 
     func testNavigationWatchdogReportsExactlyOneStall() {
@@ -430,6 +439,37 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         lifecycle.replaceRuntime(with: 21)
 
         XCTAssertNil(lifecycle.complete(ticket, as: .success))
+    }
+
+    @MainActor
+    func testIncidentSnapshotKeepsWebViewWindowAndSourceHostWindowSeparate() {
+        let slotID = UUID()
+        let webView = WebViewFactory.makeWebView()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            runtimeGeneration: 31,
+            incidentDiagnosticContextProvider: { _ in
+                [
+                    "source_window_visible": .bool(true),
+                    "source_window_key": .bool(true)
+                ]
+            }
+        )
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+
+        let snapshot = writer.events.last { $0.event == "web_runtime.incident_snapshot" }
+        XCTAssertEqual(snapshot?.fields["webview_window_visible"], .bool(false))
+        XCTAssertEqual(snapshot?.fields["webview_window_key"], .bool(false))
+        XCTAssertEqual(snapshot?.fields["source_window_visible"], .bool(true))
+        XCTAssertEqual(snapshot?.fields["source_window_key"], .bool(true))
+        observer.invalidate()
     }
 
     @MainActor
