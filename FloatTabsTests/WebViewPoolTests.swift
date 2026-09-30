@@ -122,6 +122,30 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertGreaterThan(recreatedGeneration, rebuiltGeneration)
     }
 
+    func testFailedRebuildClearsObsoleteRuntimeGeneration() throws {
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { false }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        var profile = makeProfile(name: "FailedRebuildGeneration")
+
+        _ = try pool.webView(for: profile)
+        XCTAssertNotNil(pool.diagnosticRuntimeGeneration(for: profile.id))
+
+        profile.browserProfileID = UUID()
+
+        XCTAssertThrowsError(try pool.webView(for: profile))
+        XCTAssertNil(pool.existingWebView(for: profile.id))
+        XCTAssertNil(
+            pool.diagnosticRuntimeGeneration(for: profile.id),
+            "a failed rebuild must not retain the generation of the discarded runtime"
+        )
+    }
+
     func testReloadAndHomeRequestsAreVisibleInStandardDiagnostics() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
