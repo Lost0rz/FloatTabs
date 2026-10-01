@@ -675,16 +675,21 @@ struct WebRuntimeRecoveryTracker {
     mutating func didCommit(
         _ navigation: WebRuntimeNavigationTicket
     ) -> WebRuntimeRecoveryTicket? {
-        guard let ticket = softRecoveryTicket(for: navigation) else { return nil }
-        softRecovery = nil
-        userAction = nil
-        return ticket
+        // A commit is progress, not recovery completion. The confirmed incident
+        // class is explicitly post-commit: WebKit may commit, remain loading for
+        // minutes, and only later finish. Keep the recovery ticket live so a
+        // post-commit stall or failure is still attributed to this one bounded
+        // recovery attempt.
+        guard softRecoveryTicket(for: navigation) != nil else { return nil }
+        return nil
     }
 
     mutating func didFinish(
         _ navigation: WebRuntimeNavigationTicket
     ) -> WebRuntimeRecoveryTicket? {
-        if let ticket = didCommit(navigation) {
+        if let ticket = softRecoveryTicket(for: navigation) {
+            softRecovery = nil
+            userAction = nil
             return ticket
         }
         if userActionContext(for: navigation) != nil, softRecovery == nil {
@@ -1155,13 +1160,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             // distinguished from a healthy completed load.
             scheduleWatchdog(target: .navigation(ticket), after: Self.navigationStallTimeout)
         }
-        if let ticket,
-           let completedRecovery = recoveryTracker.didCommit(ticket) {
-            recordRecoveryEvent(
-                "soft_completed",
-                ticket: completedRecovery,
-                reason: "navigation_committed"
-            )
+        if let ticket {
+            _ = recoveryTracker.didCommit(ticket)
         }
         cancelPendingInstantBack()
         // Once an https entry commits, later in-page failures can never inherit
