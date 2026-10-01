@@ -683,6 +683,22 @@ struct WebRuntimeRecoveryTracker {
         return softRecovery.request.ticket.navigationGeneration == navigation.navigationGeneration
     }
 
+    func hasPendingSoftRecoveryStart(
+        after navigation: WebRuntimeNavigationTicket
+    ) -> Bool {
+        guard navigation.runtimeGeneration == runtimeGeneration,
+              let softRecovery,
+              softRecovery.request.ticket.navigationGeneration == navigation.navigationGeneration else {
+            return false
+        }
+        switch softRecovery.phase {
+        case .requested, .deferred, .awaitingNavigationStart:
+            return true
+        case .navigating:
+            return false
+        }
+    }
+
     mutating func didCommit(
         _ navigation: WebRuntimeNavigationTicket
     ) -> WebRuntimeRecoveryTicket? {
@@ -1171,7 +1187,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
-            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+            recoveryTracker.hasPendingSoftRecoveryStart(after: $0)
         } ?? false
         if let ticket, healthTracker.didCommit(ticket) {
             if !preservesRecoveryStartWatchdog {
@@ -1293,7 +1309,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
-            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+            recoveryTracker.hasPendingSoftRecoveryStart(after: $0)
         } ?? false
         if let ticket, healthTracker.didFail(ticket) {
             // stopLoading() is the first step of soft recovery and may fail the
@@ -1339,7 +1355,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
-            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+            recoveryTracker.hasPendingSoftRecoveryStart(after: $0)
         } ?? false
         if let ticket, healthTracker.didFail(ticket) {
             // stopLoading() is the first step of soft recovery and may fail the
