@@ -55,8 +55,9 @@ replace the WebView.
   so the recovery ticket remains live across commit. `stopLoading()` may race
   with late commit, finish, or failure callbacks from the original stalled
   navigation before the replacement navigation starts; those old-navigation
-  callbacks do not cancel or replace the bounded recovery-start timeout. A
-  failed recovery navigation, a pre- or post-commit recovery navigation stall,
+  callbacks do not cancel or replace the bounded recovery-start timeout and do
+  not consume inferred-scheme fallback provenance configured for a replacement
+  Home navigation. A failed recovery navigation, a pre- or post-commit recovery navigation stall,
   or a bounded recovery-start timeout records one failure and does not trigger
   another escalation.
 - If the original user-requested navigation finishes while a fullscreen
