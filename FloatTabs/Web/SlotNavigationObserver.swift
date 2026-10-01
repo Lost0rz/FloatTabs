@@ -1160,16 +1160,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
+        let preservesRecoveryStartWatchdog = ticket.map {
+            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+        } ?? false
         if let ticket, healthTracker.didCommit(ticket) {
-            cancelWatchdog()
+            if !preservesRecoveryStartWatchdog {
+                cancelWatchdog()
+            }
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
             lastCommitUptime = ProcessInfo.processInfo.systemUptime
             // Commit proves the provisional phase made progress, but it is not
             // a terminal navigation state. Re-arm one bounded diagnostic
             // watchdog so a committed page that never finishes can still be
-            // distinguished from a healthy completed load.
-            scheduleWatchdog(target: .navigation(ticket), after: Self.navigationStallTimeout)
+            // distinguished from a healthy completed load. If soft recovery
+            // has already begun, however, a late commit from the original
+            // stalled navigation must not replace the recovery-start watchdog.
+            if !preservesRecoveryStartWatchdog {
+                scheduleWatchdog(target: .navigation(ticket), after: Self.navigationStallTimeout)
+            }
         }
         if let ticket {
             _ = recoveryTracker.didCommit(ticket)
@@ -1200,8 +1209,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreHiddenScrollerPolicy(in: webView)
 
         let ticket = currentNavigationTicket(for: navigation)
+        let preservesRecoveryStartWatchdog = ticket.map {
+            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+        } ?? false
         if let ticket, healthTracker.didFinish(ticket) {
-            cancelWatchdog()
+            if !preservesRecoveryStartWatchdog {
+                cancelWatchdog()
+            }
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
