@@ -520,6 +520,29 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         XCTAssertNil(tracker.userActionContext(for: navigation))
     }
 
+    func testPendingRecoveryStartClassificationCoversRequestedDeferredAndAwaitingPhases() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 12)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let original = WebRuntimeNavigationTicket(runtimeGeneration: 12, navigationGeneration: 1)
+        _ = tracker.navigationStarted(original)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: original,
+            classification: .rendererResponsiveNavigationStall
+        ))
+
+        XCTAssertTrue(tracker.hasPendingSoftRecoveryStart(after: original))
+
+        XCTAssertTrue(tracker.deferSoftRecovery(request.ticket))
+        XCTAssertTrue(tracker.hasPendingSoftRecoveryStart(after: original))
+
+        XCTAssertTrue(tracker.beginSoftRecovery(request.ticket))
+        XCTAssertTrue(tracker.hasPendingSoftRecoveryStart(after: original))
+
+        let replacement = WebRuntimeNavigationTicket(runtimeGeneration: 12, navigationGeneration: 2)
+        XCTAssertEqual(tracker.navigationStarted(replacement), .softRecovery(request.ticket))
+        XCTAssertFalse(tracker.hasPendingSoftRecoveryStart(after: original))
+    }
+
     func testSoftRecoveryStaysPendingAfterCommitAndCompletesExactlyOnceOnFinish() throws {
         var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 12)
         _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
