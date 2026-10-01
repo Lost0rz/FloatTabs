@@ -350,6 +350,194 @@ private final class RendererProbeJavaScriptEvaluatorCapture {
 }
 
 final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
+    func testPassiveResponsiveStallNeverRequestsRecovery() {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 1)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 1, navigationGeneration: 1)
+
+        XCTAssertEqual(tracker.navigationStarted(navigation), .passive)
+        XCTAssertNil(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+    }
+
+    func testUserReloadCanRequestOnlyOneResponsiveSoftRecovery() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 4)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 4, navigationGeneration: 1)
+
+        XCTAssertEqual(tracker.navigationStarted(navigation), .userAction(generation: 1))
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertEqual(request.ticket.action, .reload)
+        XCTAssertNil(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+    }
+
+    func testUserHomeRecoveryRetainsTheSameHomeIntentAndEntryFallback() throws {
+        let homeURL = URL(string: "https://example.test/start")!
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 5)
+        _ = tracker.recordUserAction(
+            .home,
+            navigationGenerationBefore: 0,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: true
+        )
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 5, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertEqual(request.ticket.action, .home)
+        XCTAssertEqual(request.homeURL, homeURL)
+        XCTAssertTrue(request.homeURLSchemeWasInferred)
+    }
+
+    func testOnlyRendererTimeoutIsHardRecoveryCandidate() {
+        XCTAssertFalse(WebRuntimeRecoveryClassification(probeResult: .success).isHardRecoveryCandidate)
+        XCTAssertFalse(WebRuntimeRecoveryClassification(probeResult: .failed).isHardRecoveryCandidate)
+        XCTAssertTrue(WebRuntimeRecoveryClassification(probeResult: .timeout).isHardRecoveryCandidate)
+    }
+
+    func testFailedRendererProbeDoesNotRequestSoftOrHardRecovery() {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 5)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 5, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+
+        XCTAssertNil(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: WebRuntimeRecoveryClassification(probeResult: .failed)
+        ))
+        XCTAssertNotNil(tracker.userActionContext(for: navigation))
+    }
+
+    func testNewNavigationMakesPendingSoftRecoveryStale() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 6)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let original = WebRuntimeNavigationTicket(runtimeGeneration: 6, navigationGeneration: 1)
+        _ = tracker.navigationStarted(original)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: original,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        let unrelated = WebRuntimeNavigationTicket(runtimeGeneration: 6, navigationGeneration: 2)
+        XCTAssertEqual(tracker.navigationStarted(unrelated), .staleSoftRecovery(request.ticket))
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+    }
+
+    func testNewUserActionInvalidatesOldRecoveryTimeout() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 7)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 7, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        _ = tracker.recordUserAction(.home, navigationGenerationBefore: 1)
+
+        XCTAssertFalse(tracker.softRecoveryStartTimedOut(request.ticket))
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+    }
+
+    func testCurrentRecoveryStartTimeoutConsumesItsTicketOnce() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 8)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 8, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertTrue(tracker.beginSoftRecovery(request.ticket))
+
+        XCTAssertTrue(tracker.softRecoveryStartTimedOut(request.ticket))
+        XCTAssertFalse(tracker.softRecoveryStartTimedOut(request.ticket))
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+    }
+
+    func testNaturalUserNavigationFinishInvalidatesDeferredRecovery() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 9)
+        _ = tracker.recordUserAction(.home, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 9, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertTrue(tracker.deferSoftRecovery(request.ticket))
+
+        XCTAssertEqual(tracker.userNavigationFinished(navigation), request.ticket)
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+        XCTAssertNil(tracker.didFinish(navigation))
+    }
+
+    func testRuntimeReplacementInvalidatesPendingRecovery() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 8)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 8, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+
+        XCTAssertEqual(tracker.replaceRuntime(with: 9), request.ticket)
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+        XCTAssertNil(tracker.userActionContext(for: navigation))
+    }
+
+    func testReleaseInvalidatesPendingRecoveryAndAction() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 10)
+        _ = tracker.recordUserAction(.home, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 10, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: navigation,
+            classification: .rendererResponsiveNavigationStall
+        ))
+
+        XCTAssertEqual(tracker.invalidate(), request.ticket)
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+        XCTAssertNil(tracker.userActionContext(for: navigation))
+    }
+
+    func testCompletedOrdinaryUserNavigationClearsRecoveryIntent() {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 11)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 11, navigationGeneration: 1)
+        _ = tracker.navigationStarted(navigation)
+
+        XCTAssertNil(tracker.didFinish(navigation))
+        XCTAssertNil(tracker.userActionContext(for: navigation))
+    }
+
+    func testSoftRecoveryCompletesExactlyOnceOnCommit() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 12)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let original = WebRuntimeNavigationTicket(runtimeGeneration: 12, navigationGeneration: 1)
+        _ = tracker.navigationStarted(original)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: original,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertTrue(tracker.beginSoftRecovery(request.ticket))
+        XCTAssertFalse(tracker.beginSoftRecovery(request.ticket))
+
+        let recoveryNavigation = WebRuntimeNavigationTicket(runtimeGeneration: 12, navigationGeneration: 2)
+        XCTAssertEqual(tracker.navigationStarted(recoveryNavigation), .softRecovery(request.ticket))
+        XCTAssertEqual(tracker.didCommit(recoveryNavigation), request.ticket)
+        XCTAssertNil(tracker.didFinish(recoveryNavigation))
+        XCTAssertFalse(tracker.isCurrent(request.ticket))
+    }
+
     func testNavigationFinishAndFailurePreventAStall() {
         for terminal in ["finish", "failure"] {
             var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
@@ -579,6 +767,183 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
             writer.events.contains { $0.event == "renderer_probe.timeout" },
             "navigation A's pending timeout must be ignored after navigation B starts"
         )
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testReloadNavigationWithResponsiveRendererRequestsOneSoftRecovery() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer),
+            runtimeGeneration: 7,
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+        observer.observeUserAction(.reload)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 7, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(
+            ["ready_state": "interactive", "visibility_state": "visible"],
+            nil
+        )
+        for _ in 0..<5 { await Task.yield() }
+
+        let requests = writer.events.filter { $0.event == "web_runtime.recovery.soft_requested" }
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.fields["runtime_generation"], .integer(7))
+        XCTAssertEqual(requests.first?.fields["navigation_generation"], .integer(1))
+        XCTAssertEqual(requests.first?.fields["user_action_generation"], .integer(1))
+        XCTAssertEqual(requests.first?.fields["recovery_generation"], .integer(1))
+        XCTAssertEqual(requests.first?.fields["action"], .string("reload"))
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testHomeNavigationWithResponsiveRendererKeepsHomeActionIntent() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer),
+            runtimeGeneration: 8,
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+
+        observer.observeUserAction(.home)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 8, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(
+            ["ready_state": "complete", "visibility_state": "visible"],
+            nil
+        )
+        for _ in 0..<5 { await Task.yield() }
+
+        let request = writer.events.first { $0.event == "web_runtime.recovery.soft_requested" }
+        XCTAssertEqual(request?.fields["action"], .string("home"))
+        XCTAssertEqual(request?.fields["reason"], .string("user_action_stalled_renderer_responsive"))
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testPassiveResponsiveRendererProbeRecordsWithoutRecovery() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer),
+            runtimeGeneration: 13,
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 13, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(["ready_state": "interactive", "visibility_state": "visible"], nil)
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertTrue(writer.events.contains { $0.event == "renderer_probe.success" })
+        XCTAssertFalse(writer.events.contains { $0.event.hasPrefix("web_runtime.recovery.") })
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testFailedRendererProbeRecordsNoHardRecovery() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer),
+            runtimeGeneration: 14,
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+        observer.observeUserAction(.reload)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 14, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(nil, NSError(domain: "renderer-probe-test", code: 1))
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertTrue(writer.events.contains { $0.event == "renderer_probe.failed" })
+        XCTAssertTrue(writer.events.contains {
+            $0.event == "web_runtime.recovery.soft_failed"
+                && $0.fields["reason"] == .string("renderer_probe_failed")
+        })
+        XCTAssertFalse(writer.events.contains { $0.event == "web_runtime.recovery.hard_deferred" })
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testRendererProbeTimeoutRecordsHardRecoveryDeferredWithoutEscalation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer),
+            runtimeGeneration: 15,
+            isSlotActive: { _ in true },
+            javaScriptEvaluator: { _, _, _ in }
+        )
+        observer.observeUserAction(.reload)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 15, navigationGeneration: 1)
+        )
+        let waitNanoseconds = UInt64(
+            (SlotNavigationObserver.rendererProbeTimeout + 0.25) * 1_000_000_000
+        )
+        try? await Task.sleep(nanoseconds: waitNanoseconds)
+
+        XCTAssertTrue(writer.events.contains { $0.event == "renderer_probe.timeout" })
+        XCTAssertTrue(writer.events.contains {
+            $0.event == "web_runtime.recovery.hard_deferred"
+                && $0.fields["reason"] == .string(
+                    "renderer_probe_timeout_existing_rebuild_owner_required"
+                )
+                && $0.fields["recovery_generation"] == .null
+        })
+        XCTAssertFalse(writer.events.contains { $0.event == "web_runtime.recovery.soft_requested" })
         observer.invalidate()
     }
 }

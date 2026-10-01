@@ -397,15 +397,357 @@ struct RendererProbeLifecycle {
     }
 }
 
-enum WebRuntimeUserAction: Equatable {
+enum WebRuntimeUserAction: Equatable, Sendable {
     case reload
     case home
+
+    var diagnosticAction: String {
+        switch self {
+        case .reload: "reload"
+        case .home: "home"
+        }
+    }
 
     var diagnosticEvent: String {
         switch self {
         case .reload: "web_runtime.reload.requested"
         case .home: "web_runtime.home.requested"
         }
+    }
+}
+
+struct WebRuntimeRecoveryTicket: Equatable, Sendable {
+    let runtimeGeneration: UInt64
+    let navigationGeneration: UInt64
+    let userActionGeneration: UInt64
+    let recoveryGeneration: UInt64
+    let action: WebRuntimeUserAction
+}
+
+struct WebRuntimeRecoveryRequest: Equatable {
+    let ticket: WebRuntimeRecoveryTicket
+    let homeURL: URL?
+    let homeURLSchemeWasInferred: Bool
+}
+
+struct WebRuntimeUserActionContext: Equatable {
+    let generation: UInt64
+    let action: WebRuntimeUserAction
+    let navigationGenerationBefore: UInt64
+    let homeURL: URL?
+    let homeURLSchemeWasInferred: Bool
+    var navigationGeneration: UInt64?
+}
+
+enum WebRuntimeRecoveryClassification: Equatable {
+    case rendererResponsiveNavigationStall
+    case rendererProbeFailed
+    case rendererUnresponsive
+    case contentProcessTerminated
+
+    init(probeResult: WebRuntimeRendererProbeResult) {
+        switch probeResult {
+        case .success: self = .rendererResponsiveNavigationStall
+        case .failed: self = .rendererProbeFailed
+        case .timeout: self = .rendererUnresponsive
+        }
+    }
+
+    var isHardRecoveryCandidate: Bool {
+        self == .rendererUnresponsive
+    }
+}
+
+enum WebRuntimeRecoveryNavigationAssociation: Equatable {
+    case passive
+    case userAction(generation: UInt64)
+    case softRecovery(WebRuntimeRecoveryTicket)
+    case staleSoftRecovery(WebRuntimeRecoveryTicket)
+}
+
+/// Correlates explicit user actions with the navigation they start and one
+/// bounded recovery request. Navigation generations remain owned by
+/// `WebRuntimeHealthTracker`.
+struct WebRuntimeRecoveryTracker {
+    private enum SoftRecoveryPhase: Equatable {
+        case requested
+        case deferred
+        case awaitingNavigationStart
+        case navigating(UInt64)
+    }
+
+    private struct SoftRecoveryState: Equatable {
+        let request: WebRuntimeRecoveryRequest
+        var phase: SoftRecoveryPhase
+    }
+
+    private(set) var runtimeGeneration: UInt64
+    private var nextUserActionGeneration: UInt64 = 0
+    private var nextRecoveryGeneration: UInt64 = 0
+    private var userAction: WebRuntimeUserActionContext?
+    private var softRecovery: SoftRecoveryState?
+
+    init(runtimeGeneration: UInt64) {
+        self.runtimeGeneration = runtimeGeneration
+    }
+
+    mutating func recordUserAction(
+        _ action: WebRuntimeUserAction,
+        navigationGenerationBefore: UInt64,
+        homeURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false
+    ) -> (generation: UInt64, invalidatedRecovery: WebRuntimeRecoveryTicket?) {
+        let invalidatedRecovery = softRecovery?.request.ticket
+        nextUserActionGeneration &+= 1
+        userAction = WebRuntimeUserActionContext(
+            generation: nextUserActionGeneration,
+            action: action,
+            navigationGenerationBefore: navigationGenerationBefore,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred,
+            navigationGeneration: nil
+        )
+        softRecovery = nil
+        return (nextUserActionGeneration, invalidatedRecovery)
+    }
+
+    mutating func navigationStarted(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryNavigationAssociation {
+        guard navigation.runtimeGeneration == runtimeGeneration else {
+            return .passive
+        }
+
+        if var softRecovery {
+            switch softRecovery.phase {
+            case .awaitingNavigationStart:
+                guard navigation.navigationGeneration
+                    > softRecovery.request.ticket.navigationGeneration else {
+                    self.softRecovery = nil
+                    userAction = nil
+                    return .staleSoftRecovery(softRecovery.request.ticket)
+                }
+                softRecovery.phase = .navigating(navigation.navigationGeneration)
+                self.softRecovery = softRecovery
+                return .softRecovery(softRecovery.request.ticket)
+
+            case .requested, .deferred, .navigating:
+                self.softRecovery = nil
+                userAction = nil
+                return .staleSoftRecovery(softRecovery.request.ticket)
+            }
+        }
+
+        guard var userAction else { return .passive }
+        guard navigation.navigationGeneration > userAction.navigationGenerationBefore else {
+            self.userAction = nil
+            return .passive
+        }
+        if let activeNavigationGeneration = userAction.navigationGeneration,
+           activeNavigationGeneration != navigation.navigationGeneration {
+            self.userAction = nil
+            return .passive
+        }
+
+        userAction.navigationGeneration = navigation.navigationGeneration
+        self.userAction = userAction
+        return .userAction(generation: userAction.generation)
+    }
+
+    func userActionContext(
+        for navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeUserActionContext? {
+        guard navigation.runtimeGeneration == runtimeGeneration,
+              let userAction,
+              userAction.navigationGeneration == navigation.navigationGeneration else {
+            return nil
+        }
+        return userAction
+    }
+
+    mutating func actionStartTimedOut(
+        generation: UInt64
+    ) -> WebRuntimeUserActionContext? {
+        guard let userAction,
+              userAction.generation == generation,
+              userAction.navigationGeneration == nil,
+              softRecovery == nil else {
+            return nil
+        }
+        self.userAction = nil
+        return userAction
+    }
+
+    mutating func requestSoftRecovery(
+        for navigation: WebRuntimeNavigationTicket,
+        classification: WebRuntimeRecoveryClassification
+    ) -> WebRuntimeRecoveryRequest? {
+        guard classification == .rendererResponsiveNavigationStall,
+              navigation.runtimeGeneration == runtimeGeneration,
+              let userAction = userActionContext(for: navigation),
+              softRecovery == nil else {
+            return nil
+        }
+
+        nextRecoveryGeneration &+= 1
+        let ticket = WebRuntimeRecoveryTicket(
+            runtimeGeneration: navigation.runtimeGeneration,
+            navigationGeneration: navigation.navigationGeneration,
+            userActionGeneration: userAction.generation,
+            recoveryGeneration: nextRecoveryGeneration,
+            action: userAction.action
+        )
+        let request = WebRuntimeRecoveryRequest(
+            ticket: ticket,
+            homeURL: userAction.homeURL,
+            homeURLSchemeWasInferred: userAction.homeURLSchemeWasInferred
+        )
+        softRecovery = SoftRecoveryState(request: request, phase: .requested)
+        return request
+    }
+
+    mutating func resolveProbeWithoutRecovery(
+        for navigation: WebRuntimeNavigationTicket
+    ) {
+        guard userActionContext(for: navigation) != nil,
+              softRecovery == nil else {
+            return
+        }
+        userAction = nil
+    }
+
+    func request(for ticket: WebRuntimeRecoveryTicket) -> WebRuntimeRecoveryRequest? {
+        guard softRecovery?.request.ticket == ticket else { return nil }
+        return softRecovery?.request
+    }
+
+    func isCurrent(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
+        runtimeGeneration == ticket.runtimeGeneration
+            && softRecovery?.request.ticket == ticket
+    }
+
+    mutating func deferSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
+        guard var softRecovery,
+              softRecovery.request.ticket == ticket,
+              softRecovery.phase == .requested else {
+            return false
+        }
+        softRecovery.phase = .deferred
+        self.softRecovery = softRecovery
+        return true
+    }
+
+    mutating func beginSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
+        guard var softRecovery,
+              softRecovery.request.ticket == ticket,
+              softRecovery.phase == .requested || softRecovery.phase == .deferred else {
+            return false
+        }
+        softRecovery.phase = .awaitingNavigationStart
+        self.softRecovery = softRecovery
+        return true
+    }
+
+    mutating func softRecoveryStartTimedOut(
+        _ ticket: WebRuntimeRecoveryTicket
+    ) -> Bool {
+        guard let softRecovery,
+              softRecovery.request.ticket == ticket else {
+            return false
+        }
+        self.softRecovery = nil
+        userAction = nil
+        return true
+    }
+
+    func softRecoveryTicket(
+        for navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        guard let softRecovery,
+              case let .navigating(generation) = softRecovery.phase,
+              generation == navigation.navigationGeneration,
+              navigation.runtimeGeneration == runtimeGeneration else {
+            return nil
+        }
+        return softRecovery.request.ticket
+    }
+
+    mutating func didCommit(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        guard let ticket = softRecoveryTicket(for: navigation) else { return nil }
+        softRecovery = nil
+        userAction = nil
+        return ticket
+    }
+
+    mutating func didFinish(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        if let ticket = didCommit(navigation) {
+            return ticket
+        }
+        if userActionContext(for: navigation) != nil, softRecovery == nil {
+            userAction = nil
+        }
+        return nil
+    }
+
+    mutating func userNavigationFinished(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        guard userActionContext(for: navigation) != nil,
+              let softRecovery,
+              softRecovery.request.ticket.navigationGeneration == navigation.navigationGeneration,
+              softRecovery.phase == .requested || softRecovery.phase == .deferred else {
+            return nil
+        }
+        self.softRecovery = nil
+        userAction = nil
+        return softRecovery.request.ticket
+    }
+
+    mutating func didFail(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        if let softRecovery,
+           softRecovery.phase == .awaitingNavigationStart,
+           softRecovery.request.ticket.navigationGeneration == navigation.navigationGeneration {
+            return nil
+        }
+        if let ticket = softRecoveryTicket(for: navigation) {
+            softRecovery = nil
+            userAction = nil
+            return ticket
+        }
+        if userActionContext(for: navigation) != nil, softRecovery == nil {
+            userAction = nil
+        }
+        return nil
+    }
+
+    mutating func recoveryNavigationStalled(
+        _ navigation: WebRuntimeNavigationTicket
+    ) -> WebRuntimeRecoveryTicket? {
+        guard let ticket = softRecoveryTicket(for: navigation) else { return nil }
+        softRecovery = nil
+        userAction = nil
+        return ticket
+    }
+
+    mutating func invalidate() -> WebRuntimeRecoveryTicket? {
+        let invalidated = softRecovery?.request.ticket
+        userAction = nil
+        softRecovery = nil
+        return invalidated
+    }
+
+    mutating func replaceRuntime(with generation: UInt64) -> WebRuntimeRecoveryTicket? {
+        let invalidated = invalidate()
+        runtimeGeneration = generation
+        nextUserActionGeneration = 0
+        nextRecoveryGeneration = 0
+        return invalidated
     }
 }
 
@@ -436,6 +778,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             action: WebRuntimeUserAction,
             navigationGenerationBefore: UInt64
         )
+        case softRecoveryStart(WebRuntimeRecoveryTicket)
     }
 
     private weak var webView: WKWebView?
@@ -458,9 +801,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let isSlotActive: @MainActor (UUID) -> Bool
     private let incidentDiagnosticContextProvider: IncidentDiagnosticContextProvider
     private let javaScriptEvaluator: JavaScriptEvaluationHandler
+    private let onSoftRecoveryRequested: @MainActor (WebRuntimeRecoveryRequest) -> Void
+    private let onSoftRecoveryInvalidated: @MainActor (WebRuntimeRecoveryTicket) -> Void
 
     private var healthTracker: WebRuntimeHealthTracker
     private var rendererProbeLifecycle: RendererProbeLifecycle
+    private var recoveryTracker: WebRuntimeRecoveryTracker
     private var activeNavigationIdentifier: ObjectIdentifier?
     private var navigationStartUptime: TimeInterval?
     private var lastCommitUptime: TimeInterval?
@@ -515,6 +861,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         runtimeGeneration: UInt64 = 0,
         isSlotActive: @escaping @MainActor (UUID) -> Bool = { _ in false },
         incidentDiagnosticContextProvider: @escaping IncidentDiagnosticContextProvider = { _ in [:] },
+        onSoftRecoveryRequested: @escaping @MainActor (WebRuntimeRecoveryRequest) -> Void = { _ in },
+        onSoftRecoveryInvalidated: @escaping @MainActor (WebRuntimeRecoveryTicket) -> Void = { _ in },
         javaScriptEvaluator: @escaping JavaScriptEvaluationHandler = { webView, script, completion in
             webView.evaluateJavaScript(script, completionHandler: completion)
         }
@@ -537,9 +885,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.runtimeGeneration = runtimeGeneration
         self.isSlotActive = isSlotActive
         self.incidentDiagnosticContextProvider = incidentDiagnosticContextProvider
+        self.onSoftRecoveryRequested = onSoftRecoveryRequested
+        self.onSoftRecoveryInvalidated = onSoftRecoveryInvalidated
         self.javaScriptEvaluator = javaScriptEvaluator
         healthTracker = WebRuntimeHealthTracker(runtimeGeneration: runtimeGeneration)
         rendererProbeLifecycle = RendererProbeLifecycle(runtimeGeneration: runtimeGeneration)
+        recoveryTracker = WebRuntimeRecoveryTracker(runtimeGeneration: runtimeGeneration)
         super.init()
 
         observation = webView.observe(\.url, options: [.new]) { [weak self] _, _ in
@@ -569,12 +920,33 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     /// Called at the existing user-action boundary. This schedules only one
     /// bounded no-progress observation and never changes the requested action.
-    func observeUserAction(_ action: WebRuntimeUserAction) {
+    func observeUserAction(
+        _ action: WebRuntimeUserAction,
+        homeURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false
+    ) {
         guard webView != nil else { return }
-        nextUserActionGeneration &+= 1
+        cancelWatchdog()
+        cancelRendererProbeTimeout()
+        rendererProbeLifecycle.invalidate()
+        let actionContext = recoveryTracker.recordUserAction(
+            action,
+            navigationGenerationBefore: healthTracker.latestNavigationGeneration,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred
+        )
+        if let previousRecovery = actionContext.invalidatedRecovery {
+            recordRecoveryEvent(
+                "soft_stale",
+                ticket: previousRecovery,
+                reason: "new_user_action"
+            )
+            onSoftRecoveryInvalidated(previousRecovery)
+        }
+        nextUserActionGeneration = actionContext.generation
         scheduleWatchdog(
             target: .userAction(
-                generation: nextUserActionGeneration,
+                generation: actionContext.generation,
                 action: action,
                 navigationGenerationBefore: healthTracker.latestNavigationGeneration
             ),
@@ -582,11 +954,72 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         )
     }
 
+    func isCurrentSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
+        recoveryTracker.isCurrent(ticket)
+    }
+
+    func softRecoveryRequest(
+        for ticket: WebRuntimeRecoveryTicket
+    ) -> WebRuntimeRecoveryRequest? {
+        recoveryTracker.request(for: ticket)
+    }
+
+    @discardableResult
+    func deferSoftRecovery(_ ticket: WebRuntimeRecoveryTicket, reason: String) -> Bool {
+        guard recoveryTracker.deferSoftRecovery(ticket) else { return false }
+        recordRecoveryEvent("soft_deferred", ticket: ticket, reason: reason)
+        scheduleWatchdog(
+            target: .softRecoveryStart(ticket),
+            after: Self.navigationStallTimeout
+        )
+        return true
+    }
+
+    @discardableResult
+    func beginSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
+        guard recoveryTracker.beginSoftRecovery(ticket) else { return false }
+        cancelWatchdog()
+        recordRecoveryEvent(
+            "soft_started",
+            ticket: ticket,
+            reason: "user_action_stalled_renderer_responsive"
+        )
+        scheduleWatchdog(
+            target: .softRecoveryStart(ticket),
+            after: Self.navigationStallTimeout
+        )
+        return true
+    }
+
+    func failSoftRecovery(_ ticket: WebRuntimeRecoveryTicket, reason: String) {
+        guard recoveryTracker.isCurrent(ticket) else { return }
+        cancelWatchdog()
+        _ = recoveryTracker.invalidate()
+        recordRecoveryEvent("soft_failed", ticket: ticket, reason: reason)
+        onSoftRecoveryInvalidated(ticket)
+    }
+
+    func invalidateSoftRecovery(_ ticket: WebRuntimeRecoveryTicket, reason: String) {
+        guard recoveryTracker.isCurrent(ticket) else { return }
+        cancelWatchdog()
+        _ = recoveryTracker.invalidate()
+        recordRecoveryEvent("soft_stale", ticket: ticket, reason: reason)
+        onSoftRecoveryInvalidated(ticket)
+    }
+
     /// Called before a pooled runtime is released or replaced so no delayed
     /// observation can outlive the WKWebView it describes.
-    func invalidate() {
+    func invalidate(recoveryReason: String = "runtime_released") {
         cancelWatchdog()
         cancelRendererProbeTimeout()
+        if let invalidatedRecovery = recoveryTracker.invalidate() {
+            recordRecoveryEvent(
+                "soft_stale",
+                ticket: invalidatedRecovery,
+                reason: recoveryReason
+            )
+            onSoftRecoveryInvalidated(invalidatedRecovery)
+        }
         healthTracker.invalidateCurrentNavigation()
         rendererProbeLifecycle.invalidate()
         if let webView, webView.navigationDelegate === self {
@@ -678,6 +1111,21 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             navigationStartUptime = ProcessInfo.processInfo.systemUptime
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
+            switch recoveryTracker.navigationStarted(ticket) {
+            case .passive, .userAction:
+                break
+            case .softRecovery:
+                cancelWatchdog()
+                // The start watchdog is replaced by the normal bounded
+                // navigation watchdog below.
+            case let .staleSoftRecovery(recoveryTicket):
+                recordRecoveryEvent(
+                    "soft_stale",
+                    ticket: recoveryTicket,
+                    reason: "new_navigation"
+                )
+                onSoftRecoveryInvalidated(recoveryTicket)
+            }
         }
         diagnostics.record(
             event: "navigation.provisional_started",
@@ -698,12 +1146,22 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         if let ticket, healthTracker.didCommit(ticket) {
             cancelWatchdog()
+            cancelRendererProbeTimeout()
+            rendererProbeLifecycle.invalidate()
             lastCommitUptime = ProcessInfo.processInfo.systemUptime
             // Commit proves the provisional phase made progress, but it is not
             // a terminal navigation state. Re-arm one bounded diagnostic
             // watchdog so a committed page that never finishes can still be
             // distinguished from a healthy completed load.
             scheduleWatchdog(target: .navigation(ticket), after: Self.navigationStallTimeout)
+        }
+        if let ticket,
+           let completedRecovery = recoveryTracker.didCommit(ticket) {
+            recordRecoveryEvent(
+                "soft_completed",
+                ticket: completedRecovery,
+                reason: "navigation_committed"
+            )
         }
         cancelPendingInstantBack()
         // Once an https entry commits, later in-page failures can never inherit
@@ -733,8 +1191,27 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         if let ticket, healthTracker.didFinish(ticket) {
             cancelWatchdog()
+            cancelRendererProbeTimeout()
+            rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
             navigationStartUptime = nil
+        }
+        if let ticket,
+           let supersededRecovery = recoveryTracker.userNavigationFinished(ticket) {
+            recordRecoveryEvent(
+                "soft_stale",
+                ticket: supersededRecovery,
+                reason: "user_navigation_finished_before_recovery"
+            )
+            onSoftRecoveryInvalidated(supersededRecovery)
+        }
+        if let ticket,
+           let completedRecovery = recoveryTracker.didFinish(ticket) {
+            recordRecoveryEvent(
+                "soft_completed",
+                ticket: completedRecovery,
+                reason: "navigation_finished"
+            )
         }
 
         diagnostics.record(
@@ -768,8 +1245,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         if let ticket, healthTracker.didFail(ticket) {
             cancelWatchdog()
+            cancelRendererProbeTimeout()
+            rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
             navigationStartUptime = nil
+        }
+        if let ticket,
+           let failedRecovery = recoveryTracker.didFail(ticket) {
+            recordRecoveryEvent(
+                "soft_failed",
+                ticket: failedRecovery,
+                reason: "navigation_failed"
+            )
         }
         diagnostics.record(
             event: "navigation.failed",
@@ -793,8 +1280,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let ticket = currentNavigationTicket(for: navigation)
         if let ticket, healthTracker.didFail(ticket) {
             cancelWatchdog()
+            cancelRendererProbeTimeout()
+            rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
             navigationStartUptime = nil
+        }
+        if let ticket,
+           let failedRecovery = recoveryTracker.didFail(ticket) {
+            recordRecoveryEvent(
+                "soft_failed",
+                ticket: failedRecovery,
+                reason: "navigation_failed"
+            )
         }
         diagnostics.record(
             event: "navigation.failed",
@@ -832,6 +1329,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         let ticket = healthTracker.activeTicket ?? healthTracker.latestTicket
         cancelWatchdog()
+        cancelRendererProbeTimeout()
+        rendererProbeLifecycle.invalidate()
+        if let invalidatedRecovery = recoveryTracker.invalidate() {
+            recordRecoveryEvent(
+                "soft_stale",
+                ticket: invalidatedRecovery,
+                reason: "content_process_terminated"
+            )
+            onSoftRecoveryInvalidated(invalidatedRecovery)
+        }
         activeNavigationIdentifier = nil
         navigationStartUptime = nil
         diagnostics.record(
@@ -893,30 +1400,60 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         case let .navigation(ticket):
             let navigationCommitted = healthTracker.isCommitted(ticket)
             guard healthTracker.markStalled(ticket) else { return }
+            if let recoveryTicket = recoveryTracker.recoveryNavigationStalled(ticket) {
+                recordRecoveryEvent(
+                    "soft_failed",
+                    ticket: recoveryTicket,
+                    reason: "recovery_navigation_stalled"
+                )
+                recordNavigationStall(
+                    in: webView,
+                    ticket: ticket,
+                    source: "soft_recovery",
+                    userActionContext: nil,
+                    navigationCommitted: navigationCommitted,
+                    recoveryTicket: recoveryTicket,
+                    shouldProbeRenderer: false
+                )
+                onSoftRecoveryInvalidated(recoveryTicket)
+                return
+            }
             recordNavigationStall(
                 in: webView,
                 ticket: ticket,
                 source: "navigation",
-                userActionGeneration: nil,
+                userActionContext: recoveryTracker.userActionContext(for: ticket),
                 navigationCommitted: navigationCommitted
             )
 
-        case let .userAction(generation, action, navigationGenerationBefore):
+        case let .userAction(generation, _, navigationGenerationBefore):
             guard generation == nextUserActionGeneration,
-                  healthTracker.markActionStalled(for: navigationGenerationBefore) else {
+                  let actionContext = recoveryTracker.actionStartTimedOut(generation: generation) else {
                 return
             }
-            let ticket = WebRuntimeNavigationTicket(
-                runtimeGeneration: runtimeGeneration,
-                navigationGeneration: navigationGenerationBefore
+            diagnostics.record(
+                event: "web_runtime.user_action.no_navigation",
+                level: .warning,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "runtime_generation": .integer(Int64(runtimeGeneration)),
+                    "navigation_generation": .integer(Int64(navigationGenerationBefore)),
+                    "navigation_generation_before": .integer(Int64(actionContext.navigationGenerationBefore)),
+                    "user_action_generation": .integer(Int64(actionContext.generation)),
+                    "action": .string(actionContext.action.diagnosticAction),
+                    "is_loading": .bool(webView.isLoading)
+                ]
             )
-            recordNavigationStall(
-                in: webView,
+
+        case let .softRecoveryStart(ticket):
+            guard recoveryTracker.softRecoveryStartTimedOut(ticket) else { return }
+            recordRecoveryEvent(
+                "soft_failed",
                 ticket: ticket,
-                source: action == .reload ? "reload" : "home",
-                userActionGeneration: generation,
-                navigationCommitted: nil
+                reason: "recovery_navigation_start_timeout"
             )
+            onSoftRecoveryInvalidated(ticket)
         }
     }
 
@@ -924,8 +1461,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         in webView: WKWebView,
         ticket: WebRuntimeNavigationTicket,
         source: String,
-        userActionGeneration: UInt64?,
-        navigationCommitted: Bool?
+        userActionContext: WebRuntimeUserActionContext?,
+        navigationCommitted: Bool?,
+        recoveryTicket: WebRuntimeRecoveryTicket? = nil,
+        shouldProbeRenderer: Bool = true
     ) {
         var fields = runtimeFields(for: webView, ticket: ticket)
         fields["watchdog_source"] = .string(source)
@@ -945,12 +1484,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 max(0, ProcessInfo.processInfo.systemUptime - lastCommitUptime)
             )
         }
-        if let userActionGeneration {
-            fields["user_action_generation"] = .integer(Int64(userActionGeneration))
+        if let userActionContext {
+            fields["user_action_generation"] = .integer(Int64(userActionContext.generation))
+            fields["action"] = .string(userActionContext.action.diagnosticAction)
             fields["navigation_generation_before"] = .integer(
-                Int64(ticket.navigationGeneration)
+                Int64(userActionContext.navigationGenerationBefore)
             )
-            fields["navigation_started_after_request"] = .bool(false)
+            fields["navigation_started_after_request"] = .bool(true)
+        }
+        if let recoveryTicket {
+            fields["user_action_generation"] = .integer(Int64(recoveryTicket.userActionGeneration))
+            fields["recovery_generation"] = .integer(Int64(recoveryTicket.recoveryGeneration))
+            fields["action"] = .string(recoveryTicket.action.diagnosticAction)
         }
         diagnostics.record(
             event: "navigation.stalled",
@@ -959,7 +1504,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             fields: fields
         )
         recordIncidentSnapshot(in: webView, ticket: ticket, reason: "navigation_stalled")
-        startRendererProbe(in: webView, for: ticket)
+        if shouldProbeRenderer {
+            startRendererProbe(in: webView, for: ticket)
+        }
     }
 
     private func recordIncidentSnapshot(
@@ -1108,6 +1655,106 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             level: level,
             subsystem: "web",
             fields: fields
+        )
+        handleRecoveryProbeResult(
+            result,
+            for: WebRuntimeNavigationTicket(
+                runtimeGeneration: ticket.runtimeGeneration,
+                navigationGeneration: ticket.navigationGeneration
+            )
+        )
+    }
+
+    private func handleRecoveryProbeResult(
+        _ result: WebRuntimeRendererProbeResult,
+        for navigation: WebRuntimeNavigationTicket
+    ) {
+        guard let actionContext = recoveryTracker.userActionContext(for: navigation) else {
+            return
+        }
+
+        let classification = WebRuntimeRecoveryClassification(probeResult: result)
+        switch classification {
+        case .rendererResponsiveNavigationStall:
+            guard let request = recoveryTracker.requestSoftRecovery(
+                for: navigation,
+                classification: classification
+            ) else {
+                return
+            }
+            recordRecoveryEvent(
+                "soft_requested",
+                ticket: request.ticket,
+                reason: "user_action_stalled_renderer_responsive"
+            )
+            scheduleWatchdog(
+                target: .softRecoveryStart(request.ticket),
+                after: Self.navigationStallTimeout
+            )
+            onSoftRecoveryRequested(request)
+
+        case .rendererProbeFailed:
+            recoveryTracker.resolveProbeWithoutRecovery(for: navigation)
+            diagnostics.record(
+                event: "web_runtime.recovery.soft_failed",
+                level: .warning,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "runtime_generation": .integer(Int64(navigation.runtimeGeneration)),
+                    "navigation_generation": .integer(Int64(navigation.navigationGeneration)),
+                    "user_action_generation": .integer(Int64(actionContext.generation)),
+                    "recovery_generation": .null,
+                    "action": .string(actionContext.action.diagnosticAction),
+                    "reason": .string("renderer_probe_failed")
+                ]
+            )
+
+        case .rendererUnresponsive:
+            recoveryTracker.resolveProbeWithoutRecovery(for: navigation)
+            diagnostics.record(
+                event: "web_runtime.recovery.hard_deferred",
+                level: .warning,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "runtime_generation": .integer(Int64(navigation.runtimeGeneration)),
+                    "navigation_generation": .integer(Int64(navigation.navigationGeneration)),
+                    "user_action_generation": .integer(Int64(actionContext.generation)),
+                    "recovery_generation": .null,
+                    "action": .string(actionContext.action.diagnosticAction),
+                    "reason": .string("renderer_probe_timeout_existing_rebuild_owner_required")
+                ]
+            )
+
+        case .contentProcessTerminated:
+            break
+        }
+    }
+
+    private func recordRecoveryEvent(
+        _ suffix: String,
+        ticket: WebRuntimeRecoveryTicket,
+        reason: String
+    ) {
+        let level: RuntimeDiagnosticLevel = switch suffix {
+        case "soft_requested": .notice
+        case "soft_started", "soft_completed": .info
+        default: .warning
+        }
+        diagnostics.record(
+            event: "web_runtime.recovery.\(suffix)",
+            level: level,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "runtime_generation": .integer(Int64(ticket.runtimeGeneration)),
+                "navigation_generation": .integer(Int64(ticket.navigationGeneration)),
+                "user_action_generation": .integer(Int64(ticket.userActionGeneration)),
+                "recovery_generation": .integer(Int64(ticket.recoveryGeneration)),
+                "action": .string(ticket.action.diagnosticAction),
+                "reason": .string(reason)
+            ]
         )
     }
 

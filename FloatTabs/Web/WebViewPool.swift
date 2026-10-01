@@ -43,6 +43,9 @@ enum BrowserProfileIdentity: Equatable, Hashable {
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
+    typealias StopLoadingHandler = @MainActor (WKWebView) -> Void
+    typealias ReloadFromOriginHandler = @MainActor (WKWebView) -> WKNavigation?
+    typealias JavaScriptEvaluationHandler = SlotNavigationObserver.JavaScriptEvaluationHandler
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     typealias AttentionEventHandler = @MainActor (UUID, ChatGPTAttentionEvent) -> Void
@@ -67,8 +70,14 @@ final class WebViewPool {
     private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
+    private var deferredSoftRecoveries: [UUID: WebRuntimeRecoveryRequest] = [:]
 
     var onResidentSetChange: (() -> Void)?
+
+    /// The fullscreen source owner supplies a transient reason while it owns
+    /// the Slot's presentation. Recovery requests remain bounded and are
+    /// revalidated after that owner releases the source.
+    var softRecoveryDeferralReasonProvider: @MainActor (UUID) -> String? = { _ in nil }
 
     /// One-shot diagnostic context supplied by the existing presentation and
     /// lifecycle owners. The pool does not retain or make decisions from it.
@@ -105,6 +114,9 @@ final class WebViewPool {
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let stopLoading: StopLoadingHandler
+    private let reloadFromOrigin: ReloadFromOriginHandler
+    private let javaScriptEvaluator: JavaScriptEvaluationHandler
     private let isSlotActive: IsSlotActiveHandler
     private let downloadCoordinator: DownloadCoordinator
     private let browserProfileDataStoreProvider: BrowserProfileDataStoreProvider
@@ -119,6 +131,15 @@ final class WebViewPool {
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
         },
+        stopLoading: @escaping StopLoadingHandler = { webView in
+            webView.stopLoading()
+        },
+        reloadFromOrigin: @escaping ReloadFromOriginHandler = { webView in
+            webView.reloadFromOrigin()
+        },
+        javaScriptEvaluator: @escaping JavaScriptEvaluationHandler = { webView, script, completion in
+            webView.evaluateJavaScript(script, completionHandler: completion)
+        },
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
@@ -127,6 +148,9 @@ final class WebViewPool {
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.stopLoading = stopLoading
+        self.reloadFromOrigin = reloadFromOrigin
+        self.javaScriptEvaluator = javaScriptEvaluator
         self.isSlotActive = isSlotActive
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.committedURLProvider = committedURLProvider
@@ -216,7 +240,12 @@ final class WebViewPool {
         runtimeGenerations[slotID]
     }
 
-    func recordUserAction(_ action: WebRuntimeUserAction, slotID: UUID) {
+    func recordUserAction(
+        _ action: WebRuntimeUserAction,
+        slotID: UUID,
+        homeURL: URL? = nil,
+        homeURLSchemeWasInferred: Bool = false
+    ) {
         let observer = navigationObservers[slotID]
         let webView = webViews[slotID]
         let generation = runtimeGenerations[slotID]
@@ -234,7 +263,78 @@ final class WebViewPool {
                 "is_loading": webView.map { .bool($0.isLoading) } ?? .null
             ]
         )
-        observer?.observeUserAction(action)
+        observer?.observeUserAction(
+            action,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: homeURLSchemeWasInferred
+        )
+    }
+
+    func resumeDeferredSoftRecoveries() {
+        let requests = Array(deferredSoftRecoveries.values)
+        for request in requests {
+            performSoftRecovery(request)
+        }
+    }
+
+    private func performSoftRecovery(_ request: WebRuntimeRecoveryRequest) {
+        let ticket = request.ticket
+        let slotID = deferredSoftRecoveries.first(where: { $0.value.ticket == ticket })?.key
+            ?? navigationObservers.first(where: { $0.value.isCurrentSoftRecovery(ticket) })?.key
+        guard let slotID,
+              let observer = navigationObservers[slotID],
+              let webView = webViews[slotID],
+              runtimeGenerations[slotID] == ticket.runtimeGeneration,
+              observer.isCurrentSoftRecovery(ticket),
+              observer.softRecoveryRequest(for: ticket) == request else {
+            discardDeferredSoftRecovery(ticket)
+            return
+        }
+
+        guard isSlotActive(slotID) else {
+            observer.invalidateSoftRecovery(ticket, reason: "slot_inactive")
+            return
+        }
+
+        if let reason = softRecoveryDeferralReasonProvider(slotID) {
+            deferredSoftRecoveries[slotID] = request
+            _ = observer.deferSoftRecovery(ticket, reason: reason)
+            return
+        }
+
+        if ticket.action == .home,
+           request.homeURL.map(WebAppURL.isSafe) != true {
+            observer.failSoftRecovery(ticket, reason: "home_intent_unavailable")
+            return
+        }
+
+        guard observer.beginSoftRecovery(ticket) else {
+            discardDeferredSoftRecovery(ticket)
+            return
+        }
+        deferredSoftRecoveries.removeValue(forKey: slotID)
+        stopLoading(webView)
+        switch ticket.action {
+        case .reload:
+            _ = reloadFromOrigin(webView)
+        case .home:
+            guard let homeURL = request.homeURL, WebAppURL.isSafe(homeURL) else {
+                observer.failSoftRecovery(ticket, reason: "home_intent_unavailable")
+                return
+            }
+            navigate(
+                slotID: slotID,
+                to: homeURL,
+                allowHTTPEntryFallback: request.homeURLSchemeWasInferred
+            )
+        }
+    }
+
+    private func discardDeferredSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) {
+        let slotIDs = deferredSoftRecoveries.compactMap { slotID, request in
+            request.ticket == ticket ? slotID : nil
+        }
+        slotIDs.forEach { deferredSoftRecoveries.removeValue(forKey: $0) }
     }
 
     func calibreReaderBridge(for slotID: UUID) -> CalibreReaderBridge? {
@@ -309,6 +409,7 @@ final class WebViewPool {
         appliedBrowserProfileIdentities.removeValue(forKey: slotID)
         lastKnownURLs.removeValue(forKey: slotID)
         deferredReloadSlotIDs.remove(slotID)
+        deferredSoftRecoveries.removeValue(forKey: slotID)
         let removed = webViews.removeValue(forKey: slotID)
         removed?.removeFromSuperview()
         if removed != nil {
@@ -514,7 +615,9 @@ final class WebViewPool {
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
-        navigationObservers.removeValue(forKey: profile.id)?.invalidate()
+        navigationObservers.removeValue(forKey: profile.id)?.invalidate(
+            recoveryReason: "runtime_replaced"
+        )
         // The old runtime no longer exists after this boundary. Clear its
         // diagnostic identity before attempting replacement so a failed
         // rebuild cannot leave a phantom generation attached to the Slot.
@@ -755,7 +858,14 @@ final class WebViewPool {
             isSlotActive: isSlotActive,
             incidentDiagnosticContextProvider: { [weak self] slotID in
                 self?.incidentDiagnosticContextProvider(slotID) ?? [:]
-            }
+            },
+            onSoftRecoveryRequested: { [weak self] request in
+                self?.performSoftRecovery(request)
+            },
+            onSoftRecoveryInvalidated: { [weak self] ticket in
+                self?.discardDeferredSoftRecovery(ticket)
+            },
+            javaScriptEvaluator: javaScriptEvaluator
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,

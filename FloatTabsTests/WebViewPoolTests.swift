@@ -178,6 +178,167 @@ final class WebViewPoolTests: XCTestCase {
         }
     }
 
+    func testResponsiveReloadRecoveryUsesStopAndReloadFromOriginOnce() async throws {
+        let probe = WebViewPoolRecoveryProbeCapture()
+        let profile = makeProfile(name: "SoftReloadRecovery")
+        var stopCount = 0
+        var reloadFromOriginCount = 0
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            stopLoading: { _ in stopCount += 1 },
+            reloadFromOrigin: { _ in reloadFromOriginCount += 1; return nil },
+            javaScriptEvaluator: { [weak probe] _, _, completion in
+                probe?.completion = completion
+            },
+            isSlotActive: { $0 == profile.id },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer)
+        )
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+
+        pool.recordUserAction(.reload, slotID: profile.id)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: try XCTUnwrap(
+                pool.diagnosticRuntimeGeneration(for: profile.id)
+            ), navigationGeneration: 1)
+        )
+        let reloadCompletion = try XCTUnwrap(probe.completion)
+        reloadCompletion(
+            ["ready_state": "interactive", "visibility_state": "visible"],
+            nil
+        )
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertEqual(stopCount, 1)
+        XCTAssertEqual(reloadFromOriginCount, 1)
+        XCTAssertTrue(pool.existingWebView(for: profile.id) === webView)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.recovery.soft_started" }.count,
+            1
+        )
+        pool.release(slotID: profile.id)
+    }
+
+    func testResponsiveHomeRecoveryReissuesCapturedHomeURLAndDefersForFullscreenLock() async throws {
+        let probe = WebViewPoolRecoveryProbeCapture()
+        let homeURL = URL(string: "https://nas.example.com:3010")!
+        let profile = makeProfile(
+            name: "SoftHomeRecovery",
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: true
+        )
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        var loadedRequests: [URLRequest] = []
+        var stopCount = 0
+        var reloadFromOriginCount = 0
+        var sourceLocked = true
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            stopLoading: { _ in stopCount += 1 },
+            reloadFromOrigin: { _ in reloadFromOriginCount += 1; return nil },
+            javaScriptEvaluator: { [weak probe] _, _, completion in
+                probe?.completion = completion
+            },
+            isSlotActive: { $0 == profile.id },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer)
+        )
+        pool.softRecoveryDeferralReasonProvider = { _ in
+            sourceLocked ? "fullscreen_source_locked" : nil
+        }
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        loadedRequests.removeAll()
+
+        pool.recordUserAction(
+            .home,
+            slotID: profile.id,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: true
+        )
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: try XCTUnwrap(
+                pool.diagnosticRuntimeGeneration(for: profile.id)
+            ), navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(probe.completion)
+        completion(
+            ["ready_state": "complete", "visibility_state": "visible"],
+            nil
+        )
+        for _ in 0..<5 { await Task.yield() }
+
+        XCTAssertTrue(loadedRequests.isEmpty)
+        XCTAssertEqual(stopCount, 0)
+        XCTAssertTrue(writer.events.contains { $0.event == "web_runtime.recovery.soft_deferred" })
+        XCTAssertFalse(writer.events.contains { $0.event == "web_runtime.recovery.soft_started" })
+
+        sourceLocked = false
+        pool.resumeDeferredSoftRecoveries()
+
+        XCTAssertEqual(stopCount, 1)
+        XCTAssertEqual(reloadFromOriginCount, 0)
+        XCTAssertEqual(loadedRequests.last?.url, homeURL)
+        XCTAssertTrue(pool.isHTTPEntryFallbackPending(slotID: profile.id))
+        pool.release(slotID: profile.id)
+    }
+
+    func testOriginalNavigationFinishDropsPendingFullscreenRecovery() async throws {
+        let probe = WebViewPoolRecoveryProbeCapture()
+        let profile = makeProfile(name: "FinishedDuringFullscreenDeferral")
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        var loadedRequests: [URLRequest] = []
+        var sourceLocked = true
+        var stopCount = 0
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            stopLoading: { _ in stopCount += 1 },
+            reloadFromOrigin: { _ in nil },
+            javaScriptEvaluator: { [weak probe] _, _, completion in
+                probe?.completion = completion
+            },
+            isSlotActive: { $0 == profile.id },
+            diagnostics: RuntimeDiagnostics(mode: .standard, writer: writer)
+        )
+        pool.softRecoveryDeferralReasonProvider = { _ in
+            sourceLocked ? "fullscreen_source_locked" : nil
+        }
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        loadedRequests.removeAll()
+
+        pool.recordUserAction(.reload, slotID: profile.id)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: try XCTUnwrap(
+                pool.diagnosticRuntimeGeneration(for: profile.id)
+            ), navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(probe.completion)
+        completion(["ready_state": "complete", "visibility_state": "visible"], nil)
+        for _ in 0..<5 { await Task.yield() }
+
+        observer.webView(webView, didFinish: nil)
+        sourceLocked = false
+        pool.resumeDeferredSoftRecoveries()
+
+        XCTAssertEqual(stopCount, 0)
+        XCTAssertTrue(loadedRequests.isEmpty)
+        XCTAssertTrue(writer.events.contains {
+            $0.event == "web_runtime.recovery.soft_stale"
+                && $0.fields["reason"] == .string("user_navigation_finished_before_recovery")
+        })
+        pool.release(slotID: profile.id)
+    }
+
     func testZoomOrViewportChangeAppliesWithoutRebuildingSlotWebView() throws {
         let pool = makePool()
         var profile = makeProfile(name: "A")
@@ -1871,4 +2032,9 @@ final class WebViewPoolTests: XCTestCase {
             homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
     }
+}
+
+@MainActor
+private final class WebViewPoolRecoveryProbeCapture {
+    var completion: (@Sendable (Any?, Error?) -> Void)?
 }

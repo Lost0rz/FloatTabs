@@ -794,6 +794,13 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         super.init()
 
+        webViewPool.softRecoveryDeferralReasonProvider = { [weak self] _ in
+            guard let self else { return "recovery_owner_unavailable" }
+            return self.sourceHostController.sessionState == .idle
+                ? nil
+                : "fullscreen_source_locked"
+        }
+
         webViewPool.incidentDiagnosticContextProvider = { [weak self] slotID in
             guard let self else { return [:] }
             let profile = self.tabStore.profiles.first { $0.id == slotID }
@@ -826,7 +833,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.contentView = rootView
 
         sourceHostController.onSessionLockChange = { [weak self] isLocked in
-            self?.handleSourceSessionLockChange(isLocked: isLocked)
+            guard let self else { return }
+            self.handleSourceSessionLockChange(isLocked: isLocked)
+            if !isLocked {
+                self.webViewPool.resumeDeferredSoftRecoveries()
+            }
         }
         sourceHostController.onSessionStateChange = { [weak self] state in
             self?.handleSourceSessionStateChange(state)
@@ -3807,7 +3818,12 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
 
-        webViewPool.recordUserAction(.home, slotID: id)
+        webViewPool.recordUserAction(
+            .home,
+            slotID: id,
+            homeURL: profile.homeURL,
+            homeURLSchemeWasInferred: profile.homeURLSchemeWasInferred
+        )
 
         // `homeURL` is stable Slot identity; only `currentURL` moves. Updating
         // currentURL before load also makes Return to Home deterministic for a
