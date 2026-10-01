@@ -581,6 +581,33 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         XCTAssertTrue(tracker.isAwaitingSoftRecoveryNavigationStart(after: original))
     }
 
+    func testLateOriginalCommitAndFinishWhileRecoveryAwaitsStartKeepRecoveryPending() throws {
+        for terminal in ["commit", "finish"] {
+            var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 15)
+            _ = tracker.recordUserAction(.home, navigationGenerationBefore: 0)
+            let original = WebRuntimeNavigationTicket(runtimeGeneration: 15, navigationGeneration: 1)
+            _ = tracker.navigationStarted(original)
+            let request = try XCTUnwrap(tracker.requestSoftRecovery(
+                for: original,
+                classification: .rendererResponsiveNavigationStall
+            ))
+            XCTAssertTrue(tracker.beginSoftRecovery(request.ticket))
+
+            switch terminal {
+            case "commit":
+                XCTAssertNil(tracker.didCommit(original))
+            default:
+                XCTAssertNil(tracker.didFinish(original))
+            }
+
+            XCTAssertTrue(
+                tracker.isCurrent(request.ticket),
+                "late original \(terminal) must not consume replacement-start recovery state"
+            )
+            XCTAssertTrue(tracker.isAwaitingSoftRecoveryNavigationStart(after: original))
+        }
+    }
+
     func testNavigationFinishAndFailurePreventAStall() {
         for terminal in ["finish", "failure"] {
             var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
