@@ -65,9 +65,11 @@ replace the WebView.
 - If the original user-requested navigation finishes while a fullscreen
   deferral is pending, the deferred recovery becomes stale and is discarded.
 - If the fullscreen source host is locked, soft execution is deferred until
-  that host returns to `idle`. The deferred request is transient and is dropped
-  if its ticket becomes stale, its Slot is released, or the Slot is no longer
-  active. Recovery never activates a Slot.
+  that host returns to `idle`. The deferred request remains subject to the
+  bounded recovery-start timeout; late commit or failure callbacks from the
+  original stalled navigation do not cancel that bound. The request is
+  transient and is dropped if its ticket becomes stale, its Slot is released,
+  or the Slot is no longer active. Recovery never activates a Slot.
 
 ## Tickets and invalidation
 
