@@ -3,6 +3,36 @@ import XCTest
 @testable import FloatTabs
 
 final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
+    func testWaveTwoForbiddenFieldsAreRejectedAtSanitizationBoundary() {
+        let forbiddenKeys = [
+            "conversation_id",
+            "document_token",
+            "response_id",
+            "raw_url",
+            "query",
+            "fragment",
+            "prompt",
+            "response",
+            "cookie",
+            "authorization",
+            "error_message",
+            "stack"
+        ]
+        var fields = Dictionary(uniqueKeysWithValues: forbiddenKeys.map { key in
+            (key, RuntimeDiagnosticValue.string("private-fixture"))
+        })
+        fields["response_bridge_ready"] = .bool(true)
+        fields["latest_response_complete"] = .bool(false)
+
+        let sanitized = RuntimeDiagnosticPrivacy.sanitize(fields: fields, mode: .verbose)
+
+        for key in forbiddenKeys {
+            XCTAssertNil(sanitized[key], "forbidden diagnostic field retained: \(key)")
+        }
+        XCTAssertEqual(sanitized["response_bridge_ready"], .bool(true))
+        XCTAssertEqual(sanitized["latest_response_complete"], .bool(false))
+    }
+
     func testURLsRemoveUserInfoQueryAndFragmentAndRedactConversationLikePath() {
         let url = URL(string: "https://user:password@example.com/c/secret-conversation?token=abc#message")!
         XCTAssertEqual(

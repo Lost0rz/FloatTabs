@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import OSLog
 
 @MainActor
@@ -28,9 +29,19 @@ protocol RuntimeDiagnosticRecording: AnyObject {
         to destination: URL,
         completion: @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
     )
+
+    func setCorrelationContextProvider(
+        _ provider: @escaping @MainActor (UUID) -> [String: RuntimeDiagnosticValue]
+    )
 }
 
 extension RuntimeDiagnosticRecording {
+    func setCorrelationContextProvider(
+        _ provider: @escaping @MainActor (UUID) -> [String: RuntimeDiagnosticValue]
+    ) {
+        _ = provider
+    }
+
     func beginTrace(root: String) -> RuntimeDiagnosticTrace {
         beginTrace(root: root, fields: [:])
     }
@@ -79,6 +90,7 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     private let timestamp: TimestampProvider
     private let uptime: UptimeProvider
     private let modeProvider: ModeProvider
+    private var correlationContextProvider: (@MainActor (UUID) -> [String: RuntimeDiagnosticValue])?
     private let logger = Logger(
         subsystem: "com.lost0rz.FloatTabs",
         category: "RuntimeDiagnostics"
@@ -94,9 +106,20 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     }
 
     func environmentFields() -> [String: RuntimeDiagnosticValue] {
-        [
+        let bundle = Bundle.main
+        return [
             "app_version": .string(Self.appVersion),
             "build_number": .string(Self.buildNumber),
+            "source_revision": .string(
+                bundle.object(forInfoDictionaryKey: "FloatTabsSourceRevision") as? String ?? "unknown"
+            ),
+            "build_channel": .string(
+                bundle.object(forInfoDictionaryKey: "FloatTabsBuildChannel") as? String ?? "unknown"
+            ),
+            "qa_label": .string(
+                bundle.object(forInfoDictionaryKey: "FloatTabsQALabel") as? String ?? "unlabeled"
+            ),
+            "host_pid": .integer(Int64(ProcessInfo.processInfo.processIdentifier)),
             "macos_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
             "architecture": .string(Self.processArchitecture),
             "session_id": .string(sessionID.uuidString),
@@ -157,8 +180,26 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         let currentMode = mode
         guard currentMode.allows(level) else { return nil }
 
-        let sanitizedFields = RuntimeDiagnosticPrivacy.sanitize(
+        var sanitizedFields = RuntimeDiagnosticPrivacy.sanitize(
             fields: fields,
+            mode: currentMode
+        )
+        if case let .string(rawSlotID)? = fields["slot_id"],
+           let slotID = UUID(uuidString: rawSlotID),
+           let correlationContextProvider {
+            let context = correlationContextProvider(slotID)
+            for (key, value) in context {
+                if sanitizedFields[key] == nil {
+                    sanitizedFields[key] = value
+                }
+            }
+            if !context.isEmpty {
+                sanitizedFields["session_id"] = sanitizedFields["session_id"]
+                    ?? .string(sessionID.uuidString)
+            }
+        }
+        sanitizedFields = RuntimeDiagnosticPrivacy.sanitize(
+            fields: sanitizedFields,
             mode: currentMode
         )
         var eventFields = sanitizedFields
@@ -187,6 +228,12 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         completion: @escaping @Sendable () -> Void
     ) {
         writer.requestFinalFlush(timeout: timeout, completion: completion)
+    }
+
+    func setCorrelationContextProvider(
+        _ provider: @escaping @MainActor (UUID) -> [String: RuntimeDiagnosticValue]
+    ) {
+        correlationContextProvider = provider
     }
 
     func exportRecent(
@@ -248,6 +295,156 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
 #else
         return "unknown"
 #endif
+    }
+}
+
+enum RuntimePreviousExit: String, Equatable, Sendable {
+    case clean
+    case uncleanSuspected = "unclean_suspected"
+    case unknown
+}
+
+enum RuntimeDiagnosticURLClass {
+    static func classify(_ url: URL) -> String {
+        let path = url.path
+        let host = url.host?.lowercased() ?? ""
+        if ChatGPTSitePolicy.isSupportedHost(host),
+           let first = path.split(separator: "/").first,
+           first == "c",
+           path.split(separator: "/").count >= 2 {
+            return "conversation"
+        }
+        return path.isEmpty || path == "/" ? "root" : "other"
+    }
+}
+
+/// A tiny durable sentinel independent of the JSONL writer's final flush.
+/// `active` means the prior process did not reach its termination callback; it
+/// is intentionally called unclean_suspected rather than a crash.
+struct RuntimeSessionLifecycleMarker {
+    private let markerURL: URL
+
+    init(directoryURL: URL = RuntimeDiagnosticWriter.defaultDirectory) {
+        markerURL = directoryURL.appendingPathComponent("runtime-session-state", isDirectory: false)
+    }
+
+    @discardableResult
+    func beginSession(fileManager: FileManager = .default) -> RuntimePreviousExit {
+        let previous: RuntimePreviousExit
+        if let data = try? Data(contentsOf: markerURL),
+           let value = String(data: data, encoding: .utf8) {
+            switch value {
+            case "clean": previous = .clean
+            case "active": previous = .uncleanSuspected
+            default: previous = .unknown
+            }
+        } else {
+            previous = .unknown
+        }
+        write("active", fileManager: fileManager)
+        return previous
+    }
+
+    @discardableResult
+    func markCleanExit(fileManager: FileManager = .default) -> Bool {
+        write("clean", fileManager: fileManager)
+    }
+
+    @discardableResult
+    private func write(_ value: String, fileManager: FileManager) -> Bool {
+        do {
+            try fileManager.createDirectory(
+                at: markerURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(value.utf8).write(to: markerURL, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
+@MainActor
+final class RuntimeNetworkPathMonitor {
+    private let monitor = NWPathMonitor()
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private var transitionTracker = RuntimeNetworkPathTransitionTracker()
+    private(set) var currentGeneration: UInt64?
+
+    init(diagnostics: any RuntimeDiagnosticRecording) {
+        self.diagnostics = diagnostics
+    }
+
+    func start() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let status: String
+            switch path.status {
+            case .satisfied: status = "satisfied"
+            case .unsatisfied: status = "unsatisfied"
+            case .requiresConnection: status = "requires_connection"
+            @unknown default: status = "unknown"
+            }
+            let snapshot = RuntimeNetworkPathSnapshot(
+                status: status,
+                interfaceClass: Self.interfaceClass(for: path),
+                expensive: path.isExpensive,
+                constrained: path.isConstrained
+            )
+            Task { @MainActor [weak self] in
+                self?.accept(snapshot)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.lost0rz.FloatTabs.NetworkPath"))
+    }
+
+    func stop() {
+        monitor.cancel()
+    }
+
+    private func accept(_ snapshot: RuntimeNetworkPathSnapshot) {
+        guard let generation = transitionTracker.record(snapshot) else { return }
+        currentGeneration = generation
+        diagnostics.record(
+            event: "network.path.changed",
+            level: .notice,
+            subsystem: "network",
+            fields: [
+                "generation": .integer(Int64(generation)),
+                "status": .string(snapshot.status),
+                "interface_class": .string(snapshot.interfaceClass),
+                "expensive": .bool(snapshot.expensive),
+                "constrained": .bool(snapshot.constrained)
+            ]
+        )
+    }
+
+    nonisolated private static func interfaceClass(for path: NWPath) -> String {
+        if path.usesInterfaceType(.wifi) { return "wifi" }
+        if path.usesInterfaceType(.wiredEthernet) { return "wired" }
+        if path.usesInterfaceType(.cellular) { return "cellular" }
+        if path.usesInterfaceType(.loopback) { return "loopback" }
+        if path.usesInterfaceType(.other) { return "other" }
+        return "none"
+    }
+}
+
+struct RuntimeNetworkPathSnapshot: Equatable, Sendable {
+    let status: String
+    let interfaceClass: String
+    let expensive: Bool
+    let constrained: Bool
+}
+
+struct RuntimeNetworkPathTransitionTracker {
+    private(set) var generation: UInt64 = 0
+    private var previous: RuntimeNetworkPathSnapshot?
+
+    mutating func record(_ snapshot: RuntimeNetworkPathSnapshot) -> UInt64? {
+        guard previous != snapshot else { return nil }
+        previous = snapshot
+        generation &+= 1
+        return generation
     }
 }
 

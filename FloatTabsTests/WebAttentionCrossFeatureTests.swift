@@ -4988,6 +4988,86 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
+    func testStartupRestoreDiagnosticPrecedesRuntimeConstructionAndOmitsConversationPath() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        _ = makeController(
+            profiles: [spec(
+                name: "StartupChatGPT",
+                url: "https://chatgpt.com/c/private-conversation?token=secret"
+            )],
+            diagnostics: diagnostics
+        )
+
+        let selectedIndex = try XCTUnwrap(writer.events.firstIndex {
+            $0.event == "startup.restore.selected"
+        })
+        let createIndex = try XCTUnwrap(writer.events.firstIndex {
+            $0.event == "web_runtime.create.begin"
+        })
+        XCTAssertLessThan(selectedIndex, createIndex)
+        let selected = writer.events[selectedIndex]
+        XCTAssertEqual(selected.fields["current_page_class"], .string("conversation"))
+        XCTAssertEqual(selected.fields["restored_last_active"], .bool(true))
+        XCTAssertEqual(selected.fields["construction_phase"], .string("controller_construction"))
+        XCTAssertNil(selected.fields["url"])
+        XCTAssertNil(selected.fields["conversation_id"])
+
+        let created = try XCTUnwrap(writer.events.first { $0.event == "web_runtime.created" })
+        XCTAssertEqual(created.fields["reason"], .string("startup_restore"))
+        XCTAssertEqual(created.fields["restored_last_active"], .bool(true))
+        XCTAssertNotNil(created.fields["runtime_generation"])
+    }
+
+    func testUserIncidentAndManualResetShareIncidentWithoutChangingSelection() throws {
+        let store = makeTabStore(profiles: [spec(name: "IncidentChat", url: "https://chatgpt.com/")])
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var activeSlotID: UUID?
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            isSlotActive: { $0 == activeSlotID },
+            diagnostics: diagnostics
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            frameStore: PanelFrameStore(),
+            diagnostics: diagnostics
+        )
+        retainedControllers.append(controller)
+        guard let profile = store.activeProfile else { return XCTFail("expected active test slot") }
+        activeSlotID = profile.id
+        let selectedIDBefore = store.activeTabID
+        let runtimeBefore = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+
+        controller.captureStuckTabSnapshotForQA(slotID: profile.id)
+
+        let snapshot = try XCTUnwrap(writer.events.first { $0.event == "web_runtime.incident_snapshot" })
+        guard case let .string(incidentID)? = snapshot.fields["incident_id"] else {
+            return XCTFail("user snapshot must create an incident ID")
+        }
+        XCTAssertEqual(snapshot.fields["runtime_generation"], .integer(Int64(runtimeBefore)))
+        XCTAssertEqual(store.activeTabID, selectedIDBefore)
+        XCTAssertEqual(pool.diagnosticRuntimeGeneration(for: profile.id), runtimeBefore)
+
+        _ = try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: profile.id,
+            activeProfile: profile,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { _ in }
+        )
+        let reset = try XCTUnwrap(writer.events.first { $0.event == "web_runtime.manual_reset.completed" })
+        XCTAssertEqual(reset.fields["incident_id"], .string(incidentID))
+        XCTAssertEqual(reset.fields["runtime_generation_before"], .integer(Int64(runtimeBefore)))
+        XCTAssertGreaterThan(
+            pool.diagnosticRuntimeGeneration(for: profile.id) ?? 0,
+            runtimeBefore
+        )
+        XCTAssertEqual(store.activeTabID, selectedIDBefore)
+    }
+
     // MARK: - Harness
 
     private func makeAsyncSnapshotFixture(

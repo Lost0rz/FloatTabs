@@ -59,3 +59,43 @@ residency policy, fullscreen recovery, or content-process recovery.
   values. Existing URL events continue to use the shared sanitizer.
 - All diagnostic state is transient. `RuntimeDiagnostics` remains
   observation-only, and writer I/O remains on its existing utility queue.
+
+## Wave 2 provenance and incident snapshots
+
+- App launch diagnostics include the diagnostic schema, app version/build, source
+  revision, build channel, QA label, host PID, macOS version, architecture, and
+  session ID. The build phase derives source revision from the checkout and marks
+  a dirty checkout with `-dirty`; build channel and QA label are bounded build
+  metadata. These values do not alter marketing or build version metadata.
+- Startup restore records the selected Slot and its page class (`root`,
+  `conversation`, or `other`) before constructing that Slot's runtime. It does
+  not record a URL or conversation identifier. Runtime creation and replacement
+  events record a fixed creation reason, runtime generation, navigation trigger,
+  active state, residency policy, restore flag, and construction phase.
+- `previous_exit` is `clean`, `unclean_suspected`, or `unknown`. A durable
+  lifecycle marker records only whether termination reached the clean-exit
+  callback; an interrupted session is not labeled as a confirmed crash.
+- The QA-only **Capture Stuck Tab Snapshot (QA)** command is available in Debug
+  builds for the current Slot. It creates an incident ID and records bounded
+  native runtime state without navigating, reloading, rebuilding, or changing
+  Slot selection. Correlation continues across the same Slot's manual QA reset
+  and ends on Slot change, runtime release, termination, or a new incident.
+- A manual QA reset remains explicitly user initiated. Its diagnostics correlate
+  the pre-reset snapshot, old and new runtime generations, and the resulting
+  navigation outcome under the incident ID. Reset behavior is otherwise owned
+  by the existing runtime replacement path.
+
+## Bounded app health and network metadata
+
+- For supported ChatGPT hosts only, a one-shot health observation records fixed
+  state enums/booleans for document readiness and visibility, bridge readiness,
+  conversation shell/composer/generation/loading/error indicators, and counts
+  plus coarse classes for JavaScript errors and unhandled rejections. Event
+  listeners observe and count only; they do not cancel or alter page events.
+- The health observation reads no page text, title, prompt, response body,
+  conversation/response identifier, input, cookie, storage, raw URL, query,
+  fragment, error message, or stack. The privacy sanitizer rejects these fields
+  at the diagnostic boundary.
+- Network diagnostics emit only deduplicated path transitions: generation,
+  status, coarse interface class, expensive, and constrained. They do not record
+  addresses, DNS servers, SSIDs, routes, or per-request/network-resource data.

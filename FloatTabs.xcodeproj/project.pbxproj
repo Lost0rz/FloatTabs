@@ -535,6 +535,7 @@
 				J00000000000000000000001 /* Sources */,
 				G00000000000000000000001 /* Frameworks */,
 				K00000000000000000000001 /* Resources */,
+				J00000000000000000000003 /* Write Build Provenance */,
 			);
 			buildRules = (
 			);
@@ -624,6 +625,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		J00000000000000000000003 /* Write Build Provenance */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Write Build Provenance";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			alwaysOutOfDate = 1;
+			shellPath = /bin/bash;
+			shellScript = "set -e\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\nrevision=\"$(git -C \"$SRCROOT\" rev-parse HEAD 2>/dev/null || true)\"\nif [[ ! \"$revision\" =~ ^[0-9a-f]{40}$ ]]; then revision=unknown; fi\ngit_state=\"$(git -C \"$SRCROOT\" status --porcelain --untracked-files=all 2>/dev/null || true)\"\nif [[ -n \"$git_state\" && \"$revision\" != unknown ]]; then revision=\"${revision}-dirty\"; fi\nchannel=debug\nif [[ \"$CONFIGURATION\" == Release ]]; then channel=release; fi\nshort_revision=\"$(printf '%s' \"$revision\" | cut -c 1-12)\"\nqa_label=\"${FLOATTABS_QA_LABEL:-qa-${channel}-${short_revision}}\"\nif [[ ! \"$qa_label\" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then qa_label=\"qa-${channel}-${short_revision}\"; fi\nset_plist_value() {\n  key=\"$1\"\n  value=\"$2\"\n  /usr/libexec/PlistBuddy -c \"Set :$key $value\" \"$plist\" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c \"Add :$key string $value\" \"$plist\"\n}\nset_plist_value FloatTabsSourceRevision \"$revision\"\nset_plist_value FloatTabsBuildChannel \"$channel\"\nset_plist_value FloatTabsQALabel \"$qa_label\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		J00000000000000000000001 /* Sources */ = {

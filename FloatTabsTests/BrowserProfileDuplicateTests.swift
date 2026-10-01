@@ -36,14 +36,18 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         )
         let duplicateMenu = try XCTUnwrap(duplicate.submenu)
 
+        var expectedMenuTitles = [
+            "Return to Home", "Reload", "Reset Current Tab Runtime (QA)",
+            "Website Mode", "Window Size", "Zoom",
+            "Profile", "Open in New Tab with Profile", "Residency",
+            "Background Media", "Edit Web App…", "Remove Web App…",
+        ]
+#if DEBUG
+        expectedMenuTitles.insert("Capture Stuck Tab Snapshot (QA)", at: 3)
+#endif
         XCTAssertEqual(
             menu.items.filter { !$0.isSeparatorItem }.map(\.title),
-            [
-                "Return to Home", "Reload", "Reset Current Tab Runtime (QA)",
-                "Website Mode", "Window Size", "Zoom",
-                "Profile", "Open in New Tab with Profile", "Residency",
-                "Background Media", "Edit Web App…", "Remove Web App…",
-            ]
+            expectedMenuTitles
         )
         XCTAssertEqual(
             duplicateMenu.items.map(\.title),

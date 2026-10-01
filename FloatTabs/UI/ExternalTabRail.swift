@@ -622,6 +622,7 @@ final class ExternalControlZoneView: NSView {
     var onReturnHome: ((UUID) -> Void)?
     var onReload: ((UUID) -> Void)?
     var onManualRuntimeResetForQA: ((UUID) -> Void)?
+    var onCaptureStuckTabSnapshotForQA: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
@@ -1149,6 +1150,9 @@ final class ExternalControlZoneView: NSView {
         view.onReload = { [weak self] slotID in self?.onReload?(slotID) }
         view.onManualRuntimeResetForQA = { [weak self] slotID in
             self?.onManualRuntimeResetForQA?(slotID)
+        }
+        view.onCaptureStuckTabSnapshotForQA = { [weak self] slotID in
+            self?.onCaptureStuckTabSnapshotForQA?(slotID)
         }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
@@ -2065,6 +2069,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var onReturnHome: ((UUID) -> Void)?
     var onReload: ((UUID) -> Void)?
     var onManualRuntimeResetForQA: ((UUID) -> Void)?
+    var onCaptureStuckTabSnapshotForQA: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
@@ -2435,6 +2440,16 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         runtimeReset.target = self
         runtimeReset.isEnabled = isActive
         menu.addItem(runtimeReset)
+#if DEBUG
+        let captureSnapshot = NSMenuItem(
+            title: "Capture Stuck Tab Snapshot (QA)",
+            action: #selector(captureStuckTabSnapshotForQAFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        captureSnapshot.target = self
+        captureSnapshot.isEnabled = isActive
+        menu.addItem(captureSnapshot)
+#endif
         menu.addItem(.separator())
 
         let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
@@ -2608,6 +2623,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     @objc private func manualRuntimeResetForQAFromMenu(_ sender: NSMenuItem) {
         guard isActive else { return }
         onManualRuntimeResetForQA?(slotID)
+    }
+
+    @objc private func captureStuckTabSnapshotForQAFromMenu(_ sender: NSMenuItem) {
+        guard isActive else { return }
+        onCaptureStuckTabSnapshotForQA?(slotID)
     }
 
     @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {

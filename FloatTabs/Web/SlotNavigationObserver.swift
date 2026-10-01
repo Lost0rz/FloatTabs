@@ -802,6 +802,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     typealias IncidentDiagnosticContextProvider = @MainActor (
         UUID
     ) -> [String: RuntimeDiagnosticValue]
+    typealias DiagnosticHealthSnapshotHandler = @MainActor (
+        UUID,
+        WKWebView,
+        String,
+        UInt64?
+    ) -> Void
 
     private enum WatchdogTarget {
         case navigation(WebRuntimeNavigationTicket)
@@ -831,7 +837,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let diagnostics: any RuntimeDiagnosticRecording
     private let runtimeGeneration: UInt64
     private let isSlotActive: @MainActor (UUID) -> Bool
+    private let networkPathGenerationProvider: @MainActor () -> UInt64?
     private let incidentDiagnosticContextProvider: IncidentDiagnosticContextProvider
+    private let onDiagnosticHealthSnapshot: DiagnosticHealthSnapshotHandler
     private let javaScriptEvaluator: JavaScriptEvaluationHandler
     private let onSoftRecoveryRequested: @MainActor (WebRuntimeRecoveryRequest) -> Void
     private let onSoftRecoveryInvalidated: @MainActor (WebRuntimeRecoveryTicket) -> Void
@@ -848,6 +856,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var watchdogGeneration: UInt64 = 0
     private var watchdogWorkItem: DispatchWorkItem?
     private var nextUserActionGeneration: UInt64 = 0
+    private var nextNavigationTrigger: WebNavigationTrigger?
+    private var currentNavigationTrigger: WebNavigationTrigger = .unknown
+    private var currentTriggerNavigationGeneration: UInt64?
     private var rendererProbeTimeoutWorkItem: DispatchWorkItem?
 
     private struct PendingInstantBack {
@@ -895,7 +906,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         },
         runtimeGeneration: UInt64 = 0,
         isSlotActive: @escaping @MainActor (UUID) -> Bool = { _ in false },
+        networkPathGenerationProvider: @escaping @MainActor () -> UInt64? = { nil },
         incidentDiagnosticContextProvider: @escaping IncidentDiagnosticContextProvider = { _ in [:] },
+        onDiagnosticHealthSnapshot: @escaping DiagnosticHealthSnapshotHandler = { _, _, _, _ in },
         onSoftRecoveryRequested: @escaping @MainActor (WebRuntimeRecoveryRequest) -> Void = { _ in },
         onSoftRecoveryInvalidated: @escaping @MainActor (WebRuntimeRecoveryTicket) -> Void = { _ in },
         javaScriptEvaluator: @escaping JavaScriptEvaluationHandler = { webView, script, completion in
@@ -919,7 +932,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.loadHandler = loadHandler
         self.runtimeGeneration = runtimeGeneration
         self.isSlotActive = isSlotActive
+        self.networkPathGenerationProvider = networkPathGenerationProvider
         self.incidentDiagnosticContextProvider = incidentDiagnosticContextProvider
+        self.onDiagnosticHealthSnapshot = onDiagnosticHealthSnapshot
         self.onSoftRecoveryRequested = onSoftRecoveryRequested
         self.onSoftRecoveryInvalidated = onSoftRecoveryInvalidated
         self.javaScriptEvaluator = javaScriptEvaluator
@@ -951,6 +966,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     var diagnosticNavigationGeneration: UInt64 {
         healthTracker.latestNavigationGeneration
+    }
+
+    func setNextNavigationTrigger(_ trigger: WebNavigationTrigger) {
+        nextNavigationTrigger = trigger
     }
 
     /// Called at the existing user-action boundary. This schedules only one
@@ -1153,15 +1172,24 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             navigationStartUptime = ProcessInfo.processInfo.systemUptime
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
-            switch recoveryTracker.navigationStarted(ticket) {
-            case .passive, .userAction:
-                break
+            let association = recoveryTracker.navigationStarted(ticket)
+            switch association {
+            case .passive:
+                currentNavigationTrigger = nextNavigationTrigger ?? .normalNavigation
+            case let .userAction(generation):
+                let action = recoveryTracker.userActionContext(for: ticket)?.action
+                currentNavigationTrigger = action.map(Self.navigationTrigger(for:))
+                    ?? nextNavigationTrigger
+                    ?? .unknown
+                _ = generation
             case .softRecovery:
+                currentNavigationTrigger = .softRecovery
                 softRecoveryReplacementDidStart = true
                 cancelWatchdog()
                 // The start watchdog is replaced by the normal bounded
                 // navigation watchdog below.
             case let .staleSoftRecovery(recoveryTicket):
+                currentNavigationTrigger = .softRecovery
                 clearSoftRecoverySourceNavigation()
                 recordRecoveryEvent(
                     "soft_stale",
@@ -1170,6 +1198,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 )
                 onSoftRecoveryInvalidated(recoveryTicket)
             }
+            currentTriggerNavigationGeneration = ticket.navigationGeneration
+            nextNavigationTrigger = nil
         }
         diagnostics.record(
             event: "navigation.provisional_started",
@@ -1292,6 +1322,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: runtimeFields(for: webView, ticket: ticket)
         )
+        onDiagnosticHealthSnapshot(
+            slotID,
+            webView,
+            "navigation_finish",
+            ticket?.navigationGeneration
+        )
         if diagnostics.capturesDebugEvents && mayProjectNavigationState {
             recordPageRuntimeProbe(in: webView)
         }
@@ -1353,6 +1389,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             ].merging(runtimeFields(for: webView, ticket: ticket)) { current, _ in current }
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
         )
+        onDiagnosticHealthSnapshot(
+            slotID,
+            webView,
+            "navigation_failure",
+            ticket?.navigationGeneration
+        )
     }
 
     func webView(
@@ -1401,6 +1443,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 "provisional": .bool(true)
             ].merging(runtimeFields(for: webView, ticket: ticket)) { current, _ in current }
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+        )
+        onDiagnosticHealthSnapshot(
+            slotID,
+            webView,
+            "navigation_failure",
+            ticket?.navigationGeneration
         )
         if mayProjectNavigationState {
             cancelPendingInstantBack()
@@ -1634,6 +1682,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             level: .warning,
             subsystem: "navigation",
             fields: fields
+        )
+        onDiagnosticHealthSnapshot(
+            slotID,
+            webView,
+            "navigation_stall",
+            ticket.navigationGeneration
         )
         recordIncidentSnapshot(in: webView, ticket: ticket, reason: "navigation_stalled")
         if shouldProbeRenderer {
@@ -2097,7 +2151,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let websiteMode = (webView as? FloatTabsWebView)?.websiteMode.rawValue
             ?? contentMode
         let customUserAgent = webView.customUserAgent
-        return [
+        var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
             "runtime_generation": .integer(Int64(runtimeGeneration)),
             "navigation_generation": ticket.map {
@@ -2112,6 +2166,24 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             ),
             "page_zoom": .double(Double(webView.pageZoom))
         ]
+        let trigger = ticket.flatMap { currentTriggerNavigationGeneration == $0.navigationGeneration
+            ? currentNavigationTrigger
+            : nil
+        } ?? .unknown
+        fields["navigation_trigger"] = .string(trigger.rawValue)
+        fields["network_generation"] = networkPathGenerationProvider().map {
+            .integer(Int64($0))
+        } ?? .null
+        return fields
+    }
+
+    private static func navigationTrigger(
+        for action: WebRuntimeUserAction
+    ) -> WebNavigationTrigger {
+        switch action {
+        case .reload: .userReload
+        case .home: .userHome
+        }
     }
 
     private func failingURLForDiagnostics(

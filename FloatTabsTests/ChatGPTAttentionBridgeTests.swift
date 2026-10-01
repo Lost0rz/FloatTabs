@@ -312,6 +312,48 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(probe.contains("MutationObserver"))
     }
 
+    func testRuntimeHealthProbeIsOneShotBoundedAndObservationOnly() {
+        let source = ChatGPTAttentionBridge.scriptSource
+
+        XCTAssertTrue(source.contains("window.addEventListener(\"error\""))
+        XCTAssertTrue(source.contains("window.addEventListener(\"unhandledrejection\""))
+        XCTAssertTrue(source.contains("__floatTabsAppHealthSnapshotV1"))
+        XCTAssertTrue(source.contains("conversation_load_error_present"))
+        XCTAssertTrue(source.contains("window_error_count"))
+        XCTAssertTrue(source.contains("unhandled_rejection_count"))
+        XCTAssertFalse(source.contains("preventDefault"))
+        XCTAssertFalse(source.contains("stopPropagation"))
+        XCTAssertFalse(source.contains("XMLHttpRequest"))
+        XCTAssertFalse(source.contains("fetch("))
+    }
+
+    func testRuntimeHealthParserKeepsOnlyBoundedMetadata() {
+        let snapshot = ChatGPTAppHealthSnapshot.parse([
+            "version": 1,
+            "document_ready_state": "complete",
+            "visibility_state": "visible",
+            "attention_state": "idle",
+            "bridge_document_ready": true,
+            "conversation_shell_present": true,
+            "composer_present": true,
+            "generation_indicator_present": false,
+            "loading_indicator_present": false,
+            "conversation_load_error_present": false,
+            "window_error_count": 2,
+            "window_error_class": "script_error",
+            "unhandled_rejection_count": 1,
+            "unhandled_rejection_class": "promise_rejection",
+            "probe_elapsed_ms": 7,
+            "prompt": "must never leave the page"
+        ])
+
+        XCTAssertEqual(snapshot?.fields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(snapshot?.fields["window_error_count"], .integer(2))
+        XCTAssertEqual(snapshot?.fields["unhandled_rejection_class"], .string("promise_rejection"))
+        XCTAssertNil(snapshot?.fields["prompt"])
+        XCTAssertNil(ChatGPTAppHealthSnapshot.parse(["version": 1, "document_ready_state": "secret"]))
+    }
+
     func testAttentionScriptUsesSharedResponseIdentityAndStopButtonPolicy() {
         let source = ChatGPTAttentionBridge.scriptSource
         XCTAssertTrue(source.contains("RESPONSE_STABLE_ATTRIBUTE_NAMES"))

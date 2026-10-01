@@ -52,6 +52,10 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 #endif
     private(set) var isInvalidated = false
 
+    var isDocumentReady: Bool {
+        !isInvalidated && currentDocumentToken != nil
+    }
+
     init(
         slotID: UUID,
         onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },

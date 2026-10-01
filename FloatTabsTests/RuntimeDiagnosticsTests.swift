@@ -5,6 +5,123 @@ import WebKit
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testLaunchEnvironmentContainsSelfIdentifyingBuildProvenance() {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+
+        let fields = diagnostics.environmentFields()
+
+        XCTAssertNotNil(fields["app_version"])
+        XCTAssertNotNil(fields["build_number"])
+        XCTAssertEqual(
+            fields["host_pid"],
+            .integer(Int64(ProcessInfo.processInfo.processIdentifier))
+        )
+        guard case let .string(sessionID)? = fields["session_id"] else {
+            return XCTFail("launch metadata must include the session ID")
+        }
+        XCTAssertNotNil(UUID(uuidString: sessionID))
+        guard case let .string(sourceRevision)? = fields["source_revision"] else {
+            return XCTFail("launch metadata must include the source revision")
+        }
+        XCTAssertTrue(
+            sourceRevision.range(
+                of: #"^[0-9a-f]{40}(?:-dirty)?$"#,
+                options: .regularExpression
+            ) != nil,
+            "source revision must be a full commit hash with an optional dirty marker"
+        )
+        guard case let .string(channel)? = fields["build_channel"] else {
+            return XCTFail("launch metadata must include the build channel")
+        }
+        XCTAssertTrue(["debug", "release"].contains(channel))
+        guard case let .string(qaLabel)? = fields["qa_label"] else {
+            return XCTFail("launch metadata must include a self-identifying QA label")
+        }
+        XCTAssertFalse(qaLabel.isEmpty)
+    }
+
+    func testPreviousExitMarkerDistinguishesCleanUncleanSuspectedAndUnknown() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsLifecycle-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = RuntimeSessionLifecycleMarker(directoryURL: directory)
+
+        XCTAssertEqual(marker.beginSession(), .unknown)
+        XCTAssertEqual(marker.beginSession(), .uncleanSuspected)
+        XCTAssertTrue(marker.markCleanExit())
+        XCTAssertEqual(marker.beginSession(), .clean)
+    }
+
+    func testNetworkPathTransitionsIncrementOnlyWhenBoundedStateChanges() {
+        var tracker = RuntimeNetworkPathTransitionTracker()
+        let wifi = RuntimeNetworkPathSnapshot(
+            status: "satisfied",
+            interfaceClass: "wifi",
+            expensive: false,
+            constrained: false
+        )
+        let cellular = RuntimeNetworkPathSnapshot(
+            status: "satisfied",
+            interfaceClass: "cellular",
+            expensive: true,
+            constrained: true
+        )
+
+        XCTAssertEqual(tracker.record(wifi), 1)
+        XCTAssertNil(tracker.record(wifi))
+        XCTAssertEqual(tracker.record(cellular), 2)
+    }
+
+    func testIncidentCorrelationPreservesCapturedRuntimeGenerations() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let slotID = UUID()
+        diagnostics.setCorrelationContextProvider { id in
+            XCTAssertEqual(id, slotID)
+            return [
+                "incident_id": .string("INCIDENT-A"),
+                "slot_id": .string(id.uuidString),
+                "runtime_generation": .integer(9),
+                "navigation_generation": .integer(4)
+            ]
+        }
+
+        diagnostics.record(
+            event: "web_runtime.incident_snapshot",
+            level: .warning,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "runtime_generation": .integer(3),
+                "navigation_generation": .integer(2)
+            ]
+        )
+
+        let fields = writer.events.first?.fields
+        XCTAssertEqual(fields?["incident_id"], .string("INCIDENT-A"))
+        XCTAssertEqual(fields?["runtime_generation"], .integer(3))
+        XCTAssertEqual(fields?["navigation_generation"], .integer(2))
+        XCTAssertNotNil(fields?["session_id"])
+    }
+
+    func testStartupURLClassificationNeverReturnsConversationIdentity() {
+        XCTAssertEqual(
+            RuntimeDiagnosticURLClass.classify(URL(string: "https://chatgpt.com/")!),
+            "root"
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticURLClass.classify(URL(string: "https://chatgpt.com/c/private-id?token=secret")!),
+            "conversation"
+        )
+        XCTAssertEqual(
+            RuntimeDiagnosticURLClass.classify(URL(string: "https://example.com/settings")!),
+            "other"
+        )
+    }
+
     func testEventsEncodeAsIndependentJSONLObjectsWithSessionAndMonotonicSequence() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
@@ -363,6 +480,7 @@ private struct RecoveryNavigationProjectionScenario {
     let sourceNavigation: WKNavigation
     let replacementNavigation: WKNavigation
     let projections: NavigationProjectionCapture
+    let writer: RuntimeDiagnosticInMemoryWriter
 }
 
 final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
@@ -374,6 +492,7 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         let webView = WebViewFactory.makeWebView()
         let homeURL = URL(string: "https://nas.example.com:3010")!
         let projections = NavigationProjectionCapture()
+        let writer = RuntimeDiagnosticInMemoryWriter()
         var recoveryRequest: WebRuntimeRecoveryRequest?
         let observer = SlotNavigationObserver(
             slotID: UUID(),
@@ -382,6 +501,7 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
             onURLChange: { _, _ in },
             onNavigationCommit: { _, _ in projections.commitCount += 1 },
             onNavigationFinish: { _, _ in projections.finishCount += 1 },
+            diagnostics: RuntimeDiagnostics(mode: .verbose, writer: writer),
             runtimeGeneration: runtimeGeneration,
             onSoftRecoveryRequested: { recoveryRequest = $0 },
             javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
@@ -427,7 +547,8 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
             observer: observer,
             sourceNavigation: sourceNavigation,
             replacementNavigation: replacementNavigation,
-            projections: projections
+            projections: projections,
+            writer: writer
         )
     }
 
@@ -1312,6 +1433,10 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         observer.webView(webView, didFinish: scenario.replacementNavigation)
         XCTAssertEqual(scenario.projections.commitCount, 1)
         XCTAssertEqual(scenario.projections.finishCount, 1)
+        let startEvents = scenario.writer.events.filter { $0.event == "navigation.provisional_started" }
+        XCTAssertEqual(startEvents.count, 2)
+        XCTAssertEqual(startEvents[0].fields["navigation_trigger"], .string("user_home"))
+        XCTAssertEqual(startEvents[1].fields["navigation_trigger"], .string("soft_recovery"))
 
         observer.observeUserAction(.reload)
         observer.webView(webView, didCommit: scenario.sourceNavigation)

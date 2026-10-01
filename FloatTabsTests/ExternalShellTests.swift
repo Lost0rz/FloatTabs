@@ -880,7 +880,9 @@ final class ExternalShellTests: XCTestCase {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
         var resetSlotID: UUID?
+        var snapshotSlotID: UUID?
         zone.onManualRuntimeResetForQA = { resetSlotID = $0 }
+        zone.onCaptureStuckTabSnapshotForQA = { snapshotSlotID = $0 }
         zone.apply(profiles: [active], activeTabID: active.id)
         zone.setResidentSlotIDs([active.id])
         zone.layoutSubtreeIfNeeded()
@@ -908,7 +910,7 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Reload", "Reset Current Tab Runtime (QA)", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Reload", "Reset Current Tab Runtime (QA)", "Capture Stuck Tab Snapshot (QA)", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
         let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
         assertShortcut(reload, matches: .reload)
@@ -922,6 +924,15 @@ final class ExternalShellTests: XCTestCase {
             from: runtimeReset
         ))
         XCTAssertEqual(resetSlotID, active.id)
+        let snapshotItem = try! XCTUnwrap(menu.item(withTitle: "Capture Stuck Tab Snapshot (QA)"))
+        XCTAssertEqual(snapshotItem.keyEquivalent, "")
+        XCTAssertTrue(snapshotItem.isEnabled)
+        XCTAssertTrue(NSApp.sendAction(
+            try! XCTUnwrap(snapshotItem.action),
+            to: snapshotItem.target,
+            from: snapshotItem
+        ))
+        XCTAssertEqual(snapshotSlotID, active.id)
 
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
         XCTAssertEqual(

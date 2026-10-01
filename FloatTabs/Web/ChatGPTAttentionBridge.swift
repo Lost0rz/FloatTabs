@@ -39,6 +39,56 @@ struct ChatGPTAttentionEvent: Equatable, Sendable {
     let responseIdentity: ChatGPTResponseIdentity?
 }
 
+struct ChatGPTAppHealthSnapshot: Equatable, Sendable {
+    let fields: [String: RuntimeDiagnosticValue]
+
+    static func parse(_ value: Any?) -> ChatGPTAppHealthSnapshot? {
+        guard let body = value as? [String: Any],
+              body["version"] as? Int == 1,
+              let readyState = body["document_ready_state"] as? String,
+              ["loading", "interactive", "complete"].contains(readyState),
+              let visibilityState = body["visibility_state"] as? String,
+              ["visible", "hidden", "prerender", "unloaded"].contains(visibilityState),
+              let attentionState = body["attention_state"] as? String,
+              ["generating", "idle", "unknown"].contains(attentionState) else {
+            return nil
+        }
+
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "document_ready_state": .string(readyState),
+            "visibility_state": .string(visibilityState),
+            "attention_state": .string(attentionState)
+        ]
+        let booleanKeys = [
+            "bridge_document_ready",
+            "conversation_shell_present",
+            "composer_present",
+            "generation_indicator_present",
+            "loading_indicator_present",
+            "conversation_load_error_present"
+        ]
+        for key in booleanKeys {
+            guard let value = body[key] as? Bool else { return nil }
+            fields[key] = .bool(value)
+        }
+        let boundedCounts = ["window_error_count", "unhandled_rejection_count"]
+        for key in boundedCounts {
+            guard let value = body[key] as? NSNumber else { return nil }
+            fields[key] = .integer(Int64(min(max(value.int64Value, 0), 1_000_000)))
+        }
+        for key in ["window_error_class", "unhandled_rejection_class"] {
+            guard let value = body[key] as? String,
+                  ["none", "script_error", "promise_rejection"].contains(value) else {
+                return nil
+            }
+            fields[key] = .string(value)
+        }
+        guard let elapsed = body["probe_elapsed_ms"] as? NSNumber else { return nil }
+        fields["probe_elapsed_ms"] = .integer(Int64(min(max(elapsed.int64Value, 0), 120_000)))
+        return ChatGPTAppHealthSnapshot(fields: fields)
+    }
+}
+
 /// Minimal bridge payload. Metadata only: prompt text, response text, and any
 /// other page content must never appear in this protocol.
 struct ChatGPTBridgePayload: Equatable {
@@ -233,6 +283,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           let timer = null;
           let lastCheck = 0;
           let observer = null;
+          let windowErrorCount = 0;
+          let unhandledRejectionCount = 0;
+
+          window.addEventListener("error", () => {
+            windowErrorCount = Math.min(windowErrorCount + 1, 1000000);
+          }, { capture: true });
+          window.addEventListener("unhandledrejection", () => {
+            unhandledRejectionCount = Math.min(unhandledRejectionCount + 1, 1000000);
+          }, { capture: true });
 
           const post = (generating) => {
             const target = handler();
@@ -337,6 +396,34 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               responseIdentity: canonicalResponseIdentityFor(
                 latestAssistantResponseRoot()
               )
+            };
+          };
+
+          globalThis.__floatTabsAppHealthSnapshotV1 = () => {
+            const startedAt = performance.now();
+            const present = (selector) => {
+              try { return !!document.querySelector(selector); }
+              catch (_) { return false; }
+            };
+            const generating = isGenerating();
+            return {
+              version: 1,
+              document_ready_state: ["loading", "interactive", "complete"].includes(document.readyState)
+                ? document.readyState : "loading",
+              visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
+                ? document.visibilityState : "hidden",
+              bridge_document_ready: document.readyState !== "loading",
+              attention_state: generating ? "generating" : "idle",
+              conversation_shell_present: present("main"),
+              composer_present: present("textarea, [contenteditable='true']"),
+              generation_indicator_present: present("[data-testid*='stop'], button[aria-label*='Stop']"),
+              loading_indicator_present: present("[aria-busy='true'], [data-testid*='loading']"),
+              conversation_load_error_present: present("[data-testid*='error'], [role='alert']"),
+              window_error_count: windowErrorCount,
+              window_error_class: windowErrorCount > 0 ? "script_error" : "none",
+              unhandled_rejection_count: unhandledRejectionCount,
+              unhandled_rejection_class: unhandledRejectionCount > 0 ? "promise_rejection" : "none",
+              probe_elapsed_ms: Math.max(0, Math.round(performance.now() - startedAt))
             };
           };
 
@@ -481,6 +568,40 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             handleRuntimeReplacement()
         }
         self.webView = webView
+    }
+
+    /// Runs a single metadata-only probe in the bridge's existing isolated
+    /// content world. It reads a fixed set of booleans/enums and never returns
+    /// DOM strings or page identifiers.
+    func captureAppHealthSnapshot(
+        completion: @escaping @MainActor (ChatGPTAppHealthSnapshot?) -> Void
+    ) {
+        guard !isInvalidated,
+              let webView,
+              let host = webView.url?.host,
+              ChatGPTSitePolicy.isSupportedHost(host) else {
+            completion(nil)
+            return
+        }
+        let identity = ObjectIdentifier(webView)
+        webView.evaluateJavaScript(
+            "globalThis.__floatTabsAppHealthSnapshotV1?.()",
+            in: nil,
+            in: Self.contentWorld
+        ) { [weak self, weak webView] result in
+            Task { @MainActor [weak self, weak webView] in
+                guard let self,
+                      !self.isInvalidated,
+                      let webView,
+                      self.webView === webView,
+                      ObjectIdentifier(webView) == identity,
+                      case let .success(value) = result else {
+                    completion(nil)
+                    return
+                }
+                completion(ChatGPTAppHealthSnapshot.parse(value))
+            }
+        }
     }
 
     // MARK: WKScriptMessageHandler

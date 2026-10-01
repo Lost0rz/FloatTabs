@@ -27,6 +27,70 @@ enum WebContentRecoveryDisposition: Equatable {
     case deferUntilActivation
 }
 
+enum WebRuntimeCreationReason: String, CaseIterable, Equatable {
+    case startupRestore = "startup_restore"
+    case explicitSelection = "explicit_selection"
+    case initialCreate = "initial_create"
+    case coldReactivation = "cold_reactivation"
+    case renderingRebuild = "rendering_rebuild"
+    case manualRuntimeReset = "manual_runtime_reset"
+    case contentProcessRecovery = "content_process_recovery"
+    case fullscreenRebuild = "fullscreen_rebuild"
+    case unknown
+
+    var initialNavigationTrigger: WebNavigationTrigger {
+        switch self {
+        case .startupRestore: .startupRestore
+        case .manualRuntimeReset: .manualRuntimeReset
+        case .contentProcessRecovery: .contentProcessRecovery
+        default: .initialLoad
+        }
+    }
+}
+
+enum WebNavigationTrigger: String, CaseIterable, Equatable {
+    case startupRestore = "startup_restore"
+    case initialLoad = "initial_load"
+    case userReload = "user_reload"
+    case userHome = "user_home"
+    case normalNavigation = "normal_navigation"
+    case softRecovery = "soft_recovery"
+    case manualRuntimeReset = "manual_runtime_reset"
+    case contentProcessRecovery = "content_process_recovery"
+    case unknown
+}
+
+@MainActor
+private final class RuntimeChatGPTHealthProbeAccumulator {
+    private(set) var fields: [String: RuntimeDiagnosticValue]
+    private var remaining: Int
+    private var isFinished = false
+    private let completion: @MainActor ([String: RuntimeDiagnosticValue]) -> Void
+
+    init(
+        fields: [String: RuntimeDiagnosticValue],
+        expectedResults: Int,
+        completion: @escaping @MainActor ([String: RuntimeDiagnosticValue]) -> Void
+    ) {
+        self.fields = fields
+        remaining = expectedResults
+        self.completion = completion
+    }
+
+    func receive(_ fields: [String: RuntimeDiagnosticValue]) {
+        guard !isFinished else { return }
+        self.fields.merge(fields) { _, new in new }
+        remaining -= 1
+        if remaining <= 0 { finish() }
+    }
+
+    func finish() {
+        guard !isFinished else { return }
+        isFinished = true
+        completion(fields)
+    }
+}
+
 enum BrowserProfileIdentity: Equatable, Hashable {
     case `default`
     case custom(UUID)
@@ -71,8 +135,14 @@ final class WebViewPool {
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
     private var deferredSoftRecoveries: [UUID: WebRuntimeRecoveryRequest] = [:]
+    private var recentlyReleasedSlotIDs = Set<UUID>()
+    private var latestChatGPTHealthFields: [UUID: [String: RuntimeDiagnosticValue]] = [:]
+
+    var runtimeConstructionPhaseProvider: @MainActor () -> String = { "unknown" }
+    var networkPathGenerationProvider: @MainActor () -> UInt64? = { nil }
 
     var onResidentSetChange: (() -> Void)?
+    var onRuntimeRelease: (@MainActor (UUID) -> Void)?
 
     /// The fullscreen source owner supplies a transient reason while it owns
     /// the Slot's presentation. Recovery requests remain bounded and are
@@ -158,7 +228,11 @@ final class WebViewPool {
         self.diagnostics = diagnostics
     }
 
-    func webView(for profile: WebAppProfile) throws -> WKWebView {
+    func webView(
+        for profile: WebAppProfile,
+        creationReason requestedCreationReason: WebRuntimeCreationReason = .initialCreate,
+        restoredLastActive: Bool = false
+    ) throws -> WKWebView {
         let desiredRendering = profile.renderingProfile.normalized()
         let desiredBrowserProfileIdentity = BrowserProfileIdentity(
             browserProfileID: profile.browserProfileID
@@ -188,7 +262,8 @@ final class WebViewPool {
                 )
                 return try rebuildWebView(
                     for: profile,
-                    navigationURL: navigationURL
+                    navigationURL: navigationURL,
+                    reason: .renderingRebuild
                 )
             }
 
@@ -221,14 +296,21 @@ final class WebViewPool {
             )
             return try rebuildWebView(
                 for: profile,
-                navigationURL: navigationURL
+                navigationURL: navigationURL,
+                reason: .renderingRebuild
             )
         }
+
+        let creationReason = recentlyReleasedSlotIDs.remove(profile.id) == nil
+            ? requestedCreationReason
+            : .coldReactivation
 
         return try createWebView(
             for: profile,
             navigationURL: profile.currentURL ?? profile.homeURL,
-            cachePolicy: .useProtocolCachePolicy
+            cachePolicy: .useProtocolCachePolicy,
+            reason: creationReason,
+            restoredLastActive: restoredLastActive
         )
     }
 
@@ -335,7 +417,8 @@ final class WebViewPool {
         do {
             let replacement = try rebuildWebView(
                 for: profile,
-                navigationURL: navigationURL
+                navigationURL: navigationURL,
+                reason: .manualRuntimeReset
             )
             let runtimeGenerationAfter = runtimeGenerations[requestedSlotID]
             diagnostics.record(
@@ -378,6 +461,10 @@ final class WebViewPool {
 
     func diagnosticRuntimeGeneration(for slotID: UUID) -> UInt64? {
         runtimeGenerations[slotID]
+    }
+
+    func diagnosticNavigationGeneration(for slotID: UUID) -> UInt64? {
+        navigationObservers[slotID]?.diagnosticNavigationGeneration
     }
 
     func recordUserAction(
@@ -523,8 +610,58 @@ final class WebViewPool {
     func reload(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
         recordUserAction(.reload, slotID: slotID)
+        captureChatGPTHealthSnapshot(
+            slotID: slotID,
+            webView: webView,
+            trigger: "pre_user_reload",
+            navigationGeneration: navigationObservers[slotID]?.diagnosticNavigationGeneration
+        )
+        navigationObservers[slotID]?.setNextNavigationTrigger(.userReload)
         webView.reload()
         return true
+    }
+
+    func captureDiagnosticSnapshot(
+        slotID: UUID,
+        incidentID: UUID,
+        reason: String
+    ) {
+        guard let webView = webViews[slotID] else { return }
+        let navigationGeneration = navigationObservers[slotID]?.diagnosticNavigationGeneration
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "incident_id": .string(incidentID.uuidString),
+            "slot_id": .string(slotID.uuidString),
+            "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+            "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
+            "network_generation": networkPathGenerationProvider().map { .integer(Int64($0)) } ?? .null,
+            "incident_reason": .string(reason),
+            "webview_exists": .bool(true),
+            "is_loading": .bool(webView.isLoading),
+            "estimated_progress": .double(Double(webView.estimatedProgress)),
+            "attached_to_window": .bool(webView.window != nil),
+            "attached_to_superview": .bool(webView.superview != nil),
+            "response_bridge_ready": .bool(responseBridges[slotID]?.isDocumentReady ?? false)
+        ]
+        fields.merge(incidentDiagnosticContextProvider(slotID)) { _, new in new }
+        fields.merge(latestChatGPTHealthFields[slotID] ?? [:]) { _, new in new }
+        if fields["latest_response_complete"] == nil {
+            fields["latest_response_complete"] = .bool(false)
+        }
+        let isChatGPT = webView.url?.host.map(ChatGPTSitePolicy.isSupportedHost) ?? false
+        fields["chatgpt_supported_document"] = .bool(isChatGPT)
+        let snapshot = RuntimeDiagnosticSnapshot(fields: fields)
+        diagnostics.record(
+            event: "web_runtime.incident_snapshot",
+            level: .warning,
+            subsystem: "web",
+            fields: snapshot.fields
+        )
+        captureChatGPTHealthSnapshot(
+            slotID: slotID,
+            webView: webView,
+            trigger: reason,
+            navigationGeneration: navigationGeneration
+        )
     }
 
     func remove(slotID: UUID) {
@@ -551,6 +688,10 @@ final class WebViewPool {
         deferredReloadSlotIDs.remove(slotID)
         deferredSoftRecoveries.removeValue(forKey: slotID)
         let removed = webViews.removeValue(forKey: slotID)
+        latestChatGPTHealthFields.removeValue(forKey: slotID)
+        if removed != nil {
+            recentlyReleasedSlotIDs.insert(slotID)
+        }
         removed?.removeFromSuperview()
         if removed != nil {
             diagnostics.record(
@@ -563,6 +704,7 @@ final class WebViewPool {
                     "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null
                 ]
             )
+            onRuntimeRelease?(slotID)
             onResidentSetChange?()
         }
     }
@@ -685,6 +827,7 @@ final class WebViewPool {
                 return
             }
             lastKnownURLs[slotID] = recoveryURL
+            navigationObservers[slotID]?.setNextNavigationTrigger(.contentProcessRecovery)
             load(webView, recoveryRequest(url: recoveryURL))
             diagnostics.record(
                 event: "web_runtime.recovery.reload_now",
@@ -731,7 +874,9 @@ final class WebViewPool {
 
     private func rebuildWebView(
         for profile: WebAppProfile,
-        navigationURL: URL
+        navigationURL: URL,
+        reason: WebRuntimeCreationReason = .renderingRebuild,
+        restoredLastActive: Bool = false
     ) throws -> WKWebView {
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: profile.renderingProfile.normalized(),
@@ -739,6 +884,12 @@ final class WebViewPool {
         )
         var rebuildFields = renderingDiagnosticFields(for: runtimeRendering)
         rebuildFields["slot_id"] = .string(profile.id.uuidString)
+        rebuildFields["runtime_generation"] = .integer(Int64(nextRuntimeGeneration &+ 1))
+        rebuildFields["reason"] = .string(reason.rawValue)
+        rebuildFields["active"] = .bool(isSlotActive(profile.id))
+        rebuildFields["residency_policy"] = .string(profile.residencyPolicy.rawValue)
+        rebuildFields["restored_last_active"] = .bool(restoredLastActive)
+        rebuildFields["construction_phase"] = .string(runtimeConstructionPhaseProvider())
         rebuildFields["runtime_generation_before"] = runtimeGenerations[profile.id].map {
             .integer(Int64($0))
         } ?? .null
@@ -751,6 +902,10 @@ final class WebViewPool {
             subsystem: "web",
             fields: rebuildFields
         )
+        if reason != .manualRuntimeReset {
+            onRuntimeRelease?(profile.id)
+        }
+        latestChatGPTHealthFields.removeValue(forKey: profile.id)
         invalidateAttentionBridge(slotID: profile.id)
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
@@ -778,7 +933,9 @@ final class WebViewPool {
                 for: profile,
                 navigationURL: navigationURL,
                 cachePolicy: .useProtocolCachePolicy,
-                notifyResidentSetChange: false
+                notifyResidentSetChange: false,
+                reason: reason,
+                restoredLastActive: restoredLastActive
             )
             diagnostics.record(
                 event: "web_runtime.rebuild.completed",
@@ -812,14 +969,20 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL,
         cachePolicy: URLRequest.CachePolicy,
-        notifyResidentSetChange: Bool = true
+        notifyResidentSetChange: Bool = true,
+        reason: WebRuntimeCreationReason = .initialCreate,
+        restoredLastActive: Bool = false
     ) throws -> WKWebView {
-        let fields = [
-            "slot_id": RuntimeDiagnosticValue.string(profile.id.uuidString),
+        let fields = runtimeCreationFields(
+            for: profile,
+            reason: reason,
+            runtimeGeneration: nextRuntimeGeneration &+ 1,
+            restoredLastActive: restoredLastActive
+        ).merging([
             "browser_profile": RuntimeDiagnosticValue.string(
                 String(describing: BrowserProfileIdentity(browserProfileID: profile.browserProfileID))
             )
-        ]
+        ]) { _, new in new }
         diagnostics.record(
             event: "web_runtime.create.begin",
             level: .info,
@@ -832,7 +995,9 @@ final class WebViewPool {
                 for: profile,
                 navigationURL: navigationURL,
                 cachePolicy: cachePolicy,
-                notifyResidentSetChange: notifyResidentSetChange
+                notifyResidentSetChange: notifyResidentSetChange,
+                reason: reason,
+                restoredLastActive: restoredLastActive
             )
         } catch {
             var failureFields = fields
@@ -851,7 +1016,9 @@ final class WebViewPool {
         for profile: WebAppProfile,
         navigationURL: URL,
         cachePolicy: URLRequest.CachePolicy,
-        notifyResidentSetChange: Bool = true
+        notifyResidentSetChange: Bool = true,
+        reason: WebRuntimeCreationReason,
+        restoredLastActive: Bool
     ) throws -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
@@ -1003,8 +1170,21 @@ final class WebViewPool {
             diagnostics: diagnostics,
             runtimeGeneration: runtimeGeneration,
             isSlotActive: isSlotActive,
+            networkPathGenerationProvider: networkPathGenerationProvider,
             incidentDiagnosticContextProvider: { [weak self] slotID in
                 self?.incidentDiagnosticContextProvider(slotID) ?? [:]
+            },
+            onDiagnosticHealthSnapshot: { [weak self, weak attentionBridge, weak responseBridge, weak webView] slotID, _, trigger, navigationGeneration in
+                guard let self, let webView,
+                      self.existingWebView(for: slotID) === webView else { return }
+                self.captureChatGPTHealthSnapshot(
+                    slotID: slotID,
+                    webView: webView,
+                    trigger: trigger,
+                    navigationGeneration: navigationGeneration,
+                    attentionBridge: attentionBridge,
+                    responseBridge: responseBridge
+                )
             },
             onSoftRecoveryRequested: { [weak self] request in
                 self?.performSoftRecovery(request)
@@ -1037,6 +1217,7 @@ final class WebViewPool {
             for: navigationURL,
             allowed: isConfiguredHomeEntry && profile.homeURLSchemeWasInferred
         )
+        observer.setNextNavigationTrigger(reason.initialNavigationTrigger)
 
         // Store the effective runtime profile so warm-slot reuse compares against
         // the identity actually applied to this WKWebView.
@@ -1056,6 +1237,11 @@ final class WebViewPool {
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
         createdFields["runtime_generation"] = .integer(Int64(runtimeGeneration))
+        createdFields["reason"] = .string(reason.rawValue)
+        createdFields["active"] = .bool(isSlotActive(profile.id))
+        createdFields["residency_policy"] = .string(profile.residencyPolicy.rawValue)
+        createdFields["restored_last_active"] = .bool(restoredLastActive)
+        createdFields["construction_phase"] = .string(runtimeConstructionPhaseProvider())
         createdFields["browser_profile"] = .string(String(describing: browserProfileIdentity))
         createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
         createdFields["initial_frame_height"] = .double(Double(webView.frame.height))
@@ -1087,6 +1273,85 @@ final class WebViewPool {
         ]
     }
 
+    private func runtimeCreationFields(
+        for profile: WebAppProfile,
+        reason: WebRuntimeCreationReason,
+        runtimeGeneration: UInt64,
+        restoredLastActive: Bool
+    ) -> [String: RuntimeDiagnosticValue] {
+        [
+            "slot_id": .string(profile.id.uuidString),
+            "runtime_generation": .integer(Int64(runtimeGeneration)),
+            "reason": .string(reason.rawValue),
+            "active": .bool(isSlotActive(profile.id)),
+            "residency_policy": .string(profile.residencyPolicy.rawValue),
+            "restored_last_active": .bool(restoredLastActive),
+            "construction_phase": .string(runtimeConstructionPhaseProvider())
+        ]
+    }
+
+    private func captureChatGPTHealthSnapshot(
+        slotID: UUID,
+        webView: WKWebView,
+        trigger: String,
+        navigationGeneration: UInt64?,
+        attentionBridge: ChatGPTAttentionBridge? = nil,
+        responseBridge: ChatGPTResponseBridge? = nil
+    ) {
+        guard let host = webView.url?.host,
+              ChatGPTSitePolicy.isSupportedHost(host) else { return }
+        let attentionBridge = attentionBridge ?? attentionBridges[slotID]
+        let responseBridge = responseBridge ?? responseBridges[slotID]
+        let fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+            "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
+            "network_generation": networkPathGenerationProvider().map { .integer(Int64($0)) } ?? .null,
+            "probe_trigger": .string(trigger),
+            "response_bridge_ready": .bool(responseBridge?.isDocumentReady ?? false),
+            "latest_response_complete": .bool(false)
+        ]
+        let accumulator = RuntimeChatGPTHealthProbeAccumulator(
+            fields: fields,
+            expectedResults: 2
+        ) { [weak self] completedFields in
+            guard let self else { return }
+            let boundedHealthKeys = Set([
+                "document_ready_state", "visibility_state", "bridge_document_ready",
+                "attention_state", "conversation_shell_present", "composer_present",
+                "generation_indicator_present", "loading_indicator_present",
+                "conversation_load_error_present", "response_bridge_ready",
+                "latest_response_complete", "probe_elapsed_ms", "window_error_count",
+                "window_error_class", "unhandled_rejection_count", "unhandled_rejection_class",
+                "health_probe_available"
+            ])
+            self.latestChatGPTHealthFields[slotID] = completedFields.filter {
+                boundedHealthKeys.contains($0.key)
+            }
+            self.diagnostics.record(
+                event: "chatgpt.health_snapshot",
+                level: .info,
+                subsystem: "web",
+                fields: completedFields
+            )
+        }
+        attentionBridge?.captureAppHealthSnapshot { snapshot in
+            var healthFields = snapshot?.fields ?? [:]
+            healthFields["health_probe_available"] = .bool(snapshot != nil)
+            accumulator.receive(healthFields)
+        }
+        responseBridge?.snapshotLatestResponseStatus { snapshot in
+            accumulator.receive([
+                "latest_response_complete": .bool(snapshot.map { !$0.generating } ?? false)
+            ])
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak accumulator] in
+            Task { @MainActor in
+                accumulator?.finish()
+            }
+        }
+    }
+
     private static func isMobileUserAgent(_ userAgent: String?) -> Bool {
         guard let userAgent else { return false }
         return userAgent.localizedCaseInsensitiveContains("iPhone")
@@ -1111,6 +1376,7 @@ final class WebViewPool {
         let navigationURL = profile.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil }
             ?? profile.homeURL
         lastKnownURLs[profile.id] = navigationURL
+        navigationObservers[profile.id]?.setNextNavigationTrigger(.contentProcessRecovery)
         load(webView, recoveryRequest(url: navigationURL))
         diagnostics.record(
             event: "web_runtime.recovery.deferred_reload",

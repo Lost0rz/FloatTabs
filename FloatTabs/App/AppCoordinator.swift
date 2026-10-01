@@ -14,6 +14,8 @@ final class AppCoordinator {
     )
     private let panelController: PanelController
     private let diagnostics: RuntimeDiagnostics
+    private let sessionLifecycleMarker: RuntimeSessionLifecycleMarker
+    private let networkPathMonitor: RuntimeNetworkPathMonitor
     private let diagnosticExporter: RuntimeDiagnosticExporter
     private let speechPreferencesStore: SpeechPreferencesStore
     private let speechVoiceCatalog: SpeechVoiceCatalog
@@ -68,6 +70,20 @@ final class AppCoordinator {
             writer: RuntimeDiagnosticWriter(directory: RuntimeDiagnosticWriter.defaultDirectory),
             modeProvider: { resolvedPreferencesStore.runtimeDiagnosticsMode }
         )
+        let sessionLifecycleMarker = RuntimeSessionLifecycleMarker()
+        let previousExit = sessionLifecycleMarker.beginSession()
+        let launchTrace = diagnostics.beginTrace(root: "app.launch")
+        diagnostics.record(
+            event: "app.launch",
+            level: .info,
+            subsystem: "app",
+            trace: launchTrace,
+            fields: diagnostics.environmentFields().merging([
+                "previous_exit": .string(previousExit.rawValue)
+            ]) { _, new in new }
+        )
+        let networkPathMonitor = RuntimeNetworkPathMonitor(diagnostics: diagnostics)
+        networkPathMonitor.start()
         // Layer-backed rail controls resolve dynamic NSColors to CGColor while
         // they are created. Apply the stored appearance before PanelController
         // builds any windows/views so a saved Dark choice cannot be cached as
@@ -75,6 +91,8 @@ final class AppCoordinator {
         resolvedPreferencesStore.applyStoredAppearance()
         self.preferencesStore = resolvedPreferencesStore
         self.diagnostics = diagnostics
+        self.sessionLifecycleMarker = sessionLifecycleMarker
+        self.networkPathMonitor = networkPathMonitor
         self.diagnosticExporter = RuntimeDiagnosticExporter(diagnostics: diagnostics)
         self.speechPreferencesStore = resolvedSpeechPreferencesStore
         self.speechVoiceCatalog = resolvedSpeechVoiceCatalog
@@ -104,6 +122,9 @@ final class AppCoordinator {
                 },
                 diagnostics: diagnostics
             )
+            webViewPool.networkPathGenerationProvider = { [weak networkPathMonitor] in
+                networkPathMonitor?.currentGeneration
+            }
             // Exactly one runtime attention authority for the whole app,
             // injected into the presentation owner. AppCoordinator itself
             // never routes provider observations.
@@ -126,14 +147,7 @@ final class AppCoordinator {
     }
 
     func start() {
-        let trace = diagnostics.beginTrace(root: "app.launch")
-        diagnostics.record(
-            event: "app.launch",
-            level: .info,
-            subsystem: "app",
-            trace: trace,
-            fields: diagnostics.environmentFields()
-        )
+        panelController.markAppStartedForDiagnostics()
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
@@ -291,6 +305,7 @@ final class AppCoordinator {
         // waits 45 seconds on a first run, and then sleeps until the next
         // eligible interval instead of using a high-frequency timer.
         startWebsiteCacheAutomaticSchedule(initialDelay: WebsiteCacheAutomaticSchedulePolicy.initialDelay)
+        let trace = diagnostics.beginTrace(root: "app.ready")
         diagnostics.record(
             event: "app.ready",
             level: .notice,
@@ -309,6 +324,7 @@ final class AppCoordinator {
             trace: trace
         )
         isTerminating = true
+        networkPathMonitor.stop()
         externalVoiceFocusTask?.cancel()
         externalVoiceFocusTask = nil
         externalVoiceFocusRequestID = nil
@@ -329,6 +345,7 @@ final class AppCoordinator {
             subsystem: "app",
             trace: trace
         )
+        _ = sessionLifecycleMarker.markCleanExit()
         diagnostics.requestFinalFlush(timeout: 0.25) {}
     }
 

@@ -321,6 +321,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var restoredFrame: NSRect?
     private var preferredPanelSize: NSSize?
     private var hasPositionedPanel = false
+    private var runtimeConstructionPhase = "controller_construction"
+    private var startupRestorePending = true
+    private struct ActiveDiagnosticIncident {
+        let id: UUID
+        let slotID: UUID
+    }
+    private var activeDiagnosticIncident: ActiveDiagnosticIncident?
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var lastSynchronizedProfilesByID: [UUID: WebAppProfile] = [:]
@@ -793,6 +800,29 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
 
         super.init()
+
+        webViewPool.runtimeConstructionPhaseProvider = { [weak self] in
+            self?.runtimeConstructionPhase ?? "unknown"
+        }
+        webViewPool.onRuntimeRelease = { [weak self] slotID in
+            guard self?.activeDiagnosticIncident?.slotID == slotID else { return }
+            self?.activeDiagnosticIncident = nil
+        }
+        diagnostics.setCorrelationContextProvider { [weak self] slotID in
+            guard let self,
+                  let incident = self.activeDiagnosticIncident,
+                  incident.slotID == slotID else {
+                return [:]
+            }
+            return [
+                "incident_id": .string(incident.id.uuidString),
+                "slot_id": .string(slotID.uuidString),
+                "runtime_generation": self.webViewPool.diagnosticRuntimeGeneration(for: slotID)
+                    .map { .integer(Int64($0)) } ?? .null,
+                "navigation_generation": self.webViewPool.diagnosticNavigationGeneration(for: slotID)
+                    .map { .integer(Int64($0)) } ?? .null
+            ]
+        }
 
         webViewPool.softRecoveryDeferralReasonProvider = { [weak self] _ in
             guard let self else { return "recovery_owner_unavailable" }
@@ -1348,6 +1378,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func prepareForTermination(trace: RuntimeDiagnosticTrace? = nil) {
+        activeDiagnosticIncident = nil
         diagnostics.record(
             event: "app.termination.panel-preparation",
             level: .notice,
@@ -2800,6 +2831,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onManualRuntimeResetForQA = { [weak self] id in
             self?.resetSlotRuntimeForQA(id: id)
         }
+        rail.onCaptureStuckTabSnapshotForQA = { [weak self] id in
+            self?.captureStuckTabSnapshotForQA(slotID: id)
+        }
         rail.onAdd = { [weak self] in
             self?.presentAddWebAppEditor()
         }
@@ -2953,6 +2987,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.reconcile(profiles: orderedProfiles)
 
         guard let activeProfile = tabStore.activeProfile else {
+            startupRestorePending = false
             if let previous = lastSynchronizedActiveProfile {
                 slotLifecycleCoordinator.deactivate(profile: previous)
             }
@@ -2968,6 +3003,11 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
         if activeChanged,
+           activeDiagnosticIncident?.slotID != nil,
+           activeDiagnosticIncident?.slotID != activeProfile.id {
+            activeDiagnosticIncident = nil
+        }
+        if activeChanged,
            let previous = lastSynchronizedActiveProfile,
            previous.id != activeProfile.id {
             slotLifecycleCoordinator.deactivate(profile: previous)
@@ -2979,7 +3019,36 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let webView: WKWebView
         do {
-            webView = try webViewPool.webView(for: activeProfile)
+            let isStartupRestore = startupRestorePending
+            startupRestorePending = false
+            if isStartupRestore {
+                diagnostics.record(
+                    event: "startup.restore.selected",
+                    level: .notice,
+                    subsystem: "startup",
+                    fields: [
+                        "slot_id": .string(activeProfile.id.uuidString),
+                        "current_page_class": .string(Self.startupURLClass(for: activeProfile)),
+                        "residency_policy": .string(activeProfile.residencyPolicy.rawValue),
+                        "restored_last_active": .bool(true),
+                        "construction_phase": .string(runtimeConstructionPhase)
+                    ]
+                )
+            }
+            let creationReason: WebRuntimeCreationReason = if isStartupRestore {
+                .startupRestore
+            } else if activeChanged {
+                .explicitSelection
+            } else if sourceHostController.sessionState == .fullscreen {
+                .fullscreenRebuild
+            } else {
+                .initialCreate
+            }
+            webView = try webViewPool.webView(
+                for: activeProfile,
+                creationReason: creationReason,
+                restoredLastActive: isStartupRestore
+            )
         } catch {
             webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(
@@ -3027,6 +3096,29 @@ final class PanelController: NSObject, NSWindowDelegate {
            panel.isKeyWindow || sourceHostController.window.isKeyWindow {
             sourceHostController.orderFrontAndFocus(webView)
         }
+    }
+
+    func markAppStartedForDiagnostics() {
+        runtimeConstructionPhase = "app_started"
+    }
+
+    func captureStuckTabSnapshotForQA(slotID: UUID) {
+        guard tabStore.activeTabID == slotID,
+              webViewPool.existingWebView(for: slotID) != nil else {
+            return
+        }
+        let incidentID = UUID()
+        activeDiagnosticIncident = ActiveDiagnosticIncident(id: incidentID, slotID: slotID)
+        webViewPool.captureDiagnosticSnapshot(
+            slotID: slotID,
+            incidentID: incidentID,
+            reason: "user_marked_stuck_tab"
+        )
+    }
+
+    private static func startupURLClass(for profile: WebAppProfile) -> String {
+        let url = profile.currentURL ?? profile.homeURL
+        return RuntimeDiagnosticURLClass.classify(url)
     }
 
     /// Background Media Policy has one source-local bridge for Calibre. The
@@ -3816,6 +3908,18 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func resetSlotRuntimeForQA(id: UUID) {
+        let incidentID: UUID
+        if let current = activeDiagnosticIncident, current.slotID == id {
+            incidentID = current.id
+        } else {
+            incidentID = UUID()
+            activeDiagnosticIncident = ActiveDiagnosticIncident(id: incidentID, slotID: id)
+        }
+        webViewPool.captureDiagnosticSnapshot(
+            slotID: id,
+            incidentID: incidentID,
+            reason: "pre_manual_runtime_reset"
+        )
         let activeProfile = tabStore.activeProfile
         let fullscreenSourceLocked = sourceHostController.sessionState != .idle
         let oldWebView = webViewPool.existingWebView(for: id)
@@ -5326,7 +5430,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let webView: WKWebView
         do {
-            webView = try webViewPool.webView(for: activeProfile)
+            webView = try webViewPool.webView(
+                for: activeProfile,
+                creationReason: .fullscreenRebuild
+            )
         } catch {
             webFocusRouter.setCurrentWebView(nil)
             if let profileName = Self.unsupportedBrowserProfileName(

@@ -25,8 +25,13 @@ enum RuntimeDiagnosticPrivacy {
         "hardwareuuid",
         "ipaddress",
         "documenttoken",
+        "conversationid",
         "responseid",
         "responseidentity",
+        "rawurl",
+        "prompt",
+        "errormessage",
+        "stack",
         "location",
         "dictionary",
         "aria",
@@ -42,6 +47,11 @@ enum RuntimeDiagnosticPrivacy {
         "refresh_token=",
         "client_secret=",
         "sk-",
+    ]
+
+    private static let safeResponseMetadataKeys: Set<String> = [
+        "responsebridgeready",
+        "latestresponsecomplete"
     ]
 
     static func safeURLString(
@@ -165,6 +175,9 @@ enum RuntimeDiagnosticPrivacy {
 
     private static func isSensitiveKey(_ key: String) -> Bool {
         let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
+        if normalized.contains("response"), !safeResponseMetadataKeys.contains(normalized) {
+            return true
+        }
         return sensitiveKeyFragments.contains { normalized.contains($0) }
     }
 
