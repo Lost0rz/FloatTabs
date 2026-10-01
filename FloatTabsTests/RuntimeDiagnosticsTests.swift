@@ -981,6 +981,66 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
     }
 
     @MainActor
+    func testLateOriginalCallbacksDoNotClearReplacementHomeFallback() async throws {
+        for terminal in ["commit", "provisional_failure"] {
+            let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+            let webView = WebViewFactory.makeWebView()
+            let homeURL = URL(string: "https://nas.example.com:3010")!
+            var recoveryRequest: WebRuntimeRecoveryRequest?
+            let observer = SlotNavigationObserver(
+                slotID: UUID(),
+                webView: webView,
+                websiteMode: .desktop,
+                onURLChange: { _, _ in },
+                runtimeGeneration: 16,
+                onSoftRecoveryRequested: { recoveryRequest = $0 },
+                javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                    evaluatorCapture?.completion = completion
+                }
+            )
+
+            observer.observeUserAction(
+                .home,
+                homeURL: homeURL,
+                homeURLSchemeWasInferred: true
+            )
+            observer.webView(webView, didStartProvisionalNavigation: nil)
+            observer.startRendererProbe(
+                in: webView,
+                for: WebRuntimeNavigationTicket(runtimeGeneration: 16, navigationGeneration: 1)
+            )
+            let completion = try XCTUnwrap(evaluatorCapture.completion)
+            completion(["ready_state": "interactive", "visibility_state": "visible"], nil)
+            for _ in 0..<5 { await Task.yield() }
+
+            let request = try XCTUnwrap(recoveryRequest)
+            XCTAssertTrue(observer.beginSoftRecovery(request.ticket))
+            observer.configureHTTPEntryFallback(for: homeURL, allowed: true)
+            XCTAssertTrue(observer.isHTTPEntryFallbackPending)
+
+            switch terminal {
+            case "commit":
+                observer.webView(webView, didCommit: nil)
+            default:
+                observer.webView(
+                    webView,
+                    didFailProvisionalNavigation: nil,
+                    withError: NSError(
+                        domain: NSURLErrorDomain,
+                        code: NSURLErrorCancelled
+                    )
+                )
+            }
+
+            XCTAssertTrue(
+                observer.isHTTPEntryFallbackPending,
+                "late original \(terminal) must not consume replacement Home fallback provenance"
+            )
+            observer.invalidate()
+        }
+    }
+
+    @MainActor
     func testRendererProbeTimeoutRecordsHardRecoveryDeferredWithoutEscalation() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let webView = WebViewFactory.makeWebView()
