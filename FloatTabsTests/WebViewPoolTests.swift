@@ -1872,6 +1872,7 @@ final class WebViewPoolTests: XCTestCase {
         let entry = URL(string: "https://nas.example.com:3010")!
         observer.configureHTTPEntryFallback(for: entry, allowed: true)
         XCTAssertTrue(observer.isHTTPEntryFallbackPending)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
 
         observer.webView(
             webView,
@@ -1931,6 +1932,7 @@ final class WebViewPoolTests: XCTestCase {
 
         let entry = URL(string: "https://nas.example.com:3010")!
         observer.configureHTTPEntryFallback(for: entry, allowed: true)
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
 
         observer.webView(

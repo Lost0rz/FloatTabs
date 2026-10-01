@@ -350,7 +350,87 @@ private final class RendererProbeJavaScriptEvaluatorCapture {
     var completion: (@Sendable (Any?, Error?) -> Void)?
 }
 
+@MainActor
+private final class NavigationProjectionCapture {
+    var commitCount = 0
+    var finishCount = 0
+}
+
+@MainActor
+private struct RecoveryNavigationProjectionScenario {
+    let webView: WKWebView
+    let observer: SlotNavigationObserver
+    let sourceNavigation: WKNavigation
+    let replacementNavigation: WKNavigation
+    let projections: NavigationProjectionCapture
+}
+
 final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
+    @MainActor
+    private func makeStartedSoftHomeRecoveryProjectionScenario(
+        runtimeGeneration: UInt64
+    ) async throws -> RecoveryNavigationProjectionScenario {
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let homeURL = URL(string: "https://nas.example.com:3010")!
+        let projections = NavigationProjectionCapture()
+        var recoveryRequest: WebRuntimeRecoveryRequest?
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onNavigationCommit: { _, _ in projections.commitCount += 1 },
+            onNavigationFinish: { _, _ in projections.finishCount += 1 },
+            runtimeGeneration: runtimeGeneration,
+            onSoftRecoveryRequested: { recoveryRequest = $0 },
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+
+        webView.navigationDelegate = nil
+        let sourceNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>source</body></html>", baseURL: homeURL)
+        )
+        webView.stopLoading()
+        webView.navigationDelegate = observer
+
+        observer.observeUserAction(
+            .home,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: true
+        )
+        observer.webView(webView, didStartProvisionalNavigation: sourceNavigation)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: runtimeGeneration, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(["ready_state": "interactive", "visibility_state": "visible"], nil)
+        for _ in 0..<5 { await Task.yield() }
+
+        let request = try XCTUnwrap(recoveryRequest)
+        XCTAssertTrue(observer.beginSoftRecovery(request.ticket))
+        observer.configureHTTPEntryFallback(for: homeURL, allowed: true)
+
+        webView.navigationDelegate = nil
+        let replacementNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>replacement</body></html>", baseURL: homeURL)
+        )
+        webView.stopLoading()
+        webView.navigationDelegate = observer
+        observer.webView(webView, didStartProvisionalNavigation: replacementNavigation)
+
+        return RecoveryNavigationProjectionScenario(
+            webView: webView,
+            observer: observer,
+            sourceNavigation: sourceNavigation,
+            replacementNavigation: replacementNavigation,
+            projections: projections
+        )
+    }
+
     func testPassiveResponsiveStallNeverRequestsRecovery() {
         var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 1)
         let navigation = WebRuntimeNavigationTicket(runtimeGeneration: 1, navigationGeneration: 1)
@@ -1219,6 +1299,81 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
             1,
             "late recovery-source finish after replacement finish must remain stale"
         )
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testLateRecoverySourceCallbacksAfterNewUserActionRemainNonProjecting() async throws {
+        let scenario = try await makeStartedSoftHomeRecoveryProjectionScenario(runtimeGeneration: 30)
+        let observer = scenario.observer
+        let webView = scenario.webView
+
+        observer.webView(webView, didCommit: scenario.replacementNavigation)
+        observer.webView(webView, didFinish: scenario.replacementNavigation)
+        XCTAssertEqual(scenario.projections.commitCount, 1)
+        XCTAssertEqual(scenario.projections.finishCount, 1)
+
+        observer.observeUserAction(.reload)
+        observer.webView(webView, didCommit: scenario.sourceNavigation)
+        observer.webView(webView, didFinish: scenario.sourceNavigation)
+
+        XCTAssertEqual(scenario.projections.commitCount, 1)
+        XCTAssertEqual(scenario.projections.finishCount, 1)
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testLateRecoverySourceCannotProjectAcrossNextNavigation() async throws {
+        let scenario = try await makeStartedSoftHomeRecoveryProjectionScenario(runtimeGeneration: 31)
+        let observer = scenario.observer
+        let webView = scenario.webView
+        let homeURL = URL(string: "https://nas.example.com:3010")!
+
+        observer.webView(webView, didCommit: scenario.replacementNavigation)
+        observer.webView(webView, didFinish: scenario.replacementNavigation)
+        XCTAssertEqual(scenario.projections.commitCount, 1)
+        XCTAssertEqual(scenario.projections.finishCount, 1)
+
+        observer.observeUserAction(.reload)
+        webView.navigationDelegate = nil
+        let currentNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>current</body></html>", baseURL: homeURL)
+        )
+        webView.stopLoading()
+        webView.navigationDelegate = observer
+        observer.webView(webView, didStartProvisionalNavigation: currentNavigation)
+
+        observer.webView(webView, didCommit: scenario.sourceNavigation)
+        observer.webView(webView, didFinish: scenario.sourceNavigation)
+        XCTAssertEqual(scenario.projections.commitCount, 1)
+        XCTAssertEqual(scenario.projections.finishCount, 1)
+
+        observer.webView(webView, didCommit: currentNavigation)
+        observer.webView(webView, didFinish: currentNavigation)
+        XCTAssertEqual(scenario.projections.commitCount, 2)
+        XCTAssertEqual(scenario.projections.finishCount, 2)
+        observer.invalidate()
+    }
+
+    @MainActor
+    func testCurrentNavigationIsNotSuppressedByHistoricalSourceIdentifier() async throws {
+        let scenario = try await makeStartedSoftHomeRecoveryProjectionScenario(runtimeGeneration: 32)
+        let observer = scenario.observer
+        let webView = scenario.webView
+
+        observer.webView(webView, didCommit: scenario.replacementNavigation)
+        observer.webView(webView, didFinish: scenario.replacementNavigation)
+        XCTAssertEqual(scenario.projections.commitCount, 1)
+        XCTAssertEqual(scenario.projections.finishCount, 1)
+
+        // Reusing the same WKNavigation object deterministically models a
+        // historical identity value reused by a later current navigation.
+        observer.webView(webView, didStartProvisionalNavigation: scenario.sourceNavigation)
+        observer.webView(webView, didCommit: scenario.sourceNavigation)
+        observer.webView(webView, didFinish: scenario.sourceNavigation)
+
+        XCTAssertEqual(scenario.projections.commitCount, 2)
+        XCTAssertEqual(scenario.projections.finishCount, 2)
         observer.invalidate()
     }
 

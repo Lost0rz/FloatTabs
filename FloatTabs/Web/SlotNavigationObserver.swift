@@ -1188,7 +1188,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
-        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
+        let isCurrentNavigationCallback = ticket != nil
+        let isRecoverySourceCallback = !isCurrentNavigationCallback
+            && isCurrentSoftRecoverySourceNavigation(navigation)
+        let mayProjectNavigationState = isCurrentNavigationCallback && !isRecoverySourceCallback
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.hasPendingSoftRecoveryStart(after: $0)
         } ?? false
@@ -1212,7 +1215,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let ticket {
             _ = recoveryTracker.didCommit(ticket)
         }
-        if !isRecoverySourceCallback {
+        if mayProjectNavigationState {
             cancelPendingInstantBack()
             // Once an https entry commits, later in-page failures can never inherit
             // the entry-only downgrade permission. A late commit from the original
@@ -1237,7 +1240,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // from the original recovery-source navigation is stale once the
         // replacement has begun and must not reset bridges or project a
         // committed URL for the replacement document.
-        if !isRecoverySourceCallback {
+        if mayProjectNavigationState {
             onNavigationCommit(slotID, webView.url)
         }
     }
@@ -1247,7 +1250,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreHiddenScrollerPolicy(in: webView)
 
         let ticket = currentNavigationTicket(for: navigation)
-        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
+        let isCurrentNavigationCallback = ticket != nil
+        let isRecoverySourceCallback = !isCurrentNavigationCallback
+            && isCurrentSoftRecoverySourceNavigation(navigation)
+        let mayProjectNavigationState = isCurrentNavigationCallback && !isRecoverySourceCallback
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
         } ?? false
@@ -1286,11 +1292,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: runtimeFields(for: webView, ticket: ticket)
         )
-        if diagnostics.capturesDebugEvents && !isRecoverySourceCallback {
+        if diagnostics.capturesDebugEvents && mayProjectNavigationState {
             recordPageRuntimeProbe(in: webView)
         }
 
-        if !isRecoverySourceCallback {
+        if mayProjectNavigationState {
             onNavigationFinish(slotID, webView.url)
 
             if let url = webView.url, WebAppURL.isSafe(url) {
@@ -1356,7 +1362,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
-        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
+        let isCurrentNavigationCallback = ticket != nil
+        let isRecoverySourceCallback = !isCurrentNavigationCallback
+            && isCurrentSoftRecoverySourceNavigation(navigation)
+        let mayProjectNavigationState = isCurrentNavigationCallback && !isRecoverySourceCallback
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.hasPendingSoftRecoveryStart(after: $0)
         } ?? false
@@ -1393,14 +1402,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             ].merging(runtimeFields(for: webView, ticket: ticket)) { current, _ in current }
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
         )
-        if !isRecoverySourceCallback {
+        if mayProjectNavigationState {
             cancelPendingInstantBack()
         }
         // The replacement Home load may already have installed fresh inferred-
         // scheme fallback provenance while WebKit is still delivering a late
         // failure for the original stopped navigation. Do not let that stale
         // callback consume or clear the replacement navigation's permission.
-        if !preservesRecoveryStartWatchdog && !isRecoverySourceCallback {
+        if isCurrentNavigationCallback,
+           !preservesRecoveryStartWatchdog,
+           !isRecoverySourceCallback {
             let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
                 .flatMap { URL(string: $0) }
                 ?? webView.url
@@ -1468,11 +1479,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     private func isCurrentSoftRecoverySourceNavigation(_ navigation: WKNavigation!) -> Bool {
-        guard let navigation,
-              let sourceNavigationIdentifier = softRecoverySourceNavigationIdentifier,
-              ObjectIdentifier(navigation) == sourceNavigationIdentifier else {
+        guard let navigation else {
             return false
         }
+        let navigationIdentifier = ObjectIdentifier(navigation)
+        if navigationIdentifier == activeNavigationIdentifier {
+            return false
+        }
+        guard let sourceNavigationIdentifier = softRecoverySourceNavigationIdentifier,
+              navigationIdentifier == sourceNavigationIdentifier else { return false }
         return softRecoveryReplacementDidStart
             || softRecoverySourceTicket.map(recoveryTracker.isCurrent) == true
     }

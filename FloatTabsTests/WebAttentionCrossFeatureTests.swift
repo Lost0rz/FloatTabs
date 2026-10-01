@@ -1752,6 +1752,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // A committed top-level document replacement resets the runtime, but
         // the completed response remains unread until explicit selection.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
 
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
@@ -1831,6 +1832,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         // so this admission assertion cannot race loadHTMLString's callback
         // ordering. SlotNavigationObserver derives the transient attention
         // fact from this same webView.url value.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
 
@@ -1986,14 +1988,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // A normal committed navigation establishes the first current page.
         committedURLs[ObjectIdentifier(webView)] = pageA
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originA)
 
         // Ordinary Forward and Back remain didCommit-owned.
         committedURLs[ObjectIdentifier(webView)] = pageB
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originB)
         committedURLs[ObjectIdentifier(webView)] = pageA
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originA)
 
@@ -2018,6 +2023,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, originD)
 
         committedURLs[ObjectIdentifier(webView)] = home
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeOrigin)
     }
@@ -2068,6 +2074,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, homeOrigin)
 
         committedURLs[ObjectIdentifier(recreatedWebView)] = persistedCurrent
+        observer.webView(recreatedWebView, didStartProvisionalNavigation: nil)
         observer.webView(recreatedWebView, didCommit: nil)
         XCTAssertEqual(statusItem.debugSelectedFaviconOriginKey, currentOrigin)
         XCTAssertEqual(store.activeProfile?.currentURL, persistedCurrent)
@@ -2945,6 +2952,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         // A committed replacement ends attention protection, but media
         // protection alone must keep the runtime resident past the Warm TTL.
+        observer.webView(webView, didStartProvisionalNavigation: nil)
         observer.webView(webView, didCommit: nil)
         XCTAssertEqual(coordinator.state(for: slot.id), .idle)
         try await wait(milliseconds: 100)
