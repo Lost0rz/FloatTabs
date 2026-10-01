@@ -265,6 +265,25 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
     let documentToken: String
     let responseID: String?
     let blocks: [SpeechContentBlock]
+    let responseIdentity: ChatGPTResponseIdentity?
+
+    init(
+        version: Int,
+        kind: ChatGPTResponseMessageKind,
+        requestID: String,
+        documentToken: String,
+        responseID: String?,
+        blocks: [SpeechContentBlock],
+        responseIdentity: ChatGPTResponseIdentity? = nil
+    ) {
+        self.version = version
+        self.kind = kind
+        self.requestID = requestID
+        self.documentToken = documentToken
+        self.responseID = responseID
+        self.blocks = blocks
+        self.responseIdentity = responseIdentity
+    }
 
     static func parse(_ body: [String: Any]) -> ChatGPTResponsePayload? {
         guard let version = body["version"] as? Int,
@@ -280,6 +299,18 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
 
         let responseID = body["responseID"] as? String
         guard responseID == nil || isOpaqueIdentifier(responseID ?? "") else {
+            return nil
+        }
+
+        let responseIdentity: ChatGPTResponseIdentity?
+        if let rawIdentity = body["responseIdentity"] as? String {
+            guard let parsedIdentity = ChatGPTResponseIdentity(rawValue: rawIdentity) else {
+                return nil
+            }
+            responseIdentity = parsedIdentity
+        } else if body["responseIdentity"] == nil || body["responseIdentity"] is NSNull {
+            responseIdentity = nil
+        } else {
             return nil
         }
 
@@ -310,7 +341,8 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
             requestID: requestID,
             documentToken: documentToken,
             responseID: responseID,
-            blocks: blocks
+            blocks: blocks,
+            responseIdentity: responseIdentity
         )
     }
 
@@ -329,7 +361,8 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
                     level: block.level,
                     sourceLocator: locator.assigning(slotID: slotID)
                 )
-            }
+            },
+            responseIdentity: responseIdentity
         )
     }
 
@@ -1180,6 +1213,7 @@ enum ChatGPTResponseExtraction {
               requestID: requestID,
               documentToken: documentToken,
               responseID: responseID,
+              responseIdentity: canonicalResponseIdentityFor(root),
               blocks: wireBlocks
             });
             return true;

@@ -125,6 +125,14 @@
 		A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */; };
 		A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000078 /* SettingsInformationArchitecture.swift */; };
 		A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */; };
+		A00000000000000000000080 /* MemoXCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000080 /* MemoXCaptureTests.swift */; };
+		A00000000000000000000081 /* MemoXCaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000081 /* MemoXCaptureCoordinator.swift */; };
+		A00000000000000000000082 /* MemoXCaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000082 /* MemoXCaptureModels.swift */; };
+		A00000000000000000000083 /* MemoXActivationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000083 /* MemoXActivationStore.swift */; };
+		A00000000000000000000084 /* MemoXInstallationIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000084 /* MemoXInstallationIdentityStore.swift */; };
+		A00000000000000000000085 /* MemoXOutboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000085 /* MemoXOutboxStore.swift */; };
+		A00000000000000000000086 /* MemoXUnixSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000086 /* MemoXUnixSocketClient.swift */; };
+		A00000000000000000000087 /* MemoXSenderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000087 /* MemoXSenderService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -258,6 +266,14 @@
 		B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsSettingsViewController.swift; sourceTree = "<group>"; };
 		B00000000000000000000078 /* SettingsInformationArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitecture.swift; sourceTree = "<group>"; };
 		B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitectureTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000080 /* MemoXCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXCaptureTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000081 /* MemoXCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXCaptureCoordinator.swift; sourceTree = "<group>"; };
+		B00000000000000000000082 /* MemoXCaptureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXCaptureModels.swift; sourceTree = "<group>"; };
+		B00000000000000000000083 /* MemoXActivationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXActivationStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000084 /* MemoXInstallationIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXInstallationIdentityStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000085 /* MemoXOutboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXOutboxStore.swift; sourceTree = "<group>"; };
+		B00000000000000000000086 /* MemoXUnixSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXUnixSocketClient.swift; sourceTree = "<group>"; };
+		B00000000000000000000087 /* MemoXSenderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoXSenderService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -302,6 +318,7 @@
 				H00000000000000000000007 /* Web */,
 				H0000000000000000000000D /* UI */,
 				H0000000000000000000000F /* Speech */,
+				H00000000000000000000011 /* MemoX */,
 				H00000000000000000000008 /* Resources */,
 			);
 			path = FloatTabs;
@@ -512,8 +529,23 @@
 				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
 				B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */,
 				B00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift */,
+				B00000000000000000000080 /* MemoXCaptureTests.swift */,
 			);
 			path = FloatTabsTests;
+			sourceTree = "<group>";
+		};
+		H00000000000000000000011 /* MemoX */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000081 /* MemoXCaptureCoordinator.swift */,
+				B00000000000000000000082 /* MemoXCaptureModels.swift */,
+				B00000000000000000000083 /* MemoXActivationStore.swift */,
+				B00000000000000000000084 /* MemoXInstallationIdentityStore.swift */,
+				B00000000000000000000085 /* MemoXOutboxStore.swift */,
+				B00000000000000000000086 /* MemoXUnixSocketClient.swift */,
+				B00000000000000000000087 /* MemoXSenderService.swift */,
+			);
+			path = MemoX;
 			sourceTree = "<group>";
 		};
 		H0000000000000000000000A /* Products */ = {
@@ -639,6 +671,13 @@
 				A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */,
 				A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
+				A00000000000000000000081 /* MemoXCaptureCoordinator.swift in Sources */,
+				A00000000000000000000082 /* MemoXCaptureModels.swift in Sources */,
+				A00000000000000000000083 /* MemoXActivationStore.swift in Sources */,
+				A00000000000000000000084 /* MemoXInstallationIdentityStore.swift in Sources */,
+				A00000000000000000000085 /* MemoXOutboxStore.swift in Sources */,
+				A00000000000000000000086 /* MemoXUnixSocketClient.swift in Sources */,
+				A00000000000000000000087 /* MemoXSenderService.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
 				A00000000000000000000023 /* AppPreferencesStore.swift in Sources */,
@@ -753,6 +792,7 @@
 				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
 				A00000000000000000000070 /* RuntimeDiagnosticsRotationTests.swift in Sources */,
 				A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */,
+				A00000000000000000000080 /* MemoXCaptureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
