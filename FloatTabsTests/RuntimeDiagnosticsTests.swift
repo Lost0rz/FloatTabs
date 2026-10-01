@@ -561,6 +561,26 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
         XCTAssertFalse(tracker.isCurrent(request.ticket))
     }
 
+    func testOriginalNavigationFailureWhileRecoveryAwaitsStartKeepsRecoveryPending() throws {
+        var tracker = WebRuntimeRecoveryTracker(runtimeGeneration: 14)
+        _ = tracker.recordUserAction(.reload, navigationGenerationBefore: 0)
+        let original = WebRuntimeNavigationTicket(runtimeGeneration: 14, navigationGeneration: 1)
+        _ = tracker.navigationStarted(original)
+        let request = try XCTUnwrap(tracker.requestSoftRecovery(
+            for: original,
+            classification: .rendererResponsiveNavigationStall
+        ))
+        XCTAssertTrue(tracker.beginSoftRecovery(request.ticket))
+        XCTAssertTrue(tracker.isAwaitingSoftRecoveryNavigationStart(after: original))
+
+        XCTAssertNil(
+            tracker.didFail(original),
+            "stopLoading may fail the original navigation before replacement navigation starts"
+        )
+        XCTAssertTrue(tracker.isCurrent(request.ticket))
+        XCTAssertTrue(tracker.isAwaitingSoftRecoveryNavigationStart(after: original))
+    }
+
     func testNavigationFinishAndFailurePreventAStall() {
         for terminal in ["finish", "failure"] {
             var tracker = WebRuntimeHealthTracker(runtimeGeneration: 7)
