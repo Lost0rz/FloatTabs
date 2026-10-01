@@ -1116,6 +1116,76 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
     }
 
     @MainActor
+    func testLateRecoverySourceCommitAndFinishDoNotProjectReplacementState() async throws {
+        let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+        let webView = WebViewFactory.makeWebView()
+        let homeURL = URL(string: "https://nas.example.com:3010")!
+        var recoveryRequest: WebRuntimeRecoveryRequest?
+        var commitProjectionCount = 0
+        var finishProjectionCount = 0
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            onNavigationCommit: { _, _ in commitProjectionCount += 1 },
+            onNavigationFinish: { _, _ in finishProjectionCount += 1 },
+            runtimeGeneration: 18,
+            onSoftRecoveryRequested: { recoveryRequest = $0 },
+            javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                evaluatorCapture?.completion = completion
+            }
+        )
+
+        webView.navigationDelegate = nil
+        let originalNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>original</body></html>", baseURL: homeURL)
+        )
+        webView.stopLoading()
+        webView.navigationDelegate = observer
+
+        observer.observeUserAction(
+            .home,
+            homeURL: homeURL,
+            homeURLSchemeWasInferred: true
+        )
+        observer.webView(webView, didStartProvisionalNavigation: originalNavigation)
+        observer.startRendererProbe(
+            in: webView,
+            for: WebRuntimeNavigationTicket(runtimeGeneration: 18, navigationGeneration: 1)
+        )
+        let completion = try XCTUnwrap(evaluatorCapture.completion)
+        completion(["ready_state": "interactive", "visibility_state": "visible"], nil)
+        for _ in 0..<5 { await Task.yield() }
+
+        let request = try XCTUnwrap(recoveryRequest)
+        XCTAssertTrue(observer.beginSoftRecovery(request.ticket))
+        observer.configureHTTPEntryFallback(for: homeURL, allowed: true)
+
+        webView.navigationDelegate = nil
+        let replacementNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>replacement</body></html>", baseURL: homeURL)
+        )
+        webView.stopLoading()
+        webView.navigationDelegate = observer
+        observer.webView(webView, didStartProvisionalNavigation: replacementNavigation)
+
+        observer.webView(webView, didCommit: originalNavigation)
+        observer.webView(webView, didFinish: originalNavigation)
+
+        XCTAssertEqual(commitProjectionCount, 0)
+        XCTAssertEqual(finishProjectionCount, 0)
+        XCTAssertTrue(observer.isHTTPEntryFallbackPending)
+
+        observer.webView(webView, didCommit: replacementNavigation)
+        observer.webView(webView, didFinish: replacementNavigation)
+
+        XCTAssertEqual(commitProjectionCount, 1)
+        XCTAssertEqual(finishProjectionCount, 1)
+        observer.invalidate()
+    }
+
+    @MainActor
     func testRendererProbeTimeoutRecordsHardRecoveryDeferredWithoutEscalation() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let webView = WebViewFactory.makeWebView()
