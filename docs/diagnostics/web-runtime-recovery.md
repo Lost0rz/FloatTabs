@@ -52,12 +52,13 @@ replace the WebView.
   reload of the current page.
 - A soft recovery is complete only after its resulting navigation finishes.
   Commit is progress, not success: the confirmed incident class is post-commit,
-  so the recovery ticket remains live across commit. `stopLoading()` may fail
-  the original stalled navigation before the replacement navigation starts;
-  that expected old-navigation failure does not cancel the bounded recovery-start
-  timeout. A failed recovery navigation, a pre- or post-commit recovery
-  navigation stall, or a bounded recovery-start timeout records one failure and
-  does not trigger another escalation.
+  so the recovery ticket remains live across commit. `stopLoading()` may race
+  with late commit, finish, or failure callbacks from the original stalled
+  navigation before the replacement navigation starts; those old-navigation
+  callbacks do not cancel or replace the bounded recovery-start timeout. A
+  failed recovery navigation, a pre- or post-commit recovery navigation stall,
+  or a bounded recovery-start timeout records one failure and does not trigger
+  another escalation.
 - If the original user-requested navigation finishes while a fullscreen
   deferral is pending, the deferred recovery becomes stale and is discarded.
 - If the fullscreen source host is locked, soft execution is deferred until
