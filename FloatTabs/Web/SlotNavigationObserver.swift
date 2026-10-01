@@ -672,6 +672,17 @@ struct WebRuntimeRecoveryTracker {
         return softRecovery.request.ticket
     }
 
+    func isAwaitingSoftRecoveryNavigationStart(
+        after navigation: WebRuntimeNavigationTicket
+    ) -> Bool {
+        guard navigation.runtimeGeneration == runtimeGeneration,
+              let softRecovery,
+              softRecovery.phase == .awaitingNavigationStart else {
+            return false
+        }
+        return softRecovery.request.ticket.navigationGeneration == navigation.navigationGeneration
+    }
+
     mutating func didCommit(
         _ navigation: WebRuntimeNavigationTicket
     ) -> WebRuntimeRecoveryTicket? {
@@ -1243,8 +1254,17 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
+        let preservesRecoveryStartWatchdog = ticket.map {
+            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+        } ?? false
         if let ticket, healthTracker.didFail(ticket) {
-            cancelWatchdog()
+            // stopLoading() is the first step of soft recovery and may fail the
+            // original stalled navigation before reloadFromOrigin()/Home starts
+            // its replacement navigation. That expected old-navigation failure
+            // must not cancel the bounded recovery-start watchdog.
+            if !preservesRecoveryStartWatchdog {
+                cancelWatchdog()
+            }
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
@@ -1278,8 +1298,17 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
+        let preservesRecoveryStartWatchdog = ticket.map {
+            recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
+        } ?? false
         if let ticket, healthTracker.didFail(ticket) {
-            cancelWatchdog()
+            // stopLoading() is the first step of soft recovery and may fail the
+            // original stalled navigation before reloadFromOrigin()/Home starts
+            // its replacement navigation. That expected old-navigation failure
+            // must not cancel the bounded recovery-start watchdog.
+            if !preservesRecoveryStartWatchdog {
+                cancelWatchdog()
+            }
             cancelRendererProbeTimeout()
             rendererProbeLifecycle.invalidate()
             activeNavigationIdentifier = nil
