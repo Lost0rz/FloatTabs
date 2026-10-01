@@ -50,10 +50,11 @@ replace the WebView.
   captured Home URL through the existing `WebViewPool.navigate` path, including
   its existing inferred-scheme fallback permission. It never turns Home into a
   reload of the current page.
-- A soft recovery is complete only after its resulting navigation commits or
-  finishes. A failed navigation, a recovery navigation stall, or a bounded
-  recovery-start timeout records one failure and does not trigger another
-  escalation.
+- A soft recovery is complete only after its resulting navigation finishes.
+  Commit is progress, not success: the confirmed incident class is post-commit,
+  so the recovery ticket remains live across commit. A failed navigation, a
+  pre- or post-commit recovery navigation stall, or a bounded recovery-start
+  timeout records one failure and does not trigger another escalation.
 - If the original user-requested navigation finishes while a fullscreen
   deferral is pending, the deferred recovery becomes stale and is discarded.
 - If the fullscreen source host is locked, soft execution is deferred until
