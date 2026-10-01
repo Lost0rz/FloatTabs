@@ -842,6 +842,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var activeNavigationIdentifier: ObjectIdentifier?
     private var softRecoverySourceNavigationIdentifier: ObjectIdentifier?
     private var softRecoverySourceTicket: WebRuntimeRecoveryTicket?
+    private var softRecoveryReplacementDidStart = false
     private var navigationStartUptime: TimeInterval?
     private var lastCommitUptime: TimeInterval?
     private var watchdogGeneration: UInt64 = 0
@@ -969,7 +970,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             homeURL: homeURL,
             homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
-        clearSoftRecoverySourceNavigation()
+        clearSoftRecoverySourceNavigation(force: true)
         if let previousRecovery = actionContext.invalidatedRecovery {
             recordRecoveryEvent(
                 "soft_stale",
@@ -1015,6 +1016,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         guard recoveryTracker.beginSoftRecovery(ticket) else { return false }
         softRecoverySourceNavigationIdentifier = activeNavigationIdentifier
         softRecoverySourceTicket = ticket
+        softRecoveryReplacementDidStart = false
         cancelWatchdog()
         recordRecoveryEvent(
             "soft_started",
@@ -1051,7 +1053,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func invalidate(recoveryReason: String = "runtime_released") {
         cancelWatchdog()
         cancelRendererProbeTimeout()
-        clearSoftRecoverySourceNavigation()
+        clearSoftRecoverySourceNavigation(force: true)
         if let invalidatedRecovery = recoveryTracker.invalidate() {
             recordRecoveryEvent(
                 "soft_stale",
@@ -1155,6 +1157,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             case .passive, .userAction:
                 break
             case .softRecovery:
+                softRecoveryReplacementDidStart = true
                 cancelWatchdog()
                 // The start watchdog is replaced by the normal bounded
                 // navigation watchdog below.
@@ -1425,8 +1428,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         cancelWatchdog()
         cancelRendererProbeTimeout()
         rendererProbeLifecycle.invalidate()
+        clearSoftRecoverySourceNavigation(force: true)
         if let invalidatedRecovery = recoveryTracker.invalidate() {
-            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_stale",
                 ticket: invalidatedRecovery,
@@ -1467,16 +1470,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private func isCurrentSoftRecoverySourceNavigation(_ navigation: WKNavigation!) -> Bool {
         guard let navigation,
               let sourceNavigationIdentifier = softRecoverySourceNavigationIdentifier,
-              let sourceTicket = softRecoverySourceTicket,
-              recoveryTracker.isCurrent(sourceTicket) else {
+              ObjectIdentifier(navigation) == sourceNavigationIdentifier else {
             return false
         }
-        return ObjectIdentifier(navigation) == sourceNavigationIdentifier
+        return softRecoveryReplacementDidStart
+            || softRecoverySourceTicket.map(recoveryTracker.isCurrent) == true
     }
 
-    private func clearSoftRecoverySourceNavigation() {
+    private func clearSoftRecoverySourceNavigation(force: Bool = false) {
+        guard force || !softRecoveryReplacementDidStart else { return }
         softRecoverySourceNavigationIdentifier = nil
         softRecoverySourceTicket = nil
+        softRecoveryReplacementDidStart = false
     }
 
     private func scheduleWatchdog(target: WatchdogTarget, after delay: TimeInterval) {

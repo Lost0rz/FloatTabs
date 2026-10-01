@@ -1205,6 +1205,20 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
 
         XCTAssertEqual(commitProjectionCount, 1)
         XCTAssertEqual(finishProjectionCount, 1)
+
+        observer.webView(webView, didCommit: originalNavigation)
+        observer.webView(webView, didFinish: originalNavigation)
+
+        XCTAssertEqual(
+            commitProjectionCount,
+            1,
+            "late recovery-source commit after replacement finish must remain stale"
+        )
+        XCTAssertEqual(
+            finishProjectionCount,
+            1,
+            "late recovery-source finish after replacement finish must remain stale"
+        )
         observer.invalidate()
     }
 
