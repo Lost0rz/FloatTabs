@@ -2797,6 +2797,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onReload = { [weak self] id in
             self?.reloadSlot(id: id)
         }
+        rail.onManualRuntimeResetForQA = { [weak self] id in
+            self?.resetSlotRuntimeForQA(id: id)
+        }
         rail.onAdd = { [weak self] in
             self?.presentAddWebAppEditor()
         }
@@ -3809,6 +3812,42 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard webViewPool.reload(slotID: id) else { return }
         if tabStore.activeTabID == id {
             focusActiveWebViewIfAvailable()
+        }
+    }
+
+    private func resetSlotRuntimeForQA(id: UUID) {
+        let activeProfile = tabStore.activeProfile
+        let fullscreenSourceLocked = sourceHostController.sessionState != .idle
+        let oldWebView = webViewPool.existingWebView(for: id)
+
+        do {
+            guard try webViewPool.replaceRuntimeForManualQAReset(
+                requestedSlotID: id,
+                activeProfile: activeProfile,
+                fullscreenSourceLocked: fullscreenSourceLocked,
+                prepareRuntimeForReplacement: { [weak self] slotID in
+                    self?.calibreSpeechCoordinator.prepareForRuntimeRelease(slotID: slotID)
+                }
+            ) != nil else {
+                return
+            }
+
+            // This is the existing active-Slot attachment authority. It reads
+            // the new resident runtime back from WebViewPool and attaches it
+            // through WebPanelContainerView's normal synchronization path.
+            synchronizeSlotState()
+        } catch {
+            // The existing rebuild authority has already detached the old
+            // runtime. Keep the selected Slot identity, but leave its panel
+            // empty until a later explicit normal synchronization retries it.
+            guard tabStore.activeTabID == id else { return }
+            if let oldWebView {
+                sourceHostController.stopObservingFullscreenState(of: oldWebView)
+            }
+            rootView.webPanelContainerView.showEmptyState()
+            webFocusRouter.setCurrentWebView(nil)
+            synchronizeResidentIndicators()
+            synchronizeSpeechPresentation()
         }
     }
 

@@ -39,7 +39,8 @@ final class BrowserProfileDuplicateTests: XCTestCase {
         XCTAssertEqual(
             menu.items.filter { !$0.isSeparatorItem }.map(\.title),
             [
-                "Return to Home", "Reload", "Website Mode", "Window Size", "Zoom",
+                "Return to Home", "Reload", "Reset Current Tab Runtime (QA)",
+                "Website Mode", "Window Size", "Zoom",
                 "Profile", "Open in New Tab with Profile", "Residency",
                 "Background Media", "Edit Web App…", "Remove Web App…",
             ]

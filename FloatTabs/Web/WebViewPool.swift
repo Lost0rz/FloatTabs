@@ -236,6 +236,146 @@ final class WebViewPool {
         webViews[slotID]
     }
 
+    /// Applies a URL observation only while its WebView is still the runtime
+    /// owned by this Slot. A queued KVO task from a replaced runtime must not
+    /// persist its URL over the current runtime's state.
+    func recordObservedURLChange(slotID: UUID, from webView: WKWebView, url: URL) {
+        guard webViews[slotID] === webView,
+              WebAppURL.isSafe(url) else {
+            return
+        }
+        lastKnownURLs[slotID] = url
+        onURLChange(slotID, url)
+    }
+
+    /// Performs an explicitly user-triggered QA runtime replacement for one
+    /// already-resident active Slot. All runtime teardown and construction
+    /// remains owned by `rebuildWebView`; this entry only gates the operation,
+    /// captures bounded pre-reset metadata, and asks the presentation owner to
+    /// prepare runtime-bound speech before the old WKWebView is invalidated.
+    @discardableResult
+    func replaceRuntimeForManualQAReset(
+        requestedSlotID: UUID,
+        activeProfile: WebAppProfile?,
+        fullscreenSourceLocked: Bool,
+        prepareRuntimeForReplacement: @MainActor (UUID) -> Void
+    ) throws -> WKWebView? {
+        let oldWebView = webViews[requestedSlotID]
+        let runtimeGenerationBefore = runtimeGenerations[requestedSlotID]
+        let navigationGenerationBefore = navigationObservers[requestedSlotID]
+            .map(\.diagnosticNavigationGeneration)
+        let isActive = activeProfile?.id == requestedSlotID && isSlotActive(requestedSlotID)
+        let reason = "qa_manual_runtime_reset"
+        diagnostics.record(
+            event: "web_runtime.manual_reset.requested",
+            level: .notice,
+            subsystem: "web",
+            fields: [
+                "slot_id": .string(requestedSlotID.uuidString),
+                "runtime_generation_before": runtimeGenerationBefore.map {
+                    .integer(Int64($0))
+                } ?? .null,
+                "navigation_generation_before": navigationGenerationBefore.map {
+                    .integer(Int64($0))
+                } ?? .null,
+                "is_active": .bool(isActive),
+                "is_loading": oldWebView.map { .bool($0.isLoading) } ?? .null,
+                "estimated_progress": oldWebView.map {
+                    .double(Double($0.estimatedProgress))
+                } ?? .null,
+                "fullscreen_source_locked": .bool(fullscreenSourceLocked),
+                "reason": .string(reason)
+            ]
+        )
+
+        func recordBlocked(_ reason: String) {
+            diagnostics.record(
+                event: "web_runtime.manual_reset.blocked",
+                level: .warning,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(requestedSlotID.uuidString),
+                    "runtime_generation_before": runtimeGenerationBefore.map {
+                        .integer(Int64($0))
+                    } ?? .null,
+                    "reason": .string(reason)
+                ]
+            )
+        }
+
+        if fullscreenSourceLocked {
+            recordBlocked("fullscreen_source_locked")
+            return nil
+        }
+
+        guard let profile = activeProfile,
+              profile.id == requestedSlotID,
+              isActive else {
+            recordBlocked("no_active_slot")
+            return nil
+        }
+
+        guard let oldWebView,
+              runtimeGenerationBefore != nil else {
+            recordBlocked("runtime_not_resident")
+            return nil
+        }
+
+        let navigationURL = Self.rebuildNavigationURL(
+            initialURL: oldWebView.backForwardList.currentItem?.initialURL,
+            visibleURL: oldWebView.url,
+            storedCurrentURL: profile.currentURL,
+            homeURL: profile.homeURL
+        )
+        let browserProfileBefore = appliedBrowserProfileIdentities[requestedSlotID]
+            ?? BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
+
+        prepareRuntimeForReplacement(requestedSlotID)
+
+        do {
+            let replacement = try rebuildWebView(
+                for: profile,
+                navigationURL: navigationURL
+            )
+            let runtimeGenerationAfter = runtimeGenerations[requestedSlotID]
+            diagnostics.record(
+                event: "web_runtime.manual_reset.completed",
+                level: .notice,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(requestedSlotID.uuidString),
+                    "runtime_generation_before": runtimeGenerationBefore.map {
+                        .integer(Int64($0))
+                    } ?? .null,
+                    "runtime_generation_after": runtimeGenerationAfter.map {
+                        .integer(Int64($0))
+                    } ?? .null,
+                    "same_slot": .bool(true),
+                    "same_browser_profile": .bool(
+                        browserProfileIdentity(for: requestedSlotID) == browserProfileBefore
+                    ),
+                    "reason": .string(reason)
+                ]
+            )
+            return replacement
+        } catch {
+            diagnostics.record(
+                event: "web_runtime.manual_reset.failed",
+                level: .warning,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(requestedSlotID.uuidString),
+                    "runtime_generation_before": runtimeGenerationBefore.map {
+                        .integer(Int64($0))
+                    } ?? .null,
+                    "operation": .string("runtime_rebuild"),
+                    "error_category": .string(RuntimeDiagnosticPrivacy.safeErrorCategory(error))
+                ]
+            )
+            throw error
+        }
+    }
+
     func diagnosticRuntimeGeneration(for slotID: UUID) -> UInt64? {
         runtimeGenerations[slotID]
     }
@@ -786,13 +926,20 @@ final class WebViewPool {
             webView: webView,
             websiteMode: rendering.effectiveWebsiteMode,
             downloadCoordinator: downloadCoordinator,
-            onURLChange: { [weak self] slotID, url in
-                guard let self else { return }
-                self.lastKnownURLs[slotID] = url
-                self.onURLChange(slotID, url)
+            onURLChange: { [weak self, weak webView] slotID, url in
+                guard let self,
+                      let webView else {
+                    return
+                }
+                self.recordObservedURLChange(slotID: slotID, from: webView, url: url)
             },
-            onContentProcessTermination: { [weak self] slotID in
-                self?.handleContentProcessTermination(slotID: slotID)
+            onContentProcessTermination: { [weak self, weak webView] slotID in
+                guard let self,
+                      let webView,
+                      self.existingWebView(for: slotID) === webView else {
+                    return
+                }
+                self.handleContentProcessTermination(slotID: slotID)
             },
             onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID, commitURL in
                 guard let self,

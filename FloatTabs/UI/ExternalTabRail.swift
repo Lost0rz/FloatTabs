@@ -621,6 +621,7 @@ final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
     var onReload: ((UUID) -> Void)?
+    var onManualRuntimeResetForQA: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
@@ -1146,6 +1147,9 @@ final class ExternalControlZoneView: NSView {
         view.onSelect = { [weak self] slotID in self?.onSelect?(slotID) }
         view.onReturnHome = { [weak self] slotID in self?.onReturnHome?(slotID) }
         view.onReload = { [weak self] slotID in self?.onReload?(slotID) }
+        view.onManualRuntimeResetForQA = { [weak self] slotID in
+            self?.onManualRuntimeResetForQA?(slotID)
+        }
         view.onEdit = { [weak self] slotID in self?.onEdit?(slotID) }
         view.onRemove = { [weak self] slotID in self?.onRemove?(slotID) }
         view.onSetWebsiteMode = { [weak self] slotID, mode in
@@ -2060,6 +2064,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var onSelect: ((UUID) -> Void)?
     var onReturnHome: ((UUID) -> Void)?
     var onReload: ((UUID) -> Void)?
+    var onManualRuntimeResetForQA: ((UUID) -> Void)?
     var onEdit: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
     var onSetWebsiteMode: ((UUID, WebsiteMode) -> Void)?
@@ -2421,6 +2426,15 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         reload.target = self
         reload.isEnabled = isResident
         menu.addItem(reload)
+
+        let runtimeReset = NSMenuItem(
+            title: "Reset Current Tab Runtime (QA)",
+            action: #selector(manualRuntimeResetForQAFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        runtimeReset.target = self
+        runtimeReset.isEnabled = isActive
+        menu.addItem(runtimeReset)
         menu.addItem(.separator())
 
         let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
@@ -2590,6 +2604,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     @objc private func returnHomeFromMenu(_ sender: NSMenuItem) { onReturnHome?(slotID) }
     @objc private func reloadFromMenu(_ sender: NSMenuItem) { onReload?(slotID) }
+
+    @objc private func manualRuntimeResetForQAFromMenu(_ sender: NSMenuItem) {
+        guard isActive else { return }
+        onManualRuntimeResetForQA?(slotID)
+    }
 
     @objc private func setWebsiteModeFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,

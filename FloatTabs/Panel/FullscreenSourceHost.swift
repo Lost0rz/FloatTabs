@@ -556,6 +556,19 @@ final class FullscreenSourceHostController {
         handleFullscreenStateChange(of: webView)
     }
 
+    /// Drops the fullscreen observation for a runtime that was removed after a
+    /// failed replacement. It cannot change a locked source session and never
+    /// initiates or exits WebKit fullscreen.
+    func stopObservingFullscreenState(of webView: WKWebView) {
+        guard !isSessionLocked,
+              observedWebView === webView else {
+            return
+        }
+        fullscreenObservation?.invalidate()
+        fullscreenObservation = nil
+        observedWebView = nil
+    }
+
     static func sourceFrame(
         forShellFrame frame: NSRect,
         leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth

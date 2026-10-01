@@ -122,6 +122,232 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertGreaterThan(recreatedGeneration, rebuiltGeneration)
     }
 
+    func testManualQAResetReplacesOnlyActiveSlotAndPreservesProfileStoreAndURL() throws {
+        let customBrowserProfileID = UUID()
+        let customStore = WKWebsiteDataStore.nonPersistent()
+        let currentURL = URL(string: "https://example.com/current?q=private#response")!
+        var activeSlotID: UUID?
+        var resolverCalls = 0
+        var removeCalls = 0
+        var loadedURLs: [URL?] = []
+        var reportedURLs: [URL] = []
+        var responseRuntimeResetSlotIDs: [UUID] = []
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { true },
+            customStoreResolver: { _ in
+                resolverCalls += 1
+                return customStore
+            },
+            customStoreRemover: { _ in
+                removeCalls += 1
+            }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, url in reportedURLs.append(url) },
+            initialLoad: { _, request in loadedURLs.append(request.url) },
+            isSlotActive: { $0 == activeSlotID },
+            browserProfileDataStoreProvider: provider,
+            diagnostics: diagnostics
+        )
+        var profile = makeProfile(
+            name: "ManualRuntimeReset",
+            browserProfileID: customBrowserProfileID
+        )
+        profile.currentURL = currentURL
+        let otherProfile = makeProfile(name: "UntouchedRuntime")
+        activeSlotID = profile.id
+
+        let original = try pool.webView(for: profile)
+        let otherOriginal = try pool.webView(for: otherProfile)
+        let originalGeneration = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+        let otherGeneration = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: otherProfile.id))
+        let originalAttentionBridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        let originalResponseBridge = try XCTUnwrap(pool.responseBridge(for: profile.id))
+        let originalCalibreBridge = try XCTUnwrap(pool.calibreReaderBridge(for: profile.id))
+        let originalNavigationObserver = try XCTUnwrap(
+            original.navigationDelegate as? SlotNavigationObserver
+        )
+        XCTAssertTrue(original.navigationDelegate === originalNavigationObserver)
+        pool.onResponseRuntimeReset = { responseRuntimeResetSlotIDs.append($0) }
+
+        let replacement = try XCTUnwrap(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: profile.id,
+            activeProfile: profile,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { slotID in
+                XCTAssertEqual(slotID, profile.id)
+                XCTAssertEqual(writer.events.last?.event, "web_runtime.manual_reset.requested")
+            }
+        ))
+
+        let replacementGeneration = try XCTUnwrap(
+            pool.diagnosticRuntimeGeneration(for: profile.id)
+        )
+        XCTAssertFalse(original === replacement)
+        XCTAssertNil(original.navigationDelegate)
+        XCTAssertTrue(originalAttentionBridge.isInvalidated)
+        XCTAssertTrue(originalResponseBridge.isInvalidated)
+        XCTAssertTrue(originalCalibreBridge.isInvalidated)
+        XCTAssertFalse(pool.attentionBridge(for: profile.id) === originalAttentionBridge)
+        XCTAssertFalse(pool.responseBridge(for: profile.id) === originalResponseBridge)
+        XCTAssertFalse(pool.calibreReaderBridge(for: profile.id) === originalCalibreBridge)
+        XCTAssertGreaterThan(replacementGeneration, originalGeneration)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .custom(customBrowserProfileID))
+        XCTAssertTrue(replacement.configuration.websiteDataStore === customStore)
+        XCTAssertTrue(otherOriginal === pool.existingWebView(for: otherProfile.id))
+        XCTAssertEqual(pool.diagnosticRuntimeGeneration(for: otherProfile.id), otherGeneration)
+        XCTAssertEqual(loadedURLs, [currentURL, otherProfile.homeURL, currentURL])
+        XCTAssertEqual(resolverCalls, 2)
+        XCTAssertEqual(removeCalls, 0, "runtime replacement must not remove persisted website data")
+        XCTAssertEqual(responseRuntimeResetSlotIDs, [profile.id])
+
+        let staleURL = URL(string: "https://example.com/stale-old-runtime")!
+        pool.recordObservedURLChange(slotID: profile.id, from: original, url: staleURL)
+        XCTAssertTrue(reportedURLs.isEmpty, "a queued old-runtime URL observation must be ignored")
+        pool.recordObservedURLChange(slotID: profile.id, from: replacement, url: currentURL)
+        XCTAssertEqual(reportedURLs, [currentURL])
+
+        let eventNames = writer.events.map(\.event)
+        XCTAssertLessThan(
+            try XCTUnwrap(eventNames.firstIndex(of: "web_runtime.manual_reset.requested")),
+            try XCTUnwrap(eventNames.firstIndex(of: "web_runtime.rebuild.begin"))
+        )
+        XCTAssertEqual(eventNames.last, "web_runtime.manual_reset.completed")
+        let requested = try XCTUnwrap(writer.events.first {
+            $0.event == "web_runtime.manual_reset.requested"
+        })
+        XCTAssertEqual(requested.fields["reason"], .string("qa_manual_runtime_reset"))
+        XCTAssertEqual(requested.fields["is_active"], .bool(true))
+        XCTAssertEqual(requested.fields["fullscreen_source_locked"], .bool(false))
+        XCTAssertNil(requested.fields["url"])
+        XCTAssertNil(requested.fields["query"])
+        XCTAssertNil(requested.fields["fragment"])
+        let completed = try XCTUnwrap(writer.events.last)
+        XCTAssertEqual(completed.fields["runtime_generation_before"], .integer(Int64(originalGeneration)))
+        XCTAssertEqual(completed.fields["runtime_generation_after"], .integer(Int64(replacementGeneration)))
+        XCTAssertEqual(completed.fields["same_slot"], .bool(true))
+        XCTAssertEqual(completed.fields["same_browser_profile"], .bool(true))
+    }
+
+    func testManualQAResetKeepsThePersistentDefaultWebsiteDataStore() throws {
+        let defaultStore = WKWebsiteDataStore.default()
+        let provider = BrowserProfileDataStoreProvider(
+            defaultStoreResolver: { defaultStore }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider
+        )
+        let profile = makeProfile(name: "ManualDefaultStoreReset")
+        let original = try pool.webView(for: profile)
+
+        let replacement = try XCTUnwrap(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: profile.id,
+            activeProfile: profile,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { _ in }
+        ))
+
+        XCTAssertTrue(defaultStore.isPersistent)
+        XCTAssertTrue(original.configuration.websiteDataStore === defaultStore)
+        XCTAssertTrue(replacement.configuration.websiteDataStore === defaultStore)
+        XCTAssertEqual(pool.browserProfileIdentity(for: profile.id), .default)
+    }
+
+    func testManualQAResetBlocksFullscreenAndInactiveSlotsWithoutChangingRuntime() throws {
+        var isActive = true
+        var preparationCount = 0
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            isSlotActive: { _ in isActive },
+            diagnostics: RuntimeDiagnostics(mode: .verbose, writer: writer)
+        )
+        let profile = makeProfile(name: "ManualResetBlocked")
+        let original = try pool.webView(for: profile)
+        let generation = try XCTUnwrap(pool.diagnosticRuntimeGeneration(for: profile.id))
+
+        XCTAssertNil(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: profile.id,
+            activeProfile: profile,
+            fullscreenSourceLocked: true,
+            prepareRuntimeForReplacement: { _ in preparationCount += 1 }
+        ))
+        XCTAssertTrue(original === pool.existingWebView(for: profile.id))
+        XCTAssertEqual(pool.diagnosticRuntimeGeneration(for: profile.id), generation)
+
+        isActive = false
+        XCTAssertNil(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: profile.id,
+            activeProfile: profile,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { _ in preparationCount += 1 }
+        ))
+        XCTAssertTrue(original === pool.existingWebView(for: profile.id))
+        XCTAssertEqual(pool.diagnosticRuntimeGeneration(for: profile.id), generation)
+        XCTAssertEqual(preparationCount, 0)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.manual_reset.blocked" }
+                .compactMap { $0.fields["reason"] },
+            [.string("fullscreen_source_locked"), .string("no_active_slot")]
+        )
+    }
+
+    func testManualQAResetBlocksNonresidentSlotAndRecordsNoSensitiveFailureDetails() throws {
+        var customProfilesSupported = true
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let provider = BrowserProfileDataStoreProvider(
+            isCustomProfileSupported: { customProfilesSupported },
+            customStoreResolver: { _ in WKWebsiteDataStore.nonPersistent() }
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            browserProfileDataStoreProvider: provider,
+            diagnostics: RuntimeDiagnostics(mode: .verbose, writer: writer)
+        )
+        let nonresident = makeProfile(name: "ManualResetNonresident")
+
+        XCTAssertNil(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: nonresident.id,
+            activeProfile: nonresident,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { _ in XCTFail("blocked reset must not prepare runtime") }
+        ))
+        XCTAssertEqual(
+            writer.events.last?.fields["reason"],
+            .string("runtime_not_resident")
+        )
+
+        let customID = UUID()
+        let resident = makeProfile(name: "ManualResetFailure", browserProfileID: customID)
+        let oldWebView = try pool.webView(for: resident)
+        customProfilesSupported = false
+
+        XCTAssertThrowsError(try pool.replaceRuntimeForManualQAReset(
+            requestedSlotID: resident.id,
+            activeProfile: resident,
+            fullscreenSourceLocked: false,
+            prepareRuntimeForReplacement: { _ in }
+        ))
+        XCTAssertNil(pool.existingWebView(for: resident.id))
+        XCTAssertNil(oldWebView.navigationDelegate)
+        let failed = try XCTUnwrap(writer.events.last {
+            $0.event == "web_runtime.manual_reset.failed"
+        })
+        XCTAssertEqual(failed.fields["operation"], .string("runtime_rebuild"))
+        XCTAssertEqual(failed.fields["error_category"], .string("runtime"))
+        XCTAssertNil(failed.fields["errorDescription"])
+        XCTAssertNil(failed.fields["url"])
+        XCTAssertNil(failed.fields["query"])
+        XCTAssertNil(failed.fields["fragment"])
+    }
+
     func testFailedRebuildClearsObsoleteRuntimeGeneration() throws {
         let provider = BrowserProfileDataStoreProvider(
             isCustomProfileSupported: { false }

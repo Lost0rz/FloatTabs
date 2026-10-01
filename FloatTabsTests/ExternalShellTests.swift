@@ -879,6 +879,8 @@ final class ExternalShellTests: XCTestCase {
     func testTabContextMenuStartsWithReturnToHome() {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "GPT")
+        var resetSlotID: UUID?
+        zone.onManualRuntimeResetForQA = { resetSlotID = $0 }
         zone.apply(profiles: [active], activeTabID: active.id)
         zone.setResidentSlotIDs([active.id])
         zone.layoutSubtreeIfNeeded()
@@ -906,11 +908,20 @@ final class ExternalShellTests: XCTestCase {
             .map(\.title)
         XCTAssertEqual(
             actionTitles,
-            ["Return to Home", "Reload", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
+            ["Return to Home", "Reload", "Reset Current Tab Runtime (QA)", "Website Mode", "Window Size", "Zoom", "Profile", "Open in New Tab with Profile", "Residency", "Background Media", "Edit Web App…", "Remove Web App…"]
         )
         let reload = try! XCTUnwrap(menu.item(withTitle: "Reload"))
         assertShortcut(reload, matches: .reload)
         XCTAssertTrue(reload.isEnabled)
+        let runtimeReset = try! XCTUnwrap(menu.item(withTitle: "Reset Current Tab Runtime (QA)"))
+        XCTAssertEqual(runtimeReset.keyEquivalent, "")
+        XCTAssertTrue(runtimeReset.isEnabled)
+        XCTAssertTrue(NSApp.sendAction(
+            try! XCTUnwrap(runtimeReset.action),
+            to: runtimeReset.target,
+            from: runtimeReset
+        ))
+        XCTAssertEqual(resetSlotID, active.id)
 
         XCTAssertEqual(menu.item(withTitle: "Website Mode")?.submenu?.items.map(\.title), ["Desktop", "Mobile"])
         XCTAssertEqual(
@@ -940,6 +951,68 @@ final class ExternalShellTests: XCTestCase {
             ["Default"]
         )
         XCTAssertFalse(actionTitles.contains("Rename…"))
+    }
+
+    func testManualRuntimeResetMenuActionIsDisabledForInactiveTab() throws {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "Active")
+        let inactive = makeProfile(order: 1, name: "Inactive")
+        zone.apply(profiles: [active, inactive], activeTabID: active.id)
+        zone.setResidentSlotIDs([active.id, inactive.id])
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try XCTUnwrap(zone.tabView(for: inactive.id))
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: tab.frame.midX, y: tab.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        )!
+        let reset = try XCTUnwrap(
+            tab.menu(for: event)?.item(withTitle: "Reset Current Tab Runtime (QA)")
+        )
+
+        XCTAssertFalse(reset.isEnabled)
+        XCTAssertEqual(reset.keyEquivalent, "")
+    }
+
+    func testManualRuntimeResetMenuRemainsAvailableToRecordNonresidentBlock() throws {
+        let (_, zone) = makeZoneHarness()
+        let active = makeProfile(order: 0, name: "ColdActive")
+        var resetSlotID: UUID?
+        zone.onManualRuntimeResetForQA = { resetSlotID = $0 }
+        zone.apply(profiles: [active], activeTabID: active.id)
+        zone.setResidentSlotIDs([])
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try XCTUnwrap(zone.tabView(for: active.id))
+        let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: NSPoint(x: tab.frame.midX, y: tab.frame.midY),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        )!
+        let reset = try XCTUnwrap(
+            tab.menu(for: event)?.item(withTitle: "Reset Current Tab Runtime (QA)")
+        )
+
+        XCTAssertTrue(reset.isEnabled)
+        XCTAssertTrue(NSApp.sendAction(
+            try XCTUnwrap(reset.action),
+            to: reset.target,
+            from: reset
+        ))
+        XCTAssertEqual(resetSlotID, active.id)
     }
 
     func testFixedWindowModeDisablesPerTabWindowSizeMenu() {
