@@ -1185,8 +1185,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         cancelPendingInstantBack()
         // Once an https entry commits, later in-page failures can never inherit
-        // the entry-only downgrade permission.
-        pendingHTTPEntryFallback = nil
+        // the entry-only downgrade permission. A late commit from the original
+        // stalled navigation during soft-recovery startup must not clear the
+        // fallback provenance just configured for the replacement Home load.
+        if !preservesRecoveryStartWatchdog {
+            pendingHTTPEntryFallback = nil
+        }
         var commitFields = runtimeFields(for: webView, ticket: ticket)
         commitFields["url"] = webView.url.flatMap {
             RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
@@ -1348,24 +1352,30 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
         )
         cancelPendingInstantBack()
-        let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
-            .flatMap { URL(string: $0) }
-            ?? webView.url
-        if let fallback = Self.httpFallbackURL(
-            pending: pendingHTTPEntryFallback,
-            failingURL: failingURL,
-            error: error
-        ) {
-            pendingHTTPEntryFallback = nil
-            diagnostics.record(
-                event: "http_entry_fallback",
-                level: .debug,
-                subsystem: "navigation",
-                fields: ["slot_id": .string(slotID.uuidString)]
-            )
-            loadHandler(webView, fallback)
-        } else {
-            pendingHTTPEntryFallback = nil
+        // The replacement Home load may already have installed fresh inferred-
+        // scheme fallback provenance while WebKit is still delivering a late
+        // failure for the original stopped navigation. Do not let that stale
+        // callback consume or clear the replacement navigation's permission.
+        if !preservesRecoveryStartWatchdog {
+            let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
+                .flatMap { URL(string: $0) }
+                ?? webView.url
+            if let fallback = Self.httpFallbackURL(
+                pending: pendingHTTPEntryFallback,
+                failingURL: failingURL,
+                error: error
+            ) {
+                pendingHTTPEntryFallback = nil
+                diagnostics.record(
+                    event: "http_entry_fallback",
+                    level: .debug,
+                    subsystem: "navigation",
+                    fields: ["slot_id": .string(slotID.uuidString)]
+                )
+                loadHandler(webView, fallback)
+            } else {
+                pendingHTTPEntryFallback = nil
+            }
         }
     }
 
