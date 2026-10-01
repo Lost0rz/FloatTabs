@@ -1193,13 +1193,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let ticket {
             _ = recoveryTracker.didCommit(ticket)
         }
-        cancelPendingInstantBack()
-        // Once an https entry commits, later in-page failures can never inherit
-        // the entry-only downgrade permission. A late commit from the original
-        // stalled navigation during soft-recovery startup must not clear the
-        // fallback provenance just configured for the replacement Home load.
-        if !preservesRecoveryStartWatchdog && !isRecoverySourceCallback {
-            pendingHTTPEntryFallback = nil
+        if !isRecoverySourceCallback {
+            cancelPendingInstantBack()
+            // Once an https entry commits, later in-page failures can never inherit
+            // the entry-only downgrade permission. A late commit from the original
+            // stalled navigation during soft-recovery startup must not clear the
+            // fallback provenance just configured for the replacement Home load.
+            if !preservesRecoveryStartWatchdog {
+                pendingHTTPEntryFallback = nil
+            }
         }
         var commitFields = runtimeFields(for: webView, ticket: ticket)
         commitFields["url"] = webView.url.flatMap {
@@ -1212,10 +1214,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             fields: commitFields
         )
         // At this delegate boundary WebKit's visible URL is the final
-        // committed destination for this navigation. Pass it as a narrow,
-        // transient commit fact; shared presentation lookup remains history
-        // based and must not broaden to generic `webView.url` observation.
-        onNavigationCommit(slotID, webView.url)
+        // committed destination for the current navigation. A late callback
+        // from the original recovery-source navigation is stale once the
+        // replacement has begun and must not reset bridges or project a
+        // committed URL for the replacement document.
+        if !isRecoverySourceCallback {
+            onNavigationCommit(slotID, webView.url)
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1223,6 +1228,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreHiddenScrollerPolicy(in: webView)
 
         let ticket = currentNavigationTicket(for: navigation)
+        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
         } ?? false
@@ -1261,14 +1267,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: runtimeFields(for: webView, ticket: ticket)
         )
-        if diagnostics.capturesDebugEvents {
+        if diagnostics.capturesDebugEvents && !isRecoverySourceCallback {
             recordPageRuntimeProbe(in: webView)
         }
 
-        onNavigationFinish(slotID, webView.url)
+        if !isRecoverySourceCallback {
+            onNavigationFinish(slotID, webView.url)
 
-        if let url = webView.url, WebAppURL.isSafe(url) {
-            confirmInstantBackActivation(in: webView, observedURL: url)
+            if let url = webView.url, WebAppURL.isSafe(url) {
+                confirmInstantBackActivation(in: webView, observedURL: url)
+            }
         }
 
         DispatchQueue.main.async { [weak webView] in
@@ -1366,7 +1374,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             ].merging(runtimeFields(for: webView, ticket: ticket)) { current, _ in current }
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
         )
-        cancelPendingInstantBack()
+        if !isRecoverySourceCallback {
+            cancelPendingInstantBack()
+        }
         // The replacement Home load may already have installed fresh inferred-
         // scheme fallback provenance while WebKit is still delivering a late
         // failure for the original stopped navigation. Do not let that stale
