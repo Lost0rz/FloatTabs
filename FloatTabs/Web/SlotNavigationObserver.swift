@@ -824,6 +824,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var rendererProbeLifecycle: RendererProbeLifecycle
     private var recoveryTracker: WebRuntimeRecoveryTracker
     private var activeNavigationIdentifier: ObjectIdentifier?
+    private var softRecoverySourceNavigationIdentifier: ObjectIdentifier?
+    private var softRecoverySourceTicket: WebRuntimeRecoveryTicket?
     private var navigationStartUptime: TimeInterval?
     private var lastCommitUptime: TimeInterval?
     private var watchdogGeneration: UInt64 = 0
@@ -951,6 +953,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             homeURL: homeURL,
             homeURLSchemeWasInferred: homeURLSchemeWasInferred
         )
+        clearSoftRecoverySourceNavigation()
         if let previousRecovery = actionContext.invalidatedRecovery {
             recordRecoveryEvent(
                 "soft_stale",
@@ -994,6 +997,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     @discardableResult
     func beginSoftRecovery(_ ticket: WebRuntimeRecoveryTicket) -> Bool {
         guard recoveryTracker.beginSoftRecovery(ticket) else { return false }
+        softRecoverySourceNavigationIdentifier = activeNavigationIdentifier
+        softRecoverySourceTicket = ticket
         cancelWatchdog()
         recordRecoveryEvent(
             "soft_started",
@@ -1011,6 +1016,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         guard recoveryTracker.isCurrent(ticket) else { return }
         cancelWatchdog()
         _ = recoveryTracker.invalidate()
+        clearSoftRecoverySourceNavigation()
         recordRecoveryEvent("soft_failed", ticket: ticket, reason: reason)
         onSoftRecoveryInvalidated(ticket)
     }
@@ -1019,6 +1025,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         guard recoveryTracker.isCurrent(ticket) else { return }
         cancelWatchdog()
         _ = recoveryTracker.invalidate()
+        clearSoftRecoverySourceNavigation()
         recordRecoveryEvent("soft_stale", ticket: ticket, reason: reason)
         onSoftRecoveryInvalidated(ticket)
     }
@@ -1028,6 +1035,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func invalidate(recoveryReason: String = "runtime_released") {
         cancelWatchdog()
         cancelRendererProbeTimeout()
+        clearSoftRecoverySourceNavigation()
         if let invalidatedRecovery = recoveryTracker.invalidate() {
             recordRecoveryEvent(
                 "soft_stale",
@@ -1135,6 +1143,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 // The start watchdog is replaced by the normal bounded
                 // navigation watchdog below.
             case let .staleSoftRecovery(recoveryTicket):
+                clearSoftRecoverySourceNavigation()
                 recordRecoveryEvent(
                     "soft_stale",
                     ticket: recoveryTicket,
@@ -1160,6 +1169,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
+        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
         } ?? false
@@ -1188,7 +1198,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // the entry-only downgrade permission. A late commit from the original
         // stalled navigation during soft-recovery startup must not clear the
         // fallback provenance just configured for the replacement Home load.
-        if !preservesRecoveryStartWatchdog {
+        if !preservesRecoveryStartWatchdog && !isRecoverySourceCallback {
             pendingHTTPEntryFallback = nil
         }
         var commitFields = runtimeFields(for: webView, ticket: ticket)
@@ -1227,6 +1237,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         if let ticket,
            let supersededRecovery = recoveryTracker.userNavigationFinished(ticket) {
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_stale",
                 ticket: supersededRecovery,
@@ -1236,6 +1247,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         if let ticket,
            let completedRecovery = recoveryTracker.didFinish(ticket) {
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_completed",
                 ticket: completedRecovery,
@@ -1290,6 +1302,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         if let ticket,
            let failedRecovery = recoveryTracker.didFail(ticket) {
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_failed",
                 ticket: failedRecovery,
@@ -1316,6 +1329,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = currentNavigationTicket(for: navigation)
+        let isRecoverySourceCallback = isCurrentSoftRecoverySourceNavigation(navigation)
         let preservesRecoveryStartWatchdog = ticket.map {
             recoveryTracker.isAwaitingSoftRecoveryNavigationStart(after: $0)
         } ?? false
@@ -1334,6 +1348,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         if let ticket,
            let failedRecovery = recoveryTracker.didFail(ticket) {
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_failed",
                 ticket: failedRecovery,
@@ -1356,7 +1371,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // scheme fallback provenance while WebKit is still delivering a late
         // failure for the original stopped navigation. Do not let that stale
         // callback consume or clear the replacement navigation's permission.
-        if !preservesRecoveryStartWatchdog {
+        if !preservesRecoveryStartWatchdog && !isRecoverySourceCallback {
             let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
                 .flatMap { URL(string: $0) }
                 ?? webView.url
@@ -1385,6 +1400,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         cancelRendererProbeTimeout()
         rendererProbeLifecycle.invalidate()
         if let invalidatedRecovery = recoveryTracker.invalidate() {
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_stale",
                 ticket: invalidatedRecovery,
@@ -1422,6 +1438,21 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             : nil
     }
 
+    private func isCurrentSoftRecoverySourceNavigation(_ navigation: WKNavigation!) -> Bool {
+        guard let navigation,
+              let sourceNavigationIdentifier = softRecoverySourceNavigationIdentifier,
+              let sourceTicket = softRecoverySourceTicket,
+              recoveryTracker.isCurrent(sourceTicket) else {
+            return false
+        }
+        return ObjectIdentifier(navigation) == sourceNavigationIdentifier
+    }
+
+    private func clearSoftRecoverySourceNavigation() {
+        softRecoverySourceNavigationIdentifier = nil
+        softRecoverySourceTicket = nil
+    }
+
     private func scheduleWatchdog(target: WatchdogTarget, after delay: TimeInterval) {
         cancelWatchdog()
         watchdogGeneration &+= 1
@@ -1454,6 +1485,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             let navigationCommitted = healthTracker.isCommitted(ticket)
             guard healthTracker.markStalled(ticket) else { return }
             if let recoveryTicket = recoveryTracker.recoveryNavigationStalled(ticket) {
+                clearSoftRecoverySourceNavigation()
                 recordRecoveryEvent(
                     "soft_failed",
                     ticket: recoveryTicket,
@@ -1501,6 +1533,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
         case let .softRecoveryStart(ticket):
             guard recoveryTracker.softRecoveryStartTimedOut(ticket) else { return }
+            clearSoftRecoverySourceNavigation()
             recordRecoveryEvent(
                 "soft_failed",
                 ticket: ticket,

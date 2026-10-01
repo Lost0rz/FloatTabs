@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import WebKit
 @testable import FloatTabs
 
 @MainActor
@@ -1035,6 +1036,80 @@ final class RuntimeDiagnosticsInstrumentationTests: XCTestCase {
             XCTAssertTrue(
                 observer.isHTTPEntryFallbackPending,
                 "late original \(terminal) must not consume replacement Home fallback provenance"
+            )
+            observer.invalidate()
+        }
+    }
+
+    @MainActor
+    func testLateOriginalCallbacksAfterReplacementStartDoNotClearHomeFallback() async throws {
+        for terminal in ["commit", "provisional_failure"] {
+            let evaluatorCapture = RendererProbeJavaScriptEvaluatorCapture()
+            let webView = WebViewFactory.makeWebView()
+            let homeURL = URL(string: "https://nas.example.com:3010")!
+            var recoveryRequest: WebRuntimeRecoveryRequest?
+            let observer = SlotNavigationObserver(
+                slotID: UUID(),
+                webView: webView,
+                websiteMode: .desktop,
+                onURLChange: { _, _ in },
+                runtimeGeneration: 17,
+                onSoftRecoveryRequested: { recoveryRequest = $0 },
+                javaScriptEvaluator: { [weak evaluatorCapture] _, _, completion in
+                    evaluatorCapture?.completion = completion
+                }
+            )
+
+            webView.navigationDelegate = nil
+            let originalNavigation = try XCTUnwrap(
+                webView.loadHTMLString("<html><body>original</body></html>", baseURL: homeURL)
+            )
+            webView.stopLoading()
+            webView.navigationDelegate = observer
+
+            observer.observeUserAction(
+                .home,
+                homeURL: homeURL,
+                homeURLSchemeWasInferred: true
+            )
+            observer.webView(webView, didStartProvisionalNavigation: originalNavigation)
+            observer.startRendererProbe(
+                in: webView,
+                for: WebRuntimeNavigationTicket(runtimeGeneration: 17, navigationGeneration: 1)
+            )
+            let completion = try XCTUnwrap(evaluatorCapture.completion)
+            completion(["ready_state": "interactive", "visibility_state": "visible"], nil)
+            for _ in 0..<5 { await Task.yield() }
+
+            let request = try XCTUnwrap(recoveryRequest)
+            XCTAssertTrue(observer.beginSoftRecovery(request.ticket))
+            observer.configureHTTPEntryFallback(for: homeURL, allowed: true)
+            webView.navigationDelegate = nil
+            let replacementNavigation = try XCTUnwrap(
+                webView.loadHTMLString("<html><body>replacement</body></html>", baseURL: homeURL)
+            )
+            webView.stopLoading()
+            webView.navigationDelegate = observer
+            observer.webView(webView, didStartProvisionalNavigation: replacementNavigation)
+
+            switch terminal {
+            case "commit":
+                observer.webView(webView, didCommit: originalNavigation)
+            default:
+                observer.webView(
+                    webView,
+                    didFailProvisionalNavigation: originalNavigation,
+                    withError: NSError(
+                        domain: NSURLErrorDomain,
+                        code: NSURLErrorCancelled,
+                        userInfo: ["NSErrorFailingURLStringKey": "https://old.example.test/"]
+                    )
+                )
+            }
+
+            XCTAssertTrue(
+                observer.isHTTPEntryFallbackPending,
+                "late original \(terminal) after replacement start must not consume Home fallback provenance"
             )
             observer.invalidate()
         }
