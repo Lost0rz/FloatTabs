@@ -964,6 +964,35 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(actionTitles.contains("Rename…"))
     }
 
+    func testStuckTabSnapshotCapabilityAllowsExplicitWaveTwoReleaseLabel() {
+        XCTAssertTrue(RuntimeQACapabilities.allowsStuckTabSnapshot(
+            isDebugBuild: false,
+            qaLabel: "runtime-diagnostics-wave2"
+        ))
+    }
+
+    func testStuckTabSnapshotCapabilityRejectsUnlabeledAndOtherReleaseBuilds() {
+        XCTAssertFalse(RuntimeQACapabilities.allowsStuckTabSnapshot(
+            isDebugBuild: false,
+            qaLabel: nil
+        ))
+        XCTAssertFalse(RuntimeQACapabilities.allowsStuckTabSnapshot(
+            isDebugBuild: false,
+            qaLabel: "qa-release-746a5d3135b0"
+        ))
+        XCTAssertFalse(RuntimeQACapabilities.allowsStuckTabSnapshot(
+            isDebugBuild: false,
+            qaLabel: "unrelated-qa-label"
+        ))
+    }
+
+    func testDebugBuildKeepsStuckTabSnapshotCapabilityEnabledWithoutQALabel() {
+        XCTAssertTrue(RuntimeQACapabilities.allowsStuckTabSnapshot(
+            isDebugBuild: true,
+            qaLabel: nil
+        ))
+    }
+
     func testManualRuntimeResetMenuActionIsDisabledForInactiveTab() throws {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "Active")
@@ -987,9 +1016,13 @@ final class ExternalShellTests: XCTestCase {
         let reset = try XCTUnwrap(
             tab.menu(for: event)?.item(withTitle: "Reset Current Tab Runtime (QA)")
         )
+        let snapshot = try XCTUnwrap(
+            tab.menu(for: event)?.item(withTitle: "Capture Stuck Tab Snapshot (QA)")
+        )
 
         XCTAssertFalse(reset.isEnabled)
         XCTAssertEqual(reset.keyEquivalent, "")
+        XCTAssertFalse(snapshot.isEnabled)
     }
 
     func testManualRuntimeResetMenuRemainsAvailableToRecordNonresidentBlock() throws {

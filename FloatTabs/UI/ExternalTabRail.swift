@@ -616,6 +616,22 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     }
 }
 
+enum RuntimeQACapabilities {
+    static func allowsStuckTabSnapshot(isDebugBuild: Bool, qaLabel: String?) -> Bool {
+        isDebugBuild || qaLabel == "runtime-diagnostics-wave2"
+    }
+
+    static var stuckTabSnapshotMenuVisible: Bool {
+#if DEBUG
+        let isDebugBuild = true
+#else
+        let isDebugBuild = false
+#endif
+        let qaLabel = Bundle.main.object(forInfoDictionaryKey: "FloatTabsQALabel") as? String
+        return allowsStuckTabSnapshot(isDebugBuild: isDebugBuild, qaLabel: qaLabel)
+    }
+}
+
 @MainActor
 final class ExternalControlZoneView: NSView {
     var onSelect: ((UUID) -> Void)?
@@ -2440,16 +2456,16 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         runtimeReset.target = self
         runtimeReset.isEnabled = isActive
         menu.addItem(runtimeReset)
-#if DEBUG
-        let captureSnapshot = NSMenuItem(
-            title: "Capture Stuck Tab Snapshot (QA)",
-            action: #selector(captureStuckTabSnapshotForQAFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        captureSnapshot.target = self
-        captureSnapshot.isEnabled = isActive
-        menu.addItem(captureSnapshot)
-#endif
+        if RuntimeQACapabilities.stuckTabSnapshotMenuVisible {
+            let captureSnapshot = NSMenuItem(
+                title: "Capture Stuck Tab Snapshot (QA)",
+                action: #selector(captureStuckTabSnapshotForQAFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            captureSnapshot.target = self
+            captureSnapshot.isEnabled = isActive
+            menu.addItem(captureSnapshot)
+        }
         menu.addItem(.separator())
 
         let websiteMode = NSMenuItem(title: "Website Mode", action: nil, keyEquivalent: "")
