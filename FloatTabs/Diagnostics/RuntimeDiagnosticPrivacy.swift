@@ -54,6 +54,10 @@ enum RuntimeDiagnosticPrivacy {
         "latestresponsecomplete"
     ]
 
+    private static let explicitlySafeMetadataKeys: Set<String> = [
+        "qalabel"
+    ]
+
     static func safeURLString(
         _ url: URL,
         mode: RuntimeDiagnosticMode
@@ -175,6 +179,9 @@ enum RuntimeDiagnosticPrivacy {
 
     private static func isSensitiveKey(_ key: String) -> Bool {
         let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
+        if explicitlySafeMetadataKeys.contains(normalized) {
+            return false
+        }
         if normalized.contains("response"), !safeResponseMetadataKeys.contains(normalized) {
             return true
         }

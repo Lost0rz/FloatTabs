@@ -5,6 +5,22 @@ import WebKit
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testRecordPreservesSafeQALabelProvenance() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let qaLabel = "runtime-diagnostics-wave2"
+
+        let event = diagnostics.record(
+            event: "app.launch",
+            level: .info,
+            subsystem: "app",
+            fields: ["qa_label": .string(qaLabel)]
+        )
+
+        XCTAssertEqual(event?.fields["qa_label"], .string(qaLabel))
+        XCTAssertEqual(writer.events.first?.fields["qa_label"], .string(qaLabel))
+    }
+
     func testLaunchEnvironmentContainsSelfIdentifyingBuildProvenance() {
         let diagnostics = RuntimeDiagnostics(
             mode: .standard,

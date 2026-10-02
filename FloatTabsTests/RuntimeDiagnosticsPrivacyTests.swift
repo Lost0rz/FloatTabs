@@ -3,6 +3,55 @@ import XCTest
 @testable import FloatTabs
 
 final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
+    func testQALabelSurvivesSanitizationWhileGenericLabelFieldsRemainBlocked() {
+        let sanitized = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "qa_label": .string("runtime-diagnostics-wave2"),
+            "label": .string("private label"),
+            "aria_label": .string("private accessible name"),
+            "input_label": .string("private input label"),
+            "document_label": .string("private document label")
+        ], mode: .verbose)
+
+        XCTAssertEqual(sanitized["qa_label"], .string("runtime-diagnostics-wave2"))
+        for key in ["label", "aria_label", "input_label", "document_label"] {
+            XCTAssertNil(sanitized[key], "sensitive label field retained: \(key)")
+        }
+    }
+
+    func testQALabelSurvivesDefenseInDepthEventSanitization() {
+        let event = RuntimeDiagnosticEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            uptime: 1,
+            sequence: 1,
+            sessionID: UUID(),
+            traceID: nil,
+            level: .notice,
+            subsystem: "tests",
+            event: "app.launch",
+            fields: ["qa_label": .string("runtime-diagnostics-wave2")]
+        )
+
+        let sanitized = RuntimeDiagnosticPrivacy.sanitizedEvent(event)
+
+        XCTAssertEqual(sanitized.fields["qa_label"], .string("runtime-diagnostics-wave2"))
+    }
+
+    func testQALabelValuesStillUseStringSanitization() {
+        let secret = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "qa_label": .string("Bearer private-secret")
+        ], mode: .verbose)
+        let ipAddress = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "qa_label": .string("192.0.2.44")
+        ], mode: .verbose)
+        let url = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "qa_label": .string("https://chatgpt.com/c/private-conversation?query=private#fragment")
+        ], mode: .verbose)
+
+        XCTAssertNil(secret["qa_label"])
+        XCTAssertNil(ipAddress["qa_label"])
+        XCTAssertEqual(url["qa_label"], .string("https://chatgpt.com/c/<redacted>"))
+    }
+
     func testWaveTwoForbiddenFieldsAreRejectedAtSanitizationBoundary() {
         let forbiddenKeys = [
             "conversation_id",
@@ -329,6 +378,7 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
             fields: [
                 "url": .string("https://example.com/c/private?token=secret"),
                 "body": .string("private page content"),
+                "qa_label": .string("runtime-diagnostics-wave2"),
                 "safe_state": .string("ready")
             ]
         )
@@ -354,6 +404,7 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         )
         XCTAssertEqual(persisted.fields["url"], .string("https://example.com/c/<redacted>"))
         XCTAssertNil(persisted.fields["body"])
+        XCTAssertEqual(persisted.fields["qa_label"], .string("runtime-diagnostics-wave2"))
         XCTAssertEqual(persisted.fields["safe_state"], .string("ready"))
     }
 
