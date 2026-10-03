@@ -16,7 +16,7 @@ the same project state without reconstructing it from conversation history:
 
 The task is not complete merely because the files exist. It completes when the
 local repository/worktree state has been reconciled and exactly one authoritative
-production worktree is bound in `CURRENT_STATUS.md`.
+production worktree identity is bound in `CURRENT_STATUS.md`.
 
 ## Authorized work
 
@@ -27,10 +27,11 @@ The following work is allowed:
 3. Perform read-only Git/GitHub inventory of branches, PRs, commits, worktrees,
    status, and upstream relationships.
 4. Classify existing PRs/worktrees without changing production behavior.
-5. Choose one authoritative clean production worktree only after the inventory
-   proves its branch/HEAD/upstream relationship.
-6. Update `CURRENT_STATUS.md` with the verified authoritative production
-   worktree and any corrected classifications.
+5. Choose one authoritative clean production worktree identity only after the
+   inventory proves its branch/HEAD/upstream relationship.
+6. Update `CURRENT_STATUS.md` with the verified logical worktree ID, branch/ref
+   contract, and any corrected classifications. Keep machine-specific absolute
+   paths out of the public repository.
 
 A governance checkout may be used to edit these three documents. It does not
 become the production worktree merely by hosting PR #103.
@@ -58,17 +59,17 @@ Until this task changes state, do **not**:
 - Governance PR: #103
 - Governance branch: `codex/project-agents-control-plane-v1`
 - Runtime investigation stack: #99 → #100 → #101, all frozen
-- Authorized production worktree: **NONE**
-- Last requested worktree:
-  `/Users/jack7788/.codex/worktrees/web-runtime-reset-validation/FloatTabs`
-  — confirmed missing; baseline gate stopped.
+- Authorized production worktree ID: **NONE**
+- Previous requested worktree: confirmed missing on the machine where the
+  baseline gate ran; no replacement was authorized. Exact local paths remain
+  local-only and are not part of the public repository contract.
 
 ## Required local reconciliation procedure
 
 Before interpreting local state, refresh remote refs read-only. Then produce one
-compact table for every discovered FloatTabs worktree with:
+compact **local audit** table for every discovered FloatTabs worktree with:
 
-- absolute path;
+- absolute path (local audit output only; do not commit it);
 - branch or DETACHED;
 - HEAD;
 - upstream ref and upstream HEAD if present;
@@ -77,8 +78,10 @@ compact table for every discovered FloatTabs worktree with:
 - classification;
 - whether it is eligible to become the authoritative production worktree.
 
-Also verify the live remote refs for `main`, #99, #100, #101, #102, #103, #87,
-#94, and #96 against `CURRENT_STATUS.md`.
+Also verify the live remote refs for `main`, #99, #100, #101, #102, #87, #94,
+and #96 against the recorded snapshots in `CURRENT_STATUS.md`. For #103, apply
+its dynamic governance-branch HEAD verification contract rather than expecting a
+self-recorded SHA.
 
 If a remote head differs from the recorded snapshot, report the mismatch and
 update/reconcile `CURRENT_STATUS.md` before any implementation work.
@@ -91,9 +94,9 @@ FT-GOV-001 is complete only when all of the following are true:
 - the remote main baseline and relevant open PR stack are recorded;
 - live-ref authority versus state-contract authority is unambiguous;
 - confirmed incident facts are separated from hypotheses;
-- exactly one local production worktree is recorded as authoritative;
-- its path, branch, HEAD, upstream, and clean state are verified after remote
-  refresh;
+- exactly one production worktree identity is recorded as authoritative;
+- its branch/ref contract is recorded, while its locally resolved path, HEAD,
+  upstream, and clean state are verified after remote refresh;
 - unresolved worktrees/PRs have explicit classifications;
 - a new agent can detect a checkout or ref mismatch and STOP without guessing;
 - no production/runtime behavior was changed while establishing the control plane.
