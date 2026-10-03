@@ -58,24 +58,32 @@ For a local governance checkout to be valid:
 
 ## Open PR inventory and classification
 
-The existing runtime investigation stack is **FROZEN** until PR/worktree
-reconciliation is complete.
+Canonical lifecycle states used by this control plane are:
 
-| PR | Role | Branch / recorded HEAD | Base | Current classification |
+`ACTIVE`, `FROZEN`, `MERGED`, `SUPERSEDED`, `ABANDONED`, and
+`SEPARATE_SCOPE`.
+
+The existing runtime investigation stack is **FROZEN** until PR/worktree
+reconciliation is complete. Role/reason is descriptive metadata; it must not be
+parsed as a second lifecycle state.
+
+| PR | Role / reason | Branch / recorded HEAD | Base | Lifecycle state |
 | --- | --- | --- | --- | --- |
-| #99 | stalled WebKit runtime diagnostics | `codex/web-runtime-health-diagnostics` / `00e172b98e29ecd1c15c8aa169d5c08892867d73` | `main` | FROZEN_DIAGNOSTIC |
-| #100 | bounded WebKit stall recovery | `codex/web-runtime-recovery` / `16b4ea4df39538c8bf0e86d151ccf64265c43b23` | #99 branch | FROZEN_RECOVERY |
-| #101 | per-slot runtime replacement / QA validation | `codex/web-runtime-reset-validation` / `690ccd193b45aff730ea53b00d598a15fbb0757e` | #100 branch | FROZEN_QA |
-| #102 | MemoX durable outbox sender | `phase2/pr-e-floattabs-durable-outbox-sender` / `db6e886b33dffd93ece130463b184ae371b97684` | `main` | SEPARATE_SCOPE |
-| #87 | single runtime ownership | `fix/single-instance-runtime-ownership` / `96fb030a3de1c86856a9a4a155318ef16de430bd` | `main` | UNRESOLVED_LEGACY |
-| #94 | trusted interaction unread contract | `fix/unread-trusted-interaction-contract` / `cf727a050e71842028fb95af2559903016e82c25` | `main` | UNRESOLVED_LEGACY |
-| #96 | unread reappearance diagnostics | `diag/pr94-unread-reappearance-trace` / `afecda2af0b82e22fe666ce7ea7a963865b50dfa` | #94 branch | UNRESOLVED_LEGACY |
+| #99 | stalled WebKit runtime diagnostics | `codex/web-runtime-health-diagnostics` / `00e172b98e29ecd1c15c8aa169d5c08892867d73` | `main` | FROZEN |
+| #100 | bounded WebKit stall recovery | `codex/web-runtime-recovery` / `16b4ea4df39538c8bf0e86d151ccf64265c43b23` | #99 branch | FROZEN |
+| #101 | per-slot runtime replacement / QA validation | `codex/web-runtime-reset-validation` / `690ccd193b45aff730ea53b00d598a15fbb0757e` | #100 branch | FROZEN |
+| #102 | MemoX durable outbox sender; independent scope | `phase2/pr-e-floattabs-durable-outbox-sender` / `db6e886b33dffd93ece130463b184ae371b97684` | `main` | SEPARATE_SCOPE |
+| #87 | legacy single-runtime-ownership PR; disposition not yet reconciled | `fix/single-instance-runtime-ownership` / `96fb030a3de1c86856a9a4a155318ef16de430bd` | `main` | FROZEN |
+| #94 | legacy trusted-interaction unread PR; disposition not yet reconciled | `fix/unread-trusted-interaction-contract` / `cf727a050e71842028fb95af2559903016e82c25` | `main` | FROZEN |
+| #96 | legacy unread-reappearance diagnostics; disposition not yet reconciled | `diag/pr94-unread-reappearance-trace` / `afecda2af0b82e22fe666ce7ea7a963865b50dfa` | #94 branch | FROZEN |
 
 Recorded SHAs are snapshot evidence. If a live PR head has moved, do not silently
 accept the new SHA; reconcile and update this file.
 
-No row marked FROZEN or UNRESOLVED is authorized for new implementation work by
-the current task.
+No row marked `FROZEN` is authorized for new implementation work by the current
+task. `SEPARATE_SCOPE` means the PR is not part of the WebKit incident stack; the
+current task can still temporarily prohibit merging it to keep repository state
+stable during reconciliation.
 
 ## Worktree authority
 
