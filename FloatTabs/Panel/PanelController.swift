@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import OSLog
 import WebKit
 
@@ -49,6 +50,62 @@ struct WorkspaceAutoHideSuppression: Equatable {
     }
 }
 
+enum PresentationWebFocusOwner: String, Equatable {
+    case standardPresentation = "standard_presentation"
+    case externalVoice = "external_voice"
+}
+
+/// Keeps native-window focus decisions pure and owner-specific. The actual
+/// AppKit calls remain in the presentation owner; this policy only decides
+/// which transition is allowed for the current presentation generation.
+enum PresentationNativeFocusPolicy {
+    static func isNativeWindowReady(
+        owner: PresentationWebFocusOwner,
+        applicationActive: Bool,
+        shellWindowIsKey: Bool,
+        sourceWindowIsKey: Bool,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        guard applicationActive else { return false }
+        if owner == .externalVoice, !sourceSessionLocked {
+            return sourceWindowIsKey
+        }
+        return shellWindowIsKey || sourceWindowIsKey
+    }
+
+    static func shouldMakeShellKey(
+        owner: PresentationWebFocusOwner,
+        presentationAlreadyVisible: Bool,
+        sourceWindowIsVisible: Bool,
+        sourceWindowIsKey: Bool,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        guard owner == .externalVoice,
+              presentationAlreadyVisible,
+              sourceWindowIsVisible,
+              sourceWindowIsKey,
+              !sourceSessionLocked else {
+            return true
+        }
+        return false
+    }
+
+    static func shouldMakeSourceWindowKey(sourceWindowIsKey: Bool) -> Bool {
+        !sourceWindowIsKey
+    }
+
+    static func shouldMakeSourceWindowMain(
+        owner: PresentationWebFocusOwner,
+        sourceSessionLocked: Bool
+    ) -> Bool {
+        owner == .standardPresentation && !sourceSessionLocked
+    }
+
+    static func shouldRefocusDuringSettle(owner: PresentationWebFocusOwner) -> Bool {
+        owner == .standardPresentation
+    }
+}
+
 /// The RemoteOrbit bridge sends one semantic scroll command per physical edge.
 /// Keep delivery direct and bounded: if the WebView is not present yet, the
 /// command is reported as unavailable instead of starting a retry stream that
@@ -56,11 +113,6 @@ struct WorkspaceAutoHideSuppression: Equatable {
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
-    private enum PresentationWebFocusOwner: String {
-        case standardPresentation = "standard_presentation"
-        case externalVoice = "external_voice"
-    }
-
     private struct PreviousApplicationContext {
         let application: NSRunningApplication
         let displayID: CGDirectDisplayID?
@@ -293,7 +345,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             workspaceAutoHideSuppression.arm(atUptime: presentationUptime)
             activateFloatTabs(trace: trace)
             panel.orderFrontRegardless()
-            panel.makeKeyAndOrderFront(nil)
+            if PresentationNativeFocusPolicy.shouldMakeShellKey(
+                owner: webFocusOwner,
+                presentationAlreadyVisible: true,
+                sourceWindowIsVisible: sourceHostController.window.isVisible,
+                sourceWindowIsKey: sourceHostController.window.isKeyWindow,
+                sourceSessionLocked: sourceHostController.isSessionLocked
+            ) {
+                panel.makeKeyAndOrderFront(nil)
+            }
             beginPresentationFocusHandshake(
                 trace: trace,
                 webFocusOwner: webFocusOwner
@@ -326,6 +386,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "focus",
             trace: trace
         )
+        recordVoiceInputSourceDiagnostic(stage: "VOICE_FOCUS_BEGIN", trace: trace)
         // Capture the exact DOM input before activating FloatTabs. AppKit and
         // WebKit may restore a different editor while the window becomes key;
         // the voice path must not mistake that restored element for the user's
@@ -352,17 +413,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         let voiceGeneration = presentationFocusGeneration
 
         webFocusRouter.setCurrentWebView(webView)
-        activateFloatTabs(trace: trace)
-        panel.orderFrontRegardless()
-        if sourceHostController.isSessionLocked {
-            panel.makeKeyAndOrderFront(nil)
-            WebViewFocus.focus(webView, in: panel)
-        } else {
-            sourceHostController.orderFrontAndFocus(
-                webView,
-                makeSourceWindowMain: true
-            )
-        }
 
         await Task.yield()
         guard !Task.isCancelled,
@@ -384,6 +434,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             preservingCapturedTarget: true,
             trace: trace
         )
+        recordVoiceInputSourceDiagnostic(stage: "AFTER_DOM_FOCUS", trace: trace)
         guard !Task.isCancelled,
               isCurrentPresentationFocusRequest(voiceGeneration),
               presentationWebFocusOwner == .externalVoice,
@@ -397,6 +448,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             trace: trace,
             focused: focused
         )
+        if focused {
+            recordVoiceInputSourceDiagnostic(stage: "VOICE_FOCUS_READY", trace: trace)
+        }
         return focused ? .ready : .failed("dom-input-unavailable")
     }
 
@@ -3094,6 +3148,63 @@ final class PanelController: NSObject, NSWindowDelegate {
         )
     }
 
+    /// Read-only evidence for input-source investigations. FloatTabs never
+    /// selects an input source here; the current TIS semantic identifier and
+    /// macOS's per-document switching preference are sampled only at the
+    /// four external-voice focus boundaries.
+    private func recordVoiceInputSourceDiagnostic(
+        stage: String,
+        trace: RuntimeDiagnosticTrace?
+    ) {
+        let sourceIdentifier: String
+        if let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+           let rawIdentifier = TISGetInputSourceProperty(
+               source,
+               kTISPropertyInputSourceID
+           ) {
+            sourceIdentifier = Unmanaged<CFString>
+                .fromOpaque(rawIdentifier)
+                .takeUnretainedValue() as String
+        } else {
+            sourceIdentifier = "UNKNOWN"
+        }
+
+        let documentSwitchingPreference: String
+        let preferenceKey = "NSAutomaticTextInputSourceSwitchingEnabled"
+        let preferenceDomains = [
+            UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain),
+            Bundle.main.bundleIdentifier.flatMap {
+                UserDefaults.standard.persistentDomain(forName: $0)
+            }
+        ]
+        if let value = preferenceDomains.compactMap({ $0?[preferenceKey] }).first {
+            if let boolValue = value as? Bool {
+                documentSwitchingPreference = boolValue ? "ON" : "OFF"
+            } else {
+                documentSwitchingPreference = "UNKNOWN"
+            }
+        } else if let boolValue = UserDefaults.standard.object(forKey: preferenceKey) as? Bool {
+            documentSwitchingPreference = boolValue ? "ON" : "OFF"
+        } else {
+            documentSwitchingPreference = "UNKNOWN"
+        }
+
+        diagnostics.record(
+            event: "voice.focus.input_source",
+            level: .info,
+            subsystem: "focus",
+            trace: trace,
+            fields: [
+                "stage": .string(stage),
+                "source_id": .string(sourceIdentifier),
+                "document_switching": .string(documentSwitchingPreference),
+                "app_active": .bool(NSApp.isActive),
+                "shell_key": .bool(panel.isKeyWindow),
+                "source_key": .bool(sourceHostController.window.isKeyWindow)
+            ]
+        )
+    }
+
     private func togglePrimaryWebFocus(trace: RuntimeDiagnosticTrace? = nil) {
         // A manual focus toggle takes ownership of the DOM-focus decision and
         // must not be overwritten by the presentation initializer still
@@ -3695,7 +3806,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func completePresentationFocusIfReady() {
         let readiness = presentationFocusReadinessProvider?() ?? (
             applicationActive: NSApp.isActive,
-            windowKey: panel.isKeyWindow || sourceHostController.window.isKeyWindow
+            windowKey: PresentationNativeFocusPolicy.isNativeWindowReady(
+                owner: presentationWebFocusOwner,
+                applicationActive: NSApp.isActive,
+                shellWindowIsKey: panel.isKeyWindow,
+                sourceWindowIsKey: sourceHostController.window.isKeyWindow,
+                sourceSessionLocked: sourceHostController.isSessionLocked
+            )
         )
         guard requestedVisibility, readiness.applicationActive else { return }
         if (presentationNativeFocusPending || presentationWebFocusPending),
@@ -3720,7 +3837,18 @@ final class PanelController: NSObject, NSWindowDelegate {
             // Mark consumed before handing control to AppKit/WebKit. A nested
             // window notification must not enter the focus path twice.
             presentationNativeFocusPending = false
-            focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
+            focusActiveWebViewIfAvailable(
+                makeSourceWindowMain: PresentationNativeFocusPolicy.shouldMakeSourceWindowMain(
+                    owner: presentationWebFocusOwner,
+                    sourceSessionLocked: sourceHostController.isSessionLocked
+                )
+            )
+            if presentationWebFocusOwner == .externalVoice {
+                recordVoiceInputSourceDiagnostic(
+                    stage: "AFTER_NATIVE_SOURCE_FOCUS",
+                    trace: presentationTrace
+                )
+            }
             diagnostics.record(
                 event: "presentation_focus.native.ready",
                 level: .info,
@@ -3791,7 +3919,10 @@ final class PanelController: NSObject, NSWindowDelegate {
             // turn after the shell becomes key. Allow exactly one settle pass;
             // unlike the former 30-iteration retry loop, this has a fixed and
             // very small cost and cannot keep WebKit focus churn alive.
-            if !self.sourceHostController.window.isKeyWindow {
+            if PresentationNativeFocusPolicy.shouldRefocusDuringSettle(
+                owner: self.presentationWebFocusOwner
+            ),
+               !self.sourceHostController.window.isKeyWindow {
                 self.focusActiveWebViewIfAvailable(makeSourceWindowMain: true)
             }
             self.completePresentationFocusIfReady()

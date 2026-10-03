@@ -420,8 +420,16 @@ final class FullscreenSourceHostController {
         )
         if let webView {
             observeFullscreenState(of: webView)
-            window.makeKeyAndOrderFront(nil)
-            if makeSourceWindowMain {
+            let sourceWasKey = window.isKeyWindow
+            let shouldMakeKey = PresentationNativeFocusPolicy.shouldMakeSourceWindowKey(
+                sourceWindowIsKey: sourceWasKey
+            )
+            if shouldMakeKey {
+                window.makeKeyAndOrderFront(nil)
+            }
+            let sourceWasMain = window.isMainWindow
+            let shouldMakeMain = makeSourceWindowMain && !sourceWasMain
+            if shouldMakeMain {
                 // WebKit chooses the element-fullscreen display from the
                 // source window's AppKit main/key context. The source frame
                 // has already been positioned by PanelController on the
@@ -437,7 +445,13 @@ final class FullscreenSourceHostController {
                 subsystem: "fullscreen",
                 fields: [
                     "success": .bool(focused),
-                    "window_number": .integer(Int64(window.windowNumber))
+                    "window_number": .integer(Int64(window.windowNumber)),
+                    "source_key_before": .bool(sourceWasKey),
+                    "source_key_after": .bool(window.isKeyWindow),
+                    "source_main_before": .bool(sourceWasMain),
+                    "source_main_after": .bool(window.isMainWindow),
+                    "made_key": .bool(shouldMakeKey),
+                    "made_main": .bool(shouldMakeMain)
                 ]
             )
         }

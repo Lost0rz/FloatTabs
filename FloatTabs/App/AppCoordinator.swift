@@ -144,6 +144,16 @@ final class AppCoordinator {
             trace: trace,
             fields: launchFields
         )
+        diagnostics.record(
+            event: "VOICE_NATIVE_FOCUS_DEDUP=ON",
+            level: .notice,
+            subsystem: "focus",
+            trace: trace,
+            fields: [
+                "owner_policy": .string("standard_presentation_external_voice"),
+                "input_source_selection": .string("never")
+            ]
+        )
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
