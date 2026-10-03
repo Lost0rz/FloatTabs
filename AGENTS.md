@@ -34,8 +34,9 @@ Before implementation work:
 
 1. refresh remote refs without modifying working files;
 2. read the three control-plane files from the authorized branch;
-3. verify repository identity, branch, HEAD, upstream, worktree path, and clean/
-   dirty state against `CURRENT_STATUS.md`;
+3. verify repository identity, branch, HEAD, upstream, authorized worktree identity,
+   locally resolved worktree path, and clean/dirty state against the control-plane
+   contract;
 4. verify the requested work fits `CURRENT_TASK.md`;
 5. stop on any mismatch until the state contract is updated.
 
@@ -49,10 +50,16 @@ if no production worktree is yet authorized.
 2. Existing persistent configuration, Browser Profile identity/session isolation,
    and user website data are product data. Do not delete/reset them or replace an
    unreadable configuration with an empty fallback merely to recover a runtime.
-3. Exactly one local worktree must be explicitly authorized in
-   `CURRENT_STATUS.md` before production implementation changes. A different
-   clean-looking checkout is not an acceptable substitute.
-4. Before starting a new branch or PR, reconcile related open PRs/worktrees and
+3. Exactly one production worktree identity must be explicitly authorized in
+   `CURRENT_STATUS.md` before production implementation changes. The repository
+   records its logical identity/branch/ref contract; machine-specific absolute
+   paths are resolved locally and must not be committed to this public repository.
+   A different clean-looking checkout is not an acceptable substitute.
+4. Before changing production behavior, read the current product/design contract
+   relevant to the affected boundary plus the current release/validation record.
+   Historical or superseded records are evidence only and must not override the
+   current contract.
+5. Before starting a new branch or PR, reconcile related open PRs/worktrees and
    record whether each is ACTIVE, FROZEN, MERGED, SUPERSEDED, ABANDONED, or
    SEPARATE_SCOPE.
 
