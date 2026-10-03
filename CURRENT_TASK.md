@@ -1,101 +1,51 @@
 # FloatTabs Current Task
 
-**Task ID:** FT-GOV-002  
-**Title:** Repository closeout and local worktree reconciliation  
-**Status:** ACTIVE  
-**Mode:** REPOSITORY HYGIENE / READ-ONLY OR CLEANUP
+**Task ID:** FT-GOV-002
+**Title:** Repository closeout and local worktree reconciliation
+**Status:** ACTIVE — `BLOCKED_BY_LOCAL_DIRTY_WORKTREE`
 
 ## Objective
 
-Close stale FloatTabs development identities before returning to feature/runtime
-work.
+Reconcile stale FloatTabs branches and worktrees while preserving unique local work. Do not resume the stuck-tab fix or runtime diagnostics.
 
-Repository lifecycle states are exactly:
+## Authorization and boundaries
 
-- ACTIVE
-- MERGED
-- SUPERSEDED
-- ABANDONED
+Authorized: fetch and inventory `Lost0rz/FloatTabs`; read the three control-plane files; classify worktrees and branches; prune registrations whose directories are missing; remove clean MERGED/ABANDONED worktrees and safe local branches; delete stale `origin` branches one at a time after dependency checks; establish one clean `main` production worktree; update only `CURRENT_STATUS.md` and `CURRENT_TASK.md` on #103; commit and push those governance changes.
 
-The remote PR closeout is complete: only #102 and #103 remain OPEN.
+Prohibited: production Swift/runtime changes, test logic changes, stuck-tab fixes, added diagnostics/logging, build/install/release, resetting user runtime state, deleting DIRTY worktrees, force-deleting MERGED branches, creating replacement worktrees for missing historical paths, merging #102, or creating a follow-on runtime task.
 
-## Remote work completed
+## Completed
 
-- #87 → ABANDONED / CLOSED
-- #94 → ABANDONED / CLOSED
-- #96 → ABANDONED / CLOSED
-- #99 → ABANDONED / CLOSED
-- #100 → ABANDONED / CLOSED
-- #101 → ABANDONED / CLOSED
-- #102 → ACTIVE / OPEN
-- #103 → ACTIVE / OPEN
+- Verified `origin` is `https://github.com/Lost0rz/FloatTabs.git`; live `main`, #102, and #103 heads matched the fresh baseline.
+- Read `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` from the live #103 branch.
+- Enumerated all worktrees, local branches, and remote-tracking refs. Captured full dirty diffs and untracked-file status before cleanup.
+- Pruned 13 missing/stale worktree registrations. Removed three clean worktrees: merged #88/#90 and abandoned #101.
+- Removed safe local branch refs with `git branch -d` and clean abandoned refs with `git branch -D`. Where `git branch -d` refused for a merged squash head, retained the local ref and did not force-delete it.
+- Deleted 17 stale `origin` branches individually and verified each ref absent with `git ls-remote --heads`. The only live `origin` branches are `main`, #102, and #103.
+- Established exactly one clean production worktree, `floattabs-main-production`, on `main` at `origin/main` with upstream `origin/main`.
+- Established a clean #103 governance worktree. #102 remains OPEN/DRAFT and ACTIVE but currently awaits remote audit; no #102 worktree was recreated.
+- Updated this task and `CURRENT_STATUS.md` to record live state and blockers.
 
-Each abandoned PR has an exact preserved head and a closeout comment explaining
-why it is no longer an active merge path.
+## Preserved blockers
 
-## Authorized remaining work
+1. A detached checkout at `96fb030a3de1c86856a9a4a155318ef16de430bd` has unique uncommitted changes in three production Swift files and one test file. Its complete diff is captured outside the repository. It remains DIRTY and must not be removed without an explicit disposition.
+2. `fix/unread-trusted-interaction-contract` retains two local-only commits (`d1c7bc9b`, `ce9b1bdc`) absent from the closed PR #94 head.
+3. `codex/float-tabs-connector-left-gutter` and `codex/float-tabs-connector-tab-exclusion` retain unique commits absent from current `origin` branches and GitHub PR records.
+4. Six local refs for merged squash PRs remain because safe `git branch -d` refused and force deletion is not permitted for MERGED refs. Their exact heads remain available in PR histories.
 
-1. Verify the remote inventory in `CURRENT_STATUS.md`.
-2. On the local machine, enumerate every FloatTabs worktree and local branch.
-3. Remove clean MERGED worktrees.
-4. Inspect and preserve any dirty diff from ABANDONED worktrees before removing
-   them.
-5. Prune missing/stale worktree registrations.
-6. Keep/recreate #102 only as a separate task worktree if that integration resumes.
-7. Establish exactly one clean production worktree for `main`.
-8. Delete remote MERGED/ABANDONED branches only after local dependency checks.
-9. Update `CURRENT_STATUS.md` with the final remaining ACTIVE identities.
-10. Run the exact-head required macOS CI gate for #103 when its merge head is
-    final.
+## Acceptance status
 
-## Explicitly prohibited
+| Criterion | Result |
+| --- | --- |
+| Full local worktree/branch inventory and lifecycle classification | Complete |
+| Missing worktree registrations pruned | Complete (13) |
+| Removable clean MERGED/ABANDONED worktrees removed | Complete (3) |
+| Unique dirty/local-only work preserved and recorded | Complete; blocks task closure |
+| Safe stale `origin` branches deleted after dependency audit | Complete (17) |
+| One clean `main` production worktree at `origin/main` | Complete |
+| `CURRENT_STATUS.md` matches the live repository state | Updated against the final post-cleanup refs; live Git refs remain authoritative |
+| #103 exact-head required CI | Not run; deferred until blockers are dispositioned and the final #103 head is fixed |
 
-Until FT-GOV-002 completes, do not:
+## Required next decision
 
-- resume the stuck-tab fix;
-- add/expand runtime diagnostics;
-- revive #87/#94/#96/#99/#100/#101 as production branches;
-- merge #102 as part of repository hygiene;
-- discard dirty local changes without first recording what they contain;
-- delete an ACTIVE branch/worktree;
-- treat a missing required CI check as PASS.
-
-## Cleanup rule
-
-A worktree/branch is deletable only when:
-
-- lifecycle state is MERGED or ABANDONED;
-- it is not the current checkout of an ACTIVE task;
-- local worktree state is clean, or any dirty diff has been explicitly preserved
-  and dispositioned;
-- no remaining ACTIVE branch/PR uses it as a required base.
-
-Missing worktree paths should be pruned from Git metadata rather than recreated
-solely for deletion.
-
-## Remote branch deletion blocker
-
-The currently connected GitHub action surface does not expose a safe delete-ref
-operation. Therefore the remote branches classified MERGED/ABANDONED are deletion
-candidates, not falsely claimed deletions.
-
-Native Git/GitHub cleanup after local reconciliation is part of this task.
-
-## Acceptance criteria
-
-FT-GOV-002 is complete only when:
-
-- actual local worktrees have been freshly enumerated;
-- every worktree is classified ACTIVE / MERGED / SUPERSEDED / ABANDONED;
-- all removable clean MERGED/ABANDONED worktrees are removed;
-- dirty abandoned work is either preserved with an explicit record or removed by
-  an explicit decision;
-- stale missing-worktree registrations are pruned;
-- only required ACTIVE local worktrees remain;
-- exactly one clean `main` production worktree is designated;
-- remote stale branches are deleted after local dependency checks;
-- `CURRENT_STATUS.md` matches the final live repository state;
-- #103 exact merge head passes the required branch-protection CI.
-
-After those conditions pass, FT-GOV-002 may be marked COMPLETE and the next
-runtime/product task can be selected from current evidence.
+Keep FT-GOV-002 ACTIVE until the owner decides the disposition of the preserved dirty checkout and local-only commits. After that decision, update the controls, commit/push the final #103 state, then dispatch and verify the required exact-head CI. Do not select or start a runtime task automatically.
