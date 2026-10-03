@@ -125,6 +125,10 @@ if no production worktree is yet authorized.
 22. Before recommending merge or release, state unresolved root-cause uncertainty,
     untested runtime paths, and whether the change is diagnostic, recovery-only,
     experimental, or production-ready.
-23. A handoff is complete only when another agent can read the three control-plane
+23. Required branch-protection checks must pass on the exact commit proposed for
+    merge. If path filters prevent an automatic required check from running,
+    explicitly dispatch the existing required workflow on that branch/head rather
+    than treating an absent check as a pass.
+24. A handoff is complete only when another agent can read the three control-plane
     files, verify the checkout against them, and continue without reconstructing
     current state from chat history.
