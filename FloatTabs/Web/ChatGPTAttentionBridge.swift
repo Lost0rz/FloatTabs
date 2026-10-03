@@ -65,10 +65,14 @@ struct ChatGPTAppHealthSnapshot: Equatable, Sendable {
             "composer_present",
             "generation_indicator_present",
             "loading_indicator_present",
+            "loading_indicator_visible",
             "conversation_load_error_present"
         ]
         for key in booleanKeys {
             guard let value = body[key] as? Bool else { return nil }
+            if key == "loading_indicator_visible",
+               let number = body[key] as? NSNumber,
+               CFGetTypeID(number) != CFBooleanGetTypeID() { return nil }
             fields[key] = .bool(value)
         }
         let boundedCounts = ["window_error_count", "unhandled_rejection_count"]
@@ -405,6 +409,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               try { return !!document.querySelector(selector); }
               catch (_) { return false; }
             };
+            // Diagnostic sensor only; does not participate in attention/recovery.
+            const loadingVisible = () => {
+              const matches = document.querySelectorAll("[aria-busy='true'], [data-testid*='loading']");
+              return Array.from(matches).some((element) => {
+                if (!element.isConnected) { return false; }
+                for (let node = element; node; node = node.parentElement) {
+                  if (node.hidden || node.getAttribute("aria-hidden") === "true") { return false; }
+                  const style = window.getComputedStyle(node);
+                  if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility)
+                      || Number(style.opacity) <= 0) { return false; }
+                }
+                return Array.from(element.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0);
+              });
+            };
             const generating = isGenerating();
             return {
               version: 1,
@@ -418,6 +436,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               composer_present: present("textarea, [contenteditable='true']"),
               generation_indicator_present: present("[data-testid*='stop'], button[aria-label*='Stop']"),
               loading_indicator_present: present("[aria-busy='true'], [data-testid*='loading']"),
+              loading_indicator_visible: loadingVisible(),
               conversation_load_error_present: present("[data-testid*='error'], [role='alert']"),
               window_error_count: windowErrorCount,
               window_error_class: windowErrorCount > 0 ? "script_error" : "none",

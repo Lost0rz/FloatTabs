@@ -5068,6 +5068,77 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(store.activeTabID, selectedIDBefore)
     }
 
+    func testIncidentCaptureAcknowledgesOnlyActiveResidentSlot() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "AckA", url: "https://chatgpt.com/"), spec(name: "AckB", url: "https://example.com/")], diagnostics: diagnostics
+        )
+        let active = try XCTUnwrap(store.activeProfile)
+        controller.captureStuckTabSnapshotForQA(slotID: active.id)
+        let snapshot = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.incident_snapshot" })
+        let ack = try XCTUnwrap(writer.events.last { $0.event == "diagnostic.incident.acknowledged" })
+        XCTAssertEqual(ack.fields["incident_id"], snapshot.fields["incident_id"])
+        guard case let .string(id)? = ack.fields["incident_id"] else { return XCTFail("missing identifier") }
+        let hud = StatusHUDView()
+        hud.showIncident(id: try XCTUnwrap(UUID(uuidString: id)))
+        XCTAssertTrue(hud.displayedText.contains(String(id.prefix(8))))
+        let count = writer.events.filter { $0.event == "diagnostic.incident.acknowledged" }.count
+        let inactive = try XCTUnwrap(store.profiles.first { $0.id != active.id })
+        controller.captureStuckTabSnapshotForQA(slotID: inactive.id)
+        pool.release(slotID: active.id)
+        controller.captureStuckTabSnapshotForQA(slotID: active.id)
+        XCTAssertEqual(writer.events.filter { $0.event == "diagnostic.incident.acknowledged" }.count, count)
+    }
+
+    func testIncidentCaptureSurvivesTabSwitchAndManualReset() throws {
+        let store = makeTabStore(profiles: [spec(name: "ContinuityA", url: "https://chatgpt.com/"), spec(name: "ContinuityB", url: "https://example.com/")])
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in }, isSlotActive: { store.activeTabID == $0 }, diagnostics: diagnostics)
+        let controller = PanelController(tabStore: store, webViewPool: pool, frameStore: PanelFrameStore(), diagnostics: diagnostics)
+        retainedControllers.append(controller)
+        let a = try XCTUnwrap(store.activeProfile)
+        let b = try XCTUnwrap(store.profiles.first { $0.id != a.id })
+        controller.captureStuckTabSnapshotForQA(slotID: a.id)
+        let captured = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.incident_snapshot" }).fields["incident_id"]
+        XCTAssertTrue(store.select(id: b.id))
+        XCTAssertTrue(store.select(id: a.id))
+        _ = try pool.replaceRuntimeForManualQAReset(requestedSlotID: a.id, activeProfile: a, fullscreenSourceLocked: false, prepareRuntimeForReplacement: { _ in })
+        for name in ["web_runtime.manual_reset.requested", "web_runtime.rebuild.begin", "web_runtime.created", "web_runtime.manual_reset.completed"] {
+            XCTAssertEqual(writer.events.last { $0.event == name }?.fields["incident_id"], captured, name)
+        }
+        XCTAssertFalse(writer.events.contains { $0.event == "diagnostic.incident.closed" })
+    }
+
+    func testIncidentClosesAfterRealReplacementNavigationHealth() async throws {
+        let store = makeTabStore(profiles: [spec(name: "HealthClose", url: "https://chatgpt.com/")])
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in }, isSlotActive: { store.activeTabID == $0 }, diagnostics: diagnostics)
+        let controller = PanelController(tabStore: store, webViewPool: pool, frameStore: PanelFrameStore(), diagnostics: diagnostics)
+        retainedControllers.append(controller)
+        let slot = try XCTUnwrap(store.activeProfile)
+        controller.captureStuckTabSnapshotForQA(slotID: slot.id)
+        let captured = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.incident_snapshot" }).fields["incident_id"]
+        let replacement = try XCTUnwrap(pool.replaceRuntimeForManualQAReset(requestedSlotID: slot.id, activeProfile: slot, fullscreenSourceLocked: false, prepareRuntimeForReplacement: { _ in }))
+        XCTAssertFalse(writer.events.contains { $0.event == "diagnostic.incident.closed" })
+        replacement.loadHTMLString("<!doctype html><main><textarea></textarea></main>", baseURL: URL(string: "https://chatgpt.com/"))
+        let closed = try await waitUntil(timeoutMilliseconds: 10000) {
+            writer.events.contains { $0.event == "diagnostic.incident.closed" }
+        }
+        XCTAssertTrue(closed)
+        let close = try XCTUnwrap(writer.events.last { $0.event == "diagnostic.incident.closed" })
+        XCTAssertEqual(close.fields["incident_id"], captured)
+        XCTAssertEqual(close.fields["reason"], .string("post_recovery_evidence_complete"))
+        let healthIndex = try XCTUnwrap(writer.events.lastIndex { $0.event == "chatgpt.health_snapshot" && $0.fields["probe_trigger"] == .string("navigation_finish") })
+        let closeIndex = try XCTUnwrap(writer.events.lastIndex { $0.event == "diagnostic.incident.closed" })
+        XCTAssertLessThan(healthIndex, closeIndex)
+        XCTAssertEqual(writer.events[healthIndex].fields["incident_id"], captured)
+        diagnostics.record(event: "diagnostic.test.after_close", subsystem: "diagnostics", fields: ["slot_id": .string(slot.id.uuidString)])
+        XCTAssertNil(writer.events.last?.fields["incident_id"])
+    }
+
     // MARK: - Harness
 
     private func makeAsyncSnapshotFixture(

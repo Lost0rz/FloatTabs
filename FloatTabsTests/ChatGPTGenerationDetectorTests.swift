@@ -90,6 +90,27 @@ private final class ChatGPTDetectorPage {
 
 @MainActor
 final class ChatGPTGenerationDetectorTests: XCTestCase {
+    func testLoadingVisibilityDistinguishesDOMPresenceFromRenderedState() async {
+        let fixtures = [
+            ("style='display:none'", false), ("hidden", false),
+            ("aria-hidden='true'", false), ("style='width:0;height:0;overflow:hidden'", false),
+            ("style='width:20px;height:20px'", true),
+            ("style='visibility:hidden;width:20px;height:20px'", false),
+            ("style='opacity:0;width:20px;height:20px'", false)
+        ]
+        for (attributes, expected) in fixtures {
+            let page = ChatGPTDetectorPage()
+            page.load(bodyHTML: "<main><div data-testid='loading' \(attributes)></div></main>")
+            await page.settleBaseline()
+            let snapshot: ChatGPTAppHealthSnapshot? = await withCheckedContinuation { continuation in
+                page.bridge.captureAppHealthSnapshot { continuation.resume(returning: $0) }
+            }
+            XCTAssertEqual(snapshot?.fields["loading_indicator_present"], .bool(true), attributes)
+            XCTAssertEqual(snapshot?.fields["loading_indicator_visible"], .bool(expected), attributes)
+            page.bridge.invalidate()
+        }
+    }
+
     func testImmediateAndSettledNamedWorldResyncBothEstablishBaseline() async {
         for settled in [false, true] {
             let page = ChatGPTDetectorPage()

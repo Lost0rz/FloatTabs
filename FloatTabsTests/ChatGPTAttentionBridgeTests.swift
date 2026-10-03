@@ -327,6 +327,25 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(source.contains("fetch("))
     }
 
+    func testLoadingVisibilityParserRequiresBoolean() {
+        var body: [String: Any] = [
+            "version": 1, "document_ready_state": "complete", "visibility_state": "visible",
+            "attention_state": "idle", "bridge_document_ready": true,
+            "conversation_shell_present": true, "composer_present": true,
+            "generation_indicator_present": false, "loading_indicator_present": true,
+            "loading_indicator_visible": false, "conversation_load_error_present": false,
+            "window_error_count": 0, "window_error_class": "none",
+            "unhandled_rejection_count": 0, "unhandled_rejection_class": "none", "probe_elapsed_ms": 0
+        ]
+        XCTAssertEqual(ChatGPTAppHealthSnapshot.parse(body)?.fields["loading_indicator_visible"], .bool(false))
+        for invalid in ["true", 2, NSNumber(value: 1), NSNull()] as [Any] {
+            body["loading_indicator_visible"] = invalid
+            XCTAssertNil(ChatGPTAppHealthSnapshot.parse(body))
+        }
+        body.removeValue(forKey: "loading_indicator_visible")
+        XCTAssertNil(ChatGPTAppHealthSnapshot.parse(body))
+    }
+
     func testRuntimeHealthParserKeepsOnlyBoundedMetadata() {
         let snapshot = ChatGPTAppHealthSnapshot.parse([
             "version": 1,
@@ -338,6 +357,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             "composer_present": true,
             "generation_indicator_present": false,
             "loading_indicator_present": false,
+            "loading_indicator_visible": false,
             "conversation_load_error_present": false,
             "window_error_count": 2,
             "window_error_class": "script_error",

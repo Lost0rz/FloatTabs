@@ -99,3 +99,25 @@ residency policy, fullscreen recovery, or content-process recovery.
 - Network diagnostics emit only deduplicated path transitions: generation,
   status, coarse interface class, expensive, and constrained. They do not record
   addresses, DNS servers, SSIDs, routes, or per-request/network-resource data.
+
+## Wave 2 incident observations
+
+Capture acknowledges a successfully recorded snapshot in the existing nonblocking
+HUD with an incident UUID prefix; the JSONL retains the full UUID. Capture never
+navigates, transfers focus, copies to clipboard, or replaces a runtime.
+
+One open incident binds UUID, slot and monotonic opened uptime. Tab selection
+changes do not close it. A newer capture supersedes it. Actual runtime release,
+app termination or a token-guarded 30-minute timeout closes it with an explicit
+`diagnostic.incident.closed` reason. Manual replacement keeps correlation through
+reset completion, replacement navigation and the first available application-health
+snapshot triggered by navigation finish for that new runtime. Only then is it
+closed as `post_recovery_evidence_complete`. Failed/unavailable health stays open
+until a bounded close boundary. These are diagnostic observations, not recovery policy.
+
+`loading_indicator_present` retains its DOM-existence semantics.
+`loading_indicator_visible` separately checks the same loading selector for
+connected, nonhidden elements with visible ancestor styles, positive opacity and
+nonzero rendered rectangles. Neither field establishes that ChatGPT is stuck.
+No element text, attributes containing content, HTML, URLs or JS error payloads
+are exported; health contains only bounded booleans, counts and categories.

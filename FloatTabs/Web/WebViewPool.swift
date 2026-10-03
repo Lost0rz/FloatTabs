@@ -142,6 +142,9 @@ final class WebViewPool {
     var networkPathGenerationProvider: @MainActor () -> UInt64? = { nil }
 
     var onResidentSetChange: (() -> Void)?
+    var onManualResetStarted: (@MainActor (UUID) -> Void)?
+    var onManualResetCompleted: (@MainActor (UUID, UInt64) -> Void)?
+    var onChatGPTHealthSnapshot: (@MainActor (UUID, [String: RuntimeDiagnosticValue]) -> Void)?
     var onRuntimeRelease: (@MainActor (UUID) -> Void)?
 
     /// The fullscreen source owner supplies a transient reason while it owns
@@ -412,6 +415,7 @@ final class WebViewPool {
         let browserProfileBefore = appliedBrowserProfileIdentities[requestedSlotID]
             ?? BrowserProfileIdentity(browserProfileID: profile.browserProfileID)
 
+        onManualResetStarted?(requestedSlotID)
         prepareRuntimeForReplacement(requestedSlotID)
 
         do {
@@ -440,6 +444,9 @@ final class WebViewPool {
                     "reason": .string(reason)
                 ]
             )
+            if let runtimeGenerationAfter {
+                onManualResetCompleted?(requestedSlotID, runtimeGenerationAfter)
+            }
             return replacement
         } catch {
             diagnostics.record(
@@ -621,12 +628,13 @@ final class WebViewPool {
         return true
     }
 
+    @discardableResult
     func captureDiagnosticSnapshot(
         slotID: UUID,
         incidentID: UUID,
         reason: String
-    ) {
-        guard let webView = webViews[slotID] else { return }
+    ) -> Bool {
+        guard let webView = webViews[slotID] else { return false }
         let navigationGeneration = navigationObservers[slotID]?.diagnosticNavigationGeneration
         var fields: [String: RuntimeDiagnosticValue] = [
             "incident_id": .string(incidentID.uuidString),
@@ -650,7 +658,7 @@ final class WebViewPool {
         let isChatGPT = webView.url?.host.map(ChatGPTSitePolicy.isSupportedHost) ?? false
         fields["chatgpt_supported_document"] = .bool(isChatGPT)
         let snapshot = RuntimeDiagnosticSnapshot(fields: fields)
-        diagnostics.record(
+        let recorded = diagnostics.record(
             event: "web_runtime.incident_snapshot",
             level: .warning,
             subsystem: "web",
@@ -662,6 +670,7 @@ final class WebViewPool {
             trigger: reason,
             navigationGeneration: navigationGeneration
         )
+        return recorded != nil
     }
 
     func remove(slotID: UUID) {
@@ -1319,14 +1328,17 @@ final class WebViewPool {
             let boundedHealthKeys = Set([
                 "document_ready_state", "visibility_state", "bridge_document_ready",
                 "attention_state", "conversation_shell_present", "composer_present",
-                "generation_indicator_present", "loading_indicator_present",
+                "generation_indicator_present", "loading_indicator_present", "loading_indicator_visible",
                 "conversation_load_error_present", "response_bridge_ready",
                 "latest_response_complete", "probe_elapsed_ms", "window_error_count",
                 "window_error_class", "unhandled_rejection_count", "unhandled_rejection_class",
                 "health_probe_available"
             ])
-            self.latestChatGPTHealthFields[slotID] = completedFields.filter {
-                boundedHealthKeys.contains($0.key)
+            // Late old-document probes must not overwrite the replacement cache.
+            if self.existingWebView(for: slotID) === webView {
+                self.latestChatGPTHealthFields[slotID] = completedFields.filter {
+                    boundedHealthKeys.contains($0.key)
+                }
             }
             self.diagnostics.record(
                 event: "chatgpt.health_snapshot",
@@ -1334,6 +1346,7 @@ final class WebViewPool {
                 subsystem: "web",
                 fields: completedFields
             )
+            self.onChatGPTHealthSnapshot?(slotID, completedFields)
         }
         attentionBridge?.captureAppHealthSnapshot { snapshot in
             var healthFields = snapshot?.fields ?? [:]

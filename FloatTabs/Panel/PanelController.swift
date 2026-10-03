@@ -323,11 +323,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var hasPositionedPanel = false
     private var runtimeConstructionPhase = "controller_construction"
     private var startupRestorePending = true
-    private struct ActiveDiagnosticIncident {
-        let id: UUID
-        let slotID: UUID
-    }
-    private var activeDiagnosticIncident: ActiveDiagnosticIncident?
+    private lazy var diagnosticIncident = DiagnosticIncidentLifecycle(diagnostics: diagnostics)
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
     private var lastSynchronizedProfilesByID: [UUID: WebAppProfile] = [:]
@@ -805,12 +801,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             self?.runtimeConstructionPhase ?? "unknown"
         }
         webViewPool.onRuntimeRelease = { [weak self] slotID in
-            guard self?.activeDiagnosticIncident?.slotID == slotID else { return }
-            self?.activeDiagnosticIncident = nil
+            self?.diagnosticIncident.runtimeReleased(slotID: slotID)
+        }
+        webViewPool.onManualResetStarted = { [weak self] slotID in
+            self?.diagnosticIncident.recoveryStarted(slotID: slotID)
+        }
+        webViewPool.onManualResetCompleted = { [weak self] slotID, generation in
+            self?.diagnosticIncident.recoveryCompleted(slotID: slotID, runtimeGeneration: generation)
+        }
+        webViewPool.onChatGPTHealthSnapshot = { [weak self] slotID, fields in
+            self?.diagnosticIncident.observeHealth(slotID: slotID, fields: fields)
         }
         diagnostics.setCorrelationContextProvider { [weak self] slotID in
             guard let self,
-                  let incident = self.activeDiagnosticIncident,
+                  let incident = self.diagnosticIncident.current,
                   incident.slotID == slotID else {
                 return [:]
             }
@@ -1378,7 +1382,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func prepareForTermination(trace: RuntimeDiagnosticTrace? = nil) {
-        activeDiagnosticIncident = nil
+        diagnosticIncident.close(reason: "app_termination")
         diagnostics.record(
             event: "app.termination.panel-preparation",
             level: .notice,
@@ -3003,11 +3007,6 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         let activeChanged = lastSynchronizedActiveID != activeProfile.id
         if activeChanged,
-           activeDiagnosticIncident?.slotID != nil,
-           activeDiagnosticIncident?.slotID != activeProfile.id {
-            activeDiagnosticIncident = nil
-        }
-        if activeChanged,
            let previous = lastSynchronizedActiveProfile,
            previous.id != activeProfile.id {
             slotLifecycleCoordinator.deactivate(profile: previous)
@@ -3107,13 +3106,21 @@ final class PanelController: NSObject, NSWindowDelegate {
               webViewPool.existingWebView(for: slotID) != nil else {
             return
         }
-        let incidentID = UUID()
-        activeDiagnosticIncident = ActiveDiagnosticIncident(id: incidentID, slotID: slotID)
-        webViewPool.captureDiagnosticSnapshot(
+        let incidentID = diagnosticIncident.open(slotID: slotID)
+        let recorded = webViewPool.captureDiagnosticSnapshot(
             slotID: slotID,
             incidentID: incidentID,
             reason: "user_marked_stuck_tab"
         )
+        guard recorded else {
+            diagnosticIncident.close(reason: "capture_not_recorded")
+            return
+        }
+        statusHUDView.showIncident(id: incidentID)
+        diagnostics.record(event: "diagnostic.incident.acknowledged", level: .notice, subsystem: "diagnostics", fields: [
+            "incident_id": .string(incidentID.uuidString),
+            "slot_id": .string(slotID.uuidString)
+        ])
     }
 
     private static func startupURLClass(for profile: WebAppProfile) -> String {
@@ -3909,11 +3916,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func resetSlotRuntimeForQA(id: UUID) {
         let incidentID: UUID
-        if let current = activeDiagnosticIncident, current.slotID == id {
+        if let current = diagnosticIncident.current, current.slotID == id {
             incidentID = current.id
         } else {
-            incidentID = UUID()
-            activeDiagnosticIncident = ActiveDiagnosticIncident(id: incidentID, slotID: id)
+            incidentID = diagnosticIncident.open(slotID: id)
         }
         webViewPool.captureDiagnosticSnapshot(
             slotID: id,
@@ -5722,6 +5728,10 @@ final class StatusHUDView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    func showIncident(id: UUID) {
+        show(message: "Incident captured · \(id.uuidString.prefix(8))", duration: 4)
+    }
+
     func show(zoom: CGFloat) {
         show(message: ZoomSteps.percentageText(for: zoom))
     }
@@ -5730,7 +5740,7 @@ final class StatusHUDView: NSView {
         show(message: "Mode: \(residency.displayName)")
     }
 
-    func show(message: String) {
+    func show(message: String, duration: TimeInterval = 0.85) {
         hideWorkItem?.cancel()
         label.stringValue = message
         isHidden = false
@@ -5739,6 +5749,6 @@ final class StatusHUDView: NSView {
             self?.isHidden = true
         }
         hideWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: item)
     }
 }

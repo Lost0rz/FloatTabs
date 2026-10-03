@@ -490,3 +490,104 @@ final class RuntimeDiagnosticNoopRecorder: RuntimeDiagnosticRecording {
         }
     }
 }
+
+/// Observation-only correlation ownership. No navigation or runtime actions.
+@MainActor
+final class DiagnosticIncidentLifecycle {
+    struct Incident {
+        let id: UUID
+        let slotID: UUID
+        let openedUptime: TimeInterval
+        var phase = "captured"
+        var recoveryRuntimeGeneration: UInt64?
+    }
+    private(set) var current: Incident?
+    private let diagnostics: any RuntimeDiagnosticRecording
+    private let uptime: () -> TimeInterval
+    private let timeout: TimeInterval
+    private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+
+    init(
+        diagnostics: any RuntimeDiagnosticRecording,
+        uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        timeout: TimeInterval = 30 * 60,
+        schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, action in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                Task { @MainActor in action() }
+            }
+        }
+    ) {
+        self.diagnostics = diagnostics
+        self.uptime = uptime
+        self.timeout = timeout
+        self.schedule = schedule
+    }
+
+    @discardableResult
+    func open(slotID: UUID) -> UUID {
+        close(reason: "superseded_by_new_capture")
+        let incident = Incident(id: UUID(), slotID: slotID, openedUptime: uptime())
+        current = incident
+        record("diagnostic.incident.opened", incident: incident, reason: "capture")
+        schedule(timeout) { [weak self] in self?.expire(token: incident.id) }
+        return incident.id
+    }
+
+    func expire(token: UUID) {
+        guard let incident = current, incident.id == token else { return }
+        let remaining = timeout - (uptime() - incident.openedUptime)
+        guard remaining <= 0 else {
+            schedule(remaining) { [weak self] in self?.expire(token: token) }
+            return
+        }
+        close(reason: "timeout")
+    }
+
+    func recoveryStarted(slotID: UUID) {
+        guard var incident = current, incident.slotID == slotID else { return }
+        incident.phase = "recovery_in_progress"
+        incident.recoveryRuntimeGeneration = nil
+        current = incident
+        record("diagnostic.incident.recovery_started", incident: incident, reason: "manual_runtime_reset")
+    }
+
+    func recoveryCompleted(slotID: UUID, runtimeGeneration: UInt64) {
+        guard var incident = current, incident.slotID == slotID,
+              incident.phase == "recovery_in_progress" else { return }
+        incident.phase = "post_recovery_observation"
+        incident.recoveryRuntimeGeneration = runtimeGeneration
+        current = incident
+    }
+
+    func observeHealth(slotID: UUID, fields: [String: RuntimeDiagnosticValue]) {
+        guard let incident = current, incident.slotID == slotID,
+              incident.phase == "post_recovery_observation",
+              let generation = incident.recoveryRuntimeGeneration,
+              fields["runtime_generation"] == .integer(Int64(generation)),
+              fields["probe_trigger"] == .string("navigation_finish"),
+              fields["health_probe_available"] == .bool(true) else { return }
+        close(reason: "post_recovery_evidence_complete")
+    }
+
+    func runtimeReleased(slotID: UUID) {
+        guard current?.slotID == slotID else { return }
+        close(reason: "runtime_released")
+    }
+
+    func close(reason: String) {
+        guard let incident = current else { return }
+        // Record while correlation is still installed, then detach it.
+        record("diagnostic.incident.closed", incident: incident, reason: reason)
+        current = nil
+    }
+
+    private func record(_ event: String, incident: Incident, reason: String) {
+        diagnostics.record(event: event, level: .notice, subsystem: "diagnostics", fields: [
+            "incident_id": .string(incident.id.uuidString),
+            "slot_id": .string(incident.slotID.uuidString),
+            "phase": .string(incident.phase),
+            "opened_uptime": .double(incident.openedUptime),
+            "reason": .string(reason)
+        ])
+    }
+}

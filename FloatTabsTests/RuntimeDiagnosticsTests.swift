@@ -5,6 +5,80 @@ import WebKit
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testIncidentSupersedeRuntimeReleaseAndTerminationCloseReasons() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let lifecycle = DiagnosticIncidentLifecycle(diagnostics: diagnostics, schedule: { _, _ in })
+        let a = UUID(), b = UUID()
+        let first = lifecycle.open(slotID: a)
+        let second = lifecycle.open(slotID: b)
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(writer.events.last { $0.event == "diagnostic.incident.closed" }?.fields["reason"], .string("superseded_by_new_capture"))
+        lifecycle.runtimeReleased(slotID: a)
+        XCTAssertEqual(lifecycle.current?.id, second)
+        lifecycle.runtimeReleased(slotID: b)
+        XCTAssertNil(lifecycle.current)
+        XCTAssertEqual(writer.events.last?.fields["reason"], .string("runtime_released"))
+        lifecycle.open(slotID: a)
+        lifecycle.close(reason: "app_termination")
+        XCTAssertNil(lifecycle.current)
+        XCTAssertEqual(writer.events.last?.fields["reason"], .string("app_termination"))
+    }
+
+    func testIncidentTimeoutUsesMonotonicTimeAndRejectsStaleToken() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var uptime: TimeInterval = 100
+        var callbacks: [@MainActor () -> Void] = []
+        let lifecycle = DiagnosticIncidentLifecycle(diagnostics: diagnostics, uptime: { uptime }, timeout: 1800, schedule: { _, action in callbacks.append(action) })
+        let slot = UUID()
+        let first = lifecycle.open(slotID: slot)
+        uptime = 101
+        let second = lifecycle.open(slotID: slot)
+        uptime = 1900
+        callbacks[0]()
+        XCTAssertEqual(lifecycle.current?.id, second)
+        lifecycle.expire(token: first)
+        XCTAssertEqual(lifecycle.current?.id, second)
+        callbacks[1]()
+        XCTAssertEqual(lifecycle.current?.id, second, "early wake must rearm using uptime")
+        uptime = 1901
+        callbacks.last?()
+        XCTAssertNil(lifecycle.current)
+        XCTAssertEqual(writer.events.last?.fields["reason"], .string("timeout"))
+        XCTAssertTrue(writer.events.allSatisfy { $0.event.hasPrefix("diagnostic.incident.") }, "timeout must not perform runtime/navigation work")
+    }
+
+    func testIncidentWaitsForAvailableNewRuntimeFinishedHealthBeforeClosing() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let lifecycle = DiagnosticIncidentLifecycle(diagnostics: diagnostics, schedule: { _, _ in })
+        let slot = UUID(), other = UUID()
+        let id = lifecycle.open(slotID: slot)
+        lifecycle.recoveryStarted(slotID: slot)
+        XCTAssertEqual(lifecycle.current?.phase, "recovery_in_progress")
+        lifecycle.recoveryCompleted(slotID: slot, runtimeGeneration: 7)
+        XCTAssertEqual(lifecycle.current?.id, id, "manual_reset.completed must keep correlation open")
+        var health: [String: RuntimeDiagnosticValue] = ["runtime_generation": .integer(5), "probe_trigger": .string("navigation_finish"), "health_probe_available": .bool(true)]
+        lifecycle.observeHealth(slotID: slot, fields: health)
+        XCTAssertNotNil(lifecycle.current, "old runtime cannot close")
+        health["runtime_generation"] = .integer(7)
+        lifecycle.observeHealth(slotID: other, fields: health)
+        XCTAssertNotNil(lifecycle.current)
+        health["probe_trigger"] = .string("pre_manual_runtime_reset")
+        lifecycle.observeHealth(slotID: slot, fields: health)
+        XCTAssertNotNil(lifecycle.current)
+        health["probe_trigger"] = .string("navigation_finish")
+        health["health_probe_available"] = .bool(false)
+        lifecycle.observeHealth(slotID: slot, fields: health)
+        XCTAssertNotNil(lifecycle.current)
+        health["health_probe_available"] = .bool(true)
+        lifecycle.observeHealth(slotID: slot, fields: health)
+        XCTAssertNil(lifecycle.current)
+        XCTAssertEqual(writer.events.last?.fields["incident_id"], .string(id.uuidString))
+        XCTAssertEqual(writer.events.last?.fields["reason"], .string("post_recovery_evidence_complete"))
+    }
+
     func testRecordPreservesSafeQALabelProvenance() {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
