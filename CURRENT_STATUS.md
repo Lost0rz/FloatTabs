@@ -8,188 +8,158 @@
 
 ## Validity rule
 
-This file defines intended project state and authorization. It does not override
-Git itself for the SHA stored at a live ref.
+This file defines intended repository state and authorization. Git/GitHub refs are
+authoritative for the SHA stored at a live ref.
 
-Before implementation work, refresh remote refs and verify:
+Before implementation work, refresh remote refs. If `origin/main`, an ACTIVE PR
+head, or an authorized worktree identity differs from this contract, STOP and
+reconcile this file first.
 
-- `origin/main` still equals the recorded main baseline above, unless this file
-  has been intentionally updated for a newer baseline;
-- the active governance branch exists and the local HEAD equals its freshly
-  fetched remote HEAD;
-- every PR/branch used by the current task still matches the recorded relationship
-  or has been reconciled here.
-
-Any mismatch makes this status contract **STALE** and requires reconciliation
-before implementation.
+Machine-specific absolute worktree paths are local evidence and are not committed
+to this public repository.
 
 ## Current operating mode
 
-**MODE: STATE-GOVERNANCE FREEZE**
+**MODE: REPOSITORY-CLOSEOUT**
 
-Production bug fixing, recovery changes, and diagnostic/log expansion are paused.
-The immediate goal is to make repository state unambiguous across ChatGPT/web and
-local development agents before further runtime investigation.
+Phase 1 — the three-file state control plane — is established and independently
+audited.
 
-## Active control-plane PR
+Phase 2 is closing stale PR/branch/worktree identities before any further runtime
+bug fixing or diagnostic expansion.
 
-- **PR:** #103 — `docs: establish FloatTabs state control plane`
-- **Branch:** `codex/project-agents-control-plane-v1`
-- **Base:** `main`
-- **Recorded base HEAD:** `a94ae46db756b10014651f3639cf8659917e204b`
-- **Prior governance commit:** `04545324eeb8aaebd66feb2ba5b1ee613ac52443`
-- **State:** OPEN / DRAFT
-- **Scope:** `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and PR metadata only.
+Canonical lifecycle states are exactly:
 
-### HEAD verification contract
+`ACTIVE`, `MERGED`, `SUPERSEDED`, `ABANDONED`.
 
-The governance branch's current HEAD is intentionally **not** embedded in this
-file. A commit cannot truthfully contain its own final SHA without creating an
-infinite self-reference.
+Role, scope, clean/dirty state, and deletion blockers are separate metadata.
 
-For a local governance checkout to be valid:
+## Current PR closeout
 
-- branch = `codex/project-agents-control-plane-v1`;
-- local HEAD = freshly fetched
-  `origin/codex/project-agents-control-plane-v1`;
-- working tree = clean unless the current task explicitly authorizes a
-  control-plane edit;
-- upstream relationship = verified, not inferred from an old checkout.
+After remote closeout, only two pull requests remain OPEN.
 
-## Open PR inventory and classification
+| PR | Branch / preserved head | State | Disposition |
+| --- | --- | --- | --- |
+| #103 — state control plane | `codex/project-agents-control-plane-v1` / dynamic live head | ACTIVE | Keep. Current governance PR; remains Draft until local worktree reconciliation and exact-head required CI pass. |
+| #102 — MemoX durable outbox sender | `phase2/pr-e-floattabs-durable-outbox-sender` / `db6e886b33dffd93ece130463b184ae371b97684` | ACTIVE | Keep. Separate cross-project integration with its own acceptance path; not part of WebKit incident cleanup. |
+| #101 — per-slot runtime replacement / Wave 2 | `codex/web-runtime-reset-validation` / `690ccd193b45aff730ea53b00d598a15fbb0757e` | ABANDONED | Closed. Root cause remained unknown; authoritative incident never executed the controlled reset; branch is stacked on unaccepted recovery work. |
+| #100 — bounded WebKit stall recovery | `codex/web-runtime-recovery` / `16b4ea4df39538c8bf0e86d151ccf64265c43b23` | ABANDONED | Closed. Recovery experiment was never accepted as a root-cause fix. |
+| #99 — stalled WebKit runtime diagnostics | `codex/web-runtime-health-diagnostics` / `00e172b98e29ecd1c15c8aa169d5c08892867d73` | ABANDONED | Closed. Observation experiment did not close root cause; future diagnostics must start fresh from current main under a new task. |
+| #96 — PR #94 unread diagnostics | `diag/pr94-unread-reappearance-trace` / `afecda2af0b82e22fe666ce7ea7a963865b50dfa` | ABANDONED | Closed. Diagnostics were specific to the abandoned #94 path. |
+| #94 — alternate unread trusted-interaction contract | `fix/unread-trusted-interaction-contract` / `cf727a050e71842028fb95af2559903016e82c25` | ABANDONED | Closed. Never accepted into production; v0.5.2 shipped without it. |
+| #87 — single runtime ownership experiment | `fix/single-instance-runtime-ownership` / `96fb030a3de1c86856a9a4a155318ef16de430bd` | ABANDONED | Closed. Unique historical experiment, stale against current main and without an active acceptance path. |
 
-Canonical lifecycle states used by this control plane are:
+Closing an ABANDONED PR preserves its commit history and exact head for forensic or
+future design reference. It does not authorize reviving that branch for production
+work.
 
-`ACTIVE`, `FROZEN`, `MERGED`, `SUPERSEDED`, `ABANDONED`, and
-`SEPARATE_SCOPE`.
+## Remote branch closeout — complete inventory
 
-The existing runtime investigation stack is **FROZEN** until PR/worktree
-reconciliation is complete. Role/reason is descriptive metadata; it must not be
-parsed as a second lifecycle state.
+The repository currently has 20 remote branches.
 
-| PR | Role / reason | Branch / recorded HEAD | Base | Lifecycle state |
+| Branch | Related PR | State | Cleanup action / reason |
+| --- | ---: | --- | --- |
+| `main` | — | ACTIVE | Keep. Canonical production branch. |
+| `codex/project-agents-control-plane-v1` | #103 | ACTIVE | Keep until #103 completes and merges. |
+| `phase2/pr-e-floattabs-durable-outbox-sender` | #102 | ACTIVE | Keep; separate MemoX integration is still open. |
+| `codex/web-runtime-health-diagnostics` | #99 | ABANDONED | Delete after local refs/worktrees no longer depend on it. |
+| `codex/web-runtime-recovery` | #100 | ABANDONED | Delete after local refs/worktrees no longer depend on it. |
+| `codex/web-runtime-reset-validation` | #101 | ABANDONED | Delete after dirty/local experimental worktrees are reconciled. |
+| `diag/pr94-unread-reappearance-trace` | #96 | ABANDONED | Delete after local registrations are pruned. |
+| `fix/single-instance-runtime-ownership` | #87 | ABANDONED | Delete only after the known dirty detached/local checkout is inspected and preserved as needed. |
+| `fix/unread-trusted-interaction-contract` | #94 | ABANDONED | Delete after local PR94 acceptance/base worktrees are removed/pruned. |
+| `fix/baseline-xctest-gate-stability` | #95 | MERGED | Safe remote branch deletion after local worktree check. |
+| `fix/chatgpt-dom-compatibility` | #97 | MERGED | Safe remote branch deletion after local worktree check. |
+| `fix/external-voice-native-focus-dedup` | #88 | MERGED | Safe remote branch deletion; last-known local worktree was clean. |
+| `fix/set-current-page-as-home` | #85 | MERGED | Safe remote branch deletion after local worktree check. |
+| `fix/unread-badge-visible-completion` | #86 | MERGED | Safe remote branch deletion after local worktree check. |
+| `fix/unread-completion-liveness-u2` | #92 | MERGED | Safe remote branch deletion; old local u2 worktree can be removed/pruned. |
+| `fix/unread-diagnostics-u0` | #90 | MERGED | Safe remote branch deletion; last-known local u0 worktree was clean. |
+| `fix/unread-response-identity-u3` | #93 | MERGED | Safe remote branch deletion; old u3/acceptance worktrees can be removed/pruned. |
+| `fix/unread-trusted-interaction-u1` | #91 | MERGED | Safe remote branch deletion; old u1 audit worktree can be removed/pruned. |
+| `release/v0.5.1` | #89 | MERGED | Safe remote branch deletion; release is already merged and superseded operationally by v0.5.2. |
+| `release/v0.5.2` | #98 | MERGED | Safe remote branch deletion; release commit is already on main. |
+
+### Remote deletion capability
+
+The connected GitHub action surface used for this closeout can close/update PRs
+and move refs, but exposes no safe branch/ref deletion action. Therefore no branch
+is falsely reported as deleted.
+
+All rows marked MERGED or ABANDONED above are **remote-delete candidates** subject
+to the local dependency checks stated in the table. Actual ref deletion is deferred
+to native Git/GitHub tooling after local worktree reconciliation.
+
+## Known local worktree identity closeout
+
+Remote GitHub cannot enumerate the current machine's filesystem. The table below
+records known logical worktree identities from the latest available local audits;
+absolute paths remain local-only.
+
+| Logical worktree identity | Related branch/PR | Last-known local condition | State | Local action |
 | --- | --- | --- | --- | --- |
-| #99 | stalled WebKit runtime diagnostics | `codex/web-runtime-health-diagnostics` / `00e172b98e29ecd1c15c8aa169d5c08892867d73` | `main` | FROZEN |
-| #100 | bounded WebKit stall recovery | `codex/web-runtime-recovery` / `16b4ea4df39538c8bf0e86d151ccf64265c43b23` | #99 branch | FROZEN |
-| #101 | per-slot runtime replacement / QA validation | `codex/web-runtime-reset-validation` / `690ccd193b45aff730ea53b00d598a15fbb0757e` | #100 branch | FROZEN |
-| #102 | MemoX durable outbox sender; independent scope | `phase2/pr-e-floattabs-durable-outbox-sender` / `db6e886b33dffd93ece130463b184ae371b97684` | `main` | SEPARATE_SCOPE |
-| #87 | legacy single-runtime-ownership PR; disposition not yet reconciled | `fix/single-instance-runtime-ownership` / `96fb030a3de1c86856a9a4a155318ef16de430bd` | `main` | FROZEN |
-| #94 | legacy trusted-interaction unread PR; disposition not yet reconciled | `fix/unread-trusted-interaction-contract` / `cf727a050e71842028fb95af2559903016e82c25` | `main` | FROZEN |
-| #96 | legacy unread-reappearance diagnostics; disposition not yet reconciled | `diag/pr94-unread-reappearance-trace` / `afecda2af0b82e22fe666ce7ea7a963865b50dfa` | #94 branch | FROZEN |
+| legacy detached runtime-ownership checkout | detached at #87 head | DIRTY | ABANDONED | Do not delete yet. Inspect/preserve dirty diff, then remove. |
+| web-runtime-reset-validation-v2 | #101 | DIRTY | ABANDONED | Do not delete yet. Inspect/preserve dirty diff, then remove. |
+| web-runtime-health-diagnostics | #99 | previously DIRTY during construction | ABANDONED | Re-verify. Preserve any uncommitted evidence before removal. |
+| focus-dedup-final | merged #88 | last-known CLEAN | MERGED | Safe local removal after one fresh clean/ref check. |
+| unread-diagnostics-u0 | merged #90 | last-known CLEAN | MERGED | Safe local removal after one fresh clean/ref check. |
+| release-v0.5.1 | merged #89 | last-known CLEAN | MERGED | Safe local removal. |
+| phase2-pr-e | #102 | last-known clean when PR was created; current existence must be rechecked | ACTIVE | Keep or recreate one clean task worktree if #102 work resumes. |
+| original web-runtime-reset-validation requested checkout | #101 | confirmed missing | ABANDONED | Already absent; prune stale worktree registration if still present. |
+| PR96 diagnostics final | #96 | registered path later reported missing | ABANDONED | Prune stale registration. |
+| baseline-xctest | merged #95 | registered path later reported missing | MERGED | Prune stale registration. |
+| main-control temporary checkout | historical main snapshot | registered path later reported missing | MERGED | Prune stale registration. |
+| PR94 acceptance/base variants | #94 | registered paths later reported missing | ABANDONED | Prune stale registrations. |
+| unread u1 audit | merged #91 | registered path later reported missing | MERGED | Prune stale registration. |
+| unread u2 | merged #92 | registered path later reported missing | MERGED | Prune stale registration. |
+| unread u3 + acceptance | merged #93 | registered paths later reported missing | MERGED | Prune stale registrations. |
+| generic historical test worktree | historical | registered path later reported missing | ABANDONED | Prune stale registration after confirming no unique ref. |
 
-Recorded SHAs are snapshot evidence. If a live PR head has moved, do not silently
-accept the new SHA; reconcile and update this file.
-
-No row marked `FROZEN` is authorized for new implementation work by the current
-task. `SEPARATE_SCOPE` means the PR is not part of the WebKit incident stack; the
-current task can still temporarily prohibit merging it to keep repository state
-stable during reconciliation.
-
-## Worktree authority
+No production worktree is authorized yet:
 
 **AUTHORIZED_PRODUCTION_WORKTREE_ID: NONE**
 
-Repository-level authorization records a logical worktree identity, its branch,
-upstream/ref relationship, and expected remote HEAD. Machine-specific absolute
-paths are local runtime evidence and are **not committed** to this public
-repository.
+The target after governance closeout is one clean `main` production worktree.
+#102 may retain a separate task worktree because it is an independent ACTIVE
+integration; it does not become the production authority.
 
-The previously requested production worktree was confirmed missing on the machine
-where the baseline gate ran. The gate stopped before branch/HEAD/origin
-verification, and no alternate checkout was authorized.
+## Preserved incident conclusion
 
-Historical local checkout observations may be used to guide a fresh inventory, but
-their absolute paths and machine usernames must remain local-only. Do not choose a
-worktree merely because it exists or is clean.
+The old #99 → #100 → #101 stack is closed, but its evidence conclusion remains:
 
-A governance checkout may be used for the docs-only task defined in
-`CURRENT_TASK.md`; that does not make it the authorized production worktree.
+**stuck-tab root cause = UNKNOWN**
 
-When a production worktree is selected, record here:
-
-- a stable logical worktree ID;
-- required branch;
-- required upstream/ref;
-- expected remote HEAD or dynamic-head verification rule;
-- lifecycle classification.
-
-The local session entry gate must additionally resolve that identity to exactly one
-absolute path on the current machine and verify that checkout is clean before
-implementation.
-
-## Confirmed incident facts
-
-The following facts are preserved because they affect what may be concluded from
-#99/#100/#101:
-
-1. A complete FloatTabs restart restored the affected UI in the observed incident.
-   Recovery by restart does **not** identify the root cause.
-2. An ordinary reload could reach WebKit `commit` and `finished` while the
-   visible ChatGPT page still showed a loading state. Navigation completion alone
-   therefore did not prove visual/application recovery.
-3. One captured startup/navigation sequence included provisional navigation →
-   commit → `NSURLErrorDomain -1005`. System evidence also contained WebKit
-   networking connection-loss / WebContent-process events. This is a
-   network/runtime confounder, not a proven single cause.
-4. Other FloatTabs tabs were subsequently able to finish navigation. The evidence
-   does not establish that the entire shared WebKit runtime was dead.
-5. The controlled per-slot manual-reset experiment represented by #101 was not
-   executed in the captured incident. There were no authoritative
-   `web_runtime.manual_reset.*` markers proving that experiment.
-6. Startup restore timing is supported as an observation; a causal startup race is
-   unconfirmed.
-7. Persisted-state corruption is not supported by the current evidence.
-8. The root cause of the stuck-tab incident remains **UNKNOWN**.
-
-## What the open runtime PRs currently mean
-
-- **#99:** diagnostic/observation work. It is not a root-cause conclusion.
-- **#100:** recovery behavior built on the diagnostic branch. It is on HOLD and is
-  not accepted as a root-cause fix.
-- **#101:** QA/runtime-replacement validation work built on #100. It is on HOLD;
-  its controlled manual-reset experiment still requires an authoritative run if
-  that line of investigation is resumed.
-
-No automatic recovery or further observability expansion is authorized while the
-state-governance freeze is active.
+Restart recovery, reload outcomes, renderer probes, or manual-reset design must not
+be reinterpreted as a proven cause or production fix.
 
 ## Governance PR merge gate
 
-`main` branch protection requires the status check:
+`main` branch protection requires:
 
 `Build & Test (Apple Silicon arm64)`
 
-The existing `.github/workflows/macos-ci.yml` automatically runs for pull
-requests only when code/build/release paths change. This governance PR changes
-only the three root Markdown control-plane files, so the required check is not
-auto-triggered by the PR path filter.
-
-Therefore an absent check is **not** a pass. After local reconciliation is complete
-and the governance branch is otherwise final:
-
-1. manually dispatch the existing **macOS CI** workflow on
-   `codex/project-agents-control-plane-v1`;
-2. ensure the workflow is attached to the exact branch HEAD proposed for merge;
-3. require `Build & Test (Apple Silicon arm64)` = PASS;
-4. only then move #103 out of Draft / merge, subject to the rest of the repository
-   protection rules.
-
-Do not modify the CI workflow merely to make this docs-only PR trigger
-automatically.
+The docs-only #103 change does not auto-trigger this required check through the
+current PR path filter. After local worktree closeout and final control-plane
+review, manually dispatch the existing macOS CI workflow on the exact #103 head
+and require the protected check to pass before Ready/merge.
 
 ## Next state transition
 
-Before runtime work resumes, a local read-only reconciliation must:
+Local reconciliation must now:
 
-1. enumerate every FloatTabs worktree and checkout locally;
-2. record local path, branch/detached state, HEAD, upstream/origin relation, and
-   dirty state in the local audit output; do not commit machine-specific paths;
-3. reconcile those results with every open PR above;
-4. classify each worktree/PR as ACTIVE, FROZEN, MERGED, SUPERSEDED, ABANDONED, or
-   SEPARATE_SCOPE;
-5. select exactly one clean authoritative production worktree identity for the
-   next authorized implementation task;
-6. update this file with its logical ID, branch, verified HEAD/upstream contract,
-   and classification; keep the resolved absolute path local-only.
+1. run a fresh `git worktree list --porcelain` and `git branch -vv`;
+2. map every actual local path to the logical identities above;
+3. remove clean MERGED worktrees;
+4. inspect/preserve dirty ABANDONED worktrees, then remove them;
+5. prune registrations for missing worktrees;
+6. keep/recreate only the ACTIVE #102 task worktree if that integration remains in
+   use;
+7. create or select exactly one clean `main` production worktree after #103 is
+   ready to merge;
+8. delete remote MERGED/ABANDONED branches once no local worktree/ref depends on
+   them;
+9. update this file with the final production worktree identity and remaining
+   ACTIVE task worktrees.
 
-Until that transition is recorded, production changes remain blocked.
+Until this transition is complete, production bug fixing and diagnostic expansion
+remain blocked.
