@@ -87,28 +87,35 @@ stable during reconciliation.
 
 ## Worktree authority
 
-**AUTHORIZED_PRODUCTION_WORKTREE: NONE**
+**AUTHORIZED_PRODUCTION_WORKTREE_ID: NONE**
 
-The most recently requested authoritative path was:
+Repository-level authorization records a logical worktree identity, its branch,
+upstream/ref relationship, and expected remote HEAD. Machine-specific absolute
+paths are local runtime evidence and are **not committed** to this public
+repository.
 
-`/Users/jack7788/.codex/worktrees/web-runtime-reset-validation/FloatTabs`
+The previously requested production worktree was confirmed missing on the machine
+where the baseline gate ran. The gate stopped before branch/HEAD/origin
+verification, and no alternate checkout was authorized.
 
-That path was confirmed missing. The baseline gate therefore stopped before
-branch/HEAD/origin verification. No alternate checkout was authorized.
-
-Last observed local paths that require fresh read-only reconciliation before use:
-
-- `/Volumes/Jack-Dev/Projects/FloatTabs`
-- `/Users/jack7788/.codex/worktrees/web-runtime-reset-validation-v2/FloatTabs`
-- `/Users/jack7788/Documents/Code/FloatTabs-focus-dedup-final`
-- `/Volumes/Jack-Dev/Projects/FloatTabs-u0`
-
-The first path was previously observed detached and dirty. These observations are
-historical until re-verified locally. Do not choose a worktree merely because it
-exists or is clean.
+Historical local checkout observations may be used to guide a fresh inventory, but
+their absolute paths and machine usernames must remain local-only. Do not choose a
+worktree merely because it exists or is clean.
 
 A governance checkout may be used for the docs-only task defined in
 `CURRENT_TASK.md`; that does not make it the authorized production worktree.
+
+When a production worktree is selected, record here:
+
+- a stable logical worktree ID;
+- required branch;
+- required upstream/ref;
+- expected remote HEAD or dynamic-head verification rule;
+- lifecycle classification.
+
+The local session entry gate must additionally resolve that identity to exactly one
+absolute path on the current machine and verify that checkout is clean before
+implementation.
 
 ## Confirmed incident facts
 
@@ -150,15 +157,15 @@ state-governance freeze is active.
 
 Before runtime work resumes, a local read-only reconciliation must:
 
-1. enumerate every FloatTabs worktree and checkout;
-2. record path, branch/detached state, HEAD, upstream/origin relation, and dirty
-   state;
+1. enumerate every FloatTabs worktree and checkout locally;
+2. record local path, branch/detached state, HEAD, upstream/origin relation, and
+   dirty state in the local audit output; do not commit machine-specific paths;
 3. reconcile those results with every open PR above;
 4. classify each worktree/PR as ACTIVE, FROZEN, MERGED, SUPERSEDED, ABANDONED, or
    SEPARATE_SCOPE;
-5. select exactly one clean authoritative production worktree for the next
-   authorized implementation task;
-6. update this file with that worktree path, branch, verified HEAD/upstream
-   relationship, and classification.
+5. select exactly one clean authoritative production worktree identity for the
+   next authorized implementation task;
+6. update this file with its logical ID, branch, verified HEAD/upstream contract,
+   and classification; keep the resolved absolute path local-only.
 
 Until that transition is recorded, production changes remain blocked.
