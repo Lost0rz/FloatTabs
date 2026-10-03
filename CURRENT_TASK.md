@@ -7,17 +7,16 @@
 
 ## Objective
 
-Create and adopt a three-file control plane so ChatGPT/web and local development
-agents share the same project state without reconstructing it from conversation
-history:
+Adopt a three-file control plane so ChatGPT/web and local development agents share
+the same project state without reconstructing it from conversation history:
 
 - `AGENTS.md` — durable rules;
-- `CURRENT_STATUS.md` — authoritative current state;
+- `CURRENT_STATUS.md` — authoritative intended state and classifications;
 - `CURRENT_TASK.md` — the single authorized task.
 
 The task is not complete merely because the files exist. It completes when the
 local repository/worktree state has been reconciled and exactly one authoritative
-worktree is bound in `CURRENT_STATUS.md`.
+production worktree is bound in `CURRENT_STATUS.md`.
 
 ## Authorized work
 
@@ -28,10 +27,13 @@ The following work is allowed:
 3. Perform read-only Git/GitHub inventory of branches, PRs, commits, worktrees,
    status, and upstream relationships.
 4. Classify existing PRs/worktrees without changing production behavior.
-5. Choose one authoritative clean worktree only after the inventory proves its
-   branch/HEAD relationship.
-6. Update `CURRENT_STATUS.md` with the verified authoritative worktree and any
-   corrected classifications.
+5. Choose one authoritative clean production worktree only after the inventory
+   proves its branch/HEAD/upstream relationship.
+6. Update `CURRENT_STATUS.md` with the verified authoritative production
+   worktree and any corrected classifications.
+
+A governance checkout may be used to edit these three documents. It does not
+become the production worktree merely by hosting PR #103.
 
 ## Explicitly prohibited
 
@@ -45,24 +47,26 @@ Until this task changes state, do **not**:
 - perform a runtime reset or controlled incident experiment;
 - merge #99, #100, #101, #102, #87, #94, or #96;
 - create a new bug-fix/diagnostic PR on top of the unresolved stack;
-- use a different local checkout because the requested worktree is missing;
-- infer current state from Memory/chat when it conflicts with the three files.
+- use a different local checkout as a production worktree because the requested
+  worktree is missing;
+- infer current state from Memory/chat when it conflicts with the control-plane
+  files.
 
-## Baseline
+## Recorded baseline
 
 - Remote `main`: `a94ae46db756b10014651f3639cf8659917e204b`
 - Governance PR: #103
 - Governance branch: `codex/project-agents-control-plane-v1`
 - Runtime investigation stack: #99 → #100 → #101, all frozen
-- Authorized local worktree: **NONE**
+- Authorized production worktree: **NONE**
 - Last requested worktree:
   `/Users/jack7788/.codex/worktrees/web-runtime-reset-validation/FloatTabs`
   — confirmed missing; baseline gate stopped.
 
-## Required local reconciliation output
+## Required local reconciliation procedure
 
-The local agent must produce one compact table with, for every discovered FloatTabs
-worktree:
+Before interpreting local state, refresh remote refs read-only. Then produce one
+compact table for every discovered FloatTabs worktree with:
 
 - absolute path;
 - branch or DETACHED;
@@ -71,28 +75,34 @@ worktree:
 - clean/dirty state;
 - associated PR if any;
 - classification;
-- whether it is eligible to become authoritative.
+- whether it is eligible to become the authoritative production worktree.
 
-It must also verify the remote refs for `main`, #99, #100, #101, #102, #103,
-#87, #94, and #96.
+Also verify the live remote refs for `main`, #99, #100, #101, #102, #103, #87,
+#94, and #96 against `CURRENT_STATUS.md`.
+
+If a remote head differs from the recorded snapshot, report the mismatch and
+update/reconcile `CURRENT_STATUS.md` before any implementation work.
 
 ## Acceptance criteria
 
 FT-GOV-001 is complete only when all of the following are true:
 
 - all three control-plane files exist and have non-overlapping roles;
-- remote main HEAD and the relevant open PR stack are recorded;
+- the remote main baseline and relevant open PR stack are recorded;
+- live-ref authority versus state-contract authority is unambiguous;
 - confirmed incident facts are separated from hypotheses;
-- exactly one local worktree is recorded as authoritative;
-- its path, branch, HEAD, upstream, and clean state are verified;
+- exactly one local production worktree is recorded as authoritative;
+- its path, branch, HEAD, upstream, and clean state are verified after remote
+  refresh;
 - unresolved worktrees/PRs have explicit classifications;
-- a new agent can detect a checkout mismatch and STOP without guessing;
+- a new agent can detect a checkout or ref mismatch and STOP without guessing;
 - no production/runtime behavior was changed while establishing the control plane.
 
 ## Stop / handoff condition
 
-After local reconciliation, update `CURRENT_STATUS.md` and this task.
+After local reconciliation, update `CURRENT_STATUS.md` and this task together if
+the task state changes.
 
 If the state is clean and unambiguous, FT-GOV-001 may be marked COMPLETE and the
-next task may be created. The next task must be chosen from the reconciled facts;
-it must not automatically resume bug fixing or log expansion.
+next task may be created. The next task must be chosen from reconciled facts; it
+must not automatically resume bug fixing or log expansion.

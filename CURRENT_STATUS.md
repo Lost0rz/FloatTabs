@@ -1,10 +1,27 @@
 # FloatTabs Current Status
 
 **Status date:** 2026-10-03  
-**State authority:** THIS FILE  
+**State contract:** THIS FILE  
 **Repository:** `Lost0rz/FloatTabs`  
 **Default branch:** `main`  
-**Remote main HEAD:** `a94ae46db756b10014651f3639cf8659917e204b`
+**Recorded remote main baseline:** `a94ae46db756b10014651f3639cf8659917e204b`
+
+## Validity rule
+
+This file defines intended project state and authorization. It does not override
+Git itself for the SHA stored at a live ref.
+
+Before implementation work, refresh remote refs and verify:
+
+- `origin/main` still equals the recorded main baseline above, unless this file
+  has been intentionally updated for a newer baseline;
+- the active governance branch exists and the local HEAD equals its freshly
+  fetched remote HEAD;
+- every PR/branch used by the current task still matches the recorded relationship
+  or has been reconciled here.
+
+Any mismatch makes this status contract **STALE** and requires reconciliation
+before implementation.
 
 ## Current operating mode
 
@@ -19,21 +36,32 @@ local development agents before further runtime investigation.
 - **PR:** #103 — `docs: establish FloatTabs state control plane`
 - **Branch:** `codex/project-agents-control-plane-v1`
 - **Base:** `main`
-- **Base HEAD:** `a94ae46db756b10014651f3639cf8659917e204b`
-- **Pre-control-plane parent HEAD:** `04545324eeb8aaebd66feb2ba5b1ee613ac52443`
+- **Recorded base HEAD:** `a94ae46db756b10014651f3639cf8659917e204b`
+- **Prior governance commit:** `04545324eeb8aaebd66feb2ba5b1ee613ac52443`
 - **State:** OPEN / DRAFT
 - **Scope:** `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and PR metadata only.
 
-The exact live HEAD of the control-plane branch is the commit containing this file
-and must be verified from the branch ref before local work begins. It is not
-embedded as a self-referential SHA inside the same commit.
+### HEAD verification contract
 
-## WebKit incident PR stack
+The governance branch's current HEAD is intentionally **not** embedded in this
+file. A commit cannot truthfully contain its own final SHA without creating an
+infinite self-reference.
+
+For a local governance checkout to be valid:
+
+- branch = `codex/project-agents-control-plane-v1`;
+- local HEAD = freshly fetched
+  `origin/codex/project-agents-control-plane-v1`;
+- working tree = clean unless the current task explicitly authorizes a
+  control-plane edit;
+- upstream relationship = verified, not inferred from an old checkout.
+
+## Open PR inventory and classification
 
 The existing runtime investigation stack is **FROZEN** until PR/worktree
 reconciliation is complete.
 
-| PR | Role | Branch / HEAD | Base | Current classification |
+| PR | Role | Branch / recorded HEAD | Base | Current classification |
 | --- | --- | --- | --- | --- |
 | #99 | stalled WebKit runtime diagnostics | `codex/web-runtime-health-diagnostics` / `00e172b98e29ecd1c15c8aa169d5c08892867d73` | `main` | FROZEN_DIAGNOSTIC |
 | #100 | bounded WebKit stall recovery | `codex/web-runtime-recovery` / `16b4ea4df39538c8bf0e86d151ccf64265c43b23` | #99 branch | FROZEN_RECOVERY |
@@ -43,12 +71,15 @@ reconciliation is complete.
 | #94 | trusted interaction unread contract | `fix/unread-trusted-interaction-contract` / `cf727a050e71842028fb95af2559903016e82c25` | `main` | UNRESOLVED_LEGACY |
 | #96 | unread reappearance diagnostics | `diag/pr94-unread-reappearance-trace` / `afecda2af0b82e22fe666ce7ea7a963865b50dfa` | #94 branch | UNRESOLVED_LEGACY |
 
+Recorded SHAs are snapshot evidence. If a live PR head has moved, do not silently
+accept the new SHA; reconcile and update this file.
+
 No row marked FROZEN or UNRESOLVED is authorized for new implementation work by
 the current task.
 
 ## Worktree authority
 
-**AUTHORIZED_WORKTREE: NONE**
+**AUTHORIZED_PRODUCTION_WORKTREE: NONE**
 
 The most recently requested authoritative path was:
 
@@ -68,6 +99,9 @@ The first path was previously observed detached and dirty. These observations ar
 historical until re-verified locally. Do not choose a worktree merely because it
 exists or is clean.
 
+A governance checkout may be used for the docs-only task defined in
+`CURRENT_TASK.md`; that does not make it the authorized production worktree.
+
 ## Confirmed incident facts
 
 The following facts are preserved because they affect what may be concluded from
@@ -78,10 +112,10 @@ The following facts are preserved because they affect what may be concluded from
 2. An ordinary reload could reach WebKit `commit` and `finished` while the
    visible ChatGPT page still showed a loading state. Navigation completion alone
    therefore did not prove visual/application recovery.
-3. One captured startup/navigation sequence included
-   provisional navigation → commit → `NSURLErrorDomain -1005`. System evidence
-   also contained WebKit networking connection-loss / WebContent-process events.
-   This is a network/runtime confounder, not a proven single cause.
+3. One captured startup/navigation sequence included provisional navigation →
+   commit → `NSURLErrorDomain -1005`. System evidence also contained WebKit
+   networking connection-loss / WebContent-process events. This is a
+   network/runtime confounder, not a proven single cause.
 4. Other FloatTabs tabs were subsequently able to finish navigation. The evidence
    does not establish that the entire shared WebKit runtime was dead.
 5. The controlled per-slot manual-reset experiment represented by #101 was not
@@ -114,7 +148,9 @@ Before runtime work resumes, a local read-only reconciliation must:
 3. reconcile those results with every open PR above;
 4. classify each worktree/PR as ACTIVE, FROZEN, MERGED, SUPERSEDED, ABANDONED, or
    SEPARATE_SCOPE;
-5. select exactly one clean authoritative worktree for the next authorized task;
-6. update this file with that worktree path, branch, and verified HEAD.
+5. select exactly one clean authoritative production worktree for the next
+   authorized implementation task;
+6. update this file with that worktree path, branch, verified HEAD/upstream
+   relationship, and classification.
 
 Until that transition is recorded, production changes remain blocked.
