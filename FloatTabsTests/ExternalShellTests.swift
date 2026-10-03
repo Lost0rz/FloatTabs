@@ -993,6 +993,19 @@ final class ExternalShellTests: XCTestCase {
         ))
     }
 
+    func testPeriodicHealthSamplingRequiresExactWaveTwoQALabel() {
+        XCTAssertTrue(RuntimeQACapabilities.allowsPeriodicHealthSampling(
+            qaLabel: "runtime-diagnostics-wave2"
+        ))
+        XCTAssertFalse(RuntimeQACapabilities.allowsPeriodicHealthSampling(qaLabel: nil))
+        XCTAssertFalse(RuntimeQACapabilities.allowsPeriodicHealthSampling(
+            qaLabel: "unrelated-qa-label"
+        ))
+        XCTAssertFalse(RuntimeQACapabilities.allowsPeriodicHealthSampling(
+            qaLabel: "runtime-diagnostics-wave2-extra"
+        ))
+    }
+
     func testManualRuntimeResetMenuActionIsDisabledForInactiveTab() throws {
         let (_, zone) = makeZoneHarness()
         let active = makeProfile(order: 0, name: "Active")

@@ -836,6 +836,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let instantBackURLSafetyCheck: (URL) -> Bool
     private let diagnostics: any RuntimeDiagnosticRecording
     private let runtimeGeneration: UInt64
+    private let webViewInstanceID: UUID
+    private let documentEpochProvider: @MainActor () -> UInt64?
     private let isSlotActive: @MainActor (UUID) -> Bool
     private let networkPathGenerationProvider: @MainActor () -> UInt64?
     private let incidentDiagnosticContextProvider: IncidentDiagnosticContextProvider
@@ -905,6 +907,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             webView.load(URLRequest(url: url))
         },
         runtimeGeneration: UInt64 = 0,
+        webViewInstanceID: UUID = UUID(),
+        documentEpochProvider: @escaping @MainActor () -> UInt64? = { nil },
         isSlotActive: @escaping @MainActor (UUID) -> Bool = { _ in false },
         networkPathGenerationProvider: @escaping @MainActor () -> UInt64? = { nil },
         incidentDiagnosticContextProvider: @escaping IncidentDiagnosticContextProvider = { _ in [:] },
@@ -931,6 +935,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.instantBackURLSafetyCheck = instantBackURLSafetyCheck
         self.loadHandler = loadHandler
         self.runtimeGeneration = runtimeGeneration
+        self.webViewInstanceID = webViewInstanceID
+        self.documentEpochProvider = documentEpochProvider
         self.isSlotActive = isSlotActive
         self.networkPathGenerationProvider = networkPathGenerationProvider
         self.incidentDiagnosticContextProvider = incidentDiagnosticContextProvider
@@ -2154,6 +2160,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         var fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
             "runtime_generation": .integer(Int64(runtimeGeneration)),
+            "webview_instance_id": .string(webViewInstanceID.uuidString),
+            "document_epoch": documentEpochProvider().map { .integer(Int64($0)) } ?? .null,
             "navigation_generation": ticket.map {
                 .integer(Int64($0.navigationGeneration))
             } ?? .null,

@@ -60,6 +60,149 @@ enum WebNavigationTrigger: String, CaseIterable, Equatable {
     case unknown
 }
 
+struct RuntimeDiagnosticCachedHealthContext {
+    let capturedUptime: TimeInterval
+    let runtimeGeneration: UInt64?
+    let navigationGeneration: UInt64?
+    let documentEpoch: UInt64?
+    let webViewInstanceID: UUID?
+
+    func fields(
+        nowUptime: TimeInterval,
+        currentRuntimeGeneration: UInt64?,
+        currentNavigationGeneration: UInt64?,
+        currentDocumentEpoch: UInt64?,
+        currentWebViewInstanceID: UUID?
+    ) -> [String: RuntimeDiagnosticValue] {
+        let elapsed = max(0, nowUptime - capturedUptime)
+        let ageMilliseconds = Int64(min(86_400_000, elapsed * 1_000).rounded())
+        let runtimeMatches = runtimeGeneration != nil
+            && runtimeGeneration == currentRuntimeGeneration
+            && webViewInstanceID != nil
+            && webViewInstanceID == currentWebViewInstanceID
+        let documentMatches = runtimeMatches
+            && documentEpoch != nil
+            && documentEpoch == currentDocumentEpoch
+        let navigationMatches = runtimeMatches
+            && navigationGeneration != nil
+            && navigationGeneration == currentNavigationGeneration
+        return [
+            "cached_health_available": .bool(true),
+            "cached_health_source": .string("latest_recorded"),
+            "cached_health_age_ms": .integer(ageMilliseconds),
+            "cached_health_runtime_generation": runtimeGeneration.map { .integer(Int64($0)) } ?? .null,
+            "cached_health_navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
+            "cached_health_document_epoch": documentEpoch.map { .integer(Int64($0)) } ?? .null,
+            "cached_health_webview_instance_id": webViewInstanceID.map { .string($0.uuidString) } ?? .null,
+            "cached_health_runtime_matches_current": .bool(runtimeMatches),
+            "cached_health_runtime_stale": .bool(!runtimeMatches),
+            "cached_health_navigation_matches_current": .bool(navigationMatches),
+            "cached_health_document_matches_current": .bool(documentMatches)
+        ]
+    }
+
+    static let unavailable: [String: RuntimeDiagnosticValue] = [
+        "cached_health_available": .bool(false),
+        "cached_health_source": .string("none"),
+        "cached_health_age_ms": .null,
+        "cached_health_runtime_generation": .null,
+        "cached_health_navigation_generation": .null,
+        "cached_health_document_epoch": .null,
+        "cached_health_webview_instance_id": .null,
+        "cached_health_runtime_matches_current": .bool(false),
+        "cached_health_runtime_stale": .bool(false),
+        "cached_health_navigation_matches_current": .bool(false),
+        "cached_health_document_matches_current": .bool(false)
+    ]
+}
+
+struct QAPeriodicHealthSampleTarget: Equatable {
+    let slotID: UUID
+    let runtimeGeneration: UInt64
+    let navigationGeneration: UInt64
+    let webViewInstanceID: UUID
+}
+
+@MainActor
+final class QAPeriodicHealthSampler {
+    typealias ScheduledAction = @MainActor () -> Void
+    typealias Scheduler = (TimeInterval, @escaping ScheduledAction) -> Void
+    typealias CandidateProvider = @MainActor () -> QAPeriodicHealthSampleTarget?
+    typealias Completion = @MainActor () -> Void
+    typealias Sample = @MainActor (QAPeriodicHealthSampleTarget, @escaping Completion) -> Void
+
+    let interval: TimeInterval
+    private let scheduler: Scheduler
+    private let candidateProvider: CandidateProvider
+    private let sample: Sample
+    private var isRunning = false
+    private var inFlightSampleID: UUID?
+    private var inFlightTarget: QAPeriodicHealthSampleTarget?
+
+    init(
+        interval: TimeInterval = 30,
+        scheduler: @escaping Scheduler = { delay, action in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                Task { @MainActor in action() }
+            }
+        },
+        candidateProvider: @escaping CandidateProvider,
+        sample: @escaping Sample
+    ) {
+        self.interval = interval
+        self.scheduler = scheduler
+        self.candidateProvider = candidateProvider
+        self.sample = sample
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        scheduleNextTick()
+    }
+
+    func stop() {
+        isRunning = false
+        inFlightSampleID = nil
+        inFlightTarget = nil
+    }
+
+    func cancelInFlight(slotID: UUID) {
+        guard inFlightTarget?.slotID == slotID else { return }
+        inFlightSampleID = nil
+        inFlightTarget = nil
+    }
+
+    private func scheduleNextTick() {
+        guard isRunning else { return }
+        scheduler(interval) { [weak self] in self?.tick() }
+    }
+
+    private func tick() {
+        guard isRunning else { return }
+        // Schedule from this wake, so sleep produces one sample and never a catch-up burst.
+        scheduleNextTick()
+        guard inFlightSampleID == nil,
+              let target = candidateProvider() else { return }
+
+        let sampleID = UUID()
+        inFlightSampleID = sampleID
+        inFlightTarget = target
+        sample(target) { [weak self] in
+            guard let self,
+                  self.isRunning,
+                  self.inFlightSampleID == sampleID else { return }
+            if self.candidateProvider() != target {
+                self.inFlightSampleID = nil
+                self.inFlightTarget = nil
+                return
+            }
+            self.inFlightSampleID = nil
+            self.inFlightTarget = nil
+        }
+    }
+}
+
 @MainActor
 private final class RuntimeChatGPTHealthProbeAccumulator {
     private(set) var fields: [String: RuntimeDiagnosticValue]
@@ -88,6 +231,26 @@ private final class RuntimeChatGPTHealthProbeAccumulator {
         guard !isFinished else { return }
         isFinished = true
         completion(fields)
+    }
+}
+
+struct RuntimeDiagnosticHealthProbeGate {
+    private(set) var hasResolved = false
+
+    mutating func resolve(
+        outcome: ChatGPTHealthProbeOutcome,
+        available: Bool,
+        roundTripMilliseconds: Int64?
+    ) -> [String: RuntimeDiagnosticValue]? {
+        guard !hasResolved else { return nil }
+        hasResolved = true
+        return [
+            "health_probe_available": .bool(available),
+            "health_probe_outcome": .string(outcome.rawValue),
+            "health_probe_roundtrip_ms": roundTripMilliseconds.map {
+                .integer(min(max($0, 0), 120_000))
+            } ?? .null
+        ]
     }
 }
 
@@ -122,9 +285,15 @@ final class WebViewPool {
     typealias CalibreReaderRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
+    private struct CachedChatGPTHealth {
+        let fields: [String: RuntimeDiagnosticValue]
+        let context: RuntimeDiagnosticCachedHealthContext
+    }
+
     private var webViews: [UUID: WKWebView] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var runtimeGenerations: [UUID: UInt64] = [:]
+    private var webViewInstanceIDs: [UUID: UUID] = [:]
     private var nextRuntimeGeneration: UInt64 = 0
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
@@ -136,7 +305,10 @@ final class WebViewPool {
     private var deferredReloadSlotIDs = Set<UUID>()
     private var deferredSoftRecoveries: [UUID: WebRuntimeRecoveryRequest] = [:]
     private var recentlyReleasedSlotIDs = Set<UUID>()
-    private var latestChatGPTHealthFields: [UUID: [String: RuntimeDiagnosticValue]] = [:]
+    private var latestChatGPTHealthFields: [UUID: CachedChatGPTHealth] = [:]
+    private var healthProbeTokens: [UUID: UUID] = [:]
+    private var periodicHealthSampler: QAPeriodicHealthSampler?
+    private let monotonicUptime: () -> TimeInterval
 
     var runtimeConstructionPhaseProvider: @MainActor () -> String = { "unknown" }
     var networkPathGenerationProvider: @MainActor () -> UInt64? = { nil }
@@ -217,7 +389,8 @@ final class WebViewPool {
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
         browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider(),
-        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        monotonicUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
@@ -229,6 +402,32 @@ final class WebViewPool {
         self.committedURLProvider = committedURLProvider
         self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
         self.diagnostics = diagnostics
+        self.monotonicUptime = monotonicUptime
+
+        let qaLabel = Bundle.main.object(forInfoDictionaryKey: "FloatTabsQALabel") as? String
+        if RuntimeQACapabilities.allowsPeriodicHealthSampling(qaLabel: qaLabel) {
+            let sampler = QAPeriodicHealthSampler(
+                candidateProvider: { [weak self] in self?.periodicHealthSampleTarget() },
+                sample: { [weak self] target, completion in
+                    guard let self,
+                          self.isCurrentPeriodicHealthTarget(target),
+                          let webView = self.webViews[target.slotID] else {
+                        completion()
+                        return
+                    }
+                    let started = self.captureChatGPTHealthSnapshot(
+                        slotID: target.slotID,
+                        webView: webView,
+                        trigger: "qa_periodic_active",
+                        navigationGeneration: target.navigationGeneration,
+                        completion: completion
+                    )
+                    if !started { completion() }
+                }
+            )
+            periodicHealthSampler = sampler
+            sampler.start()
+        }
     }
 
     func webView(
@@ -279,6 +478,12 @@ final class WebViewPool {
             var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
             reuseFields["slot_id"] = .string(profile.id.uuidString)
             reuseFields["runtime_generation"] = runtimeGenerations[profile.id].map {
+                .integer(Int64($0))
+            } ?? .null
+            reuseFields["webview_instance_id"] = webViewInstanceIDs[profile.id].map {
+                .string($0.uuidString)
+            } ?? .null
+            reuseFields["document_epoch"] = attentionBridges[profile.id]?.diagnosticDocumentEpoch.map {
                 .integer(Int64($0))
             } ?? .null
             diagnostics.record(
@@ -347,6 +552,8 @@ final class WebViewPool {
     ) throws -> WKWebView? {
         let oldWebView = webViews[requestedSlotID]
         let runtimeGenerationBefore = runtimeGenerations[requestedSlotID]
+        let webViewInstanceIDBefore = webViewInstanceIDs[requestedSlotID]
+        let documentEpochBefore = attentionBridges[requestedSlotID]?.diagnosticDocumentEpoch
         let navigationGenerationBefore = navigationObservers[requestedSlotID]
             .map(\.diagnosticNavigationGeneration)
         let isActive = activeProfile?.id == requestedSlotID && isSlotActive(requestedSlotID)
@@ -357,6 +564,12 @@ final class WebViewPool {
             subsystem: "web",
             fields: [
                 "slot_id": .string(requestedSlotID.uuidString),
+                "webview_instance_id": webViewInstanceIDBefore.map {
+                    .string($0.uuidString)
+                } ?? .null,
+                "document_epoch": documentEpochBefore.map {
+                    .integer(Int64($0))
+                } ?? .null,
                 "runtime_generation_before": runtimeGenerationBefore.map {
                     .integer(Int64($0))
                 } ?? .null,
@@ -437,6 +650,12 @@ final class WebViewPool {
                     "runtime_generation_after": runtimeGenerationAfter.map {
                         .integer(Int64($0))
                     } ?? .null,
+                    "webview_instance_id": webViewInstanceIDs[requestedSlotID].map {
+                        .string($0.uuidString)
+                    } ?? .null,
+                    "document_epoch": attentionBridges[requestedSlotID]?.diagnosticDocumentEpoch.map {
+                        .integer(Int64($0))
+                    } ?? .null,
                     "same_slot": .bool(true),
                     "same_browser_profile": .bool(
                         browserProfileIdentity(for: requestedSlotID) == browserProfileBefore
@@ -455,6 +674,12 @@ final class WebViewPool {
                 subsystem: "web",
                 fields: [
                     "slot_id": .string(requestedSlotID.uuidString),
+                    "webview_instance_id_before": webViewInstanceIDBefore.map {
+                        .string($0.uuidString)
+                    } ?? .null,
+                    "document_epoch_before": documentEpochBefore.map {
+                        .integer(Int64($0))
+                    } ?? .null,
                     "runtime_generation_before": runtimeGenerationBefore.map {
                         .integer(Int64($0))
                     } ?? .null,
@@ -640,6 +865,12 @@ final class WebViewPool {
             "incident_id": .string(incidentID.uuidString),
             "slot_id": .string(slotID.uuidString),
             "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+            "webview_instance_id": webViewInstanceIDs[slotID].map {
+                .string($0.uuidString)
+            } ?? .null,
+            "document_epoch": attentionBridges[slotID]?.diagnosticDocumentEpoch.map {
+                .integer(Int64($0))
+            } ?? .null,
             "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
             "network_generation": networkPathGenerationProvider().map { .integer(Int64($0)) } ?? .null,
             "incident_reason": .string(reason),
@@ -651,7 +882,20 @@ final class WebViewPool {
             "response_bridge_ready": .bool(responseBridges[slotID]?.isDocumentReady ?? false)
         ]
         fields.merge(incidentDiagnosticContextProvider(slotID)) { _, new in new }
-        fields.merge(latestChatGPTHealthFields[slotID] ?? [:]) { _, new in new }
+        let currentRuntimeGeneration = runtimeGenerations[slotID]
+        let currentDocumentEpoch = attentionBridges[slotID]?.diagnosticDocumentEpoch
+        if let cached = latestChatGPTHealthFields[slotID] {
+            fields.merge(cached.fields) { _, new in new }
+            fields.merge(cached.context.fields(
+                nowUptime: monotonicUptime(),
+                currentRuntimeGeneration: currentRuntimeGeneration,
+                currentNavigationGeneration: navigationGeneration,
+                currentDocumentEpoch: currentDocumentEpoch,
+                currentWebViewInstanceID: webViewInstanceIDs[slotID]
+            )) { _, new in new }
+        } else {
+            fields.merge(RuntimeDiagnosticCachedHealthContext.unavailable) { _, new in new }
+        }
         if fields["latest_response_complete"] == nil {
             fields["latest_response_complete"] = .bool(false)
         }
@@ -681,6 +925,9 @@ final class WebViewPool {
     /// persisted WebAppProfile, currentURL, cookies and shared website data stay
     /// outside this pool and therefore survive Cold eviction.
     func release(slotID: UUID) {
+        periodicHealthSampler?.cancelInFlight(slotID: slotID)
+        healthProbeTokens.removeValue(forKey: slotID)
+        let documentEpoch = attentionBridges[slotID]?.diagnosticDocumentEpoch
         // The bridge dies with its WKWebView: invalidate it first so no stale
         // callback can arrive after the runtime is dropped.
         invalidateAttentionBridge(slotID: slotID)
@@ -689,6 +936,7 @@ final class WebViewPool {
         discardPopupCoordinator(slotID: slotID)
         let observer = navigationObservers.removeValue(forKey: slotID)
         let runtimeGeneration = runtimeGenerations.removeValue(forKey: slotID)
+        let webViewInstanceID = webViewInstanceIDs.removeValue(forKey: slotID)
         let navigationGeneration = observer?.diagnosticNavigationGeneration
         observer?.invalidate()
         appliedRenderingProfiles.removeValue(forKey: slotID)
@@ -710,7 +958,9 @@ final class WebViewPool {
                 fields: [
                     "slot_id": .string(slotID.uuidString),
                     "runtime_generation": runtimeGeneration.map { .integer(Int64($0)) } ?? .null,
-                    "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null
+                    "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
+                    "webview_instance_id": webViewInstanceID.map { .string($0.uuidString) } ?? .null,
+                    "document_epoch": documentEpoch.map { .integer(Int64($0)) } ?? .null
                 ]
             )
             onRuntimeRelease?(slotID)
@@ -814,6 +1064,10 @@ final class WebViewPool {
             fields: [
                 "slot_id": .string(slotID.uuidString),
                 "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
+                "webview_instance_id": webViewInstanceIDs[slotID].map { .string($0.uuidString) } ?? .null,
+                "document_epoch": attentionBridges[slotID]?.diagnosticDocumentEpoch.map {
+                    .integer(Int64($0))
+                } ?? .null,
                 "navigation_generation": navigationObservers[slotID].map {
                     .integer(Int64($0.diagnosticNavigationGeneration))
                 } ?? .null,
@@ -867,6 +1121,32 @@ final class WebViewPool {
         }
     }
 
+    private func periodicHealthSampleTarget() -> QAPeriodicHealthSampleTarget? {
+        guard let slotID = webViews.keys.first(where: { isSlotActive($0) }),
+              let webView = webViews[slotID],
+              let url = webView.url,
+              ChatGPTSitePolicy.isSupportedChatGPTURL(url),
+              let runtimeGeneration = runtimeGenerations[slotID],
+              let navigationGeneration = navigationObservers[slotID]?.diagnosticNavigationGeneration,
+              let webViewInstanceID = webViewInstanceIDs[slotID] else { return nil }
+        return QAPeriodicHealthSampleTarget(
+            slotID: slotID,
+            runtimeGeneration: runtimeGeneration,
+            navigationGeneration: navigationGeneration,
+            webViewInstanceID: webViewInstanceID
+        )
+    }
+
+    private func isCurrentPeriodicHealthTarget(_ target: QAPeriodicHealthSampleTarget) -> Bool {
+        guard isSlotActive(target.slotID),
+              let webView = webViews[target.slotID],
+              let url = webView.url else { return false }
+        return ChatGPTSitePolicy.isSupportedChatGPTURL(url)
+            && runtimeGenerations[target.slotID] == target.runtimeGeneration
+            && navigationObservers[target.slotID]?.diagnosticNavigationGeneration == target.navigationGeneration
+            && webViewInstanceIDs[target.slotID] == target.webViewInstanceID
+    }
+
     static func rebuildNavigationURL(
         initialURL: URL?,
         visibleURL: URL?,
@@ -887,6 +1167,9 @@ final class WebViewPool {
         reason: WebRuntimeCreationReason = .renderingRebuild,
         restoredLastActive: Bool = false
     ) throws -> WKWebView {
+        periodicHealthSampler?.cancelInFlight(slotID: profile.id)
+        healthProbeTokens.removeValue(forKey: profile.id)
+        let replacementWebViewInstanceID = UUID()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
             for: profile.renderingProfile.normalized(),
             navigationURL: navigationURL
@@ -902,6 +1185,14 @@ final class WebViewPool {
         rebuildFields["runtime_generation_before"] = runtimeGenerations[profile.id].map {
             .integer(Int64($0))
         } ?? .null
+        rebuildFields["runtime_generation_after"] = .integer(Int64(nextRuntimeGeneration &+ 1))
+        rebuildFields["webview_instance_id_before"] = webViewInstanceIDs[profile.id].map {
+            .string($0.uuidString)
+        } ?? .null
+        rebuildFields["webview_instance_id_after"] = .string(replacementWebViewInstanceID.uuidString)
+        rebuildFields["document_epoch_before"] = attentionBridges[profile.id]?.diagnosticDocumentEpoch.map {
+            .integer(Int64($0))
+        } ?? .null
         rebuildFields["navigation_generation_before"] = navigationObservers[profile.id].map {
             .integer(Int64($0.diagnosticNavigationGeneration))
         } ?? .null
@@ -914,7 +1205,6 @@ final class WebViewPool {
         if reason != .manualRuntimeReset {
             onRuntimeRelease?(profile.id)
         }
-        latestChatGPTHealthFields.removeValue(forKey: profile.id)
         invalidateAttentionBridge(slotID: profile.id)
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
@@ -926,6 +1216,7 @@ final class WebViewPool {
         // diagnostic identity before attempting replacement so a failed
         // rebuild cannot leave a phantom generation attached to the Slot.
         runtimeGenerations.removeValue(forKey: profile.id)
+        webViewInstanceIDs.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
@@ -944,14 +1235,21 @@ final class WebViewPool {
                 cachePolicy: .useProtocolCachePolicy,
                 notifyResidentSetChange: false,
                 reason: reason,
-                restoredLastActive: restoredLastActive
+                restoredLastActive: restoredLastActive,
+                webViewInstanceID: replacementWebViewInstanceID
             )
             diagnostics.record(
                 event: "web_runtime.rebuild.completed",
                 level: .notice,
                 subsystem: "web",
                 fields: rebuildFields.merging([
-                    "runtime_generation": runtimeGenerations[profile.id].map { .integer(Int64($0)) } ?? .null
+                    "runtime_generation": runtimeGenerations[profile.id].map { .integer(Int64($0)) } ?? .null,
+                    "webview_instance_id": webViewInstanceIDs[profile.id].map {
+                        .string($0.uuidString)
+                    } ?? .null,
+                    "document_epoch": attentionBridges[profile.id]?.diagnosticDocumentEpoch.map {
+                        .integer(Int64($0))
+                    } ?? .null
                 ]) { _, new in new }
             )
             return webView
@@ -961,7 +1259,12 @@ final class WebViewPool {
             }
             var fields: [String: RuntimeDiagnosticValue] = [
                 "slot_id": .string(profile.id.uuidString),
-                "operation": .string("rebuild")
+                "operation": .string("rebuild"),
+                "runtime_generation_before": rebuildFields["runtime_generation_before"] ?? .null,
+                "runtime_generation_after": .null,
+                "webview_instance_id_before": rebuildFields["webview_instance_id_before"] ?? .null,
+                "webview_instance_id_after": .string(replacementWebViewInstanceID.uuidString),
+                "document_epoch_before": rebuildFields["document_epoch_before"] ?? .null
             ]
             fields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { _, new in new }
             diagnostics.record(
@@ -980,7 +1283,8 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true,
         reason: WebRuntimeCreationReason = .initialCreate,
-        restoredLastActive: Bool = false
+        restoredLastActive: Bool = false,
+        webViewInstanceID: UUID = UUID()
     ) throws -> WKWebView {
         let fields = runtimeCreationFields(
             for: profile,
@@ -990,7 +1294,8 @@ final class WebViewPool {
         ).merging([
             "browser_profile": RuntimeDiagnosticValue.string(
                 String(describing: BrowserProfileIdentity(browserProfileID: profile.browserProfileID))
-            )
+            ),
+            "webview_instance_id": .string(webViewInstanceID.uuidString)
         ]) { _, new in new }
         diagnostics.record(
             event: "web_runtime.create.begin",
@@ -1006,7 +1311,8 @@ final class WebViewPool {
                 cachePolicy: cachePolicy,
                 notifyResidentSetChange: notifyResidentSetChange,
                 reason: reason,
-                restoredLastActive: restoredLastActive
+                restoredLastActive: restoredLastActive,
+                webViewInstanceID: webViewInstanceID
             )
         } catch {
             var failureFields = fields
@@ -1027,7 +1333,8 @@ final class WebViewPool {
         cachePolicy: URLRequest.CachePolicy,
         notifyResidentSetChange: Bool = true,
         reason: WebRuntimeCreationReason,
-        restoredLastActive: Bool
+        restoredLastActive: Bool,
+        webViewInstanceID: UUID
     ) throws -> WKWebView {
         let rendering = profile.renderingProfile.normalized()
         let runtimeRendering = SiteCompatibilityPolicy.runtimeRendering(
@@ -1094,6 +1401,7 @@ final class WebViewPool {
         nextRuntimeGeneration &+= 1
         let runtimeGeneration = nextRuntimeGeneration
         runtimeGenerations[profile.id] = runtimeGeneration
+        webViewInstanceIDs[profile.id] = webViewInstanceID
         attentionBridge.attach(to: webView)
         responseBridge.attach(to: webView)
         calibreReaderBridge.attach(to: webView)
@@ -1178,6 +1486,10 @@ final class WebViewPool {
             },
             diagnostics: diagnostics,
             runtimeGeneration: runtimeGeneration,
+            webViewInstanceID: webViewInstanceID,
+            documentEpochProvider: { [weak attentionBridge] in
+                attentionBridge?.diagnosticDocumentEpoch
+            },
             isSlotActive: isSlotActive,
             networkPathGenerationProvider: networkPathGenerationProvider,
             incidentDiagnosticContextProvider: { [weak self] slotID in
@@ -1246,6 +1558,8 @@ final class WebViewPool {
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
         createdFields["runtime_generation"] = .integer(Int64(runtimeGeneration))
+        createdFields["webview_instance_id"] = .string(webViewInstanceID.uuidString)
+        createdFields["document_epoch"] = .null
         createdFields["reason"] = .string(reason.rawValue)
         createdFields["active"] = .bool(isSlotActive(profile.id))
         createdFields["residency_policy"] = .string(profile.residencyPolicy.rawValue)
@@ -1305,26 +1619,57 @@ final class WebViewPool {
         trigger: String,
         navigationGeneration: UInt64?,
         attentionBridge: ChatGPTAttentionBridge? = nil,
-        responseBridge: ChatGPTResponseBridge? = nil
-    ) {
+        responseBridge: ChatGPTResponseBridge? = nil,
+        completion: (@MainActor () -> Void)? = nil
+    ) -> Bool {
         guard let host = webView.url?.host,
-              ChatGPTSitePolicy.isSupportedHost(host) else { return }
+              ChatGPTSitePolicy.isSupportedHost(host),
+              healthProbeTokens[slotID] == nil else { return false }
         let attentionBridge = attentionBridge ?? attentionBridges[slotID]
         let responseBridge = responseBridge ?? responseBridges[slotID]
+        let probeToken = UUID()
+        let startingRuntimeGeneration = runtimeGenerations[slotID]
+        let startingNavigationGeneration = navigationGeneration
+            ?? navigationObservers[slotID]?.diagnosticNavigationGeneration
+        let startingWebViewInstanceID = webViewInstanceIDs[slotID]
+        let startingDocumentEpoch = attentionBridge?.diagnosticDocumentEpoch
+        let startedUptime = monotonicUptime()
+        healthProbeTokens[slotID] = probeToken
         let fields: [String: RuntimeDiagnosticValue] = [
             "slot_id": .string(slotID.uuidString),
-            "runtime_generation": runtimeGenerations[slotID].map { .integer(Int64($0)) } ?? .null,
-            "navigation_generation": navigationGeneration.map { .integer(Int64($0)) } ?? .null,
+            "runtime_generation": startingRuntimeGeneration.map { .integer(Int64($0)) } ?? .null,
+            "navigation_generation": startingNavigationGeneration.map { .integer(Int64($0)) } ?? .null,
+            "webview_instance_id": startingWebViewInstanceID.map { .string($0.uuidString) } ?? .null,
+            "document_epoch": startingDocumentEpoch.map { .integer(Int64($0)) } ?? .null,
             "network_generation": networkPathGenerationProvider().map { .integer(Int64($0)) } ?? .null,
             "probe_trigger": .string(trigger),
             "response_bridge_ready": .bool(responseBridge?.isDocumentReady ?? false),
-            "latest_response_complete": .bool(false)
+            "latest_response_complete": .bool(false),
+            "health_probe_outcome": .string("timeout"),
+            "health_probe_roundtrip_ms": .null
         ]
+        var healthProbeGate = RuntimeDiagnosticHealthProbeGate()
         let accumulator = RuntimeChatGPTHealthProbeAccumulator(
             fields: fields,
             expectedResults: 2
         ) { [weak self] completedFields in
-            guard let self else { return }
+            guard let self,
+                  self.healthProbeTokens[slotID] == probeToken else { return }
+            self.healthProbeTokens.removeValue(forKey: slotID)
+            let currentDocumentEpoch = attentionBridge?.diagnosticDocumentEpoch
+            guard self.webViews[slotID] === webView,
+                  self.runtimeGenerations[slotID] == startingRuntimeGeneration,
+                  self.webViewInstanceIDs[slotID] == startingWebViewInstanceID,
+                  self.navigationObservers[slotID]?.diagnosticNavigationGeneration == startingNavigationGeneration,
+                  startingDocumentEpoch == nil || currentDocumentEpoch == startingDocumentEpoch,
+                  trigger != "qa_periodic_active" || self.isSlotActive(slotID) else {
+                completion?()
+                return
+            }
+            var healthFields = completedFields
+            healthFields["document_epoch"] = currentDocumentEpoch.map {
+                .integer(Int64($0))
+            } ?? .null
             let boundedHealthKeys = Set([
                 "document_ready_state", "visibility_state", "bridge_document_ready",
                 "attention_state", "conversation_shell_present", "composer_present",
@@ -1332,37 +1677,83 @@ final class WebViewPool {
                 "conversation_load_error_present", "response_bridge_ready",
                 "latest_response_complete", "probe_elapsed_ms", "window_error_count",
                 "window_error_class", "unhandled_rejection_count", "unhandled_rejection_class",
-                "health_probe_available"
+                "health_probe_available", "script_error_event_count", "resource_error_event_count",
+                "other_window_error_event_count", "last_window_error_kind",
+                "first_window_error_age_ms", "last_window_error_age_ms",
+                "first_unhandled_rejection_age_ms", "last_unhandled_rejection_age_ms",
+                "observed_dom_mutation_batch_count", "last_dom_mutation_age_ms",
+                "pageshow_count", "last_pageshow_age_ms",
+                "visibility_change_count", "last_visibility_change_age_ms",
+                "health_probe_outcome", "health_probe_roundtrip_ms",
+                "probe_trigger"
             ])
             // Late old-document probes must not overwrite the replacement cache.
-            if self.existingWebView(for: slotID) === webView {
-                self.latestChatGPTHealthFields[slotID] = completedFields.filter {
-                    boundedHealthKeys.contains($0.key)
-                }
-            }
+            self.latestChatGPTHealthFields[slotID] = CachedChatGPTHealth(
+                fields: healthFields.filter { boundedHealthKeys.contains($0.key) },
+                context: RuntimeDiagnosticCachedHealthContext(
+                    capturedUptime: self.monotonicUptime(),
+                    runtimeGeneration: self.runtimeGenerations[slotID],
+                    navigationGeneration: startingNavigationGeneration,
+                    documentEpoch: attentionBridge?.diagnosticDocumentEpoch,
+                    webViewInstanceID: self.webViewInstanceIDs[slotID]
+                )
+            )
             self.diagnostics.record(
                 event: "chatgpt.health_snapshot",
                 level: .info,
                 subsystem: "web",
-                fields: completedFields
+                fields: healthFields
             )
-            self.onChatGPTHealthSnapshot?(slotID, completedFields)
+            self.onChatGPTHealthSnapshot?(slotID, healthFields)
+            completion?()
         }
-        attentionBridge?.captureAppHealthSnapshot { snapshot in
-            var healthFields = snapshot?.fields ?? [:]
-            healthFields["health_probe_available"] = .bool(snapshot != nil)
-            accumulator.receive(healthFields)
+        let deliverHealthResult: @MainActor (ChatGPTAppHealthProbeResult) -> Void = { result in
+            guard let resultFields = healthProbeGate.resolve(
+                outcome: result.outcome,
+                available: result.snapshot != nil,
+                roundTripMilliseconds: result.roundTripMilliseconds
+            ) else { return }
+            var mergedFields = resultFields
+            mergedFields.merge(result.snapshot?.fields ?? [:]) { _, new in new }
+            accumulator.receive(mergedFields)
+        }
+        attentionBridge?.captureAppHealthProbe { result in
+            deliverHealthResult(result)
+        }
+        if attentionBridge == nil {
+            deliverHealthResult(ChatGPTAppHealthProbeResult(
+                snapshot: nil,
+                outcome: .bridgeUnavailable,
+                roundTripMilliseconds: nil
+            ))
         }
         responseBridge?.snapshotLatestResponseStatus { snapshot in
             accumulator.receive([
                 "latest_response_complete": .bool(snapshot.map { !$0.generating } ?? false)
             ])
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak accumulator] in
+        if responseBridge == nil {
+            accumulator.receive(["latest_response_complete": .bool(false)])
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self, weak accumulator] in
+            Task { @MainActor in
+                guard let self, self.healthProbeTokens[slotID] == probeToken else { return }
+                deliverHealthResult(ChatGPTAppHealthProbeResult(
+                    snapshot: nil,
+                    outcome: .timeout,
+                    roundTripMilliseconds: Int64(min(
+                        120_000,
+                        max(0, (self.monotonicUptime() - startedUptime) * 1_000).rounded()
+                    ))
+                ))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) { [weak accumulator] in
             Task { @MainActor in
                 accumulator?.finish()
             }
         }
+        return true
     }
 
     private static func isMobileUserAgent(_ userAgent: String?) -> Bool {

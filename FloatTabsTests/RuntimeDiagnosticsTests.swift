@@ -49,6 +49,31 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(writer.events.allSatisfy { $0.event.hasPrefix("diagnostic.incident.") }, "timeout must not perform runtime/navigation work")
     }
 
+    func testDefaultIncidentTimeoutRemainsOpenAtThirtyMinutesAndClosesAtSixty() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var uptime: TimeInterval = 100
+        var scheduled: [(TimeInterval, @MainActor () -> Void)] = []
+        let lifecycle = DiagnosticIncidentLifecycle(
+            diagnostics: diagnostics,
+            uptime: { uptime },
+            schedule: { delay, action in scheduled.append((delay, action)) }
+        )
+
+        lifecycle.open(slotID: UUID())
+        XCTAssertEqual(scheduled.first?.0, 60 * 60)
+
+        uptime += 30 * 60
+        scheduled[0].1()
+        XCTAssertNotNil(lifecycle.current, "the QA incident must remain open before 60 minutes")
+
+        uptime += 30 * 60
+        scheduled.last?.1()
+        XCTAssertNil(lifecycle.current, "the QA incident must close once 60 monotonic minutes elapse")
+        XCTAssertEqual(writer.events.last?.fields["reason"], .string("timeout"))
+        XCTAssertTrue(writer.events.allSatisfy { $0.event.hasPrefix("diagnostic.incident.") })
+    }
+
     func testIncidentWaitsForAvailableNewRuntimeFinishedHealthBeforeClosing() {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)

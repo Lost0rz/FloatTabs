@@ -327,6 +327,27 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(source.contains("fetch("))
     }
 
+    func testRuntimeHealthScriptReportsBoundedPreIncidentObservations() {
+        let source = ChatGPTAttentionBridge.scriptSource
+
+        XCTAssertTrue(source.contains("script_error_event_count"))
+        XCTAssertTrue(source.contains("resource_error_event_count"))
+        XCTAssertTrue(source.contains("other_window_error_event_count"))
+        XCTAssertTrue(source.contains("last_window_error_kind"))
+        XCTAssertTrue(source.contains("first_window_error_age_ms"))
+        XCTAssertTrue(source.contains("last_window_error_age_ms"))
+        XCTAssertTrue(source.contains("first_unhandled_rejection_age_ms"))
+        XCTAssertTrue(source.contains("last_unhandled_rejection_age_ms"))
+        XCTAssertTrue(source.contains("observed_dom_mutation_batch_count"))
+        XCTAssertTrue(source.contains("last_dom_mutation_age_ms"))
+        XCTAssertTrue(source.contains("pageshow_count"))
+        XCTAssertTrue(source.contains("visibility_change_count"))
+
+        for forbidden in ["event.message", "event.filename", "event.error", "event.reason", "event.target.src", "event.target.href", "innerHTML", "textContent"] {
+            XCTAssertFalse(source.contains(forbidden), "page content must not be read: \(forbidden)")
+        }
+    }
+
     func testLoadingVisibilityParserRequiresBoolean() {
         var body: [String: Any] = [
             "version": 1, "document_ready_state": "complete", "visibility_state": "visible",
@@ -335,7 +356,14 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             "generation_indicator_present": false, "loading_indicator_present": true,
             "loading_indicator_visible": false, "conversation_load_error_present": false,
             "window_error_count": 0, "window_error_class": "none",
-            "unhandled_rejection_count": 0, "unhandled_rejection_class": "none", "probe_elapsed_ms": 0
+            "unhandled_rejection_count": 0, "unhandled_rejection_class": "none", "probe_elapsed_ms": 0,
+            "script_error_event_count": 0, "resource_error_event_count": 0,
+            "other_window_error_event_count": 0, "last_window_error_kind": "none",
+            "first_window_error_age_ms": NSNull(), "last_window_error_age_ms": NSNull(),
+            "first_unhandled_rejection_age_ms": NSNull(), "last_unhandled_rejection_age_ms": NSNull(),
+            "observed_dom_mutation_batch_count": 0, "last_dom_mutation_age_ms": NSNull(),
+            "pageshow_count": 0, "last_pageshow_age_ms": NSNull(),
+            "visibility_change_count": 0, "last_visibility_change_age_ms": NSNull()
         ]
         XCTAssertEqual(ChatGPTAppHealthSnapshot.parse(body)?.fields["loading_indicator_visible"], .bool(false))
         for invalid in ["true", 2, NSNumber(value: 1), NSNull()] as [Any] {
@@ -363,6 +391,20 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             "window_error_class": "script_error",
             "unhandled_rejection_count": 1,
             "unhandled_rejection_class": "promise_rejection",
+            "script_error_event_count": 1,
+            "resource_error_event_count": 1,
+            "other_window_error_event_count": 0,
+            "last_window_error_kind": "resource",
+            "first_window_error_age_ms": 18,
+            "last_window_error_age_ms": 4,
+            "first_unhandled_rejection_age_ms": NSNull(),
+            "last_unhandled_rejection_age_ms": NSNull(),
+            "observed_dom_mutation_batch_count": 42,
+            "last_dom_mutation_age_ms": 950,
+            "pageshow_count": 2,
+            "last_pageshow_age_ms": 12_000,
+            "visibility_change_count": 3,
+            "last_visibility_change_age_ms": 17_000,
             "probe_elapsed_ms": 7,
             "prompt": "must never leave the page"
         ])
@@ -370,6 +412,14 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(snapshot?.fields["document_ready_state"], .string("complete"))
         XCTAssertEqual(snapshot?.fields["window_error_count"], .integer(2))
         XCTAssertEqual(snapshot?.fields["unhandled_rejection_class"], .string("promise_rejection"))
+        XCTAssertEqual(snapshot?.fields["script_error_event_count"], .integer(1))
+        XCTAssertEqual(snapshot?.fields["resource_error_event_count"], .integer(1))
+        XCTAssertEqual(snapshot?.fields["last_window_error_kind"], .string("resource"))
+        XCTAssertEqual(snapshot?.fields["first_window_error_age_ms"], .integer(18))
+        XCTAssertEqual(snapshot?.fields["first_unhandled_rejection_age_ms"], .null)
+        XCTAssertEqual(snapshot?.fields["observed_dom_mutation_batch_count"], .integer(42))
+        XCTAssertEqual(snapshot?.fields["pageshow_count"], .integer(2))
+        XCTAssertEqual(snapshot?.fields["last_visibility_change_age_ms"], .integer(17_000))
         XCTAssertNil(snapshot?.fields["prompt"])
         XCTAssertNil(ChatGPTAppHealthSnapshot.parse(["version": 1, "document_ready_state": "secret"]))
     }

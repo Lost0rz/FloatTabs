@@ -10,6 +10,10 @@ residency policy, fullscreen recovery, or content-process recovery.
   assigned when the pool creates a `WKWebView`. Reuse preserves it; release,
   rendering rebuild, and later recreation produce a new value. It is diagnostic
   metadata only and is never persisted.
+- `webview_instance_id` is a fresh opaque UUID for each physical `WKWebView`.
+  Reuse preserves it; rebuild/recreation changes it. `document_epoch` is the
+  attention bridge's current native document epoch. Neither value contains a
+  URL or page identifier.
 - `navigation_generation` advances on each `didStartProvisionalNavigation` for
   that runtime. Commit, finish, failure, and watchdog events carry the current
   generation. Delayed callbacks must match both runtime and navigation identity.
@@ -70,16 +74,20 @@ residency policy, fullscreen recovery, or content-process recovery.
 - Startup restore records the selected Slot and its page class (`root`,
   `conversation`, or `other`) before constructing that Slot's runtime. It does
   not record a URL or conversation identifier. Runtime creation and replacement
-  events record a fixed creation reason, runtime generation, navigation trigger,
-  active state, residency policy, restore flag, and construction phase.
+  events record a fixed creation reason, runtime generation, WebView instance
+  ID, document epoch when available, navigation trigger, active state, residency
+  policy, restore flag, and construction phase. WebKit exposes no supported
+  public API that identifies a WebContent process PID; the app PID is not a
+  substitute for that identity.
 - `previous_exit` is `clean`, `unclean_suspected`, or `unknown`. A durable
   lifecycle marker records only whether termination reached the clean-exit
   callback; an interrupted session is not labeled as a confirmed crash.
 - The QA-only **Capture Stuck Tab Snapshot (QA)** command is available in Debug
-  builds for the current Slot. It creates an incident ID and records bounded
-  native runtime state without navigating, reloading, rebuilding, or changing
-  Slot selection. Correlation continues across the same Slot's manual QA reset
-  and ends on Slot change, runtime release, termination, or a new incident.
+  builds and the explicitly labeled Wave 2 QA build for the current Slot. It
+  creates an incident ID and records bounded native runtime state without
+  navigating, reloading, rebuilding, or changing Slot selection. Correlation
+  continues across the same Slot's manual QA reset; tab selection alone does not
+  close it.
 - A manual QA reset remains explicitly user initiated. Its diagnostics correlate
   the pre-reset snapshot, old and new runtime generations, and the resulting
   navigation outcome under the incident ID. Reset behavior is otherwise owned
@@ -87,11 +95,34 @@ residency policy, fullscreen recovery, or content-process recovery.
 
 ## Bounded app health and network metadata
 
-- For supported ChatGPT hosts only, a one-shot health observation records fixed
+- For supported ChatGPT hosts only, each health sample records fixed
   state enums/booleans for document readiness and visibility, bridge readiness,
   conversation shell/composer/generation/loading/error indicators, and counts
-  plus coarse classes for JavaScript errors and unhandled rejections. Event
+  plus coarse classes for JavaScript errors and unhandled rejections. It also
+  records bounded script/resource/other error counts, relative ages of the
+  first/last error and rejection, activity batch counts/age from the existing
+  filtered MutationObserver, and pageshow/visibility-change counts/ages. Event
   listeners observe and count only; they do not cancel or alter page events.
+- Native health records include a bounded probe outcome and WebKit round-trip
+  duration. A missing bridge, malformed snapshot, evaluation error, or a
+  five-second timeout has a coarse outcome; late callbacks are ignored. The
+  script's `probe_elapsed_ms` remains a separate in-document duration.
+- A cached health snapshot is accompanied by its monotonic age, source, runtime,
+  navigation, document epoch, and WebView instance ID. Explicit match/stale
+  flags distinguish observations from an earlier runtime or document; the
+  current incident capture retains its own live generation and network metadata.
+- Periodic sampling runs only for the exact QA label
+  `runtime-diagnostics-wave2`, at a 30-second monotonic cadence, and only for
+  the currently active, resident slot whose current document has a supported
+  ChatGPT host. There is at most one sample in flight. Inactive/unsupported
+  slots are skipped; a delayed wake schedules from the wake time and does not
+  generate catch-up samples. Ordinary Release labels do not enable this sampler.
+  Sampling records diagnostics only and cannot trigger recovery.
+- A representative serialized health event is about 1.5 KB: 120 samples/hour
+  or 2,880/day is approximately 4.4 MB/day and 30.6 MB over seven days for one
+  continuously active ChatGPT slot. The writer retains up to ten 10 MiB
+  segments, so the estimate fits the existing rotation budget with room for
+  other diagnostic events.
 - The health observation reads no page text, title, prompt, response body,
   conversation/response identifier, input, cookie, storage, raw URL, query,
   fragment, error message, or stack. The privacy sanitizer rejects these fields
@@ -108,7 +139,7 @@ navigates, transfers focus, copies to clipboard, or replaces a runtime.
 
 One open incident binds UUID, slot and monotonic opened uptime. Tab selection
 changes do not close it. A newer capture supersedes it. Actual runtime release,
-app termination or a token-guarded 30-minute timeout closes it with an explicit
+app termination or a token-guarded 60-minute timeout closes it with an explicit
 `diagnostic.incident.closed` reason. Manual replacement keeps correlation through
 reset completion, replacement navigation and the first available application-health
 snapshot triggered by navigation finish for that new runtime. Only then is it

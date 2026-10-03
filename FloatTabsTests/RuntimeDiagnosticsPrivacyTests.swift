@@ -82,6 +82,29 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(sanitized["latest_response_complete"], .bool(false))
     }
 
+    func testWaveTwoRuntimeProvenanceAndProbeOutcomeRemainAvailable() {
+        let instanceID = UUID().uuidString
+        let sanitized = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "document_epoch": .integer(12),
+            "webview_instance_id": .string(instanceID),
+            "runtime_generation": .integer(9),
+            "navigation_generation": .integer(22),
+            "health_probe_outcome": .string("success"),
+            "health_probe_roundtrip_ms": .integer(37),
+            "cached_health_runtime_stale": .bool(true),
+            "cached_health_navigation_matches_current": .bool(false)
+        ], mode: .verbose)
+
+        XCTAssertEqual(sanitized["document_epoch"], .integer(12))
+        XCTAssertEqual(sanitized["webview_instance_id"], .string(instanceID))
+        XCTAssertEqual(sanitized["runtime_generation"], .integer(9))
+        XCTAssertEqual(sanitized["navigation_generation"], .integer(22))
+        XCTAssertEqual(sanitized["health_probe_outcome"], .string("success"))
+        XCTAssertEqual(sanitized["health_probe_roundtrip_ms"], .integer(37))
+        XCTAssertEqual(sanitized["cached_health_runtime_stale"], .bool(true))
+        XCTAssertEqual(sanitized["cached_health_navigation_matches_current"], .bool(false))
+    }
+
     func testURLsRemoveUserInfoQueryAndFragmentAndRedactConversationLikePath() {
         let url = URL(string: "https://user:password@example.com/c/secret-conversation?token=abc#message")!
         XCTAssertEqual(

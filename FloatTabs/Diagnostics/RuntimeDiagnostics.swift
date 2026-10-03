@@ -510,7 +510,7 @@ final class DiagnosticIncidentLifecycle {
     init(
         diagnostics: any RuntimeDiagnosticRecording,
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        timeout: TimeInterval = 30 * 60,
+        timeout: TimeInterval = 60 * 60,
         schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, action in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 Task { @MainActor in action() }

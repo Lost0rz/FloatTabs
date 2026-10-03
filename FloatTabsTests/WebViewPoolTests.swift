@@ -32,6 +32,195 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(created.fields["viewport_height"], .double(820))
     }
 
+    func testWebViewInstanceIdentityIsStableOnReuseAndChangesOnPhysicalReplacement() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .verbose, writer: writer)
+        )
+        var profile = makeProfile(name: "WebViewInstanceIdentity")
+        let first = try pool.webView(for: profile)
+        let firstCreated = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.created" })
+        let firstID = firstCreated.fields["webview_instance_id"]
+        XCTAssertNotNil(firstID, "physical WebViews need an opaque diagnostics identity")
+
+        XCTAssertTrue(try pool.webView(for: profile) === first)
+        let reused = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.reused" })
+        XCTAssertEqual(reused.fields["webview_instance_id"], firstID)
+
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
+        let replacement = try pool.webView(for: profile)
+        XCTAssertFalse(replacement === first)
+        let replacementCreated = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.created" })
+        XCTAssertNotNil(replacementCreated.fields["webview_instance_id"])
+        XCTAssertNotEqual(replacementCreated.fields["webview_instance_id"], firstID)
+    }
+
+    func testIncidentSnapshotLabelsCachedHealthAvailabilityAndIdentity() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: RuntimeDiagnostics(mode: .verbose, writer: writer)
+        )
+        let profile = makeProfile(
+            name: "ChatGPTIncidentSnapshot",
+            homeURL: URL(string: "https://chatgpt.com/")!
+        )
+        let webView = try pool.webView(for: profile)
+        let bridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "doc-token-0001",
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        XCTAssertTrue(pool.captureDiagnosticSnapshot(
+            slotID: profile.id,
+            incidentID: UUID(),
+            reason: "user_marked_stuck_tab"
+        ))
+
+        let snapshot = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.incident_snapshot" })
+        XCTAssertEqual(snapshot.fields["cached_health_available"], .bool(false))
+        XCTAssertEqual(snapshot.fields["cached_health_source"], .string("none"))
+        XCTAssertEqual(snapshot.fields["cached_health_runtime_matches_current"], .bool(false))
+        XCTAssertNotNil(snapshot.fields["webview_instance_id"])
+        XCTAssertEqual(snapshot.fields["document_epoch"], .integer(1))
+    }
+
+    func testCachedHealthContextMarksPreviousRuntimeStaleAndBoundsAge() {
+        let cachedWebViewID = UUID()
+        let currentWebViewID = UUID()
+        let context = RuntimeDiagnosticCachedHealthContext(
+            capturedUptime: 10,
+            runtimeGeneration: 4,
+            navigationGeneration: 7,
+            documentEpoch: 3,
+            webViewInstanceID: cachedWebViewID
+        )
+
+        let fields = context.fields(
+            nowUptime: 100,
+            currentRuntimeGeneration: 5,
+            currentNavigationGeneration: 1,
+            currentDocumentEpoch: 1,
+            currentWebViewInstanceID: currentWebViewID
+        )
+
+        XCTAssertEqual(fields["cached_health_available"], .bool(true))
+        XCTAssertEqual(fields["cached_health_source"], .string("latest_recorded"))
+        XCTAssertEqual(fields["cached_health_age_ms"], .integer(90_000))
+        XCTAssertEqual(fields["cached_health_runtime_generation"], .integer(4))
+        XCTAssertEqual(fields["cached_health_navigation_generation"], .integer(7))
+        XCTAssertEqual(fields["cached_health_document_epoch"], .integer(3))
+        XCTAssertEqual(fields["cached_health_runtime_matches_current"], .bool(false))
+        XCTAssertEqual(fields["cached_health_document_matches_current"], .bool(false))
+
+        let capped = context.fields(
+            nowUptime: 100_000,
+            currentRuntimeGeneration: 4,
+            currentNavigationGeneration: 7,
+            currentDocumentEpoch: 3,
+            currentWebViewInstanceID: cachedWebViewID
+        )
+        XCTAssertEqual(capped["cached_health_age_ms"], .integer(86_400_000))
+        XCTAssertEqual(capped["cached_health_runtime_matches_current"], .bool(true))
+        XCTAssertEqual(capped["cached_health_runtime_stale"], .bool(false))
+        XCTAssertEqual(capped["cached_health_navigation_matches_current"], .bool(true))
+        XCTAssertEqual(fields["cached_health_runtime_stale"], .bool(true))
+        XCTAssertEqual(fields["cached_health_navigation_matches_current"], .bool(false))
+    }
+
+    func testQAPeriodicSamplerFollowsActiveTargetAndSkipsOverlap() {
+        let targetA = QAPeriodicHealthSampleTarget(
+            slotID: UUID(),
+            runtimeGeneration: 1,
+            navigationGeneration: 4,
+            webViewInstanceID: UUID()
+        )
+        let targetB = QAPeriodicHealthSampleTarget(
+            slotID: UUID(),
+            runtimeGeneration: 2,
+            navigationGeneration: 7,
+            webViewInstanceID: UUID()
+        )
+        var currentTarget: QAPeriodicHealthSampleTarget? = targetA
+        var scheduledActions: [QAPeriodicHealthSampler.ScheduledAction] = []
+        var scheduledDelays: [TimeInterval] = []
+        var sampledTargets: [QAPeriodicHealthSampleTarget] = []
+        var sampleCompletions: [QAPeriodicHealthSampler.Completion] = []
+        let sampler = QAPeriodicHealthSampler(
+            scheduler: { delay, action in
+                scheduledDelays.append(delay)
+                scheduledActions.append(action)
+            },
+            candidateProvider: { currentTarget },
+            sample: { target, completion in
+                sampledTargets.append(target)
+                sampleCompletions.append(completion)
+            }
+        )
+
+        sampler.start()
+        XCTAssertEqual(scheduledDelays, [30])
+        scheduledActions.removeFirst()()
+        XCTAssertEqual(sampledTargets, [targetA])
+        XCTAssertEqual(scheduledDelays, [30, 30])
+
+        currentTarget = targetB
+        scheduledActions.removeFirst()()
+        XCTAssertEqual(sampledTargets, [targetA], "overlapping probes must be skipped")
+
+        sampleCompletions.removeFirst()()
+        scheduledActions.removeFirst()()
+        XCTAssertEqual(sampledTargets, [targetA, targetB], "next tick resolves the active target")
+        XCTAssertEqual(scheduledDelays, [30, 30, 30, 30])
+    }
+
+    func testHealthProbeTimeoutWinsOnceAndIgnoresLateCallback() {
+        var timeoutGate = RuntimeDiagnosticHealthProbeGate()
+        let timeoutFields = timeoutGate.resolve(
+            outcome: .timeout,
+            available: false,
+            roundTripMilliseconds: 5_000
+        )
+        XCTAssertEqual(timeoutFields?["health_probe_outcome"], .string("timeout"))
+        XCTAssertEqual(timeoutFields?["health_probe_available"], .bool(false))
+        XCTAssertEqual(timeoutFields?["health_probe_roundtrip_ms"], .integer(5_000))
+        XCTAssertNil(timeoutGate.resolve(
+            outcome: .success,
+            available: true,
+            roundTripMilliseconds: 37
+        ))
+
+        var successGate = RuntimeDiagnosticHealthProbeGate()
+        XCTAssertEqual(
+            successGate.resolve(
+                outcome: .success,
+                available: true,
+                roundTripMilliseconds: 37
+            )?["health_probe_outcome"],
+            .string("success")
+        )
+        XCTAssertNil(successGate.resolve(
+            outcome: .timeout,
+            available: false,
+            roundTripMilliseconds: 5_000
+        ))
+        XCTAssertEqual(Set(ChatGPTHealthProbeOutcome.allCases.map(\.rawValue)), [
+            "success", "bridge_unavailable", "malformed_snapshot", "evaluation_error", "timeout"
+        ])
+    }
+
     func testWebRuntimeCreationRecordsMobileRenderingDiagnostics() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)

@@ -621,6 +621,10 @@ enum RuntimeQACapabilities {
         isDebugBuild || qaLabel == "runtime-diagnostics-wave2"
     }
 
+    static func allowsPeriodicHealthSampling(qaLabel: String?) -> Bool {
+        qaLabel == "runtime-diagnostics-wave2"
+    }
+
     static var stuckTabSnapshotMenuVisible: Bool {
 #if DEBUG
         let isDebugBuild = true

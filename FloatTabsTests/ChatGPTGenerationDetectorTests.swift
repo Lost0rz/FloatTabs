@@ -111,6 +111,22 @@ final class ChatGPTGenerationDetectorTests: XCTestCase {
         }
     }
 
+    func testHealthProbeReportsBoundedOutcomeAndNativeRoundTrip() async {
+        let page = ChatGPTDetectorPage()
+        page.load(bodyHTML: "<main><textarea></textarea></main>")
+        await page.settleBaseline()
+
+        let result: ChatGPTAppHealthProbeResult = await withCheckedContinuation { continuation in
+            page.bridge.captureAppHealthProbe { continuation.resume(returning: $0) }
+        }
+
+        XCTAssertEqual(result.outcome, .success)
+        XCTAssertNotNil(result.snapshot)
+        XCTAssertGreaterThanOrEqual(result.roundTripMilliseconds ?? -1, 0)
+        XCTAssertLessThanOrEqual(result.roundTripMilliseconds ?? Int64.max, 120_000)
+        page.bridge.invalidate()
+    }
+
     func testImmediateAndSettledNamedWorldResyncBothEstablishBaseline() async {
         for settled in [false, true] {
             let page = ChatGPTDetectorPage()

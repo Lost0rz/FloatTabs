@@ -75,7 +75,12 @@ struct ChatGPTAppHealthSnapshot: Equatable, Sendable {
                CFGetTypeID(number) != CFBooleanGetTypeID() { return nil }
             fields[key] = .bool(value)
         }
-        let boundedCounts = ["window_error_count", "unhandled_rejection_count"]
+        let boundedCounts = [
+            "window_error_count", "unhandled_rejection_count",
+            "script_error_event_count", "resource_error_event_count",
+            "other_window_error_event_count", "observed_dom_mutation_batch_count",
+            "pageshow_count", "visibility_change_count"
+        ]
         for key in boundedCounts {
             guard let value = body[key] as? NSNumber else { return nil }
             fields[key] = .integer(Int64(min(max(value.int64Value, 0), 1_000_000)))
@@ -87,10 +92,45 @@ struct ChatGPTAppHealthSnapshot: Equatable, Sendable {
             }
             fields[key] = .string(value)
         }
+        guard let lastWindowErrorKind = body["last_window_error_kind"] as? String,
+              ["none", "script", "resource", "other"].contains(lastWindowErrorKind) else {
+            return nil
+        }
+        fields["last_window_error_kind"] = .string(lastWindowErrorKind)
+        let ageKeys = [
+            "first_window_error_age_ms", "last_window_error_age_ms",
+            "first_unhandled_rejection_age_ms", "last_unhandled_rejection_age_ms",
+            "last_dom_mutation_age_ms", "last_pageshow_age_ms",
+            "last_visibility_change_age_ms"
+        ]
+        for key in ageKeys {
+            guard let value = body[key] else { return nil }
+            if value is NSNull {
+                fields[key] = .null
+                continue
+            }
+            guard let number = value as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            fields[key] = .integer(Int64(min(max(number.int64Value, 0), 86_400_000)))
+        }
         guard let elapsed = body["probe_elapsed_ms"] as? NSNumber else { return nil }
         fields["probe_elapsed_ms"] = .integer(Int64(min(max(elapsed.int64Value, 0), 120_000)))
         return ChatGPTAppHealthSnapshot(fields: fields)
     }
+}
+
+enum ChatGPTHealthProbeOutcome: String, CaseIterable, Sendable {
+    case success
+    case bridgeUnavailable = "bridge_unavailable"
+    case malformedSnapshot = "malformed_snapshot"
+    case evaluationError = "evaluation_error"
+    case timeout
+}
+
+struct ChatGPTAppHealthProbeResult {
+    let snapshot: ChatGPTAppHealthSnapshot?
+    let outcome: ChatGPTHealthProbeOutcome
+    let roundTripMilliseconds: Int64?
 }
 
 /// Minimal bridge payload. Metadata only: prompt text, response text, and any
@@ -288,13 +328,57 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           let lastCheck = 0;
           let observer = null;
           let windowErrorCount = 0;
+          let scriptErrorEventCount = 0;
+          let resourceErrorEventCount = 0;
+          let otherWindowErrorEventCount = 0;
+          let lastWindowErrorKind = "none";
+          let firstWindowErrorAt = null;
+          let lastWindowErrorAt = null;
           let unhandledRejectionCount = 0;
+          let firstUnhandledRejectionAt = null;
+          let lastUnhandledRejectionAt = null;
+          let observedDOMMutationBatchCount = 0;
+          let lastDOMMutationAt = null;
+          let pageshowCount = 0;
+          let lastPageshowAt = null;
+          let visibilityChangeCount = 0;
+          let lastVisibilityChangeAt = null;
 
-          window.addEventListener("error", () => {
-            windowErrorCount = Math.min(windowErrorCount + 1, 1000000);
+          const increment = (value) => Math.min(value + 1, 1000000);
+          const boundedAge = (occurredAt, now) => occurredAt === null
+            ? null
+            : Math.min(86400000, Math.max(0, Math.round(now - occurredAt)));
+
+          window.addEventListener("error", (event) => {
+            const now = performance.now();
+            if (firstWindowErrorAt === null) { firstWindowErrorAt = now; }
+            lastWindowErrorAt = now;
+            windowErrorCount = increment(windowErrorCount);
+            if (event instanceof ErrorEvent) {
+              scriptErrorEventCount = increment(scriptErrorEventCount);
+              lastWindowErrorKind = "script";
+            } else {
+              const target = event && event.target;
+              const isElementTarget = !!target && target !== window
+                && target !== document && target.nodeType === 1;
+              if (isElementTarget) {
+                resourceErrorEventCount = increment(resourceErrorEventCount);
+                lastWindowErrorKind = "resource";
+              } else {
+                otherWindowErrorEventCount = increment(otherWindowErrorEventCount);
+                lastWindowErrorKind = "other";
+              }
+            }
           }, { capture: true });
           window.addEventListener("unhandledrejection", () => {
-            unhandledRejectionCount = Math.min(unhandledRejectionCount + 1, 1000000);
+            const now = performance.now();
+            if (firstUnhandledRejectionAt === null) { firstUnhandledRejectionAt = now; }
+            lastUnhandledRejectionAt = now;
+            unhandledRejectionCount = increment(unhandledRejectionCount);
+          }, { capture: true });
+          document.addEventListener("visibilitychange", () => {
+            lastVisibilityChangeAt = performance.now();
+            visibilityChangeCount = increment(visibilityChangeCount);
           }, { capture: true });
 
           const post = (generating) => {
@@ -352,7 +436,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
           const startObserving = () => {
             if (observer || !document.documentElement) { return; }
-            observer = new MutationObserver(schedule);
+            observer = new MutationObserver((records) => {
+              if (records.length > 0) {
+                observedDOMMutationBatchCount = increment(observedDOMMutationBatchCount);
+                lastDOMMutationAt = performance.now();
+              }
+              schedule();
+            });
             // Render-state transitions can arrive through attributes alone —
             // a control hidden or revealed by class/style/hidden mutations
             // without any node insertion or removal must still re-evaluate.
@@ -440,8 +530,22 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               conversation_load_error_present: present("[data-testid*='error'], [role='alert']"),
               window_error_count: windowErrorCount,
               window_error_class: windowErrorCount > 0 ? "script_error" : "none",
+              script_error_event_count: scriptErrorEventCount,
+              resource_error_event_count: resourceErrorEventCount,
+              other_window_error_event_count: otherWindowErrorEventCount,
+              last_window_error_kind: lastWindowErrorKind,
+              first_window_error_age_ms: boundedAge(firstWindowErrorAt, performance.now()),
+              last_window_error_age_ms: boundedAge(lastWindowErrorAt, performance.now()),
               unhandled_rejection_count: unhandledRejectionCount,
               unhandled_rejection_class: unhandledRejectionCount > 0 ? "promise_rejection" : "none",
+              first_unhandled_rejection_age_ms: boundedAge(firstUnhandledRejectionAt, performance.now()),
+              last_unhandled_rejection_age_ms: boundedAge(lastUnhandledRejectionAt, performance.now()),
+              observed_dom_mutation_batch_count: observedDOMMutationBatchCount,
+              last_dom_mutation_age_ms: boundedAge(lastDOMMutationAt, performance.now()),
+              pageshow_count: pageshowCount,
+              last_pageshow_age_ms: boundedAge(lastPageshowAt, performance.now()),
+              visibility_change_count: visibilityChangeCount,
+              last_visibility_change_age_ms: boundedAge(lastVisibilityChangeAt, performance.now()),
               probe_elapsed_ms: Math.max(0, Math.round(performance.now() - startedAt))
             };
           };
@@ -451,6 +555,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           // also exposes a narrow same-world resync entry for the confirmed
           // current history item.
           window.addEventListener("pageshow", () => {
+            lastPageshowAt = performance.now();
+            pageshowCount = increment(pageshowCount);
             lastSent = null;
             schedule();
           });
@@ -539,6 +645,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingInstantBackHandoff != nil
     }
 
+    /// Native document epoch for diagnostics only. It is not a page identifier
+    /// and is never used to classify health or trigger recovery.
+    var diagnosticDocumentEpoch: UInt64? {
+        document?.epoch
+    }
+
     init(
         slotID: UUID,
         onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void,
@@ -595,30 +707,60 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     func captureAppHealthSnapshot(
         completion: @escaping @MainActor (ChatGPTAppHealthSnapshot?) -> Void
     ) {
+        captureAppHealthProbe { result in
+            completion(result.snapshot)
+        }
+    }
+
+    func captureAppHealthProbe(
+        completion: @escaping @MainActor (ChatGPTAppHealthProbeResult) -> Void
+    ) {
         guard !isInvalidated,
               let webView,
               let host = webView.url?.host,
               ChatGPTSitePolicy.isSupportedHost(host) else {
-            completion(nil)
+            completion(ChatGPTAppHealthProbeResult(
+                snapshot: nil,
+                outcome: .bridgeUnavailable,
+                roundTripMilliseconds: nil
+            ))
             return
         }
         let identity = ObjectIdentifier(webView)
+        let startedUptime = ProcessInfo.processInfo.systemUptime
         webView.evaluateJavaScript(
             "globalThis.__floatTabsAppHealthSnapshotV1?.()",
             in: nil,
             in: Self.contentWorld
         ) { [weak self, weak webView] result in
+            let finishedUptime = ProcessInfo.processInfo.systemUptime
             Task { @MainActor [weak self, weak webView] in
                 guard let self,
                       !self.isInvalidated,
                       let webView,
                       self.webView === webView,
-                      ObjectIdentifier(webView) == identity,
-                      case let .success(value) = result else {
-                    completion(nil)
+                      ObjectIdentifier(webView) == identity else {
                     return
                 }
-                completion(ChatGPTAppHealthSnapshot.parse(value))
+                let elapsed = Int64(min(
+                    120_000,
+                    max(0, (finishedUptime - startedUptime) * 1_000).rounded()
+                ))
+                switch result {
+                case let .success(value):
+                    let snapshot = ChatGPTAppHealthSnapshot.parse(value)
+                    completion(ChatGPTAppHealthProbeResult(
+                        snapshot: snapshot,
+                        outcome: snapshot == nil ? .malformedSnapshot : .success,
+                        roundTripMilliseconds: elapsed
+                    ))
+                case .failure:
+                    completion(ChatGPTAppHealthProbeResult(
+                        snapshot: nil,
+                        outcome: .evaluationError,
+                        roundTripMilliseconds: elapsed
+                    ))
+                }
             }
         }
     }
