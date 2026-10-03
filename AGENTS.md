@@ -61,9 +61,10 @@ if no production worktree is yet authorized.
    relevant to the affected boundary plus the current release/validation record.
    Historical or superseded records are evidence only and must not override the
    current contract.
-5. Before starting a new branch or PR, reconcile related open PRs/worktrees and
-   record whether each is ACTIVE, FROZEN, MERGED, SUPERSEDED, ABANDONED, or
-   SEPARATE_SCOPE.
+5. Before starting a new branch or PR, reconcile related PRs/branches/worktrees
+   and assign exactly one repository lifecycle state: ACTIVE, MERGED, SUPERSEDED,
+   or ABANDONED. Scope, role, dirty state, and cleanup blockers are separate
+   metadata and must not be encoded as extra lifecycle states.
 
 ## Runtime / diagnostic evidence
 
