@@ -17,8 +17,8 @@ Lifecycle states are `ACTIVE`, `MERGED`, `SUPERSEDED`, and `ABANDONED`. Clean/di
 
 | PR | Branch | Live state | Head / disposition |
 | --- | --- | --- | --- |
-| #103 | `codex/project-agents-control-plane-v1` | ACTIVE / OPEN / Draft | Governance PR. Resolve its current head from the live ref rather than embedding this file's own commit SHA. Keep until FT-GOV-002 closeout and exact-head CI are complete. |
-| #102 | `phase2/pr-e-floattabs-durable-outbox-sender` | ACTIVE / OPEN / Draft | Head `db6e886b33dffd93ece130463b184ae371b97684`. Awaiting independent remote technical audit; no local development worktree is currently needed. Keep branch. |
+| #103 | `codex/project-agents-control-plane-v1` | ACTIVE / OPEN / Draft | Governance PR. Local topology closeout is complete. Keep until final exact-head governance audit and required CI PASS. Resolve its current head from the live ref rather than embedding this file's own commit SHA. |
+| #102 | `phase2/pr-e-floattabs-durable-outbox-sender` | ACTIVE / OPEN / Draft | Head `db6e886b33dffd93ece130463b184ae371b97684`. Separate MemoX integration; no local worktree is currently present or required by FT-GOV-002. |
 
 PRs #73–#78 and #85–#101 were individually live-verified closed; merged PR heads remain available in their PR histories.
 
@@ -29,72 +29,64 @@ The only live `origin` heads are:
 | Branch | Lifecycle | Reason to retain |
 | --- | --- | --- |
 | `main` | ACTIVE | Canonical production branch. |
-| `codex/project-agents-control-plane-v1` | ACTIVE | PR #103 governance branch; keep until merge. Its head is dynamic and must be read from the live ref. |
-| `phase2/pr-e-floattabs-durable-outbox-sender` | ACTIVE | PR #102 remains open and awaiting its independent audit. |
+| `codex/project-agents-control-plane-v1` | ACTIVE | PR #103 governance branch; keep until closeout merge/disposition. |
+| `phase2/pr-e-floattabs-durable-outbox-sender` | ACTIVE | PR #102 remains open and separate from this governance closeout. |
 
-No deleted stale branch is listed as a live `origin` branch.
+No stale remote branch remains from the closed diagnostic/recovery PR stack.
 
 ## Local worktree inventory
 
+Local executor returned `CLOSEOUT_LOCAL_GATE_PASS` against control head `a1622346c6996c1c299ae713139d270e8b906196`.
+
 | Logical identity | Branch / HEAD | Upstream | State | Lifecycle / action |
 | --- | --- | --- | --- | --- |
-| `floattabs-main-production` | `main` / `a94ae46db756b10014651f3639cf8659917e204b` | `origin/main` | CLEAN | ACTIVE but selected for removal during the authorized rebind, after exact preflight verification. |
-| `floattabs-governance` | `codex/project-agents-control-plane-v1` / dynamic live head | `origin/codex/project-agents-control-plane-v1` | CLEAN | ACTIVE / keep through PR #103 merge. |
-| `ft-gov-002-primary-archive-checkout` | `archive-tmp/ft-gov-002-pr87-input-source-telemetry` / `bca7df4f08fd1d3d06553961ea61eac17b5cfc34` | none | CLEAN | ACTIVE temporary primary checkout. Owner selected rebind route: after removing the clean linked production worktree, switch this primary checkout to `main` at `origin/main`, then delete the temporary archive branch after archive-tag verification. |
+| `floattabs-main-production` | `main` / `a94ae46db756b10014651f3639cf8659917e204b` | `origin/main` | CLEAN, 0/0 | ACTIVE / sole production worktree. The former primary archive checkout was successfully rebound to this identity. |
+| `floattabs-governance` | `codex/project-agents-control-plane-v1` / synchronized with live remote at local closeout time | `origin/codex/project-agents-control-plane-v1` | CLEAN | ACTIVE / keep through PR #103 finalization. |
 
-The A dirty diff was archived exactly as audited: the commit contains only the four original tracked files and its patch ID was `1384308d52f857be37b410199c1877183704d786`. Its annotated archive tag is remotely verified. No dirty changes remain in that checkout.
+The former linked production worktree was removed normally. The temporary local branch `archive-tmp/ft-gov-002-pr87-input-source-telemetry` is absent. No #102 worktree was created.
 
-## Owner-selected primary-worktree disposition
+## Archive preservation
 
-**DISPOSITION: REBIND_PRIMARY_TO_MAIN**
-
-The owner authorized the non-relocation route on 2026-10-03:
-
-1. do not move or reconstruct the repository's `.git` administration directory;
-2. re-verify both the current primary archive checkout and the linked `main` production worktree are clean and at their recorded identities;
-3. remove only the clean linked `main` production worktree;
-4. switch the primary checkout from the temporary archive branch to local `main`, requiring `main == origin/main`;
-5. verify `main` tracks `origin/main`;
-6. re-verify the remote archive tag dereferences to `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`, then delete only the temporary local archive branch;
-7. prune stale worktree registrations and return the final topology evidence.
-
-Any mismatch, dirty state, missing archive tag, unexpected branch ownership, or `main` drift is a STOP condition. No `.git` relocation is authorized.
-
-## Local-only branch disposition
-
-| Local ref | Owner disposition | Current result |
+| Tag | Archived commit | Verification |
 | --- | --- | --- |
-| `fix/unread-trusted-interaction-contract` at `ce9b1bdc` | SUPERSEDED | Local branch deleted; no remote branch recreated. |
-| `codex/float-tabs-connector-left-gutter` at `039a2d25` | SUPERSEDED | Local branch deleted after D archive verification. |
-| `codex/float-tabs-connector-tab-exclusion` at `cd209566` | ARCHIVE_ONLY | Local branch deleted after its exact commit was remotely preserved by the D archive tag. |
+| `archive/ft-gov-002-pr87-input-source-telemetry-20261003` | `bca7df4f08fd1d3d06553961ea61eac17b5cfc34` | Remote dereference verified after rebind. |
+| `archive/ft-gov-002-connector-tab-exclusion-20261003` | `cd2095660705aa84301731ea4202e08cee71abbf` | Remote dereference verified after rebind. |
 
-The A temporary archival branch remains checked out only until the authorized primary-to-main rebind is executed. The archive tag, not that branch, is the preservation record.
+The A archive commit contains exactly the previously audited four-file diff with patch ID `1384308d52f857be37b410199c1877183704d786`. The archive tags are preservation records only and are not production merge candidates.
 
-## Archival evidence and tag follow-up
+The local/remote `v0.2.6` tag discrepancy remains `NON_BLOCKING_TAG_PROVENANCE_FOLLOW_UP`. Do not alter `v0.2.6`, `v0.2.4`, or `v0.1.3` in FT-GOV-002.
 
-| Tag | Archived commit | Purpose |
-| --- | --- | --- |
-| `archive/ft-gov-002-pr87-input-source-telemetry-20261003` | `bca7df4f08fd1d3d06553961ea61eac17b5cfc34` | Exact four-file A diff, archival only; not a production merge candidate. |
-| `archive/ft-gov-002-connector-tab-exclusion-20261003` | `cd2095660705aa84301731ea4202e08cee71abbf` | Exact D commit and its C ancestor/history; archival only. |
+## Production authority
 
-Both annotated tags were pushed individually and their remote dereferenced commits were verified. The local/remote `v0.2.6` tag discrepancy is `NON_BLOCKING_TAG_PROVENANCE_FOLLOW_UP`; do not alter `v0.2.6`, `v0.2.4`, or `v0.1.3` in FT-GOV-002.
-
-## Production authority and verification
-
-**CURRENT_PRODUCTION_WORKTREE_ID:** `floattabs-main-production`
-**TARGET_PRODUCTION_WORKTREE_ID:** primary checkout after successful rebind, then logically `floattabs-main-production`
+**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`
 **PRODUCTION_BRANCH:** `main`
 **EXPECTED_UPSTREAM:** `origin/main`
+**PRODUCTION_HEAD:** `a94ae46db756b10014651f3639cf8659917e204b`
 
-Until the local rebind evidence is returned, the existing linked production worktree remains the current production identity. After successful rebind, the primary checkout becomes the sole authorized production `main` worktree. The governance worktree is never a production worktree.
+The surviving primary checkout is now the sole authorized production worktree. It is clean, tracks `origin/main`, and is 0 ahead / 0 behind. The governance worktree is not a production worktree.
 
 ## Closeout state and next gate
 
-FT-GOV-002 is **ACTIVE — PRIMARY_REBIND_AUTHORIZED / LOCAL_EXECUTION_REQUIRED**.
+FT-GOV-002 is **ACTIVE — LOCAL_CLOSEOUT_COMPLETE / FINAL_GOVERNANCE_CI_PENDING**.
 
-The prior ambiguity is resolved: use the rebind route above, not Git administration-directory relocation. Local execution must now produce the exact topology evidence required by `CURRENT_TASK.md`. The web control plane will then record the final local truth, fix the final #103 head, and dispatch the required exact-head `Build & Test (Apple Silicon arm64)` workflow.
+The repository/worktree closeout itself is complete:
+- stale local B/C/D refs are disposed as previously authorized;
+- unique A and D history is preserved by verified remote archive tags;
+- the former linked production worktree is removed;
+- the primary checkout is rebound to clean `main`;
+- the temporary A archive branch is deleted;
+- exactly one production `main` worktree remains;
+- governance remains isolated in its own clean worktree;
+- no source, test, or runtime file was modified during the rebind.
 
-Do not merge PR #103 before the final topology sync and exact-head required CI PASS. Missing CI is not PASS.
+Remaining FT-GOV-002 gates are governance-only:
+1. commit/push this final topology truth together with `CURRENT_TASK.md`;
+2. verify the exact resulting #103 head;
+3. rerun the required governance audit against that exact head;
+4. obtain PASS for the required exact-head `Build & Test (Apple Silicon arm64)` workflow;
+5. only then determine #103 merge readiness.
+
+Missing CI is not PASS. Do not resume runtime work until FT-GOV-002 is formally closed.
 
 ## Preserved incident conclusion
 
@@ -102,4 +94,4 @@ The old #99 → #100 → #101 stack is closed. The stuck-tab root cause remains 
 
 ## Scope record
 
-No production source or test logic was changed. No build, install, release, runtime work, or CI dispatch is authorized by this transition. This update only freezes the owner-selected local closeout route.
+No production source or test logic was changed by FT-GOV-002 closeout. No build, install, release, runtime modification, or new diagnostic implementation occurred during the topology rebind.
