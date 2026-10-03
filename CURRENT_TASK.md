@@ -20,7 +20,7 @@ Prohibited: production Swift/runtime changes, test logic changes, stuck-tab fixe
 - Read `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` from the live #103 branch.
 - Enumerated all worktrees, local branches, and remote-tracking refs. Captured full dirty diffs and untracked-file status before cleanup.
 - Pruned 13 missing/stale worktree registrations. Removed three clean worktrees: merged #88/#90 and abandoned #101.
-- Removed safe local branch refs with `git branch -d` and clean abandoned refs with `git branch -D`. Where `git branch -d` refused for a merged squash head, retained the local ref and did not force-delete it.
+- Removed safe local branch refs with `git branch -d` and clean abandoned refs with `git branch -D`. For merged squash heads, verified the exact preserved GitHub PR-head ref, used it as a temporary upstream, then deleted with `git branch -d` and removed the temporary tracking ref. No force deletion was used for MERGED refs.
 - Deleted 17 stale `origin` branches individually and verified each ref absent with `git ls-remote --heads`. The only live `origin` branches are `main`, #102, and #103.
 - Established exactly one clean production worktree, `floattabs-main-production`, on `main` at `origin/main` with upstream `origin/main`.
 - Established a clean #103 governance worktree. #102 remains OPEN/DRAFT and ACTIVE but currently awaits remote audit; no #102 worktree was recreated.
@@ -31,7 +31,6 @@ Prohibited: production Swift/runtime changes, test logic changes, stuck-tab fixe
 1. A detached checkout at `96fb030a3de1c86856a9a4a155318ef16de430bd` has unique uncommitted changes in three production Swift files and one test file. Its complete diff is captured outside the repository. It remains DIRTY and must not be removed without an explicit disposition.
 2. `fix/unread-trusted-interaction-contract` retains two local-only commits (`d1c7bc9b`, `ce9b1bdc`) absent from the closed PR #94 head.
 3. `codex/float-tabs-connector-left-gutter` and `codex/float-tabs-connector-tab-exclusion` retain unique commits absent from current `origin` branches and GitHub PR records.
-4. Six local refs for merged squash PRs remain because safe `git branch -d` refused and force deletion is not permitted for MERGED refs. Their exact heads remain available in PR histories.
 
 ## Acceptance status
 

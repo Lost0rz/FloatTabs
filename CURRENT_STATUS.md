@@ -53,12 +53,7 @@ PR #102 remains an ACTIVE branch but has no worktree. Its current Draft is await
 | `fix/unread-trusted-interaction-contract` at `ce9b1bdc` | ABANDONED | `BLOCKED_LOCAL_ONLY_COMMITS`: commits `d1c7bc9b` and `ce9b1bdc` are absent from the closed PR #94 head and have no associated GitHub PR record. Preserve the local branch. |
 | `codex/float-tabs-connector-left-gutter` at `039a2d25` | ABANDONED | `BLOCKED_LOCAL_ONLY_COMMITS`: unique MiRemote integration commits are not on `origin` and have no associated PR record. Preserve the local branch. |
 | `codex/float-tabs-connector-tab-exclusion` at `cd209566` | ABANDONED | `BLOCKED_LOCAL_ONLY_COMMITS`: shares the unique local MiRemote integration commits above. Preserve the local branch. |
-| `chore/apple-silicon-only` at `4edd1dd1` | MERGED | PR #74 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
-| `feature/c2a-calibre-epub-speech` at `bfdc7158` | MERGED | PR #78 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
-| `feature/custom-ready-sound-speech-defaults` at `d9a29796` | MERGED | PR #75 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
-| `feature/persistent-unread-response-badge` at `9763d29f` | MERGED | PR #76 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
-| `fix/cross-display-focus-restore` at `b0586696` | MERGED | PR #73 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
-| `refactor/shared-speech-source-foundation` at `c77f90aa` | MERGED | PR #77 is merged. Safe `git branch -d` refused because the squash head is not an ancestor of `main`; no force delete was used. |
+All clean local branches classified MERGED were deleted with safe `git branch -d` after verifying their matching preserved PR-head refs.
 
 The remaining local branch inventory is otherwise limited to the ACTIVE `main`, #102, and #103 branches listed above. The non-origin tracking ref `pinned-calibre-web/master` at `a97826402f1b39c45b7ea8d906efddc9f1750934` is retained as source provenance for merged PR #78; it is not a `Lost0rz/FloatTabs` origin branch and has no configured remote.
 
