@@ -153,6 +153,30 @@ The following facts are preserved because they affect what may be concluded from
 No automatic recovery or further observability expansion is authorized while the
 state-governance freeze is active.
 
+## Governance PR merge gate
+
+`main` branch protection requires the status check:
+
+`Build & Test (Apple Silicon arm64)`
+
+The existing `.github/workflows/macos-ci.yml` automatically runs for pull
+requests only when code/build/release paths change. This governance PR changes
+only the three root Markdown control-plane files, so the required check is not
+auto-triggered by the PR path filter.
+
+Therefore an absent check is **not** a pass. After local reconciliation is complete
+and the governance branch is otherwise final:
+
+1. manually dispatch the existing **macOS CI** workflow on
+   `codex/project-agents-control-plane-v1`;
+2. ensure the workflow is attached to the exact branch HEAD proposed for merge;
+3. require `Build & Test (Apple Silicon arm64)` = PASS;
+4. only then move #103 out of Draft / merge, subject to the rest of the repository
+   protection rules.
+
+Do not modify the CI workflow merely to make this docs-only PR trigger
+automatically.
+
 ## Next state transition
 
 Before runtime work resumes, a local read-only reconciliation must:
