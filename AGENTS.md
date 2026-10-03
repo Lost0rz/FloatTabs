@@ -8,10 +8,12 @@ this order:
 2. `CURRENT_STATUS.md` — the current state contract.
 3. `CURRENT_TASK.md` — the single currently authorized task and its boundaries.
 
-If the local checkout, branch, HEAD, worktree path, PR state, or task does not
-match the control-plane files after a fresh remote ref check, STOP. Do not silently
-substitute another checkout or continue from chat history, Memory, an older
-handoff, or an old PR.
+If the local checkout, branch, HEAD, authorized worktree identity, PR state, or
+task does not match the control-plane files after a fresh remote ref check, STOP.
+The locally resolved absolute path must uniquely satisfy that worktree identity;
+it is local evidence, not a committed repository value. Do not silently substitute
+another checkout or continue from chat history, Memory, an older handoff, or an
+old PR.
 
 ## Authority model
 
