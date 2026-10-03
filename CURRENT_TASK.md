@@ -2,116 +2,125 @@
 
 **Task ID:** FT-GOV-002
 **Title:** Repository closeout and local worktree reconciliation
-**Status:** ACTIVE — `PRIMARY_REBIND_AUTHORIZED / LOCAL_EXECUTION_REQUIRED`
+**Status:** ACTIVE — `LOCAL_CLOSEOUT_COMPLETE / FINAL_GOVERNANCE_CI_PENDING`
 
 ## Objective
 
-Complete repository closeout while preserving unique archived work and ending with exactly one authorized production `main` worktree. Do not resume the stuck-tab fix or runtime diagnostics.
+Finalize repository closeout after the successful local primary-worktree rebind, then close FT-GOV-002 only after the exact final governance head passes its required audit and CI gate. Do not resume stuck-tab runtime work in this task.
 
 ## Authorization and boundaries
 
 Authorized:
-- refresh refs and verify live repository identities;
-- read the three control-plane files;
-- perform the owner-selected primary-worktree rebind only if every preflight gate below passes;
-- remove the existing linked `main` production worktree only when it is clean and exactly at `origin/main`;
-- switch the primary checkout to local `main` only after that linked worktree is removed;
-- verify local `main == origin/main` and upstream `origin/main`;
-- verify the remote A archive tag still dereferences to `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`;
-- delete only the temporary local branch `archive-tmp/ft-gov-002-pr87-input-source-telemetry` after the tag verification;
-- prune stale worktree registrations;
-- return final topology evidence to the web control plane.
+- update `CURRENT_STATUS.md` and `CURRENT_TASK.md` with the returned local closeout truth;
+- verify live #103/main/#102 refs after the final control-plane commits;
+- audit the exact resulting #103 head;
+- inspect branch-protection/workflow configuration and exact-head status;
+- dispatch the existing required `Build & Test (Apple Silicon arm64)` workflow on the exact #103 head when the available action surface supports it;
+- if remote dispatch is unavailable, perform no substitute build and stop at `CI_DISPATCH_REQUIRED` with the exact command/input needed for a local GitHub CLI dispatch;
+- after exact-head audit PASS and required CI PASS, update the task/status to CLOSED and determine #103 merge readiness.
 
 Prohibited:
 - production Swift/runtime changes;
 - test logic changes;
-- stuck-tab fixes;
-- added diagnostics/logging;
-- build/install/release;
-- resetting user runtime state;
-- discarding unarchived work;
+- stuck-tab fixes or new diagnostics;
+- local build/install/release as a substitute for required GitHub CI;
+- resetting runtime/user state;
 - force-pushing;
-- merging #102 or #103;
-- relocating/reconstructing the repository `.git` administration directory;
-- changing protected historical tags;
-- modifying `CURRENT_STATUS.md` or `CURRENT_TASK.md` locally during this execution card;
-- starting a follow-on runtime task.
+- altering protected historical tags;
+- changing #102;
+- starting a follow-on runtime task before FT-GOV-002 closure.
+
+## Accepted local closeout evidence
+
+The local executor returned `CLOSEOUT_LOCAL_GATE_PASS` against control head `a1622346c6996c1c299ae713139d270e8b906196`.
+
+Accepted facts:
+- surviving primary production checkout is on `main`;
+- `main == origin/main == a94ae46db756b10014651f3639cf8659917e204b`;
+- production upstream is `origin/main`, ahead/behind `0/0`, CLEAN;
+- former linked production worktree was removed;
+- governance worktree remains present and CLEAN;
+- temporary archive branch `archive-tmp/ft-gov-002-pr87-input-source-telemetry` is absent;
+- A archive tag dereferences to `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`;
+- D archive tag dereferences to `cd2095660705aa84301731ea4202e08cee71abbf`;
+- relevant remote branches are only `main`, #103 governance, and #102;
+- no source/test/runtime file was modified during the local rebind.
 
 ## Completed
 
-- Refreshed `origin` without fetching or mutating tags. Live `main`, #102, and #103 heads were verified.
-- Read `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` from the #103 governance branch.
-- Verified the A checkout's expected detached/original identity, exact four tracked modified files, no staged or untracked files, and audited patch ID `1384308d52f857be37b410199c1877183704d786`.
-- Created archival commit `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`, containing exactly A's four-file diff, and pushed only its unique annotated archive tag. Verified the remote dereference.
-- Verified C is an ancestor of exact D head `cd2095660705aa84301731ea4202e08cee71abbf`; pushed only D's unique annotated archive tag and verified the remote dereference.
-- Deleted the explicitly authorized local B, C, and D branches after checking exact heads and worktree use.
-- Verified the clean production worktree remains at `origin/main`, the governance worktree is clean, #102 and #103 remain OPEN/DRAFT, and protected version tags were not changed.
-- Recorded the local/remote `v0.2.6` discrepancy as `NON_BLOCKING_TAG_PROVENANCE_FOLLOW_UP` without resolving it.
-- Owner selected the non-relocation closeout route: rebind the primary checkout to `main` and remove the existing linked production worktree.
+- Established the three-file repository control plane.
+- Closed and classified the stale diagnostic/recovery PR stack.
+- Preserved unique A and D history through remotely verified archive tags.
+- Removed/disposed stale local B/C/D refs as authorized.
+- Selected and executed `REBIND_PRIMARY_TO_MAIN` without relocating `.git`.
+- Removed the former linked production worktree.
+- Rebound the primary checkout to clean `main` at `origin/main`.
+- Deleted the temporary A archive branch after archive verification.
+- Re-established exactly one production `main` worktree plus the separate governance worktree.
+- Recorded the successful local closeout into the repository control plane.
 
-## Local execution gate
+## Final governance gate
 
-Before any topology mutation, the local executor must prove all of the following in one fresh run:
+The next immutable target is the exact live #103 head after both final control-plane updates are committed.
 
-1. repository is `Lost0rz/FloatTabs`;
-2. live `origin/main` is exactly `a94ae46db756b10014651f3639cf8659917e204b`, unless the web control plane has first reconciled a legitimate newer main;
-3. governance branch exists separately and is not the worktree being removed;
-4. current linked production worktree is on local `main`, tracks `origin/main`, is CLEAN, and `HEAD == origin/main`;
-5. primary checkout is CLEAN and is on `archive-tmp/ft-gov-002-pr87-input-source-telemetry` at `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`;
-6. remote tag `archive/ft-gov-002-pr87-input-source-telemetry-20261003^{}` resolves to `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`;
-7. no untracked/staged/modified files exist in either checkout;
-8. the executor is not running from inside the linked production worktree when removing it.
+Required audit against that exact head:
 
-If any item fails: STOP without mutation and report the mismatch.
+1. **Control-plane semantic audit**
+   - `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` remain non-conflicting;
+   - no production/runtime authorization was introduced;
+   - local closeout facts are represented without machine-specific committed paths;
+   - no self-referential governance SHA is embedded.
 
-## Authorized mutation sequence
+2. **Repository/live-ref audit**
+   - #103 is still OPEN/Draft until CI passes;
+   - base remains the expected `main`;
+   - only the three control-plane files differ from `main`;
+   - #102 remains separate and unchanged;
+   - live branch inventory matches the recorded state.
 
-Only after the full preflight gate passes:
+3. **Adversarial handoff audit**
+   - a stale local governance checkout will fail closed because the branch head is dynamic;
+   - missing CI remains a blocker;
+   - no old #99/#100/#101 recovery result is promoted to root-cause proof or production fix;
+   - the next agent can continue using the three control-plane files without chat reconstruction.
 
-1. remove the clean linked `main` production worktree using normal non-force worktree removal;
-2. from the primary checkout, switch to local `main`;
-3. require `HEAD == origin/main == a94ae46db756b10014651f3639cf8659917e204b`;
-4. require local `main` tracks `origin/main`;
-5. re-check the remote A archive tag dereference;
-6. delete only local branch `archive-tmp/ft-gov-002-pr87-input-source-telemetry`; force branch deletion is permitted only because the exact commit is already preserved by the verified remote archive tag;
-7. run worktree prune;
-8. perform a fresh read-only inventory.
+Any blocker, major, or minor finding invalidates merge readiness.
 
-Do not remove the governance worktree. Do not create a #102 worktree. Do not alter remotes or tags.
+## Exact-head CI gate
 
-## Acceptance evidence required from local executor
+Required check:
+`Build & Test (Apple Silicon arm64)`
 
-Return a compact result containing:
+Rules:
+- it must run for the exact final #103 head;
+- a prior-head PASS does not count;
+- absent/skipped CI does not count;
+- a local build does not substitute for this protected check.
 
-- repository top-level path for the surviving primary checkout;
-- `git worktree list --porcelain` after cleanup;
-- surviving production branch, HEAD, upstream, ahead/behind, and CLEAN state;
-- governance worktree branch, HEAD, upstream, and CLEAN state;
-- confirmation the old linked production worktree path is absent;
-- confirmation temporary archive branch is absent;
-- remote A archive tag dereferenced commit;
-- remote D archive tag dereferenced commit;
-- local branch list relevant to `main`, governance, #102, and archive-temp refs;
-- `origin` branch list;
-- explicit statement that no source/test/runtime file was modified.
+If the connected GitHub action surface cannot start a new workflow run, stop with `CI_DISPATCH_REQUIRED` after providing the exact final head and workflow identity. Do not mutate the repository merely to trigger CI.
 
 ## Acceptance status
 
 | Criterion | Result |
 | --- | --- |
-| Full local worktree/branch inventory and lifecycle classification | Complete |
-| A unique dirty diff preserved as exact archival commit and remotely verified tag | Complete |
-| D exact commit and C ancestry preserved as remotely verified archive tag | Complete |
-| Owner-authorized B/C/D local branch dispositions | Complete |
-| Primary rebind route selected | Complete — REBIND_PRIMARY_TO_MAIN |
-| Existing linked production worktree removed | Pending local execution |
-| Primary checkout switched to clean `main` at `origin/main` | Pending local execution |
-| Temporary A archive branch deleted after tag verification | Pending local execution |
-| Final worktree topology returned and reconciled | Pending |
-| `CURRENT_STATUS.md` / `CURRENT_TASK.md` final truth sync | Pending web control-plane update |
-| #103 exact-head required CI | Pending final governance head |
-| PR #103 merged | No; prohibited until prior gates pass |
+| Repository/worktree inventory and lifecycle classification | PASS |
+| Unique local work preserved remotely | PASS |
+| Primary worktree rebind | PASS |
+| Exactly one production `main` worktree | PASS |
+| Temporary archive branch removed | PASS |
+| No production source/test/runtime changes | PASS |
+| Final control-plane truth sync | In progress; this commit sequence |
+| Exact final #103 governance audit | Pending |
+| Exact-head required CI | Pending |
+| FT-GOV-002 closed | Pending |
+| PR #103 merge readiness | Pending final gates |
 
 ## Stop condition
 
-Remain in FT-GOV-002 until the local executor returns passing evidence. Then the web control plane must update both control files to final truth, commit/push, verify #103's live head, rerun the required governance audit for that exact head, dispatch and verify `Build & Test (Apple Silicon arm64)`, and only then decide PR #103 merge readiness. Do not start runtime work automatically.
+Do not begin runtime construction while this task is active.
+
+FT-GOV-002 may transition to CLOSED only after:
+1. final control-plane commits are live on #103;
+2. exact-head governance audit is PASS;
+3. exact-head `Build & Test (Apple Silicon arm64)` is PASS;
+4. the final repository state is recorded without creating another un-audited governance-head cycle.
