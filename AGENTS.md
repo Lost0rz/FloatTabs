@@ -65,64 +65,64 @@ if no production worktree is yet authorized.
 
 ## Runtime / diagnostic evidence
 
-5. Symptom recovery, reload success, slot reset success, app restart success, or a
+6. Symptom recovery, reload success, slot reset success, app restart success, or a
    watchdog recovery does not by itself prove the underlying root cause.
-6. Keep these conclusions distinct:
+7. Keep these conclusions distinct:
    - observation / diagnostic evidence;
    - recovery behavior;
    - causal root-cause evidence;
    - experimental mitigation;
    - production fix.
-7. A diagnostic PR is not a production fix unless its production behavior is
+8. A diagnostic PR is not a production fix unless its production behavior is
    explicitly authorized and validated as such.
-8. For an incident, bind evidence to the relevant identities when available:
+9. For an incident, bind evidence to the relevant identities when available:
    source HEAD/build, PR/branch, Slot identity, navigation/document generation or
    epoch, incident/session identifier, and the runtime timestamps needed to order
    events. Do not combine evidence from different identities as if it were one run.
-9. Stale callbacks, probes, or events from an earlier navigation/runtime generation
+10. Stale callbacks, probes, or events from an earlier navigation/runtime generation
    must not be treated as evidence about a later generation without explicit
    correlation.
-10. Separate verified facts, plausible mechanisms, and uninspected areas. Unknown
+11. Separate verified facts, plausible mechanisms, and uninspected areas. Unknown
     must remain unknown.
 
 ## Change discipline
 
-11. Do not stack a new speculative fix on unresolved diagnostic/recovery branches
+12. Do not stack a new speculative fix on unresolved diagnostic/recovery branches
     without first reconciling what each open change proves, what it does not prove,
     and which behavior is intended for production.
-12. During a controlled incident capture, do not rebuild, reinstall, replace the
+13. During a controlled incident capture, do not rebuild, reinstall, replace the
     running app, reset persistent state, or materially change diagnostics unless
     `CURRENT_TASK.md` explicitly authorizes that mutation.
-13. Preserve Slot-scoped ownership and lifecycle semantics. A fix for one Slot,
+14. Preserve Slot-scoped ownership and lifecycle semantics. A fix for one Slot,
     navigation generation, fullscreen lifecycle, attention state, profile, or
     recovery path must not silently broaden ownership across unrelated Slots.
-14. Current design/product contracts override older stage records. Historical
+15. Current design/product contracts override older stage records. Historical
     validation is evidence about that historical build, not automatic proof for the
     current runtime.
-15. State-governance work must remain docs/control-plane only unless
+16. State-governance work must remain docs/control-plane only unless
     `CURRENT_TASK.md` explicitly changes scope.
 
 ## State transition discipline
 
-16. When material state changes, update `CURRENT_STATUS.md` and
+17. When material state changes, update `CURRENT_STATUS.md` and
     `CURRENT_TASK.md` together when both are affected.
-17. Do not hard-code the SHA of the commit that contains `CURRENT_STATUS.md`
+18. Do not hard-code the SHA of the commit that contains `CURRENT_STATUS.md`
     inside that same file. That creates an impossible self-reference. Instead,
     record immutable baselines and require the local HEAD to equal the freshly
     fetched remote head of the authorized branch.
-18. A status transition is not complete until the updated control-plane files are
+19. A status transition is not complete until the updated control-plane files are
     committed/pushed and the live branch/PR metadata agrees with them.
 
 ## Validation and handoff
 
-19. Validate the changed boundary with the smallest sufficient evidence. Use
+20. Validate the changed boundary with the smallest sufficient evidence. Use
     focused tests first; run broader regression when the affected lifecycle,
     persistence, WebKit behavior, or requested acceptance criteria justify it.
-20. Tests and logs should establish behavioral contracts and causal boundaries,
+21. Tests and logs should establish behavioral contracts and causal boundaries,
     not merely increase coverage volume.
-21. Before recommending merge or release, state unresolved root-cause uncertainty,
+22. Before recommending merge or release, state unresolved root-cause uncertainty,
     untested runtime paths, and whether the change is diagnostic, recovery-only,
     experimental, or production-ready.
-22. A handoff is complete only when another agent can read the three control-plane
+23. A handoff is complete only when another agent can read the three control-plane
     files, verify the checkout against them, and continue without reconstructing
     current state from chat history.
