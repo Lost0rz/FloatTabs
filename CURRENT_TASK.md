@@ -32,6 +32,10 @@ The following work is allowed:
 6. Update `CURRENT_STATUS.md` with the verified logical worktree ID, branch/ref
    contract, and any corrected classifications. Keep machine-specific absolute
    paths out of the public repository.
+7. After local reconciliation and final docs review, manually dispatch the existing
+   `macOS CI` workflow on the exact #103 governance branch HEAD so the required
+   `Build & Test (Apple Silicon arm64)` branch-protection check can run. Do not
+   install or release the resulting build.
 
 A governance checkout may be used to edit these three documents. It does not
 become the production worktree merely by hosting PR #103.
@@ -99,13 +103,16 @@ FT-GOV-001 is complete only when all of the following are true:
   upstream, and clean state are verified after remote refresh;
 - unresolved worktrees/PRs have explicit classifications;
 - a new agent can detect a checkout or ref mismatch and STOP without guessing;
-- no production/runtime behavior was changed while establishing the control plane.
+- no production/runtime behavior was changed while establishing the control plane;
+- the exact governance HEAD proposed for merge has a passing
+  `Build & Test (Apple Silicon arm64)` required check.
 
 ## Stop / handoff condition
 
 After local reconciliation, update `CURRENT_STATUS.md` and this task together if
 the task state changes.
 
-If the state is clean and unambiguous, FT-GOV-001 may be marked COMPLETE and the
-next task may be created. The next task must be chosen from reconciled facts; it
+If the state is clean and unambiguous and the exact merge HEAD satisfies the
+required branch-protection check, FT-GOV-001 may be marked COMPLETE and the next
+task may be created. The next task must be chosen from reconciled facts; it
 must not automatically resume bug fixing or log expansion.
