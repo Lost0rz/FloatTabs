@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testEnvironmentFieldsCarryBuiltSourceAndBoundedChannelLabels() throws {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .verbose,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let fields = diagnostics.environmentFields()
+
+        guard case let .string(sourceRevision)? = fields["source_revision"] else {
+            return XCTFail("expected source_revision metadata")
+        }
+        XCTAssertEqual(sourceRevision.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) != nil, true)
+        XCTAssertEqual(fields["build_channel"], .string("Debug"))
+        XCTAssertEqual(fields["qa_label"], .string("ft-diag-002-qa"))
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.sanitize(fields: fields, mode: .verbose)["qa_label"],
+            .string("ft-diag-002-qa")
+        )
+    }
+
     func testEventsEncodeAsIndependentJSONLObjectsWithSessionAndMonotonicSequence() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!

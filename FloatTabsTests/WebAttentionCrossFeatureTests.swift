@@ -244,6 +244,122 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         super.tearDown()
     }
 
+    func testStuckTabCaptureDoesNotCreateMissingRuntimeOrChangeSelection() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CaptureWithoutRuntime", url: "https://chatgpt.com/")],
+            diagnostics: diagnostics
+        )
+        let activeSlot = try XCTUnwrap(store.activeProfile)
+        let selectedBefore = store.activeTabID
+        pool.release(slotID: activeSlot.id)
+        XCTAssertEqual(pool.count, 0)
+
+        let message = controller.captureStuckTabSnapshot()
+        XCTAssertTrue(message.contains("no resident WebView"))
+        XCTAssertEqual(pool.count, 0)
+        XCTAssertEqual(store.activeTabID, selectedBefore)
+        let event = try XCTUnwrap(writer.events.first { $0.event == "diagnostics.stuck_tab_snapshot" })
+        XCTAssertEqual(event.fields["slot_id"], .string(activeSlot.id.uuidString))
+        XCTAssertEqual(event.fields["capture_availability"], .string("no_resident_active_runtime"))
+        XCTAssertNotNil(event.fields["incident_id"])
+        XCTAssertFalse(writer.events.contains { $0.event == "navigation.renderer_probe" })
+    }
+
+    func testStuckTabCaptureCorrelatesResidentRuntimeWithoutChangingOwners() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CaptureResident", url: "https://chatgpt.com/")],
+            diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: { _, script in
+                XCTAssertEqual(script, ChatGPTAttentionBridge.incidentHealthProbeScript)
+                return [
+                    "version": 1,
+                    "document_ready_state": "complete",
+                    "visibility_state": "visible",
+                    "conversation_shell_present": true,
+                    "composer_present": true,
+                    "loading_indicator_present": false,
+                    "loading_indicator_visible": false,
+                    "conversation_load_error_present": false
+                ]
+            }
+        )
+        let webView = try makeResidentWebView(
+            pool: pool,
+            store: store,
+            slotName: "CaptureResident"
+        )
+        let slot = try profile(named: "CaptureResident", in: store)
+        let healthURL = URL(string: "https://chatgpt.com/")!
+        _ = webView.loadHTMLString("<html><body><main></main></body></html>", baseURL: healthURL)
+        let healthPageLoaded = try await waitForWebViewURL(webView, url: healthURL)
+        XCTAssertTrue(healthPageLoaded)
+        let attentionBridge = try XCTUnwrap(pool.attentionBridge(for: slot.id))
+        let attentionDocumentAdmitted = try await waitUntil {
+            attentionBridge.diagnosticSnapshotFields["attention_document_admitted"] == .bool(true)
+        }
+        XCTAssertTrue(attentionDocumentAdmitted)
+        let selectedBefore = store.activeTabID
+        let runtimeIdentityBefore = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+        let residentCountBefore = pool.count
+        let focusBefore = controller.runtimeDiagnosticSnapshot().fields["focus_target"]
+        let navigationGenerationBefore = pool.diagnosticSnapshotFields(for: slot.id)["navigation_generation"]
+        let webViewURLBefore = webView.url
+        let currentHistoryItemBefore = webView.backForwardList.currentItem
+        let backHistoryItemBefore = webView.backForwardList.backItem
+        let attentionFieldsBefore = attentionBridge.diagnosticSnapshotFields
+        _ = controller.captureStuckTabSnapshot()
+        let healthRecorded = try await waitUntil {
+            writer.events.contains { $0.event == "diagnostics.chatgpt_health_probe" }
+        }
+
+        XCTAssertTrue(healthRecorded)
+        XCTAssertEqual(store.activeTabID, selectedBefore)
+        XCTAssertEqual(pool.count, residentCountBefore)
+        XCTAssertTrue(pool.existingWebView(for: slot.id) === webView)
+        XCTAssertEqual(pool.runtimeDiagnosticIdentity(for: slot.id), runtimeIdentityBefore)
+        XCTAssertEqual(controller.runtimeDiagnosticSnapshot().fields["focus_target"], focusBefore)
+        XCTAssertEqual(attentionBridge.diagnosticSnapshotFields, attentionFieldsBefore)
+        XCTAssertEqual(webView.url, webViewURLBefore)
+        XCTAssertTrue(webView.backForwardList.currentItem === currentHistoryItemBefore)
+        XCTAssertTrue(webView.backForwardList.backItem === backHistoryItemBefore)
+        XCTAssertEqual(
+            pool.diagnosticSnapshotFields(for: slot.id)["navigation_generation"],
+            navigationGenerationBefore
+        )
+
+        let event = try XCTUnwrap(writer.events.first { $0.event == "diagnostics.stuck_tab_snapshot" })
+        XCTAssertEqual(event.fields["slot_id"], .string(slot.id.uuidString))
+        XCTAssertEqual(event.fields["runtime_generation"], .integer(Int64(runtimeIdentityBefore.runtimeGeneration)))
+        XCTAssertEqual(event.fields["webview_instance_id"], .string(runtimeIdentityBefore.webViewInstanceID.uuidString))
+        XCTAssertEqual(event.fields["active_slot_matches"], .bool(true))
+        XCTAssertEqual(event.fields["resident"], .bool(true))
+        XCTAssertNil(event.fields["document_token"])
+        XCTAssertNil(event.fields["page_title"])
+        XCTAssertNil(event.fields["url"])
+        XCTAssertEqual(event.fields["page_class"], .string("chatgpt"))
+
+        let healthEvent = try XCTUnwrap(
+            writer.events.first { $0.event == "diagnostics.chatgpt_health_probe" }
+        )
+        XCTAssertEqual(healthEvent.fields["incident_id"], event.fields["incident_id"])
+        XCTAssertEqual(healthEvent.fields["health_probe_outcome"], .string("success"))
+        XCTAssertEqual(healthEvent.fields["attention_document_admitted"], .bool(true))
+        XCTAssertEqual(healthEvent.fields["chatgpt_document_epoch"], .integer(1))
+        XCTAssertEqual(healthEvent.fields["chatgpt_generating"], .bool(false))
+        XCTAssertNotNil(healthEvent.fields["response_current_document_ready"])
+        XCTAssertEqual(healthEvent.fields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(healthEvent.fields["visibility_state"], .string("visible"))
+        XCTAssertEqual(healthEvent.fields["conversation_shell_present"], .bool(true))
+        XCTAssertEqual(healthEvent.fields["composer_present"], .bool(true))
+        XCTAssertEqual(healthEvent.fields["loading_indicator_present"], .bool(false))
+        XCTAssertEqual(healthEvent.fields["loading_indicator_visible"], .bool(false))
+        XCTAssertEqual(healthEvent.fields["conversation_load_error_present"], .bool(false))
+    }
+
     // MARK: FloatTabs native focus ownership
 
     func testExternalVoiceDoesNotRequireSourceMain() {
@@ -5057,12 +5173,14 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
         presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
         let pool = makePool(
             committedURLProvider: committedURLProvider,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator
         )
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         let controller = PanelController(
@@ -5097,14 +5215,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     private func makePool(
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
-        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil
     ) -> WebViewPool {
         WebViewPool(
             onURLChange: { _, _ in },
             initialLoad: { _, _ in },
             isSlotActive: { _ in false },
             committedURLProvider: committedURLProvider,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator
         )
     }
 

@@ -2,6 +2,16 @@ import AppKit
 import Foundation
 import WebKit
 
+struct RendererProbeValues: Equatable, Sendable {
+    let readyState: String
+    let visibilityState: String
+}
+
+typealias RendererJavaScriptEvaluator = @MainActor (
+    WKWebView,
+    String
+) async throws -> RendererProbeValues
+
 @MainActor
 final class DownloadCoordinator: NSObject, WKDownloadDelegate {
     private struct PendingDestination {
@@ -213,9 +223,25 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
 /// desktop-class browsing API for iOS, not as the macOS layout mechanism.
 @MainActor
 final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
+    private enum DiagnosticNavigationPhase: String {
+        case provisional
+        case postCommit = "post_commit"
+        case finished
+        case failed
+        case terminated
+    }
+
+    private struct DiagnosticNavigationTicket {
+        let navigationID: ObjectIdentifier
+        let generation: UInt64
+        var phase: DiagnosticNavigationPhase
+        var didEmitStall: Bool
+    }
+
     private weak var webView: WKWebView?
     private var observation: NSKeyValueObservation?
     private let slotID: UUID
+    private let runtimeDiagnosticIdentity: WebRuntimeDiagnosticIdentity?
     private let websiteMode: WebsiteMode
     private let navigationCoordinator: WebNavigationCoordinator
     private let downloadCoordinator: DownloadCoordinator
@@ -229,6 +255,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let loadHandler: @MainActor (WKWebView, URL) -> Void
     private let instantBackURLSafetyCheck: (URL) -> Bool
     private let diagnostics: any RuntimeDiagnosticRecording
+    private let navigationStallTimeout: TimeInterval
+    private let rendererProbeTimeout: TimeInterval
+    private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
+    private var nextNavigationGeneration: UInt64 = 0
+    private var currentNavigationTicket: DiagnosticNavigationTicket?
+    private var navigationStallTask: Task<Void, Never>?
+    private var pendingRendererProbeID: UUID?
+    private var rendererProbeTimeoutTask: Task<Void, Never>?
+    private var rendererProbeStartedAt: TimeInterval?
+    private var rendererProbeTrigger: String?
+    private var rendererProbeIncidentID: UUID?
+    private var rendererProbeCompletion: (@MainActor (String) -> Void)?
 
     private struct PendingInstantBack {
         let targetItem: WKBackForwardListItem
@@ -258,6 +296,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     init(
         slotID: UUID,
         webView: WKWebView,
+        runtimeDiagnosticIdentity: WebRuntimeDiagnosticIdentity? = nil,
         websiteMode: WebsiteMode,
         navigationCoordinator: WebNavigationCoordinator = WebNavigationCoordinator(),
         downloadCoordinator: DownloadCoordinator? = nil,
@@ -269,6 +308,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        navigationStallTimeout: TimeInterval = 120,
+        rendererProbeTimeout: TimeInterval = 5,
+        rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
         instantBackURLSafetyCheck: @escaping (URL) -> Bool = WebAppURL.isSafe,
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
@@ -276,6 +318,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     ) {
         self.slotID = slotID
         self.webView = webView
+        self.runtimeDiagnosticIdentity = runtimeDiagnosticIdentity
         self.websiteMode = websiteMode
         self.navigationCoordinator = navigationCoordinator
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
@@ -287,6 +330,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
         self.diagnostics = diagnostics
+        self.navigationStallTimeout = max(0, navigationStallTimeout)
+        self.rendererProbeTimeout = max(0, rendererProbeTimeout)
+        self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
         self.instantBackURLSafetyCheck = instantBackURLSafetyCheck
         self.loadHandler = loadHandler
         super.init()
@@ -380,11 +426,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
+        let ticket = navigation.map(beginDiagnosticNavigation)
+        let callbackFields = ticket.map(navigationFields(for:)) ?? staleNavigationFields
         diagnostics.record(
             event: "navigation.provisional_started",
             level: .debug,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView)
+            fields: runtimeFields(for: webView).merging(callbackFields) { _, new in new }
         )
         // If Instant Back falls back to normal loading, ordinary didCommit is
         // authoritative again. A new provisional navigation also invalidates
@@ -399,7 +447,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // Once an https entry commits, later in-page failures can never inherit
         // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
-        var commitFields = runtimeFields(for: webView)
+        let ticket = navigation.flatMap(commitDiagnosticNavigation)
+        var commitFields = runtimeFields(for: webView).merging(
+            ticket.map(navigationFields(for:)) ?? staleNavigationFields
+        ) { _, new in new }
         commitFields["url"] = webView.url.flatMap {
             RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
         }.map(RuntimeDiagnosticValue.string) ?? .null
@@ -420,15 +471,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
 
+        let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .finished) }
+
         diagnostics.record(
             event: "navigation.finished",
             level: .debug,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView)
+            fields: runtimeFields(for: webView).merging(
+                ticket.map(navigationFields(for:)) ?? staleNavigationFields
+            ) { _, new in new }
         )
-        if diagnostics.capturesDebugEvents {
-            recordPageRuntimeProbe(in: webView)
-        }
 
         onNavigationFinish(slotID, webView.url)
 
@@ -448,15 +500,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
         diagnostics.record(
             event: "navigation.failed",
             level: .warning,
             subsystem: "navigation",
-            fields: [
+            fields: runtimeFields(for: webView).merging([
                 "slot_id": .string(slotID.uuidString),
                 "failure": .string("navigation"),
                 "provisional": .bool(false)
-            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+            ]) { _, new in new }
+                .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+                .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
     }
 
@@ -466,15 +521,18 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         withError error: Error
     ) {
         restoreHiddenScrollerPolicy(in: webView)
+        let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
         diagnostics.record(
             event: "navigation.failed",
             level: .warning,
             subsystem: "navigation",
-            fields: [
+            fields: runtimeFields(for: webView).merging([
                 "slot_id": .string(slotID.uuidString),
                 "url": failingURLForDiagnostics(error: error, webView: webView),
                 "provisional": .bool(true)
-            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+            ]) { _, new in new }
+                .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
+                .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
         cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
@@ -499,11 +557,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        invalidateDiagnosticNavigation(phase: .terminated)
         diagnostics.record(
             event: "web_content_process_terminated",
             level: .warning,
             subsystem: "navigation",
-            fields: ["slot_id": .string(slotID.uuidString)]
+            fields: runtimeFields(for: webView)
         )
         onContentProcessTermination(slotID)
     }
@@ -574,6 +633,354 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             : nil
     }
 
+    func invalidateDiagnosticNavigation() {
+        invalidateDiagnosticNavigation(phase: nil)
+    }
+
+    var currentNavigationDiagnosticFields: [String: RuntimeDiagnosticValue] {
+        guard let currentNavigationTicket else { return [:] }
+        return navigationFields(for: currentNavigationTicket)
+    }
+
+    var currentDiagnosticNavigationGeneration: UInt64? {
+        currentNavigationTicket?.generation
+    }
+
+    private var staleNavigationFields: [String: RuntimeDiagnosticValue] {
+        [
+            "navigation_generation": .null,
+            "navigation_phase": .null,
+            "navigation_callback_stale": .bool(true)
+        ]
+    }
+
+    private func navigationFields(
+        for ticket: DiagnosticNavigationTicket
+    ) -> [String: RuntimeDiagnosticValue] {
+        [
+            "navigation_generation": .integer(Int64(ticket.generation)),
+            "navigation_phase": .string(ticket.phase.rawValue),
+            "navigation_callback_stale": .bool(false)
+        ]
+    }
+
+    private func beginDiagnosticNavigation(
+        _ navigation: WKNavigation
+    ) -> DiagnosticNavigationTicket {
+        let navigationID = ObjectIdentifier(navigation)
+        if let currentNavigationTicket,
+           currentNavigationTicket.navigationID == navigationID {
+            return currentNavigationTicket
+        }
+
+        invalidateDiagnosticNavigation(phase: nil)
+        precondition(nextNavigationGeneration < UInt64.max, "Navigation diagnostic generation exhausted")
+        nextNavigationGeneration += 1
+        let ticket = DiagnosticNavigationTicket(
+            navigationID: navigationID,
+            generation: nextNavigationGeneration,
+            phase: .provisional,
+            didEmitStall: false
+        )
+        currentNavigationTicket = ticket
+        scheduleStallWatchdog(for: ticket)
+        return ticket
+    }
+
+    private func commitDiagnosticNavigation(
+        _ navigation: WKNavigation
+    ) -> DiagnosticNavigationTicket? {
+        guard var ticket = matchingActiveTicket(for: navigation) else { return nil }
+        if ticket.phase == .provisional {
+            ticket.phase = .postCommit
+            currentNavigationTicket = ticket
+            scheduleStallWatchdog(for: ticket)
+        }
+        return ticket
+    }
+
+    private func completeDiagnosticNavigation(
+        _ navigation: WKNavigation,
+        phase: DiagnosticNavigationPhase
+    ) -> DiagnosticNavigationTicket? {
+        guard var ticket = matchingActiveTicket(for: navigation) else { return nil }
+        ticket.phase = phase
+        currentNavigationTicket = ticket
+        cancelNavigationStallWatchdog()
+        invalidateRendererProbe()
+        return ticket
+    }
+
+    private func matchingActiveTicket(
+        for navigation: WKNavigation
+    ) -> DiagnosticNavigationTicket? {
+        guard let ticket = currentNavigationTicket,
+              ticket.navigationID == ObjectIdentifier(navigation),
+              ticket.phase != .finished,
+              ticket.phase != .failed,
+              ticket.phase != .terminated else {
+            return nil
+        }
+        return ticket
+    }
+
+    private func invalidateDiagnosticNavigation(phase: DiagnosticNavigationPhase?) {
+        cancelNavigationStallWatchdog()
+        invalidateRendererProbe()
+        guard var ticket = currentNavigationTicket else { return }
+        if let phase {
+            ticket.phase = phase
+            currentNavigationTicket = ticket
+        } else {
+            currentNavigationTicket = nil
+        }
+    }
+
+    private func scheduleStallWatchdog(for ticket: DiagnosticNavigationTicket) {
+        cancelNavigationStallWatchdog()
+        let delay = UInt64(navigationStallTimeout * 1_000_000_000)
+        navigationStallTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            self?.fireDiagnosticStallWatchdog(
+                navigationID: ticket.navigationID,
+                generation: ticket.generation,
+                phase: ticket.phase.rawValue
+            )
+        }
+    }
+
+    func fireDiagnosticStallWatchdog(
+        navigationID: ObjectIdentifier,
+        generation: UInt64,
+        phase: String
+    ) {
+        guard let webView = self.webView,
+              var current = currentNavigationTicket,
+              current.navigationID == navigationID,
+              current.generation == generation,
+              current.phase.rawValue == phase,
+              !current.didEmitStall else {
+            return
+        }
+
+        current.didEmitStall = true
+        currentNavigationTicket = current
+        navigationStallTask = nil
+        var fields = runtimeFields(for: webView)
+        fields.merge(navigationFields(for: current)) { _, new in new }
+        fields["stall_class"] = .string(
+            current.phase == .provisional
+                ? "PRE_COMMIT_NAVIGATION_STALL"
+                : "POST_COMMIT_NAVIGATION_STALL"
+        )
+        fields["is_loading"] = .bool(webView.isLoading)
+        fields["estimated_progress"] = .double(webView.estimatedProgress)
+        fields["origin"] = webView.url.flatMap {
+            RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+        }.map(RuntimeDiagnosticValue.string) ?? .null
+        diagnostics.record(
+            event: "navigation.stall_detected",
+            level: .warning,
+            subsystem: "navigation",
+            fields: fields
+        )
+        startRendererProbe(trigger: "stall", incidentID: nil, completion: nil)
+    }
+
+    func captureBoundedRendererProbe(
+        incidentID: UUID,
+        completion: @escaping @MainActor (String) -> Void
+    ) {
+        startRendererProbe(
+            trigger: "qa_incident_capture",
+            incidentID: incidentID,
+            completion: completion
+        )
+    }
+
+    private static let rendererProbeScript =
+        "(() => ({ ready_state: document.readyState, visibility_state: document.visibilityState }))()"
+
+    private func startRendererProbe(
+        trigger: String,
+        incidentID: UUID?,
+        completion: (@MainActor (String) -> Void)?
+    ) {
+        guard let webView else {
+            completion?("failed")
+            return
+        }
+
+        invalidateRendererProbe()
+        let probeID = UUID()
+        let expectedNavigationGeneration = currentNavigationTicket?.generation
+        let expectedRuntimeIdentity = runtimeDiagnosticIdentity
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        pendingRendererProbeID = probeID
+        rendererProbeStartedAt = startedAt
+        rendererProbeTrigger = trigger
+        rendererProbeIncidentID = incidentID
+        rendererProbeCompletion = completion
+
+        let timeout = UInt64(rendererProbeTimeout * 1_000_000_000)
+        rendererProbeTimeoutTask = Task { @MainActor [weak self, weak webView] in
+            do {
+                try await Task.sleep(nanoseconds: timeout)
+            } catch {
+                return
+            }
+            guard let self, let webView else { return }
+            self.finishRendererProbe(
+                id: probeID,
+                webView: webView,
+                expectedRuntimeIdentity: expectedRuntimeIdentity,
+                expectedNavigationGeneration: expectedNavigationGeneration,
+                outcome: .timeout
+            )
+        }
+
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let webView else { return }
+            do {
+                let values: RendererProbeValues
+                if let evaluator = self.rendererJavaScriptEvaluator {
+                    values = try await evaluator(webView, Self.rendererProbeScript)
+                } else {
+                    let result = try await webView.evaluateJavaScript(Self.rendererProbeScript)
+                    guard let fields = result as? [String: Any],
+                          let readyState = fields["ready_state"] as? String,
+                          let visibilityState = fields["visibility_state"] as? String else {
+                        self.finishRendererProbe(
+                            id: probeID,
+                            webView: webView,
+                            expectedRuntimeIdentity: expectedRuntimeIdentity,
+                            expectedNavigationGeneration: expectedNavigationGeneration,
+                            outcome: .failed
+                        )
+                        return
+                    }
+                    values = RendererProbeValues(
+                        readyState: readyState,
+                        visibilityState: visibilityState
+                    )
+                }
+
+                guard Self.isAllowed(values) else {
+                    self.finishRendererProbe(
+                        id: probeID,
+                        webView: webView,
+                        expectedRuntimeIdentity: expectedRuntimeIdentity,
+                        expectedNavigationGeneration: expectedNavigationGeneration,
+                        outcome: .failed
+                    )
+                    return
+                }
+                self.finishRendererProbe(
+                    id: probeID,
+                    webView: webView,
+                    expectedRuntimeIdentity: expectedRuntimeIdentity,
+                    expectedNavigationGeneration: expectedNavigationGeneration,
+                    outcome: .success(values)
+                )
+            } catch {
+                self.finishRendererProbe(
+                    id: probeID,
+                    webView: webView,
+                    expectedRuntimeIdentity: expectedRuntimeIdentity,
+                    expectedNavigationGeneration: expectedNavigationGeneration,
+                    outcome: .failed
+                )
+            }
+        }
+    }
+
+    private enum RendererProbeOutcome {
+        case success(RendererProbeValues)
+        case failed
+        case timeout
+
+        var result: String {
+            switch self {
+            case .success: "success"
+            case .failed: "failed"
+            case .timeout: "timeout"
+            }
+        }
+    }
+
+    private static func isAllowed(_ values: RendererProbeValues) -> Bool {
+        ["loading", "interactive", "complete"].contains(values.readyState)
+            && ["visible", "hidden", "prerender", "unloaded"].contains(values.visibilityState)
+    }
+
+    private func finishRendererProbe(
+        id: UUID,
+        webView: WKWebView,
+        expectedRuntimeIdentity: WebRuntimeDiagnosticIdentity?,
+        expectedNavigationGeneration: UInt64?,
+        outcome: RendererProbeOutcome
+    ) {
+        guard pendingRendererProbeID == id else { return }
+        guard self.webView === webView,
+              runtimeDiagnosticIdentity == expectedRuntimeIdentity,
+              currentNavigationTicket?.generation == expectedNavigationGeneration else {
+            invalidateRendererProbe()
+            return
+        }
+
+        rendererProbeTimeoutTask?.cancel()
+        rendererProbeTimeoutTask = nil
+        pendingRendererProbeID = nil
+        let completion = rendererProbeCompletion
+        rendererProbeCompletion = nil
+
+        var fields = runtimeFields(for: webView)
+        fields["probe_trigger"] = .string(rendererProbeTrigger ?? "unknown")
+        fields["probe_result"] = .string(outcome.result)
+        let startedAt = rendererProbeStartedAt ?? ProcessInfo.processInfo.systemUptime
+        fields["probe_latency_ms"] = .double(
+            max(0, ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
+        )
+        if let rendererProbeIncidentID {
+            fields["incident_id"] = .string(rendererProbeIncidentID.uuidString)
+        }
+        if case let .success(values) = outcome {
+            fields["document_ready_state"] = .string(values.readyState)
+            fields["document_visibility_state"] = .string(values.visibilityState)
+        }
+        diagnostics.record(
+            event: "navigation.renderer_probe",
+            level: .notice,
+            subsystem: "navigation",
+            fields: fields
+        )
+        rendererProbeStartedAt = nil
+        rendererProbeTrigger = nil
+        rendererProbeIncidentID = nil
+        completion?(outcome.result)
+    }
+
+    private func invalidateRendererProbe() {
+        rendererProbeTimeoutTask?.cancel()
+        rendererProbeTimeoutTask = nil
+        pendingRendererProbeID = nil
+        rendererProbeStartedAt = nil
+        rendererProbeTrigger = nil
+        rendererProbeIncidentID = nil
+        let completion = rendererProbeCompletion
+        rendererProbeCompletion = nil
+        completion?("discarded")
+    }
+
+    private func cancelNavigationStallWatchdog() {
+        navigationStallTask?.cancel()
+        navigationStallTask = nil
+    }
+
     /// Pure fallback decision: a connection-level failure of exactly the
     /// pending inferred entry URL yields the http candidate. Certificate-trust
     /// failures, other URLs, and absent pending state never downgrade.
@@ -605,93 +1012,6 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
     }
 
-    private func recordPageRuntimeProbe(in webView: WKWebView) {
-        let script = """
-        (() => {
-          const video = document.querySelector('video');
-          return {
-            inner_width: window.innerWidth,
-            client_width: document.documentElement?.clientWidth || 0,
-            inner_height: window.innerHeight,
-            device_pixel_ratio: window.devicePixelRatio || 0,
-            user_agent_is_mobile: /iPhone|Android/i.test(navigator.userAgent),
-            video_width: video?.videoWidth || 0,
-            video_height: video?.videoHeight || 0,
-            video_ready_state: video?.readyState || 0,
-            video_network_state: video?.networkState || 0,
-            video_present: !!video
-          };
-        })()
-        """
-
-        webView.evaluateJavaScript(script) { [weak self, weak webView] value, error in
-            Task { @MainActor [weak self, weak webView] in
-                guard let self, let webView, webView === self.webView, error == nil,
-                      let probe = value as? [String: Any] else {
-                    return
-                }
-
-                var fields = self.runtimeFields(for: webView)
-                Self.copyNumber(probe["inner_width"], to: "page_inner_width", fields: &fields)
-                Self.copyNumber(probe["client_width"], to: "page_client_width", fields: &fields)
-                Self.copyNumber(probe["inner_height"], to: "page_inner_height", fields: &fields)
-                Self.copyNumber(
-                    probe["device_pixel_ratio"],
-                    to: "page_device_pixel_ratio",
-                    fields: &fields
-                )
-                Self.copyNumber(probe["video_width"], to: "video_width", fields: &fields)
-                Self.copyNumber(probe["video_height"], to: "video_height", fields: &fields)
-                Self.copyInteger(
-                    probe["video_ready_state"],
-                    to: "video_ready_state",
-                    fields: &fields
-                )
-                Self.copyInteger(
-                    probe["video_network_state"],
-                    to: "video_network_state",
-                    fields: &fields
-                )
-                if let value = probe["user_agent_is_mobile"] as? Bool {
-                    fields["page_user_agent_is_mobile"] = .bool(value)
-                }
-                if let value = probe["video_present"] as? Bool {
-                    fields["video_present"] = .bool(value)
-                }
-                self.diagnostics.record(
-                    event: "navigation.page_runtime_probe",
-                    level: .debug,
-                    subsystem: "navigation",
-                    fields: fields
-                )
-            }
-        }
-    }
-
-    private static func copyNumber(
-        _ value: Any?,
-        to key: String,
-        fields: inout [String: RuntimeDiagnosticValue]
-    ) {
-        if let value = value as? NSNumber {
-            fields[key] = .double(value.doubleValue)
-        } else if let value = value as? Double {
-            fields[key] = .double(value)
-        }
-    }
-
-    private static func copyInteger(
-        _ value: Any?,
-        to key: String,
-        fields: inout [String: RuntimeDiagnosticValue]
-    ) {
-        if let value = value as? NSNumber {
-            fields[key] = .integer(value.int64Value)
-        } else if let value = value as? Int {
-            fields[key] = .integer(Int64(value))
-        }
-    }
-
     private func runtimeFields(for webView: WKWebView) -> [String: RuntimeDiagnosticValue] {
         let contentMode: String = switch webView.configuration.defaultWebpagePreferences.preferredContentMode {
         case .desktop: "desktop"
@@ -702,7 +1022,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let websiteMode = (webView as? FloatTabsWebView)?.websiteMode.rawValue
             ?? contentMode
         let customUserAgent = webView.customUserAgent
-        return [
+        var fields = diagnostics.environmentFields()
+        fields.merge([
             "slot_id": .string(slotID.uuidString),
             "website_mode": .string(websiteMode),
             "preferred_content_mode": .string(contentMode),
@@ -716,7 +1037,15 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             "bounds_width": .double(Double(webView.bounds.width)),
             "bounds_height": .double(Double(webView.bounds.height)),
             "page_zoom": .double(Double(webView.pageZoom))
-        ]
+        ]) { _, new in new }
+        fields.merge(runtimeDiagnosticIdentity?.fields ?? [:]) { current, _ in current }
+        let navigationFields = currentNavigationDiagnosticFields
+        fields.merge(navigationFields.isEmpty ? [
+            "navigation_generation": RuntimeDiagnosticValue.null,
+            "navigation_phase": .string("none"),
+            "navigation_callback_stale": .bool(false)
+        ] : navigationFields) { current, _ in current }
+        return fields
     }
 
     private func failingURLForDiagnostics(

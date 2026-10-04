@@ -36,7 +36,11 @@ private final class ChatGPTAttentionBridgeHarness {
 
     var observations: [ChatGPTAttentionObservation] { log.entries }
 
-    init(probeValues: [Any?] = []) {
+    init(
+        probeValues: [Any?] = [],
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
+    ) {
         // The observation callback must not capture the harness itself before
         // initialization completes; the log reference it captures is enough.
         let log = self.log
@@ -51,7 +55,9 @@ private final class ChatGPTAttentionBridgeHarness {
             },
             livenessSleeper: { nanoseconds in
                 nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
-            }
+            },
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentHealthProbeTimeout: incidentHealthProbeTimeout
         )
         bridge.attach(to: webView)
         probeCount = { probes.count }
@@ -80,6 +86,29 @@ private final class ChatGPTAttentionBridgeHarness {
             originHost: host,
             originProtocol: originProtocol
         )
+    }
+}
+
+@MainActor
+private final class IncidentHealthProbeGate {
+    private var continuation: CheckedContinuation<Any, Error>?
+
+    func evaluate() async throws -> Any {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while continuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resolve(_ value: Any) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: value)
     }
 }
 
@@ -176,6 +205,200 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         tokenA = nil
         tokenB = nil
         super.tearDown()
+    }
+
+    func testExplicitIncidentHealthProbePopulatesSupportedDocumentBooleans() async {
+        var evaluatedScript: String?
+        let harness = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, script in
+                evaluatedScript = script
+                return Self.healthProbePayload()
+            }
+        )
+        harness.accept(false, token: tokenA)
+
+        let result = await captureHealthProbe(harness)
+
+        XCTAssertEqual(result.outcome, .success)
+        XCTAssertEqual(result.documentEpoch, 1)
+        XCTAssertEqual(result.generating, false)
+        XCTAssertEqual(evaluatedScript, ChatGPTAttentionBridge.incidentHealthProbeScript)
+        XCTAssertNotNil(result.values)
+        XCTAssertEqual(result.diagnosticFields["attention_document_admitted"], .bool(true))
+        XCTAssertEqual(result.diagnosticFields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(result.diagnosticFields["visibility_state"], .string("visible"))
+        XCTAssertEqual(result.diagnosticFields["conversation_shell_present"], .bool(true))
+        XCTAssertEqual(result.diagnosticFields["composer_present"], .bool(true))
+        XCTAssertEqual(result.diagnosticFields["loading_indicator_present"], .bool(false))
+        XCTAssertEqual(result.diagnosticFields["loading_indicator_visible"], .bool(false))
+        XCTAssertEqual(result.diagnosticFields["conversation_load_error_present"], .bool(false))
+    }
+
+    func testIncidentHealthProbeReturnsExplicitUnsupportedAndUnavailableOutcomes() async {
+        var evaluatorCalls = 0
+        let unsupported = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in
+                evaluatorCalls += 1
+                return Self.healthProbePayload()
+            }
+        )
+        unsupported.bridge.handleRuntimeReplacement(
+            committedURL: URL(string: "https://example.org/")
+        )
+        let unsupportedResult = await captureHealthProbe(unsupported)
+        XCTAssertEqual(unsupportedResult.outcome, .unsupportedDocument)
+        XCTAssertNil(unsupportedResult.values)
+
+        let unavailable = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in
+                evaluatorCalls += 1
+                return Self.healthProbePayload()
+            }
+        )
+        let unavailableResult = await captureHealthProbe(unavailable)
+        XCTAssertEqual(unavailableResult.outcome, .bridgeUnavailable)
+        XCTAssertNil(unavailableResult.values)
+        XCTAssertEqual(evaluatorCalls, 0)
+    }
+
+    func testIncidentHealthProbeEvaluationFailureIsExplicitAndContentFree() async {
+        let harness = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in
+                throw NSError(domain: "HealthProbeTest", code: 1)
+            }
+        )
+        harness.accept(false, token: tokenA)
+
+        let result = await captureHealthProbe(harness)
+
+        XCTAssertEqual(result.outcome, .evaluationFailed)
+        XCTAssertNil(result.values)
+        XCTAssertEqual(result.diagnosticFields["conversation_shell_present"], .null)
+        XCTAssertNil(result.diagnosticFields["document_token"])
+        XCTAssertNil(result.diagnosticFields["error_message"])
+    }
+
+    func testIncidentHealthProbeTimeoutRejectsLateCallback() async {
+        var callbackCount = 0
+        var finalResult: ChatGPTIncidentHealthProbeResult?
+        let harness = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in
+                try await Task.sleep(nanoseconds: 80_000_000)
+                return Self.healthProbePayload()
+            },
+            incidentHealthProbeTimeout: 0.01
+        )
+        harness.accept(false, token: tokenA)
+        harness.bridge.captureIncidentHealthSnapshot(
+            for: harness.webView,
+            contextIsCurrent: { true }
+        ) { result in
+            callbackCount += 1
+            finalResult = result
+        }
+
+        let timedOut = await waitUntil { finalResult != nil }
+        XCTAssertTrue(timedOut)
+        XCTAssertEqual(finalResult?.outcome, .timeout)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(callbackCount, 1)
+        XCTAssertEqual(finalResult?.outcome, .timeout)
+        XCTAssertNil(finalResult?.values)
+    }
+
+    func testIncidentHealthProbeDiscardsChangedDocumentAndWebViewIdentities() async {
+        let documentGate = IncidentHealthProbeGate()
+        let documentHarness = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in try await documentGate.evaluate() }
+        )
+        documentHarness.accept(false, token: tokenA)
+        var documentResult: ChatGPTIncidentHealthProbeResult?
+        documentHarness.bridge.captureIncidentHealthSnapshot(
+            for: documentHarness.webView,
+            contextIsCurrent: { true }
+        ) { documentResult = $0 }
+        await documentGate.waitUntilStarted()
+        documentHarness.bridge.handleRuntimeReplacement()
+        documentHarness.accept(true, token: tokenB)
+        documentGate.resolve(Self.healthProbePayload())
+        let documentCompleted = await waitUntil { documentResult != nil }
+        XCTAssertTrue(documentCompleted)
+        XCTAssertEqual(documentResult?.outcome, .stale)
+        XCTAssertNil(documentResult?.values)
+
+        let webViewGate = IncidentHealthProbeGate()
+        let webViewHarness = ChatGPTAttentionBridgeHarness(
+            incidentHealthProbeEvaluator: { _, _ in try await webViewGate.evaluate() }
+        )
+        webViewHarness.accept(false, token: tokenA)
+        var webViewResult: ChatGPTIncidentHealthProbeResult?
+        webViewHarness.bridge.captureIncidentHealthSnapshot(
+            for: webViewHarness.webView,
+            contextIsCurrent: { true }
+        ) { webViewResult = $0 }
+        await webViewGate.waitUntilStarted()
+        webViewHarness.bridge.attach(to: WKWebView())
+        webViewGate.resolve(Self.healthProbePayload())
+        let webViewCompleted = await waitUntil { webViewResult != nil }
+        XCTAssertTrue(webViewCompleted)
+        XCTAssertEqual(webViewResult?.outcome, .stale)
+        XCTAssertNil(webViewResult?.values)
+    }
+
+    func testIncidentHealthProbeScriptReturnsOnlyBoundedContentFreeFields() {
+        let script = ChatGPTAttentionBridge.incidentHealthProbeScript
+        XCTAssertTrue(script.contains("document.readyState"))
+        XCTAssertTrue(script.contains("document.visibilityState"))
+        XCTAssertTrue(script.contains("conversation_shell_present"))
+        XCTAssertTrue(script.contains("composer_present"))
+        XCTAssertTrue(script.contains("loading_indicator_present"))
+        XCTAssertTrue(script.contains("loading_indicator_visible"))
+        XCTAssertTrue(script.contains("conversation_load_error_present"))
+        for forbidden in [
+            "innerText", "textContent", "outerHTML", "document.cookie", "localStorage",
+            "sessionStorage", "location.", "setInterval", "setTimeout", "MutationObserver",
+            "addEventListener", "window.onerror"
+        ] {
+            XCTAssertFalse(script.contains(forbidden), "Probe must not read \(forbidden)")
+        }
+    }
+
+    private func captureHealthProbe(
+        _ harness: ChatGPTAttentionBridgeHarness
+    ) async -> ChatGPTIncidentHealthProbeResult {
+        await withCheckedContinuation { continuation in
+            harness.bridge.captureIncidentHealthSnapshot(
+                for: harness.webView,
+                contextIsCurrent: { true }
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private static func healthProbePayload() -> [String: Any] {
+        [
+            "version": 1,
+            "document_ready_state": "complete",
+            "visibility_state": "visible",
+            "conversation_shell_present": true,
+            "composer_present": true,
+            "loading_indicator_present": false,
+            "loading_indicator_visible": false,
+            "conversation_load_error_present": false
+        ]
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 1,
+        _ predicate: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if predicate() { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return predicate()
     }
 
     // MARK: - Shared host policy

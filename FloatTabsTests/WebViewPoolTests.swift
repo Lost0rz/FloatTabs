@@ -4,6 +4,29 @@ import XCTest
 @testable import FloatTabs
 
 @MainActor
+private final class IncidentHealthProbeTestGate {
+    private var continuation: CheckedContinuation<Any, Error>?
+
+    func evaluate() async throws -> Any {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while continuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resolve(_ value: Any) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: value)
+    }
+}
+
+@MainActor
 final class WebViewPoolTests: XCTestCase {
     func testWebRuntimeCreationRecordsSuccessOnlyAfterRuntimeIsCreated() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
@@ -25,6 +48,504 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(created.fields["custom_user_agent_present"], .bool(false))
         XCTAssertEqual(created.fields["viewport_width"], .double(600))
         XCTAssertEqual(created.fields["viewport_height"], .double(820))
+    }
+
+    func testPhysicalRuntimeDiagnosticIdentityTracksCreateReuseRebuildAndRelease() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        var profile = makeProfile(name: "RuntimeDiagnosticIdentity")
+        func integer(
+            _ key: String,
+            in fields: [String: RuntimeDiagnosticValue],
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) throws -> Int64 {
+            guard case let .integer(value)? = fields[key] else {
+                XCTFail("Missing integer diagnostic field \(key); fields=\(fields)", file: file, line: line)
+                throw NSError(domain: "RuntimeDiagnosticIdentityTest", code: 1)
+            }
+            return value
+        }
+        func string(
+            _ key: String,
+            in fields: [String: RuntimeDiagnosticValue],
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) throws -> String {
+            guard case let .string(value)? = fields[key] else {
+                XCTFail("Missing string diagnostic field \(key); fields=\(fields)", file: file, line: line)
+                throw NSError(domain: "RuntimeDiagnosticIdentityTest", code: 2)
+            }
+            return value
+        }
+
+        _ = try pool.webView(for: profile)
+        let assignedIdentity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let created = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.created" })
+        let firstGeneration = try integer("runtime_generation", in: created.fields)
+        let firstInstanceID = try string("webview_instance_id", in: created.fields)
+        XCTAssertGreaterThan(firstGeneration, 0)
+        XCTAssertNotNil(UUID(uuidString: firstInstanceID))
+        XCTAssertEqual(assignedIdentity.runtimeGeneration, UInt64(firstGeneration))
+        XCTAssertEqual(assignedIdentity.webViewInstanceID.uuidString, firstInstanceID)
+
+        _ = try pool.webView(for: profile)
+        let reused = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.reused" })
+        XCTAssertEqual(try integer("runtime_generation", in: reused.fields), firstGeneration)
+        XCTAssertEqual(try string("webview_instance_id", in: reused.fields), firstInstanceID)
+
+        pool.handleContentProcessTermination(slotID: profile.id)
+        let terminated = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.content_process_terminated" }
+        )
+        XCTAssertEqual(try integer("runtime_generation", in: terminated.fields), firstGeneration)
+        XCTAssertEqual(try string("webview_instance_id", in: terminated.fields), firstInstanceID)
+        XCTAssertNotNil(terminated.fields["source_revision"])
+        XCTAssertNotNil(terminated.fields["build_channel"])
+        XCTAssertNotNil(terminated.fields["qa_label"])
+        XCTAssertEqual(terminated.fields["navigation_generation"], .null)
+        XCTAssertEqual(terminated.fields["navigation_phase"], .string("none"))
+
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
+        _ = try pool.webView(for: profile)
+        let rebuilt = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.rebuild.completed" }
+        )
+        let rebuiltGeneration = try integer("runtime_generation", in: rebuilt.fields)
+        let rebuiltInstanceID = try string("webview_instance_id", in: rebuilt.fields)
+        XCTAssertGreaterThan(rebuiltGeneration, firstGeneration)
+        XCTAssertNotEqual(rebuiltInstanceID, firstInstanceID)
+        XCTAssertNotNil(rebuilt.fields["source_revision"])
+        XCTAssertNotNil(rebuilt.fields["build_channel"])
+        XCTAssertNotNil(rebuilt.fields["qa_label"])
+        XCTAssertEqual(rebuilt.fields["navigation_phase"], .string("none"))
+
+        pool.release(slotID: profile.id)
+        let released = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.released" })
+        XCTAssertEqual(try integer("runtime_generation", in: released.fields), rebuiltGeneration)
+        XCTAssertEqual(try string("webview_instance_id", in: released.fields), rebuiltInstanceID)
+        XCTAssertNil(pool.runtimeDiagnosticIdentity(for: profile.id))
+    }
+
+    func testIncidentHealthProbeDiscardsRuntimeAndWebViewReplacement() async throws {
+        let gate = IncidentHealthProbeTestGate()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            incidentHealthProbeEvaluator: { _, _ in try await gate.evaluate() },
+            incidentHealthProbeTimeout: 1
+        )
+        let profile = makeProfile(name: "IncidentHealthRuntimeIdentity")
+        defer { pool.release(slotID: profile.id) }
+        let originalWebView = try pool.webView(for: profile)
+        let originalRuntimeIdentity = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: profile.id)
+        )
+        let originalBridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        originalBridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "health-runtime-token",
+                generating: false
+            ),
+            messageWebView: originalWebView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        var capturedResult: ChatGPTIncidentHealthProbeResult?
+        pool.captureBoundedChatGPTHealthProbe(slotID: profile.id) {
+            capturedResult = $0
+        }
+        await gate.waitUntilStarted()
+        pool.release(slotID: profile.id)
+        let replacementWebView = try pool.webView(for: profile)
+        XCTAssertFalse(replacementWebView === originalWebView)
+        XCTAssertNotEqual(pool.runtimeDiagnosticIdentity(for: profile.id), originalRuntimeIdentity)
+        gate.resolve(Self.healthPayload())
+
+        let completed = await waitForResult { capturedResult }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(capturedResult?.outcome, .stale)
+        XCTAssertNil(capturedResult?.values)
+    }
+
+    func testIncidentHealthProbeDiscardsNavigationGenerationChange() async throws {
+        let gate = IncidentHealthProbeTestGate()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            incidentHealthProbeEvaluator: { _, _ in try await gate.evaluate() },
+            incidentHealthProbeTimeout: 1
+        )
+        let profile = makeProfile(name: "IncidentHealthNavigationIdentity")
+        defer { pool.release(slotID: profile.id) }
+        let webView = try pool.webView(for: profile)
+        let bridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "health-navigation-token",
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        var capturedResult: ChatGPTIncidentHealthProbeResult?
+        pool.captureBoundedChatGPTHealthProbe(slotID: profile.id) {
+            capturedResult = $0
+        }
+        await gate.waitUntilStarted()
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>test</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
+        XCTAssertNotNil(observer.currentDiagnosticNavigationGeneration)
+        gate.resolve(Self.healthPayload())
+
+        let completed = await waitForResult { capturedResult }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(capturedResult?.outcome, .stale)
+        XCTAssertNil(capturedResult?.values)
+    }
+
+    func testNavigationGenerationIsMonotonicAndStaleCallbacksDoNotCompleteCurrentTicket() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "NavigationDiagnosticTickets")
+        let webView = try pool.webView(for: profile)
+        let physicalRuntimeGeneration = try XCTUnwrap(
+            pool.runtimeDiagnosticIdentity(for: profile.id)?.runtimeGeneration
+        )
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+
+        let firstNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>one</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: firstNavigation)
+        observer.webView(webView, didStartProvisionalNavigation: firstNavigation)
+
+        let firstStarts = writer.events.filter { $0.event == "navigation.provisional_started" }
+        XCTAssertGreaterThanOrEqual(firstStarts.count, 2)
+        XCTAssertTrue(firstStarts.allSatisfy {
+            $0.fields["navigation_generation"] == .integer(1)
+                && $0.fields["navigation_phase"] == .string("provisional")
+        })
+
+        observer.webView(webView, didCommit: firstNavigation)
+        let firstCommit = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        XCTAssertEqual(firstCommit.fields["navigation_generation"], .integer(1))
+        XCTAssertEqual(firstCommit.fields["navigation_phase"], .string("post_commit"))
+
+        let secondNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>two</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: secondNavigation)
+        let secondStart = try XCTUnwrap(writer.events.last { $0.event == "navigation.provisional_started" })
+        XCTAssertEqual(secondStart.fields["navigation_generation"], .integer(2))
+
+        observer.webView(webView, didFinish: firstNavigation)
+        let staleFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(staleFinish.fields["navigation_callback_stale"], .bool(true))
+        XCTAssertEqual(staleFinish.fields["navigation_generation"], .null)
+        observer.webView(webView, didFinish: secondNavigation)
+        let currentFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(currentFinish.fields["navigation_callback_stale"], .bool(false))
+        XCTAssertEqual(currentFinish.fields["navigation_generation"], .integer(2))
+        XCTAssertEqual(
+            pool.runtimeDiagnosticIdentity(for: profile.id)?.runtimeGeneration,
+            physicalRuntimeGeneration,
+            "A stale navigation callback must not change physical runtime identity"
+        )
+
+        pool.release(slotID: profile.id)
+    }
+
+    func testNavigationStallWatchdogSeparatesPhasesAndEmitsAtMostOncePerGeneration() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "NavigationStallWatchdog")
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+
+        let firstNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>first</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: firstNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(firstNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(firstNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.count,
+            1
+        )
+        let preCommitStall = try XCTUnwrap(writer.events.last { $0.event == "navigation.stall_detected" })
+        XCTAssertEqual(preCommitStall.fields["stall_class"], .string("PRE_COMMIT_NAVIGATION_STALL"))
+
+        observer.webView(webView, didCommit: firstNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(firstNavigation),
+            generation: 1,
+            phase: "post_commit"
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.count,
+            1,
+            "Commit must replace the watchdog without emitting a second stall for the generation"
+        )
+
+        let secondNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>second</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: secondNavigation)
+        observer.webView(webView, didCommit: secondNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(secondNavigation),
+            generation: 2,
+            phase: "post_commit"
+        )
+        let stalls = writer.events.filter { $0.event == "navigation.stall_detected" }
+        XCTAssertEqual(stalls.count, 2)
+        XCTAssertEqual(stalls.last?.fields["stall_class"], .string("POST_COMMIT_NAVIGATION_STALL"))
+
+        observer.webView(webView, didFinish: secondNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(secondNavigation),
+            generation: 2,
+            phase: "post_commit"
+        )
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.count,
+            2,
+            "Finish invalidates its watchdog"
+        )
+        pool.release(slotID: profile.id)
+    }
+
+    func testStallWatchdogRejectsFailureSupersessionReleaseRebuildAndTerminationWork() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics
+        )
+        var profile = makeProfile(name: "StallWatchdogInvalidation")
+        var webView = try pool.webView(for: profile)
+        var observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+
+        let supersededNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>superseded</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: supersededNavigation)
+        let failedNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>failed</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: failedNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(supersededNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        XCTAssertTrue(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.isEmpty,
+            "A superseded navigation watchdog must be ignored"
+        )
+        observer.webView(
+            webView,
+            didFailProvisionalNavigation: failedNavigation,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        )
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(failedNavigation),
+            generation: 2,
+            phase: "provisional"
+        )
+        XCTAssertTrue(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.isEmpty,
+            "A failed navigation watchdog must be ignored"
+        )
+
+        let rebuiltNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>rebuild</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: rebuiltNavigation)
+        profile.renderingProfile = profile.renderingProfile.settingBrowserIdentity(.windowsChrome)
+        webView = try pool.webView(for: profile)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(rebuiltNavigation),
+            generation: 3,
+            phase: "provisional"
+        )
+        XCTAssertTrue(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.isEmpty,
+            "A replaced runtime watchdog must be ignored"
+        )
+
+        observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        let terminatedNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>terminated</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: terminatedNavigation)
+        observer.webViewWebContentProcessDidTerminate(webView)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(terminatedNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        XCTAssertTrue(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.isEmpty,
+            "A terminated WebContent watchdog must be ignored"
+        )
+
+        let releasedNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>release</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: releasedNavigation)
+        pool.release(slotID: profile.id)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(releasedNavigation),
+            generation: 2,
+            phase: "provisional"
+        )
+
+        XCTAssertTrue(
+            writer.events.filter { $0.event == "navigation.stall_detected" }.isEmpty,
+            "A released runtime watchdog must be ignored"
+        )
+    }
+
+    func testStallStartsOnlyBoundedRendererProbeAndRecordsAllowedReadinessValues() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var evaluatedScripts: [String] = []
+        var loadedRequestCount = 0
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in loadedRequestCount += 1 },
+            diagnostics: diagnostics,
+            rendererJavaScriptEvaluator: { _, script in
+                evaluatedScripts.append(script)
+                return RendererProbeValues(readyState: "complete", visibilityState: "visible")
+            }
+        )
+        let profile = makeProfile(name: "BoundedRendererProbe")
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>probe</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
+        let loadCountBeforeProbe = loadedRequestCount
+
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(navigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(evaluatedScripts, ["(() => ({ ready_state: document.readyState, visibility_state: document.visibilityState }))()"])
+        XCTAssertEqual(loadedRequestCount, loadCountBeforeProbe)
+        let probe = try XCTUnwrap(writer.events.last { $0.event == "navigation.renderer_probe" })
+        XCTAssertEqual(probe.fields["probe_result"], .string("success"))
+        XCTAssertEqual(probe.fields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(probe.fields["document_visibility_state"], .string("visible"))
+        guard case let .double(latency)? = probe.fields["probe_latency_ms"] else {
+            return XCTFail("Probe latency must be recorded")
+        }
+        XCTAssertGreaterThanOrEqual(latency, 0)
+        XCTAssertNil(probe.fields["page_text"])
+        XCTAssertNil(probe.fields["document_token"])
+        pool.release(slotID: profile.id)
+    }
+
+    func testRendererProbeFailureTimeoutAndLateCompletionAreBounded() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var evaluationCount = 0
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            diagnostics: diagnostics,
+            rendererProbeTimeout: 0.005,
+            rendererJavaScriptEvaluator: { _, _ in
+                evaluationCount += 1
+                if evaluationCount == 1 {
+                    throw NSError(domain: "RendererProbeTest", code: 7)
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+                return RendererProbeValues(readyState: "complete", visibilityState: "visible")
+            }
+        )
+        let profile = makeProfile(name: "RendererProbeTimeout")
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+
+        let failedNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>failure</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: failedNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(failedNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        let failedProbe = try XCTUnwrap(writer.events.last { $0.event == "navigation.renderer_probe" })
+        XCTAssertEqual(failedProbe.fields["probe_result"], .string("failed"))
+        XCTAssertNil(failedProbe.fields["document_ready_state"])
+
+        let timeoutNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>timeout</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: timeoutNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(timeoutNavigation),
+            generation: 2,
+            phase: "provisional"
+        )
+        try? await Task.sleep(nanoseconds: 15_000_000)
+        let probeEvents = writer.events.filter { $0.event == "navigation.renderer_probe" }
+        XCTAssertEqual(probeEvents.count, 2)
+        XCTAssertEqual(probeEvents.last?.fields["probe_result"], .string("timeout"))
+
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "navigation.renderer_probe" }.count,
+            2,
+            "The late success callback after timeout must be discarded"
+        )
+        pool.release(slotID: profile.id)
     }
 
     func testWebRuntimeCreationRecordsMobileRenderingDiagnostics() throws {
@@ -1776,6 +2297,31 @@ final class WebViewPoolTests: XCTestCase {
 
     private func makePool() -> WebViewPool {
         WebViewPool(onURLChange: { _, _ in }, initialLoad: { _, _ in })
+    }
+
+    private func waitForResult(
+        timeout: TimeInterval = 1,
+        _ result: @MainActor () -> ChatGPTIncidentHealthProbeResult?
+    ) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if result() != nil { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return result() != nil
+    }
+
+    private static func healthPayload() -> [String: Any] {
+        [
+            "version": 1,
+            "document_ready_state": "complete",
+            "visibility_state": "visible",
+            "conversation_shell_present": true,
+            "composer_present": true,
+            "loading_indicator_present": false,
+            "loading_indicator_visible": false,
+            "conversation_load_error_present": false
+        ]
     }
 
     private func makeProfile(

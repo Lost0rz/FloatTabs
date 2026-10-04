@@ -346,6 +346,16 @@ final class FullscreenSourceHostController {
         restoreGeneration
     }
 
+    var diagnosticObservedWebView: WKWebView? {
+        observedWebView
+    }
+
+    func diagnosticIsFullscreenPrivatePresentation(of webView: WKWebView) -> Bool {
+        observedWebView === webView
+            && fullscreenPresentationWindow != nil
+            && webView.window === fullscreenPresentationWindow
+    }
+
     init(
         container: WebPanelContainerView,
         resizeHandle: PanelResizeHandleView,

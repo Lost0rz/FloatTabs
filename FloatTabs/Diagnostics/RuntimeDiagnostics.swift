@@ -5,6 +5,8 @@ import OSLog
 protocol RuntimeDiagnosticRecording: AnyObject {
     var capturesDebugEvents: Bool { get }
 
+    func environmentFields() -> [String: RuntimeDiagnosticValue]
+
     func beginTrace(
         root: String,
         fields: [String: RuntimeDiagnosticValue]
@@ -31,6 +33,10 @@ protocol RuntimeDiagnosticRecording: AnyObject {
 }
 
 extension RuntimeDiagnosticRecording {
+    func environmentFields() -> [String: RuntimeDiagnosticValue] {
+        [:]
+    }
+
     func beginTrace(root: String) -> RuntimeDiagnosticTrace {
         beginTrace(root: root, fields: [:])
     }
@@ -97,6 +103,9 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         [
             "app_version": .string(Self.appVersion),
             "build_number": .string(Self.buildNumber),
+            "source_revision": .string(Self.sourceRevision),
+            "build_channel": .string(Self.buildChannel),
+            "qa_label": .string(Self.qaLabel),
             "macos_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
             "architecture": .string(Self.processArchitecture),
             "session_id": .string(sessionID.uuidString),
@@ -238,6 +247,18 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     private static var buildNumber: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
             ?? "unknown"
+    }
+
+    private static var sourceRevision: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsSourceRevision") as? String ?? "unknown"
+    }
+
+    private static var buildChannel: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsBuildChannel") as? String ?? "unknown"
+    }
+
+    private static var qaLabel: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsQALabel") as? String ?? "unknown"
     }
 
     private static var processArchitecture: String {

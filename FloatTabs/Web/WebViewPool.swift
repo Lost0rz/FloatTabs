@@ -40,6 +40,32 @@ enum BrowserProfileIdentity: Equatable, Hashable {
     }
 }
 
+struct WebRuntimeDiagnosticIdentity: Equatable, Sendable {
+    let runtimeGeneration: UInt64
+    let webViewInstanceID: UUID
+
+    var fields: [String: RuntimeDiagnosticValue] {
+        [
+            "runtime_generation": .integer(Int64(runtimeGeneration)),
+            "webview_instance_id": .string(webViewInstanceID.uuidString)
+        ]
+    }
+}
+
+@MainActor
+private enum WebRuntimeDiagnosticIdentitySequence {
+    private static var nextGeneration: UInt64 = 1
+
+    static func next() -> WebRuntimeDiagnosticIdentity {
+        precondition(nextGeneration < UInt64.max, "Web runtime diagnostic generation exhausted")
+        defer { nextGeneration += 1 }
+        return WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: nextGeneration,
+            webViewInstanceID: UUID()
+        )
+    }
+}
+
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
@@ -56,6 +82,7 @@ final class WebViewPool {
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
 
     private var webViews: [UUID: WKWebView] = [:]
+    private var runtimeDiagnosticIdentities: [UUID: WebRuntimeDiagnosticIdentity] = [:]
     private var navigationObservers: [UUID: SlotNavigationObserver] = [:]
     private var popupCoordinators: [UUID: PopupCoordinator] = [:]
     private var attentionBridges: [UUID: ChatGPTAttentionBridge] = [:]
@@ -103,6 +130,11 @@ final class WebViewPool {
     private let downloadCoordinator: DownloadCoordinator
     private let browserProfileDataStoreProvider: BrowserProfileDataStoreProvider
     private let diagnostics: any RuntimeDiagnosticRecording
+    private let navigationStallTimeout: TimeInterval
+    private let rendererProbeTimeout: TimeInterval
+    private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
+    private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator?
+    private let incidentHealthProbeTimeout: TimeInterval
     // Production leaves this nil and reads WKWebView history directly. The
     // optional seam lets tests model a committed history item without network
     // or WebKit process timing.
@@ -117,7 +149,12 @@ final class WebViewPool {
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
         browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider(),
-        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
+        navigationStallTimeout: TimeInterval = 120,
+        rendererProbeTimeout: TimeInterval = 5,
+        rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
@@ -126,6 +163,14 @@ final class WebViewPool {
         self.committedURLProvider = committedURLProvider
         self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
         self.diagnostics = diagnostics
+        self.navigationStallTimeout = max(0, navigationStallTimeout)
+        self.rendererProbeTimeout = max(0, rendererProbeTimeout)
+        self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
+        self.incidentHealthProbeEvaluator = incidentHealthProbeEvaluator
+        self.incidentHealthProbeTimeout = min(
+            max(incidentHealthProbeTimeout, 0),
+            ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
+        )
     }
 
     func webView(for profile: WebAppProfile) throws -> WKWebView {
@@ -170,6 +215,7 @@ final class WebViewPool {
             recoverDeferredContentProcessIfNeeded(for: profile, in: existing)
             var reuseFields = renderingDiagnosticFields(for: desiredRuntimeRendering)
             reuseFields["slot_id"] = .string(profile.id.uuidString)
+            reuseFields.merge(runtimeDiagnosticIdentities[profile.id]?.fields ?? [:]) { current, _ in current }
             diagnostics.record(
                 event: "web_runtime.reused",
                 level: .debug,
@@ -201,6 +247,80 @@ final class WebViewPool {
 
     func existingWebView(for slotID: UUID) -> WKWebView? {
         webViews[slotID]
+    }
+
+    /// Read-only physical runtime identity for a resident WebView. This value
+    /// is diagnostic metadata only and is never consulted by lifecycle policy.
+    func runtimeDiagnosticIdentity(for slotID: UUID) -> WebRuntimeDiagnosticIdentity? {
+        runtimeDiagnosticIdentities[slotID]
+    }
+
+    func diagnosticSnapshotFields(for slotID: UUID) -> [String: RuntimeDiagnosticValue] {
+        guard let webView = webViews[slotID] else { return [:] }
+        var fields = runtimeDiagnosticIdentities[slotID]?.fields ?? [:]
+        fields.merge(navigationObservers[slotID]?.currentNavigationDiagnosticFields ?? [:]) {
+            current, _ in current
+        }
+        if fields["navigation_generation"] == nil {
+            fields["navigation_generation"] = .null
+            fields["navigation_phase"] = .string("none")
+            fields["navigation_callback_stale"] = .bool(false)
+        }
+        fields.merge(nativeNavigationFields(for: webView)) { current, _ in current }
+        return fields
+    }
+
+    func captureBoundedRendererProbe(
+        slotID: UUID,
+        incidentID: UUID,
+        completion: @escaping @MainActor (String) -> Void
+    ) {
+        guard let observer = navigationObservers[slotID] else {
+            completion("failed")
+            return
+        }
+        observer.captureBoundedRendererProbe(
+            incidentID: incidentID,
+            completion: completion
+        )
+    }
+
+    /// Captures one explicit ChatGPT document-health sample. Pool/runtime and
+    /// navigation identities are frozen at entry and rechecked by the bridge
+    /// when the isolated-world result (or timeout) returns.
+    func captureBoundedChatGPTHealthProbe(
+        slotID: UUID,
+        completion: @escaping @MainActor (ChatGPTIncidentHealthProbeResult) -> Void
+    ) {
+        guard let webView = webViews[slotID],
+              let bridge = attentionBridges[slotID],
+              let observer = navigationObservers[slotID],
+              let runtimeIdentity = runtimeDiagnosticIdentities[slotID] else {
+            completion(ChatGPTIncidentHealthProbeResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                documentEpoch: nil,
+                generating: nil,
+                latencyMilliseconds: 0
+            ))
+            return
+        }
+        let navigationGeneration = observer.currentDiagnosticNavigationGeneration
+        bridge.captureIncidentHealthSnapshot(
+            for: webView,
+            contextIsCurrent: { [weak self, weak webView, weak bridge, weak observer] in
+                guard let self,
+                      let webView,
+                      let bridge,
+                      let observer else { return false }
+                return self.webViews[slotID] === webView
+                    && self.attentionBridges[slotID] === bridge
+                    && self.navigationObservers[slotID] === observer
+                    && self.runtimeDiagnosticIdentities[slotID] == runtimeIdentity
+                    && observer.currentDiagnosticNavigationGeneration == navigationGeneration
+            },
+            completion: completion
+        )
     }
 
     func calibreReaderBridge(for slotID: UUID) -> CalibreReaderBridge? {
@@ -266,6 +386,8 @@ final class WebViewPool {
         invalidateResponseBridge(slotID: slotID)
         invalidateCalibreReaderBridge(slotID: slotID)
         discardPopupCoordinator(slotID: slotID)
+        let priorNavigationFields = navigationObservers[slotID]?.currentNavigationDiagnosticFields ?? [:]
+        navigationObservers[slotID]?.invalidateDiagnosticNavigation()
         navigationObservers.removeValue(forKey: slotID)
         appliedRenderingProfiles.removeValue(forKey: slotID)
         appliedBrowserProfileIdentities.removeValue(forKey: slotID)
@@ -274,12 +396,16 @@ final class WebViewPool {
         let removed = webViews.removeValue(forKey: slotID)
         removed?.removeFromSuperview()
         if removed != nil {
+            var fields = ["slot_id": RuntimeDiagnosticValue.string(slotID.uuidString)]
+            fields.merge(runtimeDiagnosticIdentities[slotID]?.fields ?? [:]) { current, _ in current }
+            fields.merge(priorNavigationFields) { current, _ in current }
             diagnostics.record(
                 event: "web_runtime.released",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: fields
             )
+            runtimeDiagnosticIdentities.removeValue(forKey: slotID)
             onResidentSetChange?()
         }
     }
@@ -373,14 +499,17 @@ final class WebViewPool {
     func handleContentProcessTermination(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
 
+        var terminationFields = diagnostics.environmentFields()
+        terminationFields.merge([
+            "slot_id": .string(slotID.uuidString),
+            "is_active": .bool(isSlotActive(slotID))
+        ]) { _, new in new }
+        terminationFields.merge(diagnosticSnapshotFields(for: slotID)) { _, new in new }
         diagnostics.record(
             event: "web_runtime.content_process_terminated",
             level: .warning,
             subsystem: "web",
-            fields: [
-                "slot_id": .string(slotID.uuidString),
-                "is_active": .bool(isSlotActive(slotID))
-            ]
+            fields: terminationFields
         )
 
         // The terminated runtime is authoritatively replaced: reset its
@@ -439,7 +568,11 @@ final class WebViewPool {
             for: profile.renderingProfile.normalized(),
             navigationURL: navigationURL
         )
-        var rebuildFields = renderingDiagnosticFields(for: runtimeRendering)
+        var rebuildFields = diagnostics.environmentFields()
+        rebuildFields.merge(renderingDiagnosticFields(for: runtimeRendering)) {
+            _, new in new
+        }
+        rebuildFields.merge(diagnosticSnapshotFields(for: profile.id)) { _, new in new }
         rebuildFields["slot_id"] = .string(profile.id.uuidString)
         diagnostics.record(
             event: "web_runtime.rebuild.begin",
@@ -451,12 +584,14 @@ final class WebViewPool {
         invalidateResponseBridge(slotID: profile.id)
         invalidateCalibreReaderBridge(slotID: profile.id)
         discardPopupCoordinator(slotID: profile.id)
+        navigationObservers[profile.id]?.invalidateDiagnosticNavigation()
         navigationObservers.removeValue(forKey: profile.id)
         appliedRenderingProfiles.removeValue(forKey: profile.id)
         appliedBrowserProfileIdentities.removeValue(forKey: profile.id)
         lastKnownURLs.removeValue(forKey: profile.id)
         deferredReloadSlotIDs.remove(profile.id)
         let replaced = webViews.removeValue(forKey: profile.id)
+        runtimeDiagnosticIdentities.removeValue(forKey: profile.id)
         replaced?.removeFromSuperview()
 
         // A rendering-profile rebuild replaces the transient runtime for the same
@@ -470,21 +605,31 @@ final class WebViewPool {
                 cachePolicy: .useProtocolCachePolicy,
                 notifyResidentSetChange: false
             )
+            var completedFields = diagnostics.environmentFields()
+            completedFields.merge(renderingDiagnosticFields(for: runtimeRendering)) {
+                _, new in new
+            }
+            completedFields.merge(diagnosticSnapshotFields(for: profile.id)) {
+                _, new in new
+            }
+            completedFields["slot_id"] = .string(profile.id.uuidString)
             diagnostics.record(
                 event: "web_runtime.rebuild.completed",
                 level: .notice,
                 subsystem: "web",
-                fields: rebuildFields
+                fields: completedFields
             )
             return webView
         } catch {
             if replaced != nil {
                 onResidentSetChange?()
             }
-            var fields: [String: RuntimeDiagnosticValue] = [
+            var fields = diagnostics.environmentFields()
+            fields.merge([
                 "slot_id": .string(profile.id.uuidString),
                 "operation": .string("rebuild")
-            ]
+            ]) { _, new in new }
+            fields.merge(rebuildFields) { current, _ in current }
             fields.merge(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { _, new in new }
             diagnostics.record(
                 event: "web_runtime.recovery.failed",
@@ -562,6 +707,8 @@ final class WebViewPool {
                 self?.onAttentionObservation?(slotID, observation)
             },
             diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentHealthProbeTimeout: incidentHealthProbeTimeout,
             onAttentionEvent: { [weak self] slotID, event in
                 if let onAttentionEvent = self?.onAttentionEvent {
                     onAttentionEvent(slotID, event)
@@ -603,12 +750,15 @@ final class WebViewPool {
                 calibreReaderBridge.install(into: userContentController)
             }
         )
+        let runtimeIdentity = WebRuntimeDiagnosticIdentitySequence.next()
+        runtimeDiagnosticIdentities[profile.id] = runtimeIdentity
         attentionBridge.attach(to: webView)
         responseBridge.attach(to: webView)
         calibreReaderBridge.attach(to: webView)
         let observer = SlotNavigationObserver(
             slotID: profile.id,
             webView: webView,
+            runtimeDiagnosticIdentity: runtimeIdentity,
             websiteMode: rendering.effectiveWebsiteMode,
             downloadCoordinator: downloadCoordinator,
             onURLChange: { [weak self] slotID, url in
@@ -678,7 +828,10 @@ final class WebViewPool {
                 }
                 self.onCommittedURLChange?(slotID, committedURL)
             },
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            navigationStallTimeout: navigationStallTimeout,
+            rendererProbeTimeout: rendererProbeTimeout,
+            rendererJavaScriptEvaluator: rendererJavaScriptEvaluator
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
@@ -722,6 +875,8 @@ final class WebViewPool {
         var createdFields = runtimeFields
         createdFields["slot_id"] = .string(profile.id.uuidString)
         createdFields["browser_profile"] = .string(String(describing: browserProfileIdentity))
+        createdFields["runtime_generation"] = .integer(Int64(runtimeIdentity.runtimeGeneration))
+        createdFields["webview_instance_id"] = .string(runtimeIdentity.webViewInstanceID.uuidString)
         createdFields["initial_frame_width"] = .double(Double(webView.frame.width))
         createdFields["initial_frame_height"] = .double(Double(webView.frame.height))
         createdFields["initial_attached_to_window"] = .bool(webView.window != nil)
@@ -749,6 +904,18 @@ final class WebViewPool {
             "viewport_width": .double(Double(normalized.viewportWidth)),
             "viewport_height": .double(Double(normalized.viewportHeight)),
             "zoom": .double(Double(normalized.zoom))
+        ]
+    }
+
+    private func nativeNavigationFields(
+        for webView: WKWebView
+    ) -> [String: RuntimeDiagnosticValue] {
+        [
+            "is_loading": .bool(webView.isLoading),
+            "estimated_progress": .double(webView.estimatedProgress),
+            "origin": webView.url.flatMap {
+                RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+            }.map(RuntimeDiagnosticValue.string) ?? .null
         ]
     }
 

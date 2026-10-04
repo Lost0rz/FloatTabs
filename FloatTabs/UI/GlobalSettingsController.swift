@@ -134,6 +134,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     private let websiteCacheManager: WebsiteCacheManagementClient
     private let onExportDiagnostics: RuntimeDiagnosticsExportHandler
     private let onOpenDiagnosticsLogs: () -> Void
+    private let onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler?
     private lazy var settingsWindow: NSWindow = makeWindow()
 
     init(
@@ -150,7 +151,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         onExportDiagnostics: @escaping RuntimeDiagnosticsExportHandler = { _, completion in
             completion(.failure(.writerDisabled))
         },
-        onOpenDiagnosticsLogs: @escaping () -> Void = {}
+        onOpenDiagnosticsLogs: @escaping () -> Void = {},
+        onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler? = nil
     ) {
         self.preferencesStore = preferencesStore
         self.speechPreferencesStore = speechPreferencesStore
@@ -164,6 +166,7 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         self.websiteCacheManager = websiteCacheManager
         self.onExportDiagnostics = onExportDiagnostics
         self.onOpenDiagnosticsLogs = onOpenDiagnosticsLogs
+        self.onCaptureDiagnosticsIncident = onCaptureDiagnosticsIncident
         super.init()
     }
 
@@ -245,7 +248,8 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
                 RuntimeDiagnosticsSettingsViewController(
                     preferencesStore: preferencesStore,
                     exportHandler: onExportDiagnostics,
-                    openLogsHandler: onOpenDiagnosticsLogs
+                    openLogsHandler: onOpenDiagnosticsLogs,
+                    captureIncidentHandler: onCaptureDiagnosticsIncident
                 ),
                 BackupRestoreSettingsViewController(
                     onExportBackup: onExportBackup,

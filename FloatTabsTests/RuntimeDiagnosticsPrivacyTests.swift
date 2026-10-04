@@ -193,6 +193,27 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safeState"], .string("ready"))
     }
 
+    func testQALabelOnlyAllowsBoundedOpaqueLabels() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "qa_label": .string(" ft-diag-002-qa "),
+            "qa_label_with_suffix": .string("ft-diag-002-qa"),
+            "qa_label_secret": .string("safe"),
+            "qa_label_url": .string("https://example.com/private"),
+            "qa_label_ip": .string("192.168.1.2"),
+            "qa_label_secret_pattern": .string("Bearer private"),
+            "qa_label_invalid": .string("qa label with spaces")
+        ], mode: .verbose)
+
+        XCTAssertEqual(fields["qa_label"], .string("ft-diag-002-qa"))
+        XCTAssertNil(fields["qa_label_trimmed"])
+        XCTAssertNil(fields["qa_label_with_suffix"])
+        XCTAssertNil(fields["qa_label_secret"])
+        XCTAssertNil(fields["qa_label_url"])
+        XCTAssertNil(fields["qa_label_ip"])
+        XCTAssertNil(fields["qa_label_secret_pattern"])
+        XCTAssertNil(fields["qa_label_invalid"])
+    }
+
     func testUnreadDiagnosticFieldsRemainAllowedWhileSensitiveLookalikesAreDropped() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "slot_id": .string(UUID().uuidString),
@@ -265,6 +286,46 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertNil(fields["messageContent"])
         XCTAssertNil(fields["requestAuthorizationHeader"])
         XCTAssertEqual(fields["safeState"], .string("ready"))
+    }
+
+    func testChatGPTHealthProbeFieldsStayBoundedAndRejectSensitiveNeighbors() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "document_ready_state": .string("complete"),
+            "visibility_state": .string("visible"),
+            "conversation_shell_present": .bool(true),
+            "composer_present": .bool(true),
+            "loading_indicator_present": .bool(false),
+            "loading_indicator_visible": .bool(false),
+            "conversation_load_error_present": .bool(false),
+            "conversation_id": .string("private-conversation-id"),
+            "prompt": .string("private prompt"),
+            "response_body": .string("private response"),
+            "document_token": .string("private-document-token"),
+            "js_error_message": .string("private error text"),
+            "js_error_stack": .string("private stack"),
+            "dom_text": .string("private page text"),
+            "cookie_value": .string("private cookie"),
+            "storage_value": .string("private storage"),
+            "conversation_url": .string("https://chatgpt.com/c/private-id?secret=x#fragment")
+        ], mode: .standard)
+
+        XCTAssertEqual(fields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(fields["visibility_state"], .string("visible"))
+        XCTAssertEqual(fields["conversation_shell_present"], .bool(true))
+        XCTAssertEqual(fields["composer_present"], .bool(true))
+        XCTAssertEqual(fields["loading_indicator_present"], .bool(false))
+        XCTAssertEqual(fields["loading_indicator_visible"], .bool(false))
+        XCTAssertEqual(fields["conversation_load_error_present"], .bool(false))
+        XCTAssertNil(fields["conversation_id"])
+        XCTAssertNil(fields["prompt"])
+        XCTAssertNil(fields["response_body"])
+        XCTAssertNil(fields["document_token"])
+        XCTAssertNil(fields["js_error_message"])
+        XCTAssertNil(fields["js_error_stack"])
+        XCTAssertNil(fields["dom_text"])
+        XCTAssertNil(fields["cookie_value"])
+        XCTAssertNil(fields["storage_value"])
+        XCTAssertEqual(fields["conversation_url"], .string("https://chatgpt.com"))
     }
 
     func testVoiceFocusDiagnosticsKeepOnlyFixedClassifications() {

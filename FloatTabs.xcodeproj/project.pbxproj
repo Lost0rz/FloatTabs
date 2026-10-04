@@ -535,6 +535,7 @@
 				J00000000000000000000001 /* Sources */,
 				G00000000000000000000001 /* Frameworks */,
 				K00000000000000000000001 /* Resources */,
+				T00000000000000000000001 /* Stamp Diagnostic Build Provenance */,
 			);
 			buildRules = (
 			);
@@ -624,6 +625,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		T00000000000000000000001 /* Stamp Diagnostic Build Provenance */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stamp Diagnostic Build Provenance";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/FloatTabsGeneratedInfo.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nplist=\"$DERIVED_FILE_DIR/FloatTabsGeneratedInfo.plist\"\n/usr/bin/install -m 644 \"$SRCROOT/FloatTabs/Info.plist\" \"$plist\"\nsource_revision=$(git -C \"$SRCROOT\" rev-parse --verify HEAD 2>/dev/null || true)\nif ! printf '%s' \"$source_revision\" | /usr/bin/grep -Eq '^[0-9a-f]{40}$'; then source_revision=unknown; fi\nset_plist_value() { /usr/libexec/PlistBuddy -c \"Set :$1 $2\" \"$plist\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :$1 string $2\" \"$plist\"; }\nset_plist_value FloatTabsSourceRevision \"$source_revision\"\nset_plist_value FloatTabsBuildChannel \"$CONFIGURATION\"\ncase \"$CONFIGURATION\" in Debug) qa_label=ft-diag-002-qa ;; *) qa_label=release ;; esac\nset_plist_value FloatTabsQALabel \"$qa_label\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		J00000000000000000000001 /* Sources */ = {
@@ -810,7 +830,7 @@
 				CURRENT_PROJECT_VERSION = 20;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = FloatTabs/Info.plist;
+				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FloatTabsGeneratedInfo.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = FloatTabs;
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -833,7 +853,7 @@
 				CURRENT_PROJECT_VERSION = 20;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = FloatTabs/Info.plist;
+				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/FloatTabsGeneratedInfo.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = FloatTabs;
 				INFOPLIST_KEY_LSUIElement = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
