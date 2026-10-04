@@ -132,9 +132,11 @@ out branch before review.
   malicious messages, stacks, URLs, headers, bodies, tokens, prompts, and
   answers. The generated JavaScript recorder test exercises ring eviction and
   counter saturation.
-- Focused tests: 315 executed, 3 skipped, 0 failures. Full FloatTabs tests:
-  1,290 executed, 4 skipped, 0 failures. Debug and Release builds passed on
-  macOS arm64; both binaries contain arm64 only. `git diff --check` passed.
+- Focused tests on the implementation source commit: 315 executed, 3 skipped,
+  0 failures. Final full FloatTabs tests at PR head
+  `1fabef84819225cc30fe7f047bb7e455d0498c9e`: 1,290 executed, 3 skipped,
+  0 failures. Debug and Release builds at that PR head passed on macOS arm64;
+  both binaries contain arm64 only. `git diff --check` passed.
 - One earlier full run had a timing-sensitive failure in the unrelated
   `WebsiteCacheCleanupTests.testAutomaticCapacityRunUsesItsLocalMeasurementDuringSettingsRefresh`;
   the isolated retry and the subsequent final full suite passed.

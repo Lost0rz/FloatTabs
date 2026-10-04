@@ -104,10 +104,11 @@ It keeps at most 16 allowlisted event summaries and saturates each counter at
 navigation and document epoch. Runtime replacement, navigation replacement or
 document identity mismatch is classified stale and emits no page evidence.
 
-Final validation on the implementation source commit: focused tests 315 passed
-(3 skipped); full FloatTabs tests 1,290 passed (4 skipped); Debug and Release
-macOS arm64 builds succeeded; both app binaries report `arm64`; `git diff --check`
-passed. An earlier full-suite run had one timing-sensitive unrelated
+Final full validation at PR head
+`1fabef84819225cc30fe7f047bb7e455d0498c9e`: 1,290 FloatTabs tests passed (3
+skipped); Debug and Release macOS arm64 builds succeeded; both app binaries
+report `arm64`; `git diff --check` passed. Focused diagnostics tests passed at
+the implementation source commit: 315 tests (3 skipped). An earlier full-suite run had one timing-sensitive unrelated
 website-cache test failure; that test passed in isolation and the next full run
 passed.
 
