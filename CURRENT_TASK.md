@@ -2,7 +2,7 @@
 
 **Task ID:** FT-DIAG-003
 **Title:** QA Runtime Baseline & Fresh Incident Observation
-**Status:** ACTIVE — `LOCAL_QA_OBSERVATION`
+**Status:** ACTIVE — `OBSERVATION_BASELINE_ACCEPTED`
 
 ## Objective
 
@@ -67,7 +67,9 @@ Preserve user data/profile state. Do not clear cookies, cache, website data, pre
 
 ## Observation phase
 
-After the accepted QA build is running:
+**Baseline verification is complete and accepted.** The running QA build is the exact clean DEBUG build from accepted main `1897fae15031673a37800ac57758e462d8dfb851`, with QA capture capability available.
+
+From this point:
 
 - use FloatTabs normally;
 - do not proactively trigger resets/reloads to manufacture an incident;
