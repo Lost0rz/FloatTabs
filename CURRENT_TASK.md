@@ -1,120 +1,138 @@
 # FloatTabs Current Task
 
-**Task ID:** FT-GOV-002
-**Title:** Repository closeout and local worktree reconciliation
-**Status:** TERMINAL CORRECTIVE GATE — `AUTO-CLOSED ON MERGE-STABLE EXACT-HEAD AUDIT PASS + EXACT-HEAD CI PASS`
+**Task ID:** FT-DIAG-001
+**Title:** Stuck-slot diagnostic architecture audit
+**Status:** ACTIVE — `REMOTE_READ_ONLY_AUDIT`
 
 ## Objective
 
-End FT-GOV-002 on one merge-stable terminal governance head. The terminal control plane must remain valid both immediately before and immediately after #103 merges.
+Build an evidence-grounded diagnostic architecture for the unresolved stuck/blank/black Slot/WebView incident before authorizing any new instrumentation or runtime fix.
 
-## Why this corrective gate exists
+This task is an audit/design task only. Its output must make the next construction decision narrower, not larger.
 
-The prior terminal head `a384ca2e4b5679ab3d10d486084856b07a497009` passed exact-head audit and CI, but a final live review found that two static fields would become stale at the instant #103 merged:
-- an embedded “live `main` HEAD” equal to the pre-merge main;
-- a static #103 OPEN/Draft state.
+## Authorized scope
 
-This corrective terminal head removes those self-invalidating post-merge facts. No runtime/source/test change is involved.
+Read-only remote repository audit of:
+- Slot/WebView ownership and lifecycle;
+- navigation/document generation or epoch handling;
+- `WKWebView` / WebKit process and renderer-facing boundaries;
+- navigation observers and completion/failure paths;
+- `WebViewPool` and slot reuse/replacement/reset paths;
+- app/window/fullscreen/focus lifecycle only where it can affect WebView ownership or visibility;
+- existing runtime diagnostics, health probes, recovery/watchdog logic, incident identifiers, and log correlation;
+- closed PR #99/#100/#101 code/history as historical evidence only;
+- tests that express relevant lifecycle/diagnostic contracts.
 
-## Authority and boundaries
+Read-only GitHub metadata inspection is allowed.
 
-Authorized:
-- finalize this merge-stable terminal control-plane state;
-- verify the exact live #103 head after this file is committed;
-- run the final exact-head governance audit;
-- dispatch/verify `macos-ci.yml` on that exact head;
-- when both exact-head audit and exact-head required CI PASS, treat FT-GOV-002 as CLOSED without another control-plane commit;
-- mark #103 ready and merge it only if live GitHub still reports the audited exact head, expected base, mergeability, and required CI PASS;
-- verify the resulting PR/main state after merge.
+## Prohibited
 
-Prohibited:
-- any production Swift/runtime change;
-- any test-logic change;
-- stuck-tab fixes or new diagnostics;
-- local build/install/release as a substitute for GitHub CI;
-- force-push;
-- historical tag mutation;
-- #102 changes;
-- another control-plane commit solely to restate the final audit/CI result or merge-produced main SHA.
+Do not:
+- change production Swift/runtime behavior;
+- add or modify probes/logging;
+- modify tests;
+- rebuild/install/release;
+- reset user/runtime state;
+- reopen or modify #99/#100/#101;
+- modify #102;
+- create a speculative recovery/fix PR;
+- claim a causal root cause from recovery behavior.
 
-## Accepted repository closeout
+## Required audit products
 
-The local repository/worktree closeout remains accepted:
+### A. State-machine map
 
-- sole production worktree: `main`, clean and 0/0 against `origin/main` at the accepted pre-merge baseline;
-- former linked production worktree removed;
-- primary checkout rebound to `main`;
-- governance worktree retained separately;
-- temporary A archive branch absent;
-- A archive tag → `bca7df4f08fd1d3d06553961ea61eac17b5cfc34`;
-- D archive tag → `cd2095660705aa84301731ea4202e08cee71abbf`;
-- no source/test/runtime files modified during closeout.
+For each relevant machine, identify:
+- owner;
+- states;
+- transition triggers;
+- generation/epoch identity;
+- terminal/completion semantics;
+- cancellation/reset semantics;
+- stale-event rejection;
+- observable signals;
+- unobservable transitions.
 
-## Required-check blocker discovered at merge
+At minimum inspect:
+- Slot lifecycle;
+- WebView ownership/pool lifecycle;
+- navigation lifecycle;
+- post-commit/render-health lifecycle;
+- recovery/reset lifecycle;
+- app/window visibility lifecycle where relevant.
 
-GitHub rejected the attempted merge of exact head `d22be46bbf07fc134ed5d74a286792a80b650d19` because protected check `Build & Test (Apple Silicon arm64)` remained `expected`.
+### B. Boundary map
 
-The exact-head manual run `37163445523` succeeded, but GitHub did not count that `workflow_dispatch` run as satisfying the pull request's required check. Do not bypass protection.
+Map causal boundaries where the incident could cross without current proof, including:
+- app/Slot → `WKWebView`;
+- navigation API → WebKit navigation callbacks;
+- UI process → WebContent/renderer process;
+- WebContent → rendered/visible content;
+- process responsiveness → page/document responsiveness;
+- Slot identity → navigation generation/epoch;
+- recovery/reset → replacement/reuse of WebView;
+- persistence/config → runtime Slot reconstruction.
 
-Authorized corrective change:
-- update `.github/workflows/macos-ci.yml` path filters to include `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` for both `pull_request` and `push`;
-- correct the durable rule in `AGENTS.md`;
-- update only these governance/control-plane records needed to describe the correction;
-- do not change production source or test logic.
+For every boundary, classify current evidence as:
+- OBSERVED;
+- PARTIALLY_OBSERVED;
+- UNOBSERVED;
+- NOT_RELEVANT.
 
-## Final immutable gate
+### C. Probe inventory and gap analysis
 
-After the corrective workflow commit, resolve the live #103 head dynamically. That SHA is the **merge-stable terminal closure head**.
+Inventory existing probes/logs by boundary and state transition.
 
-For that same exact SHA, both must pass:
+Prefer gaps that discriminate between competing failure classes. Do not recommend internal log expansion unless it closes a specific causal ambiguity.
 
-1. **Final governance audit**
-   - #103 remains based on expected pre-merge `main`;
-   - complete PR diff remains limited to `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and `.github/workflows/macos-ci.yml`;
-   - the workflow diff is path-trigger governance only;
-   - #102 remains unchanged and separate;
-   - expected pre-merge remote branch set remains intact;
-   - control-plane semantics remain non-conflicting and fail-closed;
-   - no static fact will become false merely because #103 is merged;
-   - stuck-tab root cause remains UNKNOWN;
-   - no machine-specific absolute path is committed.
+For every proposed missing probe specify:
+- boundary/state transition it observes;
+- exact identity fields needed;
+- event semantics;
+- what competing hypotheses it separates;
+- expected cost/noise;
+- whether it requires production/runtime mutation.
 
-2. **Required GitHub CI / branch protection**
-   - the final head receives the PR-context `macOS CI` run automatically;
-   - job `Build & Test (Apple Silicon arm64)` completes successfully;
-   - GitHub branch protection recognizes the required check as satisfied;
-   - a successful manual `workflow_dispatch` that remains `expected` does not count.
+### D. Diagnostic flow
 
-## Automatic terminal transition
+Produce a deterministic incident workflow from fresh incident capture through classification.
 
-If and only if both final gates PASS for the same merge-stable terminal closure head and GitHub no longer reports the required check as `expected`:
+It must define:
+- required identity tuple;
+- timeline ordering;
+- first discriminator;
+- next discriminator;
+- stop conditions;
+- when evidence is sufficient for a root-cause class;
+- when evidence remains UNKNOWN.
 
-**FT-GOV-002 = CLOSED**
+### E. Construction Gate verdict
 
-and:
+End with exactly one:
+- `CONSTRUCTION_GATE_READY`; or
+- `CONSTRUCTION_GATE_STOP`.
 
-**PR #103 = MERGE-READY**, subject only to live GitHub mergeability/protection.
+`READY` requires a bounded probe/diagnostic implementation scope with explicit acceptance criteria and no unresolved architectural question that would change where probes belong.
 
-At merge time:
-- require #103 head still equals the audited terminal head;
-- require base still equals the expected pre-merge `main`;
-- mark Ready if still Draft;
-- merge using GitHub with expected-head protection;
-- then verify GitHub reports #103 MERGED and refresh live `main`.
+`STOP` must enumerate the missing read-only evidence required before construction.
 
-No additional control-plane commit is required solely to record:
-- the external audit PASS;
-- the external CI PASS;
-- #103’s transition from OPEN to MERGED;
-- the merge-produced `main` SHA.
+## Evidence discipline
 
-The terminal state contract already defines those external transitions.
+Keep these separate:
+- verified source fact;
+- historical runtime observation;
+- plausible mechanism;
+- uninspected area;
+- proposed diagnostic discriminator.
 
-If either final gate fails, FT-GOV-002 remains NOT CLOSED. Stop and report the exact blocker.
+Historical recovery behavior is not root-cause proof.
 
-## Next-task boundary
+## Completion and state synchronization
 
-Closing/merging FT-GOV-002 does not authorize stuck-tab/runtime construction. Before any follow-on runtime or diagnostic work:
-- refresh the production worktree to the new live `origin/main`;
-- read the merged three-file control plane;
-- create and synchronize a separate new `CURRENT_TASK.md` transition with its own scope and gates.
+When the remote audit is complete:
+1. record the final audit conclusion, scope, acceptance criteria, and construction Gate in `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
+2. commit/push through the repository control plane;
+3. if and only if Gate = READY, provide a compact local execution card that references the repository task contract instead of duplicating it;
+4. if Gate = STOP, do not issue a construction command.
+
+No local execution is required during the audit itself.
