@@ -1,4 +1,5 @@
 import WebKit
+import JavaScriptCore
 import XCTest
 @testable import FloatTabs
 
@@ -39,6 +40,7 @@ private final class ChatGPTAttentionBridgeHarness {
     init(
         probeValues: [Any?] = [],
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
     ) {
         // The observation callback must not capture the harness itself before
@@ -57,6 +59,7 @@ private final class ChatGPTAttentionBridgeHarness {
                 nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
             },
             incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator,
             incidentHealthProbeTimeout: incidentHealthProbeTimeout
         )
         bridge.attach(to: webView)
@@ -363,6 +366,185 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         }
     }
 
+    func testIncidentPageAppProbeParsesOnlyBoundedMetadataAndDropsHostileFields() async {
+        var evaluatedScript: String?
+        let harness = ChatGPTAttentionBridgeHarness(
+            incidentPageAppProbeEvaluator: { _, script, token in
+                evaluatedScript = script
+                return Self.pageAppPayload(token: token, hostile: true)
+            }
+        )
+        harness.accept(false, token: tokenA)
+
+        let result = await capturePageAppProbe(harness)
+
+        XCTAssertEqual(result.outcome, .success)
+        XCTAssertEqual(result.documentEpoch, 1)
+        XCTAssertEqual(evaluatedScript, ChatGPTAttentionBridge.incidentPageAppProbeScript)
+        let fields = try! XCTUnwrap(result.values).diagnosticFields
+        XCTAssertEqual(fields["page_app_javascript_error_count"], .integer(1))
+        XCTAssertEqual(fields["page_app_unhandled_rejection_count"], .integer(1))
+        XCTAssertEqual(fields["page_app_resource_http_error_count"], .integer(1))
+        XCTAssertEqual(fields["page_app_resource_timing_available"], .bool(true))
+        XCTAssertEqual(fields["page_app_response_status_available"], .bool(false))
+        XCTAssertEqual(fields["page_app_handled_fetch_xhr_failure_observable"], .bool(false))
+        XCTAssertEqual(fields["page_app_capture_ring_capacity"], .integer(16))
+        XCTAssertFalse(fields.keys.contains { key in
+            ["token", "message", "stack", "body", "header", "cookie", "prompt", "answer", "url"]
+                .contains { key.lowercased().contains($0) }
+        })
+        XCTAssertFalse(fields.values.contains(.string("SECRET_ERROR_TEXT")))
+        XCTAssertFalse(ChatGPTAttentionBridge.scriptSource.contains("window.fetch ="))
+        XCTAssertFalse(ChatGPTAttentionBridge.scriptSource.contains("XMLHttpRequest.prototype"))
+        XCTAssertFalse(ChatGPTAttentionBridge.scriptSource.contains("window.WebSocket ="))
+    }
+
+    func testIncidentPageAppProbeRejectsOversizedAndMalformedRecorderPayloads() {
+        var oversized = Self.pageAppPayload(token: tokenA)
+        oversized["events"] = Array(repeating: Self.pageAppEvent(), count: 17)
+        XCTAssertNil(ChatGPTIncidentPageAppProbeValues.parse(oversized, expectedDocumentToken: tokenA))
+
+        var overflowingCounter = Self.pageAppPayload(token: tokenA)
+        overflowingCounter["javascript_error_count"] = 256
+        XCTAssertNil(ChatGPTIncidentPageAppProbeValues.parse(overflowingCounter, expectedDocumentToken: tokenA))
+
+        var maliciousEnum = Self.pageAppPayload(token: tokenA)
+        maliciousEnum["events"] = [[
+            "kind": "javascript_error",
+            "category": "Bearer private-token",
+            "resource_type": "script",
+            "http_status": NSNull(),
+            "duration_bucket": NSNull(),
+            "age_ms": 1
+        ]]
+        XCTAssertNil(ChatGPTIncidentPageAppProbeValues.parse(maliciousEnum, expectedDocumentToken: tokenA))
+
+        let bounded = Self.pageAppPayload(token: tokenA, eventCount: 16)
+        XCTAssertEqual(
+            ChatGPTIncidentPageAppProbeValues.parse(bounded, expectedDocumentToken: tokenA)?.events.count,
+            16
+        )
+    }
+
+    func testIncidentPageAppProbeRejectsChangedDocumentAndWebViewIdentities() async {
+        let documentGate = IncidentHealthProbeGate()
+        let documentHarness = ChatGPTAttentionBridgeHarness(
+            incidentPageAppProbeEvaluator: { _, _, _ in try await documentGate.evaluate() }
+        )
+        documentHarness.accept(false, token: tokenA)
+        var documentResult: ChatGPTIncidentPageAppProbeResult?
+        documentHarness.bridge.captureIncidentPageAppDiagnostics(
+            for: documentHarness.webView,
+            contextIsCurrent: { true }
+        ) { documentResult = $0 }
+        await documentGate.waitUntilStarted()
+        documentHarness.bridge.handleRuntimeReplacement()
+        documentHarness.accept(true, token: tokenB)
+        documentGate.resolve(Self.pageAppPayload(token: tokenA))
+        let documentCompleted = await waitUntil { documentResult != nil }
+        XCTAssertTrue(documentCompleted)
+        XCTAssertEqual(documentResult?.outcome, .stale)
+        XCTAssertNil(documentResult?.values)
+
+        let identityHarness = ChatGPTAttentionBridgeHarness(
+            incidentPageAppProbeEvaluator: { _, _, _ in Self.pageAppPayload(token: self.tokenB) }
+        )
+        identityHarness.accept(false, token: tokenA)
+        let mismatchedIdentityResult = await capturePageAppProbe(identityHarness)
+        XCTAssertEqual(mismatchedIdentityResult.outcome, .stale)
+        XCTAssertNil(mismatchedIdentityResult.values)
+
+        let webViewGate = IncidentHealthProbeGate()
+        let webViewHarness = ChatGPTAttentionBridgeHarness(
+            incidentPageAppProbeEvaluator: { _, _, _ in try await webViewGate.evaluate() }
+        )
+        webViewHarness.accept(false, token: tokenA)
+        var webViewResult: ChatGPTIncidentPageAppProbeResult?
+        webViewHarness.bridge.captureIncidentPageAppDiagnostics(
+            for: webViewHarness.webView,
+            contextIsCurrent: { true }
+        ) { webViewResult = $0 }
+        await webViewGate.waitUntilStarted()
+        webViewHarness.bridge.attach(to: WKWebView())
+        webViewGate.resolve(Self.pageAppPayload(token: tokenA))
+        let webViewCompleted = await waitUntil { webViewResult != nil }
+        XCTAssertTrue(webViewCompleted)
+        XCTAssertEqual(webViewResult?.outcome, .stale)
+        XCTAssertNil(webViewResult?.values)
+    }
+
+    func testInstalledPageAppRecorderUsesPassiveBoundedSignalsOnly() {
+        let source = ChatGPTAttentionBridge.scriptSource
+        for expected in [
+            "unhandledrejection", "resource", "responseStatus", "visibilitychange",
+            "pageshow", "pagehide", "online", "offline", "PAGE_EVENT_LIMIT",
+            "PAGE_COUNTER_LIMIT", "page_show_bfcache", "pageEvents.length = 0",
+            "__floatTabsPageAppDiagnosticSnapshotV1"
+        ] {
+            XCTAssertTrue(source.contains(expected), "Missing passive signal \(expected)")
+        }
+        for forbidden in [
+            "event.message", "event.error", "event.reason", "entry.name", "document.cookie",
+            "localStorage", "sessionStorage", "XMLHttpRequest.prototype", "window.fetch =",
+            "window.WebSocket =", "history.pushState ="
+        ] {
+            XCTAssertFalse(source.contains(forbidden), "Recorder must not inspect or replace \(forbidden)")
+        }
+        XCTAssertTrue(source.contains("pageEvents.length === PAGE_EVENT_LIMIT"))
+        XCTAssertTrue(source.contains("pageDroppedEvents < PAGE_COUNTER_LIMIT"))
+        XCTAssertTrue(source.contains("pageCounts[key] < PAGE_COUNTER_LIMIT"))
+    }
+
+    func testInstalledPageAppRecorderKeepsRingAndCountersBounded() throws {
+        let context = try XCTUnwrap(JSContext())
+        context.evaluateScript("""
+        globalThis.window = globalThis;
+        window.top = window;
+        globalThis.location = { hostname: "chatgpt.com" };
+        window.webkit = { messageHandlers: { floatTabsChatGPTAttention: { postMessage: function() {} } } };
+        window.crypto = { randomUUID: function() { return "page-app-test-token-0001"; } };
+        globalThis.crypto = window.crypto;
+        globalThis.document = {
+          documentElement: {},
+          visibilityState: "visible",
+          addEventListener: function() {},
+          querySelector: function() { return null; }
+        };
+        window.__listeners = {};
+        window.addEventListener = function(name, listener) { window.__listeners[name] = listener; };
+        globalThis.MutationObserver = class { constructor() {} observe() {} disconnect() {} };
+        globalThis.PerformanceObserver = undefined;
+        globalThis.PerformanceResourceTiming = undefined;
+        globalThis.performance = { now: function() { return 123; } };
+        """)
+        context.evaluateScript(ChatGPTAttentionBridge.scriptSource)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "JavaScript source did not parse")
+
+        context.evaluateScript("""
+        for (let i = 0; i < 260; i++) { window.__listeners.error({ target: window }); }
+        window.__listeners.error({ target: { localName: "script" } });
+        window.__listeners.unhandledrejection({ reason: "DO_NOT_READ_THIS" });
+        """)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Recorder produced a JavaScript exception")
+        let payload = try XCTUnwrap(
+            context.evaluateScript(ChatGPTAttentionBridge.incidentPageAppProbeScript)?.toDictionary()
+        )
+        let values = try XCTUnwrap(
+            ChatGPTIncidentPageAppProbeValues.parse(
+                payload,
+                expectedDocumentToken: "page-app-test-token-0001"
+            )
+        )
+        XCTAssertEqual(values.events.count, 16)
+        XCTAssertEqual(values.droppedEvents, 246)
+        XCTAssertEqual(values.javascriptErrorCount, 255)
+        XCTAssertEqual(values.resourceLoadFailureCount, 1)
+        XCTAssertEqual(values.unhandledRejectionCount, 1)
+        XCTAssertFalse(values.resourceTimingAvailable)
+        XCTAssertFalse(values.responseStatusAvailable)
+        XCTAssertFalse(values.diagnosticFields.values.contains(.string("DO_NOT_READ_THIS")))
+    }
+
     private func captureHealthProbe(
         _ harness: ChatGPTAttentionBridgeHarness
     ) async -> ChatGPTIncidentHealthProbeResult {
@@ -374,6 +556,67 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
                 continuation.resume(returning: result)
             }
         }
+    }
+
+    private func capturePageAppProbe(
+        _ harness: ChatGPTAttentionBridgeHarness
+    ) async -> ChatGPTIncidentPageAppProbeResult {
+        await withCheckedContinuation { continuation in
+            harness.bridge.captureIncidentPageAppDiagnostics(
+                for: harness.webView,
+                contextIsCurrent: { true }
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private static func pageAppEvent(index: Int = 0) -> [String: Any] {
+        let samples: [[String: Any]] = [
+            ["kind": "javascript_error", "category": "global_error", "resource_type": "none",
+             "http_status": NSNull(), "duration_bucket": NSNull(), "age_ms": 10],
+            ["kind": "unhandled_rejection", "category": "unhandled_rejection", "resource_type": "none",
+             "http_status": NSNull(), "duration_bucket": NSNull(), "age_ms": 20],
+            ["kind": "resource_http_error", "category": "http_error", "resource_type": "script",
+             "http_status": 503, "duration_bucket": NSNull(), "age_ms": 30]
+        ]
+        return samples[index % samples.count]
+    }
+
+    private static func pageAppPayload(
+        token: String,
+        hostile: Bool = false,
+        eventCount: Int = 3
+    ) -> [String: Any] {
+        var fields: [String: Any] = [
+            "version": 1,
+            "document_identity": token,
+            "events": (0..<eventCount).map { pageAppEvent(index: $0) },
+            "dropped_events": 0,
+            "javascript_error_count": 1,
+            "unhandled_rejection_count": 1,
+            "resource_load_failure_count": 0,
+            "resource_http_error_count": 1,
+            "slow_resource_count": 1,
+            "lifecycle_event_count": 0,
+            "resource_timing_available": true,
+            "response_status_available": false
+        ]
+        if hostile {
+            fields["message"] = "SECRET_ERROR_TEXT"
+            fields["stack"] = "Bearer private-token"
+            fields["url"] = "https://example.invalid/private?token=secret"
+            fields["headers"] = ["Authorization": "Bearer secret"]
+            fields["requestBody"] = "private request"
+            fields["prompt"] = "private prompt"
+            fields["answer"] = "private answer"
+            var firstEvent = pageAppEvent()
+            firstEvent["message"] = "SECRET_ERROR_TEXT"
+            firstEvent["stack"] = "private stack"
+            firstEvent["request_url"] = "https://example.invalid/private"
+            fields["events"] = [firstEvent] + (1..<eventCount).map { pageAppEvent(index: $0) }
+        }
+        return fields
     }
 
     private static func healthProbePayload() -> [String: Any] {

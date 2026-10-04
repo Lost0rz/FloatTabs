@@ -34,6 +34,7 @@ enum RuntimeDiagnosticPrivacy {
         "stack",
         "errormessage",
         "errorstack",
+        "answer",
         "pagetext",
         "domtext",
         "location",

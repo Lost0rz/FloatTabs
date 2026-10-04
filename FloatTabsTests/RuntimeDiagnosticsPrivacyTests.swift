@@ -193,6 +193,51 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertEqual(fields["safeState"], .string("ready"))
     }
 
+    @MainActor
+    func testPageAppDiagnosticsPersistOnlyBoundedCategoriesAndDropMaliciousNeighbors() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        diagnostics.record(
+            event: "diagnostics.chatgpt_page_app_snapshot",
+            level: .notice,
+            subsystem: "diagnostics",
+            fields: [
+                "page_app_probe_outcome": .string("success"),
+                "page_app_javascript_error_count": .integer(1),
+                "page_app_event_00_kind": .string("javascript_error"),
+                "page_app_event_00_category": .string("global_error"),
+                "page_app_event_00_resource_type": .string("none"),
+                "page_app_event_00_http_status": .null,
+                "page_app_event_00_age_ms": .integer(12),
+                "page_app_event_00_error_message": .string("SECRET_ERROR_TEXT"),
+                "page_app_event_00_stack": .string("private stack"),
+                "page_app_event_00_url": .string("https://example.invalid/private?token=secret"),
+                "page_app_event_00_headers": .string("Authorization: Bearer secret"),
+                "page_app_event_00_body": .string("private request body"),
+                "page_app_event_00_prompt": .string("private prompt"),
+                "page_app_event_00_answer": .string("private answer"),
+                "document_token": .string("opaque-document-identity")
+            ]
+        )
+
+        let event = try XCTUnwrap(writer.events.first)
+        XCTAssertEqual(event.fields["page_app_probe_outcome"], .string("success"))
+        XCTAssertEqual(event.fields["page_app_event_00_category"], .string("global_error"))
+        XCTAssertEqual(event.fields["page_app_event_00_http_status"], .null)
+        XCTAssertEqual(event.fields["page_app_event_00_url"], .string("https://example.invalid/private"))
+        for sensitive in [
+            "page_app_event_00_error_message", "page_app_event_00_stack",
+            "page_app_event_00_headers", "page_app_event_00_body", "page_app_event_00_prompt",
+            "page_app_event_00_answer", "document_token"
+        ] {
+            XCTAssertNil(event.fields[sensitive], "Sensitive diagnostic field escaped: \(sensitive)")
+        }
+        let persistedLine = try XCTUnwrap(String(data: XCTUnwrap(writer.lines.first), encoding: .utf8))
+        for secret in ["SECRET_ERROR_TEXT", "private stack", "Authorization", "private request body", "private prompt", "private answer"] {
+            XCTAssertFalse(persistedLine.contains(secret))
+        }
+    }
+
     func testQALabelOnlyAllowsBoundedOpaqueLabels() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "qa_label": .string(" ft-diag-002-qa "),

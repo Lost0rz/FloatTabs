@@ -191,6 +191,194 @@ typealias ChatGPTIncidentHealthProbeEvaluator = @MainActor (
     String
 ) async throws -> Any
 
+typealias ChatGPTIncidentPageAppProbeEvaluator = @MainActor (
+    WKWebView,
+    String,
+    String
+) async throws -> Any
+
+enum ChatGPTIncidentPageAppProbeOutcome: String, Equatable, Sendable {
+    case success
+    case unsupportedDocument = "unsupported_document"
+    case bridgeUnavailable = "bridge_unavailable"
+    case evaluationFailed = "evaluation_failed"
+    case timeout
+    case stale
+}
+
+struct ChatGPTIncidentPageAppEvent: Equatable, Sendable {
+    let kind: String
+    let category: String
+    let resourceType: String
+    let httpStatus: Int?
+    let durationBucket: String?
+    let ageMilliseconds: Int
+
+    func diagnosticFields(prefix: String) -> [String: RuntimeDiagnosticValue] {
+        [
+            "\(prefix)_kind": .string(kind),
+            "\(prefix)_category": .string(category),
+            "\(prefix)_resource_type": .string(resourceType),
+            "\(prefix)_http_status": httpStatus.map { .integer(Int64($0)) } ?? .null,
+            "\(prefix)_duration_bucket": durationBucket.map(RuntimeDiagnosticValue.string) ?? .null,
+            "\(prefix)_age_ms": .integer(Int64(ageMilliseconds))
+        ]
+    }
+}
+
+struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
+    static let maximumEvents = 16
+
+    let events: [ChatGPTIncidentPageAppEvent]
+    let droppedEvents: Int
+    let javascriptErrorCount: Int
+    let unhandledRejectionCount: Int
+    let resourceLoadFailureCount: Int
+    let resourceHTTPErrorCount: Int
+    let slowResourceCount: Int
+    let lifecycleEventCount: Int
+    let resourceTimingAvailable: Bool
+    let responseStatusAvailable: Bool
+
+    static func parse(_ value: Any, expectedDocumentToken: String) -> Self? {
+        guard let fields = value as? [String: Any],
+              fields["version"] as? Int == 1,
+              fields["document_identity"] as? String == expectedDocumentToken,
+              let rawEvents = fields["events"] as? [[String: Any]],
+              rawEvents.count <= maximumEvents,
+              let droppedEvents = boundedCounter(fields["dropped_events"]),
+              let javascriptErrorCount = boundedCounter(fields["javascript_error_count"]),
+              let unhandledRejectionCount = boundedCounter(fields["unhandled_rejection_count"]),
+              let resourceLoadFailureCount = boundedCounter(fields["resource_load_failure_count"]),
+              let resourceHTTPErrorCount = boundedCounter(fields["resource_http_error_count"]),
+              let slowResourceCount = boundedCounter(fields["slow_resource_count"]),
+              let lifecycleEventCount = boundedCounter(fields["lifecycle_event_count"]),
+              let resourceTimingAvailable = fields["resource_timing_available"] as? Bool,
+              let responseStatusAvailable = fields["response_status_available"] as? Bool else {
+            return nil
+        }
+
+        let events = rawEvents.compactMap(parseEvent)
+        guard events.count == rawEvents.count else { return nil }
+        return Self(
+            events: events,
+            droppedEvents: droppedEvents,
+            javascriptErrorCount: javascriptErrorCount,
+            unhandledRejectionCount: unhandledRejectionCount,
+            resourceLoadFailureCount: resourceLoadFailureCount,
+            resourceHTTPErrorCount: resourceHTTPErrorCount,
+            slowResourceCount: slowResourceCount,
+            lifecycleEventCount: lifecycleEventCount,
+            resourceTimingAvailable: resourceTimingAvailable,
+            responseStatusAvailable: responseStatusAvailable
+        )
+    }
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "page_app_event_count": .integer(Int64(events.count)),
+            "page_app_dropped_event_count": .integer(Int64(droppedEvents)),
+            "page_app_javascript_error_count": .integer(Int64(javascriptErrorCount)),
+            "page_app_unhandled_rejection_count": .integer(Int64(unhandledRejectionCount)),
+            "page_app_resource_load_failure_count": .integer(Int64(resourceLoadFailureCount)),
+            "page_app_resource_http_error_count": .integer(Int64(resourceHTTPErrorCount)),
+            "page_app_slow_resource_count": .integer(Int64(slowResourceCount)),
+            "page_app_lifecycle_event_count": .integer(Int64(lifecycleEventCount)),
+            "page_app_resource_timing_available": .bool(resourceTimingAvailable),
+            "page_app_response_status_available": .bool(responseStatusAvailable),
+            "page_app_handled_fetch_xhr_failure_observable": .bool(false),
+            "page_app_capture_ring_capacity": .integer(Int64(Self.maximumEvents))
+        ]
+        for (index, event) in events.enumerated() {
+            fields.merge(event.diagnosticFields(prefix: String(format: "page_app_event_%02d", index))) {
+                _, new in new
+            }
+        }
+        return fields
+    }
+
+    private static func boundedCounter(_ value: Any?) -> Int? {
+        guard let value = value as? Int, (0...255).contains(value) else { return nil }
+        return value
+    }
+
+    private static func parseEvent(_ raw: [String: Any]) -> ChatGPTIncidentPageAppEvent? {
+        let kinds = ["javascript_error", "unhandled_rejection", "resource_load_failure", "resource_http_error", "resource_timing", "lifecycle"]
+        let categories = [
+            "global_error", "unhandled_rejection", "script_load", "style_load", "image_load", "frame_load", "other_resource_load",
+            "http_error", "slow_resource", "visibility_visible", "visibility_hidden", "visibility_other",
+            "page_show", "page_show_bfcache", "page_hide", "page_hide_bfcache", "online", "offline"
+        ]
+        let resourceTypes = ["none", "script", "style", "image", "iframe", "fetch", "xhr", "other"]
+        let durationBuckets = ["1s_to_3s", "3s_to_10s", "10s_or_more"]
+        guard let kind = raw["kind"] as? String, kinds.contains(kind),
+              let category = raw["category"] as? String, categories.contains(category),
+              let resourceType = raw["resource_type"] as? String, resourceTypes.contains(resourceType),
+              let age = raw["age_ms"] as? Int, (0...86_400_000).contains(age) else {
+            return nil
+        }
+        let status: Int?
+        if let value = raw["http_status"] as? Int {
+            guard (400...599).contains(value) else { return nil }
+            status = value
+        } else if raw["http_status"] == nil || raw["http_status"] is NSNull {
+            status = nil
+        } else {
+            return nil
+        }
+        let duration: String?
+        if let value = raw["duration_bucket"] as? String {
+            guard durationBuckets.contains(value) else { return nil }
+            duration = value
+        } else if raw["duration_bucket"] == nil || raw["duration_bucket"] is NSNull {
+            duration = nil
+        } else {
+            return nil
+        }
+        return ChatGPTIncidentPageAppEvent(
+            kind: kind,
+            category: category,
+            resourceType: resourceType,
+            httpStatus: status,
+            durationBucket: duration,
+            ageMilliseconds: age
+        )
+    }
+}
+
+struct ChatGPTIncidentPageAppProbeResult: Equatable, Sendable {
+    let outcome: ChatGPTIncidentPageAppProbeOutcome
+    let values: ChatGPTIncidentPageAppProbeValues?
+    let documentEpoch: UInt64?
+    let latencyMilliseconds: Double
+    let captureUptimeMilliseconds: Int64
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "page_app_probe_outcome": .string(outcome.rawValue),
+            "page_app_probe_latency_ms": .double(min(max(latencyMilliseconds, 0), 5_000)),
+            "page_app_capture_uptime_ms": .integer(captureUptimeMilliseconds),
+            "chatgpt_document_epoch": documentEpoch.map { .integer(Int64($0)) } ?? .null
+        ]
+        let valueFields = values?.diagnosticFields ?? [
+            "page_app_event_count": .null,
+            "page_app_dropped_event_count": .null,
+            "page_app_javascript_error_count": .null,
+            "page_app_unhandled_rejection_count": .null,
+            "page_app_resource_load_failure_count": .null,
+            "page_app_resource_http_error_count": .null,
+            "page_app_slow_resource_count": .null,
+            "page_app_lifecycle_event_count": .null,
+            "page_app_resource_timing_available": .null,
+            "page_app_response_status_available": .null,
+            "page_app_handled_fetch_xhr_failure_observable": .bool(false),
+            "page_app_capture_ring_capacity": .integer(Int64(ChatGPTIncidentPageAppProbeValues.maximumEvents))
+        ]
+        fields.merge(valueFields) { _, new in new }
+        return fields
+    }
+}
+
 /// Pure per-document baseline/transition reducer. The first observation for a
 /// document establishes its baseline — an idle baseline can never synthesize a
 /// finish — and duplicate states never re-emit, so noisy injected JS cannot
@@ -262,6 +450,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 continuation.resume(with: result)
             }
         }
+    }
+
+    private static let productionIncidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator = {
+        webView, script, _ in
+        try await ChatGPTAttentionBridge.productionIncidentHealthProbeEvaluator(webView, script)
     }
 
     private static let productionLivenessSleeper: LivenessSleeper = { nanoseconds in
@@ -343,6 +536,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     })()
     """
 
+    /// Reads the fixed-size recorder installed in the isolated content world.
+    /// Its result contains only allowlisted categories and coarse timing/status
+    /// metadata; the opaque identity is consumed by the native stale guard.
+    static let incidentPageAppProbeScript = """
+    globalThis.__floatTabsPageAppDiagnosticSnapshotV1?.()
+    """
+
     /// The injected script's early host gate, generated from the same
     /// `ChatGPTSitePolicy` constants used by native message validation and
     /// `SiteCompatibilityPolicy`. The script must never carry an
@@ -378,6 +578,175 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             ? crypto.randomUUID()
             : "tok-" + Date.now().toString(36) + "-" +
               Math.random().toString(36).slice(2, 10);
+
+          // Passive, bounded page-app observation. No application networking
+          // or navigation API is replaced, and no event text or URL is read.
+          const PAGE_EVENT_LIMIT = 16;
+          const PAGE_COUNTER_LIMIT = 255;
+          const pageEvents = [];
+          const pageCounts = {
+            javascript_error_count: 0,
+            unhandled_rejection_count: 0,
+            resource_load_failure_count: 0,
+            resource_http_error_count: 0,
+            slow_resource_count: 0,
+            lifecycle_event_count: 0
+          };
+          let pageDroppedEvents = 0;
+          let resourceTimingAvailable = false;
+          let responseStatusAvailable = false;
+
+          const incrementPageCount = (key) => {
+            if (pageCounts[key] < PAGE_COUNTER_LIMIT) { pageCounts[key] += 1; }
+          };
+          const boundedAge = () => Math.min(
+            Math.max(Math.floor(performance.now()), 0), 86400000
+          );
+          const pushPageEvent = (event) => {
+            if (pageEvents.length === PAGE_EVENT_LIMIT) {
+              pageEvents.shift();
+              if (pageDroppedEvents < PAGE_COUNTER_LIMIT) { pageDroppedEvents += 1; }
+            }
+            pageEvents.push({
+              kind: event.kind,
+              category: event.category,
+              resource_type: event.resource_type || "none",
+              http_status: Number.isInteger(event.http_status) ? event.http_status : null,
+              duration_bucket: event.duration_bucket || null,
+              age_ms: boundedAge()
+            });
+          };
+          const resourceKind = (value) => {
+            switch (value) {
+              case "script": return "script";
+              case "css": case "link": return "style";
+              case "img": case "image": return "image";
+              case "iframe": return "iframe";
+              case "fetch": return "fetch";
+              case "xmlhttprequest": return "xhr";
+              default: return "other";
+            }
+          };
+          const durationKind = (duration) => {
+            if (duration >= 10000) { return "10s_or_more"; }
+            if (duration >= 3000) { return "3s_to_10s"; }
+            return "1s_to_3s";
+          };
+          const resourceFailureKind = (target) => {
+            const localName = target && typeof target.localName === "string"
+              ? target.localName.toLowerCase() : "";
+            switch (localName) {
+              case "script": return "script_load";
+              case "link": return "style_load";
+              case "img": return "image_load";
+              case "iframe": return "frame_load";
+              default: return "other_resource_load";
+            }
+          };
+
+          window.addEventListener("error", (event) => {
+            if (event.target === window) {
+              incrementPageCount("javascript_error_count");
+              pushPageEvent({ kind: "javascript_error", category: "global_error" });
+              return;
+            }
+            incrementPageCount("resource_load_failure_count");
+            pushPageEvent({
+              kind: "resource_load_failure",
+              category: resourceFailureKind(event.target),
+              resource_type: resourceKind(event.target && event.target.localName)
+            });
+          }, { capture: true, passive: true });
+
+          window.addEventListener("unhandledrejection", () => {
+            incrementPageCount("unhandled_rejection_count");
+            pushPageEvent({ kind: "unhandled_rejection", category: "unhandled_rejection" });
+          }, { passive: true });
+
+          document.addEventListener("visibilitychange", () => {
+            incrementPageCount("lifecycle_event_count");
+            const state = document.visibilityState;
+            pushPageEvent({
+              kind: "lifecycle",
+              category: state === "visible" ? "visibility_visible"
+                : state === "hidden" ? "visibility_hidden" : "visibility_other"
+            });
+          }, { passive: true });
+          window.addEventListener("pageshow", (event) => {
+            if (event.persisted) {
+              // A BFCache restore reuses the JavaScript document but represents
+              // a new native navigation epoch. Drop prior-epoch recorder state.
+              pageEvents.length = 0;
+              pageDroppedEvents = 0;
+              for (const key of Object.keys(pageCounts)) { pageCounts[key] = 0; }
+            }
+            incrementPageCount("lifecycle_event_count");
+            pushPageEvent({ kind: "lifecycle", category: event.persisted ? "page_show_bfcache" : "page_show" });
+          }, { passive: true });
+          window.addEventListener("pagehide", (event) => {
+            incrementPageCount("lifecycle_event_count");
+            pushPageEvent({ kind: "lifecycle", category: event.persisted ? "page_hide_bfcache" : "page_hide" });
+          }, { passive: true });
+          window.addEventListener("online", () => {
+            incrementPageCount("lifecycle_event_count");
+            pushPageEvent({ kind: "lifecycle", category: "online" });
+          }, { passive: true });
+          window.addEventListener("offline", () => {
+            incrementPageCount("lifecycle_event_count");
+            pushPageEvent({ kind: "lifecycle", category: "offline" });
+          }, { passive: true });
+
+          try {
+            const hasResponseStatus = typeof PerformanceResourceTiming !== "undefined" &&
+              "responseStatus" in PerformanceResourceTiming.prototype;
+            responseStatusAvailable = Boolean(hasResponseStatus);
+            if (typeof PerformanceObserver !== "undefined") {
+              const resourceObserver = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                  const type = resourceKind(entry.initiatorType);
+                  if (typeof entry.responseStatus === "number" &&
+                      Number.isInteger(entry.responseStatus) &&
+                      entry.responseStatus >= 400 && entry.responseStatus <= 599) {
+                    incrementPageCount("resource_http_error_count");
+                    pushPageEvent({
+                      kind: "resource_http_error",
+                      category: "http_error",
+                      resource_type: type,
+                      http_status: entry.responseStatus
+                    });
+                  }
+                  if (typeof entry.duration === "number" && entry.duration >= 1000) {
+                    incrementPageCount("slow_resource_count");
+                    pushPageEvent({
+                      kind: "resource_timing",
+                      category: "slow_resource",
+                      resource_type: type,
+                      duration_bucket: durationKind(entry.duration)
+                    });
+                  }
+                }
+              });
+              resourceObserver.observe({ type: "resource", buffered: true });
+              resourceTimingAvailable = true;
+            }
+          } catch (_) {
+            resourceTimingAvailable = false;
+          }
+
+          globalThis.__floatTabsPageAppDiagnosticSnapshotV1 = () => ({
+            version: 1,
+            document_identity: TOKEN,
+            events: pageEvents.slice(0, PAGE_EVENT_LIMIT),
+            dropped_events: pageDroppedEvents,
+            javascript_error_count: pageCounts.javascript_error_count,
+            unhandled_rejection_count: pageCounts.unhandled_rejection_count,
+            resource_load_failure_count: pageCounts.resource_load_failure_count,
+            resource_http_error_count: pageCounts.resource_http_error_count,
+            slow_resource_count: pageCounts.slow_resource_count,
+            lifecycle_event_count: pageCounts.lifecycle_event_count,
+            resource_timing_available: resourceTimingAvailable,
+            response_status_available: responseStatusAvailable
+          });
 
           let lastSent = null;
           let timer = null;
@@ -557,6 +926,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private let livenessProbe: LivenessProbeProvider
     private let livenessSleeper: LivenessSleeper
     private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator
+    private let incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator
     private let incidentHealthProbeTimeout: TimeInterval
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
@@ -576,6 +946,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessIdleCandidateOwnerGeneration: UInt64?
     private var pendingIncidentHealthProbeID: UUID?
     private var incidentHealthProbeTimeoutTask: Task<Void, Never>?
+    private var pendingIncidentPageAppProbeID: UUID?
+    private var incidentPageAppProbeTimeoutTask: Task<Void, Never>?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -768,6 +1140,165 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         ))
     }
 
+    /// Performs one explicit read of the document-local passive recorder. Its
+    /// result is accepted only for the captured document token, epoch, WebView,
+    /// and caller-owned runtime/navigation context.
+    func captureIncidentPageAppDiagnostics(
+        for expectedWebView: WKWebView,
+        contextIsCurrent: @escaping @MainActor () -> Bool,
+        completion: @escaping @MainActor (ChatGPTIncidentPageAppProbeResult) -> Void
+    ) {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        if !isInvalidated,
+           case .unsupportedCurrentDocument = documentAdmission {
+            completion(Self.pageAppResult(
+                outcome: .unsupportedDocument,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard !isInvalidated,
+              let attachedWebView = webView,
+              attachedWebView === expectedWebView,
+              case .activeSupportedDocument = documentAdmission,
+              let document else {
+            completion(Self.pageAppResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard contextIsCurrent() else {
+            completion(Self.pageAppResult(
+                outcome: .stale,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard pendingIncidentPageAppProbeID == nil else {
+            completion(Self.pageAppResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+
+        let probeID = UUID()
+        let expectedDocumentEpoch = document.epoch
+        let expectedDocumentToken = document.token
+        pendingIncidentPageAppProbeID = probeID
+        let timeoutNanoseconds = UInt64(incidentHealthProbeTimeout * 1_000_000_000)
+        incidentPageAppProbeTimeoutTask = Task { @MainActor [weak self, weak expectedWebView] in
+            do {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+            } catch {
+                return
+            }
+            guard let self, let expectedWebView else { return }
+            self.finishIncidentPageAppProbe(
+                id: probeID,
+                webView: expectedWebView,
+                documentEpoch: expectedDocumentEpoch,
+                documentToken: expectedDocumentToken,
+                contextIsCurrent: contextIsCurrent,
+                outcome: .timeout,
+                values: nil,
+                startedAt: startedAt,
+                completion: completion
+            )
+        }
+
+        Task { @MainActor [weak self, weak expectedWebView] in
+            guard let self, let expectedWebView else { return }
+            do {
+                let value = try await self.incidentPageAppProbeEvaluator(
+                    expectedWebView,
+                    Self.incidentPageAppProbeScript,
+                    expectedDocumentToken
+                )
+                let returnedIdentity = (value as? [String: Any])?["document_identity"] as? String
+                let values = ChatGPTIncidentPageAppProbeValues.parse(
+                    value,
+                    expectedDocumentToken: expectedDocumentToken
+                )
+                let outcome: ChatGPTIncidentPageAppProbeOutcome
+                if returnedIdentity != expectedDocumentToken {
+                    outcome = .stale
+                } else {
+                    outcome = values == nil ? .evaluationFailed : .success
+                }
+                self.finishIncidentPageAppProbe(
+                    id: probeID,
+                    webView: expectedWebView,
+                    documentEpoch: expectedDocumentEpoch,
+                    documentToken: expectedDocumentToken,
+                    contextIsCurrent: contextIsCurrent,
+                    outcome: outcome,
+                    values: values,
+                    startedAt: startedAt,
+                    completion: completion
+                )
+            } catch {
+                self.finishIncidentPageAppProbe(
+                    id: probeID,
+                    webView: expectedWebView,
+                    documentEpoch: expectedDocumentEpoch,
+                    documentToken: expectedDocumentToken,
+                    contextIsCurrent: contextIsCurrent,
+                    outcome: .evaluationFailed,
+                    values: nil,
+                    startedAt: startedAt,
+                    completion: completion
+                )
+            }
+        }
+    }
+
+    private func finishIncidentPageAppProbe(
+        id: UUID,
+        webView expectedWebView: WKWebView,
+        documentEpoch expectedDocumentEpoch: UInt64,
+        documentToken expectedDocumentToken: String,
+        contextIsCurrent: @escaping @MainActor () -> Bool,
+        outcome: ChatGPTIncidentPageAppProbeOutcome,
+        values: ChatGPTIncidentPageAppProbeValues?,
+        startedAt: TimeInterval,
+        completion: @escaping @MainActor (ChatGPTIncidentPageAppProbeResult) -> Void
+    ) {
+        guard pendingIncidentPageAppProbeID == id else { return }
+        let currentDocumentMatches: Bool
+        if case .activeSupportedDocument = documentAdmission,
+           let document {
+            currentDocumentMatches = document.epoch == expectedDocumentEpoch
+                && document.token == expectedDocumentToken
+        } else {
+            currentDocumentMatches = false
+        }
+        let isCurrent = !isInvalidated
+            && self.webView === expectedWebView
+            && currentDocumentMatches
+            && contextIsCurrent()
+
+        incidentPageAppProbeTimeoutTask?.cancel()
+        incidentPageAppProbeTimeoutTask = nil
+        pendingIncidentPageAppProbeID = nil
+        let finalOutcome: ChatGPTIncidentPageAppProbeOutcome = isCurrent ? outcome : .stale
+        completion(Self.pageAppResult(
+            outcome: finalOutcome,
+            values: finalOutcome == .success ? values : nil,
+            document: isCurrent ? document : nil,
+            startedAt: startedAt
+        ))
+    }
+
     private static func incidentHealthResult(
         outcome: ChatGPTIncidentHealthProbeOutcome,
         values: ChatGPTIncidentHealthProbeValues?,
@@ -786,6 +1317,24 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         )
     }
 
+    private static func pageAppResult(
+        outcome: ChatGPTIncidentPageAppProbeOutcome,
+        values: ChatGPTIncidentPageAppProbeValues?,
+        document: DocumentSession?,
+        startedAt: TimeInterval
+    ) -> ChatGPTIncidentPageAppProbeResult {
+        ChatGPTIncidentPageAppProbeResult(
+            outcome: outcome,
+            values: values,
+            documentEpoch: document?.epoch,
+            latencyMilliseconds: min(
+                max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                5_000
+            ),
+            captureUptimeMilliseconds: Int64(max(startedAt * 1_000, 0))
+        )
+    }
+
     init(
         slotID: UUID,
         onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void,
@@ -793,6 +1342,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         livenessProbe: LivenessProbeProvider? = nil,
         livenessSleeper: LivenessSleeper? = nil,
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout,
         onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
     ) {
@@ -804,6 +1354,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
         self.incidentHealthProbeEvaluator = incidentHealthProbeEvaluator
             ?? Self.productionIncidentHealthProbeEvaluator
+        self.incidentPageAppProbeEvaluator = incidentPageAppProbeEvaluator
+            ?? Self.productionIncidentPageAppProbeEvaluator
         self.incidentHealthProbeTimeout = min(
             max(incidentHealthProbeTimeout, 0),
             Self.defaultIncidentHealthProbeTimeout

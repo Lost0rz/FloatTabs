@@ -134,6 +134,7 @@ final class WebViewPool {
     private let rendererProbeTimeout: TimeInterval
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
     private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator?
+    private let incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator?
     private let incidentHealthProbeTimeout: TimeInterval
     // Production leaves this nil and reads WKWebView history directly. The
     // optional seam lets tests model a committed history item without network
@@ -154,6 +155,7 @@ final class WebViewPool {
         rendererProbeTimeout: TimeInterval = 5,
         rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
     ) {
         self.onURLChange = onURLChange
@@ -167,6 +169,7 @@ final class WebViewPool {
         self.rendererProbeTimeout = max(0, rendererProbeTimeout)
         self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
         self.incidentHealthProbeEvaluator = incidentHealthProbeEvaluator
+        self.incidentPageAppProbeEvaluator = incidentPageAppProbeEvaluator
         self.incidentHealthProbeTimeout = min(
             max(incidentHealthProbeTimeout, 0),
             ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
@@ -307,6 +310,43 @@ final class WebViewPool {
         }
         let navigationGeneration = observer.currentDiagnosticNavigationGeneration
         bridge.captureIncidentHealthSnapshot(
+            for: webView,
+            contextIsCurrent: { [weak self, weak webView, weak bridge, weak observer] in
+                guard let self,
+                      let webView,
+                      let bridge,
+                      let observer else { return false }
+                return self.webViews[slotID] === webView
+                    && self.attentionBridges[slotID] === bridge
+                    && self.navigationObservers[slotID] === observer
+                    && self.runtimeDiagnosticIdentities[slotID] == runtimeIdentity
+                    && observer.currentDiagnosticNavigationGeneration == navigationGeneration
+            },
+            completion: completion
+        )
+    }
+
+    /// Captures the isolated world's bounded passive recorder using the same
+    /// frozen physical-runtime and navigation guards as the health probe.
+    func captureBoundedChatGPTPageAppDiagnostics(
+        slotID: UUID,
+        completion: @escaping @MainActor (ChatGPTIncidentPageAppProbeResult) -> Void
+    ) {
+        guard let webView = webViews[slotID],
+              let bridge = attentionBridges[slotID],
+              let observer = navigationObservers[slotID],
+              let runtimeIdentity = runtimeDiagnosticIdentities[slotID] else {
+            completion(ChatGPTIncidentPageAppProbeResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                documentEpoch: nil,
+                latencyMilliseconds: 0,
+                captureUptimeMilliseconds: Int64(ProcessInfo.processInfo.systemUptime * 1_000)
+            ))
+            return
+        }
+        let navigationGeneration = observer.currentDiagnosticNavigationGeneration
+        bridge.captureIncidentPageAppDiagnostics(
             for: webView,
             contextIsCurrent: { [weak self, weak webView, weak bridge, weak observer] in
                 guard let self,
@@ -708,6 +748,7 @@ final class WebViewPool {
             },
             diagnostics: diagnostics,
             incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator,
             incidentHealthProbeTimeout: incidentHealthProbeTimeout,
             onAttentionEvent: { [weak self] slotID, event in
                 if let onAttentionEvent = self?.onAttentionEvent {
