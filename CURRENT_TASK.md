@@ -1,146 +1,91 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-DIAG-003
-**Title:** QA Runtime Baseline & Fresh Incident Observation
-**Status:** ACTIVE — `OBSERVATION_BASELINE_ACCEPTED`
+**Title:** Fresh Incident Classification & Read-Only App-Layer Evidence
+**Status:** ACTIVE — `INCIDENT_CAPTURED_APP_LAYER_EVIDENCE_REQUIRED`
 
 ## Objective
 
-Ensure the actually installed and running FloatTabs process is the accepted DEBUG QA build from the latest clean `origin/main`, then use it normally until the next fresh stuck/blank/black incident can be captured with the new FT-DIAG-002 diagnostic mechanism.
+Preserve the fresh stuck-Tab incident and perform one bounded read-only evidence pass that can distinguish page-application/bootstrap failure, request/resource failure, and a possible inactive-finish/warm-reuse lifecycle interaction.
 
-This task is observation and runtime-baseline verification only. It does not authorize a new fix.
+This task does **not** authorize a fix, a recovery experiment, a rebuild, or new diagnostic code.
 
-## Local baseline gate
+## Incident binding
 
-Before checking or replacing the running app:
+Only evidence that can be tied to the accepted incident identity is authoritative for this pass:
 
-1. `git fetch origin --prune`;
-2. production checkout must be `main`, CLEAN, and exactly equal current `origin/main`;
-3. read `AGENTS.md`, `CURRENT_STATUS.md`, and this task from that exact main;
-4. define the current accepted baseline dynamically as the freshly fetched `origin/main` SHA.
+- session `7C81B78D-F98A-496F-A2E6-94E3DE74194A`;
+- Slot `89953BED-613F-4E31-AAEC-C8D71B5956B3`;
+- WKWebView `28A7FDCA-1263-4AE1-B242-7459C5DF692F`;
+- runtime generation `4`;
+- navigation generation `1`;
+- source revision `1897fae15031673a37800ac57758e462d8dfb851`;
+- incident snapshots `75B3A768-F766-40B4-97BC-8A0F416C0B2F` and `B35360B0-11A3-4719-AA5C-C9AEC37F0AEC`.
 
-Do not assume the prior #106 merge SHA is still the final baseline after this control-plane transition.
+Remote comparison confirms the later `a77f9a4e1f6e9aba897ccfa8afb20c702e37d711` control-plane transition changed only `CURRENT_STATUS.md` and `CURRENT_TASK.md`. Do not rebuild the live incident solely to eliminate this governance-only provenance difference.
 
-## Accepted running-build contract
+## Confirmed starting classification
 
-The process used for observation must be a DEBUG QA build whose bundled diagnostic provenance reports:
+`CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`
 
-- `FloatTabsSourceRevision` = current accepted `origin/main` SHA;
-- `FloatTabsSourceTreeState` = `clean`;
-- `FloatTabsSourceRevisionExact` = `true`;
-- `FloatTabsBuildChannel` = `Debug`;
-- `FloatTabsQALabel` = `ft-diag-002-qa`.
+At capture, navigation was finished, renderer JavaScript was responsive, the current WebView/Slot ownership and geometry were coherent, the document was complete and visible, and the ChatGPT shell existed while the composer did not.
 
-The running process executable path and the installed app bundle must refer to the same accepted build.
+This classification is not root cause evidence.
 
-A version string alone is not sufficient evidence.
+## Hypotheses under test
 
-## Authorized local actions
+- **H1:** ChatGPT page bootstrap/hydration/application state failed or remained incomplete.
+- **H2:** a required network/service/script/resource/API dependency failed, was blocked, timed out, or became pathologically slow.
+- **H3:** navigation completing while inactive and later warm reuse contributed to a lifecycle race or missed page transition.
 
-The local agent may:
+## Authorized evidence pass
 
-- inspect the running FloatTabs PID and executable path;
-- inspect the installed app bundle's Info.plist provenance;
-- inspect code-signing/bundle metadata as needed;
-- synchronize the production checkout by fast-forward only;
-- if the installed/running app is not the accepted build, gracefully quit FloatTabs;
-- build a fresh DEBUG QA app from the clean accepted main using a separate DerivedData path;
-- verify the built app's provenance before installation;
-- replace/install the local QA app using the repository's established local QA procedure;
-- launch the accepted app;
-- re-read the running executable path and bundled provenance after launch;
-- leave the app running for normal observation.
+Before touching the incident, refresh remote refs and read the three control-plane files. Then:
 
-Do not use a dirty source checkout for an accepted QA build.
+- verify the running process and current diagnostics still refer to the accepted incident identity;
+- preserve/export the existing diagnostics before any further inspection;
+- determine whether an already available, read-only page inspection surface can observe the current document without restart/reload/configuration change;
+- if available, capture only bounded metadata relevant to application exceptions/rejections and failed/blocked/timed-out required resources or requests, with timestamps and current-document identity;
+- preserve any existing console/network/inspector artifact without request/response bodies, credentials, cookies, tokens, prompts, or assistant content;
+- make no source, test, build, preference, website-data, or control-plane changes locally.
 
-## QA build/install gate
+One bounded pass is enough. Repeated poking of a live incident is not authorized.
 
-If replacement is required:
+## Decision matrix
 
-1. build from the clean production `main` checkout, not an old construction worktree;
-2. use Debug configuration so the **Capture Stuck Tab Snapshot (QA)** control is present;
-3. verify the built bundle provenance before copying/installing;
-4. do not install if `source_revision_exact != true` or `source_tree_state != clean`;
-5. after installation, launch and verify the running process resolves to that installed bundle and the same accepted provenance.
+| Same-incident evidence | Classification result | Next state |
+| --- | --- | --- |
+| JavaScript exception or unhandled rejection tied to bootstrap/app initialization | H1 supported; record the exact bounded error class/timestamp | STOP and seal for remote review |
+| Required script/chunk/resource/fetch/XHR fails, is blocked, times out, or returns an error status | H1/H2 supported; record dependency class/status/timestamp without sensitive payloads | STOP and seal for remote review |
+| No page/request failure is visible, but this incident retains the inactive-finish/warm-reuse sequence | H3 remains a hypothesis only; one incident is insufficient for causality | STOP and seal; remote side decides whether a future controlled recurrence test is justified |
+| Renderer probe fails/times out or the WebContent process terminates before recovery | Current failure class changes toward renderer/content-process failure | STOP immediately and seal |
+| Slot/WKWebView/runtime/navigation/document identity changes, or any navigation/reload occurs | Same-incident causal binding is lost | STOP immediately and seal |
+| Required page-layer evidence is unavailable without mutation/relaunch/rebuild/configuration change | `CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION` | STOP and seal; next task may authorize a bounded probe enhancement |
+| Available page-layer evidence is clean or inconclusive after one bounded pass | Root cause remains unknown | STOP and seal; no speculative fix |
 
-Preserve user data/profile state. Do not clear cookies, cache, website data, preferences, or diagnostics.
+## Mandatory STOP and evidence sealing
 
-## Observation phase
+Stop immediately when any decision-matrix row becomes true, when the symptom recovers/disappears, or before any step that would alter the current document/runtime.
 
-**Baseline verification is complete and accepted.** The running QA build is the exact clean DEBUG build from accepted main `1897fae15031673a37800ac57758e462d8dfb851`, with QA capture capability available.
+Evidence sealing means:
 
-From this point:
+- preserve the latest diagnostic export plus any bounded inspector/console/network artifact already obtained;
+- record local timestamp, visible symptom, Slot and runtime identities, and the exact last action taken;
+- perform no reload/Home/back/forward/new navigation, restart, quit, rebuild, reinstall, WebView replacement, cache/cookie/site-data reset, or configuration toggle before remote review.
 
-- use FloatTabs normally;
-- do not proactively trigger resets/reloads to manufacture an incident;
-- no new code changes are authorized;
-- no repeated health probing is required while healthy.
-
-## Fresh incident protocol
-
-At the first real stuck/blank/black incident:
-
-1. **Do not Reload/Home/restart/quit/reset first.**
-2. Open Runtime Diagnostics and run **Capture Stuck Tab Snapshot (QA)**.
-3. Record the incident ID/message returned by the capture action.
-4. Export recent diagnostics immediately.
-5. Record:
-   - affected Slot/profile;
-   - visible symptom;
-   - approximate local timestamp;
-   - whether the panel/source window was visible;
-   - whether any navigation had just been requested.
-6. Return the diagnostic export and incident information for classification.
-
-Do not perform a recovery experiment until the captured evidence has been reviewed, unless continuing operation is operationally necessary. If emergency recovery is required, record the exact recovery action and whether it succeeded.
+If operational recovery is unavoidable, seal first when possible, then record the exact recovery action and result separately. Recovery success is not root-cause evidence.
 
 ## Prohibited
 
-Do not:
+Do not modify production source, tests, diagnostics, lifecycle/recovery behavior, website data, or PR #102. Do not add a new probe during this task. Do not manufacture repeated incidents.
 
-- modify source/test/control files during normal observation;
-- change navigation, lifecycle, focus, fullscreen, attention/unread, or content-process recovery policy;
-- add more probes/logging;
-- install a Release build as the observation build;
-- build from a dirty worktree and call it exact;
-- clear website data/cache/cookies/preferences;
-- perform periodic synthetic incident probes while healthy;
-- modify #102.
+## Completion gate
 
-## Success criteria for baseline verification
+FT-DIAG-003 leaves this state only after one of the following is returned for independent remote review:
 
-Before beginning observation, return evidence that:
+1. decisive same-incident page-layer evidence;
+2. a sealed inconclusive bounded pass;
+3. `CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION`;
+4. an identity change/recovery that invalidates further same-incident capture.
 
-- local production main == freshly fetched origin/main;
-- production worktree CLEAN;
-- installed app provenance == accepted main;
-- running executable comes from the accepted installed app;
-- source tree state clean;
-- source revision exact true;
-- build channel Debug;
-- QA label expected;
-- Capture Stuck Tab Snapshot (QA) capability is present;
-- no user data was cleared.
-
-Once these pass, the task remains ACTIVE while waiting for a real incident.
-
-## Fresh incident outcome
-
-A fresh incident does not itself close FT-DIAG-003.
-
-After evidence review, the web-side control plane will classify the incident and decide whether:
-- existing probes are sufficient and a root-cause class is established;
-- another bounded diagnostic gap exists;
-- a recovery experiment is justified;
-- a fix task can be authorized.
-
-## Mandatory STOP conditions
-
-STOP before installation or observation if:
-
-- production main is dirty/diverged;
-- accepted origin/main cannot be resolved;
-- built provenance is dirty/unknown/non-exact;
-- running executable path cannot be tied to the installed bundle;
-- QA capture capability is missing;
-- replacing the app would require clearing user data or altering unrelated configuration.
+The web-side control plane will then decide whether the next task is additional bounded diagnostics, a controlled recurrence experiment, or an evidence-backed fix.

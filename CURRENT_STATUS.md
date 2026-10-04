@@ -12,7 +12,7 @@ Machine-specific worktree paths remain local-only.
 
 ## Mode
 
-**MODE: QA-RUNTIME-OBSERVATION**
+**MODE: QA-INCIDENT-EVIDENCE**
 
 ## Production authority
 
@@ -20,9 +20,9 @@ Machine-specific worktree paths remain local-only.
 **PRODUCTION_BRANCH:** `main`  
 **EXPECTED_UPSTREAM:** `origin/main`
 
-Before any QA build or runtime check, the local production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
+For source changes or a future QA build, the local production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
 
-The live `origin/main` after the control-plane transition is the accepted QA source baseline. Do not hard-code an older SHA when verifying the installed/running application.
+The currently captured incident is a preserved evidence exception to the ordinary rebuild-to-latest rule: do not rebuild, reinstall, reload, navigate, reset, or replace the running WebView merely to make its provenance equal the later control-plane-only main commit while same-incident evidence may still exist.
 
 ## FT-DIAG-001
 
@@ -47,67 +47,79 @@ Merge-produced main commit for #106:
 
 `e706809800ccc63c1562bd6b09319fa7f600c522`
 
-FT-DIAG-002 adds observation-only diagnostic capability:
-- build/source provenance;
-- physical WKWebView runtime identity;
-- navigation generation/ticket correlation;
-- provisional/post-commit stall classification;
-- bounded renderer/JavaScript probe;
-- explicit QA stuck-tab snapshot;
-- bounded ChatGPT app-health snapshot;
-- termination/rebuild correlation.
+FT-DIAG-002 adds observation-only diagnostic capability for build/source provenance, physical WKWebView identity, navigation/runtime correlation, stall classification, bounded renderer probing, explicit stuck-tab capture, bounded ChatGPT DOM health, and termination/rebuild correlation.
 
-It does **not** establish a root cause and does **not** implement a stuck-tab fix.
+It does not establish a root cause and does not implement a stuck-tab fix.
+
+## FT-DIAG-003
+
+**FT-DIAG-003 — Fresh Incident Classification & Read-Only App-Layer Evidence**
+
+**STATUS: ACTIVE — INCIDENT_CAPTURED_APP_LAYER_EVIDENCE_REQUIRED**
+
+### Accepted incident identity
+
+The fresh incident export is internally coherent and is accepted for classification with this identity:
+
+- session: `7C81B78D-F98A-496F-A2E6-94E3DE74194A`;
+- Slot: `89953BED-613F-4E31-AAEC-C8D71B5956B3`;
+- WKWebView: `28A7FDCA-1263-4AE1-B242-7459C5DF692F`;
+- runtime generation: `4`;
+- navigation generation: `1`;
+- source revision: `1897fae15031673a37800ac57758e462d8dfb851`;
+- source tree state: `clean`;
+- source revision exact: `true`;
+- build channel: `Debug`;
+- QA label: `ft-diag-002-qa`;
+- accepted incident snapshots: `75B3A768-F766-40B4-97BC-8A0F416C0B2F` and `B35360B0-11A3-4719-AA5C-C9AEC37F0AEC`.
+
+The live main had advanced from `1897fae15031673a37800ac57758e462d8dfb851` to `a77f9a4e1f6e9aba897ccfa8afb20c702e37d711` before this classification. Remote comparison confirms that single intervening commit changed only `CURRENT_STATUS.md` and `CURRENT_TASK.md`; no production/runtime source changed. This governance-only drift does not invalidate the already captured runtime evidence, but it must not be generalized to future builds.
+
+### Confirmed facts
+
+The incident supports the following facts, not a causal root cause:
+
+- top-level navigation reached `finished`; at capture `is_loading=false`, progress was 1.0, and the navigation callback was current;
+- the renderer answered two bounded JavaScript probes successfully in approximately 16.6 ms and 9.1 ms;
+- both probes reported `document.readyState=complete` and a visible document;
+- the physical WKWebView was resident, visible, non-zero-sized, attached under the expected host, matched the pool/presented/source ownership, and matched the active Slot;
+- the ChatGPT health probe succeeded twice, five seconds apart;
+- both health probes found a conversation shell but no composer;
+- the loading marker existed in the DOM but was not visibly rendered; no bounded conversation-error element was detected; ChatGPT generation state was idle;
+- the Slot was deactivated after navigation commit but before navigation finished; that navigation finished while the Slot was inactive; the same warm WKWebView was later reused before the incident capture;
+- nearby fresh ChatGPT navigations in the same session were also slow, but the export does not identify a specific request, response, script, API, or network failure.
+
+**INCIDENT FAILURE CLASS:** `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`
+
+This is an observation/classification label only.
 
 **STUCK-SLOT ROOT CAUSE: UNKNOWN**
 
-## Current task
+The current evidence rules out, for this capture state, a renderer hang, wrong/absent presented WebView, zero/hidden WebView geometry, active-Slot mismatch, stale navigation callback, and an unfinished top-level navigation as the immediate explanation for the visible symptom.
 
-**FT-DIAG-003 — QA Runtime Baseline & Fresh Incident Observation**
+### Hypotheses still requiring evidence
 
-**QA BASELINE VERIFICATION: PASS**
+1. **H1 — ChatGPT application bootstrap/state initialization failure.** A script/chunk/API/session bootstrap failure, application exception, rejected promise, hydration/state transition failure, or equivalent page-layer dependency may have left the shell present without a composer.
+2. **H2 — Network/service/resource failure or extreme latency.** The broader slow-navigation cluster is consistent with this category, but current incident evidence contains no request-level proof.
+3. **H3 — inactive-finish / warm-reuse lifecycle interaction.** Deactivation-before-finish followed by warm reuse is a confirmed temporal sequence; causality is not established from one incident.
 
-Accepted local evidence:
-- production `main` = `origin/main` = `1897fae15031673a37800ac57758e462d8dfb851`;
-- production worktree CLEAN, ahead/behind `0/0`;
-- previous running Wave2 Release build rejected as stale;
-- replacement DEBUG QA build was built from the clean accepted main;
-- running provenance reports `source_revision = 1897fae15031673a37800ac57758e462d8dfb851`;
-- `source_tree_state = clean`;
-- `source_revision_exact = true`;
-- `build_channel = Debug`;
-- `qa_label = ft-diag-002-qa`;
-- **Capture Stuck Tab Snapshot (QA)** is available;
-- no user data was cleared;
-- no source/control files were modified.
+No specific HTTP error, JavaScript exception, OpenAI service failure, or FloatTabs lifecycle defect is currently confirmed.
 
-FT-DIAG-003 is now in the ordinary-use observation phase. No further baseline rebuild/install work is authorized unless the running build identity later diverges from current accepted `origin/main`.
+### Evidence gate
 
-The required running QA application must be built from a CLEAN checkout exactly equal to current `origin/main` and must report:
-- `source_tree_state = clean`;
-- `source_revision_exact = true`;
-- `source_revision = accepted origin/main SHA`;
-- DEBUG QA capability available for explicit stuck-tab capture.
+The next authorized activity is a **bounded, read-only same-incident evidence capture**. It may inspect already available page/renderer diagnostic surfaces only if doing so does not reload, navigate, restart, rebuild, reinstall, replace the WebView, clear data, or change runtime configuration.
 
-If the currently installed/running app does not satisfy that identity, it is not an accepted observation build.
+Target evidence is metadata sufficient to discriminate H1/H2/H3, such as an already available same-document JavaScript exception/rejection or failed/blocked/timed-out application dependency. Do not capture page bodies, cookies, auth headers, tokens, prompts, responses, or unrelated browsing content.
 
-## Fresh incident rule
-
-When the stuck/blank/black symptom occurs:
-
-1. do not Reload/Home/restart/reset first;
-2. use **Capture Stuck Tab Snapshot (QA)**;
-3. preserve the returned incident ID and current diagnostics;
-4. export recent diagnostics;
-5. return the evidence for classification before any recovery experiment.
-
-Recovery success must continue to be recorded separately from causal classification.
+If the required page-layer evidence is not already accessible without mutating the live incident, stop and record that diagnostic gap. That result is sufficient to define a later bounded diagnostic-probe task; it is not permission to add probes during FT-DIAG-003.
 
 ## Runtime construction state
 
 **NEW RUNTIME FIX CONSTRUCTION: NOT AUTHORIZED**
 
-Do not add recovery logic, reset logic, new probes, or further diagnostics unless the fresh incident evidence identifies a specific remaining gap and a new task authorizes it.
+**NEW DIAGNOSTIC CONSTRUCTION: NOT AUTHORIZED DURING THIS LIVE INCIDENT**
+
+Do not add recovery behavior or infer a fix from the current classification. A new construction task requires either decisive same-incident evidence or a confirmed evidence gap after the current incident is sealed.
 
 ## Separate work
 
@@ -117,4 +129,4 @@ PR #102 remains separate MemoX durable-outbox work. Do not modify it as part of 
 
 PRs #99–#101 remain abandoned historical experiments only.
 
-The historical `v0.2.6` tag provenance discrepancy remains non-blocking and outside FT-DIAG-003.
+Historical stall/process/network incidents are useful comparison evidence but must not be merged into this incident's causal chain without matching runtime/document identity.
