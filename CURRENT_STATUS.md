@@ -89,7 +89,27 @@ Do not convert any of these into a fix claim.
 
 **FT-DIAG-004 — Bounded Page-App Failure Probe Foundation**
 
-**STATUS: WAITING_FOR_INDEPENDENT_AUDIT**
+**STATUS: INDEPENDENT_AUDIT_BLOCKED — WKCONTENTWORLD_BOUNDARY_TEST_REQUIRED**
+
+### Independent audit result
+
+**VERDICT: CHANGES_REQUIRED — TEST/EVIDENCE BLOCKER, NOT A CONFIRMED PRODUCTION DEFECT**
+
+Remote code audit found no recovery-policy expansion, second diagnostic persistence authority,
+network API monkey-patching, unbounded recorder state, or identified privacy-content leak.
+Exact-head PR-context macOS CI and QA DMG passed on `9e0fde59d6b1fde48eb47ec7cf36db9ccbb4b393`.
+
+The remaining blocker is proof of the real WebKit content-world boundary. The current recorder
+test executes the generated script inside one `JavaScriptCore.JSContext` and manually invokes
+listeners. It therefore proves parser/bounds/privacy behavior, but does not prove that a
+page-world uncaught error, page-world unhandled Promise rejection, and page resource-load error
+are delivered to the named isolated `WKContentWorld` recorder in an actual `WKWebView`.
+
+Before merge, add one focused real-`WKWebView` boundary test using the production bridge/script.
+It must cause those signals from page content and verify the bounded isolated-world snapshot
+observes them without persisting raw message/reason/URL/body content. If any required signal is
+not passively observable across that boundary, STOP and record it as a remaining GAP; do not
+introduce fetch/XHR/WebSocket or application-runtime interception.
 
 Implementation is on branch `codex/ft-diag-004-page-app-probe`, based on
 `caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`, with implementation commit
@@ -157,7 +177,7 @@ Do not persist request/response bodies, headers, cookies, credentials, auth stat
 
 **NEW STUCK-TAB FIX: NOT AUTHORIZED**
 
-**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: COMPLETE — WAITING_FOR_INDEPENDENT_AUDIT**
+**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: AUDIT AMENDMENT REQUIRED — REAL WKCONTENTWORLD TEST ONLY**
 
 The new diagnostic path must be passive with respect to page behavior. It must not reload, recover, reset, replace a WebView, clear website data, or change navigation/lifecycle decisions.
 

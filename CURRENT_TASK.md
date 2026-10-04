@@ -2,7 +2,7 @@
 
 **Task ID:** FT-DIAG-004
 **Title:** Bounded Page-App Failure Probe Foundation
-**Status:** `WAITING_FOR_INDEPENDENT_AUDIT`
+**Status:** `INDEPENDENT_AUDIT_BLOCKED — WKCONTENTWORLD_BOUNDARY_TEST_REQUIRED`
 
 **Task branch:** `codex/ft-diag-004-page-app-probe`
 
@@ -11,6 +11,33 @@
 **Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`
 
 **Pull request:** #111
+
+## Independent audit result
+
+**Verdict:** `CHANGES_REQUIRED`
+
+No production defect is confirmed. The implementation is blocked only on a missing behavioral
+test at the WebKit content-world boundary.
+
+Required amendment:
+
+- use a real `WKWebView` configured with the production `ChatGPTAttentionBridge` user script in
+  its named isolated content world;
+- trigger an uncaught JavaScript error from page-world script and verify `javascript_error`;
+- trigger an unhandled page-world Promise rejection and verify `unhandled_rejection`;
+- trigger at least one deterministic page resource-load failure and verify
+  `resource_load_failure`;
+- verify the persisted diagnostic snapshot still contains no raw message/reason/URL/body or
+  other prohibited content;
+- make no production-behavior change unless the test exposes an actual defect.
+
+If any required class cannot be observed passively in the real `WKWebView`, STOP and report that
+class as a remaining passive-observation GAP. Do not add networking/runtime monkey-patches.
+
+Exact-head evidence already accepted for the current implementation head
+`9e0fde59d6b1fde48eb47ec7cf36db9ccbb4b393`: required macOS CI PASS; Debug/Release/arm64 PASS;
+1,290 tests / 3 skipped / 0 failures; QA DMG PASS. A new amendment commit must rerun the required
+exact-head PR-context check before merge.
 
 ## Objective
 
