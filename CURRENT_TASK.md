@@ -50,15 +50,28 @@ The local repository/worktree closeout remains accepted:
 - D archive tag → `cd2095660705aa84301731ea4202e08cee71abbf`;
 - no source/test/runtime files modified during closeout.
 
+## Required-check blocker discovered at merge
+
+GitHub rejected the attempted merge of exact head `d22be46bbf07fc134ed5d74a286792a80b650d19` because protected check `Build & Test (Apple Silicon arm64)` remained `expected`.
+
+The exact-head manual run `37163445523` succeeded, but GitHub did not count that `workflow_dispatch` run as satisfying the pull request's required check. Do not bypass protection.
+
+Authorized corrective change:
+- update `.github/workflows/macos-ci.yml` path filters to include `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` for both `pull_request` and `push`;
+- correct the durable rule in `AGENTS.md`;
+- update only these governance/control-plane records needed to describe the correction;
+- do not change production source or test logic.
+
 ## Final immutable gate
 
-After this commit, resolve the live #103 head dynamically. That SHA is the **merge-stable terminal closure head**.
+After the corrective workflow commit, resolve the live #103 head dynamically. That SHA is the **merge-stable terminal closure head**.
 
 For that same exact SHA, both must pass:
 
 1. **Final governance audit**
    - #103 remains based on expected pre-merge `main`;
-   - complete PR diff remains limited to `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md`;
+   - complete PR diff remains limited to `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and `.github/workflows/macos-ci.yml`;
+   - the workflow diff is path-trigger governance only;
    - #102 remains unchanged and separate;
    - expected pre-merge remote branch set remains intact;
    - control-plane semantics remain non-conflicting and fail-closed;
@@ -66,17 +79,15 @@ For that same exact SHA, both must pass:
    - stuck-tab root cause remains UNKNOWN;
    - no machine-specific absolute path is committed.
 
-2. **Required GitHub CI**
-   - workflow `macos-ci.yml`;
-   - event `workflow_dispatch`;
-   - run HEAD equals the merge-stable terminal closure head;
-   - job `Build & Test (Apple Silicon arm64)`;
-   - workflow conclusion = `success`;
-   - required job conclusion = `success`.
+2. **Required GitHub CI / branch protection**
+   - the final head receives the PR-context `macOS CI` run automatically;
+   - job `Build & Test (Apple Silicon arm64)` completes successfully;
+   - GitHub branch protection recognizes the required check as satisfied;
+   - a successful manual `workflow_dispatch` that remains `expected` does not count.
 
 ## Automatic terminal transition
 
-If and only if both final gates PASS for the same merge-stable terminal closure head:
+If and only if both final gates PASS for the same merge-stable terminal closure head and GitHub no longer reports the required check as `expected`:
 
 **FT-GOV-002 = CLOSED**
 
