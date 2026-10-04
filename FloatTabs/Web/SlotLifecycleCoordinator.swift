@@ -401,6 +401,19 @@ final class SlotLifecycleCoordinator {
         hiddenActiveToken != nil
     }
 
+    func diagnosticSnapshotFields(for slotID: UUID) -> [String: RuntimeDiagnosticValue] {
+        let plan = inactivePlans[slotID]
+        let protection = protectionState(slotID: slotID)
+        return [
+            "lifecycle_slot_active": .bool(activeSlotID == slotID),
+            "lifecycle_pending_release": .bool(plan != nil),
+            "lifecycle_pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
+            "lifecycle_media_protected": .bool(protection.media),
+            "lifecycle_attention_protected": .bool(protection.attention),
+            "lifecycle_speech_protected": .bool(protection.speech)
+        ]
+    }
+
     #if DEBUG
     /// Read-only diagnostic: the current inactive-plan identity for a Slot.
     /// Exposes existing internal state only — no mutation, no second plan

@@ -693,6 +693,163 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator.readySlotIDs.count
     }
 
+    /// Captures one QA-only, read-only snapshot of the currently selected
+    /// Slot. It deliberately queries the pool and view hierarchy directly and
+    /// never materializes a missing runtime or changes presentation state.
+    @discardableResult
+    func captureStuckTabSnapshot() -> String {
+        let incidentID = UUID()
+        var fields = diagnostics.environmentFields()
+        fields["incident_id"] = .string(incidentID.uuidString)
+
+        guard let profile = tabStore.activeProfile else {
+            fields["capture_availability"] = .string("no_active_slot")
+            diagnostics.record(
+                event: "diagnostics.stuck_tab_snapshot",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: fields
+            )
+            return "Snapshot recorded (no active Slot)."
+        }
+
+        let slotID = profile.id
+        fields["slot_id"] = .string(slotID.uuidString)
+        fields["active_slot_matches"] = .bool(tabStore.activeTabID == slotID)
+        fields["fullscreen_session_state"] = .string(sourceHostController.sessionState.rawValue)
+        fields["fullscreen_restore_generation"] = .integer(
+            Int64(sourceHostController.diagnosticRestoreGeneration)
+        )
+        fields["fullscreen_source_window_visible"] = .bool(sourceHostController.window.isVisible)
+        fields["fullscreen_source_window_key"] = .bool(sourceHostController.window.isKeyWindow)
+
+        guard let webView = webViewPool.existingWebView(for: slotID) else {
+            fields["capture_availability"] = .string("no_resident_active_runtime")
+            fields["resident"] = .bool(false)
+            fields.merge(slotLifecycleCoordinator.diagnosticSnapshotFields(for: slotID)) {
+                current, _ in current
+            }
+            diagnostics.record(
+                event: "diagnostics.stuck_tab_snapshot",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: fields
+            )
+            return "Snapshot recorded (active Slot has no resident WebView)."
+        }
+
+        let normalWebView = rootView.webPanelContainerView.currentWebView
+        let companionWebView = sourceHostController.companionContainer.currentWebView
+        let sourceWebView = sourceHostController.diagnosticObservedWebView
+        let matchesNormal = normalWebView === webView
+        let matchesCompanion = companionWebView === webView
+        let matchesSource = sourceWebView === webView
+        let matchesSourceWindow = matchesSource && webView.window === sourceHostController.window
+        let matchesFullscreenPrivateWindow = sourceHostController
+            .diagnosticIsFullscreenPrivatePresentation(of: webView)
+        let expectedContainer: NSView?
+        if matchesCompanion {
+            expectedContainer = sourceHostController.companionContainer
+        } else {
+            expectedContainer = rootView.webPanelContainerView
+        }
+        let hasExpectedAncestry = expectedContainer.map {
+            webView.isDescendant(of: $0)
+        } ?? false
+        let role: String
+        if matchesCompanion {
+            role = "shell_companion"
+        } else if matchesSourceWindow {
+            role = "source"
+        } else if matchesNormal || webView.window === panel {
+            role = "shell"
+        } else if matchesFullscreenPrivateWindow {
+            role = "fullscreen_private"
+        } else {
+            role = "none_other"
+        }
+
+        fields["capture_availability"] = .string("captured")
+        fields["resident"] = .bool(true)
+        fields.merge(webViewPool.diagnosticSnapshotFields(for: slotID)) { current, _ in current }
+        fields.merge(slotLifecycleCoordinator.diagnosticSnapshotFields(for: slotID)) {
+            current, _ in current
+        }
+        fields["slot_residency_policy"] = .string(profile.residencyPolicy.rawValue)
+        fields["pool_webview_present"] = .bool(true)
+        fields["pool_matches_normal_presented_webview"] = .bool(matchesNormal)
+        fields["pool_matches_companion_webview"] = .bool(matchesCompanion)
+        fields["pool_matches_source_webview"] = .bool(matchesSource)
+        fields["pool_webview_matches_presented"] = .bool(
+            matchesNormal || matchesCompanion || matchesSourceWindow || matchesFullscreenPrivateWindow
+        )
+        fields["expected_container_host_relationship"] = .bool(
+            hasExpectedAncestry || matchesFullscreenPrivateWindow
+        )
+        fields["webview_descendant_of_expected_container"] = .bool(hasExpectedAncestry)
+        fields["webview_role"] = .string(role)
+        fields["webview_hidden"] = .bool(webView.isHiddenOrHasHiddenAncestor)
+        fields["host_hidden"] = .bool(
+            webView.superview?.isHiddenOrHasHiddenAncestor ?? true
+        )
+        fields["window_visible"] = .bool(webView.window?.isVisible ?? false)
+        fields["window_key"] = .bool(webView.window?.isKeyWindow ?? false)
+        fields["frame_nonzero"] = .bool(webView.frame.width > 0 && webView.frame.height > 0)
+        fields["bounds_nonzero"] = .bool(webView.bounds.width > 0 && webView.bounds.height > 0)
+        let origin = webView.url.flatMap {
+            RuntimeDiagnosticPrivacy.safeURLString($0, mode: .standard)
+        }
+        fields["origin"] = origin.map(RuntimeDiagnosticValue.string) ?? .null
+
+        let pageURL = webView.url
+        let isSupportedChatGPT = pageURL.map(ChatGPTSitePolicy.isSupportedChatGPTURL) ?? false
+        fields["page_class"] = .string(isSupportedChatGPT ? "chatgpt" : "other_or_unknown")
+        if isSupportedChatGPT {
+            fields.merge(
+                webViewPool.attentionBridge(for: slotID)?.diagnosticSnapshotFields ?? [
+                    "attention_document_admitted": .bool(false),
+                    "chatgpt_document_epoch": .null,
+                    "chatgpt_generating": .null,
+                    "attention_document_admission": .string("unavailable")
+                ]
+            ) { current, _ in current }
+            if let responseBridge = webViewPool.responseBridge(for: slotID) {
+                fields["response_current_document_ready"] = .bool(
+                    responseBridge.diagnosticCurrentDocumentReady
+                )
+            } else {
+                fields["response_current_document_ready"] = .null
+            }
+        }
+
+        diagnostics.record(
+            event: "diagnostics.stuck_tab_snapshot",
+            level: .notice,
+            subsystem: "diagnostics",
+            fields: fields
+        )
+        if isSupportedChatGPT {
+            webViewPool.captureBoundedChatGPTHealthProbe(slotID: slotID) {
+                [weak self, fields] result in
+                guard let self else { return }
+                var healthFields = fields
+                healthFields.merge(result.diagnosticFields) { _, new in new }
+                self.diagnostics.record(
+                    event: "diagnostics.chatgpt_health_probe",
+                    level: .notice,
+                    subsystem: "diagnostics",
+                    fields: healthFields
+                )
+            }
+        }
+        webViewPool.captureBoundedRendererProbe(
+            slotID: slotID,
+            incidentID: incidentID,
+            completion: { _ in }
+        )
+        return "Snapshot recorded for active Slot."
+    }
+
     /// Assemble a one-shot projection from the live business owners. This is
     /// intentionally not stored, restored, or consulted by any decision path.
     func runtimeDiagnosticSnapshot() -> RuntimeDiagnosticSnapshot {

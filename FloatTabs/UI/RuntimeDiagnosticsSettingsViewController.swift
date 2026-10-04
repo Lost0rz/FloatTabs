@@ -6,15 +6,25 @@ typealias RuntimeDiagnosticsExportHandler = @MainActor (
     @escaping @Sendable (Result<Void, RuntimeDiagnosticExportError>) -> Void
 ) -> Void
 
+typealias RuntimeDiagnosticsIncidentCaptureHandler = @MainActor () -> String
+
 @MainActor
 final class RuntimeDiagnosticsSettingsViewController: NSViewController {
     let modePopup = NSPopUpButton()
     let exportButton = NSButton(title: "Export Recent Diagnostics…", target: nil, action: nil)
     let openLogsButton = NSButton(title: "Open Logs Folder", target: nil, action: nil)
+#if DEBUG
+    let captureStuckTabButton = NSButton(
+        title: "Capture Stuck Tab Snapshot (QA)",
+        target: nil,
+        action: nil
+    )
+#endif
 
     private let preferencesStore: AppPreferencesStore
     private let exportHandler: RuntimeDiagnosticsExportHandler
     private let openLogsHandler: () -> Void
+    private let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler?
     private let statusLabel = NSTextField(labelWithString: "")
 
     init(
@@ -22,11 +32,13 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         exportHandler: @escaping RuntimeDiagnosticsExportHandler = { _, completion in
             completion(.failure(.writerDisabled))
         },
-        openLogsHandler: @escaping () -> Void = {}
+        openLogsHandler: @escaping () -> Void = {},
+        captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = nil
     ) {
         self.preferencesStore = preferencesStore
         self.exportHandler = exportHandler
         self.openLogsHandler = openLogsHandler
+        self.captureIncidentHandler = captureIncidentHandler
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -58,6 +70,10 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         exportButton.action = #selector(exportDiagnostics(_:))
         openLogsButton.target = self
         openLogsButton.action = #selector(openLogs(_:))
+#if DEBUG
+        captureStuckTabButton.target = self
+        captureStuckTabButton.action = #selector(captureStuckTab(_:))
+#endif
 
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 0
@@ -70,7 +86,13 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         modeRow.alignment = .centerY
         modeRow.spacing = 16
 
-        let actions = NSStackView(views: [exportButton, openLogsButton])
+        var actionViews: [NSView] = [exportButton, openLogsButton]
+#if DEBUG
+        if captureIncidentHandler != nil {
+            actionViews.append(captureStuckTabButton)
+        }
+#endif
+        let actions = NSStackView(views: actionViews)
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -142,6 +164,13 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
     @objc private func openLogs(_ sender: NSButton) {
         openLogsHandler()
     }
+
+#if DEBUG
+    @objc private func captureStuckTab(_ sender: NSButton) {
+        guard let captureIncidentHandler else { return }
+        statusLabel.stringValue = captureIncidentHandler()
+    }
+#endif
 
     private func synchronizeControls() {
         guard isViewLoaded else { return }

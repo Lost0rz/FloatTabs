@@ -52,6 +52,12 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 #endif
     private(set) var isInvalidated = false
 
+    /// Whether this bridge currently recognizes a document-ready handshake.
+    /// The opaque document token itself is never exposed to diagnostics.
+    var diagnosticCurrentDocumentReady: Bool {
+        !isInvalidated && currentDocumentToken != nil
+    }
+
     init(
         slotID: UUID,
         onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },

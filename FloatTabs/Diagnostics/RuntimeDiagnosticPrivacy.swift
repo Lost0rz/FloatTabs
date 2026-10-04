@@ -7,6 +7,7 @@ enum RuntimeDiagnosticPrivacy {
         "authorization",
         "cookie",
         "password",
+        "prompt",
         "token",
         "secret",
         "body",
@@ -25,8 +26,16 @@ enum RuntimeDiagnosticPrivacy {
         "hardwareuuid",
         "ipaddress",
         "documenttoken",
+        "conversationid",
+        "conversationidentifier",
         "responseid",
         "responseidentity",
+        "storage",
+        "stack",
+        "errormessage",
+        "errorstack",
+        "pagetext",
+        "domtext",
         "location",
         "dictionary",
         "aria",
@@ -128,6 +137,27 @@ enum RuntimeDiagnosticPrivacy {
     ) -> [String: RuntimeDiagnosticValue] {
         fields.reduce(into: [:]) { result, entry in
             let (key, value) = entry
+            if key == "source_tree_state" {
+                guard case let .string(state) = value,
+                      ["clean", "dirty", "unknown"].contains(state) else {
+                    return
+                }
+                result[key] = .string(state)
+                return
+            }
+            if key == "source_revision_exact" {
+                guard case let .bool(exact) = value else { return }
+                result[key] = .bool(exact)
+                return
+            }
+            if key == "qa_label" {
+                guard case let .string(label) = value,
+                      let safeLabel = safeQALabel(label) else {
+                    return
+                }
+                result[key] = .string(safeLabel)
+                return
+            }
             guard !isSensitiveKey(key) else { return }
 
             switch value {
@@ -166,6 +196,16 @@ enum RuntimeDiagnosticPrivacy {
     private static func isSensitiveKey(_ key: String) -> Bool {
         let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
         return sensitiveKeyFragments.contains { normalized.contains($0) }
+    }
+
+    private static func safeQALabel(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.range(of: #"^[A-Za-z0-9._-]{1,64}$"#, options: .regularExpression) != nil,
+              !containsSecretPattern(trimmed),
+              !isIPAddressLiteral(trimmed) else {
+            return nil
+        }
+        return trimmed
     }
 
     private static func isIPAddressLiteral(_ value: String) -> Bool {

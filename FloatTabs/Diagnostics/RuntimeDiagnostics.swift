@@ -5,6 +5,8 @@ import OSLog
 protocol RuntimeDiagnosticRecording: AnyObject {
     var capturesDebugEvents: Bool { get }
 
+    func environmentFields() -> [String: RuntimeDiagnosticValue]
+
     func beginTrace(
         root: String,
         fields: [String: RuntimeDiagnosticValue]
@@ -31,6 +33,10 @@ protocol RuntimeDiagnosticRecording: AnyObject {
 }
 
 extension RuntimeDiagnosticRecording {
+    func environmentFields() -> [String: RuntimeDiagnosticValue] {
+        [:]
+    }
+
     func beginTrace(root: String) -> RuntimeDiagnosticTrace {
         beginTrace(root: root, fields: [:])
     }
@@ -68,6 +74,45 @@ extension RuntimeDiagnosticRecording {
     }
 }
 
+struct RuntimeDiagnosticSourceProvenance: Equatable {
+    enum TreeState: String, Equatable {
+        case clean
+        case dirty
+        case unknown
+    }
+
+    let sourceRevision: String
+    let sourceTreeState: TreeState
+    let sourceRevisionExact: Bool
+
+    static func fromBuildMetadata(
+        sourceRevision: String?,
+        sourceTreeState: String?,
+        sourceRevisionExact: String?
+    ) -> Self {
+        let revisionIsValid = sourceRevision?.range(
+            of: #"^[0-9a-f]{40}$"#,
+            options: .regularExpression
+        ) != nil
+        let boundedRevision = revisionIsValid ? sourceRevision! : "unknown"
+        guard revisionIsValid,
+              let sourceTreeState,
+              let treeState = TreeState(rawValue: sourceTreeState) else {
+            return Self(
+                sourceRevision: boundedRevision,
+                sourceTreeState: .unknown,
+                sourceRevisionExact: false
+            )
+        }
+
+        return Self(
+            sourceRevision: boundedRevision,
+            sourceTreeState: treeState,
+            sourceRevisionExact: treeState == .clean && sourceRevisionExact == "true"
+        )
+    }
+}
+
 @MainActor
 final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     typealias TimestampProvider = () -> Date
@@ -94,9 +139,19 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     }
 
     func environmentFields() -> [String: RuntimeDiagnosticValue] {
-        [
+        let sourceProvenance = RuntimeDiagnosticSourceProvenance.fromBuildMetadata(
+            sourceRevision: Self.sourceRevision,
+            sourceTreeState: Self.sourceTreeState,
+            sourceRevisionExact: Self.sourceRevisionExact
+        )
+        return [
             "app_version": .string(Self.appVersion),
             "build_number": .string(Self.buildNumber),
+            "source_revision": .string(sourceProvenance.sourceRevision),
+            "source_tree_state": .string(sourceProvenance.sourceTreeState.rawValue),
+            "source_revision_exact": .bool(sourceProvenance.sourceRevisionExact),
+            "build_channel": .string(Self.buildChannel),
+            "qa_label": .string(Self.qaLabel),
             "macos_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
             "architecture": .string(Self.processArchitecture),
             "session_id": .string(sessionID.uuidString),
@@ -238,6 +293,26 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     private static var buildNumber: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
             ?? "unknown"
+    }
+
+    private static var sourceRevision: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsSourceRevision") as? String ?? "unknown"
+    }
+
+    private static var sourceTreeState: String? {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsSourceTreeState") as? String
+    }
+
+    private static var sourceRevisionExact: String? {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsSourceRevisionExact") as? String
+    }
+
+    private static var buildChannel: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsBuildChannel") as? String ?? "unknown"
+    }
+
+    private static var qaLabel: String {
+        Bundle.main.object(forInfoDictionaryKey: "FloatTabsQALabel") as? String ?? "unknown"
     }
 
     private static var processArchitecture: String {

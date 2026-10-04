@@ -101,6 +101,96 @@ struct ChatGPTBridgePayload: Equatable {
     }
 }
 
+enum ChatGPTIncidentHealthProbeOutcome: String, Equatable, Sendable {
+    case success
+    case unsupportedDocument = "unsupported_document"
+    case bridgeUnavailable = "bridge_unavailable"
+    case evaluationFailed = "evaluation_failed"
+    case timeout
+    case stale
+}
+
+struct ChatGPTIncidentHealthProbeValues: Equatable, Sendable {
+    let documentReadyState: String
+    let visibilityState: String
+    let conversationShellPresent: Bool
+    let composerPresent: Bool
+    let loadingIndicatorPresent: Bool
+    let loadingIndicatorVisible: Bool
+    let conversationLoadErrorPresent: Bool
+
+    static func parse(_ value: Any) -> ChatGPTIncidentHealthProbeValues? {
+        guard let fields = value as? [String: Any],
+              fields["version"] as? Int == 1,
+              let documentReadyState = fields["document_ready_state"] as? String,
+              ["loading", "interactive", "complete", "other"].contains(documentReadyState),
+              let visibilityState = fields["visibility_state"] as? String,
+              ["visible", "hidden", "prerender", "unloaded", "other"].contains(visibilityState),
+              let conversationShellPresent = fields["conversation_shell_present"] as? Bool,
+              let composerPresent = fields["composer_present"] as? Bool,
+              let loadingIndicatorPresent = fields["loading_indicator_present"] as? Bool,
+              let loadingIndicatorVisible = fields["loading_indicator_visible"] as? Bool,
+              let conversationLoadErrorPresent = fields["conversation_load_error_present"] as? Bool else {
+            return nil
+        }
+        return ChatGPTIncidentHealthProbeValues(
+            documentReadyState: documentReadyState,
+            visibilityState: visibilityState,
+            conversationShellPresent: conversationShellPresent,
+            composerPresent: composerPresent,
+            loadingIndicatorPresent: loadingIndicatorPresent,
+            loadingIndicatorVisible: loadingIndicatorVisible,
+            conversationLoadErrorPresent: conversationLoadErrorPresent
+        )
+    }
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        [
+            "document_ready_state": .string(documentReadyState),
+            "visibility_state": .string(visibilityState),
+            "conversation_shell_present": .bool(conversationShellPresent),
+            "composer_present": .bool(composerPresent),
+            "loading_indicator_present": .bool(loadingIndicatorPresent),
+            "loading_indicator_visible": .bool(loadingIndicatorVisible),
+            "conversation_load_error_present": .bool(conversationLoadErrorPresent)
+        ]
+    }
+}
+
+struct ChatGPTIncidentHealthProbeResult: Equatable, Sendable {
+    let outcome: ChatGPTIncidentHealthProbeOutcome
+    let values: ChatGPTIncidentHealthProbeValues?
+    let documentEpoch: UInt64?
+    let generating: Bool?
+    let latencyMilliseconds: Double
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "health_probe_outcome": .string(outcome.rawValue),
+            "health_probe_latency_ms": .double(min(max(latencyMilliseconds, 0), 5_000)),
+            "attention_document_admitted": outcome == .success ? .bool(true) : .null,
+            "chatgpt_document_epoch": documentEpoch.map { .integer(Int64($0)) } ?? .null,
+            "chatgpt_generating": generating.map(RuntimeDiagnosticValue.bool) ?? .null
+        ]
+        let healthFields = values?.diagnosticFields ?? [
+            "document_ready_state": .null,
+            "visibility_state": .null,
+            "conversation_shell_present": .null,
+            "composer_present": .null,
+            "loading_indicator_present": .null,
+            "loading_indicator_visible": .null,
+            "conversation_load_error_present": .null
+        ]
+        fields.merge(healthFields) { _, new in new }
+        return fields
+    }
+}
+
+typealias ChatGPTIncidentHealthProbeEvaluator = @MainActor (
+    WKWebView,
+    String
+) async throws -> Any
+
 /// Pure per-document baseline/transition reducer. The first observation for a
 /// document establishes its baseline — an idle baseline can never synthesize a
 /// finish — and duplicate states never re-emit, so noisy injected JS cannot
@@ -108,6 +198,10 @@ struct ChatGPTBridgePayload: Equatable {
 struct ChatGPTDocumentGenerationTracker {
     private var hasBaseline = false
     private var isGenerating = false
+
+    var diagnosticGeneratingState: Bool? {
+        hasBaseline ? isGenerating : nil
+    }
 
     mutating func observe(_ generating: Bool) -> ChatGPTAttentionObservation? {
         observeEvent(generating, responseIdentity: nil)?.observation
@@ -149,12 +243,26 @@ struct ChatGPTDocumentGenerationTracker {
 final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let contentWorldName = "FloatTabsChatGPTAttention"
     static let messageHandlerName = "floatTabsChatGPTAttention"
+    static let defaultIncidentHealthProbeTimeout: TimeInterval = 5
     static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
 
     typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
     typealias LivenessSleeper = @MainActor (UInt64) async -> Bool
+
+    private static let productionIncidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator = {
+        webView, script in
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(
+                script,
+                in: nil,
+                in: ChatGPTAttentionBridge.contentWorld
+            ) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
 
     private static let productionLivenessSleeper: LivenessSleeper = { nanoseconds in
         guard !Task.isCancelled else { return false }
@@ -192,6 +300,48 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// documents, generated by `makeScriptSource()` from Swift-owned
     /// constants.
     static let scriptSource = makeScriptSource()
+
+    /// The explicit incident probe reads only fixed booleans and bounded
+    /// document-state enums. It never serializes DOM text or page identity.
+    static let incidentHealthProbeScript = """
+    (() => {
+      const ready = ["loading", "interactive", "complete"].includes(document.readyState)
+        ? document.readyState : "other";
+      const visibility = ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
+        ? document.visibilityState : "other";
+      const shell = document.querySelector(
+        'main, [data-testid="conversation-turn-list"], article[data-testid*="conversation-turn"]'
+      );
+      const composer = document.querySelector(
+        '#prompt-textarea, textarea[aria-label="Message ChatGPT"], ' +
+        '[contenteditable="true"][data-testid*="composer"], main [role="textbox"]'
+      );
+      const loading = document.querySelector(
+        '[data-testid="stop-button"], [data-testid="fruitjuice-stop-button"], [aria-busy="true"]'
+      );
+      const pageError = document.querySelector(
+        '[data-testid="conversation-error"], [data-testid="conversation-error-banner"], main [role="alert"]'
+      );
+      const isVisible = (element) => {
+        if (!element || !element.isConnected || element.hidden ||
+            element.getAttribute("aria-hidden") === "true" ||
+            element.getClientRects().length === 0) return false;
+        const style = getComputedStyle(element);
+        return style.display !== "none" &&
+          style.visibility !== "hidden" && style.visibility !== "collapse";
+      };
+      return {
+        version: 1,
+        document_ready_state: ready,
+        visibility_state: visibility,
+        conversation_shell_present: Boolean(shell),
+        composer_present: Boolean(composer),
+        loading_indicator_present: Boolean(loading),
+        loading_indicator_visible: isVisible(loading),
+        conversation_load_error_present: Boolean(pageError)
+      };
+    })()
+    """
 
     /// The injected script's early host gate, generated from the same
     /// `ChatGPTSitePolicy` constants used by native message validation and
@@ -406,6 +556,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private let diagnostics: any RuntimeDiagnosticRecording
     private let livenessProbe: LivenessProbeProvider
     private let livenessSleeper: LivenessSleeper
+    private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator
+    private let incidentHealthProbeTimeout: TimeInterval
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var document: DocumentSession?
@@ -422,6 +574,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessGeneration: UInt64 = 0
     private var livenessCycleOwnerGeneration: UInt64?
     private var livenessIdleCandidateOwnerGeneration: UInt64?
+    private var pendingIncidentHealthProbeID: UUID?
+    private var incidentHealthProbeTimeoutTask: Task<Void, Never>?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -433,12 +587,213 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingInstantBackHandoff != nil
     }
 
+    /// Content-free view of the bridge-owned current document. The opaque
+    /// document token is deliberately never projected into diagnostics.
+    var diagnosticSnapshotFields: [String: RuntimeDiagnosticValue] {
+        let isActiveDocument: Bool
+        if case .activeSupportedDocument = documentAdmission {
+            isActiveDocument = true
+        } else {
+            isActiveDocument = false
+        }
+        let admitted = isActiveDocument && document != nil
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "attention_document_admitted": .bool(admitted),
+            "chatgpt_document_epoch": document.map {
+                .integer(Int64($0.epoch))
+            } ?? .null,
+            "chatgpt_generating": document?.tracker.diagnosticGeneratingState.map {
+                .bool($0)
+            } ?? .null
+        ]
+        switch documentAdmission {
+        case .awaitingSupportedBaseline:
+            fields["attention_document_admission"] = .string("awaiting_supported_baseline")
+        case .activeSupportedDocument:
+            fields["attention_document_admission"] = .string("active_supported_document")
+        case .unsupportedCurrentDocument:
+            fields["attention_document_admission"] = .string("unsupported_current_document")
+        case .awaitingAuthorizedResync:
+            fields["attention_document_admission"] = .string("awaiting_authorized_resync")
+        }
+        return fields
+    }
+
+    /// Performs one explicit incident-only DOM snapshot in the same isolated
+    /// content world as the attention bridge. The opaque document token is
+    /// used only as an in-memory stale guard and is never returned or logged.
+    func captureIncidentHealthSnapshot(
+        for expectedWebView: WKWebView,
+        contextIsCurrent: @escaping @MainActor () -> Bool,
+        completion: @escaping @MainActor (ChatGPTIncidentHealthProbeResult) -> Void
+    ) {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        if !isInvalidated,
+           case .unsupportedCurrentDocument = documentAdmission {
+            completion(Self.incidentHealthResult(
+                outcome: .unsupportedDocument,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard !isInvalidated,
+              let attachedWebView = webView,
+              attachedWebView === expectedWebView,
+              case .activeSupportedDocument = documentAdmission,
+              let document else {
+            completion(Self.incidentHealthResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard contextIsCurrent() else {
+            completion(Self.incidentHealthResult(
+                outcome: .stale,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+        guard pendingIncidentHealthProbeID == nil else {
+            completion(Self.incidentHealthResult(
+                outcome: .bridgeUnavailable,
+                values: nil,
+                document: nil,
+                startedAt: startedAt
+            ))
+            return
+        }
+
+        let probeID = UUID()
+        let expectedDocumentEpoch = document.epoch
+        let expectedDocumentToken = document.token
+        pendingIncidentHealthProbeID = probeID
+        let timeoutNanoseconds = UInt64(incidentHealthProbeTimeout * 1_000_000_000)
+        incidentHealthProbeTimeoutTask = Task { @MainActor [weak self, weak expectedWebView] in
+            do {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+            } catch {
+                return
+            }
+            guard let self, let expectedWebView else { return }
+            self.finishIncidentHealthProbe(
+                id: probeID,
+                webView: expectedWebView,
+                documentEpoch: expectedDocumentEpoch,
+                documentToken: expectedDocumentToken,
+                contextIsCurrent: contextIsCurrent,
+                outcome: .timeout,
+                values: nil,
+                startedAt: startedAt,
+                completion: completion
+            )
+        }
+
+        Task { @MainActor [weak self, weak expectedWebView] in
+            guard let self, let expectedWebView else { return }
+            do {
+                let value = try await self.incidentHealthProbeEvaluator(
+                    expectedWebView,
+                    Self.incidentHealthProbeScript
+                )
+                let values = ChatGPTIncidentHealthProbeValues.parse(value)
+                self.finishIncidentHealthProbe(
+                    id: probeID,
+                    webView: expectedWebView,
+                    documentEpoch: expectedDocumentEpoch,
+                    documentToken: expectedDocumentToken,
+                    contextIsCurrent: contextIsCurrent,
+                    outcome: values == nil ? .evaluationFailed : .success,
+                    values: values,
+                    startedAt: startedAt,
+                    completion: completion
+                )
+            } catch {
+                self.finishIncidentHealthProbe(
+                    id: probeID,
+                    webView: expectedWebView,
+                    documentEpoch: expectedDocumentEpoch,
+                    documentToken: expectedDocumentToken,
+                    contextIsCurrent: contextIsCurrent,
+                    outcome: .evaluationFailed,
+                    values: nil,
+                    startedAt: startedAt,
+                    completion: completion
+                )
+            }
+        }
+    }
+
+    private func finishIncidentHealthProbe(
+        id: UUID,
+        webView expectedWebView: WKWebView,
+        documentEpoch expectedDocumentEpoch: UInt64,
+        documentToken expectedDocumentToken: String,
+        contextIsCurrent: @escaping @MainActor () -> Bool,
+        outcome: ChatGPTIncidentHealthProbeOutcome,
+        values: ChatGPTIncidentHealthProbeValues?,
+        startedAt: TimeInterval,
+        completion: @escaping @MainActor (ChatGPTIncidentHealthProbeResult) -> Void
+    ) {
+        guard pendingIncidentHealthProbeID == id else { return }
+        let currentDocumentMatches: Bool
+        if case .activeSupportedDocument = documentAdmission,
+           let document {
+            currentDocumentMatches = document.epoch == expectedDocumentEpoch
+                && document.token == expectedDocumentToken
+        } else {
+            currentDocumentMatches = false
+        }
+        let isCurrent = !isInvalidated
+            && self.webView === expectedWebView
+            && currentDocumentMatches
+            && contextIsCurrent()
+
+        incidentHealthProbeTimeoutTask?.cancel()
+        incidentHealthProbeTimeoutTask = nil
+        pendingIncidentHealthProbeID = nil
+        let finalOutcome: ChatGPTIncidentHealthProbeOutcome = isCurrent ? outcome : .stale
+        let finalValues = finalOutcome == .success ? values : nil
+        completion(Self.incidentHealthResult(
+            outcome: finalOutcome,
+            values: finalValues,
+            document: isCurrent ? document : nil,
+            startedAt: startedAt
+        ))
+    }
+
+    private static func incidentHealthResult(
+        outcome: ChatGPTIncidentHealthProbeOutcome,
+        values: ChatGPTIncidentHealthProbeValues?,
+        document: DocumentSession?,
+        startedAt: TimeInterval
+    ) -> ChatGPTIncidentHealthProbeResult {
+        ChatGPTIncidentHealthProbeResult(
+            outcome: outcome,
+            values: values,
+            documentEpoch: document?.epoch,
+            generating: document?.tracker.diagnosticGeneratingState,
+            latencyMilliseconds: min(
+                max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                5_000
+            )
+        )
+    }
+
     init(
         slotID: UUID,
         onObservation: @escaping @MainActor (UUID, ChatGPTAttentionObservation) -> Void,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         livenessProbe: LivenessProbeProvider? = nil,
         livenessSleeper: LivenessSleeper? = nil,
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout,
         onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
     ) {
         self.slotID = slotID
@@ -447,6 +802,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         self.diagnostics = diagnostics
         self.livenessProbe = livenessProbe ?? Self.productionLivenessProbe
         self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
+        self.incidentHealthProbeEvaluator = incidentHealthProbeEvaluator
+            ?? Self.productionIncidentHealthProbeEvaluator
+        self.incidentHealthProbeTimeout = min(
+            max(incidentHealthProbeTimeout, 0),
+            Self.defaultIncidentHealthProbeTimeout
+        )
         super.init()
     }
 

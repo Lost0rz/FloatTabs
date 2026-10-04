@@ -142,6 +142,14 @@ final class AppCoordinator {
         )
         websiteCacheCleanupCoordinator = websiteCacheCoordinator
 
+#if DEBUG
+        let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = { [weak self] in
+            self?.panelController.captureStuckTabSnapshot() ?? "Snapshot unavailable."
+        }
+#else
+        let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = nil
+#endif
+
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
             speechPreferencesStore: speechPreferencesStore,
@@ -169,7 +177,8 @@ final class AppCoordinator {
             },
             onOpenDiagnosticsLogs: {
                 NSWorkspace.shared.open(RuntimeDiagnosticWriter.defaultDirectory)
-            }
+            },
+            onCaptureDiagnosticsIncident: captureIncidentHandler
         )
         websiteCacheCoordinator.onPolicyChanged = { [weak self] in
             self?.restartWebsiteCacheAutomaticSchedule()

@@ -4,6 +4,80 @@ import XCTest
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testEnvironmentFieldsCarryBuiltSourceAndBoundedChannelLabels() throws {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .verbose,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let fields = diagnostics.environmentFields()
+
+        guard case let .string(sourceRevision)? = fields["source_revision"] else {
+            return XCTFail("expected source_revision metadata")
+        }
+        XCTAssertTrue(
+            sourceRevision == "unknown"
+                || sourceRevision.range(of: #"^[0-9a-f]{40}$"#, options: .regularExpression) != nil
+        )
+        guard case let .string(treeState)? = fields["source_tree_state"],
+              RuntimeDiagnosticSourceProvenance.TreeState(rawValue: treeState) != nil else {
+            return XCTFail("expected a bounded source_tree_state")
+        }
+        guard case let .bool(revisionExact)? = fields["source_revision_exact"] else {
+            return XCTFail("expected boolean source_revision_exact metadata")
+        }
+        XCTAssertEqual(revisionExact, treeState == "clean")
+        let sanitizedEnvironment = RuntimeDiagnosticPrivacy.sanitize(fields: fields, mode: .verbose)
+        XCTAssertEqual(sanitizedEnvironment["source_tree_state"], .string(treeState))
+        XCTAssertEqual(sanitizedEnvironment["source_revision_exact"], .bool(revisionExact))
+        XCTAssertEqual(fields["build_channel"], .string("Debug"))
+        XCTAssertEqual(fields["qa_label"], .string("ft-diag-002-qa"))
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.sanitize(fields: fields, mode: .verbose)["qa_label"],
+            .string("ft-diag-002-qa")
+        )
+    }
+
+    func testCleanSourceProvenanceIsExact() {
+        let provenance = RuntimeDiagnosticSourceProvenance.fromBuildMetadata(
+            sourceRevision: String(repeating: "a", count: 40),
+            sourceTreeState: "clean",
+            sourceRevisionExact: "true"
+        )
+        XCTAssertEqual(provenance.sourceTreeState, .clean)
+        XCTAssertTrue(provenance.sourceRevisionExact)
+    }
+
+    func testDirtySourceProvenanceIsNotExact() {
+        let provenance = RuntimeDiagnosticSourceProvenance.fromBuildMetadata(
+            sourceRevision: String(repeating: "b", count: 40),
+            sourceTreeState: "dirty",
+            sourceRevisionExact: "true"
+        )
+        XCTAssertEqual(provenance.sourceTreeState, .dirty)
+        XCTAssertFalse(provenance.sourceRevisionExact)
+    }
+
+    func testUnknownSourceProvenanceIsNotExact() {
+        let provenance = RuntimeDiagnosticSourceProvenance.fromBuildMetadata(
+            sourceRevision: String(repeating: "c", count: 40),
+            sourceTreeState: "unknown",
+            sourceRevisionExact: "true"
+        )
+        XCTAssertEqual(provenance.sourceTreeState, .unknown)
+        XCTAssertFalse(provenance.sourceRevisionExact)
+    }
+
+    func testInvalidSourceRevisionForcesUnknownAndNotExact() {
+        let provenance = RuntimeDiagnosticSourceProvenance.fromBuildMetadata(
+            sourceRevision: "not-a-revision",
+            sourceTreeState: "clean",
+            sourceRevisionExact: "true"
+        )
+        XCTAssertEqual(provenance.sourceRevision, "unknown")
+        XCTAssertEqual(provenance.sourceTreeState, .unknown)
+        XCTAssertFalse(provenance.sourceRevisionExact)
+    }
+
     func testEventsEncodeAsIndependentJSONLObjectsWithSessionAndMonotonicSequence() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
