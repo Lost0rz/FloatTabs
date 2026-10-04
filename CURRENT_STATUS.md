@@ -65,7 +65,23 @@ It does **not** establish a root cause and does **not** implement a stuck-tab fi
 
 **FT-DIAG-003 — QA Runtime Baseline & Fresh Incident Observation**
 
-The next authorized activity is local QA baseline verification followed by ordinary real-world use until a fresh incident occurs.
+**QA BASELINE VERIFICATION: PASS**
+
+Accepted local evidence:
+- production `main` = `origin/main` = `1897fae15031673a37800ac57758e462d8dfb851`;
+- production worktree CLEAN, ahead/behind `0/0`;
+- previous running Wave2 Release build rejected as stale;
+- replacement DEBUG QA build was built from the clean accepted main;
+- running provenance reports `source_revision = 1897fae15031673a37800ac57758e462d8dfb851`;
+- `source_tree_state = clean`;
+- `source_revision_exact = true`;
+- `build_channel = Debug`;
+- `qa_label = ft-diag-002-qa`;
+- **Capture Stuck Tab Snapshot (QA)** is available;
+- no user data was cleared;
+- no source/control files were modified.
+
+FT-DIAG-003 is now in the ordinary-use observation phase. No further baseline rebuild/install work is authorized unless the running build identity later diverges from current accepted `origin/main`.
 
 The required running QA application must be built from a CLEAN checkout exactly equal to current `origin/main` and must report:
 - `source_tree_state = clean`;
