@@ -82,12 +82,22 @@ Governance head `a384ca2e4b5679ab3d10d486084856b07a497009` passed:
 
 That PASS exposed one final control-plane defect before merge: static “live main HEAD” and “#103 OPEN/Draft” fields would become stale immediately after merge. This merge-stable terminal correction removes that defect.
 
+## Required-check integration correction
+
+The merge attempt against `d22be46bbf07fc134ed5d74a286792a80b650d19` was rejected by GitHub branch protection with required check `Build & Test (Apple Silicon arm64)` still reported as `expected`, even though workflow-dispatch run `37163445523` succeeded on that exact SHA.
+
+Therefore:
+- successful manual `workflow_dispatch` is retained as CI evidence but does not satisfy this PR's protected required check by itself;
+- `.github/workflows/macos-ci.yml` must include the three root control-plane files in its `pull_request` path filter so governance-only changes generate a PR-context required check;
+- the same paths are included in the `push` filter for consistency after merge;
+- this is a governance/CI trigger correction only; production source/test/runtime behavior is unchanged.
+
 ## Merge-stable terminal closeout rule
 
 FT-GOV-002 is **TERMINAL — CLOSED AUTOMATICALLY WHEN THE LIVE #103 MERGE-STABLE TERMINAL HEAD SATISFIES BOTH CONDITIONS BELOW**:
 
 1. exact-head final governance audit = PASS;
-2. exact-head `Build & Test (Apple Silicon arm64)` = PASS.
+2. GitHub branch protection recognizes `Build & Test (Apple Silicon arm64)` as PASS on that exact PR head.
 
 When both conditions are satisfied for the same live #103 terminal head:
 - FT-GOV-002 is CLOSED without another control-plane commit;
@@ -95,7 +105,7 @@ When both conditions are satisfied for the same live #103 terminal head:
 - after GitHub merges #103, its lifecycle automatically becomes MERGED and the merge-produced `main` HEAD becomes authoritative;
 - no follow-up control-plane commit is required solely to restate the merge SHA or PR merged state.
 
-Until both conditions are satisfied, runtime construction remains prohibited.
+A manual workflow run that GitHub leaves as `expected` does not satisfy condition 2. Until both conditions are satisfied, runtime construction remains prohibited.
 
 ## Preserved incident conclusion
 
