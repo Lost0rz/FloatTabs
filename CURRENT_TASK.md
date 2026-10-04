@@ -1,91 +1,113 @@
 # FloatTabs Current Task
 
-**Task ID:** FT-DIAG-003
-**Title:** Fresh Incident Classification & Read-Only App-Layer Evidence
-**Status:** ACTIVE — `INCIDENT_CAPTURED_APP_LAYER_EVIDENCE_REQUIRED`
+**Task ID:** FT-DIAG-004
+**Title:** Bounded Page-App Failure Probe Foundation
+**Status:** ACTIVE — `CONSTRUCTION_AUTHORIZED`
 
 ## Objective
 
-Preserve the fresh stuck-Tab incident and perform one bounded read-only evidence pass that can distinguish page-application/bootstrap failure, request/resource failure, and a possible inactive-finish/warm-reuse lifecycle interaction.
+Add the minimum observation-only page-application diagnostics needed to classify a future `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER` incident without requiring Web Inspector or mutation of the affected runtime.
 
-This task does **not** authorize a fix, a recovery experiment, a rebuild, or new diagnostic code.
+The task exists because FT-DIAG-003 closed with:
 
-## Incident binding
+`CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION`
 
-Only evidence that can be tied to the accepted incident identity is authoritative for this pass:
+This task does not authorize a stuck-tab fix.
 
-- session `7C81B78D-F98A-496F-A2E6-94E3DE74194A`;
-- Slot `89953BED-613F-4E31-AAEC-C8D71B5956B3`;
-- WKWebView `28A7FDCA-1263-4AE1-B242-7459C5DF692F`;
-- runtime generation `4`;
-- navigation generation `1`;
-- source revision `1897fae15031673a37800ac57758e462d8dfb851`;
-- incident snapshots `75B3A768-F766-40B4-97BC-8A0F416C0B2F` and `B35360B0-11A3-4719-AA5C-C9AEC37F0AEC`.
+## Construction scope
 
-Remote comparison confirms the later `a77f9a4e1f6e9aba897ccfa8afb20c702e37d711` control-plane transition changed only `CURRENT_STATUS.md` and `CURRENT_TASK.md`. Do not rebuild the live incident solely to eliminate this governance-only provenance difference.
+Build a bounded ChatGPT-specific diagnostic surface that can preserve, for the current document and without page-content capture:
 
-## Confirmed starting classification
+1. application-level JavaScript error occurrence/category;
+2. unhandled rejection occurrence/category without rejection text;
+3. script/resource load-failure metadata;
+4. passive resource timing/status metadata where the browser exposes it without replacing or monkey-patching application networking APIs;
+5. document lifecycle correlation relevant to the H3 hypothesis, including visibility and page show/hide transitions.
 
-`CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`
+The implementation may use a dedicated diagnostic bridge/component or another clearly isolated observation path. It must not change the semantics or ownership of the existing attention, response, navigation, lifecycle, focus, or recovery systems.
 
-At capture, navigation was finished, renderer JavaScript was responsive, the current WebView/Slot ownership and geometry were coherent, the document was complete and visible, and the ChatGPT shell existed while the composer did not.
+## Required identity binding
 
-This classification is not root cause evidence.
+Every persisted page-diagnostic event or explicit incident snapshot must be correlatable, where available, to the existing:
 
-## Hypotheses under test
+- session ID;
+- Slot ID;
+- physical WKWebView instance ID;
+- runtime generation;
+- navigation generation;
+- ChatGPT document epoch/current-document guard;
+- monotonic/timestamp ordering.
 
-- **H1:** ChatGPT page bootstrap/hydration/application state failed or remained incomplete.
-- **H2:** a required network/service/script/resource/API dependency failed, was blocked, timed out, or became pathologically slow.
-- **H3:** navigation completing while inactive and later warm reuse contributed to a lifecycle race or missed page transition.
+Stale events from an earlier document/runtime/navigation must be dropped or explicitly classified stale; they must never be attributed to a later document.
 
-## Authorized evidence pass
+## Privacy and boundedness gate
 
-Before touching the incident, refresh remote refs and read the three control-plane files. Then:
+The diagnostic path must use the existing `RuntimeDiagnostics` persistence authority and `RuntimeDiagnosticPrivacy` boundary.
 
-- verify the running process and current diagnostics still refer to the accepted incident identity;
-- preserve/export the existing diagnostics before any further inspection;
-- determine whether an already available, read-only page inspection surface can observe the current document without restart/reload/configuration change;
-- if available, capture only bounded metadata relevant to application exceptions/rejections and failed/blocked/timed-out required resources or requests, with timestamps and current-document identity;
-- preserve any existing console/network/inspector artifact without request/response bodies, credentials, cookies, tokens, prompts, or assistant content;
-- make no source, test, build, preference, website-data, or control-plane changes locally.
+It must never persist:
+- raw exception/rejection messages;
+- stack traces;
+- request or response bodies;
+- request/response headers;
+- cookies, credentials, authorization or tokens;
+- prompt/assistant/page/DOM text;
+- conversation/response identifiers.
 
-One bounded pass is enough. Repeated poking of a live incident is not authorized.
+If resource URL metadata is retained, it must pass through the existing URL sanitization policy before persistence.
 
-## Decision matrix
+Use bounded counters/ring-buffered metadata or equivalently bounded state. Do not create an unbounded console/network recorder.
 
-| Same-incident evidence | Classification result | Next state |
-| --- | --- | --- |
-| JavaScript exception or unhandled rejection tied to bootstrap/app initialization | H1 supported; record the exact bounded error class/timestamp | STOP and seal for remote review |
-| Required script/chunk/resource/fetch/XHR fails, is blocked, times out, or returns an error status | H1/H2 supported; record dependency class/status/timestamp without sensitive payloads | STOP and seal for remote review |
-| No page/request failure is visible, but this incident retains the inactive-finish/warm-reuse sequence | H3 remains a hypothesis only; one incident is insufficient for causality | STOP and seal; remote side decides whether a future controlled recurrence test is justified |
-| Renderer probe fails/times out or the WebContent process terminates before recovery | Current failure class changes toward renderer/content-process failure | STOP immediately and seal |
-| Slot/WKWebView/runtime/navigation/document identity changes, or any navigation/reload occurs | Same-incident causal binding is lost | STOP immediately and seal |
-| Required page-layer evidence is unavailable without mutation/relaunch/rebuild/configuration change | `CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION` | STOP and seal; next task may authorize a bounded probe enhancement |
-| Available page-layer evidence is clean or inconclusive after one bounded pass | Root cause remains unknown | STOP and seal; no speculative fix |
+## Passive-observation gate
 
-## Mandatory STOP and evidence sealing
+Do not wrap or replace `fetch`, `XMLHttpRequest`, WebSocket, navigation functions, or ChatGPT application functions in this task.
 
-Stop immediately when any decision-matrix row becomes true, when the symptom recovers/disappears, or before any step that would alter the current document/runtime.
+Do not alter page request behavior, retry behavior, caching, timing, lifecycle, focus, navigation or recovery policy.
 
-Evidence sealing means:
+If a desired discriminator cannot be obtained passively with supported WebKit/browser surfaces, record it as a remaining gap rather than introducing behavioral interception.
 
-- preserve the latest diagnostic export plus any bounded inspector/console/network artifact already obtained;
-- record local timestamp, visible symptom, Slot and runtime identities, and the exact last action taken;
-- perform no reload/Home/back/forward/new navigation, restart, quit, rebuild, reinstall, WebView replacement, cache/cookie/site-data reset, or configuration toggle before remote review.
+## Incident capture integration
 
-If operational recovery is unavoidable, seal first when possible, then record the exact recovery action and result separately. Recovery success is not root-cause evidence.
+Extend the existing explicit QA stuck-tab capture so that a future incident can emit the bounded page-app evidence alongside the existing:
+- stuck-tab snapshot;
+- ChatGPT health probe;
+- renderer probe.
 
-## Prohibited
+Normal healthy operation must not require periodic polling. Event listeners/observers may keep only bounded diagnostic metadata for the current document.
 
-Do not modify production source, tests, diagnostics, lifecycle/recovery behavior, website data, or PR #102. Do not add a new probe during this task. Do not manufacture repeated incidents.
+## Acceptance criteria
 
-## Completion gate
+Construction is acceptable only when all of the following are demonstrated:
 
-FT-DIAG-003 leaves this state only after one of the following is returned for independent remote review:
+- observation-only behavior; no recovery/navigation behavior added;
+- exact current-document/runtime identity correlation and stale rejection;
+- bounded page-error/rejection/resource/lifecycle metadata available in an explicit incident capture;
+- raw sensitive exception/request/page content cannot cross the persistence boundary;
+- privacy tests cover malicious/sensitive values and URL sanitization;
+- focused tests cover current-document replacement/stale events and bounded storage;
+- existing FT-DIAG-002 renderer/health probe behavior remains intact;
+- existing attention/response/lifecycle semantics remain unchanged;
+- package lock unchanged unless separately authorized;
+- focused tests pass;
+- full FloatTabs test suite and required Debug/Release builds pass on the exact proposed head.
 
-1. decisive same-incident page-layer evidence;
-2. a sealed inconclusive bounded pass;
-3. `CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION`;
-4. an identity change/recovery that invalidates further same-incident capture.
+## Mandatory STOP conditions
 
-The web-side control plane will then decide whether the next task is additional bounded diagnostics, a controlled recurrence experiment, or an evidence-backed fix.
+Stop construction and return for remote review if:
+
+- passive supported WebKit/browser surfaces cannot observe a required class without monkey-patching application networking/runtime APIs;
+- the design would require persisting raw exception messages, stack traces, request content, auth/session data or page text;
+- diagnostics would become a second authority for application/lifecycle state;
+- implementation would change reload/reset/recovery/navigation behavior;
+- PR #102 or unrelated production behavior would need modification;
+- authoritative `main`/control-plane state drifts before construction.
+
+A stopped discriminator may be documented as a remaining gap; do not broaden scope to solve it speculatively.
+
+## Handoff state
+
+When implementation and local validation complete:
+
+1. update the control-plane evidence with exact branch/head and validation;
+2. push the dedicated FT-DIAG-004 branch;
+3. stop at the repository's independent-audit gate;
+4. do not merge or install as the new QA baseline until independent remote audit authorizes it.
