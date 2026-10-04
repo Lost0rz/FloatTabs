@@ -89,11 +89,48 @@ Do not convert any of these into a fix claim.
 
 **FT-DIAG-004 — Bounded Page-App Failure Probe Foundation**
 
-**STATUS: ACTIVE — CONSTRUCTION_AUTHORIZED**
+**STATUS: WAITING_FOR_INDEPENDENT_AUDIT**
+
+Implementation is on branch `codex/ft-diag-004-page-app-probe`, based on
+`caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`, with implementation commit
+`cbea3705fbcd2de089c425b2aa45dde3914aca4d` and PR #111. The dedicated branch
+contains this status/task synchronization; its live remote head is authoritative
+and must be checked before review.
+
+The passive recorder is injected in the existing isolated ChatGPT content world.
+It keeps at most 16 allowlisted event summaries and saturates each counter at
+255. The explicit QA stuck-tab action persists one page-app snapshot through
+`RuntimeDiagnostics`, correlated to the same incident, Slot, WebView, runtime,
+navigation and document epoch. Runtime replacement, navigation replacement or
+document identity mismatch is classified stale and emits no page evidence.
+
+Final validation on the implementation source commit: focused tests 315 passed
+(3 skipped); full FloatTabs tests 1,290 passed (4 skipped); Debug and Release
+macOS arm64 builds succeeded; both app binaries report `arm64`; `git diff --check`
+passed. An earlier full-suite run had one timing-sensitive unrelated
+website-cache test failure; that test passed in isolation and the next full run
+passed.
+
+### Remaining passive-observation gaps
+
+- A fetch/XHR failure already caught by ChatGPT is not visible without wrapping
+  application network APIs; snapshot field
+  `page_app_handled_fetch_xhr_failure_observable` is false.
+- HTTP status is captured only when WebKit exposes
+  `PerformanceResourceTiming.responseStatus`; missing or opaque status remains
+  unknown.
+- Exception/rejection class names, messages and stacks are not inspected; only
+  generic event categories are retained.
+- Request URLs/chunk identifiers are omitted, so resource evidence is by type,
+  status and timing only.
+
+No stuck-tab fix or recovery behavior was added. The new build has not been
+installed as a QA baseline. Root cause remains unknown pending independent
+review and a future naturally occurring incident.
 
 Remote audit confirms the next missing discriminator is below the currently healthy renderer/document boundary and above FloatTabs recovery policy: page-application errors, rejected promises, resource-load failure metadata, bounded resource timing/status evidence, and page lifecycle correlation are not available in the sealed incident.
 
-FT-DIAG-004 may add **observation-only, privacy-bounded ChatGPT page diagnostics** sufficient for the next naturally occurring incident. It must not add reload/reset/rebuild/recovery decisions.
+FT-DIAG-004 added **observation-only, privacy-bounded ChatGPT page diagnostics** for a future naturally occurring incident. It adds no reload/reset/rebuild/recovery decisions.
 
 ### Authority boundary
 
@@ -119,7 +156,7 @@ Do not persist request/response bodies, headers, cookies, credentials, auth stat
 
 **NEW STUCK-TAB FIX: NOT AUTHORIZED**
 
-**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: AUTHORIZED**
+**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: COMPLETE — WAITING_FOR_INDEPENDENT_AUDIT**
 
 The new diagnostic path must be passive with respect to page behavior. It must not reload, recover, reset, replace a WebView, clear website data, or change navigation/lifecycle decisions.
 

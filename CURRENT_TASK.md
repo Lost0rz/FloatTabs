@@ -2,7 +2,15 @@
 
 **Task ID:** FT-DIAG-004
 **Title:** Bounded Page-App Failure Probe Foundation
-**Status:** ACTIVE — `CONSTRUCTION_AUTHORIZED`
+**Status:** `WAITING_FOR_INDEPENDENT_AUDIT`
+
+**Task branch:** `codex/ft-diag-004-page-app-probe`
+
+**Base:** `caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`
+
+**Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`
+
+**Pull request:** #111
 
 ## Objective
 
@@ -105,9 +113,40 @@ A stopped discriminator may be documented as a remaining gap; do not broaden sco
 
 ## Handoff state
 
-When implementation and local validation complete:
+Implementation and local validation are complete. The PR is open for independent
+audit. The branch head will include this control-plane synchronization commit;
+verify the live `origin/codex/ft-diag-004-page-app-probe` head against the checked
+out branch before review.
 
-1. update the control-plane evidence with exact branch/head and validation;
-2. push the dedicated FT-DIAG-004 branch;
-3. stop at the repository's independent-audit gate;
-4. do not merge or install as the new QA baseline until independent remote audit authorizes it.
+### Executor result
+
+- `ChatGPTAttentionBridge` installs passive listeners and a resource
+  `PerformanceObserver` in the existing isolated content world. The recorder
+  keeps a 16-entry ring and saturating counters (255 maximum), emits only fixed
+  categories, coarse timing, resource type, and exposed HTTP status.
+- `Capture Stuck Tab Snapshot (QA)` emits the page-app snapshot under the same
+  incident ID and frozen Slot/WebView/runtime/navigation fields. Capture also
+  binds the document epoch and opaque identity in memory; stale identity or
+  runtime/navigation completion drops page evidence.
+- Persistence remains through `RuntimeDiagnostics`; privacy tests cover
+  malicious messages, stacks, URLs, headers, bodies, tokens, prompts, and
+  answers. The generated JavaScript recorder test exercises ring eviction and
+  counter saturation.
+- Focused tests: 315 executed, 3 skipped, 0 failures. Full FloatTabs tests:
+  1,290 executed, 4 skipped, 0 failures. Debug and Release builds passed on
+  macOS arm64; both binaries contain arm64 only. `git diff --check` passed.
+- One earlier full run had a timing-sensitive failure in the unrelated
+  `WebsiteCacheCleanupTests.testAutomaticCapacityRunUsesItsLocalMeasurementDuringSettingsRefresh`;
+  the isolated retry and the subsequent final full suite passed.
+
+### Remaining passive-observation gaps
+
+- Failures already caught and handled by page fetch/XHR code cannot be observed
+  without forbidden API interception.
+- HTTP status is unknown when WebKit does not expose
+  `PerformanceResourceTiming.responseStatus` or exposes an opaque value.
+- Exception/rejection class names and raw details are not inspected. Request
+  URLs and resource/chunk identifiers are omitted.
+
+No fix or recovery behavior was added; no new QA baseline was installed. The
+root cause remains unknown. Stop at `WAITING_FOR_INDEPENDENT_AUDIT`; do not merge.
