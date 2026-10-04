@@ -127,9 +127,12 @@ if no production worktree is yet authorized.
     untested runtime paths, and whether the change is diagnostic, recovery-only,
     experimental, or production-ready.
 23. Required branch-protection checks must pass on the exact commit proposed for
-    merge. If path filters prevent an automatic required check from running,
-    explicitly dispatch the existing required workflow on that branch/head rather
-    than treating an absent check as a pass.
+    merge and must be recognized by GitHub branch protection for that pull request.
+    A successful `workflow_dispatch` run is supporting evidence only when GitHub
+    actually records it as satisfying the required check; never assume a manual run
+    satisfies PR protection. Required workflows must include control-plane paths (or
+    use another PR-context trigger) so governance-only changes produce the required
+    PR check. An absent or merely "expected" required check is not a pass.
 24. A handoff is complete only when another agent can read the three control-plane
     files, verify the checkout against them, and continue without reconstructing
     current state from chat history.
