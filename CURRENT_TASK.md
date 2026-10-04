@@ -114,9 +114,9 @@ A stopped discriminator may be documented as a remaining gap; do not broaden sco
 ## Handoff state
 
 Implementation and local validation are complete. The PR is open for independent
-audit. The branch head will include this control-plane synchronization commit;
-verify the live `origin/codex/ft-diag-004-page-app-probe` head against the checked
-out branch before review.
+audit. The branch contains this control-plane synchronization; verify the live
+`origin/codex/ft-diag-004-page-app-probe` head against the checked out branch
+before review.
 
 ### Executor result
 
