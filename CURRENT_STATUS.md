@@ -4,82 +4,140 @@
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
-## Validity and operating mode
+## Validity
 
-`CURRENT_STATUS.md` defines intended project state; live Git refs and GitHub PR metadata define current stored heads and PR states. Refresh refs before continuing.
+`CURRENT_STATUS.md` defines intended project state; live Git/GitHub refs define actual branch/PR heads. Refresh refs before implementation.
 
-**MODE: DIAGNOSTIC-ARCHITECTURE-AUDIT**
+Machine-specific worktree paths are local evidence only and must not be committed.
 
-Lifecycle states are `ACTIVE`, `MERGED`, `SUPERSEDED`, and `ABANDONED`. Machine-specific worktree paths remain local-only.
+## Mode
+
+**MODE: DIAGNOSTIC-PROBE-CONSTRUCTION**
 
 ## Production authority
 
-**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`
-**PRODUCTION_BRANCH:** `main`
+**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`  
+**PRODUCTION_BRANCH:** `main`  
 **EXPECTED_UPSTREAM:** `origin/main`
 
-The production worktree was locally synchronized after #103 merge and reported:
-- branch `main`;
-- HEAD == `origin/main`;
-- ahead/behind `0/0`;
-- CLEAN;
-- no source/test files modified.
+The production worktree must be clean and exactly synchronized with freshly fetched `origin/main` before creating the next isolated construction worktree.
 
-The live `main` ref is authoritative and must be refreshed before any implementation task.
-
-## Governance closeout
+## Governance state
 
 FT-GOV-002 is **CLOSED**.
 
-Accepted final facts:
-- PR #103 is MERGED;
-- merge-produced `main` was verified after merge;
-- repository/worktree closeout completed successfully;
-- archive tags for historical A and D evidence remain preserved;
-- exactly one production `main` worktree is authorized;
-- the former governance worktree/branch may remain temporarily as historical cleanup-only state and is not a production worktree;
-- no runtime/source/test implementation was changed by FT-GOV-002.
+PR #103 is MERGED and established the three-file control plane plus the corrected PR-context required-check rule.
 
-The required-check governance defect discovered during closeout is fixed: governance-only changes now trigger the protected PR-context `Build & Test (Apple Silicon arm64)` check.
+## FT-DIAG-001 audit state
 
-## Active pull requests
+FT-DIAG-001 is **CLOSED — CONSTRUCTION_GATE_READY**.
 
-| PR | Lifecycle | Role |
-| --- | --- | --- |
-| #102 | ACTIVE / OPEN / Draft | Separate MemoX durable-outbox integration. Do not modify in FT-DIAG-001. |
+Audit baseline:
 
-All prior diagnostic/recovery PRs #99–#101 remain closed historical evidence only.
+`68d03a0991be4ed1569b41816628b62b0a3677a1`
 
-## Incident truth
+Authoritative audit product:
 
-The stuck/blank/black WebView/Slot incident root cause remains **UNKNOWN**.
+`docs/diagnostics/FT-DIAG-001-architecture-audit.md`
 
-Preserved distinctions:
-- restart/relaunch recovery is recovery evidence only;
-- prior post-commit stall classification is diagnostic evidence only;
-- per-slot reset/recovery behavior is not causal proof;
-- no previous diagnostic/recovery PR is accepted as the production root-cause fix.
+The audit does **not** claim a root cause.
 
-## Current diagnostic direction
+**STUCK-SLOT ROOT CAUSE: UNKNOWN**
 
-The next authorized work is FT-DIAG-001: a **remote, read-only diagnostic architecture audit**.
+The audit concluded that the next probe placement is sufficiently determined even though the incident cause is not.
 
-The audit must prioritize:
-1. key state machines and ownership transitions;
-2. process/lifecycle/boundary maps;
-3. existing probe/log coverage versus missing boundary observations;
-4. cross-process and cross-generation correlation gaps;
-5. a deterministic incident-diagnosis flow;
-6. an evidence-based construction Gate.
+### Final architectural conclusion
 
-Do not expand internal logging merely for volume. Prefer missing boundary observations and causal discriminators.
+The diagnostic gap is not general log volume. It is missing cross-owner correlation across:
 
-## Construction state
+`session → source/build → Slot → physical WKWebView → navigation generation → document epoch → incident capture`
 
-**RUNTIME CONSTRUCTION: NOT AUTHORIZED**
+The highest-value missing boundary evidence is:
 
-No new probe implementation, runtime fix, recovery behavior, tests, build/install/release action, or local incident capture is authorized until FT-DIAG-001 reaches a documented construction verdict.
+- exact source/build provenance;
+- physical WebView identity;
+- navigation generation/ticket identity;
+- ordinary normal-state WebView attachment/hierarchy;
+- bounded native → WebContent JavaScript responsiveness;
+- bounded ChatGPT app/document health at explicit incident capture;
+- exact identity on content-termination/rebuild evidence.
 
-## Non-blocking follow-up
+### Existing strengths to preserve
 
-The historical local/remote `v0.2.6` tag provenance discrepancy remains non-blocking and outside FT-DIAG-001.
+- Slot lifecycle delayed-work tokens;
+- WebViewPool physical-object stale guards;
+- ChatGPT Attention document token/epoch admission;
+- ChatGPT Response document-token/WebView validation;
+- Fullscreen restore generation and hierarchy checks;
+- RuntimeDiagnostics non-authority/privacy model.
+
+### Important current blind spot
+
+The ChatGPT Attention liveness probe uses `evaluateJavaScript` without a timeout. A non-returning WebContent/JavaScript callback can leave the probe suspended without producing an explicit unresponsive classification.
+
+This is an observation gap, not proof that such a hang is the current root cause.
+
+## Boundary verdict
+
+Current classifications:
+
+| Boundary | Audit result |
+| --- | --- |
+| Persisted state → restored active Slot | PARTIALLY_OBSERVED |
+| User selection → active Slot ID | OBSERVED |
+| Active Slot → physical pool WebView | PARTIALLY_OBSERVED |
+| Pool WebView → visible normal container | UNOBSERVED |
+| Navigation → provisional/commit/finish/fail | PARTIALLY_OBSERVED |
+| UI process → WebContent | PARTIALLY_OBSERVED |
+| WebContent → admitted document | PARTIALLY_OBSERVED |
+| Document → ChatGPT app health | PARTIALLY_OBSERVED |
+| Document/WebKit → actual rendered pixels | UNOBSERVED / DEFERRED |
+| OS network path → WebKit resource behavior | UNOBSERVED / DEFERRED |
+| Content termination → recovery | OBSERVED, weak cross-identity correlation |
+| Fullscreen source restore hierarchy | OBSERVED |
+
+## Historical incident interpretation
+
+Preserved runtime evidence supports only bounded conclusions:
+
+- restart recovery is recovery evidence;
+- per-Slot replacement recovery is recovery evidence;
+- one post-commit stall had responsive JavaScript and later navigation finish;
+- navigation finish can coexist with a visibly unhealthy ChatGPT page;
+- WebContent terminations have separately occurred;
+- network/resource errors have appeared, but no network/resource mechanism is established as the root cause.
+
+No abandoned #99/#100/#101 behavior is production authority.
+
+## Current task
+
+**FT-DIAG-002 — Boundary Probe Foundation**
+
+Construction is authorized only within the exact scope in `CURRENT_TASK.md` and the P0 section of the FT-DIAG-001 audit.
+
+This is an **observation-only diagnostic construction task**.
+
+## Explicitly not authorized
+
+Do not implement in FT-DIAG-002:
+
+- automatic recovery or reload escalation;
+- manual per-Slot reset/replacement;
+- hard replacement after probe timeout;
+- periodic health sampling;
+- broad DOM/error logging;
+- request interception;
+- private WebKit APIs;
+- cache/cookie/site-data reset;
+- screenshot/image persistence;
+- automatic render snapshots;
+- network-path monitoring;
+- #102 changes.
+
+## Open unrelated work
+
+PR #102 remains **ACTIVE / OPEN / Draft**, separate MemoX durable-outbox work. FT-DIAG-002 must not modify it.
+
+## Historical archive
+
+Archive tags preserved by FT-GOV-002 remain historical evidence only. The `v0.2.6` provenance discrepancy remains non-blocking and outside FT-DIAG-002.
