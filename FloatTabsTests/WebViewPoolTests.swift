@@ -190,6 +190,8 @@ final class WebViewPoolTests: XCTestCase {
         let webView = try pool.webView(for: profile)
         let bridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
         bridge.accept(
             payload: ChatGPTBridgePayload(
                 version: 1,
@@ -235,6 +237,8 @@ final class WebViewPoolTests: XCTestCase {
             pool.runtimeDiagnosticIdentity(for: profile.id)?.runtimeGeneration
         )
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
 
         let firstNavigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>one</body></html>", baseURL: nil)
@@ -289,6 +293,8 @@ final class WebViewPoolTests: XCTestCase {
         let profile = makeProfile(name: "NavigationStallWatchdog")
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
 
         let firstNavigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>first</body></html>", baseURL: nil)
@@ -362,6 +368,8 @@ final class WebViewPoolTests: XCTestCase {
         var profile = makeProfile(name: "StallWatchdogInvalidation")
         var webView = try pool.webView(for: profile)
         var observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
 
         let supersededNavigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>superseded</body></html>", baseURL: nil)
@@ -461,6 +469,8 @@ final class WebViewPoolTests: XCTestCase {
         let profile = makeProfile(name: "BoundedRendererProbe")
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
         let navigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>probe</body></html>", baseURL: nil)
         )
@@ -493,6 +503,8 @@ final class WebViewPoolTests: XCTestCase {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
         var evaluationCount = 0
+        var lateEvaluationContinuation: CheckedContinuation<RendererProbeValues, Error>?
+        var lateEvaluationReturned = false
         let pool = WebViewPool(
             onURLChange: { _, _ in },
             initialLoad: { _, _ in },
@@ -503,13 +515,18 @@ final class WebViewPoolTests: XCTestCase {
                 if evaluationCount == 1 {
                     throw NSError(domain: "RendererProbeTest", code: 7)
                 }
-                try await Task.sleep(nanoseconds: 50_000_000)
-                return RendererProbeValues(readyState: "complete", visibilityState: "visible")
+                let result = try await withCheckedThrowingContinuation { continuation in
+                    lateEvaluationContinuation = continuation
+                }
+                lateEvaluationReturned = true
+                return result
             }
         )
         let profile = makeProfile(name: "RendererProbeTimeout")
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        // This test drives navigation callbacks manually; silence WebKit's second event source.
+        webView.navigationDelegate = nil
 
         let failedNavigation = try XCTUnwrap(
             webView.loadHTMLString("<html><body>failure</body></html>", baseURL: nil)
@@ -520,7 +537,9 @@ final class WebViewPoolTests: XCTestCase {
             generation: 1,
             phase: "provisional"
         )
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        while writer.events.filter({ $0.event == "navigation.renderer_probe" }).count < 1 {
+            await Task.yield()
+        }
         let failedProbe = try XCTUnwrap(writer.events.last { $0.event == "navigation.renderer_probe" })
         XCTAssertEqual(failedProbe.fields["probe_result"], .string("failed"))
         XCTAssertNil(failedProbe.fields["document_ready_state"])
@@ -534,12 +553,23 @@ final class WebViewPoolTests: XCTestCase {
             generation: 2,
             phase: "provisional"
         )
-        try? await Task.sleep(nanoseconds: 15_000_000)
+        while lateEvaluationContinuation == nil {
+            await Task.yield()
+        }
+        while writer.events.filter({ $0.event == "navigation.renderer_probe" }).count < 2 {
+            await Task.yield()
+        }
         let probeEvents = writer.events.filter { $0.event == "navigation.renderer_probe" }
         XCTAssertEqual(probeEvents.count, 2)
         XCTAssertEqual(probeEvents.last?.fields["probe_result"], .string("timeout"))
 
-        try? await Task.sleep(nanoseconds: 60_000_000)
+        lateEvaluationContinuation?.resume(
+            returning: RendererProbeValues(readyState: "complete", visibilityState: "visible")
+        )
+        lateEvaluationContinuation = nil
+        while !lateEvaluationReturned {
+            await Task.yield()
+        }
         XCTAssertEqual(
             writer.events.filter { $0.event == "navigation.renderer_probe" }.count,
             2,

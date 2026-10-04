@@ -137,6 +137,19 @@ enum RuntimeDiagnosticPrivacy {
     ) -> [String: RuntimeDiagnosticValue] {
         fields.reduce(into: [:]) { result, entry in
             let (key, value) = entry
+            if key == "source_tree_state" {
+                guard case let .string(state) = value,
+                      ["clean", "dirty", "unknown"].contains(state) else {
+                    return
+                }
+                result[key] = .string(state)
+                return
+            }
+            if key == "source_revision_exact" {
+                guard case let .bool(exact) = value else { return }
+                result[key] = .bool(exact)
+                return
+            }
             if key == "qa_label" {
                 guard case let .string(label) = value,
                       let safeLabel = safeQALabel(label) else {

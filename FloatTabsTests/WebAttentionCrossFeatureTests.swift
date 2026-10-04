@@ -597,7 +597,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
         let result = await controller.prepareInputFocusForExternalVoice()
         XCTAssertEqual(result, .ready)
-        try await wait(milliseconds: 100)
 
         XCTAssertEqual(adapter.voiceFocusCount, 1)
         XCTAssertEqual(adapter.ordinaryFocusCount, 0)
@@ -605,10 +604,23 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             writer.events.first(where: { $0.event == "presentation_focus.begin" })
         )
         XCTAssertEqual(begin.fields["focus_owner"], .string("external_voice"))
-        let completed = try XCTUnwrap(
-            writer.events.first(where: { $0.event == "presentation_focus.completed" })
+        let webReadyRecorded = try await waitUntil(timeoutMilliseconds: 1000) {
+            writer.events.contains {
+                $0.event == "presentation_focus.web.ready"
+                    && $0.fields["focus_owner"] == .string("external_voice")
+            }
+        }
+        XCTAssertTrue(webReadyRecorded)
+
+        let webReady = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "presentation_focus.web.ready"
+            }
         )
-        XCTAssertEqual(completed.fields["focus_owner"], .string("external_voice"))
+        XCTAssertEqual(
+            webReady.fields["focus_owner"],
+            .string("external_voice")
+        )
     }
 
     func testExternalVoiceNativeTransferAndWebFocusShareTrace() async throws {

@@ -214,6 +214,22 @@ final class RuntimeDiagnosticsPrivacyTests: XCTestCase {
         XCTAssertNil(fields["qa_label_invalid"])
     }
 
+    func testSourceProvenanceFieldsAreBoundedAndPersistable() {
+        let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "source_tree_state": .string("dirty"),
+            "source_revision_exact": .bool(false)
+        ], mode: .verbose)
+        XCTAssertEqual(fields["source_tree_state"], .string("dirty"))
+        XCTAssertEqual(fields["source_revision_exact"], .bool(false))
+
+        let invalidFields = RuntimeDiagnosticPrivacy.sanitize(fields: [
+            "source_tree_state": .string("/Users/private/source"),
+            "source_revision_exact": .string("true")
+        ], mode: .verbose)
+        XCTAssertNil(invalidFields["source_tree_state"])
+        XCTAssertNil(invalidFields["source_revision_exact"])
+    }
+
     func testUnreadDiagnosticFieldsRemainAllowedWhileSensitiveLookalikesAreDropped() {
         let fields = RuntimeDiagnosticPrivacy.sanitize(fields: [
             "slot_id": .string(UUID().uuidString),
