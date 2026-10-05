@@ -2,181 +2,99 @@
 
 **Task ID:** FT-DIAG-004
 **Title:** Bounded Page-App Failure Probe Foundation
-**Status:** `WAITING_FOR_INDEPENDENT_AUDIT`
+**Status:** `REMOTE_AUDIT_PASS — MERGE_READY; EXACT_HEAD_CI_REQUIRED`
 
-**Task branch:** `codex/ft-diag-004-page-app-probe`
-
-**Base:** `caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`
-
-**Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`
-
-**Amendment test commit:** 55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3
-
+**Task branch:** `codex/ft-diag-004-page-app-probe`  
+**Base:** `caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`  
+**Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`  
+**Real-WKWebView amendment test commit:** `55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3`  
 **Pull request:** #111
-
-## Independent audit amendment result
-
-**Verdict:** AMENDMENT_COMPLETE — WAITING_FOR_INDEPENDENT_AUDIT
-
-The amendment adds one real WKWebView behavior test and changes no production code. It installs
-the production ChatGPTAttentionBridge script through the production bridge into the named
-isolated WKContentWorld, produces page-world uncaught JavaScript and unhandled Promise errors,
-and fails a local script resource through a test-only WKURLSchemeHandler.
-
-The existing captureIncidentPageAppDiagnostics path observed:
-
-- javascript_error / global_error;
-- unhandled_rejection / unhandled_rejection;
-- resource_load_failure / script_load, resource type script.
-
-The returned diagnostic metadata did not contain the test-only raw error message, rejection
-reason, or resource-URL sentinels. A second real capture whose caller-owned runtime/navigation
-context became stale returned stale and no evidence. Existing document/runtime/WebView stale
-guards passed in the focused suite. No fetch/XHR/WebSocket patch or other page interception was
-added.
-
-Test amendment commit: 55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3
-
-Validation on macOS 27.0.1 arm64:
-
-- New boundary test: 1/1 passed plus three repeated 1/1 runs.
-- Focused bridge/privacy/capture-integration tests: 102 passed, 0 skipped, 0 failed.
-- Full FloatTabs suite: 1,288 passed, 3 skipped, 0 failed (1,291 total).
-- Debug and Release builds passed; both binaries contain arm64 only.
-- git diff --check passed.
-
-The amendment code commit was pushed. This control-plane update is a later controls-only commit;
-verify the live branch head before review. The PR-context required check must pass on the current
-live head before merge. No merge or QA baseline installation is authorized.
 
 ## Objective
 
-Add the minimum observation-only page-application diagnostics needed to classify a future `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER` incident without requiring Web Inspector or mutation of the affected runtime.
-
-The task exists because FT-DIAG-003 closed with:
-
-`CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION`
+Add the minimum observation-only ChatGPT page-application diagnostics needed to classify a future `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER` incident without Web Inspector or mutation of the affected runtime.
 
 This task does not authorize a stuck-tab fix.
 
-## Construction scope
+## Independent remote audit
 
-Build a bounded ChatGPT-specific diagnostic surface that can preserve, for the current document and without page-content capture:
+**VERDICT: PASS**
 
-1. application-level JavaScript error occurrence/category;
-2. unhandled rejection occurrence/category without rejection text;
-3. script/resource load-failure metadata;
-4. passive resource timing/status metadata where the browser exposes it without replacing or monkey-patching application networking APIs;
-5. document lifecycle correlation relevant to the H3 hypothesis, including visibility and page show/hide transitions.
+The prior independent-audit blocker is closed. A real `WKWebView` test now exercises the production `ChatGPTAttentionBridge` user script in its named isolated `WKContentWorld` and reads the recorder through the existing `captureIncidentPageAppDiagnostics` path.
 
-The implementation may use a dedicated diagnostic bridge/component or another clearly isolated observation path. It must not change the semantics or ownership of the existing attention, response, navigation, lifecycle, focus, or recovery systems.
+Verified page-world → isolated-world signals:
 
-## Required identity binding
+- uncaught JavaScript error → `javascript_error / global_error`;
+- unhandled Promise rejection → `unhandled_rejection`;
+- deterministic test-only script-resource failure → `resource_load_failure / script_load`.
 
-Every persisted page-diagnostic event or explicit incident snapshot must be correlatable, where available, to the existing:
+The test also verifies that raw message, rejection reason, and resource-URL sentinels are not returned as diagnostic evidence. Stale runtime/navigation context returns `stale` with no values. Existing document/runtime/WebView stale guards remain green.
 
-- session ID;
-- Slot ID;
-- physical WKWebView instance ID;
-- runtime generation;
-- navigation generation;
-- ChatGPT document epoch/current-document guard;
-- monotonic/timestamp ordering.
+No production implementation changed in the audit amendment. No fetch/XHR/WebSocket/application API monkey-patch was added.
 
-Stale events from an earlier document/runtime/navigation must be dropped or explicitly classified stale; they must never be attributed to a later document.
+## Accepted implementation contract
 
-## Privacy and boundedness gate
+FT-DIAG-004 remains observation-only:
 
-The diagnostic path must use the existing `RuntimeDiagnostics` persistence authority and `RuntimeDiagnosticPrivacy` boundary.
+- bounded current-document recorder: maximum 16 retained events;
+- counters saturate at 255;
+- diagnostic categories and coarse timing/status metadata only;
+- incident evidence correlates with existing session/Slot/WKWebView/runtime/navigation/document identity;
+- stale evidence is rejected;
+- persistence continues through the existing `RuntimeDiagnostics` authority and `RuntimeDiagnosticPrivacy` boundary;
+- existing attention/response/navigation/lifecycle/focus/recovery ownership is unchanged;
+- no reload, reset, rebuild, retry, recovery, navigation, cache, or website-data behavior is driven by these diagnostics.
 
-It must never persist:
-- raw exception/rejection messages;
-- stack traces;
-- request or response bodies;
-- request/response headers;
-- cookies, credentials, authorization or tokens;
-- prompt/assistant/page/DOM text;
-- conversation/response identifiers.
+## Privacy boundary
 
-If resource URL metadata is retained, it must pass through the existing URL sanitization policy before persistence.
+Do not persist raw exception/rejection messages, stack traces, request/response bodies or headers, cookies, credentials, authorization/tokens, prompt/assistant/page/DOM text, conversation identifiers, or response identifiers.
 
-Use bounded counters/ring-buffered metadata or equivalently bounded state. Do not create an unbounded console/network recorder.
+Request URLs and resource/chunk identifiers remain intentionally omitted from this probe.
 
-## Passive-observation gate
+## Accepted remaining gaps
 
-Do not wrap or replace `fetch`, `XMLHttpRequest`, WebSocket, navigation functions, or ChatGPT application functions in this task.
+These are not FT-DIAG-004 merge blockers:
 
-Do not alter page request behavior, retry behavior, caching, timing, lifecycle, focus, navigation or recovery policy.
+- page-handled fetch/XHR failures cannot be passively observed without prohibited interception;
+- HTTP status may be unavailable/opaque in WebKit resource timing;
+- raw exception/rejection detail is intentionally not collected;
+- request URL/chunk identity is intentionally not collected.
 
-If a desired discriminator cannot be obtained passively with supported WebKit/browser surfaces, record it as a remaining gap rather than introducing behavioral interception.
+**ROOT_CAUSE_CONFIRMED: NO**
 
-## Incident capture integration
+## Validation evidence
 
-Extend the existing explicit QA stuck-tab capture so that a future incident can emit the bounded page-app evidence alongside the existing:
-- stuck-tab snapshot;
-- ChatGPT health probe;
-- renderer probe.
+The independent audit accepted the amendment evidence:
 
-Normal healthy operation must not require periodic polling. Event listeners/observers may keep only bounded diagnostic metadata for the current document.
+- real WKWebView boundary test passed, including repeated runs;
+- focused bridge/privacy/capture tests passed;
+- full FloatTabs suite passed without failures;
+- Debug and Release macOS arm64 builds passed;
+- binaries were arm64-only;
+- `git diff --check` passed;
+- QA DMG passed;
+- prior reviewed PR head passed `Build & Test (Apple Silicon arm64)` in PR context.
 
-## Acceptance criteria
+The current control-plane closeout commit is docs-only. Because it changes the PR head, repository rule 23 still requires `Build & Test (Apple Silicon arm64)` to pass in PR context on this exact new head before merge.
 
-Construction is acceptable only when all of the following are demonstrated:
+## Merge gate
 
-- observation-only behavior; no recovery/navigation behavior added;
-- exact current-document/runtime identity correlation and stale rejection;
-- bounded page-error/rejection/resource/lifecycle metadata available in an explicit incident capture;
-- raw sensitive exception/request/page content cannot cross the persistence boundary;
-- privacy tests cover malicious/sensitive values and URL sanitization;
-- focused tests cover current-document replacement/stale events and bounded storage;
-- existing FT-DIAG-002 renderer/health probe behavior remains intact;
-- existing attention/response/lifecycle semantics remain unchanged;
-- package lock unchanged unless separately authorized;
-- focused tests pass;
-- full FloatTabs test suite and required Debug/Release builds pass on the exact proposed head.
+PR #111 is **remote-audit approved** but must remain OPEN and unmerged until all of the following are simultaneously true:
 
-## Mandatory STOP conditions
+1. live PR head equals the reviewed control-plane closeout head;
+2. `main`/PR base has not unexpectedly drifted;
+3. required `Build & Test (Apple Silicon arm64)` is recorded PASS by GitHub for that exact PR head;
+4. no new product/test changes were added after the real-WKWebView amendment review;
+5. PR remains mergeable.
 
-Stop construction and return for remote review if:
+Once those conditions hold, **MERGE IS AUTHORIZED without another audit amendment**. Do not add another controls-only status commit merely to restate the CI result, because that would create a new exact head and reopen the same check loop.
 
-- passive supported WebKit/browser surfaces cannot observe a required class without monkey-patching application networking/runtime APIs;
-- the design would require persisting raw exception messages, stack traces, request content, auth/session data or page text;
-- diagnostics would become a second authority for application/lifecycle state;
-- implementation would change reload/reset/recovery/navigation behavior;
-- PR #102 or unrelated production behavior would need modification;
-- authoritative `main`/control-plane state drifts before construction.
+Do not install the PR build as the QA baseline before merge.
 
-A stopped discriminator may be documented as a remaining gap; do not broaden scope to solve it speculatively.
+## Post-merge boundary
 
-## Handoff state
+After merge, FT-DIAG-004 construction closes. A separate control-plane task must authorize any QA-baseline build/install and natural incident observation. Recovery/fix construction remains unauthorized until new incident evidence supports it.
 
-Implementation and local validation are complete. The PR is open for independent
-audit. The branch contains this control-plane synchronization; verify the live
-`origin/codex/ft-diag-004-page-app-probe` head against the checked out branch
-before review.
+## Separate work
 
-### Executor result
-
-- ChatGPTAttentionBridge keeps its passive listeners and bounded recorder unchanged.
-- The new real-WKWebView test exercises the production script in the named isolated world and
-  reads its result through captureIncidentPageAppDiagnostics.
-- Page-world uncaught error, unhandled rejection, and local script-resource failure were all
-  observed as the expected bounded categories. Test-only raw message/reason/URL sentinels were
-  absent from the returned diagnostic fields.
-- Stale caller-owned runtime/navigation context returns stale with no values; existing
-  document/runtime/WebView stale-guard tests remain green.
-- Only FloatTabsTests/ChatGPTAttentionBridgeTests.swift changed in the amendment code commit.
-  No production implementation, package lock, monkey-patch, or QA baseline changed.
-- Focused, full-suite, Debug, Release, arm64, and whitespace validation results are recorded above.
-
-### Remaining passive-observation gaps
-
-- Failures already caught and handled by page fetch/XHR code cannot be observed
-  without forbidden API interception.
-- HTTP status is unknown when WebKit does not expose
-  `PerformanceResourceTiming.responseStatus` or exposes an opaque value.
-- Exception/rejection class names and raw details are not inspected. Request
-  URLs and resource/chunk identifiers are omitted.
-
-No fix or recovery behavior was added; no new QA baseline was installed. The
-root cause remains unknown. Stop at `WAITING_FOR_INDEPENDENT_AUDIT`; do not merge.
+PR #102 remains separate MemoX durable-outbox work. Do not modify, merge, rebase, or use it as a base for FT-DIAG-004.
