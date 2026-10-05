@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-04
+**Status date:** 2026-10-05
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
@@ -89,48 +89,41 @@ Do not convert any of these into a fix claim.
 
 **FT-DIAG-004 — Bounded Page-App Failure Probe Foundation**
 
-**STATUS: INDEPENDENT_AUDIT_BLOCKED — WKCONTENTWORLD_BOUNDARY_TEST_REQUIRED**
+**STATUS: WAITING_FOR_INDEPENDENT_AUDIT**
 
-### Independent audit result
+### Independent audit amendment result
 
-**VERDICT: CHANGES_REQUIRED — TEST/EVIDENCE BLOCKER, NOT A CONFIRMED PRODUCTION DEFECT**
+**AMENDMENT: PASS — REAL WKCONTENTWORLD BOUNDARY OBSERVED; NO PRODUCTION DEFECT**
 
-Remote code audit found no recovery-policy expansion, second diagnostic persistence authority,
-network API monkey-patching, unbounded recorder state, or identified privacy-content leak.
-Exact-head PR-context macOS CI and QA DMG passed on `9e0fde59d6b1fde48eb47ec7cf36db9ccbb4b393`.
+The production ChatGPTAttentionBridge user script was installed into a real WKWebView using
+its named FloatTabsChatGPTAttention content world. Embedded page-world JavaScript produced an
+uncaught error and an unhandled Promise rejection; a registered local WKURLSchemeHandler
+deterministically failed a script resource. The existing captureIncidentPageAppDiagnostics
+path returned all three allowlisted event categories: javascript_error/global_error,
+unhandled_rejection/unhandled_rejection, and resource_load_failure/script_load.
 
-The remaining blocker is proof of the real WebKit content-world boundary. The current recorder
-test executes the generated script inside one `JavaScriptCore.JSContext` and manually invokes
-listeners. It therefore proves parser/bounds/privacy behavior, but does not prove that a
-page-world uncaught error, page-world unhandled Promise rejection, and page resource-load error
-are delivered to the named isolated `WKContentWorld` recorder in an actual `WKWebView`.
+The diagnostic snapshot omitted test-only message, rejection-reason, and resource-URL
+sentinels. A real capture made stale by the caller-owned runtime/navigation context returned
+stale with no values. Existing document/runtime/WebView stale-rejection tests also passed.
+No production code, network API monkey-patch, package lock, or QA baseline changed; only
+FloatTabsTests/ChatGPTAttentionBridgeTests.swift changed.
 
-Before merge, add one focused real-`WKWebView` boundary test using the production bridge/script.
-It must cause those signals from page content and verify the bounded isolated-world snapshot
-observes them without persisting raw message/reason/URL/body content. If any required signal is
-not passively observable across that boundary, STOP and record it as a remaining GAP; do not
-introduce fetch/XHR/WebSocket or application-runtime interception.
+TESTED AMENDMENT SOURCE COMMIT: 55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3
+TASK BRANCH: codex/ft-diag-004-page-app-probe
+PULL REQUEST: #111
 
-Implementation is on branch `codex/ft-diag-004-page-app-probe`, based on
-`caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`, with implementation commit
-`cbea3705fbcd2de089c425b2aa45dde3914aca4d` and PR #111. The dedicated branch
-contains this status/task synchronization; its live remote head is authoritative
-and must be checked before review.
+Validation on macOS 27.0.1 arm64:
 
-The passive recorder is injected in the existing isolated ChatGPT content world.
-It keeps at most 16 allowlisted event summaries and saturates each counter at
-255. The explicit QA stuck-tab action persists one page-app snapshot through
-`RuntimeDiagnostics`, correlated to the same incident, Slot, WebView, runtime,
-navigation and document epoch. Runtime replacement, navigation replacement or
-document identity mismatch is classified stale and emits no page evidence.
+- New real-WebKit boundary test: 1/1 passed, then 3 additional runs each 1/1 passed.
+- Focused bridge/privacy/stuck-tab integration tests: 102 passed, 0 skipped, 0 failed.
+- Full FloatTabs suite: 1,288 passed, 3 skipped, 0 failed (1,291 total).
+- Debug and Release builds passed; both app binaries are arm64-only.
+- git diff --check passed.
 
-Final full validation at PR head
-`1fabef84819225cc30fe7f047bb7e455d0498c9e`: 1,290 FloatTabs tests passed (3
-skipped); Debug and Release macOS arm64 builds succeeded; both app binaries
-report `arm64`; `git diff --check` passed. Focused diagnostics tests passed at
-the implementation source commit: 315 tests (3 skipped). An earlier full-suite run had one timing-sensitive unrelated
-website-cache test failure; that test passed in isolation and the next full run
-passed.
+The code/test amendment was pushed. The control-plane synchronization commit follows the tested
+source commit; live Git remote refs remain authoritative for the current branch HEAD. The new
+PR-head required check must pass before any merge. Stop here at
+WAITING_FOR_INDEPENDENT_AUDIT; do not merge or install a QA baseline.
 
 ### Remaining passive-observation gaps
 

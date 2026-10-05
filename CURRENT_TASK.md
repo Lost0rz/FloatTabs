@@ -2,7 +2,7 @@
 
 **Task ID:** FT-DIAG-004
 **Title:** Bounded Page-App Failure Probe Foundation
-**Status:** `INDEPENDENT_AUDIT_BLOCKED — WKCONTENTWORLD_BOUNDARY_TEST_REQUIRED`
+**Status:** `WAITING_FOR_INDEPENDENT_AUDIT`
 
 **Task branch:** `codex/ft-diag-004-page-app-probe`
 
@@ -10,34 +10,44 @@
 
 **Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`
 
+**Amendment test commit:** 55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3
+
 **Pull request:** #111
 
-## Independent audit result
+## Independent audit amendment result
 
-**Verdict:** `CHANGES_REQUIRED`
+**Verdict:** AMENDMENT_COMPLETE — WAITING_FOR_INDEPENDENT_AUDIT
 
-No production defect is confirmed. The implementation is blocked only on a missing behavioral
-test at the WebKit content-world boundary.
+The amendment adds one real WKWebView behavior test and changes no production code. It installs
+the production ChatGPTAttentionBridge script through the production bridge into the named
+isolated WKContentWorld, produces page-world uncaught JavaScript and unhandled Promise errors,
+and fails a local script resource through a test-only WKURLSchemeHandler.
 
-Required amendment:
+The existing captureIncidentPageAppDiagnostics path observed:
 
-- use a real `WKWebView` configured with the production `ChatGPTAttentionBridge` user script in
-  its named isolated content world;
-- trigger an uncaught JavaScript error from page-world script and verify `javascript_error`;
-- trigger an unhandled page-world Promise rejection and verify `unhandled_rejection`;
-- trigger at least one deterministic page resource-load failure and verify
-  `resource_load_failure`;
-- verify the persisted diagnostic snapshot still contains no raw message/reason/URL/body or
-  other prohibited content;
-- make no production-behavior change unless the test exposes an actual defect.
+- javascript_error / global_error;
+- unhandled_rejection / unhandled_rejection;
+- resource_load_failure / script_load, resource type script.
 
-If any required class cannot be observed passively in the real `WKWebView`, STOP and report that
-class as a remaining passive-observation GAP. Do not add networking/runtime monkey-patches.
+The returned diagnostic metadata did not contain the test-only raw error message, rejection
+reason, or resource-URL sentinels. A second real capture whose caller-owned runtime/navigation
+context became stale returned stale and no evidence. Existing document/runtime/WebView stale
+guards passed in the focused suite. No fetch/XHR/WebSocket patch or other page interception was
+added.
 
-Exact-head evidence already accepted for the current implementation head
-`9e0fde59d6b1fde48eb47ec7cf36db9ccbb4b393`: required macOS CI PASS; Debug/Release/arm64 PASS;
-1,290 tests / 3 skipped / 0 failures; QA DMG PASS. A new amendment commit must rerun the required
-exact-head PR-context check before merge.
+Test amendment commit: 55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3
+
+Validation on macOS 27.0.1 arm64:
+
+- New boundary test: 1/1 passed plus three repeated 1/1 runs.
+- Focused bridge/privacy/capture-integration tests: 102 passed, 0 skipped, 0 failed.
+- Full FloatTabs suite: 1,288 passed, 3 skipped, 0 failed (1,291 total).
+- Debug and Release builds passed; both binaries contain arm64 only.
+- git diff --check passed.
+
+The amendment code commit was pushed. This control-plane update is a later controls-only commit;
+verify the live branch head before review. The PR-context required check must pass on the current
+live head before merge. No merge or QA baseline installation is authorized.
 
 ## Objective
 
@@ -147,26 +157,17 @@ before review.
 
 ### Executor result
 
-- `ChatGPTAttentionBridge` installs passive listeners and a resource
-  `PerformanceObserver` in the existing isolated content world. The recorder
-  keeps a 16-entry ring and saturating counters (255 maximum), emits only fixed
-  categories, coarse timing, resource type, and exposed HTTP status.
-- `Capture Stuck Tab Snapshot (QA)` emits the page-app snapshot under the same
-  incident ID and frozen Slot/WebView/runtime/navigation fields. Capture also
-  binds the document epoch and opaque identity in memory; stale identity or
-  runtime/navigation completion drops page evidence.
-- Persistence remains through `RuntimeDiagnostics`; privacy tests cover
-  malicious messages, stacks, URLs, headers, bodies, tokens, prompts, and
-  answers. The generated JavaScript recorder test exercises ring eviction and
-  counter saturation.
-- Focused tests on the implementation source commit: 315 executed, 3 skipped,
-  0 failures. Final full FloatTabs tests at PR head
-  `1fabef84819225cc30fe7f047bb7e455d0498c9e`: 1,290 executed, 3 skipped,
-  0 failures. Debug and Release builds at that PR head passed on macOS arm64;
-  both binaries contain arm64 only. `git diff --check` passed.
-- One earlier full run had a timing-sensitive failure in the unrelated
-  `WebsiteCacheCleanupTests.testAutomaticCapacityRunUsesItsLocalMeasurementDuringSettingsRefresh`;
-  the isolated retry and the subsequent final full suite passed.
+- ChatGPTAttentionBridge keeps its passive listeners and bounded recorder unchanged.
+- The new real-WKWebView test exercises the production script in the named isolated world and
+  reads its result through captureIncidentPageAppDiagnostics.
+- Page-world uncaught error, unhandled rejection, and local script-resource failure were all
+  observed as the expected bounded categories. Test-only raw message/reason/URL sentinels were
+  absent from the returned diagnostic fields.
+- Stale caller-owned runtime/navigation context returns stale with no values; existing
+  document/runtime/WebView stale-guard tests remain green.
+- Only FloatTabsTests/ChatGPTAttentionBridgeTests.swift changed in the amendment code commit.
+  No production implementation, package lock, monkey-patch, or QA baseline changed.
+- Focused, full-suite, Debug, Release, arm64, and whitespace validation results are recorded above.
 
 ### Remaining passive-observation gaps
 
