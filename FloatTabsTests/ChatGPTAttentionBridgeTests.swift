@@ -193,6 +193,14 @@ private final class LivenessConfirmationGate {
     }
 }
 
+private final class FTDiag004FailingResourceSchemeHandler: NSObject, WKURLSchemeHandler {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        urlSchemeTask.didFailWithError(NSError(domain: "FTDiag004Fixture", code: 1))
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+}
+
 @MainActor
 final class ChatGPTAttentionBridgeTests: XCTestCase {
     private var tokenA: String!
@@ -202,6 +210,90 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         super.setUp()
         tokenA = UUID().uuidString
         tokenB = UUID().uuidString
+    }
+
+    func testRealWKWebViewPageWorldFailuresReachIncidentSnapshot() async throws {
+        let bridge = ChatGPTAttentionBridge(slotID: UUID()) { _, _ in }
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(
+            FTDiag004FailingResourceSchemeHandler(),
+            forURLScheme: "ftdiag004"
+        )
+        bridge.install(into: configuration.userContentController)
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        bridge.attach(to: webView)
+
+        let fixture = """
+        <!doctype html>
+        <html><head>
+          <script>
+            setTimeout(() => {
+              throw new Error("FT_DIAG_004_PRIVATE_ERROR_MESSAGE");
+            }, 0);
+            Promise.reject(new Error("FT_DIAG_004_PRIVATE_REJECTION_REASON"));
+          </script>
+          <script src="ftdiag004://fixture/FT_DIAG_004_PRIVATE_RESOURCE_URL?token=fixture"></script>
+        </head><body><main></main></body></html>
+        """
+        webView.loadHTMLString(fixture, baseURL: URL(string: "https://chatgpt.com/")!)
+
+        let documentAdmitted = await waitUntil(timeout: 10) {
+            bridge.diagnosticSnapshotFields["attention_document_admitted"] == .bool(true)
+        }
+        XCTAssertTrue(documentAdmitted, "the production bridge must admit the local ChatGPT fixture")
+        guard documentAdmitted else { return }
+
+        let result: ChatGPTIncidentPageAppProbeResult = await withCheckedContinuation { continuation in
+            bridge.captureIncidentPageAppDiagnostics(
+                for: webView,
+                contextIsCurrent: { true }
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+
+        XCTAssertEqual(result.outcome, .success)
+        let snapshot = try XCTUnwrap(result.values)
+        XCTAssertGreaterThan(snapshot.javascriptErrorCount, 0)
+        XCTAssertGreaterThan(snapshot.unhandledRejectionCount, 0)
+        XCTAssertGreaterThan(snapshot.resourceLoadFailureCount, 0)
+        XCTAssertTrue(snapshot.events.contains {
+            $0.kind == "javascript_error" && $0.category == "global_error"
+        })
+        XCTAssertTrue(snapshot.events.contains {
+            $0.kind == "unhandled_rejection" && $0.category == "unhandled_rejection"
+        })
+        XCTAssertTrue(snapshot.events.contains {
+            $0.kind == "resource_load_failure"
+                && $0.category == "script_load"
+                && $0.resourceType == "script"
+        })
+
+        let capturedMetadata = String(reflecting: result.diagnosticFields)
+        for privateValue in [
+            "FT_DIAG_004_PRIVATE_ERROR_MESSAGE",
+            "FT_DIAG_004_PRIVATE_REJECTION_REASON",
+            "FT_DIAG_004_PRIVATE_RESOURCE_URL"
+        ] {
+            XCTAssertFalse(capturedMetadata.contains(privateValue))
+        }
+
+        var runtimeAndNavigationAreCurrent = true
+        var staleResult: ChatGPTIncidentPageAppProbeResult?
+        bridge.captureIncidentPageAppDiagnostics(
+            for: webView,
+            contextIsCurrent: { runtimeAndNavigationAreCurrent }
+        ) { result in
+            staleResult = result
+        }
+        runtimeAndNavigationAreCurrent = false
+        let staleCaptureCompleted = await waitUntil(timeout: 5) { staleResult != nil }
+        XCTAssertTrue(staleCaptureCompleted)
+        XCTAssertEqual(staleResult?.outcome, .stale)
+        XCTAssertNil(staleResult?.values)
     }
 
     override func tearDown() {
