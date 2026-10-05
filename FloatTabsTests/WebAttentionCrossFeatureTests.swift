@@ -285,6 +285,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                     "loading_indicator_visible": false,
                     "conversation_load_error_present": false
                 ]
+            },
+            incidentPageAppProbeEvaluator: { _, script, documentToken in
+                XCTAssertEqual(script, ChatGPTAttentionBridge.incidentPageAppProbeScript)
+                return Self.pageAppPayload(token: documentToken)
             }
         )
         let webView = try makeResidentWebView(
@@ -312,11 +316,12 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let backHistoryItemBefore = webView.backForwardList.backItem
         let attentionFieldsBefore = attentionBridge.diagnosticSnapshotFields
         _ = controller.captureStuckTabSnapshot()
-        let healthRecorded = try await waitUntil {
+        let probesRecorded = try await waitUntil {
             writer.events.contains { $0.event == "diagnostics.chatgpt_health_probe" }
+                && writer.events.contains { $0.event == "diagnostics.chatgpt_page_app_snapshot" }
         }
 
-        XCTAssertTrue(healthRecorded)
+        XCTAssertTrue(probesRecorded)
         XCTAssertEqual(store.activeTabID, selectedBefore)
         XCTAssertEqual(pool.count, residentCountBefore)
         XCTAssertTrue(pool.existingWebView(for: slot.id) === webView)
@@ -358,6 +363,22 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(healthEvent.fields["loading_indicator_present"], .bool(false))
         XCTAssertEqual(healthEvent.fields["loading_indicator_visible"], .bool(false))
         XCTAssertEqual(healthEvent.fields["conversation_load_error_present"], .bool(false))
+
+        let pageAppEvent = try XCTUnwrap(
+            writer.events.first { $0.event == "diagnostics.chatgpt_page_app_snapshot" }
+        )
+        XCTAssertEqual(pageAppEvent.fields["incident_id"], event.fields["incident_id"])
+        XCTAssertEqual(pageAppEvent.fields["slot_id"], event.fields["slot_id"])
+        XCTAssertEqual(pageAppEvent.fields["runtime_generation"], event.fields["runtime_generation"])
+        XCTAssertEqual(pageAppEvent.fields["webview_instance_id"], event.fields["webview_instance_id"])
+        XCTAssertEqual(pageAppEvent.fields["navigation_generation"], event.fields["navigation_generation"])
+        XCTAssertEqual(pageAppEvent.fields["page_app_probe_outcome"], .string("success"))
+        XCTAssertEqual(pageAppEvent.fields["chatgpt_document_epoch"], .integer(1))
+        XCTAssertEqual(pageAppEvent.fields["page_app_javascript_error_count"], .integer(1))
+        XCTAssertEqual(pageAppEvent.fields["page_app_event_00_category"], .string("global_error"))
+        XCTAssertNil(pageAppEvent.fields["document_identity"])
+        XCTAssertNil(pageAppEvent.fields["error_message"])
+        XCTAssertNil(pageAppEvent.fields["page_title"])
     }
 
     // MARK: FloatTabs native focus ownership
@@ -5186,13 +5207,15 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         webFocusRouter: WebFocusRouter? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
     ) -> (PanelController, WebAttentionCoordinator, TabStore, WebViewPool) {
         let tabStore = store ?? makeTabStore(profiles: profiles ?? [])
         let pool = makePool(
             committedURLProvider: committedURLProvider,
             diagnostics: diagnostics,
-            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator
         )
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
         let controller = PanelController(
@@ -5228,7 +5251,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private func makePool(
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
-        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil
+        incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
+        incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil
     ) -> WebViewPool {
         WebViewPool(
             onURLChange: { _, _ in },
@@ -5236,8 +5260,33 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             isSlotActive: { _ in false },
             committedURLProvider: committedURLProvider,
             diagnostics: diagnostics,
-            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator
+            incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
+            incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator
         )
+    }
+
+    private static func pageAppPayload(token: String) -> [String: Any] {
+        [
+            "version": 1,
+            "document_identity": token,
+            "events": [[
+                "kind": "javascript_error",
+                "category": "global_error",
+                "resource_type": "none",
+                "http_status": NSNull(),
+                "duration_bucket": NSNull(),
+                "age_ms": 11
+            ]],
+            "dropped_events": 0,
+            "javascript_error_count": 1,
+            "unhandled_rejection_count": 0,
+            "resource_load_failure_count": 0,
+            "resource_http_error_count": 0,
+            "slow_resource_count": 0,
+            "lifecycle_event_count": 0,
+            "resource_timing_available": true,
+            "response_status_available": true
+        ]
     }
 
     private func makeCompressedLifecycle(

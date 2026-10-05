@@ -223,6 +223,90 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertNil(capturedResult?.values)
     }
 
+    func testIncidentPageAppProbeDiscardsRuntimeReplacement() async throws {
+        let gate = IncidentHealthProbeTestGate()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            incidentPageAppProbeEvaluator: { _, _, _ in try await gate.evaluate() },
+            incidentHealthProbeTimeout: 1
+        )
+        let profile = makeProfile(name: "IncidentPageAppRuntimeIdentity")
+        defer { pool.release(slotID: profile.id) }
+        let originalWebView = try pool.webView(for: profile)
+        let originalBridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        originalBridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "page-app-runtime-token",
+                generating: false
+            ),
+            messageWebView: originalWebView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        var capturedResult: ChatGPTIncidentPageAppProbeResult?
+        pool.captureBoundedChatGPTPageAppDiagnostics(slotID: profile.id) {
+            capturedResult = $0
+        }
+        await gate.waitUntilStarted()
+        pool.release(slotID: profile.id)
+        _ = try pool.webView(for: profile)
+        gate.resolve(Self.pageAppPayload(token: "page-app-runtime-token"))
+
+        let completed = await waitForPageAppResult { capturedResult }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(capturedResult?.outcome, .stale)
+        XCTAssertNil(capturedResult?.values)
+    }
+
+    func testIncidentPageAppProbeDiscardsNavigationGenerationChange() async throws {
+        let gate = IncidentHealthProbeTestGate()
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            incidentPageAppProbeEvaluator: { _, _, _ in try await gate.evaluate() },
+            incidentHealthProbeTimeout: 1
+        )
+        let profile = makeProfile(name: "IncidentPageAppNavigationIdentity")
+        defer { pool.release(slotID: profile.id) }
+        let webView = try pool.webView(for: profile)
+        let bridge = try XCTUnwrap(pool.attentionBridge(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: "page-app-navigation-token",
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        var capturedResult: ChatGPTIncidentPageAppProbeResult?
+        pool.captureBoundedChatGPTPageAppDiagnostics(slotID: profile.id) {
+            capturedResult = $0
+        }
+        await gate.waitUntilStarted()
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>test</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
+        gate.resolve(Self.pageAppPayload(token: "page-app-navigation-token"))
+
+        let completed = await waitForPageAppResult { capturedResult }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(capturedResult?.outcome, .stale)
+        XCTAssertNil(capturedResult?.values)
+    }
+
     func testNavigationGenerationIsMonotonicAndStaleCallbacksDoNotCompleteCurrentTicket() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
@@ -2341,6 +2425,18 @@ final class WebViewPoolTests: XCTestCase {
         return result() != nil
     }
 
+    private func waitForPageAppResult(
+        timeout: TimeInterval = 1,
+        _ result: @MainActor () -> ChatGPTIncidentPageAppProbeResult?
+    ) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if result() != nil { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return result() != nil
+    }
+
     private static func healthPayload() -> [String: Any] {
         [
             "version": 1,
@@ -2351,6 +2447,30 @@ final class WebViewPoolTests: XCTestCase {
             "loading_indicator_present": false,
             "loading_indicator_visible": false,
             "conversation_load_error_present": false
+        ]
+    }
+
+    private static func pageAppPayload(token: String) -> [String: Any] {
+        [
+            "version": 1,
+            "document_identity": token,
+            "events": [[
+                "kind": "javascript_error",
+                "category": "global_error",
+                "resource_type": "none",
+                "http_status": NSNull(),
+                "duration_bucket": NSNull(),
+                "age_ms": 1
+            ]],
+            "dropped_events": 0,
+            "javascript_error_count": 1,
+            "unhandled_rejection_count": 0,
+            "resource_load_failure_count": 0,
+            "resource_http_error_count": 0,
+            "slow_resource_count": 0,
+            "lifecycle_event_count": 0,
+            "resource_timing_available": true,
+            "response_status_available": true
         ]
     }
 

@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-04
+**Status date:** 2026-10-05
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
@@ -20,108 +20,106 @@ Machine-specific worktree paths remain local-only.
 **PRODUCTION_BRANCH:** `main`  
 **EXPECTED_UPSTREAM:** `origin/main`
 
-Before any new source change or QA build, the authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
+Before any source change, QA build, merge, or installation, refresh remote refs. The authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
 
-## FT-DIAG-001
+## Closed diagnostic phases
 
-FT-DIAG-001 is **CLOSED — CONSTRUCTION_GATE_READY**.
+### FT-DIAG-001
 
-Authoritative audit:
+**CLOSED — CONSTRUCTION_GATE_READY**
 
-`docs/diagnostics/FT-DIAG-001-architecture-audit.md`
+Authoritative audit: `docs/diagnostics/FT-DIAG-001-architecture-audit.md`.
 
-## FT-DIAG-002
+### FT-DIAG-002
 
-FT-DIAG-002 is **CLOSED — MERGED / REMOTE_AUDIT_PASS**.
+**CLOSED — MERGED / REMOTE_AUDIT_PASS**
 
-PR #106 added the bounded cross-owner incident probe foundation. It is observation-only and does not implement stuck-tab recovery.
+PR #106 established the bounded cross-owner incident-probe foundation. It is observation-only and does not implement stuck-tab recovery.
 
-## FT-DIAG-003
+### FT-DIAG-003
 
-FT-DIAG-003 is **CLOSED — SEALED / PAGE-EVIDENCE-GAP_CONFIRMED**.
+**CLOSED — SEALED / PAGE-EVIDENCE-GAP_CONFIRMED**
 
-### Accepted incident classification
+Accepted incident class:
 
-**INCIDENT FAILURE CLASS:** `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`
+`CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`
 
 **STUCK-SLOT ROOT CAUSE: UNKNOWN**
 
-Accepted incident identity:
-
-- session `7C81B78D-F98A-496F-A2E6-94E3DE74194A`;
-- Slot `89953BED-613F-4E31-AAEC-C8D71B5956B3`;
-- WKWebView `28A7FDCA-1263-4AE1-B242-7459C5DF692F`;
-- runtime generation `4`;
-- navigation generation `1`;
-- source revision `1897fae15031673a37800ac57758e462d8dfb851`;
-- incident snapshots `75B3A768-F766-40B4-97BC-8A0F416C0B2F` and `B35360B0-11A3-4719-AA5C-C9AEC37F0AEC`.
-
-The incident established a finished top-level navigation, responsive JavaScript renderer, coherent physical WebView/Slot presentation, complete visible document, ChatGPT conversation shell present, and composer absent in two bounded health probes.
-
-The bounded local evidence pass then returned:
+The sealed incident established a finished top-level navigation, responsive JavaScript renderer, coherent physical WKWebView/Slot presentation, complete visible document, ChatGPT conversation shell present, and composer absent. Same-incident application-layer evidence was unavailable without mutating the incident:
 
 `CURRENT_INCIDENT_PAGE_EVIDENCE_UNAVAILABLE_WITHOUT_MUTATION`
 
-No same-incident JavaScript/bootstrap exception, resource failure, fetch/XHR failure, console artifact, network artifact, or inspector artifact was available without changing the live incident.
+Sealed artifact hashes:
 
-The target Slot/runtime identity remained correlated in later diagnostics. A recovery-completion event observed later belonged to a different Slot and is not evidence about this incident.
+- `FloatTabs-Diagnostics-20261004-135448.jsonl` — SHA-256 `4b5f9fef5e9a644d76bfe2ed3af8ab87a67b8b59a4b2b3cf03f2575f163bbe9a`
+- `runtime-20261004-001.jsonl` — SHA-256 `accf95fa13d49ce36bf15ef0fd1f022f7a834f38b33c6a737cc0fc94c4760ef1`
 
-### Sealed evidence
-
-Local sealed artifacts were reported with these hashes:
-
-- `FloatTabs-Diagnostics-20261004-135448.jsonl`  
-  SHA-256 `4b5f9fef5e9a644d76bfe2ed3af8ab87a67b8b59a4b2b3cf03f2575f163bbe9a`
-- `runtime-20261004-001.jsonl`  
-  SHA-256 `accf95fa13d49ce36bf15ef0fd1f022f7a834f38b33c6a737cc0fc94c4760ef1`
-
-Machine-specific seal paths are intentionally not committed.
-
-### Remaining hypotheses
-
-- **H1 — page bootstrap/application-state failure:** unproven.
-- **H2 — resource/API/network failure or extreme latency:** unproven.
-- **H3 — inactive-finish/warm-reuse interaction:** confirmed temporal sequence, unproven causality.
-
-Do not convert any of these into a fix claim.
+Remaining hypotheses stay unproven: page bootstrap/application-state failure; resource/API/network failure or extreme latency; inactive-finish/warm-reuse interaction.
 
 ## FT-DIAG-004
 
 **FT-DIAG-004 — Bounded Page-App Failure Probe Foundation**
 
-**STATUS: ACTIVE — CONSTRUCTION_AUTHORIZED**
+**STATUS: REMOTE_AUDIT_PASS — MERGE_READY; EXACT_HEAD_CI_REQUIRED**
 
-Remote audit confirms the next missing discriminator is below the currently healthy renderer/document boundary and above FloatTabs recovery policy: page-application errors, rejected promises, resource-load failure metadata, bounded resource timing/status evidence, and page lifecycle correlation are not available in the sealed incident.
+**PR:** #111  
+**Branch:** `codex/ft-diag-004-page-app-probe`  
+**Base:** `caacc3b143ef3a5ba41d642b0a8aee3eaeacec4e`  
+**Implementation commit:** `cbea3705fbcd2de089c425b2aa45dde3914aca4d`  
+**Real-WKWebView amendment test commit:** `55d6a9cc2238bb8c873c3d7cfc0ebef11d3841e3`
 
-FT-DIAG-004 may add **observation-only, privacy-bounded ChatGPT page diagnostics** sufficient for the next naturally occurring incident. It must not add reload/reset/rebuild/recovery decisions.
+### Independent remote audit verdict
 
-### Authority boundary
+**PASS — the prior WKContentWorld evidence blocker is closed.**
 
-- `RuntimeDiagnostics` remains the single diagnostic persistence/event-envelope authority.
-- Existing Slot, WebView, navigation and ChatGPT document owners remain authoritative for their state.
-- New page diagnostics are observations only and must bind to existing runtime/navigation/document identity.
-- Do not create a second business-state authority or let diagnostics drive production behavior.
+Remote audit verified the actual PR implementation, identity/stale guards, privacy boundary, test amendment, and PR-context CI evidence. No recovery-policy expansion, second diagnostic persistence authority, network API monkey-patching, unbounded recorder state, or confirmed sensitive-content persistence was found.
 
-### Privacy boundary
+The amendment uses a real `WKWebView` with the production `ChatGPTAttentionBridge` user script in the named isolated `WKContentWorld`. Page-world activity was observed through the existing production capture path:
 
-Current privacy policy already rejects message/stack/body/content/prompt/token/query and similar sensitive fields. FT-DIAG-004 must preserve and test this boundary.
+- uncaught JavaScript error → `javascript_error / global_error`;
+- unhandled Promise rejection → `unhandled_rejection`;
+- deterministic local script-resource failure → `resource_load_failure / script_load`.
 
-Allowed evidence should be bounded metadata such as:
-- application error/rejection occurrence and stable category, never raw message or stack;
-- resource failure type and sanitized URL metadata through the existing privacy boundary when a URL is necessary;
-- initiator/resource class, response-status class when publicly observable, and bounded duration/timing buckets;
-- document visibility/pageshow/pagehide/online/offline transition metadata;
-- timestamps and existing Slot/WebView/runtime/navigation/document identities.
+Raw test message, rejection reason, and resource-URL sentinels did not enter the diagnostic snapshot. A capture whose runtime/navigation context became stale returned `stale` with no evidence. Existing document/runtime/WebView stale guards remain covered.
 
-Do not persist request/response bodies, headers, cookies, credentials, auth state, DOM/page text, prompts, assistant responses, raw exception messages or stacks.
+The amendment changed no production implementation and added no networking/runtime interception.
+
+### Validation accepted by remote audit
+
+For the tested product/test state before this final control-plane-only synchronization:
+
+- real WKWebView boundary test passed and repeated successfully;
+- focused bridge/privacy/capture tests passed;
+- full FloatTabs suite passed with no failures;
+- Debug and Release macOS arm64 builds passed;
+- produced binaries were arm64-only;
+- `git diff --check` passed;
+- QA DMG passed;
+- PR-context `Build & Test (Apple Silicon arm64)` passed on the prior reviewed head.
+
+This final control-plane synchronization changes only `CURRENT_STATUS.md` and `CURRENT_TASK.md`. GitHub branch protection still requires `Build & Test (Apple Silicon arm64)` to pass in PR context on the new exact branch head before merge. Once that required check is recorded PASS and the PR head has not drifted, no further independent-audit amendment is required.
+
+### Remaining passive-observation gaps
+
+These are accepted capability limits, not merge blockers for FT-DIAG-004:
+
+- fetch/XHR failures already caught and handled by page code are not observable without forbidden interception;
+- HTTP status remains unknown when WebKit does not expose `PerformanceResourceTiming.responseStatus` or exposes an opaque value;
+- exception/rejection raw class/message/stack details are intentionally not collected;
+- request URLs and resource/chunk identifiers are intentionally omitted.
+
+**ROOT CAUSE_CONFIRMED: NO**
+
+FT-DIAG-004 is diagnostic-only. It adds no stuck-tab fix or recovery behavior. No FT-DIAG-004 build has been accepted or installed as a QA baseline yet.
 
 ## Runtime construction state
 
 **NEW STUCK-TAB FIX: NOT AUTHORIZED**
 
-**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: AUTHORIZED**
+**FT-DIAG-004 DIAGNOSTIC CONSTRUCTION: COMPLETE — REMOTE_AUDIT_PASS**
 
-The new diagnostic path must be passive with respect to page behavior. It must not reload, recover, reset, replace a WebView, clear website data, or change navigation/lifecycle decisions.
+The next runtime step after merge is a separately controlled QA-baseline build/install and natural-incident observation phase. Do not infer a root cause from the existence of the new probes.
 
 ## Separate work
 
@@ -129,6 +127,4 @@ PR #102 remains separate MemoX durable-outbox work. Do not modify, merge, rebase
 
 ## Historical evidence
 
-PRs #99–#101 remain abandoned historical experiments only.
-
-The FT-DIAG-003 sealed incident remains evidence for probe design, not a regression fixture claiming a known root cause.
+PRs #99–#101 remain abandoned historical experiments only. Historical recovery success is not causal proof.

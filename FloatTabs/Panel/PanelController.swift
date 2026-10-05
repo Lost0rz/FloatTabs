@@ -841,6 +841,18 @@ final class PanelController: NSObject, NSWindowDelegate {
                     fields: healthFields
                 )
             }
+            webViewPool.captureBoundedChatGPTPageAppDiagnostics(slotID: slotID) {
+                [weak self, fields] result in
+                guard let self else { return }
+                var pageAppFields = fields
+                pageAppFields.merge(result.diagnosticFields) { _, new in new }
+                self.diagnostics.record(
+                    event: "diagnostics.chatgpt_page_app_snapshot",
+                    level: .notice,
+                    subsystem: "diagnostics",
+                    fields: pageAppFields
+                )
+            }
         }
         webViewPool.captureBoundedRendererProbe(
             slotID: slotID,
