@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `ACTIVE — FORMAL_TDD_RED`
+**Status:** `ACTIVE — MINIMAL_FALLBACK_FIX`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -376,6 +376,21 @@ predecessor in response blocks. If first run is GREEN, STOP; do not write a fix.
 
 ## Gate 2 — Minimal production fix after verified RED
 
+### Gate 1 result — 2026-10-07
+
+`testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent` reached
+`FIRST_RUN=RED` against unchanged production source. The first focused XCTest run
+failed the desired contract assertion. A focused follow-up confirmed the specific
+result: the fallback payload contained two blocks and included the preceding
+semantic user branch together with the intended response content. The fixture uses
+fictional content and contains no author-role attribute or explicit assistant
+marker.
+
+Source inspection confirms the fallback selected the enclosing `main` as the
+smallest ancestor containing the Regenerate action and response-content elements;
+`structuredBlocks` traverses both semantic branches. No production source changed
+before the RED gate. The failure authorizes the minimal production fix below.
+
 Only after verified RED, modify only `FloatTabs/Web/ChatGPTResponseExtraction.swift`,
 preferably `latestRegenerateOwnedResponse()` or its directly related fallback-root
 logic. Fallback must require structurally bounded response ownership; narrow to a
@@ -476,13 +491,16 @@ MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
 NEW_SPEECH_TRIGGERED: NO
 PRODUCT_CODE_CHANGED: NO
 PR102_UNCHANGED: YES
-FORMAL_TDD_RED: AUTHORIZED
-MINIMAL_PRODUCTION_FIX: AUTHORIZED_AFTER_VERIFIED_RED
+FORMAL_TDD_RED: PASS
+RED_TEST_NAME: testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent
+FIRST_RUN_RED: YES
+RED_ACTUAL_BEHAVIOR: fallback payload included preceding semantic branch; 2 blocks
+MINIMAL_PRODUCTION_FIX: AUTHORIZED
 NO_NEW_DIAGNOSTIC_EXPANSION: YES
 NO_MORE_USER_REPRODUCTION_BEFORE_FIXED_QA: YES
 NO_TTS_OR_QUEUE_FIX: YES
 NO_NOTIFICATION_WORK: YES
-FINAL_STATE: ACTIVE_FORMAL_TDD_RED
+FINAL_STATE: ACTIVE_MINIMAL_FALLBACK_FIX
 ```
 
 The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,
@@ -491,5 +509,6 @@ correlation and appear in stage order. No valid `submission_summary` record exis
 The current log segment also has 10 malformed rows; none contains any of these five
 QA event names. This raw trace alone cannot name individual ownership. The Web
 review separately confirms the fallback extraction ownership boundary while
-leaving the exact live subtree unconfirmed. Proceed only with the authorized
-synthetic first-run RED fixture.
+leaving the exact live subtree unconfirmed. The synthetic first-run RED is now
+verified; continue only with the bounded fix, focused validation, and fixed QA
+installation.

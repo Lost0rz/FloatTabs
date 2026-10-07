@@ -452,6 +452,36 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.map(\.text), ["Latest semantic response."])
     }
 
+    func testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <main>
+          <article data-testid="conversation-turn-user">
+            <p>Earlier user branch.</p>
+          </article>
+          <section data-testid="message-content">
+            <p>Intended latest response.</p>
+          </section>
+          <div role="toolbar">
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </main>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let texts = payload?.blocks.map(\.text) ?? []
+
+        XCTAssertTrue(
+            payload == nil || texts == ["Intended latest response."],
+            "An unowned fallback root must not combine an earlier semantic turn with response content."
+        )
+        XCTAssertFalse(
+            texts.contains("Earlier user branch."),
+            "The fallback included the preceding semantic branch (extracted block count: \(texts.count))."
+        )
+    }
+
     func testSemanticResponseRootIgnoresUnrelatedRegenerateControl() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""

@@ -253,19 +253,31 @@ is permitted to become a response root without positive assistant-only ownership
 proof. The exact live DOM subtree is not confirmed. The raw trace remains as
 recorded above; `unknown` does not negate the independently reviewed boundary.
 
-**Authorized work:** formal TDD RED in
-`FloatTabsTests/ChatGPTResponseExtractionTests.swift`. A minimal production fix in
-`FloatTabs/Web/ChatGPTResponseExtraction.swift` is authorized only after verified
-first-run RED. No new diagnostics or user reproduction before the fixed QA; no TTS,
-queue/playback, or notification work. Keep explicit assistant/article paths,
-response identity, locator/follow behavior, and generation state intact. Build and
-install fresh arm64 Debug QA only after focused GREEN, then stop for user acceptance.
+**Authorized work:** the synthetic formal TDD RED in
+`FloatTabsTests/ChatGPTResponseExtractionTests.swift` passed its gate. The minimal
+production fix in `FloatTabs/Web/ChatGPTResponseExtraction.swift` is now authorized.
+No new diagnostics or user reproduction before the fixed QA; no TTS, queue/playback,
+or notification work. Keep explicit assistant/article paths, response identity,
+locator/follow behavior, and generation state intact. Build and install fresh arm64
+Debug QA only after focused GREEN, then stop for user acceptance.
 
-**Current state:** `ACTIVE — FORMAL_TDD_RED`. The current task authorizes a
-synthetic first-run RED extraction fixture; a minimal production fallback ownership
-fix is authorized only after verified RED. No speech was retriggered and no ChatGPT
-message was sent during the read-only review. Follow the exclusions in the current
-task and stop after fixed QA installation for user acceptance.
+### Formal TDD RED result
+
+`testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent` failed
+on its first focused run against unchanged production source. A focused follow-up
+confirmed the failure mode: the fallback payload contained two blocks, including
+the preceding semantic user branch along with the intended response content. The
+synthetic fixture contains no author-role attribute or explicit assistant marker.
+No production source was changed before the RED gate.
+
+The current product contract leaves provider selectors/fallback probes as
+implementation details. The v0.5.2 release record requires a bounded Regenerate
+fallback and excludes generated/hashed CSS-class contracts. The authorized fix must
+enforce a structural boundary or fail closed, preserve explicit/article extraction,
+and make no broader speech or notification change.
+
+**Current state:** `ACTIVE — MINIMAL_FALLBACK_FIX`. No speech was retriggered and
+no ChatGPT message was sent. Stop after fixed QA installation for user acceptance.
 
 ## Separate work
 
@@ -275,10 +287,10 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-Web root-cause review is complete. The next action is the authorized first-run RED
-fixture; continue to the minimal fix only if RED verifies the specified contract.
-Do not ask for another reproduction. Stop after installing fixed QA for user
-acceptance; no implementation PR or merge in this task.
+Web root-cause review and the first-run RED gate are complete. Continue only with
+the authorized minimal fallback fix and focused GREEN validation. Do not ask for
+another reproduction. Stop after installing fixed QA for user acceptance; no
+implementation PR or merge in this task.
 
 The implementation PR must not be merged until the task reaches
 `WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.
