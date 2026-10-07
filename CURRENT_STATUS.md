@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: ACTIVE — READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
+**STATUS: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -142,22 +142,15 @@ prove how the user's own message reaches spoken output. The temporary structural
 probe was removed. The result remains evidence, but it is not sufficient to enter
 a speculative production fix.
 
-### Current reproduction strategy
+### Reproduction strategy and current disposition
 
-The speech symptom is naturally and cheaply reproducible by the user. Therefore the
-next evidence step follows the real product path instead of expanding passive DOM
-diagnostics:
-
-1. add the smallest QA/DEBUG-only instrumentation needed to observe the actual
-   `Read Latest Response` extraction-to-speech path without changing behavior;
-2. build and install that exact QA build as `/Applications/FloatTabs.app` while
-   preserving all user/site state;
-3. let the user open FloatTabs normally and trigger `Read Latest Response` once on
-   a normal ChatGPT conversation where the symptom can be heard;
-4. capture bounded structural/provenance evidence tied to that exact user action;
-5. classify the cause before writing a production fix;
-6. only after live causal evidence, create a test-first RED reproduction and then
-   the minimal production fix.
+The minimal QA instrumentation, exact-head install, one fresh user-triggered
+reproduction, and read-only evidence review are complete. The user confirmed the
+symptom, but all extracted blocks and utterances were ownership-classified as
+`unknown`, the first admitted speech submission was `unknown`, and the summary event
+is absent. Root cause remains unconfirmed. The current state is
+`WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`; do not enter formal RED or change production
+behavior before a later task-state update.
 
 ### Privacy / instrumentation boundary
 
@@ -212,10 +205,38 @@ it spoke the user's question, then the latest ChatGPT response. This confirms th
 reported symptom as a user observation; the causal boundary is not yet established
 by the QA trace.
 
-**Authorized next step:** `READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE` only. Read the
-existing correlated diagnostics from this reproduction. Do not trigger speech,
-send a ChatGPT message, reload/reset, add probes or diagnostics, write a RED test,
-change production behavior, rebuild, reinstall, or clear user/WebKit data.
+### Gate 4 — Read-only existing Speech QA evidence
+
+The latest same-session trace is `9296134E-59C9-4591-A991-2E9143430AB9`, request
+correlation `B304B982-F43B-49CC-8ACB-B04C6E77F9A8`, in
+`runtime-20261007-001.jsonl`. Its four valid events are ordered at sequences 318–321
+in one second: `read_requested` (`stage=read_latest`), `payload_received`,
+`utterances_created`, and `submission_started`. The emitter creates
+`read_requested` only for manual origin. No valid `submission_summary` exists for
+this correlation, so `TRACE_COMPLETE=NO`.
+
+Payload metadata: `selected_path=fallback`, `root_element=div`; all six structural
+markers (composer, user, assistant, status, alert, live region) are false;
+`block_count=41`, and all 41 ownership entries are `unknown`. Actual schema counts
+are assistant-owned 0, user-owned 0, composer 0, status-live 0, unknown 41. Separate
+alert-owned and live-region-owned counters are not present in the schema.
+
+Utterance metadata: count 87; assistant-owned 0, user-owned 0, composer 0,
+status-live 0, unknown 87. Separate alert-owned and live-region-owned counters are
+not present. First accepted speech submission is ordinal 1 of expected 87 and has
+`ownership=unknown`. Actual submission totals and completion are unavailable
+because `submission_summary` is absent.
+
+The user-reported symptom is confirmed, but the ownership classifier does not tie
+the spoken question to a user-owned block. `ROOT_CAUSE_BOUNDARY_CONFIRMED=NO`;
+`CAUSE_LAYER=UNCLASSIFIED_OWNERSHIP_REACHED_ADMITTED_SPEECH_SUBMISSION`. This is
+not a production root-cause finding. Page-notification causality is
+`UNCONFIRMED`; macOS Notification Center causality is `UNOBSERVED`.
+
+**Stop state:** `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`. No speech was retriggered, no
+ChatGPT message was sent, and no product code was changed. Do not add diagnostics,
+create a RED test, change production behavior, rebuild, reinstall, reload/reset, or
+clear user/WebKit data without a later task-state update.
 
 ## Separate work
 
@@ -225,10 +246,9 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-The user has completed one fresh reproduction on the installed QA. Read only the
-existing diagnostics for that same request and classify the evidence. Do not ask
-the user to repeat the action. Stop after the read-only root-cause evidence review;
-formal RED and production changes require a later explicit task-state update.
+The one fresh reproduction has been classified from its existing diagnostics.
+Await Web root-cause review. Do not ask the user to repeat the action; formal RED
+and production changes require a later explicit task-state update.
 
 The implementation PR must not be merged until the task reaches
 `WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.

@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `ACTIVE — READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE`
+**Status:** `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -295,6 +295,38 @@ and report the structural pipeline. Do not expose raw conversation content.
 
 ## Gate 4 — Causal classification
 
+### Read-only evidence result — 2026-10-07
+
+- Latest same-session trace: `9296134E-59C9-4591-A991-2E9143430AB9`;
+  `request_correlation=B304B982-F43B-49CC-8ACB-B04C6E77F9A8`;
+  `runtime-20261007-001.jsonl`.
+- Four valid same-trace events occur in sequence 318–321 at
+  `2026-10-07T02:55:02Z`: manual `read_requested` (`stage=read_latest`),
+  `payload_received`, `utterances_created`, `submission_started`. The code emits
+  `read_requested` only for manual origin. `submission_summary` is absent;
+  therefore `TRACE_COMPLETE=NO` and final submission totals/completion are
+  `NOT_PRESENT`.
+- Payload: `selected_path=fallback`, `root_element=div`; composer, user, assistant,
+  status, alert, and live-region markers are all false; `block_count=41`;
+  ownership sequence is `unknown` for all 41 blocks. Actual counters:
+  assistant-owned 0, user-owned 0, composer 0, status-live 0, unknown 41.
+  Separate alert-owned/live-region-owned counters are not present in this schema.
+- Utterances: 87 total; assistant-owned 0, user-owned 0, composer 0, status-live 0,
+  unknown 87. Separate alert-owned/live-region-owned counters are not present.
+- First admitted speech submission: ordinal 1 of expected 87, `ownership=unknown`.
+  The logged `submitted_count=1` records that first admission only; it does not
+  establish final actual submission count.
+- The symptom remains confirmed by the user's report, but the trace does not
+  identify any payload block or utterance as `user_owned`. Therefore
+  `ROOT_CAUSE_BOUNDARY_CONFIRMED=NO` and
+  `CAUSE_LAYER=UNCLASSIFIED_OWNERSHIP_REACHED_ADMITTED_SPEECH_SUBMISSION`.
+  Page-notification causality is `UNCONFIRMED`; macOS Notification Center
+  causality is `UNOBSERVED`.
+- No speech was retriggered, no ChatGPT message was sent, and no product code was
+  changed. Stop for Web root-cause review. No new probe/diagnostic, RED test,
+  production fix, build, install, reload/reset, or user/WebKit-data cleanup is
+  authorized by this task state.
+
 Classify the user-triggered run from actual evidence, for example:
 
 - extraction root already spans wrong ownership;
@@ -346,28 +378,68 @@ Stop on any:
 - QA instrumentation that changes extraction/speech behavior;
 - unrelated product change.
 
-## Next handoff receipt
+## Current handoff receipt
 
-After Gate 2, return:
-
-```text
-TASK_ID:
-START_HEAD:
-FINAL_QA_HEAD:
-FOCUSED_INSTRUMENTATION_TESTS:
-QA_BUILD:
-APP_PATH:
-INSTALLED_SOURCE_HEAD:
-INSTALLED_VERSION_BUILD:
-INSTALLED_ARCH:
-RUNNING_PID:
-USER_DATA_PRESERVED:
-PR102_UNCHANGED:
-WORKTREE_STATUS:
-READY_FOR_USER_REPRODUCTION:
-FINAL_STATE:
+```yaml
+TASK_ID: FT-SPEECH-001
+GATE_3_FRESH_REPRODUCTION: PASS
+QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
+USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
+SYMPTOM_CONFIRMED: YES
+ROOT_CAUSE_CONFIRMED: NO
+TRACE_COMPLETE: NO
+TRACE_ID: 9296134E-59C9-4591-A991-2E9143430AB9
+REQUEST_CORRELATION: B304B982-F43B-49CC-8ACB-B04C6E77F9A8
+SELECTED_PATH: fallback
+ROOT_ELEMENT: div
+COMPOSER_MARKER_PRESENT: false
+USER_MARKER_PRESENT: false
+ASSISTANT_MARKER_PRESENT: false
+STATUS_MARKER_PRESENT: false
+ALERT_MARKER_PRESENT: false
+LIVE_REGION_MARKER_PRESENT: false
+BLOCK_COUNT: 41
+BLOCK_OWNERSHIP_SEQUENCE: unknown x 41
+BLOCK_ASSISTANT_OWNED_COUNT: 0
+BLOCK_USER_OWNED_COUNT: 0
+BLOCK_COMPOSER_OWNED_COUNT: NOT_PRESENT; actual block_composer_count=0
+BLOCK_STATUS_OWNED_COUNT: NOT_PRESENT; actual block_status_live_count=0
+BLOCK_ALERT_OWNED_COUNT: NOT_PRESENT
+BLOCK_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
+BLOCK_UNKNOWN_COUNT: 41
+UTTERANCE_COUNT: 87
+UTTERANCE_ASSISTANT_OWNED_COUNT: 0
+UTTERANCE_USER_OWNED_COUNT: 0
+UTTERANCE_COMPOSER_OWNED_COUNT: NOT_PRESENT; actual utterance_composer_count=0
+UTTERANCE_STATUS_OWNED_COUNT: NOT_PRESENT; actual utterance_status_live_count=0
+UTTERANCE_ALERT_OWNED_COUNT: NOT_PRESENT
+UTTERANCE_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
+UTTERANCE_UNKNOWN_COUNT: 87
+FIRST_SUBMISSION_OWNERSHIP: unknown
+SUBMISSION_ORDINAL: 1
+EXPECTED_SUBMISSION_COUNT: 87
+ACTUAL_SUBMISSION_COUNT: NOT_PRESENT
+SUBMITTED_ASSISTANT_OWNED_COUNT: NOT_PRESENT
+SUBMITTED_USER_OWNED_COUNT: NOT_PRESENT
+SUBMITTED_COMPOSER_OWNED_COUNT: NOT_PRESENT
+SUBMITTED_STATUS_OWNED_COUNT: NOT_PRESENT; summary absent (schema key would be submitted_status_live_count)
+SUBMITTED_ALERT_OWNED_COUNT: NOT_PRESENT
+SUBMITTED_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
+SUBMITTED_UNKNOWN_COUNT: NOT_PRESENT
+SUBMISSION_COMPLETE: NOT_PRESENT
+ROOT_CAUSE_BOUNDARY_CONFIRMED: NO
+CAUSE_LAYER: extraction-to-speech submission ownership remains unclassified
+PAGE_NOTIFICATION_CAUSAL_STATUS: UNCONFIRMED
+MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
+NEW_SPEECH_TRIGGERED: NO
+PRODUCT_CODE_CHANGED: NO
+PR102_UNCHANGED: YES
+FINAL_STATE: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
 ```
 
-Expected final state for the next local execution is:
-
-`WAITING_FOR_USER_SPEECH_REPRODUCTION`
+The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,
+at `2026-10-07T02:55:02Z`. The valid events share one session, trace, and request
+correlation and appear in stage order. No valid `submission_summary` record exists.
+The current log segment also has 10 malformed rows; none contains any of these five
+QA event names. The incomplete trace and ownership gaps are the smallest missing
+evidence boundary; do not infer a production cause or continue beyond Web review.
