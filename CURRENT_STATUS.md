@@ -115,6 +115,8 @@ PR #102 remains separate MemoX durable-outbox work and is outside this task.
 
 **STATUS: ACTIVE — GATE_0A_CONTROL_PR**
 
+**CONTROL_PR:** #114 — OPEN; GitHub is authoritative for its current head.
+
 **MODE:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 Task-start baseline was freshly fetched `main` at
