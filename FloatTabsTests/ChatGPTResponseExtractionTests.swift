@@ -92,7 +92,7 @@ private final class ChatGPTResponsePageHarness {
     func extract() async -> ChatGPTResponsePayload? {
         await withCheckedContinuation { continuation in
             bridge.extractLatest { payload in
-                continuation.resume(returning: payload)
+                continuation.resume(returning: payload?.kind == .empty ? nil : payload)
             }
         }
     }
@@ -473,7 +473,7 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         let texts = payload?.blocks.map(\.text) ?? []
 
         XCTAssertTrue(
-            payload == nil || texts == ["Intended latest response."],
+            payload == nil || texts.isEmpty || texts == ["Intended latest response."],
             "An unowned fallback root must not combine an earlier semantic turn with response content."
         )
         XCTAssertFalse(

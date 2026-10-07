@@ -121,9 +121,43 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                 && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
             );
 
+          const containsResponseContent = (root) => {
+            const isContentElement = root.matches
+              && root.matches(RESPONSE_CONTENT_SELECTOR)
+              && isRendered(root)
+              && !root.closest(RESPONSE_EXCLUDED_SELECTOR);
+            return Boolean(isContentElement) || hasResponseContent(root);
+          };
+
+          const hasSiblingResponseContentBranches = (root) => {
+            let foundContentBranch = false;
+            for (const child of Array.from(root.children || [])) {
+              if (!containsResponseContent(child)) continue;
+              if (foundContentBranch) return true;
+              foundContentBranch = true;
+            }
+            return false;
+          };
+
+          const hasNonAssistantOwnershipMarker = (root) => {
+            const selector = [
+              '[data-message-author-role="user"]',
+              '[data-message-role="user"]',
+              '[data-testid*="conversation-turn-user"]',
+              'input,textarea,[contenteditable="true"],[role="textbox"]',
+              '[role="status"],[data-testid*="status"],[role="alert"]',
+              '[aria-live]:not([aria-live="off"])'
+            ].join(',');
+            return Boolean(
+              (root.matches && root.matches(selector))
+                || (root.querySelector && root.querySelector(selector))
+            );
+          };
+
           // Current ChatGPT keeps completed-response controls semantic but may
-          // omit assistant-role attributes. Bound ownership to the smallest
-          // rendered ancestor with one Regenerate control and response content.
+          // omit assistant-role attributes. A fallback root is only bounded
+          // when its Regenerate control shares one unambiguous content branch;
+          // broader roots can span unrelated turns and must fail closed.
           const latestRegenerateOwnedResponse = () => {
             const controls = Array.from(
               document.querySelectorAll('button,[role="button"]')
@@ -137,7 +171,9 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                 if (isRendered(ancestor)
                     && !isComposerContainer(ancestor)
                     && responseActions(ancestor).length === 1
-                    && hasResponseContent(ancestor)) {
+                    && hasResponseContent(ancestor)
+                    && !hasSiblingResponseContentBranches(ancestor)
+                    && !hasNonAssistantOwnershipMarker(ancestor)) {
                   return ancestor;
                 }
                 ancestor = ancestor.parentElement;

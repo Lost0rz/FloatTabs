@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `ACTIVE — MINIMAL_FALLBACK_FIX`
+**Status:** `ACTIVE — FIXED_QA_BUILD_INSTALL`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -408,6 +408,22 @@ Run the new regression, all `ChatGPTResponseExtractionTests`, and relevant
 fallback regressions remain GREEN. Record `FALLBACK_RESULT=FAIL_CLOSED` if that is
 the safe behavior; do not claim speech is fully restored in that case.
 
+### Gate 3 result — 2026-10-07
+
+- Regression: `testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent` PASS.
+- `ChatGPTResponseExtractionTests`: 42 passed, 0 failed, 0 skipped.
+- `AssistantSpeechCoordinatorTests`: 98 passed, 0 failed, 0 skipped.
+- Total focused run: 140 passed, 0 failed, 0 skipped.
+- `FALLBACK_RESULT=FAIL_CLOSED` for an ambiguous fallback candidate. Existing
+  single response-container fallback and explicit/article tests remain GREEN.
+- The final full suite remains out of scope. No speech was triggered and no
+  ChatGPT message was sent.
+
+Implementation is limited to the Regenerate fallback structural boundary plus
+the synthetic regression and test-harness normalization of DEBUG empty results to
+the existing `nil` extraction contract. No speech service, queue, playback, or
+notification production code changed.
+
 ## Gate 4 — Build fixed Speech QA
 
 After focused GREEN, build fresh arm64 Debug QA and replace only
@@ -416,6 +432,11 @@ login sessions, Application Support, preferences, and diagnostic history. Verify
 installed provenance and running PID, then stop at
 `WAITING_FOR_USER_FIX_ACCEPTANCE`. Do not trigger speech for the user. Do not run the
 final full suite, open an implementation PR, or merge in this task.
+
+Current gate: implementation and focused GREEN are complete. Do not begin the QA
+build until this checkpoint is committed/pushed and a fresh fetch verifies local
+HEAD equals the authorized upstream. The installed runtime remains the prior QA
+until Gate 4 provenance and PID verification complete.
 
 ## Separate work
 
@@ -442,7 +463,7 @@ GATE_3_FRESH_REPRODUCTION: PASS
 QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
 USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
 SYMPTOM_CONFIRMED: YES
-ROOT_CAUSE_CONFIRMED: NO
+ROOT_CAUSE_CONFIRMED: YES at fallback extraction ownership boundary; exact live subtree unknown
 TRACE_COMPLETE: NO
 TRACE_ID: 9296134E-59C9-4591-A991-2E9143430AB9
 REQUEST_CORRELATION: B304B982-F43B-49CC-8ACB-B04C6E77F9A8
@@ -489,18 +510,22 @@ EXACT_LIVE_DOM_SUBTREE_CONFIRMED: NO
 PAGE_NOTIFICATION_CAUSAL_STATUS: UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
 NEW_SPEECH_TRIGGERED: NO
-PRODUCT_CODE_CHANGED: NO
+PRODUCT_CODE_CHANGED: YES
 PR102_UNCHANGED: YES
 FORMAL_TDD_RED: PASS
 RED_TEST_NAME: testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent
 FIRST_RUN_RED: YES
 RED_ACTUAL_BEHAVIOR: fallback payload included preceding semantic branch; 2 blocks
 MINIMAL_PRODUCTION_FIX: AUTHORIZED
+FIX_SCOPE: Regenerate fallback structural bound + extraction test harness empty normalization
+FALLBACK_RESULT: FAIL_CLOSED for ambiguous multi-branch/unowned candidate
+FOCUSED_EXTRACTION_TESTS: 42 passed, 0 failed, 0 skipped
+FOCUSED_SPEECH_TESTS: 98 passed, 0 failed, 0 skipped
 NO_NEW_DIAGNOSTIC_EXPANSION: YES
 NO_MORE_USER_REPRODUCTION_BEFORE_FIXED_QA: YES
 NO_TTS_OR_QUEUE_FIX: YES
 NO_NOTIFICATION_WORK: YES
-FINAL_STATE: ACTIVE_MINIMAL_FALLBACK_FIX
+FINAL_STATE: ACTIVE_FIXED_QA_BUILD_INSTALL
 ```
 
 The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,

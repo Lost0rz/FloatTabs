@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: ACTIVE — FORMAL_TDD_RED**
+**STATUS: ACTIVE — FIXED_QA_BUILD_INSTALL**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -276,8 +276,17 @@ fallback and excludes generated/hashed CSS-class contracts. The authorized fix m
 enforce a structural boundary or fail closed, preserve explicit/article extraction,
 and make no broader speech or notification change.
 
-**Current state:** `ACTIVE — MINIMAL_FALLBACK_FIX`. No speech was retriggered and
+**Current state:** `ACTIVE — FIXED_QA_BUILD_INSTALL`. No speech was retriggered and
 no ChatGPT message was sent. Stop after fixed QA installation for user acceptance.
+
+### Focused GREEN result
+
+The bounded fallback change and regression are green. On 2026-10-07, the focused
+arm64 XCTest run executed all 42 `ChatGPTResponseExtractionTests` and all 98
+`AssistantSpeechCoordinatorTests`: 140 passed, 0 failed, 0 skipped. This validates
+the extraction boundary and relevant speech coordination regressions; the final
+full suite remains explicitly out of scope. Next: synchronize this checkpoint,
+then build/install the fixed arm64 Debug QA and stop for user acceptance.
 
 ## Separate work
 
