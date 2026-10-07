@@ -117,7 +117,7 @@ PR #102 remains separate MemoX durable-outbox work and is outside this task.
 
 **FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
 
-**STATUS: ACTIVE — GATE_1_PROBE_SESSION_AUTHORIZED**
+**STATUS: ACTIVE — GATE_1_STOP_AWAITING_WEB_REVIEW**
 
 **CONTROL_PR:** #114 — MERGED at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
 **IMPLEMENTATION_BRANCH:** `fix/chatgpt-speech-response-ownership`.
@@ -140,26 +140,26 @@ currently authorized.
 PR #102 remains OPEN, Draft, at head
 `db6e886b33dffd93ece130463b184ae371b97684`; it is excluded from FT-SPEECH-001.
 
-**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — the live selected path remains unknown.**
+**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — the fallback candidate had no user marker.**
 
-The existing privacy-safe health snapshot reports document readiness/visibility,
-conversation shell, composer, loading indicator and conversation-load-error
-booleans. The page-app snapshot reports bounded error, resource and lifecycle
-categories. Neither reports response selection path, fallback ancestor shape,
-user/assistant subtree markers, or status/alert/live-region membership.
+Before this one-time probe, the privacy-safe health snapshot reported document
+readiness/visibility, conversation shell, composer, loading indicator and
+conversation-load-error booleans. The page-app snapshot reported bounded error,
+resource and lifecycle categories. Those existing interfaces did not report
+response selection path, fallback ancestor shape, user/assistant subtree markers,
+or status/alert/live-region membership.
 
-The previous Gate 1 stop remains valid for its evidence and scope. On 2026-10-07,
-the user explicitly authorized one minimal, controlled, privacy-safe QA/DEBUG
-probe session, including rebuild/relaunch and one necessary ChatGPT page reload.
-This authorization supersedes only the earlier no-reload restriction for that
-single session. It does not confirm root cause or authorize a behavior change.
+The previous Gate 1 stop remained valid for its evidence and scope. On 2026-10-07,
+the user authorized one minimal, controlled, privacy-safe QA/DEBUG probe session,
+including rebuild/relaunch and at most one necessary ChatGPT page reload. That
+one-time authorization has now been consumed. No behavior change was authorized.
 
-**GATE_1_PROBE_SESSION: AUTHORIZED — ONCE**
+**GATE_1_PROBE_SESSION: COMPLETE — ONE SNAPSHOT; TEMPORARY PROBE REMOVED**
 
-Allowed: temporary structural probe, probe-only focused tests, exact-head QA/DEBUG
-rebuild and relaunch, restore/open the target ChatGPT tab, at most one necessary
-page reload, and one ownership snapshot. Output is limited to fixed categories,
-booleans and bounded counts.
+The exact-head arm64 Debug QA app was rebuilt and relaunched. The existing
+ChatGPT-named Slot was selected through the configured Slot navigation shortcut.
+No ChatGPT message was sent, no response was generated, and no explicit page
+reload was performed (`RELOAD_COUNT=0`). One ownership snapshot was invoked.
 
 Not authorized: user/assistant text or DOM HTML, textContent/innerHTML/innerText,
 URLs, message IDs, cookies, tokens, cache/profile/site-data resets, repeated reloads,
@@ -172,11 +172,45 @@ The implementation freshness gate is `HEAD == origin/fix/chatgpt-speech-response
 **PROBE_TESTS:** PASS — 79/79 arm64 Debug: 78 `ChatGPTAttentionBridgeTests`
 plus one capture-wiring/privacy test. Probe coverage includes explicit/article/
 fallback/none and the closed structural schema. No formal Gate 2 RED test has run.
-The QA capture button now records only the dedicated structural ownership event.
-An earlier app build from `c23c8998…` was not launched and is stale after this
-capture-route change. **CURRENT_PHASE:** Rebuild exact-head temporary arm64 Debug
-QA app from the current remote-synced HEAD, then perform the single authorized live
-snapshot session.
+The live event matched the approved fixed schema and contained only structural
+metadata:
+
+```text
+PROBE_APP_SOURCE_HEAD=f0bc57143165d2e04bbae7cb0b73a8ba3d2a0539
+PROBE_APP_BUNDLE_ID=com.lost0rz.FloatTabs
+PROBE_APP_VERSION_BUILD=0.5.2 (20)
+PROBE_APP_ARCH_CHANNEL=arm64 / Debug
+LIVE_SELECTED_PATH=fallback
+LIVE_CANDIDATE_TAG_ROLE_TESTID=div / none / none
+LIVE_CANDIDATE_ANCESTOR_DEPTH=3
+LIVE_RESPONSE_ACTION_COUNT=1
+LIVE_SEMANTIC_BLOCK_COUNT=128
+LIVE_FALLBACK_CANDIDATE_HAS_USER=false
+LIVE_FALLBACK_CANDIDATE_HAS_ASSISTANT=false
+LIVE_FALLBACK_CANDIDATE_HAS_STATUS=false
+LIVE_FALLBACK_CANDIDATE_HAS_ALERT=false
+LIVE_FALLBACK_CANDIDATE_HAS_ARIA_LIVE=false
+LIVE_FALLBACK_CANDIDATE_HAS_COMPOSER=true
+LIVE_FALLBACK_CANDIDATE_HAS_MULTIPLE_TURNS=false
+LIVE_NOTIFICATION_SEMANTIC_BLOCK_PRESENT=false
+STRUCTURED_BLOCKS_ROOT_IS_CANDIDATE=true
+RELOAD_COUNT=0
+```
+
+Source attribution: the live fallback candidate was the root supplied to
+`structuredBlocks(root)` by the current extraction request. The candidate had no
+user marker, so this sample does not confirm user-message ownership failure and
+does not authorize Gate 2 RED or a production fix. The candidate did contain a
+composer marker; whether composer content entered the 128 blocks was not observed
+and remains unknown. The current exclusion selector does not explicitly name the
+composer/textbox boundary. No status, alert, live-region, or notification semantic
+block was present in this candidate. macOS Notification Center causality remains
+unobserved.
+
+All temporary probe code, probe-only tests, and the QA capture route/button have
+been removed. The QA Debug process was stopped after capture. No Gate 2 RED test
+has run and no production behavior changed. **CURRENT_PHASE:** Gate 1 STOP for this
+live sample; await Web review before any further task transition.
 
 ### Authorized scope
 

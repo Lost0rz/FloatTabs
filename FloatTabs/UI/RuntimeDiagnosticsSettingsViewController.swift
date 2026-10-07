@@ -14,8 +14,8 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
     let exportButton = NSButton(title: "Export Recent Diagnostics…", target: nil, action: nil)
     let openLogsButton = NSButton(title: "Open Logs Folder", target: nil, action: nil)
 #if DEBUG
-    let captureResponseOwnershipButton = NSButton(
-        title: "Capture Response Ownership Snapshot (QA)",
+    let captureStuckTabButton = NSButton(
+        title: "Capture Stuck Tab Snapshot (QA)",
         target: nil,
         action: nil
     )
@@ -71,8 +71,8 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         openLogsButton.target = self
         openLogsButton.action = #selector(openLogs(_:))
 #if DEBUG
-        captureResponseOwnershipButton.target = self
-        captureResponseOwnershipButton.action = #selector(captureResponseOwnership(_:))
+        captureStuckTabButton.target = self
+        captureStuckTabButton.action = #selector(captureStuckTab(_:))
 #endif
 
         statusLabel.textColor = .secondaryLabelColor
@@ -89,7 +89,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         var actionViews: [NSView] = [exportButton, openLogsButton]
 #if DEBUG
         if captureIncidentHandler != nil {
-            actionViews.append(captureResponseOwnershipButton)
+            actionViews.append(captureStuckTabButton)
         }
 #endif
         let actions = NSStackView(views: actionViews)
@@ -166,7 +166,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
     }
 
 #if DEBUG
-    @objc private func captureResponseOwnership(_ sender: NSButton) {
+    @objc private func captureStuckTab(_ sender: NSButton) {
         guard let captureIncidentHandler else { return }
         statusLabel.stringValue = captureIncidentHandler()
     }

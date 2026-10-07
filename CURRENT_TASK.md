@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `ACTIVE — GATE_1_PROBE_QA_BUILD`
+**Status:** `ACTIVE — GATE_1_STOP_WAITING_FOR_WEB_REVIEW`
 **Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -189,20 +189,54 @@ that base absent authorized reconciliation.
    remains, and only then begin formal Gate 2 test-first RED. If Gate 1 stops,
    remove the temporary probe and its tests and stop without RED or a fix.
 
-### Probe test checkpoint
+### Gate 1 probe, test, and live snapshot checkpoint
 
 - Probe implementation commit: `93891215fd150f841c58ad521235e39b7b9340e7`.
 - Focused arm64 Debug checks: PASS, 79/79, 0 failures (78 bridge tests plus one
-  snapshot capture-wiring/privacy test).
-- Probe-only coverage: explicit, article (isolated-world selector test seam),
-  fallback, none, strict structural schema, boolean marker types, and diagnostic
-  privacy-sanitizer acceptance. The Debug QA button records only the dedicated
-  structural ownership event; it does not invoke the broader stuck-tab snapshot.
-- The previously built app at source `c23c8998…` was not launched and is stale
-  after the capture-route change. No live app has been stopped or reloaded for
-  this task. No formal Gate 2 RED test has run. Next: build a separate exact-head
-  arm64 Debug QA artifact from the current remote-synced HEAD and verify its
-  provenance before touching the running QA process.
+  snapshot capture-wiring/privacy test). Coverage includes explicit, article
+  (isolated-world selector seam), fallback, none, fixed schema, boolean markers,
+  and privacy-sanitizer acceptance.
+- Exact-head QA app provenance: source `f0bc57143165d2e04bbae7cb0b73a8ba3d2a0539`,
+  bundle `com.lost0rz.FloatTabs`, version/build `0.5.2 (20)`, arm64 Debug.
+- The existing ChatGPT-named Slot was selected. One ownership snapshot completed
+  with the exact fixed schema; no page reload, message send, or response
+  generation occurred.
+
+```text
+LIVE_SELECTED_PATH=fallback
+LIVE_CANDIDATE_TAG_ROLE_TESTID=div / none / none
+LIVE_CANDIDATE_ANCESTOR_DEPTH=3
+LIVE_RESPONSE_ACTION_COUNT=1
+LIVE_SEMANTIC_BLOCK_COUNT=128
+LIVE_FALLBACK_CANDIDATE_HAS_USER=false
+LIVE_FALLBACK_CANDIDATE_HAS_ASSISTANT=false
+LIVE_FALLBACK_CANDIDATE_HAS_STATUS=false
+LIVE_FALLBACK_CANDIDATE_HAS_ALERT=false
+LIVE_FALLBACK_CANDIDATE_HAS_ARIA_LIVE=false
+LIVE_FALLBACK_CANDIDATE_HAS_COMPOSER=true
+LIVE_FALLBACK_CANDIDATE_HAS_MULTIPLE_TURNS=false
+LIVE_NOTIFICATION_SEMANTIC_BLOCK_PRESENT=false
+STRUCTURED_BLOCKS_BOUNDARY_PROVEN=true
+ROOT_CAUSE_CONFIRMED=NO
+PAGE_NOTIFICATION_CAUSAL_STATUS=NOT_PRESENT_IN_CAPTURED_CANDIDATE
+MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+RELOAD_COUNT=0
+```
+
+The extraction request obtains `root = latestAssistantResponseRoot()` and passes
+that same root to `structuredBlocks(root)`. The live sample therefore proves the
+fallback candidate is the extraction root, but its user-marker result does not
+confirm a user-message ownership defect. The candidate includes a composer marker;
+whether composer content entered the 128 blocks remains unknown because no content
+was read and the snapshot has no per-subtree block attribution. The current
+exclusion selector does not explicitly name the composer/textbox boundary. No
+page notification marker or semantic notification block was present in this
+candidate. macOS Notification Center was not observed.
+
+All temporary probe code, probe-only tests, and the QA capture route/button have
+been removed, and the QA Debug process was stopped after capture. No formal Gate 2
+RED test has run and no production behavior changed. Gate 1 is stopped for this
+sample; await Web review before any further task transition.
 
 ## Gate 2 — TDD RED
 

@@ -144,8 +144,7 @@ final class AppCoordinator {
 
 #if DEBUG
         let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = { [weak self] in
-            self?.panelController.captureResponseOwnershipSnapshotForQA()
-                ?? "Response ownership snapshot unavailable."
+            self?.panelController.captureStuckTabSnapshot() ?? "Snapshot unavailable."
         }
 #else
         let captureIncidentHandler: RuntimeDiagnosticsIncidentCaptureHandler? = nil

@@ -693,30 +693,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         attentionCoordinator.readySlotIDs.count
     }
 
-#if DEBUG
-    /// Runs the temporary FT-SPEECH-001 ownership probe without capturing the
-    /// broader stuck-tab snapshot. The emitted event contains only the probe's
-    /// fixed structural fields and a fixed outcome category.
-    func captureResponseOwnershipSnapshotForQA() -> String {
-        guard let profile = tabStore.activeProfile,
-              webViewPool.existingWebView(for: profile.id) != nil else {
-            return "Response ownership snapshot unavailable (no active WebView)."
-        }
-        webViewPool.captureBoundedChatGPTHealthProbe(slotID: profile.id) { [weak self] result in
-            guard let self else { return }
-            var fields = result.values?.responseOwnership?.diagnosticFields ?? [:]
-            fields["ownership_probe_outcome"] = .string(result.outcome.rawValue)
-            self.diagnostics.record(
-                event: "diagnostics.chatgpt_response_ownership_probe",
-                level: .notice,
-                subsystem: "diagnostics",
-                fields: fields
-            )
-        }
-        return "Response ownership snapshot requested for the active Slot."
-    }
-#endif
-
     /// Captures one QA-only, read-only snapshot of the currently selected
     /// Slot. It deliberately queries the pool and view hierarchy directly and
     /// never materializes a missing runtime or changes presentation state.
