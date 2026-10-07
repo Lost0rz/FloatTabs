@@ -27,6 +27,8 @@ final class AppCoordinator {
     private let backupService: FloatTabsBackupService
     private let attentionSoundAssetStore: AttentionSoundAssetStore
     private let attentionSoundPlayer: AttentionSoundPlaying
+    private let memoXOutboxStore: MemoXOutboxStore?
+    private let memoXSenderService: MemoXSenderService?
     private let websiteCacheUsageStore: WebsiteCacheUsageStore
     private let websiteCacheClock: WebsiteCacheClock
     private let websiteCacheSleeper: WebsiteCacheSleeper
@@ -88,9 +90,15 @@ final class AppCoordinator {
         if let panelController {
             self.panelController = panelController
             profileRepository = nil
+            memoXOutboxStore = nil
+            memoXSenderService = nil
         } else {
             let profileRepository = ProfileRepository()
             self.profileRepository = profileRepository
+            let memoXOutboxStore = MemoXOutboxStore()
+            let memoXSenderService = MemoXSenderService(outbox: memoXOutboxStore)
+            self.memoXOutboxStore = memoXOutboxStore
+            self.memoXSenderService = memoXSenderService
             let tabStore = TabStore(repository: profileRepository, diagnostics: diagnostics)
             tabStore.onPersistenceFailure = {
                 Self.presentConfigurationSaveFailure()
@@ -120,7 +128,9 @@ final class AppCoordinator {
                 speechService: speechService,
                 speechPreferencesStore: resolvedSpeechPreferencesStore,
                 speechVoiceCatalog: resolvedSpeechVoiceCatalog,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                memoXOutboxStore: memoXOutboxStore,
+                memoXSenderService: memoXSenderService
             )
         }
     }
@@ -134,6 +144,7 @@ final class AppCoordinator {
             trace: trace,
             fields: diagnostics.environmentFields()
         )
+        startMemoXSenderIfActivated()
         resolveStartupConfigurationRecoveryIfNeeded()
 
         let websiteCacheCoordinator = panelController.websiteCacheCleanupCoordinator(
@@ -318,6 +329,7 @@ final class AppCoordinator {
             trace: trace
         )
         isTerminating = true
+        memoXSenderService?.requestStop()
         externalVoiceFocusTask?.cancel()
         externalVoiceFocusTask = nil
         externalVoiceFocusRequestID = nil
@@ -339,6 +351,20 @@ final class AppCoordinator {
             trace: trace
         )
         diagnostics.requestFinalFlush(timeout: 0.25) {}
+    }
+
+    private func startMemoXSenderIfActivated() {
+        guard let memoXOutboxStore, let memoXSenderService else { return }
+        Task.detached(priority: .utility) {
+            do {
+                _ = try await memoXOutboxStore.pendingRecords()
+                memoXSenderService.start()
+                memoXSenderService.wake()
+            } catch {
+                // Inactive integration creates no files; active recovery stays
+                // pending and can be retried by the next accepted completion.
+            }
+        }
     }
 
     private func startWebsiteCacheAutomaticSchedule(initialDelay: TimeInterval? = nil) {

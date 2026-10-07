@@ -216,6 +216,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let speechPreferencesStore: SpeechPreferencesStore
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
+    private let memoXOutboxStore: MemoXOutboxStore?
+    private let memoXSenderService: MemoXSenderService?
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
     private weak var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private let addressOverlayView = AddressOverlayView()
@@ -280,6 +282,17 @@ final class PanelController: NSObject, NSWindowDelegate {
             return sourceKind != .chatGPT
         }
     )
+
+    private lazy var memoXCaptureCoordinator: MemoXCaptureCoordinator? = {
+        guard let memoXOutboxStore, let memoXSenderService else { return nil }
+        return MemoXCaptureCoordinator(
+            outbox: memoXOutboxStore,
+            sender: memoXSenderService,
+            responseBridgeProvider: { [weak self] slotID in
+                self?.webViewPool.responseBridge(for: slotID)
+            }
+        )
+    }()
 
     private lazy var calibreSpeechCoordinator = CalibreSpeechCoordinator(
         playbackSession: speechPlaybackSessionController,
@@ -922,7 +935,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         speechVoiceCatalog: SpeechVoiceCatalogProviding? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
-        presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
+        presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil,
+        memoXOutboxStore: MemoXOutboxStore? = nil,
+        memoXSenderService: MemoXSenderService? = nil
     ) {
         self.tabStore = tabStore
         self.webViewPool = webViewPool
@@ -945,6 +960,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             ?? SpeechPlaybackSessionController(speechService: resolvedSpeechService)
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
+        self.memoXOutboxStore = memoXOutboxStore
+        self.memoXSenderService = memoXSenderService
         self.preferencesStore = preferencesStore ?? AppPreferencesStore()
         let savedFrame = frameStore.loadFrame()
         restoredFrame = savedFrame
@@ -1087,6 +1104,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.onResponseRuntimeReset = { [weak self] slotID in
             self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
+            self?.memoXCaptureCoordinator?.observe(.runtimeReset, for: slotID)
         }
         webViewPool.onCalibreReaderRuntimeReset = { [weak self] slotID in
             self?.calibreSpeechCoordinator.resetRuntime(slotID: slotID)
@@ -3288,6 +3306,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         let attentionStateBefore = attentionCoordinator.state(for: slotID)
         let isValidGenerationCompletion = observation == .generationFinished
             && attentionStateBefore == .generating
+        let completionTimestamp = isValidGenerationCompletion ? Date() : nil
+        memoXCaptureCoordinator?.observe(observation, for: slotID)
         let userVisibleAtCompletion = isValidGenerationCompletion
             ? isAttentionUserVisible(slotID: slotID)
             : false
@@ -3375,6 +3395,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         if isValidGenerationCompletion {
             onChatGPTGenerationCompleted?(slotID)
+            if let completionTimestamp {
+                memoXCaptureCoordinator?.handleValidCompletion(
+                    slotID: slotID,
+                    responseIdentity: event.responseIdentity,
+                    completedAt: completionTimestamp
+                )
+            }
         }
 
         let isProtected = attentionCoordinator.isAttentionProtected(slotID)

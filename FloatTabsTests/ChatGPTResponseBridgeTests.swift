@@ -163,6 +163,91 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         ]))
     }
 
+    func testMalformedOptionalResponseIdentityFailsClosed() {
+        let payload = ChatGPTResponsePayload.parse([
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-12345678",
+            "documentToken": "document-12345678",
+            "responseID": "document-12345678:response-1",
+            "responseIdentity": "message:bad identity",
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+                "sourceLocator": [
+                    "documentToken": "document-12345678",
+                    "responseID": "document-12345678:response-1",
+                    "blockID": "document-12345678:response-1:block-0",
+                ],
+            ]],
+        ])
+
+        XCTAssertNil(payload)
+    }
+
+    func testResponseIdentityIsOptionalInV3AndAcceptsCanonicalValues() throws {
+        let legacy = try XCTUnwrap(ChatGPTResponsePayload.parse([
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-12345678",
+            "documentToken": "document-12345678",
+            "responseID": "document-12345678:response-1",
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+                "sourceLocator": [
+                    "documentToken": "document-12345678",
+                    "responseID": "document-12345678:response-1",
+                    "blockID": "document-12345678:response-1:block-0",
+                ],
+            ]],
+        ]))
+        let identity = try XCTUnwrap(
+            ChatGPTResponseIdentity(rawValue: "message:provider-message-123")
+        )
+        let current = try XCTUnwrap(ChatGPTResponsePayload.parse([
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-22345678",
+            "documentToken": "document-22345678",
+            "responseID": "document-22345678:response-1",
+            "responseIdentity": identity.rawValue,
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "Hello",
+                "sourceLocator": [
+                    "documentToken": "document-22345678",
+                    "responseID": "document-22345678:response-1",
+                    "blockID": "document-22345678:response-1:block-0",
+                ],
+            ]],
+        ]))
+
+        XCTAssertEqual(ChatGPTResponsePayload.currentVersion, 3)
+        XCTAssertNil(legacy.responseIdentity)
+        XCTAssertEqual(current.responseIdentity, identity)
+        XCTAssertEqual(current.responseID, "document-22345678:response-1")
+    }
+
+    func testResponseExtractionIdentityUsesTheStructuredResponseRoot() {
+        let source = ChatGPTResponseExtraction.scriptSource
+        guard let requestStart = source.range(
+            of: "globalThis.__floatTabsChatGPTResponseRequestLatestV3"
+        ),
+        let statusSnapshotStart = source.range(
+            of: "globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1"
+        ),
+        requestStart.lowerBound < statusSnapshotStart.lowerBound else {
+            XCTFail("The response extraction request script is missing")
+            return
+        }
+        let requestScript = String(source[requestStart.lowerBound..<statusSnapshotStart.lowerBound])
+
+        XCTAssertTrue(requestScript.contains("const root = latestAssistantResponseRoot();"))
+        XCTAssertTrue(requestScript.contains("const blocks = structuredBlocks(root);"))
+        XCTAssertTrue(requestScript.contains("responseIdentity: canonicalResponseIdentityFor(root)"))
+    }
+
     func testEmptyPayloadIsValidWithoutResponseBody() {
         let payload = ChatGPTResponsePayload.parse([
             "version": ChatGPTResponsePayload.currentVersion,
