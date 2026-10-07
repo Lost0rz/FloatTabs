@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `ACTIVE — GATE_1_PROBE_SESSION_AUTHORIZED`
+**Status:** `ACTIVE — GATE_1_PROBE_QA_BUILD`
 **Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -188,6 +188,16 @@ that base absent authorized reconciliation.
    code and its probe-only tests, verify no temporary diagnostic capability
    remains, and only then begin formal Gate 2 test-first RED. If Gate 1 stops,
    remove the temporary probe and its tests and stop without RED or a fix.
+
+### Probe test checkpoint
+
+- Probe source/test commit: `3e3f4a8c755225ab5825b2aef20965b5fbe2d88e`.
+- Focused arm64 Debug `ChatGPTAttentionBridgeTests`: PASS, 78/78, 0 failures.
+- Probe-only coverage: explicit, article (isolated-world selector test seam),
+  fallback, none, strict structural schema, boolean marker types, and diagnostic
+  privacy-sanitizer acceptance.
+- No formal Gate 2 RED test has run. Next: build a separate exact-head arm64 Debug
+  QA artifact and verify its provenance before touching the running QA process.
 
 ## Gate 2 — TDD RED
 
