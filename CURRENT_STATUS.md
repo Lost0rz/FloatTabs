@@ -10,69 +10,71 @@
 
 ## Mode
 
-**MODE: WEB_AUDIT_PASS — QA_ACCEPTANCE_AUTHORIZED**
+**MODE: QA_ACCEPTANCE_FAILED — WARM_PREMATURE_RELEASE_ATTRIBUTION**
 
 ## Production authority
 
 - Live accepted `main`: `569e43783a98c8caca681ce8139ec87dd4fa276e`
 - Active branch: `fix/residency-lifecycle-semantics`
-- PR: `#116` (Draft)
+- PR: `#116` (Draft; merge blocked)
 - Task: `FT-LIFECYCLE-001`
 - Product implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
-- Independently audited handoff head: `94aa9bf1633ccff427d49db09e42e540b65b760e`
-- PR #102 remains separate MemoX Draft work and is excluded from this task
+- Independently audited implementation handoff: `94aa9bf1633ccff427d49db09e42e540b65b760e`
+- QA-installed source head: `733f73fad9a955db42401abaececf9c7aeb783dc`
+- QA app: `0.5.2 (20)`, arm64
+- PR #102 remains unrelated MemoX Draft work and is excluded from this task
 
-## Confirmed pre-fix defects
+## Accepted implementation facts
 
-### Warm retention
+The first lifecycle corrective remains code-audited as implemented:
 
-The Settings value is persisted and live-wired correctly, but ordinary lifecycle logic also enforced a hidden two-Warm LRU cap. A third inactive Warm runtime could therefore release the oldest Warm runtime before the configured 2/5/10/30-minute TTL.
+1. ordinary two-Warm LRU eviction was removed from the normal inactive path;
+2. inactive Hot WebContent recovery is residency-aware and uses the existing recovery request path;
+3. no second residency authority was introduced;
+4. no unread/speech/Cold product behavior was intentionally changed.
 
-### Hot runtime
+These facts are not sufficient for merge because human Warm acceptance failed.
 
-Hot was not proactively evicted by `SlotLifecycleCoordinator`, but `WebViewPool` treated every inactive WebContent-process termination as deferred recovery. An inactive Hot renderer killed by WebKit therefore waited until later user activation before reloading.
+## Human QA failure
 
-### Red unread badge
+On the QA build from `733f73f...`, the user configured four Tabs as Warm with Warm retention selected as 30 minutes. After some ordinary use, one Warm Tab's icon became gray and clicking it recreated/reloaded the runtime.
 
-The visible red unread badge remains a separate concern owned by `ChatGPTUnreadResponseCoordinator`. No unread behavior is changed in FT-LIFECYCLE-001.
+The tab-rail gray/released presentation is driven by runtime residency (`isResident == false`), so this is evidence that the `WKWebView` runtime was actually released, not merely that a live resident renderer stalled.
 
-## Independent Web implementation audit
+**Verdict:** `WARM_HUMAN_ACCEPTANCE=FAIL`.
 
-**Verdict: PASS**
+Therefore the earlier conclusion that removing only the ordinary two-Warm LRU fully solved the user-visible Warm issue is rejected. PR #116 must not merge in its present state.
 
-Web independently inspected PR #116 at handoff head `94aa9bf1633ccff427d49db09e42e540b65b760e` and verified:
+## Current attribution boundary
 
-1. Ordinary Warm LRU eviction was removed from the inactive-plan path. Warm runtimes now follow their configured TTL during normal operation.
-2. Warm recency/eviction remains only for explicit memory-pressure handling; warning/critical behavior remains an intentional early-release override.
-3. Hot recovery is residency-aware through a read-only provider backed directly by `TabStore`; no second residency authority or persisted state was introduced.
-4. Recovery policy is now: active Slot -> reload now; inactive Hot -> reload now; inactive Warm/Cold -> defer until activation.
-5. Inactive Hot recovery reuses the existing recovery URL/request path and does not select the Slot, present the panel, change requested visibility, or steal focus.
-6. No unread-badge, speech, attention-authority, Cold-policy, browser-profile, or provider-specific keepalive behavior was added.
-7. Settings/README/product lifecycle documentation now matches the implemented contract.
-8. PR #102 remains OPEN/DRAFT on its unchanged separate head `db6e886b33dffd93ece130463b184ae371b97684`.
+Root cause of this fresh QA failure is not yet confirmed. Existing code provides three relevant hypotheses that must be distinguished with existing machine-local evidence:
 
-## Validation evidence available
+1. **Memory-pressure eviction:** production still listens to macOS memory pressure. Warning may reduce inactive eligible Warm runtimes toward one; critical may reduce them to zero, bypassing the configured TTL.
+2. **Effective preference mismatch:** the repository maps 30 minutes to 1800 seconds, but the live stored UserDefaults value must be verified on the QA machine.
+3. **Another explicit release/timer path:** an existing lifecycle release may have fired independently of the removed count-based LRU.
 
-Local execution handoff reports:
+Do not infer memory pressure solely from the symptom. Use the existing runtime diagnostic journal to attribute the actual incident.
 
-- RED Hot: proven against original behavior
-- RED Warm: proven against original behavior
-- focused lifecycle/WebViewPool suites: PASS
-- full XCTest suite: PASS
-- Debug build: PASS
-- Release build: PASS (`arm64`)
+## Existing evidence sources
 
-GitHub exact-handoff-head evidence observed by Web:
+Runtime diagnostics are already written under:
 
-- QA DMG: PASS
-- macOS CI: still running at audit time; it is not yet a merge gate result
+`~/Library/Application Support/FloatTabs/Diagnostics/Logs/runtime-YYYYMMDD-NNN.jsonl`
+
+Relevant existing events include:
+
+- `slot_lifecycle.memory_pressure`
+- `slot_lifecycle.release`
+
+No new diagnostics are authorized before checking this incident.
 
 ## Next action
 
-Install a QA build from the current task branch and perform human lifecycle acceptance only:
+Perform one read-only machine-local attribution pass against the currently installed QA incident:
 
-1. Warm: set 30-minute retention and verify ordinary tab switching does not evict the oldest Warm merely because more than two Warm tabs exist.
-2. Hot: verify an inactive Hot tab remains user-ready across ordinary use; if a WebContent termination/recovery is observed, it must recover in the background without selecting/presenting/focusing the tab.
-3. Continue observing the unread red dot, but do not modify unread behavior in this PR.
+- verify raw stored `FloatTabs.performance.warmWebViewRetentionDelay`;
+- inspect existing runtime diagnostics around the release for `slot_lifecycle.memory_pressure` and `slot_lifecycle.release`;
+- determine whether the release aligns with memory pressure, a normal TTL timer, or another existing path;
+- do not reproduce, modify code/tests, clear logs/data, reinstall, merge, or test Hot until this Warm incident is attributed.
 
-After human acceptance, Web will reconcile the final PR head, required exact-head CI, and merge gate.
+Unread/red-dot behavior remains a separate deferred concern.
