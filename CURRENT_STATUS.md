@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ACTIVE — WEB_AUDITED_ASSISTANT_CONTENT_UNIT_FIX_V4**
+**MODE: WAITING_FOR_USER_FIX_V4_ACCEPTANCE**
 
 ## Production authority
 
@@ -19,7 +19,10 @@
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
 - V2 implementation: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
 - V3 implementation: `976b6816c84fdf5e03ae5d089d402927c16626c3`
-- Last installed QA before V4: V3 source `976b6816c84fdf5e03ae5d089d402927c16626c3`, Debug arm64, version 0.5.2 (20)
+- V4 implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`
+- Installed QA: `/Applications/FloatTabs.app`, V4 source `6b5fb9a780073a26f8060e5be8baee284d511339`, Debug arm64, version 0.5.2 (20), running PID 55303
+- V4 focused validation: `ChatGPTResponseExtractionTests` 47/47 passed; `AssistantSpeechCoordinatorTests` 98/98 passed
+- User/WebKit data preservation: metadata inventory and protected hashes matched before/after app-bundle replacement
 - PR #102 is separate MemoX work; excluded and unchanged
 
 ## FT-SPEECH-001 accepted live evidence
@@ -28,6 +31,7 @@
 V1_HUMAN_RESULT=user_message_then_assistant_response
 V2_HUMAN_RESULT=no_speech
 V3_HUMAN_RESULT=no_speech
+V4_HUMAN_ACCEPTANCE=PENDING
 ```
 
 The original defect is localized to ChatGPT response-root ownership:
@@ -158,3 +162,5 @@ After V4 focused GREEN and verified QA installation:
 ```text
 FINAL_STATE=WAITING_FOR_USER_FIX_V4_ACCEPTANCE
 ```
+
+The V4 QA build is installed and running. Do not trigger speech or change product behavior before the user's acceptance result.
