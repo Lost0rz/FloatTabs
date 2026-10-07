@@ -1,90 +1,78 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-SPEECH-001
-**Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`
-**Mode:** `READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE`
+**Title:** ChatGPT Speech Response Ownership — Failed-Fix Review
+**Status:** `WAITING_FOR_WEB_FAILED_FIX_REVIEW`
+**Mode:** `CONTROL_PLANE_RECONCILIATION_ONLY`
 
 ## Current authorized objective
 
-Record the latest user-reported fresh reproduction on installed Speech QA source
-`8e8d6717f698e8c93e80faad7430217c167357e2`, then inspect only existing diagnostic
-logs for that same manual `Read Latest Response` trace. Use schema-backed,
-privacy-safe metadata to classify extraction and speech ownership stages. Do not
-reproduce or trigger speech again.
+Reconcile stale attribution in `CURRENT_STATUS.md` and `CURRENT_TASK.md`. The
+canonical current evidence is the failed live acceptance on fix QA source
+`9c3337ed41722e259d3099cc7b6bd7787f44bf5b` and its existing correlated trace
+`0CEAF62F-7F74-460C-9621-EB8DFD29C250`. This turn changes control files only.
+Record `MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE` as the next scope; do not execute it
+in this control-plane correction.
 
 ```ini
-GATE_3_FRESH_REPRODUCTION=PASS
-QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
-USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
-SYMPTOM_CONFIRMED=YES
-ROOT_CAUSE_CONFIRMED=NO
-NEXT_SCOPE=READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
+USER_FIX_ACCEPTANCE=FAIL
+FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+OBSERVED_AFTER_FIX=user_message_then_assistant_response
+POST_FIX_TRACE_AVAILABLE=YES
+POST_FIX_TRACE_ID=0CEAF62F-7F74-460C-9621-EB8DFD29C250
+POST_FIX_REQUEST_CORRELATION=5EF6B687-C0F3-440E-BB6B-1E8CD344F4A7
+POST_FIX_SESSION=42D75ADB-B191-4C73-95CA-089EC16A281F
+POST_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+SELECTED_PATH=fallback
+ROOT_ELEMENT=div
+BLOCK_COUNT=73
+BLOCK_UNKNOWN_COUNT=73
+UTTERANCE_COUNT=156
+UTTERANCE_UNKNOWN_COUNT=156
+FIRST_SUBMISSION_OWNERSHIP=unknown
+EXPECTED_SUBMISSION_COUNT=156
+FIRST_FIX_DISPOSITION=FAILED_LIVE_ACCEPTANCE
+FIRST_FIX_DID_NOT_REJECT_LIVE_FALLBACK=YES
+FIRST_FIX_TARGET_PATH_NOT_USED_IN_FAILED_ACCEPTANCE=NO
+EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
+NEXT_SCOPE=MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE
 IMPLEMENTATION_PR_AUTHORIZED=NO
 MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
+SECOND_FIX_AUTHORIZED=NO
 ```
 
-This active scope supersedes earlier reproduction, fix, and acceptance phases.
-The reported QA source differs from the prior failed-fix source; keep their
-evidence separate. The observation confirms the symptom, not its cause.
+The 8e QA reproduction and its trace assessment are historical and superseded as
+the latest acceptance. Preserve the independent evidence records, but do not give
+the 8e report current/latest attribution.
 
 ### This turn's hard limits
 
-- Read existing diagnostic logs only; do not add probes or diagnostics.
-- Do not click/trigger `Read Latest Response`, send ChatGPT messages, reload, or reset.
-- Do not change product or test code; do not build, install, open a PR, merge, or run
-  the full suite.
-- Preserve all user, profile, cookie, WebKit, login, preference, and diagnostic data.
-- If no matching trace exists, record it unavailable and stop without asking the
-  user to reproduce again. After classification, stop at
-  `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`.
+- This round may modify only `CURRENT_STATUS.md` and `CURRENT_TASK.md`.
+- Do not execute the topology probe in this round.
+- Do not change product/tests/diagnostics, build/install, trigger speech, send a
+  ChatGPT message, reload/reset, or operate PR #102.
+- `IMPLEMENTATION_PR_AUTHORIZED=NO`, `MERGE_AUTHORIZED=NO`,
+  `FULL_FINAL_SUITE_AUTHORIZED=NO`, and `SECOND_FIX_AUTHORIZED=NO`.
+- Preserve the existing user, profile, cookie, WebKit, login, preference, and
+  diagnostic data.
 
 ## Previous-phase history
 
 The original task reproduced the speech defect, added bounded QA instrumentation,
-authorized a first minimal fix after RED, and recorded a failed live acceptance on
-source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`. Those facts remain historical.
-The current user-reported reproduction is on source `8e8d6717f698e8c93e80faad7430217c167357e2`;
-do not combine the two runs.
+and installed a first minimal fix after RED. The subsequent failed live acceptance
+on source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` is the canonical latest
+acceptance. The earlier 8e run is historical/superseded.
 
-## Current handoff receipt
+## Historical / superseded handoff: earlier 8e reproduction
 
 ```yaml
-TASK_ID: FT-SPEECH-001
-GATE_3_FRESH_REPRODUCTION: PASS
-QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
-USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
-SYMPTOM_CONFIRMED: YES
-ROOT_CAUSE_CONFIRMED: NO
-NEXT_SCOPE: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
-TRACE_STATUS: NO_MATCHING_TRACE_FOR_LATEST_REPORT
-LATEST_REPORTED_REPRODUCTION_TRACE_AVAILABLE: NO
-TRACE_COMPLETE: NO
-TRACE_ID: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-REQUEST_CORRELATION: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-OLDER_QA_SOURCE_TRACE_ID: 9296134E-59C9-4591-A991-2E9143430AB9
-OLDER_QA_SOURCE_REQUEST_CORRELATION: B304B982-F43B-49CC-8ACB-B04C6E77F9A8
-OLDER_QA_SOURCE_TRACE_REUSED_FOR_LATEST_REPORT: NO
-SELECTED_PATH: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-ROOT_ELEMENT: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-BLOCK_COUNT: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-BLOCK_OWNERSHIP_SEQUENCE: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-UTTERANCE_COUNT: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-FIRST_SUBMISSION_OWNERSHIP: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-EXPECTED_SUBMISSION_COUNT: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-ACTUAL_SUBMISSION_COUNT: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-SUBMISSION_COMPLETE: NOT_PRESENT_FOR_LATEST_REPRODUCTION
-PAGE_NOTIFICATION_CAUSAL_STATUS: UNCONFIRMED
-MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
-NEW_SPEECH_TRIGGERED: NO
-PRODUCT_CODE_CHANGED: NO
-TEST_CODE_CHANGED: NO
-IMPLEMENTATION_PR_AUTHORIZED: NO
-MERGE_AUTHORIZED: NO
-FULL_FINAL_SUITE_AUTHORIZED: NO
-PR102_UNCHANGED: YES
-FINAL_STATE: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
+HISTORICAL_QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
+HISTORICAL_USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
+HISTORICAL_TRACE_ID: 9296134E-59C9-4591-A991-2E9143430AB9
+HISTORICAL_REQUEST_CORRELATION: B304B982-F43B-49CC-8ACB-B04C6E77F9A8
+HISTORICAL_TRACE_COMPLETE: NO
+HISTORICAL_TRACE_IS_CURRENT_FAILED_FIX_EVIDENCE: NO
 ```
 
 ## Baseline and identity
@@ -179,7 +167,10 @@ RUNNING_PID=<actual>
 If source provenance cannot be established or another application occupies the
 path unexpectedly, STOP before replacement.
 
-## Authorized scope
+## Historical authorized scope — completed previous phases
+
+The list below records completed earlier work; it does not widen the current
+control-plane-only round or authorize a second fix.
 
 - Minimal QA/DEBUG-only instrumentation on the real `Read Latest Response` path.
 - Focused tests proving that instrumentation is bounded, correlated, and privacy
@@ -197,7 +188,7 @@ path unexpectedly, STOP before replacement.
 - Focused GREEN validation and an exact-head arm64 Debug QA build installed at
   `/Applications/FloatTabs.app`, followed by stop for user acceptance.
 
-## Not authorized yet
+## Historical exclusions from earlier phases
 
 - Production response-selection changes.
 - Production speech/queue/playback behavior changes.
@@ -431,7 +422,7 @@ boundary. Do not claim that the exact live DOM subtree or individual unknown blo
 was proven user-owned. The regression fixture may establish the contract violation
 using the synthetic structural conditions authorized below.
 
-## Gate 1 — Formal TDD RED
+## Previous phase Gate 1 — Formal TDD RED
 
 First modify only `FloatTabsTests/ChatGPTResponseExtractionTests.swift`. Add the
 smallest synthetic fixture with no author-role attributes or explicit assistant
@@ -445,7 +436,7 @@ content together with the assistant response. Run the focused regression first.
 Require `FIRST_RUN=RED` and confirm the existing fallback includes the unrelated
 predecessor in response blocks. If first run is GREEN, STOP; do not write a fix.
 
-## Gate 2 — Minimal production fix after verified RED
+## Previous phase Gate 2 — Minimal production fix after verified RED
 
 ### Gate 1 result — 2026-10-07
 
@@ -472,7 +463,7 @@ Do not use generated CSS, text content, ordering assumptions, block-count
 thresholds, or first-block removal. Do not change SpeechService, SpeechQueue,
 playback, notifications, or broad DOM design.
 
-## Gate 3 — Focused GREEN
+## Previous phase Gate 3 — Focused GREEN
 
 Run the new regression, all `ChatGPTResponseExtractionTests`, and relevant
 `AssistantSpeechCoordinator` / speech extraction tests. Confirm existing valid
@@ -495,7 +486,7 @@ the synthetic regression and test-harness normalization of DEBUG empty results t
 the existing `nil` extraction contract. No speech service, queue, playback, or
 notification production code changed.
 
-## Gate 4 — Build fixed Speech QA
+## Previous phase Gate 4 — Build fixed Speech QA
 
 After focused GREEN, build fresh arm64 Debug QA and replace only
 `/Applications/FloatTabs.app`, preserving all profiles, Slots, cookies, WebKit data,
@@ -546,7 +537,7 @@ Stop on any:
 - QA instrumentation that changes extraction/speech behavior;
 - unrelated product change.
 
-## Historical receipt: prior failed-fix QA trace
+## Current handoff receipt
 
 ```yaml
 TASK_ID: FT-SPEECH-001
@@ -558,13 +549,15 @@ SYNTHETIC_REGRESSION: PASS
 LIVE_BEHAVIOR_FIXED: NO
 CAUSE_LAYER: CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
 EXACT_LIVE_STRUCTURAL_MECHANISM: UNCONFIRMED
-NEXT_SCOPE: READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
+NEXT_SCOPE: MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE
 IMPLEMENTATION_PR_AUTHORIZED: NO
 MERGE_AUTHORIZED: NO
 FULL_FINAL_SUITE_AUTHORIZED: NO
+SECOND_FIX_AUTHORIZED: NO
 POST_FIX_TRACE_AVAILABLE: YES
 POST_FIX_TRACE_ID: 0CEAF62F-7F74-460C-9621-EB8DFD29C250
 REQUEST_CORRELATION: 5EF6B687-C0F3-440E-BB6B-1E8CD344F4A7
+POST_FIX_SESSION: 42D75ADB-B191-4C73-95CA-089EC16A281F
 TRACE_COMPLETE: NO
 TRACE_SOURCE_REVISION: 9c3337ed41722e259d3099cc7b6bd7787f44bf5b
 TRACE_SOURCE_REVISION_EXACT: YES
@@ -602,6 +595,6 @@ NEW_SPEECH_TRIGGERED: NO
 PRODUCT_CODE_CHANGED: NO
 TEST_CODE_CHANGED: NO
 PR102_UNCHANGED: YES
-WORKTREE_STATUS: CLEAN_AFTER_CONTROL_SYNC
-FINAL_STATE: WAITING_FOR_WEB_FAILED_FIX_REVIEW
+WORKTREE_STATUS: CONTROL_FILES_ONLY; CLEAN_AFTER_COMMIT
+FINAL_STATE: READY_FOR_TOPOLOGY_PROBE
 ```

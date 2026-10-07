@@ -12,7 +12,7 @@ Machine-specific worktree paths remain local-only.
 
 ## Mode
 
-**MODE: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
+**MODE: WAITING_FOR_WEB_FAILED_FIX_REVIEW**
 
 ## Production authority
 
@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW**
+**STATUS: WAITING_FOR_WEB_FAILED_FIX_REVIEW**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -119,7 +119,6 @@ ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
 CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
 EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
 EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
-ROOT_CAUSE_CONFIRMED=NO for the latest user reproduction; no matching new trace exists
 PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
 ```
@@ -129,26 +128,22 @@ the confirmed cause layer: a fallback candidate may currently become the respons
 root without proving assistant-only ownership. The exact live DOM subtree remains
 unconfirmed; do not encode generated CSS or a guessed subtree shape.
 
-### Latest user reproduction report — 2026-10-07
+### Historical / superseded Gate 3 reproduction report — QA source 8e8d6717
 
 ```text
 GATE_3_FRESH_REPRODUCTION=PASS
-QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
+HISTORICAL_QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
 USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
 SYMPTOM_CONFIRMED=YES
 ROOT_CAUSE_CONFIRMED=NO
-NEXT_SCOPE=READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
+HISTORICAL_NEXT_SCOPE=READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
 ```
 
-The user reports one fresh reproduction on `/Applications/FloatTabs.app` running
-Speech QA source `8e8d6717f698e8c93e80faad7430217c167357e2`. This source differs
-from the previously recorded failed-fix QA source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`;
-do not conflate their traces. The user action is complete; do not trigger another
-read or request another reproduction. Current authorization is read-only review of
-existing Speech QA logs for this reported run. No new probe/diagnostics, RED,
-production fix, build/install, message, reload/reset, or user/WebKit data cleanup.
+This earlier reproduction report is superseded by the later failed-fix acceptance
+on QA source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`. It is historical context,
+not the current latest user acceptance.
 
-### Read-only log review for the latest report
+### Historical / superseded 8e trace assessment
 
 The existing logs contain one `app.launch` for QA source
 `8e8d6717f698e8c93e80faad7430217c167357e2` (session
@@ -157,21 +152,12 @@ recorded manual-read trace `9296134E-59C9-4591-A991-2E9143430AB9` / correlation
 `B304B982-F43B-49CC-8ACB-B04C6E77F9A8` at `2026-10-07T02:55:02Z`. That older trace
 has four ordered events and no `submission_summary`; it is already recorded under
 the prior Gate 4 evidence. The only later Speech QA trace in the existing logs is
-from source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` at `04:06:56Z`. No new
-source-8e8d6717 trace/session is present to bind to the latest user report. Do not
-reuse either older trace as evidence for this new reproduction or combine runs.
+from source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` at `04:06:56Z`. At that
+historical review point, no additional 8e trace was available for the report then
+under review. This assessment is superseded; do not use it as current attribution.
 
-```text
-LATEST_REPORTED_REPRODUCTION_TRACE_AVAILABLE=NO
-ROOT_CAUSE_CONFIRMED=NO
-NEXT_SCOPE=WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
-PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
-MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
-NEW_SPEECH_TRIGGERED=NO
-PRODUCT_CODE_CHANGED=NO
-TEST_CODE_CHANGED=NO
-FINAL_STATE=WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
-```
+This assessment concerns only the earlier 8e report. The later 9c failed-fix trace
+is recorded as the canonical current acceptance below.
 
 ### Accepted prior Gate 1 evidence
 
@@ -199,7 +185,7 @@ prove how the user's own message reaches spoken output. The temporary structural
 probe was removed. The result remains evidence, but it is not sufficient to enter
 a speculative production fix.
 
-### Reproduction strategy and current disposition
+### Historical reproduction strategy and pre-fix disposition
 
 The minimal QA instrumentation, exact-head install, one fresh user-triggered
 reproduction, read-only evidence review, and Web root-cause review are complete.
@@ -227,7 +213,7 @@ No production response-selection or speech behavior change is authorized before 
 live user-triggered reproduction establishes the causal boundary and the formal RED
 gate passes.
 
-### Gate 2 — Speech QA installed
+### Historical Gate 2 — Speech QA installed
 
 Gate 2 completed on 2026-10-07. Exact QA source is
 `8e8d6717f698e8c93e80faad7430217c167357e2`; focused instrumentation tests passed
@@ -247,7 +233,7 @@ normal startup write; it does not claim byte-for-byte immutability of that file.
 PR #102 remains OPEN/DRAFT at
 `db6e886b33dffd93ece130463b184ae371b97684`, unchanged.
 
-### Gate 3 — Fresh user reproduction
+### Historical Gate 3 — Fresh user reproduction on QA source 8e8d6717
 
 ```text
 GATE_3_FRESH_REPRODUCTION=PASS
@@ -262,9 +248,10 @@ it spoke the user's question, then the latest ChatGPT response. This confirms th
 reported symptom as a user observation; the causal boundary is not yet established
 by the QA trace.
 
-### Gate 4 — Read-only existing Speech QA evidence
+### Historical Gate 4 — Read-only 8e Speech QA evidence
 
-The latest same-session trace is `9296134E-59C9-4591-A991-2E9143430AB9`, request
+At that earlier stage, the latest same-session trace was
+`9296134E-59C9-4591-A991-2E9143430AB9`, request
 correlation `B304B982-F43B-49CC-8ACB-B04C6E77F9A8`, in
 `runtime-20261007-001.jsonl`. Its four valid events are ordered at sequences 318–321
 in one second: `read_requested` (`stage=read_latest`), `payload_received`,
@@ -291,7 +278,7 @@ extraction ownership boundary as recorded below; it does not establish the exact
 live DOM subtree. Page-notification causality is `UNCONFIRMED`; macOS Notification
 Center causality is `UNOBSERVED`.
 
-### Web root-cause review disposition
+### Historical Web root-cause review disposition
 
 The subsequent Web review confirms the root-cause boundary as
 `CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY`. The fallback candidate
@@ -299,15 +286,15 @@ is permitted to become a response root without positive assistant-only ownership
 proof. The exact live DOM subtree is not confirmed. The raw trace remains as
 recorded above; `unknown` does not negate the independently reviewed boundary.
 
-**Authorized work:** the synthetic formal TDD RED in
+At that earlier stage, the synthetic formal TDD RED in
 `FloatTabsTests/ChatGPTResponseExtractionTests.swift` passed its gate. The minimal
-production fix in `FloatTabs/Web/ChatGPTResponseExtraction.swift` is now authorized.
+production fix in `FloatTabs/Web/ChatGPTResponseExtraction.swift` was then authorized.
 No new diagnostics or user reproduction before the fixed QA; no TTS, queue/playback,
 or notification work. Keep explicit assistant/article paths, response identity,
 locator/follow behavior, and generation state intact. Build and install fresh arm64
 Debug QA only after focused GREEN, then stop for user acceptance.
 
-### Formal TDD RED result
+### Historical formal TDD RED result
 
 `testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent` failed
 on its first focused run against unchanged production source. A focused follow-up
@@ -334,17 +321,33 @@ LIVE_BEHAVIOR_FIXED=NO
 IMPLEMENTATION_PR_AUTHORIZED=NO
 MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
-NEXT_SCOPE=READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
+SECOND_FIX_AUTHORIZED=NO
+POST_FIX_TRACE_AVAILABLE=YES
+POST_FIX_TRACE_ID=0CEAF62F-7F74-460C-9621-EB8DFD29C250
+POST_FIX_REQUEST_CORRELATION=5EF6B687-C0F3-440E-BB6B-1E8CD344F4A7
+POST_FIX_SESSION=42D75ADB-B191-4C73-95CA-089EC16A281F
+POST_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+SELECTED_PATH=fallback
+ROOT_ELEMENT=div
+BLOCK_COUNT=73
+BLOCK_UNKNOWN_COUNT=73
+UTTERANCE_COUNT=156
+UTTERANCE_UNKNOWN_COUNT=156
+FIRST_SUBMISSION_OWNERSHIP=unknown
+EXPECTED_SUBMISSION_COUNT=156
+FIRST_FIX_DID_NOT_REJECT_LIVE_FALLBACK=YES
+FIRST_FIX_TARGET_PATH_NOT_USED_IN_FAILED_ACCEPTANCE=NO
+EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
+NEXT_SCOPE=MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE
 ```
 
 The user reports the original speech order on the installed fix QA. This
 supersedes the synthetic regression as evidence of live behavior. The first fix
 used `hasSiblingResponseContentBranches` and `hasNonAssistantOwnershipMarker`;
 do not stack another production fix. The exact live structural mechanism remains
-unconfirmed. Current authorization is limited to reading existing diagnostics
-from that failed acceptance, then stopping for Web review. Do not trigger speech,
-send a ChatGPT message, reload/reset, add probes/diagnostics/tests, change product
-code, rebuild/reinstall, or clear user/WebKit data.
+unconfirmed. The next authorized scope is a minimal live fallback topology probe.
+This control-plane-only correction does not execute that probe. A second fix,
+implementation PR, merge, and full final suite remain unauthorized.
 
 The existing `runtime-20261007-001.jsonl` contains the latest same-session manual
 read trace for the user-reported acceptance: trace
@@ -375,10 +378,10 @@ MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
 NEW_SPEECH_TRIGGERED=NO
 PRODUCT_CODE_CHANGED=NO
 TEST_CODE_CHANGED=NO
-FINAL_STATE=WAITING_FOR_WEB_FAILED_FIX_REVIEW
+FINAL_STATE=READY_FOR_TOPOLOGY_PROBE
 ```
 
-### Focused GREEN result
+### Historical focused GREEN result
 
 The bounded fallback change and regression are green. On 2026-10-07, the focused
 arm64 XCTest run executed all 42 `ChatGPTResponseExtractionTests` and all 98
@@ -386,7 +389,7 @@ arm64 XCTest run executed all 42 `ChatGPTResponseExtractionTests` and all 98
 the extraction boundary and relevant speech coordination regressions; the final
 full suite remains explicitly out of scope.
 
-### Gate 4 — Fixed Speech QA installed
+### Historical Gate 4 — Fixed Speech QA installed before failed acceptance
 
 ```text
 APP_PATH=/Applications/FloatTabs.app
@@ -425,10 +428,9 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-The latest user report has no distinct matching existing trace. Do not reuse older
-8e8d6717 or 9c3337ed evidence as the new run. Stop at
-`WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`; no new fix, RED, diagnostics, build,
-installation, implementation PR, merge, or full suite is authorized.
+The canonical latest acceptance is the failed fix QA trace from 9c3337ed. The
+older 8e8d6717 attribution above is historical and superseded. The next scope is
+`MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE`; this round only reconciles control files.
 
 ## Historical evidence
 
