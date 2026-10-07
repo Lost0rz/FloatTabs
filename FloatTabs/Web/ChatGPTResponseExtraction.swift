@@ -65,7 +65,8 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             '[data-math],[data-latex],[data-tex],[role="math"]';
           const RESPONSE_EXCLUDED_SELECTOR =
             'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
-            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"],' +
+            'h4[data-conversation-role="assistant"]';
 
           const safeCanonicalStableValue = (value) => {
             if (!value || value.length > 160) return null;
@@ -115,17 +116,26 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
               'input,textarea,[contenteditable="true"],[role="textbox"]'
             ));
 
-          const hasResponseContent = (root) =>
-            Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)).some(
+          const hasResponseContent = (root) => {
+            const candidates = [];
+            if (root && root.matches && root.matches(RESPONSE_CONTENT_SELECTOR)) {
+              candidates.push(root);
+            }
+            candidates.push(...Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
+            return candidates.some(
               (element) => isRendered(element)
                 && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
             );
+          };
 
           const hasNonAssistantOwnershipMarker = (root) => {
             const selector = [
               '[data-message-author-role="user"]',
               '[data-message-role="user"]',
               '[data-testid*="conversation-turn-user"]',
+              '[data-turn="user"]',
+              '[data-conversation-role="user"]',
+              '[data-user-message-bubble]',
               'input,textarea,[contenteditable="true"],[role="textbox"]',
               '[role="status"],[data-testid*="status"],[role="alert"]',
               '[aria-live]:not([aria-live="off"])'
@@ -135,6 +145,64 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                 || (root.querySelector && root.querySelector(selector))
             );
           };
+
+          const ASSISTANT_ROLE_MARKER_SELECTOR =
+            '[data-message-author-role="assistant"],[data-message-role="assistant"]';
+          const CONTENT_UNIT_SELECTOR = '[data-content-search-unit-key]';
+          const ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR =
+            '[data-conversation-role="assistant"],[data-chatgpt-agent-turn-start]';
+
+          const isAssistantSemanticConversationTurn = (turn) => {
+            if (!turn || !turn.matches
+                || !turn.matches('[data-testid*="conversation-turn"]')) {
+              return false;
+            }
+            return turn.getAttribute('data-turn') === 'assistant'
+              || turn.getAttribute('data-message-author-role') === 'assistant'
+              || turn.getAttribute('data-message-role') === 'assistant'
+              || Boolean(turn.querySelector(ASSISTANT_ROLE_MARKER_SELECTOR));
+          };
+
+          const hasMarkerWithinContentUnit = (unit, selector) => {
+            if (unit.matches && unit.matches(selector)) return true;
+            return Array.from(unit.querySelectorAll(selector)).some(
+              (marker) => marker.closest(CONTENT_UNIT_SELECTOR) === unit
+            );
+          };
+
+          const hasResponseContentWithinContentUnit = (unit) => {
+            const candidates = [];
+            if (unit.matches && unit.matches(RESPONSE_CONTENT_SELECTOR)) {
+              candidates.push(unit);
+            }
+            candidates.push(...Array.from(unit.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
+            return candidates.some((element) =>
+              element.closest(CONTENT_UNIT_SELECTOR) === unit
+                && isRendered(element)
+                && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+            );
+          };
+
+          const isAssistantContentUnit = (unit) => Boolean(
+            unit
+              && unit.matches
+              && unit.matches(CONTENT_UNIT_SELECTOR)
+              && isRendered(unit)
+              && !isComposerContainer(unit)
+              && !hasNonAssistantOwnershipMarker(unit)
+              && hasMarkerWithinContentUnit(
+                unit,
+                ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR
+              )
+              && hasResponseContentWithinContentUnit(unit)
+          );
+
+          const isPositiveAssistantRoot = (root) => Boolean(
+            root
+              && isRendered(root)
+              && !isComposerContainer(root)
+              && !hasNonAssistantOwnershipMarker(root)
+          );
 
           const nearestSemanticConversationTurn = (element) => {
             let ancestor = element && element.parentElement;
@@ -183,49 +251,65 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             return null;
           };
 
-          const assistantResponseRoots = () => {
-            const explicit = Array.from(document.querySelectorAll(
-              '[data-message-author-role="assistant"],'
-              + '[data-message-role="assistant"]'
-            ));
-            if (explicit.length) return explicit.filter(isRendered);
+          const positiveAssistantRoots = () => {
+            const candidates = [];
+            const seen = new Set();
+            const addCandidate = (root) => {
+              if (!isPositiveAssistantRoot(root) || seen.has(root)) return;
+              seen.add(root);
+              candidates.push(root);
+            };
 
-            const semanticTurns = Array.from(document.querySelectorAll(
-              '[data-testid*="conversation-turn"]'
-            )).filter((turn) => {
-              const role = turn.getAttribute('data-message-author-role')
-                || turn.querySelector('[data-message-author-role]')
-                  ?.getAttribute('data-message-author-role');
-              return role === 'assistant' && isRendered(turn);
+            Array.from(document.querySelectorAll(ASSISTANT_ROLE_MARKER_SELECTOR))
+              .forEach(addCandidate);
+
+            Array.from(document.querySelectorAll(
+              '[data-testid*="conversation-turn"][data-turn="assistant"]'
+            )).forEach(addCandidate);
+
+            Array.from(document.querySelectorAll('[data-testid*="conversation-turn"]'))
+              .filter(isAssistantSemanticConversationTurn)
+              .forEach(addCandidate);
+
+            Array.from(document.querySelectorAll(CONTENT_UNIT_SELECTOR))
+              .filter(isAssistantContentUnit)
+              .forEach(addCandidate);
+
+            const narrowed = candidates.filter((candidate) =>
+              !candidates.some((other) =>
+                other !== candidate
+                  && candidate.contains(other)
+                  && hasResponseContent(other)
+              )
+            );
+            return narrowed.sort((left, right) => {
+              if (left === right) return 0;
+              const position = left.compareDocumentPosition(right);
+              if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+              if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+              return 0;
             });
-            if (semanticTurns.length) return semanticTurns;
+          };
 
+          const assistantResponseRoots = () => {
+            const positiveRoots = positiveAssistantRoots();
+            if (positiveRoots.length) return positiveRoots;
             const fallback = latestRegenerateOwnedResponse();
             return fallback ? [fallback] : [];
           };
 
           const assistantResponseRootFor = (eventTarget) => {
-            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+            const element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
               ? eventTarget
               : eventTarget?.parentElement;
-            while (element) {
-              if (element.matches
-                  && element.matches(
-                    '[data-message-author-role="assistant"],'
-                      + '[data-message-role="assistant"]'
-                  )) {
-                return element;
-              }
-              if (element.matches
-                  && element.matches('[data-testid*="conversation-turn"]')) {
-                const role = element.getAttribute('data-message-author-role')
-                  || element.querySelector('[data-message-author-role]')
-                    ?.getAttribute('data-message-author-role');
-                return role === 'assistant' ? element : null;
-              }
-              element = element.parentElement;
-            }
-            return null;
+            if (!element) return null;
+            const containingRoots = positiveAssistantRoots().filter(
+              (root) => root === element || root.contains(element)
+            );
+            return containingRoots.reduce((selected, candidate) => {
+              if (!selected || selected.contains(candidate)) return candidate;
+              return selected;
+            }, null);
           };
 
           const latestAssistantResponseRoot = () => {
@@ -283,6 +367,7 @@ enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
 enum ChatGPTResponseExtractionPath: String, CaseIterable, Equatable, Sendable {
     case explicit
     case semanticTurn = "semantic_turn"
+    case contentUnit = "content_unit"
     case fallback
     case none
 }
@@ -553,9 +638,12 @@ enum ChatGPTResponseExtraction {
 #if DEBUG
         let speechDiagnosticsHelpers = """
           const speechAssistantSelector =
-            '[data-message-author-role="assistant"],[data-message-role="assistant"]';
+            '[data-message-author-role="assistant"],[data-message-role="assistant"],' +
+            '[data-turn="assistant"],[data-conversation-role="assistant"],' +
+            '[data-chatgpt-agent-turn-start]';
           const speechUserSelector =
-            '[data-message-author-role="user"],[data-message-role="user"]';
+            '[data-message-author-role="user"],[data-message-role="user"],' +
+            '[data-turn="user"],[data-conversation-role="user"],[data-user-message-bubble]';
           const speechComposerSelector =
             'input,textarea,[contenteditable="true"],[role="textbox"]';
           const speechStatusSelector = '[role="status"],[data-testid*="status"]';
@@ -573,8 +661,9 @@ enum ChatGPTResponseExtraction {
           };
           const speechSelectedPath = (root) => {
             if (!root) return "none";
-            if (root.matches && root.matches(speechAssistantSelector)) return "explicit";
-            if (root.matches && root.matches('[data-testid*="conversation-turn"]')) {
+            if (root.matches && root.matches(ASSISTANT_ROLE_MARKER_SELECTOR)) return "explicit";
+            if (isAssistantContentUnit(root)) return "content_unit";
+            if (isAssistantSemanticConversationTurn(root)) {
               return "semantic_turn";
             }
             return "fallback";
@@ -593,7 +682,8 @@ enum ChatGPTResponseExtraction {
             if (hasWithinRoot(speechComposerSelector)) return "composer";
             if (hasWithinRoot(speechStatusSelector)
                 || hasWithinRoot(speechLiveRegionSelector)) return "status_live";
-            if (hasWithinRoot(speechAssistantSelector)) return "assistant_owned";
+            if (hasWithinRoot(speechAssistantSelector)
+                || isAssistantContentUnit(root)) return "assistant_owned";
             return "unknown";
           };
           const makeSpeechDiagnostics = (root, blocks) => ({
@@ -704,7 +794,8 @@ enum ChatGPTResponseExtraction {
             '[data-math],[data-latex],[data-tex],[role="math"]';
           const excludedSelector =
             'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
-            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"],' +
+            'h4[data-conversation-role="assistant"]';
 
           const isExcluded = (element) => {
             if (!element || !element.closest) return false;

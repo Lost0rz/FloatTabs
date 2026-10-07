@@ -426,6 +426,76 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.map(\.text), ["Current semantic response."])
     }
 
+    func testGroupedRendererAssistantContentUnitSelectsOnlyAssistantAnswer() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-turn-key="turn-1">
+          <div data-content-search-unit-key="turn-1:0:user">
+            <div data-user-message-bubble>
+              <p>User prompt must not be spoken.</p>
+            </div>
+          </div>
+          <div data-content-search-unit-key="turn-1:1:assistant">
+            <h4 class="sr-only" data-conversation-role="assistant">ChatGPT said:</h4>
+            <div data-markdown-text-style="assistant-message">
+              <p>Assistant answer only.</p>
+            </div>
+          </div>
+          <div class="turn-action-controls">
+            <button data-testid="copy-turn-action-button">Copy</button>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.kind, .response)
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Assistant answer only."])
+        XCTAssertFalse(payload?.blocks.map(\.text).contains("User prompt must not be spoken.") == true)
+    }
+
+    func testDataTurnAssistantSectionIsPositiveRootWithoutRegenerate() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <section data-testid="conversation-turn-42" data-turn="assistant">
+          <div><p>Assistant turn answer.</p></div>
+        </section>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.kind, .response)
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Assistant turn answer."])
+    }
+
+    func testLatestAssistantAcrossMixedRendererGenerations() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-message-author-role="assistant">
+          <p>Older assistant answer.</p>
+        </div>
+        <div data-turn-key="new-turn">
+          <div data-content-search-unit-key="new-turn:0:user">
+            <div data-user-message-bubble><p>Newest user prompt.</p></div>
+          </div>
+          <div data-content-search-unit-key="new-turn:1:assistant">
+            <h4 class="sr-only" data-conversation-role="assistant">ChatGPT said:</h4>
+            <div data-markdown-text-style="assistant-message">
+              <p>Newest assistant answer.</p>
+            </div>
+          </div>
+        </div>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let texts = payload?.blocks.map(\.text) ?? []
+        XCTAssertEqual(payload?.kind, .response)
+        XCTAssertEqual(texts, ["Newest assistant answer."])
+        XCTAssertFalse(texts.contains("Older assistant answer."))
+        XCTAssertFalse(texts.contains("Newest user prompt."))
+    }
+
     func testRegenerateFallbackAcceptsTagAgnosticSemanticConversationTurnSection() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
