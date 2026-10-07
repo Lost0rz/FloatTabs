@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: ACTIVE — USER-TRIGGERED SPEECH REPRODUCTION AUTHORIZED**
+**STATUS: WAITING_FOR_USER_SPEECH_REPRODUCTION**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -177,6 +177,26 @@ No production response-selection or speech behavior change is authorized before 
 live user-triggered reproduction establishes the causal boundary and the formal RED
 gate passes.
 
+### Gate 2 — Speech QA installed
+
+Gate 2 completed on 2026-10-07. Exact QA source is
+`8e8d6717f698e8c93e80faad7430217c167357e2`; focused instrumentation tests passed
+125/125, and a fresh arm64 Debug build was installed at `/Applications/FloatTabs.app`
+as version `0.5.2` build `20`. Installed bundle provenance and signature verified;
+the running PID was `81252` from the canonical Applications path.
+
+Installation replaced only the app bundle. The existing Preferences file, the three
+WebKit data roots, and all pre-existing diagnostic files remained present; WebKit
+directory identities and prior diagnostic-file identities were unchanged. Normal
+application startup reserialized `WebAppProfiles.json` while restoring its existing
+configuration (the live JSON remains parseable, version 2, with 12 Slots and one
+Browser Profile). No profile, cookie, WebKit, preference, or diagnostic reset was
+performed. No ChatGPT message or speech action was triggered. This records the
+normal startup write; it does not claim byte-for-byte immutability of that file.
+
+PR #102 remains OPEN/DRAFT at
+`db6e886b33dffd93ece130463b184ae371b97684`, unchanged.
+
 ## Separate work
 
 PR #102 remains separate MemoX durable-outbox work, OPEN/DRAFT at the previously
@@ -185,10 +205,11 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-Build the bounded user-triggered Speech QA, install it to
-`/Applications/FloatTabs.app`, verify exact provenance and preserved state, then
-stop for the user's one-action reproduction unless the current task explicitly
-allows automated evidence collection after that action.
+Speech QA is installed at `/Applications/FloatTabs.app` and verified. Wait for the
+user to open/select a normal ChatGPT conversation and trigger `Read Latest Response`
+once. Do not send a ChatGPT message, trigger speech on the user's behalf, enter
+formal RED, or implement a production fix before reviewing that user-triggered
+evidence and updating task authority.
 
 The implementation PR must not be merged until the task reaches
 `WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.

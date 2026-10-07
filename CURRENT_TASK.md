@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `ACTIVE — BUILD_AND_INSTALL_SPEECH_QA`
+**Status:** `WAITING_FOR_USER_SPEECH_REPRODUCTION`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -235,6 +235,26 @@ READY_FOR_USER_REPRODUCTION=YES
 ```
 
 Do not manufacture a ChatGPT response. The user performs the next action.
+
+### Gate 2 result — 2026-10-07
+
+- `SPEECH_QA_INSTALLED=YES`
+- `SOURCE_HEAD=8e8d6717f698e8c93e80faad7430217c167357e2`
+- Focused instrumentation XCTest: 125 passed, 0 failed.
+- Fresh exact-head build: Debug, arm64, FloatTabs `0.5.2` build `20`; source
+  tree clean and source revision exact. Code signature verified.
+- `APP_PATH=/Applications/FloatTabs.app`; `BUNDLE_ID=com.lost0rz.FloatTabs`;
+  installed source matches the QA HEAD; running PID `81252` uses the canonical
+  Applications executable path.
+- UserDefaults plist, WebKit data-root identities, and all pre-existing diagnostic
+  file identities remained present and unchanged. Normal application startup
+  reserialized the existing `WebAppProfiles.json`; it remains parseable as state
+  version 2 with 12 Slots and one Browser Profile. No profile, cookie, WebKit,
+  preference, or diagnostic reset was performed. Byte-for-byte immutability of the
+  normal startup-written profile file is not claimed.
+- PR #102 remains OPEN/DRAFT at `db6e886b33dffd93ece130463b184ae371b97684`.
+- No ChatGPT message was sent and no speech was triggered. Stop here for the user's
+  one-action reproduction.
 
 ## Gate 3 — User-triggered reproduction
 
