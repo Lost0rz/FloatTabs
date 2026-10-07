@@ -10,120 +10,84 @@
 
 ## Mode
 
-**MODE: WAITING_FOR_USER_FIX_V2_ACCEPTANCE**
+**MODE: ACTIVE — TAG_AGNOSTIC_CONVERSATION_TURN_FIX_V3**
 
 ## Production authority
 
-- Worktree identity: `ft-speech-001-v2-isolated`
 - Implementation branch: `fix/chatgpt-speech-response-ownership`
 - Expected upstream: `origin/fix/chatgpt-speech-response-ownership`
-- Accepted implementation base: `main` at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- Execution branch: `codex/ft-speech-001-v2` (user-authorized isolated worktree)
-- V2 implementation commit: `3e707eb4725bc4549daf991d4d08ffa9f50745b7` (pushed by fast-forward)
-- Installed QA source: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
-- Installed app: `/Applications/FloatTabs.app`, build `20`, arm64, running PID `38242`
-- Control PR #114: merged
+- Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
+- V2 implementation commit: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
+- Last installed QA source: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
 - PR #102: separate MemoX work; excluded and unchanged
 
-## Canonical failed-fix evidence
+## FT-SPEECH-001 accepted facts
+
+Original live defect:
 
 ```text
-USER_FIX_ACCEPTANCE=FAIL
-FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
-OBSERVED_AFTER_FIX=user_message_then_assistant_response
-POST_FIX_TRACE_ID=0CEAF62F-7F74-460C-9621-EB8DFD29C250
-SELECTED_PATH=fallback
-ROOT_ELEMENT=div
-BLOCK_COUNT=73
-UTTERANCE_COUNT=156
-FIRST_FIX_DID_NOT_REJECT_LIVE_FALLBACK=YES
-```
-
-## Web code-audit verdict
-
-```text
-ROOT_CAUSE_CONFIRMED=YES
-CAUSE_LAYER=CHATGPT_RESPONSE_EXTRACTION_ROOT_OWNERSHIP_CONTRACT
+V1_USER_ACCEPTANCE=FAIL
+OBSERVED=user_message_then_assistant_response
+ROOT_CAUSE=CHATGPT_RESPONSE_EXTRACTION_ROOT_OWNERSHIP_CONTRACT
 TTS_CAUSAL=NO
-SPEECH_QUEUE_CAUSAL=NO
-CONTENT_CLEANER_CAUSAL=NO
-FIRST_FIX_FAILURE=NEGATIVE_HEURISTICS_WITHOUT_POSITIVE_OWNERSHIP
+QUEUE_CAUSAL=NO
+CLEANER_CAUSAL=NO
 ```
 
-The production path is:
+V2 changed Regenerate fallback from arbitrary generic ancestors to a positive semantic conversation-turn boundary and passed focused RED/GREEN validation. Installed V2 source was `3e707eb4725bc4549daf991d4d08ffa9f50745b7`.
+
+## V2 human acceptance result
 
 ```text
-Read Latest Response
-→ assistantResponseRoots()
-→ latestRegenerateOwnedResponse() fallback
-→ structuredBlocks(root)
-→ payload.blocks
-→ utteranceRequests(payload.blocks)
-→ speech queue / TTS
+V2_HUMAN_ACCEPTANCE=FAIL_COMPATIBILITY
+OBSERVED_AFTER_V2=NO_SPEECH
+UNSAFE_USER_TEXT_SPOKEN=NO
 ```
 
-The fallback can admit a generic ancestor without positive response ownership. `structuredBlocks` then recursively extracts all semantic content below it. Production blocks do not retain author identity, so downstream speech code cannot recover ownership after a broad root is accepted.
+The safety side of V2 is working: the old broad ancestor is no longer admitted. The compatibility side is too strict.
 
-## Correct V2 contract
+## V2 implementation mismatch
+
+The intended V2 contract was **nearest semantic conversation-turn boundary**, tag-agnostic.
+
+The committed implementation instead hard-qualified the fallback boundary as:
+
+```text
+article[data-testid*="conversation-turn"]
+```
+
+This is narrower than the intended semantic contract.
+
+Current external live-site evidence independently confirms ChatGPT changed its conversation-turn outer element from `<article>` to `<section>` while retaining semantic turn attributes such as `data-testid="conversation-turn-N"` and `data-turn="assistant|user"`; robust integrations fixed this by making conversation-turn matching tag-agnostic.
+
+Therefore the smallest supported next hypothesis is now sufficiently evidenced:
+
+```text
+V2_COMPATIBILITY_ROOT_CAUSE=TAG_QUALIFIED_CONVERSATION_TURN_SELECTOR
+EXPECTED_SAFE_FIX=TAG_AGNOSTIC_SEMANTIC_CONVERSATION_TURN_SELECTOR
+```
+
+No topology probe is required before V3.
+
+## V3 production contract
 
 - Preserve explicit assistant-role roots.
-- Preserve role-proven assistant conversation-turn roots.
-- Regenerate fallback may use only the nearest qualifying semantic conversation-turn boundary containing that action.
-- The turn must be rendered, response-bearing, contain exactly one applicable Regenerate action, and contain no explicit user/composer/status/alert/live ownership marker.
-- If no qualifying semantic turn exists, fail closed.
-- Never manufacture response ownership by ascending to an arbitrary generic ancestor.
+- Preserve role-proven semantic conversation-turn roots.
+- Regenerate fallback must use the nearest semantic conversation-turn container identified by stable semantic attributes, regardless of whether the element tag is `article`, `section`, or another tag.
+- Use tag-agnostic selector `[data-testid*="conversation-turn"]`; do not use generated CSS classes.
+- Keep existing rendered/content/action/non-assistant-marker validation.
+- If no qualifying semantic conversation-turn exists, fail closed.
+- Never restore arbitrary ancestor fallback.
 
-## V2 implementation and QA evidence
+## Authorization
 
-```text
-V2_RED_TEST=PASS_ON_FIRST_RUN
-RED_ACTUAL_BEHAVIOR=generic fallback emitted predecessor and intended-response blocks as unknown ownership
-FOCUSED_TESTS=141 passed, 0 failed across ChatGPTResponseExtractionTests and AssistantSpeechCoordinatorTests
-ARM64_DEBUG_BUILD=PASS
-INSTALLED_SOURCE_TREE_STATE=clean
-USER_DATA_PRESERVED=YES
-```
+Authorized now:
 
-The installed bundle reports `com.lost0rz.FloatTabs`, version `0.5.2` (build `20`),
-arm64, and exact source revision `3e707eb4725bc4549daf991d4d08ffa9f50745b7`. The
-Profiles/Slots state file and preferences retained identical content; all
-pre-existing WebKit paths and diagnostic-log paths remained present. Only the app
-bundle was replaced. One new Debug runtime file,
-`Application Support/FloatTabs/BenchmarkControl.json`, was created for PID
-`38242` with mode `0600`; its loopback-control token was not read or recorded. No
-Read Latest Response action was triggered.
-
-## Superseded local topology commit disposition
-
-A local-only commit was created from the now-cancelled topology-probe scope:
-
-```text
-LOCAL_SUPERSEDED_COMMIT=0a3588bf6e4675d897aa02b336c1349ef090b692
-LOCAL_SUPERSEDED_PARENT=777fa7a9390236c14f2ee1a5266818b592eb451c
-LIFECYCLE=SUPERSEDED_BY_WEB_CODE_AUDIT
-PRODUCT_BEHAVIOR_CHANGE=NO
-VALIDATION=NOT_FINAL; 73 focused tests passed before the final probe simplification, but this exact commit was not rerun
-```
-
-This commit remains in the original clean checkout at `0a3588bf6e4675d897aa02b336c1349ef090b692`, preserved by the remote archive tag below. It was not reset, merged, cherry-picked, rebased, tested for V2, or used as the V2 base. Its lifecycle remains `SUPERSEDED_BY_WEB_CODE_AUDIT`.
-
-Verified archive disposition:
-
-```text
-ARCHIVE_TAG=archive/ft-speech-001-topology-probe-superseded-20261007
-ARCHIVE_TARGET=0a3588bf6e4675d897aa02b336c1349ef090b692
-ARCHIVE_REMOTE_VERIFIED=YES
-ORIGINAL_CHECKOUT_UNCHANGED=YES
-FORCE_PUSH_IMPLEMENTATION_BRANCH=NO
-CHERRY_PICK_TOPOLOGY_COMMIT=NO
-```
-
-## Current authorization
-
-V2 implementation, focused validation, arm64 Debug QA installation, and normal
-fast-forward publication to the implementation branch are complete. The installed
-build is awaiting human acceptance. The next action is to receive the user's
-observation; do not trigger speech or modify the product before that result.
+1. one formal RED proving a `<section data-testid="conversation-turn-…">` Regenerate turn is incorrectly rejected by V2;
+2. minimal tag-agnostic selector fix in `ChatGPTResponseExtraction.swift` only;
+3. focused extraction + relevant speech regression tests;
+4. exact-head arm64 Debug build/install at `/Applications/FloatTabs.app` preserving user state;
+5. stop for one human acceptance click.
 
 Not authorized:
 
@@ -140,8 +104,8 @@ FULL_FINAL_SUITE_AUTHORIZED=NO
 
 ## Required next state
 
-The task is stopped at:
+After V3 focused GREEN and verified QA installation:
 
 ```text
-FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
+FINAL_STATE=WAITING_FOR_USER_FIX_V3_ACCEPTANCE
 ```
