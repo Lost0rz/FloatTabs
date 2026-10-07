@@ -10,65 +10,69 @@
 
 ## Mode
 
-**MODE: WAITING_FOR_INDEPENDENT_WEB_AUDIT**
+**MODE: WEB_AUDIT_PASS — QA_ACCEPTANCE_AUTHORIZED**
 
 ## Production authority
 
 - Live accepted `main`: `569e43783a98c8caca681ce8139ec87dd4fa276e`
 - Active branch: `fix/residency-lifecycle-semantics`
+- PR: `#116` (Draft)
 - Task: `FT-LIFECYCLE-001`
-- Previous `FT-SPEECH-001` is closed in production: PR #115 merged as `569e43783a98c8caca681ce8139ec87dd4fa276e`
+- Product implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
+- Independently audited handoff head: `94aa9bf1633ccff427d49db09e42e540b65b760e`
 - PR #102 remains separate MemoX Draft work and is excluded from this task
 
-## Web code-audit verdict
+## Confirmed pre-fix defects
 
 ### Warm retention
 
-The Settings value is wired correctly and updates the running lifecycle coordinator immediately. `30 minutes` is persisted as `1800` seconds and `.floatTabsSlotRetentionDidChange` calls `SlotLifecycleCoordinator.updateReleaseDelays(...)`.
-
-However, the configured Warm delay is not the only normal release authority. `SlotLifecycleCoordinator` also enforces a hidden `warmResidentLimit = 2`: when a third non-protected inactive Warm runtime enters the cache, the least-recent Warm runtime can be released immediately without waiting for its configured retention delay. macOS memory-pressure warning may reduce inactive Warm to one and critical pressure may reduce it to zero.
-
-Therefore the current user-visible setting behaves as a maximum TTL, not as an ordinary-case retention guarantee. The Settings wording does not expose that hidden LRU cap. This explains why selecting `30 minutes` can feel materially shorter than 30 minutes.
-
-**Verdict:** `CONFIRMED — NORMAL WARM LRU CAN PREEMPT THE USER-SELECTED RETENTION DELAY`.
+The Settings value is persisted and live-wired correctly, but ordinary lifecycle logic also enforced a hidden two-Warm LRU cap. A third inactive Warm runtime could therefore release the oldest Warm runtime before the configured 2/5/10/30-minute TTL.
 
 ### Hot runtime
 
-The lifecycle coordinator itself does not proactively evict Hot. Hot receives no inactive release timer, normal Warm LRU does not target it, and the Warm memory-pressure path does not release it.
-
-A separate WebKit recovery path creates a user-visible Hot failure mode: if WebKit terminates the WebContent process while the Hot Slot is inactive, `WebViewPool.recoveryDisposition(isActive:)` classifies every inactive Slot the same and defers recovery until activation. The `WKWebView` shell remains in `WebViewPool`, but its page runtime is dead; on the next click `recoverDeferredContentProcessIfNeeded(...)` reloads the stored URL.
-
-This is consistent with the reported experience that a Slot configured Hot can later reopen by reloading instead of being immediately ready. It conflicts with the documented Hot product contract of a strict resident runtime / highest responsiveness.
-
-**Verdict:** `CONFIRMED — INACTIVE HOT CONTENT-PROCESS FAILURE IS DEFERRED UNTIL USER ACTIVATION`.
+Hot was not proactively evicted by `SlotLifecycleCoordinator`, but `WebViewPool` treated every inactive WebContent-process termination as deferred recovery. An inactive Hot renderer killed by WebKit therefore waited until later user activation before reloading.
 
 ### Red unread badge
 
-The visible tab red dot is driven by `ChatGPTUnreadResponseCoordinator`, not by transient `WebAttentionCoordinator.ready`. The unread coordinator persists its sidecar state and ignores `runtimeReset`; a WebContent process termination by itself is therefore not sufficient in current code to clear the unread red dot.
+The visible red unread badge remains a separate concern owned by `ChatGPTUnreadResponseCoordinator`. No unread behavior is changed in FT-LIFECYCLE-001.
 
-**Verdict:** `NOT YET ATTRIBUTED — DO NOT CHANGE UNREAD BADGE LOGIC WITHOUT DIRECT EVIDENCE`.
+## Independent Web implementation audit
 
-## Accepted corrective direction
+**Verdict: PASS**
 
-1. **Hot:** make WebContent-process recovery residency-aware. Active Slots and inactive Hot Slots recover immediately; inactive Warm/Cold may continue to defer until activation.
-2. **Warm:** make the configured retention delay authoritative for ordinary inactivity. Remove the hidden normal-path `warmResidentLimit` eviction that can release a Warm runtime before its selected TTL. Keep explicit memory-pressure eviction as the emergency override.
-3. Update lifecycle documentation/settings wording so Hot/Warm/Cold semantics match actual behavior.
-4. Preserve persistent unread badge ownership; no red-dot behavior change is authorized without evidence.
+Web independently inspected PR #116 at handoff head `94aa9bf1633ccff427d49db09e42e540b65b760e` and verified:
 
-## Non-goals
+1. Ordinary Warm LRU eviction was removed from the inactive-plan path. Warm runtimes now follow their configured TTL during normal operation.
+2. Warm recency/eviction remains only for explicit memory-pressure handling; warning/critical behavior remains an intentional early-release override.
+3. Hot recovery is residency-aware through a read-only provider backed directly by `TabStore`; no second residency authority or persisted state was introduced.
+4. Recovery policy is now: active Slot -> reload now; inactive Hot -> reload now; inactive Warm/Cold -> defer until activation.
+5. Inactive Hot recovery reuses the existing recovery URL/request path and does not select the Slot, present the panel, change requested visibility, or steal focus.
+6. No unread-badge, speech, attention-authority, Cold-policy, browser-profile, or provider-specific keepalive behavior was added.
+7. Settings/README/product lifecycle documentation now matches the implemented contract.
+8. PR #102 remains OPEN/DRAFT on its unchanged separate head `db6e886b33dffd93ece130463b184ae371b97684`.
 
-- No new diagnostics subsystem.
-- No website/provider-specific keepalive.
-- No change to Cold semantics beyond non-regression coverage.
-- No change to speech, attention ownership, navigation policy, browser profiles, website data, or PR #102.
-- The execution card authorized task-branch commit and normal fast-forward push; merge, release, and QA installation remain unauthorized.
+## Validation evidence available
 
-## Implementation handoff
+Local execution handoff reports:
 
-- Implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
-- Focused lifecycle/WebViewPool tests: PASS, including Hot background recovery side-effect checks and Warm preference timer coverage
-- Full XCTest suite: PASS
+- RED Hot: proven against original behavior
+- RED Warm: proven against original behavior
+- focused lifecycle/WebViewPool suites: PASS
+- full XCTest suite: PASS
 - Debug build: PASS
-- Release build: PASS; architecture: `arm64`
-- QA App installation: not performed
-- Next action: independent Web audit of the exact task-branch diff
+- Release build: PASS (`arm64`)
+
+GitHub exact-handoff-head evidence observed by Web:
+
+- QA DMG: PASS
+- macOS CI: still running at audit time; it is not yet a merge gate result
+
+## Next action
+
+Install a QA build from the current task branch and perform human lifecycle acceptance only:
+
+1. Warm: set 30-minute retention and verify ordinary tab switching does not evict the oldest Warm merely because more than two Warm tabs exist.
+2. Hot: verify an inactive Hot tab remains user-ready across ordinary use; if a WebContent termination/recovery is observed, it must recover in the background without selecting/presenting/focusing the tab.
+3. Continue observing the unread red dot, but do not modify unread behavior in this PR.
+
+After human acceptance, Web will reconcile the final PR head, required exact-head CI, and merge gate.
