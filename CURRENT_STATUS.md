@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-05
+**Status date:** 2026-10-07
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
@@ -12,7 +12,7 @@ Machine-specific worktree paths remain local-only.
 
 ## Mode
 
-**MODE: QA-BASELINE-ALIGNMENT**
+**MODE: SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX**
 
 ## Production authority
 
@@ -59,7 +59,10 @@ Accepted remaining passive-observation gaps remain unchanged:
 
 **FT-QA-001 — Latest Main QA Baseline Alignment & Natural Observation**
 
-**STATUS: ACTIVE — INSTALLATION_AUTHORIZED**
+**STATUS: HISTORICAL — SUPERSEDED AS THE ACTIVE TASK BY FT-SPEECH-001**
+
+The authorization below is retained as historical state. It is not active under
+the current task. No completion of FT-QA-001 is inferred by this transition.
 
 The user has authorized replacement of the currently installed/background FloatTabs QA version with a fresh build from the latest authoritative `main`, followed by normal use and natural incident observation.
 
@@ -98,13 +101,63 @@ If build/source identity differs from freshly fetched `origin/main`, STOP.
 
 **NEW STUCK-TAB FIX: NOT AUTHORIZED**
 
-**QA BASELINE INSTALLATION: AUTHORIZED BY FT-QA-001**
+**HISTORICAL QA BASELINE AUTHORIZATION: FT-QA-001**
 
 After successful replacement and provenance verification, no further action is authorized until a new naturally occurring symptom is reported. Preserve evidence first if a new issue appears.
 
 ## Separate work
 
 PR #102 remains separate MemoX durable-outbox work and is outside this task.
+
+## FT-SPEECH-001
+
+**FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
+
+**STATUS: ACTIVE — GATE_0A_CONTROL_PR**
+
+**MODE:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
+
+Task-start baseline was freshly fetched `main` at
+`8ed28588ec79d6a5c145622ef13a7051ab7076d8`, clean and equal to `origin/main`.
+The authorized production worktree identity remains `floattabs-main-production`
+on `main` tracking `origin/main`. The active control-plane transition is limited
+to `CURRENT_STATUS.md` and `CURRENT_TASK.md`; no product or test files are
+authorized until this control-plane PR is merged and the production checkout is
+aligned to the resulting `origin/main`.
+
+The running FloatTabs observed at task start was version 0.5.2, build 20,
+arm64, with exact source revision `8ed28588ec79d6a5c145622ef13a7051ab7076d8`.
+The separately installed copy reported source revision
+`ed452e35b278ced643b546de75533f0ed5dc1c27`; installation replacement is not
+currently authorized.
+
+PR #102 remains OPEN, Draft, at head
+`db6e886b33dffd93ece130463b184ae371b97684`; it is excluded from FT-SPEECH-001.
+
+**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — Gate 1 evidence is required.**
+
+### Authorized scope
+
+- privacy-safe structural evidence from the current live ChatGPT DOM;
+- focused response-extraction regression tests and a verified RED reproduction;
+- a minimal ownership-boundary fix only after Gate 1 and Gate 2 pass;
+- the focused and full validation defined by `CURRENT_TASK.md`;
+- a QA build/install only if needed for acceptance and only after validation.
+
+### Exclusions
+
+- stuck-tab behavior;
+- browser profile, cookie, site-data, cache, or persistent-configuration reset;
+- broad ChatGPT DOM redesign or volatile generated-class contracts;
+- SpeechService, queue, or playback-controller changes without evidence;
+- raw conversation text in logs, diagnostics, fixtures, PR text, or committed files;
+- any modification, rebase, merge, or use of PR #102.
+
+### Required end state
+
+Complete only after the implementation PR has the required check on its exact
+head and is handed off as `WAITING_FOR_INDEPENDENT_WEB_AUDIT`. Do not merge the
+implementation PR.
 
 ## Historical evidence
 
