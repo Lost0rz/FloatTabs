@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: WAITING_FOR_USER_FIX_ACCEPTANCE**
+**STATUS: WAITING_FOR_WEB_FAILED_FIX_REVIEW**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -117,6 +117,7 @@ or website data as part of replacement.
 ```text
 ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
 CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
+EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
 EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
 PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
@@ -276,8 +277,29 @@ fallback and excludes generated/hashed CSS-class contracts. The authorized fix m
 enforce a structural boundary or fail closed, preserve explicit/article extraction,
 and make no broader speech or notification change.
 
-**Current state:** `WAITING_FOR_USER_FIX_ACCEPTANCE`. No speech was retriggered and
-no ChatGPT message was sent. The installed QA is ready for user acceptance.
+### Gate 5 — Failed live fix acceptance (2026-10-07)
+
+```text
+USER_FIX_ACCEPTANCE=FAIL
+FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+OBSERVED_AFTER_FIX=user_message_then_assistant_response
+FIRST_FIX_DISPOSITION=FAILED_LIVE_ACCEPTANCE
+SYNTHETIC_REGRESSION=PASS
+LIVE_BEHAVIOR_FIXED=NO
+IMPLEMENTATION_PR_AUTHORIZED=NO
+MERGE_AUTHORIZED=NO
+FULL_FINAL_SUITE_AUTHORIZED=NO
+NEXT_SCOPE=READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
+```
+
+The user reports the original speech order on the installed fix QA. This
+supersedes the synthetic regression as evidence of live behavior. The first fix
+used `hasSiblingResponseContentBranches` and `hasNonAssistantOwnershipMarker`;
+do not stack another production fix. The exact live structural mechanism remains
+unconfirmed. Current authorization is limited to reading existing diagnostics
+from that failed acceptance, then stopping for Web review. Do not trigger speech,
+send a ChatGPT message, reload/reset, add probes/diagnostics/tests, change product
+code, rebuild/reinstall, or clear user/WebKit data.
 
 ### Focused GREEN result
 
@@ -326,13 +348,12 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-Web root-cause review and the first-run RED gate are complete. Continue only with
-the authorized minimal fallback fix and focused GREEN validation. Do not ask for
-another reproduction. Stop after installing fixed QA for user acceptance; no
-implementation PR or merge in this task.
-
-The implementation PR must not be merged until the task reaches
-`WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.
+Read only the latest existing post-fix manual-read trace for installed source
+`9c3337ed41722e259d3099cc7b6bd7787f44bf5b`, if available. Record schema-backed
+privacy-safe metadata and classify whether the failed acceptance used fallback,
+explicit, or article extraction. Do not infer missing fields. Stop at
+`WAITING_FOR_WEB_FAILED_FIX_REVIEW`; no new fix, RED, diagnostics, build,
+installation, implementation PR, merge, or full suite is authorized.
 
 ## Historical evidence
 

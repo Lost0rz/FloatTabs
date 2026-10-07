@@ -2,19 +2,54 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `WAITING_FOR_USER_FIX_ACCEPTANCE`
-**Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
+**Status:** `WAITING_FOR_WEB_FAILED_FIX_REVIEW`
+**Mode:** `READ_ONLY_POST_FIX_ACCEPTANCE_TRACE`
 
-## Objective
+## Current authorized objective
 
-Reproduce the reported speech defect through the real user action: the user opens
-FloatTabs, selects a normal ChatGPT conversation, and triggers `Read Latest
-Response`. Capture enough privacy-safe evidence from that exact extraction-to-speech
-request to determine why the user's own message can be spoken before the assistant
-reply.
+Synchronize the user's failed live acceptance and inspect only the existing
+diagnostic trace from that acceptance on installed source
+`9c3337ed41722e259d3099cc7b6bd7787f44bf5b`. Use schema-backed, privacy-safe
+metadata to classify the extraction path and speech ownership stages. Do not
+reproduce or trigger speech.
 
-Do not write a production behavior fix before the live user-triggered reproduction
-establishes the causal boundary and a later formal test-first RED reproduces it.
+```ini
+USER_FIX_ACCEPTANCE=FAIL
+FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+OBSERVED_AFTER_FIX=user_message_then_assistant_response
+FIRST_FIX_DISPOSITION=FAILED_LIVE_ACCEPTANCE
+SYNTHETIC_REGRESSION=PASS
+LIVE_BEHAVIOR_FIXED=NO
+IMPLEMENTATION_PR_AUTHORIZED=NO
+MERGE_AUTHORIZED=NO
+FULL_FINAL_SUITE_AUTHORIZED=NO
+NEXT_SCOPE=READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
+CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
+EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
+```
+
+This current objective supersedes the earlier reproduction, fix, and acceptance
+instructions recorded below as history. The synthetic fixture passing does not
+prove real DOM structure or live user-visible correction. The first fix used
+`hasSiblingResponseContentBranches` and `hasNonAssistantOwnershipMarker`; do not
+stack a second production fix.
+
+### This turn's hard limits
+
+- Read existing diagnostic logs only; do not add probes or diagnostics.
+- Do not click/trigger `Read Latest Response`, send ChatGPT messages, reload, or reset.
+- Do not change product or test code; do not build, install, open a PR, merge, or run
+  the full suite.
+- Preserve all user, profile, cookie, WebKit, login, preference, and diagnostic data.
+- After trace extraction/classification, stop at
+  `WAITING_FOR_WEB_FAILED_FIX_REVIEW`.
+
+## Previous-phase history
+
+The original task reproduced the speech defect, added bounded QA instrumentation,
+authorized a first minimal fix after RED, and installed that fix for user
+acceptance. Those gates are closed historical records; the current failed
+acceptance overrides their synthetic-GREEN interpretation.
 
 ## Baseline and identity
 
@@ -479,90 +514,17 @@ Stop on any:
 
 ```yaml
 TASK_ID: FT-SPEECH-001
-GATE_3_FRESH_REPRODUCTION: PASS
-QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
-USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
-SYMPTOM_CONFIRMED: YES
-ROOT_CAUSE_CONFIRMED: YES at fallback extraction ownership boundary; exact live subtree unknown
-TRACE_COMPLETE: NO
-TRACE_ID: 9296134E-59C9-4591-A991-2E9143430AB9
-REQUEST_CORRELATION: B304B982-F43B-49CC-8ACB-B04C6E77F9A8
-SELECTED_PATH: fallback
-ROOT_ELEMENT: div
-COMPOSER_MARKER_PRESENT: false
-USER_MARKER_PRESENT: false
-ASSISTANT_MARKER_PRESENT: false
-STATUS_MARKER_PRESENT: false
-ALERT_MARKER_PRESENT: false
-LIVE_REGION_MARKER_PRESENT: false
-BLOCK_COUNT: 41
-BLOCK_OWNERSHIP_SEQUENCE: unknown x 41
-BLOCK_ASSISTANT_OWNED_COUNT: 0
-BLOCK_USER_OWNED_COUNT: 0
-BLOCK_COMPOSER_OWNED_COUNT: NOT_PRESENT; actual block_composer_count=0
-BLOCK_STATUS_OWNED_COUNT: NOT_PRESENT; actual block_status_live_count=0
-BLOCK_ALERT_OWNED_COUNT: NOT_PRESENT
-BLOCK_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
-BLOCK_UNKNOWN_COUNT: 41
-UTTERANCE_COUNT: 87
-UTTERANCE_ASSISTANT_OWNED_COUNT: 0
-UTTERANCE_USER_OWNED_COUNT: 0
-UTTERANCE_COMPOSER_OWNED_COUNT: NOT_PRESENT; actual utterance_composer_count=0
-UTTERANCE_STATUS_OWNED_COUNT: NOT_PRESENT; actual utterance_status_live_count=0
-UTTERANCE_ALERT_OWNED_COUNT: NOT_PRESENT
-UTTERANCE_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
-UTTERANCE_UNKNOWN_COUNT: 87
-FIRST_SUBMISSION_OWNERSHIP: unknown
-SUBMISSION_ORDINAL: 1
-EXPECTED_SUBMISSION_COUNT: 87
-ACTUAL_SUBMISSION_COUNT: NOT_PRESENT
-SUBMITTED_ASSISTANT_OWNED_COUNT: NOT_PRESENT
-SUBMITTED_USER_OWNED_COUNT: NOT_PRESENT
-SUBMITTED_COMPOSER_OWNED_COUNT: NOT_PRESENT
-SUBMITTED_STATUS_OWNED_COUNT: NOT_PRESENT; summary absent (schema key would be submitted_status_live_count)
-SUBMITTED_ALERT_OWNED_COUNT: NOT_PRESENT
-SUBMITTED_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
-SUBMITTED_UNKNOWN_COUNT: NOT_PRESENT
-SUBMISSION_COMPLETE: NOT_PRESENT
-ROOT_CAUSE_BOUNDARY_CONFIRMED: YES
+USER_FIX_ACCEPTANCE: FAIL
+FAILED_FIX_SOURCE: 9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+OBSERVED_AFTER_FIX: user_message_then_assistant_response
+FIRST_FIX_DISPOSITION: FAILED_LIVE_ACCEPTANCE
+SYNTHETIC_REGRESSION: PASS
+LIVE_BEHAVIOR_FIXED: NO
 CAUSE_LAYER: CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
-EXACT_LIVE_DOM_SUBTREE_CONFIRMED: NO
-PAGE_NOTIFICATION_CAUSAL_STATUS: UNCONFIRMED
-MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
-NEW_SPEECH_TRIGGERED: NO
-PRODUCT_CODE_CHANGED: YES
-PR102_UNCHANGED: YES
-FORMAL_TDD_RED: PASS
-RED_TEST_NAME: testRegenerateFallbackDoesNotCombineEarlierTurnWithUnownedLatestContent
-FIRST_RUN_RED: YES
-RED_ACTUAL_BEHAVIOR: fallback payload included preceding semantic branch; 2 blocks
-MINIMAL_PRODUCTION_FIX: AUTHORIZED
-FIX_SCOPE: Regenerate fallback structural bound + extraction test harness empty normalization
-FALLBACK_RESULT: FAIL_CLOSED for ambiguous multi-branch/unowned candidate
-FOCUSED_EXTRACTION_TESTS: 42 passed, 0 failed, 0 skipped
-FOCUSED_SPEECH_TESTS: 98 passed, 0 failed, 0 skipped
-QA_BUILD: Debug arm64 PASS
-APP_PATH: /Applications/FloatTabs.app
-INSTALLED_SOURCE_HEAD: 9c3337ed41722e259d3099cc7b6bd7787f44bf5b
-INSTALLED_VERSION_BUILD: 0.5.2 (20)
-INSTALLED_ARCH: arm64
-RUNNING_PID: 96766
-USER_DATA_PRESERVED: YES
-QA_DIAGNOSTICS_RETAINED: YES
-READY_FOR_USER_FIX_ACCEPTANCE: YES
-NO_NEW_DIAGNOSTIC_EXPANSION: YES
-NO_MORE_USER_REPRODUCTION_BEFORE_FIXED_QA: YES
-NO_TTS_OR_QUEUE_FIX: YES
-NO_NOTIFICATION_WORK: YES
-FINAL_STATE: WAITING_FOR_USER_FIX_ACCEPTANCE
+EXACT_LIVE_STRUCTURAL_MECHANISM: UNCONFIRMED
+NEXT_SCOPE: READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
+IMPLEMENTATION_PR_AUTHORIZED: NO
+MERGE_AUTHORIZED: NO
+FULL_FINAL_SUITE_AUTHORIZED: NO
+FINAL_STATE: WAITING_FOR_WEB_FAILED_FIX_REVIEW
 ```
-
-The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,
-at `2026-10-07T02:55:02Z`. The valid events share one session, trace, and request
-correlation and appear in stage order. No valid `submission_summary` record exists.
-The current log segment also has 10 malformed rows; none contains any of these five
-QA event names. This raw trace alone cannot name individual ownership. The Web
-review separately confirms the fallback extraction ownership boundary while
-leaving the exact live subtree unconfirmed. The synthetic first-run RED is now
-verified; continue only with the bounded fix, focused validation, and fixed QA
-installation.
