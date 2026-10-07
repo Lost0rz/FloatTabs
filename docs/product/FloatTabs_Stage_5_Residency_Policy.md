@@ -10,6 +10,7 @@
 ### Hot
 
 - FloatTabs does not proactively detach or evict the live `WKWebView` after that Slot has been activated in the current app process.
+- If WebKit terminates the content process, FloatTabs immediately restores the Hot runtime in the background without selecting the Slot, presenting the shell, or taking focus.
 - Hot does not eagerly preload every configured Hot Slot at app launch.
 - Each Hot Slot owns an independent AppKit presentation host.
 - The inactive Hot host freezes its last active viewport before another Slot changes panel size.
@@ -20,6 +21,7 @@
 
 - The `WKWebView` stays in `WebViewPool`.
 - It is detached from the visible presentation while inactive.
+- During normal operation, it remains resident for the configured Warm retention delay; critical memory pressure may release an inactive, non-protected Warm runtime early.
 - Re-selection reuses the same `WKWebView` object.
 - DOM/SPA/scroll preservation remains best-effort because WebKit may suspend detached content.
 
@@ -77,7 +79,7 @@ This PR must not change:
 - Bilibili Mobile real mobile layout;
 - Navigation Intent / Slot Home;
 - upload/download/OAuth behavior;
-- WebContent process recovery;
+- The existing WebContent recovery URL/request path; residency policy may now trigger background recovery for inactive Hot Slots.
 - persistent website data.
 
 The rejected Stage 4 experiment that resized multiple resident WebViews through one shared variable viewport must not be reintroduced.

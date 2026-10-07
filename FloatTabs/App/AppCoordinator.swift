@@ -102,6 +102,9 @@ final class AppCoordinator {
                 isSlotActive: { slotID in
                     tabStore.activeTabID == slotID
                 },
+                residencyPolicyProvider: { slotID in
+                    tabStore.profiles.first { $0.id == slotID }?.residencyPolicy
+                },
                 diagnostics: diagnostics
             )
             // Exactly one runtime attention authority for the whole app,

@@ -10,67 +10,61 @@
 
 ## Mode
 
-**MODE: READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE**
+**MODE: WEB_AUDIT_PASS — CORRECTIVE_QA_AUTHORIZED**
 
 ## Production authority
 
-- Implementation branch: `fix/chatgpt-speech-response-ownership`
-- Accepted main base and live `main`: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- Accepted V4 product implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`
-- Final test-only corrective: `69037473ed0b2c4cb7905ecdfbfdb320d320389c`
-- Installed QA remains V4 source `6b5fb9a780073a26f8060e5be8baee284d511339`, Debug arm64, version `0.5.2 (20)`
-- PR #102 remains separate MemoX Draft work and is excluded from FT-SPEECH-001
+- Live accepted `main`: `569e43783a98c8caca681ce8139ec87dd4fa276e`
+- Active branch: `fix/residency-lifecycle-semantics`
+- PR: `#116` (Draft; merge blocked until corrective QA and final exact-head CI pass)
+- Task: `FT-LIFECYCLE-001`
+- First lifecycle implementation: `9acd6303`
+- Warning-level corrective product head independently audited by Web: `befc4c8ef0627e23a151d726ecd3efc0a6065db4`
+- Previous QA-installed source: `733f73fad9a955db42401abaececf9c7aeb783dc`
+- PR #102 remains unrelated MemoX Draft work and is excluded from this task
 
-## Accepted product result
+## Confirmed root cause
 
-```text
-V4_HUMAN_ACCEPTANCE=PASS
-OBSERVED=only latest ChatGPT response was spoken
-USER_PROMPT_SPOKEN=NO
-NO_SPEECH_REGRESSION=NO
-```
+Human QA with four Warm Tabs and 30-minute retention showed one Warm runtime become nonresident after about 114 seconds. Machine-local evidence confirmed a `slot_lifecycle.memory_pressure` warning immediately preceded the release of that same Warm inactive plan. The stored preference was exactly `1800` seconds.
 
-## Final regression
+**Root cause:** warning-level memory-pressure eviction violated the intended Warm retention guarantee.
 
-The stale source-contract assertion was corrected without product changes.
+## Accepted product contract
 
 ```text
-FOCUSED_STALE_TEST=1/1 PASS
-FULL_FINAL_SUITE=PASS
-FULL_FINAL_SUITE_COUNTS=1300 passed, 0 failed, 2 skipped, 1302 total
-V4_PRODUCT_HEAD_UNCHANGED=YES
-AUTHORIZED_TEST_ONLY_CHANGE=YES
+ordinary inactivity            -> configured Warm TTL applies
+memory pressure warning        -> record/observe only; no early Warm release
+memory pressure critical       -> may release eligible inactive Warm runtimes
 ```
 
-Skipped tests:
+Media, attention, and speech protections remain in force. Hot recovery remains residency-aware and background-only. Cold semantics remain unchanged. Unread/red-dot behavior remains outside PR #116.
 
-- `WebAttentionCrossFeatureTests/testNewPresentationSupersedesPendingRestoreBeforeDelayedObservation()`
-- `WebAttentionCrossFeatureTests/testStatusItemPreparationSupersedesPendingRestoreBeforeActivation()`
+## Independent Web audit
 
-## Independent Web final audit
-
-**Verdict: PASS**
+**Verdict: PASS for product implementation at `befc4c8e...`.**
 
 Web independently verified:
 
-1. `main` is still exactly the accepted base `2d2b733407ea57ea66ca380887dfc11b71b6e2be`; no rebase/reconciliation is required before PR creation.
-2. The implementation branch is a pure descendant of that base.
-3. The accepted V4 response-root ownership fix remains localized to the ChatGPT speech/response boundary and preserves the fail-closed generic-ancestor behavior.
-4. The current renderer path uses positive assistant ownership, assistant content-unit narrowing, and cross-renderer DOM ordering; the mixed user/assistant group is not a speech root.
-5. Legacy explicit assistant and semantic-turn paths remain supported; Regenerate remains a legacy last-resort path rather than the primary ownership authority.
-6. The final corrective commit changes only `FloatTabsTests/ChatGPTResponseBridgeTests.swift` and updates the stale `<article>`-qualified assertion to the current semantic contract.
-7. Earlier `speech.qa` real-path diagnostics remain bounded QA instrumentation. Diagnostic emission/parsing is DEBUG-gated; it does not create a second production ownership authority and does not alter the accepted Release speech decision path. It is not a merge blocker.
-8. PR #102 remains OPEN/DRAFT/unmerged on its separate branch and was not modified by FT-SPEECH-001.
+1. `.warning` still records `slot_lifecycle.memory_pressure` but does not invoke Warm eviction;
+2. `.critical` alone invokes the existing Warm emergency eviction path;
+3. critical eviction still excludes visible or media/attention/speech-protected Warm runtimes and rechecks protections before final release;
+4. obsolete warning-target/LRU recency state was removed without creating a second lifecycle authority;
+5. ordinary Warm TTL logic remains intact;
+6. deterministic Hot recovery tests still verify inactive Hot background recovery without selection/presentation/focus side effects;
+7. Cold lifecycle semantics were not changed;
+8. Settings/product wording now states that only critical memory pressure may shorten Warm retention;
+9. PR #102 remains separate and unchanged at `db6e886b33dffd93ece130463b184ae371b97684`.
 
-## Merge recommendation
+Local execution reported: warning RED proven, focused tests PASS, full XCTest `1303 passed / 3 skipped / 0 failed`, Debug PASS, Release PASS, arm64. Web treats those as execution evidence, not a substitute for final GitHub CI.
 
-```text
-INDEPENDENT_WEB_FINAL_AUDIT=PASS
-PRODUCT_READY_FOR_PR=YES
-IMPLEMENTATION_PR_CREATE=AUTHORIZED
-DIRECT_MERGE_WITHOUT_PR=NO
-```
+At the independently audited product head, `QA DMG` was PASS and `macOS CI` was still in progress. Any later control-only head requires its own final exact-head CI check before merge.
 
-The next gate is an implementation PR from `fix/chatgpt-speech-response-ownership` to `main` at the exact current branch head after control-plane synchronization. The required GitHub branch-protection check `Build & Test (Apple Silicon arm64)` must pass on the exact PR head before merge.
+## Next action
 
-No additional product coding, diagnostic expansion, local root-cause work, QA reinstall, or human speech reproduction is required unless the PR head changes or CI exposes a new failure.
+Install a fresh QA build from the latest task-branch head containing product commit `befc4c8e...`, preserving all user/WebKit data, then repeat human lifecycle acceptance:
+
+- Warm: 30-minute retention with at least four Warm Tabs must not become Released/gray under ordinary use or a memory-pressure warning;
+- Hot: continue normal-use observation; do not fabricate renderer termination;
+- Red unread badge: observe only, no changes in this PR.
+
+Do not merge, push main, release, or modify unread/speech/Cold/attention authority before QA returns to Web.
