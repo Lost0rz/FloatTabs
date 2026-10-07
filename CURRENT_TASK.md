@@ -135,7 +135,10 @@ The installed app reports source `3e707eb4725bc4549daf991d4d08ffa9f50745b7`,
 version `0.5.2` build `20`, arm64, at `/Applications/FloatTabs.app`, running PID
 `38242`. Profiles/Slots state and preferences were byte-identical to the
 pre-install snapshot; all pre-existing WebKit paths and diagnostic-log paths
-remained present. No Read Latest Response action was triggered.
+remained present. App startup created the Debug-only
+`Application Support/FloatTabs/BenchmarkControl.json` loopback-control file with
+mode `0600`; its token was not read or recorded. No Read Latest Response action
+was triggered.
 
 After a fresh fetch confirmed the implementation branch was still at
 `1e9b8780a6fd6991ab63eb5f8c34f8994308dd5c`, the V2 commit was pushed by normal

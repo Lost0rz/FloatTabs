@@ -88,7 +88,10 @@ The installed bundle reports `com.lost0rz.FloatTabs`, version `0.5.2` (build `20
 arm64, and exact source revision `3e707eb4725bc4549daf991d4d08ffa9f50745b7`. The
 Profiles/Slots state file and preferences retained identical content; all
 pre-existing WebKit paths and diagnostic-log paths remained present. Only the app
-bundle was replaced. No Read Latest Response action was triggered.
+bundle was replaced. One new Debug runtime file,
+`Application Support/FloatTabs/BenchmarkControl.json`, was created for PID
+`38242` with mode `0600`; its loopback-control token was not read or recorded. No
+Read Latest Response action was triggered.
 
 ## Superseded local topology commit disposition
 
