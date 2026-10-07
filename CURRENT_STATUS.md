@@ -107,14 +107,25 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW**
+**STATUS: ACTIVE — FORMAL_TDD_RED**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
 
 **IMPLEMENTATION_BRANCH:** `fix/chatgpt-speech-response-ownership`.
 
-**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO.**
+```text
+ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
+CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
+EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
+PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
+MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+```
+
+The Web root-cause review accepts the fallback extraction ownership boundary as
+the confirmed cause layer: a fallback candidate may currently become the response
+root without proving assistant-only ownership. The exact live DOM subtree remains
+unconfirmed; do not encode generated CSS or a guessed subtree shape.
 
 ### Accepted prior Gate 1 evidence
 
@@ -145,12 +156,12 @@ a speculative production fix.
 ### Reproduction strategy and current disposition
 
 The minimal QA instrumentation, exact-head install, one fresh user-triggered
-reproduction, and read-only evidence review are complete. The user confirmed the
-symptom, but all extracted blocks and utterances were ownership-classified as
-`unknown`, the first admitted speech submission was `unknown`, and the summary event
-is absent. Root cause remains unconfirmed. The current state is
-`WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`; do not enter formal RED or change production
-behavior before a later task-state update.
+reproduction, read-only evidence review, and Web root-cause review are complete.
+The user confirmed the symptom. The raw QA trace labels ownership `unknown` for
+all blocks and utterances and for the first admitted submission; the final summary
+event is absent. The Web review treats `unknown` as a limitation of the live
+ownership classification, not a blocker to confirming the fallback extraction
+ownership boundary. The exact live DOM subtree remains unconfirmed.
 
 ### Privacy / instrumentation boundary
 
@@ -227,16 +238,34 @@ not present. First accepted speech submission is ordinal 1 of expected 87 and ha
 `ownership=unknown`. Actual submission totals and completion are unavailable
 because `submission_summary` is absent.
 
-The user-reported symptom is confirmed, but the ownership classifier does not tie
-the spoken question to a user-owned block. `ROOT_CAUSE_BOUNDARY_CONFIRMED=NO`;
-`CAUSE_LAYER=UNCLASSIFIED_OWNERSHIP_REACHED_ADMITTED_SPEECH_SUBMISSION`. This is
-not a production root-cause finding. Page-notification causality is
-`UNCONFIRMED`; macOS Notification Center causality is `UNOBSERVED`.
+The raw QA trace does not tie the spoken question to a user-owned block; its
+ownership labels remain `unknown`. The initial local trace-only classification left
+the cause boundary unclassified. The subsequent Web review confirms the fallback
+extraction ownership boundary as recorded below; it does not establish the exact
+live DOM subtree. Page-notification causality is `UNCONFIRMED`; macOS Notification
+Center causality is `UNOBSERVED`.
 
-**Stop state:** `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`. No speech was retriggered, no
-ChatGPT message was sent, and no product code was changed. Do not add diagnostics,
-create a RED test, change production behavior, rebuild, reinstall, reload/reset, or
-clear user/WebKit data without a later task-state update.
+### Web root-cause review disposition
+
+The subsequent Web review confirms the root-cause boundary as
+`CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY`. The fallback candidate
+is permitted to become a response root without positive assistant-only ownership
+proof. The exact live DOM subtree is not confirmed. The raw trace remains as
+recorded above; `unknown` does not negate the independently reviewed boundary.
+
+**Authorized work:** formal TDD RED in
+`FloatTabsTests/ChatGPTResponseExtractionTests.swift`. A minimal production fix in
+`FloatTabs/Web/ChatGPTResponseExtraction.swift` is authorized only after verified
+first-run RED. No new diagnostics or user reproduction before the fixed QA; no TTS,
+queue/playback, or notification work. Keep explicit assistant/article paths,
+response identity, locator/follow behavior, and generation state intact. Build and
+install fresh arm64 Debug QA only after focused GREEN, then stop for user acceptance.
+
+**Current state:** `ACTIVE — FORMAL_TDD_RED`. The current task authorizes a
+synthetic first-run RED extraction fixture; a minimal production fallback ownership
+fix is authorized only after verified RED. No speech was retriggered and no ChatGPT
+message was sent during the read-only review. Follow the exclusions in the current
+task and stop after fixed QA installation for user acceptance.
 
 ## Separate work
 
@@ -246,9 +275,10 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-The one fresh reproduction has been classified from its existing diagnostics.
-Await Web root-cause review. Do not ask the user to repeat the action; formal RED
-and production changes require a later explicit task-state update.
+Web root-cause review is complete. The next action is the authorized first-run RED
+fixture; continue to the minimal fix only if RED verifies the specified contract.
+Do not ask for another reproduction. Stop after installing fixed QA for user
+acceptance; no implementation PR or merge in this task.
 
 The implementation PR must not be merged until the task reaches
 `WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.

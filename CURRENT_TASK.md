@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`
+**Status:** `ACTIVE — FORMAL_TDD_RED`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -119,6 +119,12 @@ path unexpectedly, STOP before replacement.
 - One natural user-triggered `Read Latest Response` reproduction and bounded
   evidence capture.
 - Read-only classification of the captured evidence.
+- Formal TDD RED using a synthetic extraction fixture in
+  `FloatTabsTests/ChatGPTResponseExtractionTests.swift`.
+- After verified first-run RED only, the minimal fallback ownership fix in
+  `FloatTabs/Web/ChatGPTResponseExtraction.swift`.
+- Focused GREEN validation and an exact-head arm64 Debug QA build installed at
+  `/Applications/FloatTabs.app`, followed by stop for user acceptance.
 
 ## Not authorized yet
 
@@ -129,8 +135,11 @@ path unexpectedly, STOP before replacement.
 - Cache/profile/cookie/site-data resets.
 - New stuck-tab behavior work.
 - Changes to PR #102.
-- Formal production fix or implementation PR merge before the live reproduction is
-  reviewed and a formal RED gate is authorized.
+- Any TTS/SpeechService, SpeechQueue, playback-controller, or notification work.
+- New diagnostic expansion or another user reproduction before fixed QA.
+- Full final suite, implementation PR creation, or merge in this task.
+- A production fix unless the focused regression first demonstrates
+  `FIRST_RUN=RED`.
 
 ## Privacy boundary
 
@@ -146,7 +155,7 @@ Instrumentation must not persist, print, or export:
 Permitted evidence is limited to fixed structural/provenance categories and bounded
 counts needed to identify ownership and stage transitions.
 
-## Gate 0 — Fresh baseline
+## Previous phase Gate 0 — Fresh baseline (complete)
 
 Run a fresh remote check and verify:
 
@@ -162,7 +171,7 @@ Read `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` after the refresh.
 Confirm PR #102 remains OPEN/DRAFT at its verified excluded branch/head. Any
 mismatch is STOP.
 
-## Gate 1 — Minimal real-path QA instrumentation
+## Previous phase Gate 1 — Minimal real-path QA instrumentation (complete)
 
 Instrument only the existing real path:
 
@@ -210,7 +219,7 @@ Before installing the QA build, add focused tests proving at minimum:
 
 Focused tests must pass before installation.
 
-## Gate 2 — Build and install Speech QA
+## Previous phase Gate 2 — Build and install Speech QA (complete)
 
 Build a fresh arm64 Debug app from the exact implementation HEAD after Gate 1 tests
 pass. Record build provenance.
@@ -219,7 +228,7 @@ Replace only `/Applications/FloatTabs.app`; preserve all persistent user/site da
 Relaunch from `/Applications/FloatTabs.app` and verify the running process matches
 the installed exact QA build.
 
-### Gate 2 PASS end state
+### Previous Gate 2 PASS end state
 
 Stop active code work and report:
 
@@ -236,7 +245,7 @@ READY_FOR_USER_REPRODUCTION=YES
 
 Do not manufacture a ChatGPT response. The user performs the next action.
 
-### Gate 2 result — 2026-10-07
+### Previous Gate 2 result — 2026-10-07
 
 - `SPEECH_QA_INSTALLED=YES`
 - `SOURCE_HEAD=8e8d6717f698e8c93e80faad7430217c167357e2`
@@ -256,7 +265,7 @@ Do not manufacture a ChatGPT response. The user performs the next action.
 - No ChatGPT message was sent and no speech was triggered. Stop here for the user's
   one-action reproduction.
 
-## Gate 3 — User-triggered reproduction
+## Previous phase Gate 3 — User-triggered reproduction (complete)
 
 The user reports one fresh reproduction on the installed QA source
 `8e8d6717f698e8c93e80faad7430217c167357e2` at `/Applications/FloatTabs.app`:
@@ -272,12 +281,30 @@ This confirms the symptom as a user observation. It does not establish the causa
 boundary without the existing request-correlated QA trace. Do not ask the user to
 repeat `Read Latest Response`.
 
-### Authorized next step
+### Web root-cause review and updated authority
 
-`READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE` only: find and inspect the existing
-diagnostics for this same user-triggered request. Do not trigger speech, send a
-ChatGPT message, reload/reset, add probes or diagnostics, write a RED test, change
-production behavior, rebuild, reinstall, or clear user/WebKit data.
+The Web review concludes:
+
+```text
+ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
+CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
+EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
+PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
+MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+```
+
+The confirmed boundary is that fallback extraction can choose an ancestor as the
+response root without proving assistant-only ownership. The exact live subtree is
+not confirmed. Treat `unknown` ownership as a limitation of the QA classifier, not
+a blocker to this boundary finding.
+
+Next authorize only a formal TDD RED fixture in
+`FloatTabsTests/ChatGPTResponseExtractionTests.swift`. The minimal production fix
+in `FloatTabs/Web/ChatGPTResponseExtraction.swift` is authorized only after a
+verified first-run RED. Do not trigger another reproduction or add diagnostics.
+Do not change TTS, queue/playback, notifications, generated CSS contracts, or
+selection based on text/order/count. Preserve explicit assistant/article paths,
+response identity, locator/follow behavior, and generation state.
 
 The originally authorized natural reproduction was:
 
@@ -293,7 +320,7 @@ commands.
 After the reproduction, export/query only the correlated bounded diagnostic event(s)
 and report the structural pipeline. Do not expose raw conversation content.
 
-## Gate 4 — Causal classification
+## Previous phase Gate 4 — Causal classification (raw QA trace and Web review)
 
 ### Read-only evidence result — 2026-10-07
 
@@ -316,50 +343,64 @@ and report the structural pipeline. Do not expose raw conversation content.
 - First admitted speech submission: ordinal 1 of expected 87, `ownership=unknown`.
   The logged `submitted_count=1` records that first admission only; it does not
   establish final actual submission count.
-- The symptom remains confirmed by the user's report, but the trace does not
-  identify any payload block or utterance as `user_owned`. Therefore
-  `ROOT_CAUSE_BOUNDARY_CONFIRMED=NO` and
-  `CAUSE_LAYER=UNCLASSIFIED_OWNERSHIP_REACHED_ADMITTED_SPEECH_SUBMISSION`.
-  Page-notification causality is `UNCONFIRMED`; macOS Notification Center
-  causality is `UNOBSERVED`.
-- No speech was retriggered, no ChatGPT message was sent, and no product code was
-  changed. Stop for Web root-cause review. No new probe/diagnostic, RED test,
-  production fix, build, install, reload/reset, or user/WebKit-data cleanup is
-  authorized by this task state.
+- The raw trace does not label any payload block or utterance `user_owned`; the
+  first admitted submission is `unknown`. The subsequent Web review confirms the
+  cause layer as
+  `CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY`: fallback can select
+  an ancestor response root without proving assistant-only ownership. The exact
+  live DOM subtree remains unconfirmed. `unknown` ownership is not a blocker for
+  this boundary finding. Page-notification causality remains `UNCONFIRMED` and
+  macOS Notification Center causality remains `UNOBSERVED`.
+- No speech was retriggered and no ChatGPT message was sent. The next authorized
+  work is a formal RED fixture; a production fix is authorized only after verified
+  first-run RED.
 
-Classify the user-triggered run from actual evidence, for example:
+The Web review completed classification at the fallback extraction ownership
+boundary. Do not claim that the exact live DOM subtree or individual unknown block
+was proven user-owned. The regression fixture may establish the contract violation
+using the synthetic structural conditions authorized below.
 
-- extraction root already spans wrong ownership;
-- extracted blocks are correct but ownership/order changes later;
-- utterance construction introduces or duplicates content;
-- multiple read/speech submissions occur;
-- evidence remains insufficient.
+## Gate 1 — Formal TDD RED
 
-Keep page-notification and macOS Notification Center causality separate unless the
-same live reproduction directly proves one of them.
+First modify only `FloatTabsTests/ChatGPTResponseExtractionTests.swift`. Add the
+smallest synthetic fixture with no author-role attributes or explicit assistant
+marker, a Regenerate semantic control, a fallback ancestor broader than one safely
+proven assistant response region, and a distinct unrelated semantic branch before
+the intended assistant content. Use only fictional content.
 
-If the user hears the defect but the instrumentation cannot explain where it enters
-the pipeline, STOP and identify the smallest missing boundary. Do not guess a fix.
+Contract: an unbounded fallback candidate must either narrow to a structurally
+provable response-owned subroot or fail closed; it must never return predecessor
+content together with the assistant response. Run the focused regression first.
+Require `FIRST_RUN=RED` and confirm the existing fallback includes the unrelated
+predecessor in response blocks. If first run is GREEN, STOP; do not write a fix.
 
-## Gate 5 — Formal RED and production fix
+## Gate 2 — Minimal production fix after verified RED
 
-Do not enter this gate until the user-triggered evidence has been reviewed and the
-causal boundary is confirmed strongly enough to model a regression test.
+Only after verified RED, modify only `FloatTabs/Web/ChatGPTResponseExtraction.swift`,
+preferably `latestRegenerateOwnedResponse()` or its directly related fallback-root
+logic. Fallback must require structurally bounded response ownership; narrow to a
+provable response region or fail closed. Preserve explicit assistant and article
+paths, response identity, locator/follow behavior, and generation state.
 
-Then:
+Do not use generated CSS, text content, ordering assumptions, block-count
+thresholds, or first-block removal. Do not change SpeechService, SpeechQueue,
+playback, notifications, or broad DOM design.
 
-1. write the smallest test matching the observed live mechanism;
-2. require first-run RED for the defect;
-3. implement the minimal ownership/ordering fix at the proven boundary;
-4. require focused GREEN;
-5. run full CI-equivalent Debug, Release, XCTest, and Package.resolved checks;
-6. remove QA-only diagnostic instrumentation if it is not justified as durable
-   privacy-safe observability;
-7. audit the final diff and open the implementation PR;
-8. stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT` after the required exact-head
-   `Build & Test (Apple Silicon arm64)` check passes.
+## Gate 3 — Focused GREEN
 
-Do not merge the implementation PR from the local execution session.
+Run the new regression, all `ChatGPTResponseExtractionTests`, and relevant
+`AssistantSpeechCoordinator` / speech extraction tests. Confirm existing valid
+fallback regressions remain GREEN. Record `FALLBACK_RESULT=FAIL_CLOSED` if that is
+the safe behavior; do not claim speech is fully restored in that case.
+
+## Gate 4 — Build fixed Speech QA
+
+After focused GREEN, build fresh arm64 Debug QA and replace only
+`/Applications/FloatTabs.app`, preserving all profiles, Slots, cookies, WebKit data,
+login sessions, Application Support, preferences, and diagnostic history. Verify
+installed provenance and running PID, then stop at
+`WAITING_FOR_USER_FIX_ACCEPTANCE`. Do not trigger speech for the user. Do not run the
+final full suite, open an implementation PR, or merge in this task.
 
 ## Separate work
 
@@ -427,19 +468,28 @@ SUBMITTED_ALERT_OWNED_COUNT: NOT_PRESENT
 SUBMITTED_LIVE_REGION_OWNED_COUNT: NOT_PRESENT
 SUBMITTED_UNKNOWN_COUNT: NOT_PRESENT
 SUBMISSION_COMPLETE: NOT_PRESENT
-ROOT_CAUSE_BOUNDARY_CONFIRMED: NO
-CAUSE_LAYER: extraction-to-speech submission ownership remains unclassified
+ROOT_CAUSE_BOUNDARY_CONFIRMED: YES
+CAUSE_LAYER: CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
+EXACT_LIVE_DOM_SUBTREE_CONFIRMED: NO
 PAGE_NOTIFICATION_CAUSAL_STATUS: UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS: UNOBSERVED
 NEW_SPEECH_TRIGGERED: NO
 PRODUCT_CODE_CHANGED: NO
 PR102_UNCHANGED: YES
-FINAL_STATE: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
+FORMAL_TDD_RED: AUTHORIZED
+MINIMAL_PRODUCTION_FIX: AUTHORIZED_AFTER_VERIFIED_RED
+NO_NEW_DIAGNOSTIC_EXPANSION: YES
+NO_MORE_USER_REPRODUCTION_BEFORE_FIXED_QA: YES
+NO_TTS_OR_QUEUE_FIX: YES
+NO_NOTIFICATION_WORK: YES
+FINAL_STATE: ACTIVE_FORMAL_TDD_RED
 ```
 
 The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,
 at `2026-10-07T02:55:02Z`. The valid events share one session, trace, and request
 correlation and appear in stage order. No valid `submission_summary` record exists.
 The current log segment also has 10 malformed rows; none contains any of these five
-QA event names. The incomplete trace and ownership gaps are the smallest missing
-evidence boundary; do not infer a production cause or continue beyond Web review.
+QA event names. This raw trace alone cannot name individual ownership. The Web
+review separately confirms the fallback extraction ownership boundary while
+leaving the exact live subtree unconfirmed. Proceed only with the authorized
+synthetic first-run RED fixture.
