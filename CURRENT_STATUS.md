@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ACTIVE — POSITIVE_ASSISTANT_CONTENT_OWNERSHIP_V4**
+**MODE: ACTIVE — WEB_AUDITED_ASSISTANT_CONTENT_UNIT_FIX_V4**
 
 ## Production authority
 
@@ -30,7 +30,7 @@ V2_HUMAN_RESULT=no_speech
 V3_HUMAN_RESULT=no_speech
 ```
 
-Original defect remains localized to ChatGPT response extraction ownership, not TTS/queue/cleaner:
+The original defect is localized to ChatGPT response-root ownership:
 
 ```text
 CAUSE_LAYER=CHATGPT_RESPONSE_EXTRACTION_ROOT_OWNERSHIP_CONTRACT
@@ -39,73 +39,105 @@ SPEECH_QUEUE_CAUSAL=NO
 CONTENT_CLEANER_CAUSAL=NO
 ```
 
-V2 removed the unsafe arbitrary-ancestor fallback. V3 correctly made classic `conversation-turn` matching tag-agnostic, but live acceptance still produced no speech.
+V2 correctly removed arbitrary generic-ancestor ownership. V3 made classic `conversation-turn` matching tag-agnostic but still failed live compatibility. Do not restore the old broad fallback.
 
-## V3 live acceptance verdict
+## Web audit — completed
 
-```text
-V3_HUMAN_ACCEPTANCE=FAIL_COMPATIBILITY
-OBSERVED_AFTER_V3=NO_SPEECH
-UNSAFE_USER_TEXT_SPOKEN=NO
-```
+The Web control-plane agent re-read the full production path and owns the causal conclusion. Local execution is not responsible for rediscovering this root cause.
 
-V3 safety remains accepted: do not restore arbitrary generic ancestor ownership.
-
-## V4 Web code-audit finding
-
-Current `ChatGPTResponseExtraction.swift` still has two compatibility gaps:
-
-1. positive assistant discovery recognizes legacy `[data-message-author-role="assistant"]` / `[data-message-role="assistant"]`, and semantic turn wrappers only when an inner `data-message-author-role` proves assistant;
-2. the fallback still depends on an enabled Regenerate-labelled control before it can discover an unmarked response.
-
-Current ChatGPT integrations now need additional positive semantic surfaces, including:
+Production path:
 
 ```text
-[data-testid^="conversation-turn-"][data-turn="assistant"]
-[data-conversation-role="assistant"]
+Read Latest Response
+→ ChatGPTResponseBridge.extractLatest()
+→ latestAssistantResponseRoot()
+→ assistantResponseRoots()
+→ structuredBlocks(root)
+→ ChatGPTResponsePayload.blocks
+→ SpeechLanguageRouter.utteranceRequests(payload.blocks)
+→ speech queue / TTS
 ```
 
-A newer renderer may group user and assistant material under one `[data-turn-key]` shell. Therefore the shell itself is NOT safe as a speech root. When `[data-conversation-role="assistant"]` exists inside such a group, the assistant-owned descendant is the safe extraction root; user content in the same group must remain outside the payload.
+Confirmed code facts:
 
-Current completion controls can also be copy/turn-action controls rather than Regenerate, so positive assistant ownership must not require a Regenerate action.
+1. `structuredBlocks(root)` recursively extracts the complete supplied root. It has no production author filter.
+2. `SpeechContentBlock` does not carry author ownership.
+3. `AssistantSpeechCoordinator` passes all admitted `payload.blocks` directly into utterance creation.
+4. Therefore a root that includes both user and assistant content necessarily reproduces the original bug; downstream speech layers cannot repair it.
+5. Current production discovery still recognizes mainly legacy `data-message-author-role` / `data-message-role`, role-proven classic conversation turns, and a Regenerate-based fallback.
+6. `assistantResponseRoots()` currently returns the first non-empty schema family rather than collecting positive roots across renderer generations. A page containing old and new renderer turns can therefore select an older schema family instead of the actual latest assistant response.
 
-## V4 production contract
+## Current renderer evidence and safe root boundary
 
-Prefer positive ownership in this order, without requiring a response action:
+Current ChatGPT renderer fixtures used by active integrations show grouped turns such as:
 
-1. rendered explicit assistant content roots already supported (`data-message-author-role` / `data-message-role`);
-2. rendered assistant-owned descendant `[data-conversation-role="assistant"]`;
-3. rendered semantic conversation turn with `data-turn="assistant"`;
-4. existing role-proven semantic conversation turn behavior.
+```html
+<div data-turn-key="turn-1">
+  <div data-content-search-unit-key="turn-1:0:user">
+    <div data-user-message-bubble>...</div>
+  </div>
+  <div data-content-search-unit-key="turn-1:1:assistant">
+    <h4 class="sr-only" data-conversation-role="assistant">...</h4>
+    <div data-markdown-text-style="assistant-message">...</div>
+  </div>
+</div>
+```
 
-For the new grouped renderer:
+Important boundary:
+
+- `[data-conversation-role="assistant"]` can be only a hidden semantic marker. It is not necessarily the readable content root.
+- The safe new-renderer extraction root is the nearest rendered `[data-content-search-unit-key]` that positively contains an assistant semantic marker and response content.
+- The enclosing `[data-turn-key]` shell is forbidden as a speech root because it can contain both the user's prompt and the assistant answer.
+- Classic positively-owned turns such as `[data-testid*="conversation-turn"][data-turn="assistant"]` remain valid roots.
+- Positive assistant ownership must not require a Regenerate button.
+
+## Final V4 production contract
+
+Build one positive-root set across supported renderer generations, then choose the latest root in document order. Do not short-circuit merely because an older selector family has matches.
+
+Positive candidates:
+
+1. rendered legacy explicit assistant roots:
+   - `[data-message-author-role="assistant"]`
+   - `[data-message-role="assistant"]`
+2. rendered classic semantic turns:
+   - `[data-testid*="conversation-turn"][data-turn="assistant"]`
+   - existing role-proven semantic-turn behavior
+3. rendered assistant content units:
+   - `[data-content-search-unit-key]` containing `[data-conversation-role="assistant"]` (and optionally a stable assistant-start marker when it is inside that same unit), with response content and no user-owned marker.
+
+When one positive candidate contains another qualifying positive candidate, prefer the narrower content-bearing candidate so an outer shell cannot broaden ownership.
+
+Sort the deduplicated positive roots by DOM order; `latestAssistantResponseRoot()` must select the actual last positive assistant root across mixed renderer schemas.
+
+Only when **no positive assistant root exists** may the existing Regenerate fallback run. That fallback remains legacy-only, semantic-turn-bounded, and fail-closed.
+
+Extend user rejection where relevant with stable markers including:
 
 ```text
-[data-turn-key]
-├── user-owned content
-└── [data-conversation-role="assistant"]  ← allowed extraction root
+[data-turn="user"]
+[data-conversation-role="user"]
+[data-user-message-bubble]
 ```
 
-Never extract the whole `[data-turn-key]` shell merely because it contains an assistant marker.
+## Role split for this task
 
-Keep the existing Regenerate fallback only as a legacy last-resort path with its current positive semantic-turn boundary and fail-closed safety. Do not broaden it back to arbitrary ancestors.
-
-Extend non-assistant rejection where relevant with stable semantic user signals such as `data-turn="user"`, `data-conversation-role="user"`, and `data-user-message-bubble`.
+Per `AGENTS.md`, Web owns the code audit, root-cause conclusion, and implementation contract above. Local execution is authorized only to implement this exact contract, run the prescribed tests, build/install, and return evidence. Local must not start another open-ended diagnosis/topology investigation unless a prescribed RED contradicts this audited contract.
 
 ## Authorization
 
-Authorized now:
+Authorized next:
 
-1. one formal RED for a current-style grouped renderer with user content + `[data-conversation-role="assistant"]`, no Regenerate button, requiring assistant-only extraction;
-2. one RED/coverage case for `[data-testid^="conversation-turn-"][data-turn="assistant"]` without Regenerate;
-3. minimal production change in `FloatTabs/Web/ChatGPTResponseExtraction.swift` only;
-4. focused extraction + relevant speech coordinator tests;
-5. exact-head arm64 Debug build/install at `/Applications/FloatTabs.app`, preserving user/WebKit state;
-6. normal fast-forward publication and stop for one human acceptance.
+1. exact RED fixtures defined in `CURRENT_TASK.md`;
+2. minimal implementation in `FloatTabs/Web/ChatGPTResponseExtraction.swift` plus those focused tests;
+3. focused extraction + relevant speech-coordinator tests;
+4. exact-head arm64 Debug build/install at `/Applications/FloatTabs.app`, preserving user/WebKit state;
+5. normal fast-forward publication and stop for one human acceptance.
 
 Not authorized:
 
 ```text
+LOCAL_OPEN_ENDED_ROOT_CAUSE_AUDIT=NO
 TOPOLOGY_PROBE_AUTHORIZED=NO
 ARBITRARY_ANCESTOR_FALLBACK=NO
 GROUP_SHELL_AS_SPEECH_ROOT=NO
