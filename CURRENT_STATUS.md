@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: ACTIVE — FIXED_QA_BUILD_INSTALL**
+**STATUS: WAITING_FOR_USER_FIX_ACCEPTANCE**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -276,8 +276,8 @@ fallback and excludes generated/hashed CSS-class contracts. The authorized fix m
 enforce a structural boundary or fail closed, preserve explicit/article extraction,
 and make no broader speech or notification change.
 
-**Current state:** `ACTIVE — FIXED_QA_BUILD_INSTALL`. No speech was retriggered and
-no ChatGPT message was sent. Stop after fixed QA installation for user acceptance.
+**Current state:** `WAITING_FOR_USER_FIX_ACCEPTANCE`. No speech was retriggered and
+no ChatGPT message was sent. The installed QA is ready for user acceptance.
 
 ### Focused GREEN result
 
@@ -285,8 +285,38 @@ The bounded fallback change and regression are green. On 2026-10-07, the focused
 arm64 XCTest run executed all 42 `ChatGPTResponseExtractionTests` and all 98
 `AssistantSpeechCoordinatorTests`: 140 passed, 0 failed, 0 skipped. This validates
 the extraction boundary and relevant speech coordination regressions; the final
-full suite remains explicitly out of scope. Next: synchronize this checkpoint,
-then build/install the fixed arm64 Debug QA and stop for user acceptance.
+full suite remains explicitly out of scope.
+
+### Gate 4 — Fixed Speech QA installed
+
+```text
+APP_PATH=/Applications/FloatTabs.app
+BUNDLE_ID=com.lost0rz.FloatTabs
+INSTALLED_SOURCE_HEAD=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+SOURCE_REVISION_EXACT=true
+VERSION_BUILD=0.5.2 (20)
+ARCH=arm64
+RUNNING_PID=96766
+USER_DATA_PRESERVED=YES
+QA_DIAGNOSTICS_RETAINED=YES
+READY_FOR_USER_FIX_ACCEPTANCE=YES
+FINAL_STATE=WAITING_FOR_USER_FIX_ACCEPTANCE
+```
+
+The installed bundle is ad-hoc signed and passed deep strict signature
+verification. Process inspection ties PID 96766 to the canonical Applications
+executable. Before/after filesystem identity comparison found no missing
+pre-existing app-scoped paths; WebKit identities (32 inspected entries), the
+Preferences plist, the data-root identities, and nine existing diagnostic log
+identities are unchanged. Normal startup atomically rewrote `WebAppProfiles.json`
+and added its normal build backup; the JSON remains valid, version 2, with 12 Slots
+and one Browser Profile. No profile, cookie, website data, preferences, or
+diagnostic history was cleared or reset. No ChatGPT message was sent and no speech
+was triggered. The previous app bundle is retained temporarily at
+`/private/tmp/FT-SPEECH-001-previous-8e8d6717.app` for rollback and was not launched.
+
+PR #102 remains OPEN/DRAFT at
+`db6e886b33dffd93ece130463b184ae371b97684`, unchanged.
 
 ## Separate work
 

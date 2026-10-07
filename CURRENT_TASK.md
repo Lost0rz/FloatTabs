@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `ACTIVE — FIXED_QA_BUILD_INSTALL`
+**Status:** `WAITING_FOR_USER_FIX_ACCEPTANCE`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -433,10 +433,30 @@ installed provenance and running PID, then stop at
 `WAITING_FOR_USER_FIX_ACCEPTANCE`. Do not trigger speech for the user. Do not run the
 final full suite, open an implementation PR, or merge in this task.
 
-Current gate: implementation and focused GREEN are complete. Do not begin the QA
-build until this checkpoint is committed/pushed and a fresh fetch verifies local
-HEAD equals the authorized upstream. The installed runtime remains the prior QA
-until Gate 4 provenance and PID verification complete.
+### Gate 4 result — 2026-10-07
+
+- Fresh arm64 Debug build from source commit
+  `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` passed.
+- `APP_PATH=/Applications/FloatTabs.app`
+- `BUNDLE_ID=com.lost0rz.FloatTabs`
+- `VERSION_BUILD=0.5.2 (20)`
+- `INSTALLED_SOURCE_HEAD=9c3337ed41722e259d3099cc7b6bd7787f44bf5b`
+- `SOURCE_REVISION_EXACT=true`; `ARCH=arm64`; deep strict code-signature verification passed.
+- The running process PID `96766` maps to
+  `/Applications/FloatTabs.app/Contents/MacOS/FloatTabs`.
+- `USER_DATA_PRESERVED=YES`: all 63 pre-existing inspected app-scoped filesystem
+  paths remain; all 32 inspected WebKit identities, Preferences identity, and 9
+  pre-existing diagnostic log identities are unchanged. Normal startup rewrote
+  `WebAppProfiles.json` and created its ordinary build backup; state remains valid
+  version 2 with 12 Slots and one Browser Profile. No state was cleared or reset.
+- `QA_DIAGNOSTICS_RETAINED=YES`; no ChatGPT message was sent and no speech was
+  triggered.
+- A temporary rollback copy of the prior app remains at
+  `/private/tmp/FT-SPEECH-001-previous-8e8d6717.app`; it was not launched.
+- `READY_FOR_USER_FIX_ACCEPTANCE=YES`.
+
+Stop here for user acceptance. Do not trigger speech, send a ChatGPT message,
+reload/reset, expand diagnostics, open an implementation PR, or merge.
 
 ## Separate work
 
@@ -521,11 +541,20 @@ FIX_SCOPE: Regenerate fallback structural bound + extraction test harness empty 
 FALLBACK_RESULT: FAIL_CLOSED for ambiguous multi-branch/unowned candidate
 FOCUSED_EXTRACTION_TESTS: 42 passed, 0 failed, 0 skipped
 FOCUSED_SPEECH_TESTS: 98 passed, 0 failed, 0 skipped
+QA_BUILD: Debug arm64 PASS
+APP_PATH: /Applications/FloatTabs.app
+INSTALLED_SOURCE_HEAD: 9c3337ed41722e259d3099cc7b6bd7787f44bf5b
+INSTALLED_VERSION_BUILD: 0.5.2 (20)
+INSTALLED_ARCH: arm64
+RUNNING_PID: 96766
+USER_DATA_PRESERVED: YES
+QA_DIAGNOSTICS_RETAINED: YES
+READY_FOR_USER_FIX_ACCEPTANCE: YES
 NO_NEW_DIAGNOSTIC_EXPANSION: YES
 NO_MORE_USER_REPRODUCTION_BEFORE_FIXED_QA: YES
 NO_TTS_OR_QUEUE_FIX: YES
 NO_NOTIFICATION_WORK: YES
-FINAL_STATE: ACTIVE_FIXED_QA_BUILD_INSTALL
+FINAL_STATE: WAITING_FOR_USER_FIX_ACCEPTANCE
 ```
 
 The four observed events are in `runtime-20261007-001.jsonl`, sequences 318–321,
