@@ -142,7 +142,7 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                    && ancestor !== document.body
                    && ancestor !== document.documentElement) {
               if (ancestor.matches
-                  && ancestor.matches('article[data-testid*="conversation-turn"]')) {
+                  && ancestor.matches('[data-testid*="conversation-turn"]')) {
                 return ancestor;
               }
               ancestor = ancestor.parentElement;
@@ -190,15 +190,15 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             ));
             if (explicit.length) return explicit.filter(isRendered);
 
-            const articles = Array.from(document.querySelectorAll(
-              'article[data-testid*="conversation-turn"]'
-            )).filter((article) => {
-              const role = article.getAttribute('data-message-author-role')
-                || article.querySelector('[data-message-author-role]')
+            const semanticTurns = Array.from(document.querySelectorAll(
+              '[data-testid*="conversation-turn"]'
+            )).filter((turn) => {
+              const role = turn.getAttribute('data-message-author-role')
+                || turn.querySelector('[data-message-author-role]')
                   ?.getAttribute('data-message-author-role');
-              return role === 'assistant' && isRendered(article);
+              return role === 'assistant' && isRendered(turn);
             });
-            if (articles.length) return articles;
+            if (semanticTurns.length) return semanticTurns;
 
             const fallback = latestRegenerateOwnedResponse();
             return fallback ? [fallback] : [];
@@ -217,7 +217,7 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                 return element;
               }
               if (element.matches
-                  && element.matches('article[data-testid*="conversation-turn"]')) {
+                  && element.matches('[data-testid*="conversation-turn"]')) {
                 const role = element.getAttribute('data-message-author-role')
                   || element.querySelector('[data-message-author-role]')
                     ?.getAttribute('data-message-author-role');
@@ -282,7 +282,7 @@ enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
 
 enum ChatGPTResponseExtractionPath: String, CaseIterable, Equatable, Sendable {
     case explicit
-    case article
+    case semanticTurn = "semantic_turn"
     case fallback
     case none
 }
@@ -574,8 +574,8 @@ enum ChatGPTResponseExtraction {
           const speechSelectedPath = (root) => {
             if (!root) return "none";
             if (root.matches && root.matches(speechAssistantSelector)) return "explicit";
-            if (root.matches && root.matches('article[data-testid*="conversation-turn"]')) {
-              return "article";
+            if (root.matches && root.matches('[data-testid*="conversation-turn"]')) {
+              return "semantic_turn";
             }
             return "fallback";
           };

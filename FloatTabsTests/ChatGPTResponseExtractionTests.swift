@@ -426,6 +426,23 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         XCTAssertEqual(payload?.blocks.map(\.text), ["Current semantic response."])
     }
 
+    func testRegenerateFallbackAcceptsTagAgnosticSemanticConversationTurnSection() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <section data-testid="conversation-turn-42">
+          <div><p>Latest assistant response.</p></div>
+          <div role="toolbar">
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </section>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        XCTAssertEqual(payload?.kind, .response)
+        XCTAssertEqual(payload?.blocks.map(\.text), ["Latest assistant response."])
+    }
+
     func testRegenerateFallbackSelectsLatestAmongMultipleHistoricalContainers() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
