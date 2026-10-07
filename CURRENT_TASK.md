@@ -2,7 +2,7 @@
 
 **Task ID:** FT-LIFECYCLE-001
 **Title:** Hot/Warm Residency Lifecycle Semantics Corrective
-**Status:** `ACTIVE — WEB_AUDITED_IMPLEMENTATION`
+**Status:** `WAITING_FOR_INDEPENDENT_WEB_AUDIT`
 **Mode:** `TEST_FIRST_MINIMAL_LIFECYCLE_FIX`
 
 ## Objective
@@ -157,6 +157,18 @@ FINAL_STATE=WAITING_FOR_INDEPENDENT_WEB_AUDIT
 ```
 
 Web will inspect the exact diff before any QA installation, human acceptance, PR-ready transition, or merge authorization.
+
+## Verified execution handoff
+
+- Implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
+- Hot RED: proven on the original production behavior; the inactive Hot renderer was deferred
+- Warm RED: proven on the original production behavior; the third inactive Warm runtime was released before its TTL
+- Focused lifecycle and WebViewPool suites: PASS
+- Full XCTest suite: PASS
+- Debug build: PASS
+- Release build: PASS (`arm64`)
+- QA App installation: not performed
+- Next state: independent Web audit of the pushed task-branch diff
 
 ## Not authorized
 

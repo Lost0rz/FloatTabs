@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ACTIVE — RESIDENCY_LIFECYCLE_SEMANTICS_CORRECTIVE**
+**MODE: WAITING_FOR_INDEPENDENT_WEB_AUDIT**
 
 ## Production authority
 
@@ -61,4 +61,14 @@ The visible tab red dot is driven by `ChatGPTUnreadResponseCoordinator`, not by 
 - No website/provider-specific keepalive.
 - No change to Cold semantics beyond non-regression coverage.
 - No change to speech, attention ownership, navigation policy, browser profiles, website data, or PR #102.
-- No local repository synchronization is required until an execution card is explicitly issued.
+- The execution card authorized task-branch commit and normal fast-forward push; merge, release, and QA installation remain unauthorized.
+
+## Implementation handoff
+
+- Implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
+- Focused lifecycle/WebViewPool tests: PASS, including Hot background recovery side-effect checks and Warm preference timer coverage
+- Full XCTest suite: PASS
+- Debug build: PASS
+- Release build: PASS; architecture: `arm64`
+- QA App installation: not performed
+- Next action: independent Web audit of the exact task-branch diff
