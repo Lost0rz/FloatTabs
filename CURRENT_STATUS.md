@@ -117,7 +117,7 @@ PR #102 remains separate MemoX durable-outbox work and is outside this task.
 
 **FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
 
-**STATUS: ACTIVE — GATE_1_LIVE_EVIDENCE**
+**STATUS: BLOCKED — GATE_1_LIVE_DOM_OWNERSHIP_UNOBSERVABLE**
 
 **CONTROL_PR:** #114 — MERGED at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
 **IMPLEMENTATION_BRANCH:** `fix/chatgpt-speech-response-ownership`.
@@ -140,7 +140,19 @@ currently authorized.
 PR #102 remains OPEN, Draft, at head
 `db6e886b33dffd93ece130463b184ae371b97684`; it is excluded from FT-SPEECH-001.
 
-**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — Gate 1 evidence is required.**
+**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — the live selected path remains unknown.**
+
+The existing privacy-safe health snapshot reports document readiness/visibility,
+conversation shell, composer, loading indicator and conversation-load-error
+booleans. The page-app snapshot reports bounded error, resource and lifecycle
+categories. Neither reports response selection path, fallback ancestor shape,
+user/assistant subtree markers, or status/alert/live-region membership.
+
+Gate 1 did not change the current page, send a message, reload, or reset it. A
+temporary probe has not been added or run: the existing diagnostics cannot expose
+the required metadata, and loading a new QA/DEBUG probe into the already-running
+WebView would require an app/page reload, which Gate 1 forbids. Await a privacy-safe
+live structural capture path or explicit authorization for a future probe session.
 
 ### Authorized scope
 

@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `ACTIVE — GATE_1_LIVE_EVIDENCE`
+**Status:** `BLOCKED — GATE_1_LIVE_DOM_OWNERSHIP_UNOBSERVABLE`
 **Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -128,6 +128,22 @@ If the live page uses an explicit/article assistant path or the candidate does
 not contain user content, stop production changes and report
 `ROOT_CAUSE_CONFIRMED = NO`. Continue read-only source attribution of the actual
 payload path. Do not alter fixtures to force the web-page hypothesis.
+
+### Current execution outcome: BLOCKED
+
+The live selected path and candidate subtree are unknown. Existing privacy-safe
+health/page-app diagnostics do not expose response ownership metadata; source
+inspection confirms the health probe reports only document readiness/visibility,
+conversation-shell, composer, loading, and load-error state, while the page-app
+probe reports bounded error/resource/lifecycle categories. No response-path,
+fallback-ancestor, role-marker, or live-region fields exist in those interfaces.
+
+No new ChatGPT message was sent, no page state was changed, and no reload/reset
+was performed. The authorized temporary probe was not loaded into the running
+WebView because doing so requires rebuilding/relaunching and reloading the page,
+contrary to Gate 1's no-reload boundary. Do not enter Gate 2 or modify response
+extraction until a privacy-safe live capture route is available or the user
+authorizes a future probe session that requires a page reload.
 
 ## Gate 2 — TDD RED
 
