@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ACTIVE — FINAL_REGRESSION_AND_INDEPENDENT_WEB_AUDIT**
+**MODE: ACTIVE — STALE_TEST_CONTRACT_CORRECTIVE**
 
 ## Production authority
 
@@ -19,67 +19,74 @@
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
 - Accepted V4 product implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`
 - Installed QA: `/Applications/FloatTabs.app`, Debug arm64, version `0.5.2 (20)`, source `6b5fb9a780073a26f8060e5be8baee284d511339`
-- Focused validation: `ChatGPTResponseExtractionTests` 47/47; `AssistantSpeechCoordinatorTests` 98/98
-- User/WebKit data preservation: PASS
+- V4 human acceptance: PASS — only latest ChatGPT response spoken; user prompt not spoken
 - PR #102: separate MemoX work; excluded and unchanged
 
-## FT-SPEECH-001 accepted live evidence
+## Final regression finding
+
+The first full final suite ran 1302 tests: 1298 passed, 1 failed, 3 skipped. Debug and Release builds passed.
+
+The only failure was:
 
 ```text
-V1_HUMAN_RESULT=user_message_then_assistant_response
-V2_HUMAN_RESULT=no_speech
-V3_HUMAN_RESULT=no_speech
-V4_HUMAN_RESULT=only_latest_chatgpt_response
-V4_HUMAN_ACCEPTANCE=PASS
+ChatGPTResponseBridgeTests/testTrustedAssistantPointerProtocolUsesFixedContentFreeContract()
+FloatTabsTests/ChatGPTResponseBridgeTests.swift:735
+stale assertion: source.contains("article[data-testid*=\"conversation-turn\"]")
 ```
 
-The original defect was localized to `ChatGPTResponseExtraction` response-root ownership, not TTS, queue, or content cleaning.
+Web audit classifies this as a stale test expectation, not a product regression:
 
-## Accepted V4 behavior
+```text
+FULL_SUITE_FAILURE_CLASS=STALE_TEST_EXPECTATION
+PRODUCT_REGRESSION=NO
+V4_PRODUCT_FIX_REOPEN=NO
+```
 
-The Web-audited V4 implementation now:
+Reason: V3 intentionally removed the obsolete `<article>` qualification and production now uses a tag-agnostic semantic-turn selector plus positive assistant ownership for current renderer content units. The failing test's purpose is to lock the trusted-pointer protocol to fixed, content-free semantic ownership; requiring the historical HTML tag is not part of that contract.
 
-- collects positively assistant-owned roots across legacy, classic semantic-turn, and current grouped renderer schemas;
-- uses the assistant content unit rather than the enclosing mixed user/assistant group;
-- prefers narrower content-bearing assistant roots;
-- selects the latest assistant response by DOM order across mixed renderer generations;
-- retains the Regenerate path only as a legacy fail-closed fallback;
-- keeps generic unowned ancestors and user-owned content out of the speech payload.
+## Authorized corrective
 
-Human QA confirmed the installed exact-source V4 build reads **only the latest ChatGPT response**.
+Only one test-contract correction is authorized in:
+
+```text
+FloatTabsTests/ChatGPTResponseBridgeTests.swift
+```
+
+Replace the obsolete tag-qualified assertion with stable semantic assertions covering:
+
+```text
+[data-testid*="conversation-turn"]
+[data-turn="assistant"]
+[data-content-search-unit-key]
+[data-conversation-role="assistant"]
+```
+
+and assert that the obsolete `article[data-testid*="conversation-turn"]` form is not required/present. Preserve all existing content-free negative assertions.
+
+No production file may change. The accepted product implementation remains `6b5fb9a780073a26f8060e5be8baee284d511339`.
 
 ## Role split
 
-Per `AGENTS.md`:
+Web owns this classification and corrective contract. Local only performs the exact test edit, runs the failing test, then reruns the same full final suite. Local does not reopen product/root-cause analysis.
 
-- Web owns code audit, causal judgment, and merge recommendation.
-- Local executes exact validation/build/install/forensic instructions only.
-- Local must not reopen root-cause analysis unless a prescribed validation produces contradictory evidence.
-
-## Final validation authorization
-
-Authorized now:
-
-1. run the repository's full final test suite on the exact V4 implementation/control branch without product changes;
-2. return exact pass/fail evidence and unchanged product SHA;
-3. Web performs the independent final code/diff audit against the accepted contract and main base;
-4. if both pass, transition to implementation PR/merge/cleanup authorization.
-
-Not authorized yet:
+## Not authorized
 
 ```text
-PRODUCT_CHANGE_AFTER_V4_ACCEPTANCE=NO
-NEW_DIAGNOSTIC_WORK=NO
+PRODUCT_CHANGE=NO
+NEW_PRODUCT_FIX=NO
+NEW_DIAGNOSTICS=NO
+ROOT_CAUSE_REOPEN=NO
 TOPOLOGY_PROBE=NO
 PR102_CHANGE=NO
+IMPLEMENTATION_PR_CREATE=NO
 MERGE=NO
 RELEASE=NO
 ```
 
 ## Required next state
 
-If full regression and independent Web audit both pass:
+If the corrected focused test and full suite pass with product code unchanged:
 
 ```text
-FINAL_STATE=READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE
+FINAL_STATE=WAITING_FOR_INDEPENDENT_WEB_FINAL_AUDIT
 ```
