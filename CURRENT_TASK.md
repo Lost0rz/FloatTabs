@@ -28,6 +28,8 @@ Memory pressure remains allowed to release inactive Warm runtimes early. Cold be
 
 `SlotLifecycleCoordinator` does not proactively evict Hot. The defect is in WebContent-process recovery: `WebViewPool.recoveryDisposition(isActive:)` treats every inactive Slot identically. When WebKit terminates an inactive Hot renderer, recovery is deferred and `recoverDeferredContentProcessIfNeeded(...)` reloads only on later activation.
 
+Immediate Hot recovery means restoring the Web runtime in the background. It must **not** select the Slot, present FloatTabs, change requested visibility, or steal keyboard/window focus. The user-facing requirement is that a Hot Slot is already usable when the user later returns to it.
+
 ### Warm
 
 The Settings value is persisted and live-wired correctly through `.floatTabsSlotRetentionDidChange` → `SlotLifecycleCoordinator.updateReleaseDelays(...)`.
@@ -65,7 +67,7 @@ active=false, Warm             => deferUntilActivation
 active=false, Cold             => deferUntilActivation
 ```
 
-Also prove an inactive Hot content-process termination starts the existing recovery load immediately rather than setting only a deferred-reload marker.
+Also prove an inactive Hot content-process termination starts the existing recovery load immediately rather than setting only a deferred-reload marker, while leaving selection, panel visibility, and focus unchanged.
 
 ### Warm retention RED
 
@@ -103,7 +105,7 @@ inactive Warm                  => deferUntilActivation
 inactive Cold                  => deferUntilActivation
 ```
 
-Use the existing recovery URL / recovery request path. Do not add a keepalive loop or provider-specific JavaScript.
+Use the existing recovery URL / recovery request path. Do not add a keepalive loop or provider-specific JavaScript. Immediate recovery is runtime-only: do not activate/select the Slot or alter shell presentation/focus.
 
 ### Warm
 
@@ -113,7 +115,7 @@ Keep explicit memory-pressure handling as the early-release override. Media/atte
 
 Update lifecycle/settings documentation or explanatory copy so the contract is explicit:
 
-- Hot = immediate runtime recovery if WebKit kills its content process;
+- Hot = immediate background runtime recovery if WebKit kills its content process, without selecting/presenting the Slot;
 - Warm = configured retention under normal conditions;
 - memory pressure may shorten Warm retention;
 - Cold semantics unchanged.
@@ -124,6 +126,7 @@ At minimum:
 
 - Hot recovery policy tests;
 - inactive Hot termination recovery test;
+- no-selection/no-presentation regression for Hot background recovery;
 - Warm three-runtime pre-TTL retention test;
 - Warm memory-pressure tests;
 - Warm preference-update timer tests;
