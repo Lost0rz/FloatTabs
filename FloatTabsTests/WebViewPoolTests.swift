@@ -1593,7 +1593,6 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmMemoryPressureTarget, 2)
     }
 
     func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
@@ -1654,7 +1653,6 @@ final class WebViewPoolTests: XCTestCase {
             webViewPool: pool,
             container: container,
             warmReleaseDelay: 60,
-            warmMemoryPressureTarget: 2,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
         )

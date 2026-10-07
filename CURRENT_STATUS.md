@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ROOT_CAUSE_CONFIRMED — WARM_MEMORY_WARNING_CORRECTIVE_AUTHORIZED**
+**MODE: WAITING_FOR_INDEPENDENT_WEB_AUDIT — WARM_WARNING_CORRECTIVE_COMPLETE**
 
 ## Production authority
 
@@ -64,13 +64,8 @@ This preserves a meaningful Warm setting while retaining a response to truly cri
 
 ## Next action
 
-Implement the smallest test-driven corrective on PR #116:
+The warning-level corrective is implemented and validated on the active task branch. The warning diagnostic remains recorded without releasing Warm runtimes; critical pressure retains early release for eligible inactive Warm runtimes, subject to media, attention, and speech protections. The obsolete warning LRU target and Warm recency bookkeeping were removed because critical pressure releases all eligible Warm runtimes.
 
-1. prove RED that warning-level pressure currently releases an inactive eligible Warm before TTL;
-2. change warning handling to diagnostic-only/no Warm eviction;
-3. preserve critical-level Warm eviction and all existing protection exclusions;
-4. update existing lifecycle tests and Settings/product wording to say that only **critical** memory pressure may shorten Warm retention;
-5. run focused lifecycle tests, full XCTest, Debug/Release arm64 builds;
-6. stop for independent Web audit before reinstalling QA.
+Validation on the corrective worktree: warning RED was reproduced before the production change; focused lifecycle checks passed; full XCTest passed with 1303 passed, 3 skipped, and 0 failed; Debug build passed; Release build passed and its executable is arm64. No QA reinstall was performed. The next action is independent Web audit of the task-branch diff against the root-cause/product decision above.
 
 Do not modify unread/red-dot behavior, speech, Cold semantics, PR #102, main, or release state.

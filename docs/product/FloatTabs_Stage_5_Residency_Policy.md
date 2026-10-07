@@ -21,7 +21,7 @@
 
 - The `WKWebView` stays in `WebViewPool`.
 - It is detached from the visible presentation while inactive.
-- During normal operation, it remains resident for the configured Warm retention delay; memory pressure may release an inactive, non-protected Warm runtime early.
+- During normal operation, it remains resident for the configured Warm retention delay; critical memory pressure may release an inactive, non-protected Warm runtime early.
 - Re-selection reuses the same `WKWebView` object.
 - DOM/SPA/scroll preservation remains best-effort because WebKit may suspend detached content.
 

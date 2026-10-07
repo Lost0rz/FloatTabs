@@ -177,7 +177,7 @@ The previously reproduced post-fullscreen black-screen case has passed current R
 | Policy | Behavior |
 | --- | --- |
 | **Hot** | Keep the live WebView attached; if WebKit terminates its renderer, recover it in the background without selecting or presenting the Slot. |
-| **Warm** | Keep inactive WebViews for the configured retention (2 minutes by default) during normal operation; memory pressure may release them early. |
+| **Warm** | Keep inactive WebViews for the configured retention (2 minutes by default) during normal operation; critical memory pressure may shorten retention. |
 | **Cold** | Release after about 30 seconds away from the Slot; a selected-but-hidden Slot gets a recent-active grace period first. |
 
 Background media is separate from Residency. Inactive media pauses by default; a Slot can opt into **Allow Background Audio**.

@@ -1610,7 +1610,7 @@ final class PerformanceSettingsViewController: NSViewController {
 
         let stack = NSStackView(views: [
             sectionTitle("Tab Residency"),
-            detailLabel("Hot recovers a terminated renderer in the background. Warm follows its retention setting; memory pressure may shorten it. Cold releases after its delay."),
+            detailLabel("Hot recovers a terminated renderer in the background. Warm follows its retention setting during normal operation; critical memory pressure may shorten it. Cold releases after its delay."),
             websiteCacheSettingRow("Warm WebView retention", control: warmRetentionPopup),
             websiteCacheSettingRow("Cold release delay", control: coldReleasePopup),
             detailLabel("Choose Hot, Warm, or Cold from each Tab's menu."),

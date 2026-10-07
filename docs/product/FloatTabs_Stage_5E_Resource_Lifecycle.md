@@ -9,7 +9,7 @@ Stage 5D interaction/rendering geometry remains frozen. Stage 5E changes only re
 User policy remains:
 
 - **Hot** — strict resident runtime; highest responsiveness; no proactive eviction.
-- **Warm** — resident for the configured inactive retention period during normal operation, subject to memory-pressure release.
+- **Warm** — resident for the configured inactive retention period during normal operation; critical memory pressure may shorten retention.
 - **Cold** — non-resident after a short grace; behaves like a persistent Web App bookmark when unused.
 
 Active/selected is not itself a Residency policy. Any Slot being actively used gets a complete live WKWebView regardless of Hot/Warm/Cold.
@@ -28,7 +28,7 @@ Active/selected is not itself a Residency policy. Any Slot being actively used g
 - Inactive Warm remains resident as a short-lived cache.
 - Default inactive TTL: **120 seconds**.
 - The selected Warm retention setting is honored during normal operation; adding another inactive Warm runtime does not evict the oldest one before its TTL.
-- macOS memory-pressure warning reduces inactive Warm cache toward one; critical pressure evicts all inactive non-protected Warm runtimes.
+- macOS memory-pressure warning is diagnostic only and does not release Warm runtimes before TTL; critical pressure may evict inactive non-protected Warm runtimes early.
 - Reactivating before eviction cancels the inactive plan and reuses the same WKWebView.
 
 ### Cold
@@ -57,7 +57,7 @@ Hiding FloatTabs is not immediately equivalent to abandoning the selected page.
 - Playback state is checked periodically while protected.
 - When playback becomes paused/none, a fresh policy grace starts from that observation time.
 - Release deadlines re-check playback before destruction, preventing a page that started playing after deactivation from being killed at the old deadline.
-- Media-protected Warm is excluded from TTL release and memory-pressure eviction.
+- Media-protected Warm is excluded from TTL release and critical-pressure eviction.
 
 ## 5. Runtime state visualization
 
@@ -84,7 +84,7 @@ Benchmark/debug state exposes:
 - media-protected Slot IDs;
 - hidden-active grace pending state.
 
-These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The default Warm TTL is 120 seconds, and Settings can select a longer retention. Ordinary inactivity honors that configured TTL; explicit memory pressure remains an early-release override.
+These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The default Warm TTL is 120 seconds, and Settings can select a longer retention. Ordinary inactivity honors that configured TTL; critical memory pressure may shorten Warm retention.
 
 ## 7. Regression boundary
 

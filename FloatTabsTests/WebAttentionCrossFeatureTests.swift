@@ -1482,7 +1482,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 0.05,
-            warmMemoryPressureTarget: 3,
             attentionCoordinator: coordinator
         )
 
@@ -1493,15 +1492,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
-        // Warning pressure evicts the oldest eligible warm slot, never the
-        // Generating-protected runtime.
+        // Warning pressure is diagnostic only; critical pressure evicts the
+        // eligible Warm runtimes but never the Generating-protected runtime.
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
+        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
         XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
         lifecycle.handleMemoryPressure(.critical)
+        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
         XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
@@ -1568,7 +1568,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 60,
-            warmMemoryPressureTarget: 3,
             attentionCoordinator: coordinator
         )
 
@@ -1583,12 +1582,13 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
 
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
+        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
         XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
 
-        // Critical pressure still cannot take the Ready runtime.
+        // Critical pressure evicts eligible runtimes but cannot take Ready.
         lifecycle.handleMemoryPressure(.critical)
+        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
         XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
         XCTAssertEqual(coordinator.state(for: chat.id), .ready)
@@ -3144,7 +3144,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 0.03,
-            warmMemoryPressureTarget: 2,
             attentionCoordinator: coordinator,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             mediaProtectionPollDelay: 0.005
@@ -5358,7 +5357,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private func makeCompressedLifecycle(
         pool: WebViewPool,
         warmReleaseDelay: TimeInterval,
-        warmMemoryPressureTarget: Int,
         attentionCoordinator: WebAttentionCoordinator,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         mediaProtectionPollDelay: TimeInterval = 0.01
@@ -5374,7 +5372,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             warmReleaseDelay: warmReleaseDelay,
             hiddenActiveGraceDelay: 120,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
-            warmMemoryPressureTarget: warmMemoryPressureTarget,
             mediaPlayingQuery: mediaPlayingQuery,
             attentionProtectionQuery: { slotID in
                 attentionCoordinator.isAttentionProtected(slotID)
