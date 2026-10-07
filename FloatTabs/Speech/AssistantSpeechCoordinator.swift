@@ -6,6 +6,31 @@ enum SpeechRequestOrigin: Equatable, Sendable {
     case manual
 }
 
+struct SpeechQABatchContext: Equatable, Sendable {
+    let trace: RuntimeDiagnosticTrace
+    let correlationID: String
+    let utteranceOwnership: [ChatGPTSpeechOwnershipCategory]
+
+    func submissionMetadata(at index: Int) -> SpeechQASubmissionMetadata? {
+        guard utteranceOwnership.indices.contains(index) else { return nil }
+        return SpeechQASubmissionMetadata(
+            trace: trace,
+            correlationID: correlationID,
+            ordinal: index + 1,
+            total: utteranceOwnership.count,
+            ownership: utteranceOwnership[index]
+        )
+    }
+}
+
+struct SpeechQASubmissionMetadata: Equatable, Sendable {
+    let trace: RuntimeDiagnosticTrace
+    let correlationID: String
+    let ordinal: Int
+    let total: Int
+    let ownership: ChatGPTSpeechOwnershipCategory
+}
+
 enum SpeechPlaybackState: Equatable, Sendable {
     case idle
     case starting
@@ -111,6 +136,7 @@ final class AssistantSpeechCoordinator {
         let origin: SpeechRequestOrigin
         let automaticOrder: UInt64?
         let manualIntent: UInt64?
+        let diagnosticTrace: RuntimeDiagnosticTrace?
     }
 
     private enum AutomaticReservationState {
@@ -134,7 +160,14 @@ final class AssistantSpeechCoordinator {
         let responseID: SpeechResponseIdentity?
         let requests: [SpeechUtteranceRequest]
         let origin: SpeechPlaybackOrigin
+        let qaContext: SpeechQABatchContext?
         var nextIndex: Int
+    }
+
+    private struct SpeechQASubmissionProgress {
+        let expectedCount: Int
+        var submittedCount = 0
+        var ownershipCounts: [ChatGPTSpeechOwnershipCategory: Int] = [:]
     }
 
     private let playbackSession: SpeechPlaybackSessionController
@@ -144,7 +177,9 @@ final class AssistantSpeechCoordinator {
     private let activeSlotIDProvider: @MainActor () -> UUID?
     private let followSpeechEnabled: @MainActor () -> Bool
     private let automaticSpeechSuppressed: @MainActor (UUID) -> Bool
+    private let diagnostics: any RuntimeDiagnosticRecording
     private var extractionRequests: [UUID: ExtractionRequest] = [:]
+    private var speechQASubmissionProgress: [UUID: SpeechQASubmissionProgress] = [:]
     private var nextGeneration: UInt64 = 0
     private var stopEpoch: UInt64 = 0
     private var playbackIntentEpoch: UInt64 = 0
@@ -180,7 +215,8 @@ final class AssistantSpeechCoordinator {
         followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true },
-        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false }
+        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false },
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         self.playbackSession = playbackSession
         self.webViewProvider = webViewProvider
@@ -189,6 +225,7 @@ final class AssistantSpeechCoordinator {
         self.activeSlotIDProvider = activeSlotIDProvider
         self.followSpeechEnabled = followSpeechEnabled
         self.automaticSpeechSuppressed = automaticSpeechSuppressed
+        self.diagnostics = diagnostics
     }
 
     /// Compatibility construction for existing source-level clients and tests.
@@ -200,7 +237,8 @@ final class AssistantSpeechCoordinator {
         followBridgeProvider: @escaping @MainActor (UUID) -> ChatGPTResponseFollowing? = { _ in nil },
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
         followSpeechEnabled: @escaping @MainActor () -> Bool = { true },
-        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false }
+        automaticSpeechSuppressed: @escaping @MainActor (UUID) -> Bool = { _ in false },
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) {
         let playbackSession = SpeechPlaybackSessionController(
             speechService: speechService
@@ -212,7 +250,8 @@ final class AssistantSpeechCoordinator {
             followBridgeProvider: followBridgeProvider,
             activeSlotIDProvider: activeSlotIDProvider,
             followSpeechEnabled: followSpeechEnabled,
-            automaticSpeechSuppressed: automaticSpeechSuppressed
+            automaticSpeechSuppressed: automaticSpeechSuppressed,
+            diagnostics: diagnostics
         )
         // Compatibility construction is intentionally explicit: production
         // Panel wiring creates the adapter at the source boundary instead.
@@ -389,6 +428,9 @@ final class AssistantSpeechCoordinator {
     /// extraction so an automatic result that resolves first can only stage.
     @discardableResult
     func readLatestResponse(for slotID: UUID) -> Bool {
+#if DEBUG
+        speechQASubmissionProgress.removeAll()
+#endif
         playbackIntentEpoch &+= 1
         resetFollowState(for: slotID)
         invalidateAllAutomaticPlayback()
@@ -430,6 +472,9 @@ final class AssistantSpeechCoordinator {
     /// Preview items carry no response identity and never mutate Tab state.
     func playPreview(_ requests: [SpeechUtteranceRequest]) {
         guard !requests.isEmpty else { return }
+#if DEBUG
+        speechQASubmissionProgress.removeAll()
+#endif
         playbackIntentEpoch &+= 1
         stopEpoch &+= 1
         resetFollowState()
@@ -447,6 +492,7 @@ final class AssistantSpeechCoordinator {
             responseID: nil,
             requests: requests,
             origin: .preview,
+            qaContext: nil,
             nextIndex: 0
         )]
         drainPlayback()
@@ -454,6 +500,9 @@ final class AssistantSpeechCoordinator {
 
     /// Stop is local to speech. It never sends a cancellation to ChatGPT.
     func stop() {
+#if DEBUG
+        speechQASubmissionProgress.removeAll()
+#endif
         stopEpoch &+= 1
         playbackIntentEpoch &+= 1
         resetFollowState()
@@ -498,6 +547,9 @@ final class AssistantSpeechCoordinator {
     }
 
     private func resetRuntimeState(slotID: UUID) {
+#if DEBUG
+        speechQASubmissionProgress.removeAll()
+#endif
         nextGeneration &+= 1
         resetFollowState(for: slotID)
         let affectedRequests = extractionRequests.filter { $0.value.slotID == slotID }
@@ -536,6 +588,16 @@ final class AssistantSpeechCoordinator {
         }
 
         nextGeneration &+= 1
+        let diagnosticTrace: RuntimeDiagnosticTrace?
+#if DEBUG
+        if origin == .manual {
+            diagnosticTrace = diagnostics.beginTrace(root: "speech.qa.read_latest")
+        } else {
+            diagnosticTrace = nil
+        }
+#else
+        diagnosticTrace = nil
+#endif
         let request = ExtractionRequest(
             requestID: requestID,
             slotID: slotID,
@@ -545,12 +607,29 @@ final class AssistantSpeechCoordinator {
             webView: webView,
             origin: origin,
             automaticOrder: automaticOrder,
-            manualIntent: manualIntent
+            manualIntent: manualIntent,
+            diagnosticTrace: diagnosticTrace
         )
         extractionRequests[requestID] = request
 
+#if DEBUG
+        if let diagnosticTrace {
+            diagnostics.record(
+                event: "speech.qa.read_requested",
+                level: .info,
+                subsystem: "speech.qa",
+                trace: diagnosticTrace,
+                fields: [
+                    "stage": .string("read_latest"),
+                    "request_correlation": .string(requestID.uuidString)
+                ]
+            )
+        }
+#endif
+
         let expectedWebView = webView
-        bridge.extractLatest { [weak self, weak expectedWebView] payload in
+        let handlePayload: @MainActor (ChatGPTResponsePayload?) -> Void = {
+            [weak self, weak expectedWebView] payload in
             guard let self else { return }
             self.completeExtraction(
                 requestID: requestID,
@@ -558,6 +637,18 @@ final class AssistantSpeechCoordinator {
                 payload: payload
             )
         }
+#if DEBUG
+        if diagnosticTrace != nil {
+            bridge.extractLatest(
+                correlationID: requestID.uuidString,
+                completion: handlePayload
+            )
+        } else {
+            bridge.extractLatest(completion: handlePayload)
+        }
+#else
+        bridge.extractLatest(completion: handlePayload)
+#endif
         return true
     }
 
@@ -580,6 +671,29 @@ final class AssistantSpeechCoordinator {
             releaseExtraction(request)
             return
         }
+#if DEBUG
+        if let diagnosticTrace = request.diagnosticTrace {
+            var fields: [String: RuntimeDiagnosticValue] = [
+                "stage": .string("payload_blocks"),
+                "request_correlation": .string(requestID.uuidString),
+                "payload_present": .bool(payload != nil)
+            ]
+            if let speechDiagnostics = payload?.speechDiagnostics {
+                fields.merge(speechDiagnostics.diagnosticFields) { _, new in new }
+                fields["instrumentation_metadata_present"] = .bool(true)
+            } else {
+                fields["instrumentation_metadata_present"] = .bool(false)
+                fields["block_count"] = .integer(Int64(payload?.blocks.count ?? 0))
+            }
+            diagnostics.record(
+                event: "speech.qa.payload_received",
+                level: .info,
+                subsystem: "speech.qa",
+                trace: diagnosticTrace,
+                fields: fields
+            )
+        }
+#endif
         guard let payload,
               let responseID = payload.responseID else {
             releaseExtraction(request)
@@ -602,6 +716,42 @@ final class AssistantSpeechCoordinator {
             for: payload.blocks
         )
 
+        let qaContext: SpeechQABatchContext?
+#if DEBUG
+        if let diagnosticTrace = request.diagnosticTrace {
+            let utteranceOwnership = Self.ownershipCategories(
+                for: requests,
+                diagnostics: payload.speechDiagnostics
+            )
+            qaContext = SpeechQABatchContext(
+                trace: diagnosticTrace,
+                correlationID: requestID.uuidString,
+                utteranceOwnership: utteranceOwnership
+            )
+            var fields: [String: RuntimeDiagnosticValue] = [
+                "stage": .string("utterance_requests"),
+                "request_correlation": .string(requestID.uuidString),
+                "utterance_count": .integer(Int64(requests.count))
+            ]
+            for category in ChatGPTSpeechOwnershipCategory.allCases {
+                fields["utterance_\(category.rawValue)_count"] = .integer(
+                    Int64(utteranceOwnership.filter { $0 == category }.count)
+                )
+            }
+            diagnostics.record(
+                event: "speech.qa.utterances_created",
+                level: .info,
+                subsystem: "speech.qa",
+                trace: diagnosticTrace,
+                fields: fields
+            )
+        } else {
+            qaContext = nil
+        }
+#else
+        qaContext = nil
+#endif
+
         switch request.origin {
         case .automatic:
             stageAutomatic(
@@ -613,8 +763,25 @@ final class AssistantSpeechCoordinator {
             finishManualExtraction(
                 identity: identity,
                 requests: requests,
-                request: request
+                request: request,
+                qaContext: qaContext
             )
+        }
+    }
+
+    private static func ownershipCategories(
+        for requests: [SpeechUtteranceRequest],
+        diagnostics: ChatGPTSpeechExtractionDiagnostics?
+    ) -> [ChatGPTSpeechOwnershipCategory] {
+        requests.map { request in
+            guard let blockID = request.sourceLocator?.blockID,
+                  let marker = blockID.range(of: ":block-", options: .backwards),
+                  let index = Int(blockID[marker.upperBound...]),
+                  let diagnostics,
+                  diagnostics.blockOwnership.indices.contains(index) else {
+                return .unknown
+            }
+            return diagnostics.blockOwnership[index]
         }
     }
 
@@ -660,7 +827,8 @@ final class AssistantSpeechCoordinator {
     private func finishManualExtraction(
         identity: SpeechResponseIdentity,
         requests: [SpeechUtteranceRequest],
-        request: ExtractionRequest
+        request: ExtractionRequest,
+        qaContext: SpeechQABatchContext?
     ) {
         guard let manualIntent = request.manualIntent,
               manualPlaybackBarrier == manualIntent else {
@@ -695,6 +863,7 @@ final class AssistantSpeechCoordinator {
             responseID: identity,
             requests: requests,
             origin: .manual,
+            qaContext: qaContext,
             nextIndex: 0
         )]
         releaseManualBarrier(intent: manualIntent)
@@ -828,7 +997,8 @@ final class AssistantSpeechCoordinator {
                 requests: first.requests,
                 origin: first.origin,
                 startIndex: first.nextIndex,
-                limit: speechQueue.availableCapacity
+                limit: speechQueue.availableCapacity,
+                qaContext: first.qaContext
             )
             guard result.nextIndex > first.nextIndex || !result.items.isEmpty else { return }
             if !result.items.isEmpty {
@@ -896,13 +1066,15 @@ final class AssistantSpeechCoordinator {
         requests: [SpeechUtteranceRequest],
         origin: SpeechPlaybackOrigin,
         startIndex: Int,
-        limit: Int
+        limit: Int,
+        qaContext: SpeechQABatchContext? = nil
     ) -> (items: [SpeechQueueItem], nextIndex: Int) {
         guard limit > 0 else { return ([], max(0, min(startIndex, requests.count))) }
         var items: [SpeechQueueItem] = []
         var index = max(0, min(startIndex, requests.count))
         while index < requests.count && items.count < limit {
-            let request = requests[index]
+            let requestIndex = index
+            let request = requests[requestIndex]
             index += 1
             guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   SpeechSpeakabilityFilter.containsSpeakableContent(request.text) else {
@@ -926,7 +1098,8 @@ final class AssistantSpeechCoordinator {
                     text: request.text,
                     languageRole: request.languageRole,
                     origin: origin,
-                    sourceLocator: sourceLocator
+                    sourceLocator: sourceLocator,
+                    qaSubmission: qaContext?.submissionMetadata(at: requestIndex)
                 )
             )
         }
@@ -963,7 +1136,65 @@ final class AssistantSpeechCoordinator {
             }
             return
         }
+#if DEBUG
+        recordQASpeechSubmission(item.qaSubmission)
+#endif
     }
+
+#if DEBUG
+    private func recordQASpeechSubmission(
+        _ metadata: SpeechQASubmissionMetadata?
+    ) {
+        guard let metadata else { return }
+        var progress = speechQASubmissionProgress[metadata.trace.id]
+            ?? SpeechQASubmissionProgress(expectedCount: metadata.total)
+        progress.submittedCount += 1
+        progress.ownershipCounts[metadata.ownership, default: 0] += 1
+
+        if progress.submittedCount == 1 {
+            diagnostics.record(
+                event: "speech.qa.submission_started",
+                level: .info,
+                subsystem: "speech.qa",
+                trace: metadata.trace,
+                fields: [
+                    "stage": .string("speech_submission"),
+                    "request_correlation": .string(metadata.correlationID),
+                    "submission_ordinal": .integer(Int64(metadata.ordinal)),
+                    "expected_submission_count": .integer(Int64(metadata.total)),
+                    "submitted_count": .integer(1),
+                    "ownership": .string(metadata.ownership.rawValue)
+                ]
+            )
+        }
+
+        guard progress.submittedCount >= progress.expectedCount else {
+            speechQASubmissionProgress[metadata.trace.id] = progress
+            return
+        }
+
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "stage": .string("speech_submission"),
+            "request_correlation": .string(metadata.correlationID),
+            "expected_submission_count": .integer(Int64(progress.expectedCount)),
+            "actual_submission_count": .integer(Int64(progress.submittedCount)),
+            "submission_complete": .bool(true)
+        ]
+        for category in ChatGPTSpeechOwnershipCategory.allCases {
+            fields["submitted_\(category.rawValue)_count"] = .integer(
+                Int64(progress.ownershipCounts[category, default: 0])
+            )
+        }
+        diagnostics.record(
+            event: "speech.qa.submission_summary",
+            level: .info,
+            subsystem: "speech.qa",
+            trace: metadata.trace,
+            fields: fields
+        )
+        speechQASubmissionProgress.removeValue(forKey: metadata.trace.id)
+    }
+#endif
 
     private func followCurrentItem(force: Bool = false) {
         guard followSpeechEnabled(),

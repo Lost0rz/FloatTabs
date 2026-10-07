@@ -30,6 +30,25 @@ old PR.
   documents are supporting evidence; they do not override these files.
 - A missing or stale control-plane file is a blocker, not permission to guess.
 
+## Web audit / local execution split
+
+- When the Web control-plane agent has repository access, it owns source-path audit,
+  causal/root-cause classification, fix-scope selection, and the implementation
+  contract before local production changes begin.
+- Do not ask the local executor to rediscover a root cause that the Web agent can
+  establish by reading the relevant code. Local execution is primarily for exact
+  implementation, focused tests, build/install, runtime reproduction, log/evidence
+  extraction, and machine-specific verification.
+- The local executor may STOP and return evidence when an authorized RED does not
+  reproduce, the prescribed patch conflicts with live source, or machine/runtime
+  facts contradict the contract. It must not expand that STOP into an open-ended
+  code audit or speculative diagnosis unless `CURRENT_TASK.md` explicitly delegates
+  that missing evidence question.
+- For a narrow user-visible regression with a reproducible symptom, prefer a direct
+  business fix once Web source audit establishes the faulty boundary. Add diagnostics
+  only when missing runtime evidence prevents a safe, testable fix; do not build
+  diagnostics in parallel merely because more observability could be useful.
+
 ## Session entry gate
 
 Before implementation work:

@@ -67,22 +67,38 @@ private final class TestSpeechService: SpeechSynthesizing {
 
 @MainActor
 private final class TestResponseBridge: ChatGPTResponseExtracting {
-    private var completions: [@MainActor (ChatGPTResponsePayload?) -> Void] = []
+    private struct PendingExtraction {
+        let correlationID: String?
+        let completion: @MainActor (ChatGPTResponsePayload?) -> Void
+    }
+
+    private var completions: [PendingExtraction] = []
+    private(set) var correlationIDs: [String] = []
 
     var requestCount: Int { completions.count }
 
     func extractLatest(completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void) {
-        completions.append(completion)
+        completions.append(PendingExtraction(correlationID: nil, completion: completion))
+    }
+
+    func extractLatest(
+        correlationID: String,
+        completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void
+    ) {
+        correlationIDs.append(correlationID)
+        completions.append(
+            PendingExtraction(correlationID: correlationID, completion: completion)
+        )
     }
 
     func resolve(_ payload: ChatGPTResponsePayload?) {
         guard !completions.isEmpty else { return }
-        completions.removeFirst()(payload)
+        completions.removeFirst().completion(payload)
     }
 
     func resolve(at index: Int, with payload: ChatGPTResponsePayload?) {
         guard completions.indices.contains(index) else { return }
-        completions.remove(at: index)(payload)
+        completions.remove(at: index).completion(payload)
     }
 }
 
@@ -145,7 +161,8 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
         webView: WKWebView,
         followBridge: TestFollowBridge? = nil,
         activeSlotIDProvider: @escaping @MainActor () -> UUID? = { nil },
-        followSpeechEnabled: @escaping @MainActor () -> Bool = { true }
+        followSpeechEnabled: @escaping @MainActor () -> Bool = { true },
+        diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder()
     ) -> AssistantSpeechCoordinator {
         let playbackSession = SpeechPlaybackSessionController(speechService: service)
         let coordinator = AssistantSpeechCoordinator(
@@ -154,13 +171,179 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
             responseBridgeProvider: { _ in bridge },
             followBridgeProvider: { _ in followBridge },
             activeSlotIDProvider: activeSlotIDProvider,
-            followSpeechEnabled: followSpeechEnabled
+            followSpeechEnabled: followSpeechEnabled,
+            diagnostics: diagnostics
         )
         _ = ChatGPTSpeechSourceAdapter(
             coordinator: coordinator,
             playbackSession: playbackSession
         )
         return coordinator
+    }
+
+    private func makeQAPayload(
+        requestID: String,
+        responseID: String,
+        blocks: [(String, ChatGPTSpeechOwnershipCategory)]
+    ) -> ChatGPTResponsePayload {
+        let documentToken = "document-qa-12345678"
+        let speechBlocks = blocks.enumerated().map { index, entry in
+            SpeechContentBlock(
+                kind: .paragraph,
+                text: entry.0,
+                level: nil,
+                sourceLocator: SpeechSourceLocator(
+                    documentToken: documentToken,
+                    responseID: responseID,
+                    blockID: "\(responseID):block-\(index)"
+                )
+            )
+        }
+        return ChatGPTResponsePayload(
+            version: ChatGPTResponsePayload.currentVersion,
+            kind: .response,
+            requestID: requestID,
+            documentToken: documentToken,
+            responseID: responseID,
+            blocks: speechBlocks,
+            speechDiagnostics: ChatGPTSpeechExtractionDiagnostics(
+                selectedPath: .fallback,
+                rootElement: .div,
+                composerMarkerPresent: true,
+                userMarkerPresent: false,
+                assistantMarkerPresent: false,
+                statusMarkerPresent: false,
+                alertMarkerPresent: false,
+                liveRegionMarkerPresent: false,
+                blockOwnership: blocks.map { $0.1 }
+            )
+        )
+    }
+
+    func testSpeechQADiagnosticsCorrelateReadExtractionUtterancesAndSubmissions() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView(),
+            diagnostics: diagnostics
+        )
+        let slotID = UUID()
+
+        coordinator.readLatestResponse(for: slotID)
+        let firstCorrelation = bridge.correlationIDs[0]
+        coordinator.readLatestResponse(for: slotID)
+        let secondCorrelation = bridge.correlationIDs[1]
+        XCTAssertNotEqual(firstCorrelation, secondCorrelation)
+
+        bridge.resolve(at: 1, with: makeQAPayload(
+            requestID: secondCorrelation,
+            responseID: "response-qa-12345678",
+            blocks: [
+                ("Assistant-owned sentence.", .assistantOwned),
+                ("User-owned sentence.", .userOwned)
+            ]
+        ))
+        XCTAssertEqual(service.spoken, ["Assistant-owned sentence."])
+        service.finish(token: service.spokenTokens[0])
+        XCTAssertEqual(service.spoken, [
+            "Assistant-owned sentence.",
+            "User-owned sentence."
+        ])
+        service.finish(token: service.spokenTokens[1])
+        bridge.resolve(at: 0, with: nil)
+
+        let events = writer.events.filter { $0.subsystem == "speech.qa" }
+        let firstEvents = events.filter {
+            $0.fields["request_correlation"] == .string(firstCorrelation)
+        }
+        let secondEvents = events.filter {
+            $0.fields["request_correlation"] == .string(secondCorrelation)
+        }
+        XCTAssertEqual(firstEvents.map(\.event), ["speech.qa.read_requested"])
+        XCTAssertEqual(secondEvents.map(\.event), [
+            "speech.qa.read_requested",
+            "speech.qa.payload_received",
+            "speech.qa.utterances_created",
+            "speech.qa.submission_started",
+            "speech.qa.submission_summary"
+        ])
+        XCTAssertEqual(Set(secondEvents.compactMap(\.traceID)).count, 1)
+        XCTAssertEqual(Set(events.compactMap(\.traceID)).count, 2)
+        XCTAssertEqual(
+            secondEvents.first { $0.event == "speech.qa.payload_received" }?
+                .fields["block_ownership_sequence"],
+            .string("assistant_owned,user_owned")
+        )
+        XCTAssertEqual(
+            secondEvents.first { $0.event == "speech.qa.utterances_created" }?
+                .fields["utterance_assistant_owned_count"],
+            .integer(1)
+        )
+        XCTAssertEqual(
+            secondEvents.first { $0.event == "speech.qa.utterances_created" }?
+                .fields["utterance_user_owned_count"],
+            .integer(1)
+        )
+        XCTAssertEqual(
+            secondEvents.first { $0.event == "speech.qa.submission_summary" }?
+                .fields["actual_submission_count"],
+            .integer(2)
+        )
+        let diagnosticJSON = String(
+            decoding: writer.lines.flatMap { Array($0) },
+            as: UTF8.self
+        )
+        XCTAssertFalse(diagnosticJSON.contains("Assistant-owned sentence."))
+        XCTAssertFalse(diagnosticJSON.contains("User-owned sentence."))
+    }
+
+    func testSpeechQANoRootClassificationDoesNotCreateSpeech() {
+        let service = TestSpeechService()
+        let bridge = TestResponseBridge()
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let coordinator = makeCoordinator(
+            service: service,
+            bridge: bridge,
+            webView: WKWebView(),
+            diagnostics: diagnostics
+        )
+
+        coordinator.readLatestResponse(for: UUID())
+        let correlation = bridge.correlationIDs[0]
+        bridge.resolve(ChatGPTResponsePayload(
+            version: ChatGPTResponsePayload.currentVersion,
+            kind: .empty,
+            requestID: correlation,
+            documentToken: "document-empty-12345678",
+            responseID: nil,
+            blocks: [],
+            speechDiagnostics: ChatGPTSpeechExtractionDiagnostics(
+                selectedPath: .none,
+                rootElement: .none,
+                composerMarkerPresent: false,
+                userMarkerPresent: false,
+                assistantMarkerPresent: false,
+                statusMarkerPresent: false,
+                alertMarkerPresent: false,
+                liveRegionMarkerPresent: false,
+                blockOwnership: []
+            )
+        ))
+
+        XCTAssertTrue(service.spoken.isEmpty)
+        let events = writer.events.filter { $0.subsystem == "speech.qa" }
+        XCTAssertEqual(events.map(\.event), [
+            "speech.qa.read_requested",
+            "speech.qa.payload_received"
+        ])
+        XCTAssertEqual(events.last?.fields["selected_path"], .string("none"))
+        XCTAssertEqual(events.last?.fields["block_count"], .integer(0))
+        XCTAssertEqual(events.last?.fields["request_correlation"], .string(correlation))
     }
 
     private func makeFollowPayload(

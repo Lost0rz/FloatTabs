@@ -65,7 +65,8 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             '[data-math],[data-latex],[data-tex],[role="math"]';
           const RESPONSE_EXCLUDED_SELECTOR =
             'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
-            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"],' +
+            'h4[data-conversation-role="assistant"]';
 
           const safeCanonicalStableValue = (value) => {
             if (!value || value.length > 160) return null;
@@ -115,32 +116,125 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
               'input,textarea,[contenteditable="true"],[role="textbox"]'
             ));
 
-          const hasResponseContent = (root) =>
-            Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)).some(
+          const hasResponseContent = (root) => {
+            const candidates = [];
+            if (root && root.matches && root.matches(RESPONSE_CONTENT_SELECTOR)) {
+              candidates.push(root);
+            }
+            candidates.push(...Array.from(root.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
+            return candidates.some(
               (element) => isRendered(element)
                 && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
             );
+          };
 
-          // Current ChatGPT keeps completed-response controls semantic but may
-          // omit assistant-role attributes. Bound ownership to the smallest
-          // rendered ancestor with one Regenerate control and response content.
+          const hasNonAssistantOwnershipMarker = (root) => {
+            const selector = [
+              '[data-message-author-role="user"]',
+              '[data-message-role="user"]',
+              '[data-testid*="conversation-turn-user"]',
+              '[data-turn="user"]',
+              '[data-conversation-role="user"]',
+              '[data-user-message-bubble]',
+              'input,textarea,[contenteditable="true"],[role="textbox"]',
+              '[role="status"],[data-testid*="status"],[role="alert"]',
+              '[aria-live]:not([aria-live="off"])'
+            ].join(',');
+            return Boolean(
+              (root.matches && root.matches(selector))
+                || (root.querySelector && root.querySelector(selector))
+            );
+          };
+
+          const ASSISTANT_ROLE_MARKER_SELECTOR =
+            '[data-message-author-role="assistant"],[data-message-role="assistant"]';
+          const CONTENT_UNIT_SELECTOR = '[data-content-search-unit-key]';
+          const ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR =
+            '[data-conversation-role="assistant"],[data-chatgpt-agent-turn-start]';
+
+          const isAssistantSemanticConversationTurn = (turn) => {
+            if (!turn || !turn.matches
+                || !turn.matches('[data-testid*="conversation-turn"]')) {
+              return false;
+            }
+            return turn.getAttribute('data-turn') === 'assistant'
+              || turn.getAttribute('data-message-author-role') === 'assistant'
+              || turn.getAttribute('data-message-role') === 'assistant'
+              || Boolean(turn.querySelector(ASSISTANT_ROLE_MARKER_SELECTOR));
+          };
+
+          const hasMarkerWithinContentUnit = (unit, selector) => {
+            if (unit.matches && unit.matches(selector)) return true;
+            return Array.from(unit.querySelectorAll(selector)).some(
+              (marker) => marker.closest(CONTENT_UNIT_SELECTOR) === unit
+            );
+          };
+
+          const hasResponseContentWithinContentUnit = (unit) => {
+            const candidates = [];
+            if (unit.matches && unit.matches(RESPONSE_CONTENT_SELECTOR)) {
+              candidates.push(unit);
+            }
+            candidates.push(...Array.from(unit.querySelectorAll(RESPONSE_CONTENT_SELECTOR)));
+            return candidates.some((element) =>
+              element.closest(CONTENT_UNIT_SELECTOR) === unit
+                && isRendered(element)
+                && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
+            );
+          };
+
+          const isAssistantContentUnit = (unit) => Boolean(
+            unit
+              && unit.matches
+              && unit.matches(CONTENT_UNIT_SELECTOR)
+              && isRendered(unit)
+              && !isComposerContainer(unit)
+              && !hasNonAssistantOwnershipMarker(unit)
+              && hasMarkerWithinContentUnit(
+                unit,
+                ASSISTANT_CONTENT_UNIT_MARKER_SELECTOR
+              )
+              && hasResponseContentWithinContentUnit(unit)
+          );
+
+          const isPositiveAssistantRoot = (root) => Boolean(
+            root
+              && isRendered(root)
+              && !isComposerContainer(root)
+              && !hasNonAssistantOwnershipMarker(root)
+          );
+
+          const nearestSemanticConversationTurn = (element) => {
+            let ancestor = element && element.parentElement;
+            while (ancestor
+                   && ancestor !== document.body
+                   && ancestor !== document.documentElement) {
+              if (ancestor.matches
+                  && ancestor.matches('[data-testid*="conversation-turn"]')) {
+                return ancestor;
+              }
+              ancestor = ancestor.parentElement;
+            }
+            return null;
+          };
+
+          // Completed-response controls may lack assistant-role attributes,
+          // so Regenerate fallback requires a positive semantic turn boundary.
+          // Never widen that ownership to a generic ancestor.
           const latestRegenerateOwnedResponse = () => {
             const controls = Array.from(
               document.querySelectorAll('button,[role="button"]')
             ).filter((element) => isResponseAction(element));
             for (let index = controls.length - 1; index >= 0; index -= 1) {
               const control = controls[index];
-              let ancestor = control.parentElement;
-              while (ancestor
-                     && ancestor !== document.body
-                     && ancestor !== document.documentElement) {
-                if (isRendered(ancestor)
-                    && !isComposerContainer(ancestor)
-                    && responseActions(ancestor).length === 1
-                    && hasResponseContent(ancestor)) {
-                  return ancestor;
-                }
-                ancestor = ancestor.parentElement;
+              const turn = nearestSemanticConversationTurn(control);
+              if (turn
+                  && isRendered(turn)
+                  && !isComposerContainer(turn)
+                  && responseActions(turn).length === 1
+                  && hasResponseContent(turn)
+                  && !hasNonAssistantOwnershipMarker(turn)) {
+                return turn;
               }
             }
             return null;
@@ -157,49 +251,65 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             return null;
           };
 
-          const assistantResponseRoots = () => {
-            const explicit = Array.from(document.querySelectorAll(
-              '[data-message-author-role="assistant"],'
-              + '[data-message-role="assistant"]'
-            ));
-            if (explicit.length) return explicit.filter(isRendered);
+          const positiveAssistantRoots = () => {
+            const candidates = [];
+            const seen = new Set();
+            const addCandidate = (root) => {
+              if (!isPositiveAssistantRoot(root) || seen.has(root)) return;
+              seen.add(root);
+              candidates.push(root);
+            };
 
-            const articles = Array.from(document.querySelectorAll(
-              'article[data-testid*="conversation-turn"]'
-            )).filter((article) => {
-              const role = article.getAttribute('data-message-author-role')
-                || article.querySelector('[data-message-author-role]')
-                  ?.getAttribute('data-message-author-role');
-              return role === 'assistant' && isRendered(article);
+            Array.from(document.querySelectorAll(ASSISTANT_ROLE_MARKER_SELECTOR))
+              .forEach(addCandidate);
+
+            Array.from(document.querySelectorAll(
+              '[data-testid*="conversation-turn"][data-turn="assistant"]'
+            )).forEach(addCandidate);
+
+            Array.from(document.querySelectorAll('[data-testid*="conversation-turn"]'))
+              .filter(isAssistantSemanticConversationTurn)
+              .forEach(addCandidate);
+
+            Array.from(document.querySelectorAll(CONTENT_UNIT_SELECTOR))
+              .filter(isAssistantContentUnit)
+              .forEach(addCandidate);
+
+            const narrowed = candidates.filter((candidate) =>
+              !candidates.some((other) =>
+                other !== candidate
+                  && candidate.contains(other)
+                  && hasResponseContent(other)
+              )
+            );
+            return narrowed.sort((left, right) => {
+              if (left === right) return 0;
+              const position = left.compareDocumentPosition(right);
+              if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+              if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+              return 0;
             });
-            if (articles.length) return articles;
+          };
 
+          const assistantResponseRoots = () => {
+            const positiveRoots = positiveAssistantRoots();
+            if (positiveRoots.length) return positiveRoots;
             const fallback = latestRegenerateOwnedResponse();
             return fallback ? [fallback] : [];
           };
 
           const assistantResponseRootFor = (eventTarget) => {
-            let element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
+            const element = eventTarget && eventTarget.nodeType === Node.ELEMENT_NODE
               ? eventTarget
               : eventTarget?.parentElement;
-            while (element) {
-              if (element.matches
-                  && element.matches(
-                    '[data-message-author-role="assistant"],'
-                      + '[data-message-role="assistant"]'
-                  )) {
-                return element;
-              }
-              if (element.matches
-                  && element.matches('article[data-testid*="conversation-turn"]')) {
-                const role = element.getAttribute('data-message-author-role')
-                  || element.querySelector('[data-message-author-role]')
-                    ?.getAttribute('data-message-author-role');
-                return role === 'assistant' ? element : null;
-              }
-              element = element.parentElement;
-            }
-            return null;
+            if (!element) return null;
+            const containingRoots = positiveAssistantRoots().filter(
+              (root) => root === element || root.contains(element)
+            );
+            return containingRoots.reduce((selected, candidate) => {
+              if (!selected || selected.contains(candidate)) return candidate;
+              return selected;
+            }, null);
           };
 
           const latestAssistantResponseRoot = () => {
@@ -254,6 +364,102 @@ enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
     case assistantPointer
 }
 
+enum ChatGPTResponseExtractionPath: String, CaseIterable, Equatable, Sendable {
+    case explicit
+    case semanticTurn = "semantic_turn"
+    case contentUnit = "content_unit"
+    case fallback
+    case none
+}
+
+enum ChatGPTSpeechOwnershipCategory: String, CaseIterable, Equatable, Sendable {
+    case assistantOwned = "assistant_owned"
+    case userOwned = "user_owned"
+    case composer
+    case statusLive = "status_live"
+    case unknown
+}
+
+enum ChatGPTResponseRootElementCategory: String, Equatable, Sendable {
+    case article
+    case div
+    case section
+    case other
+    case none
+}
+
+/// Fixed, structural metadata produced beside the real response payload. This
+/// model deliberately has no field capable of holding DOM or response text.
+struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
+    static let maximumBlockCount = 1024
+
+    let selectedPath: ChatGPTResponseExtractionPath
+    let rootElement: ChatGPTResponseRootElementCategory
+    let composerMarkerPresent: Bool
+    let userMarkerPresent: Bool
+    let assistantMarkerPresent: Bool
+    let statusMarkerPresent: Bool
+    let alertMarkerPresent: Bool
+    let liveRegionMarkerPresent: Bool
+    let blockOwnership: [ChatGPTSpeechOwnershipCategory]
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "selected_path": .string(selectedPath.rawValue),
+            "root_element": .string(rootElement.rawValue),
+            "composer_marker_present": .bool(composerMarkerPresent),
+            "user_marker_present": .bool(userMarkerPresent),
+            "assistant_marker_present": .bool(assistantMarkerPresent),
+            "status_marker_present": .bool(statusMarkerPresent),
+            "alert_marker_present": .bool(alertMarkerPresent),
+            "live_region_marker_present": .bool(liveRegionMarkerPresent),
+            "block_count": .integer(Int64(blockOwnership.count)),
+            "block_ownership_sequence": .string(
+                blockOwnership.map(\.rawValue).joined(separator: ",")
+            )
+        ]
+        for category in ChatGPTSpeechOwnershipCategory.allCases {
+            fields["block_\(category.rawValue)_count"] = .integer(
+                Int64(blockOwnership.filter { $0 == category }.count)
+            )
+        }
+        return fields
+    }
+
+    static func parse(_ value: Any?) -> ChatGPTSpeechExtractionDiagnostics? {
+        guard let body = value as? [String: Any],
+              let rawPath = body["selectedPath"] as? String,
+              let selectedPath = ChatGPTResponseExtractionPath(rawValue: rawPath),
+              let rawRoot = body["rootElement"] as? String,
+              let rootElement = ChatGPTResponseRootElementCategory(rawValue: rawRoot),
+              let composerMarkerPresent = body["composerMarkerPresent"] as? Bool,
+              let userMarkerPresent = body["userMarkerPresent"] as? Bool,
+              let assistantMarkerPresent = body["assistantMarkerPresent"] as? Bool,
+              let statusMarkerPresent = body["statusMarkerPresent"] as? Bool,
+              let alertMarkerPresent = body["alertMarkerPresent"] as? Bool,
+              let liveRegionMarkerPresent = body["liveRegionMarkerPresent"] as? Bool,
+              let rawOwnership = body["blockOwnership"] as? [String],
+              rawOwnership.count <= maximumBlockCount else {
+            return nil
+        }
+        let blockOwnership = rawOwnership.compactMap(
+            ChatGPTSpeechOwnershipCategory.init(rawValue:)
+        )
+        guard blockOwnership.count == rawOwnership.count else { return nil }
+        return ChatGPTSpeechExtractionDiagnostics(
+            selectedPath: selectedPath,
+            rootElement: rootElement,
+            composerMarkerPresent: composerMarkerPresent,
+            userMarkerPresent: userMarkerPresent,
+            assistantMarkerPresent: assistantMarkerPresent,
+            statusMarkerPresent: statusMarkerPresent,
+            alertMarkerPresent: alertMarkerPresent,
+            liveRegionMarkerPresent: liveRegionMarkerPresent,
+            blockOwnership: blockOwnership
+        )
+    }
+}
+
 struct ChatGPTResponsePayload: Equatable, Sendable {
     static let currentVersion = 3
     static let responseKind = ChatGPTResponseMessageKind.response.rawValue
@@ -265,6 +471,25 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
     let documentToken: String
     let responseID: String?
     let blocks: [SpeechContentBlock]
+    let speechDiagnostics: ChatGPTSpeechExtractionDiagnostics?
+
+    init(
+        version: Int,
+        kind: ChatGPTResponseMessageKind,
+        requestID: String,
+        documentToken: String,
+        responseID: String?,
+        blocks: [SpeechContentBlock],
+        speechDiagnostics: ChatGPTSpeechExtractionDiagnostics? = nil
+    ) {
+        self.version = version
+        self.kind = kind
+        self.requestID = requestID
+        self.documentToken = documentToken
+        self.responseID = responseID
+        self.blocks = blocks
+        self.speechDiagnostics = speechDiagnostics
+    }
 
     static func parse(_ body: [String: Any]) -> ChatGPTResponsePayload? {
         guard let version = body["version"] as? Int,
@@ -310,7 +535,8 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
             requestID: requestID,
             documentToken: documentToken,
             responseID: responseID,
-            blocks: blocks
+            blocks: blocks,
+            speechDiagnostics: parseSpeechDiagnostics(body)
         )
     }
 
@@ -329,8 +555,20 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
                     level: block.level,
                     sourceLocator: locator.assigning(slotID: slotID)
                 )
-            }
+            },
+            speechDiagnostics: speechDiagnostics
         )
+    }
+
+    private static func parseSpeechDiagnostics(
+        _ body: [String: Any]
+    ) -> ChatGPTSpeechExtractionDiagnostics? {
+#if DEBUG
+        return ChatGPTSpeechExtractionDiagnostics.parse(body["speechDiagnostics"])
+#else
+        _ = body
+        return nil
+#endif
     }
 
     private static func parseBlock(
@@ -397,6 +635,81 @@ enum ChatGPTResponseExtraction {
 #else
         let debugAssistantPointerClassifier = ""
 #endif
+#if DEBUG
+        let speechDiagnosticsHelpers = """
+          const speechAssistantSelector =
+            '[data-message-author-role="assistant"],[data-message-role="assistant"],' +
+            '[data-turn="assistant"],[data-conversation-role="assistant"],' +
+            '[data-chatgpt-agent-turn-start]';
+          const speechUserSelector =
+            '[data-message-author-role="user"],[data-message-role="user"],' +
+            '[data-turn="user"],[data-conversation-role="user"],[data-user-message-bubble]';
+          const speechComposerSelector =
+            'input,textarea,[contenteditable="true"],[role="textbox"]';
+          const speechStatusSelector = '[role="status"],[data-testid*="status"]';
+          const speechLiveRegionSelector = '[aria-live]:not([aria-live="off"])';
+          const speechHasMarker = (root, selector) => Boolean(root
+            && ((root.matches && root.matches(selector))
+              || (root.querySelector && root.querySelector(selector))));
+          const speechRootElementCategory = (root) => {
+            if (!root) return "none";
+            const tag = (root.tagName || "").toLowerCase();
+            if (tag === "article") return "article";
+            if (tag === "div") return "div";
+            if (tag === "section") return "section";
+            return "other";
+          };
+          const speechSelectedPath = (root) => {
+            if (!root) return "none";
+            if (root.matches && root.matches(ASSISTANT_ROLE_MARKER_SELECTOR)) return "explicit";
+            if (isAssistantContentUnit(root)) return "content_unit";
+            if (isAssistantSemanticConversationTurn(root)) {
+              return "semantic_turn";
+            }
+            return "fallback";
+          };
+          const speechOwnershipFor = (source, root) => {
+            const hasWithinRoot = (selector) => {
+              let element = source;
+              while (element) {
+                if (element.matches && element.matches(selector)) return true;
+                if (element === root) break;
+                element = element.parentElement;
+              }
+              return false;
+            };
+            if (hasWithinRoot(speechUserSelector)) return "user_owned";
+            if (hasWithinRoot(speechComposerSelector)) return "composer";
+            if (hasWithinRoot(speechStatusSelector)
+                || hasWithinRoot(speechLiveRegionSelector)) return "status_live";
+            if (hasWithinRoot(speechAssistantSelector)
+                || isAssistantContentUnit(root)) return "assistant_owned";
+            return "unknown";
+          };
+          const makeSpeechDiagnostics = (root, blocks) => ({
+            selectedPath: speechSelectedPath(root),
+            rootElement: speechRootElementCategory(root),
+            composerMarkerPresent: speechHasMarker(root, speechComposerSelector),
+            userMarkerPresent: speechHasMarker(root, speechUserSelector),
+            assistantMarkerPresent: speechHasMarker(root, speechAssistantSelector),
+            statusMarkerPresent: speechHasMarker(root, speechStatusSelector),
+            alertMarkerPresent: speechHasMarker(root, '[role="alert"]'),
+            liveRegionMarkerPresent: speechHasMarker(root, speechLiveRegionSelector),
+            blockOwnership: Array.isArray(blocks)
+              ? blocks.slice(0, 1024).map((block) =>
+                  speechOwnershipFor(block.sourceElement, root))
+              : []
+          });
+        """
+        let speechDiagnosticsResponseAttach =
+            "message.speechDiagnostics = makeSpeechDiagnostics(root, blocks);"
+        let speechDiagnosticsEmptyAttach =
+            "message.speechDiagnostics = makeSpeechDiagnostics(root, blocks);"
+#else
+        let speechDiagnosticsHelpers = ""
+        let speechDiagnosticsResponseAttach = ""
+        let speechDiagnosticsEmptyAttach = ""
+#endif
         return """
         (() => {
           "use strict";
@@ -454,6 +767,8 @@ enum ChatGPTResponseExtraction {
 
           \(ChatGPTResponseIdentity.sharedDOMHelperSource)
 
+          \(speechDiagnosticsHelpers)
+
           const safeStableID = (value) => {
             if (!value || value.length > 160) return null;
             return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
@@ -479,7 +794,8 @@ enum ChatGPTResponseExtraction {
             '[data-math],[data-latex],[data-tex],[role="math"]';
           const excludedSelector =
             'script,style,noscript,button,[role="button"],[role="toolbar"],toolbar,' +
-            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"]';
+            '[aria-hidden="true"],svg,[data-testid*="action"],[data-testid*="toolbar"],' +
+            'h4[data-conversation-role="assistant"]';
 
           const isExcluded = (element) => {
             if (!element || !element.closest) return false;
@@ -977,15 +1293,17 @@ enum ChatGPTResponseExtraction {
             return boundedFallback;
           };
 
-          const postEmpty = (target, requestID) => {
-            target.postMessage({
+          const postEmpty = (target, requestID, root = null, blocks = []) => {
+            const message = {
               version: 3,
               kind: "empty",
               requestID: requestID,
               documentToken: documentToken,
               responseID: null,
               blocks: []
-            });
+            };
+            \(speechDiagnosticsEmptyAttach)
+            target.postMessage(message);
           };
 
           const postManualScroll = () => {
@@ -1129,7 +1447,7 @@ enum ChatGPTResponseExtraction {
             if (!target || typeof requestID !== 'string') return false;
             const root = latestAssistantResponseRoot();
             if (!root) {
-              postEmpty(target, requestID);
+              postEmpty(target, requestID, null, []);
               return true;
             }
             const blocks = structuredBlocks(root);
@@ -1137,7 +1455,7 @@ enum ChatGPTResponseExtraction {
               // Overflow is intentionally represented as the existing empty
               // bridge result. Swift maps it to nil, so no partial response,
               // speech queue item, or new locator set can be created.
-              postEmpty(target, requestID);
+              postEmpty(target, requestID, root, blocks || []);
               return true;
             }
             const responseID = responseIDFor(root);
@@ -1174,14 +1492,16 @@ enum ChatGPTResponseExtraction {
               oldestBlockIDs?.forEach((blockID) => locatorRegistry.delete(blockID));
               responseLocatorKeys.delete(oldestResponseID);
             }
-            target.postMessage({
+            const message = {
               version: 3,
               kind: "response",
               requestID: requestID,
               documentToken: documentToken,
               responseID: responseID,
               blocks: wireBlocks
-            });
+            };
+            \(speechDiagnosticsResponseAttach)
+            target.postMessage(message);
             return true;
           };
 

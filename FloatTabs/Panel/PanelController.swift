@@ -278,7 +278,8 @@ final class PanelController: NSObject, NSWindowDelegate {
                 return false
             }
             return sourceKind != .chatGPT
-        }
+        },
+        diagnostics: diagnostics
     )
 
     private lazy var calibreSpeechCoordinator = CalibreSpeechCoordinator(

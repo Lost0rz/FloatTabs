@@ -6,161 +6,71 @@
 
 ## Validity
 
-`CURRENT_STATUS.md` defines intended project state; live Git/GitHub refs define actual branch/PR heads. Refresh refs before local execution.
-
-Machine-specific worktree paths remain local-only.
+`CURRENT_STATUS.md` defines intended project state; live Git/GitHub refs define actual refs. Refresh before any PR or merge action.
 
 ## Mode
 
-**MODE: SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX**
+**MODE: READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE**
 
 ## Production authority
 
-**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`  
-**PRODUCTION_BRANCH:** `main`  
-**EXPECTED_UPSTREAM:** `origin/main`
+- Implementation branch: `fix/chatgpt-speech-response-ownership`
+- Accepted main base and live `main`: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
+- Accepted V4 product implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`
+- Final test-only corrective: `69037473ed0b2c4cb7905ecdfbfdb320d320389c`
+- Installed QA remains V4 source `6b5fb9a780073a26f8060e5be8baee284d511339`, Debug arm64, version `0.5.2 (20)`
+- PR #102 remains separate MemoX Draft work and is excluded from FT-SPEECH-001
 
-Before any build or installation, refresh remote refs. The authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
+## Accepted product result
 
-## Closed diagnostic phases
+```text
+V4_HUMAN_ACCEPTANCE=PASS
+OBSERVED=only latest ChatGPT response was spoken
+USER_PROMPT_SPOKEN=NO
+NO_SPEECH_REGRESSION=NO
+```
 
-### FT-DIAG-001
+## Final regression
 
-**CLOSED — CONSTRUCTION_GATE_READY**
+The stale source-contract assertion was corrected without product changes.
 
-### FT-DIAG-002
+```text
+FOCUSED_STALE_TEST=1/1 PASS
+FULL_FINAL_SUITE=PASS
+FULL_FINAL_SUITE_COUNTS=1300 passed, 0 failed, 2 skipped, 1302 total
+V4_PRODUCT_HEAD_UNCHANGED=YES
+AUTHORIZED_TEST_ONLY_CHANGE=YES
+```
 
-**CLOSED — MERGED / REMOTE_AUDIT_PASS**
+Skipped tests:
 
-### FT-DIAG-003
+- `WebAttentionCrossFeatureTests/testNewPresentationSupersedesPendingRestoreBeforeDelayedObservation()`
+- `WebAttentionCrossFeatureTests/testStatusItemPreparationSupersedesPendingRestoreBeforeActivation()`
 
-**CLOSED — SEALED / PAGE-EVIDENCE-GAP_CONFIRMED**
+## Independent Web final audit
 
-Accepted incident class: `CHATGPT_APP_NOT_READY_WITH_RESPONSIVE_RENDERER`.
+**Verdict: PASS**
 
-### FT-DIAG-004
+Web independently verified:
 
-**CLOSED — MERGED / REMOTE_AUDIT_PASS**
+1. `main` is still exactly the accepted base `2d2b733407ea57ea66ca380887dfc11b71b6e2be`; no rebase/reconciliation is required before PR creation.
+2. The implementation branch is a pure descendant of that base.
+3. The accepted V4 response-root ownership fix remains localized to the ChatGPT speech/response boundary and preserves the fail-closed generic-ancestor behavior.
+4. The current renderer path uses positive assistant ownership, assistant content-unit narrowing, and cross-renderer DOM ordering; the mixed user/assistant group is not a speech root.
+5. Legacy explicit assistant and semantic-turn paths remain supported; Regenerate remains a legacy last-resort path rather than the primary ownership authority.
+6. The final corrective commit changes only `FloatTabsTests/ChatGPTResponseBridgeTests.swift` and updates the stale `<article>`-qualified assertion to the current semantic contract.
+7. Earlier `speech.qa` real-path diagnostics remain bounded QA instrumentation. Diagnostic emission/parsing is DEBUG-gated; it does not create a second production ownership authority and does not alter the accepted Release speech decision path. It is not a merge blocker.
+8. PR #102 remains OPEN/DRAFT/unmerged on its separate branch and was not modified by FT-SPEECH-001.
 
-**Merged PR:** #111  
-**Merge commit:** `76a08e8f0676f4d25e2faef3be2225e48c51d66a`
+## Merge recommendation
 
-The merged page-app diagnostic foundation is observation-only. It preserves existing diagnostic authority, stale identity rejection and privacy constraints.
+```text
+INDEPENDENT_WEB_FINAL_AUDIT=PASS
+PRODUCT_READY_FOR_PR=YES
+IMPLEMENTATION_PR_CREATE=AUTHORIZED
+DIRECT_MERGE_WITHOUT_PR=NO
+```
 
-Accepted remaining passive-observation gaps remain unchanged:
+The next gate is an implementation PR from `fix/chatgpt-speech-response-ownership` to `main` at the exact current branch head after control-plane synchronization. The required GitHub branch-protection check `Build & Test (Apple Silicon arm64)` must pass on the exact PR head before merge.
 
-- page-handled fetch/XHR failures cannot be passively observed without forbidden interception;
-- HTTP status can be unavailable/opaque;
-- raw exception/rejection messages, stacks, request URLs and resource/chunk identity are intentionally omitted.
-
-**ROOT_CAUSE_CONFIRMED: NO**
-
-## FT-QA-001
-
-**FT-QA-001 — Latest Main QA Baseline Alignment & Natural Observation**
-
-**STATUS: HISTORICAL — SUPERSEDED AS THE ACTIVE TASK BY FT-SPEECH-001**
-
-The authorization below is retained as historical state. It is not active under
-the current task. No completion of FT-QA-001 is inferred by this transition.
-
-The user has authorized replacement of the currently installed/background FloatTabs QA version with a fresh build from the latest authoritative `main`, followed by normal use and natural incident observation.
-
-### Authorized actions
-
-- refresh refs and fast-forward the authorized production checkout to the exact current `origin/main`;
-- verify clean checkout and exact source identity before build;
-- build the established Apple Silicon QA/runtime artifact using the repository's existing supported build procedure;
-- verify the built app is arm64 and record bundle/version/build/source identity available from the build;
-- identify the existing installed/running FloatTabs QA application using local evidence rather than a guessed path;
-- preserve user configuration, browser profiles, cookies, website data, diagnostics and application-support data;
-- gracefully stop the currently running FloatTabs process only when needed to replace the app bundle;
-- replace only the established FloatTabs QA app bundle/binary with the newly built exact-main version;
-- relaunch it and verify the new running process corresponds to the replacement app and expected bundle identity;
-- record pre/post installed path, version/build, PID and source/build provenance when available;
-- then stop active construction and enter normal-use natural-observation mode.
-
-### Not authorized
-
-- product/source/test changes;
-- new diagnostics or probe expansion;
-- reload/reset/recovery behavior changes;
-- clearing caches, cookies, website data, browser profiles or persistent configuration;
-- deleting diagnostic history;
-- manufacturing a stuck incident;
-- modifying or using PR #102;
-- interpreting successful installation or later recovery as root-cause evidence.
-
-### Installation safety
-
-If the local agent cannot unambiguously identify the established FloatTabs QA installation target and current running bundle, STOP before replacement and report the ambiguity. Do not overwrite another app or invent an install location.
-
-If build/source identity differs from freshly fetched `origin/main`, STOP.
-
-## Runtime state after successful alignment
-
-**NEW STUCK-TAB FIX: NOT AUTHORIZED**
-
-**HISTORICAL QA BASELINE AUTHORIZATION: FT-QA-001**
-
-After successful replacement and provenance verification, no further action is authorized until a new naturally occurring symptom is reported. Preserve evidence first if a new issue appears.
-
-## Separate work
-
-PR #102 remains separate MemoX durable-outbox work and is outside this task.
-
-## FT-SPEECH-001
-
-**FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
-
-**STATUS: ACTIVE — GATE_0A_CONTROL_PR**
-
-**CONTROL_PR:** #114 — OPEN; GitHub is authoritative for its current head.
-
-**MODE:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
-
-Task-start baseline was freshly fetched `main` at
-`8ed28588ec79d6a5c145622ef13a7051ab7076d8`, clean and equal to `origin/main`.
-The authorized production worktree identity remains `floattabs-main-production`
-on `main` tracking `origin/main`. The active control-plane transition is limited
-to `CURRENT_STATUS.md` and `CURRENT_TASK.md`; no product or test files are
-authorized until this control-plane PR is merged and the production checkout is
-aligned to the resulting `origin/main`.
-
-The running FloatTabs observed at task start was version 0.5.2, build 20,
-arm64, with exact source revision `8ed28588ec79d6a5c145622ef13a7051ab7076d8`.
-The separately installed copy reported source revision
-`ed452e35b278ced643b546de75533f0ed5dc1c27`; installation replacement is not
-currently authorized.
-
-PR #102 remains OPEN, Draft, at head
-`db6e886b33dffd93ece130463b184ae371b97684`; it is excluded from FT-SPEECH-001.
-
-**LIVE INCIDENT ROOT CAUSE CONFIRMED: NO — Gate 1 evidence is required.**
-
-### Authorized scope
-
-- privacy-safe structural evidence from the current live ChatGPT DOM;
-- focused response-extraction regression tests and a verified RED reproduction;
-- a minimal ownership-boundary fix only after Gate 1 and Gate 2 pass;
-- the focused and full validation defined by `CURRENT_TASK.md`;
-- a QA build/install only if needed for acceptance and only after validation.
-
-### Exclusions
-
-- stuck-tab behavior;
-- browser profile, cookie, site-data, cache, or persistent-configuration reset;
-- broad ChatGPT DOM redesign or volatile generated-class contracts;
-- SpeechService, queue, or playback-controller changes without evidence;
-- raw conversation text in logs, diagnostics, fixtures, PR text, or committed files;
-- any modification, rebase, merge, or use of PR #102.
-
-### Required end state
-
-Complete only after the implementation PR has the required check on its exact
-head and is handed off as `WAITING_FOR_INDEPENDENT_WEB_AUDIT`. Do not merge the
-implementation PR.
-
-## Historical evidence
-
-PRs #99–#101 remain abandoned historical experiments only. Historical recovery success is not causal proof.
+No additional product coding, diagnostic expansion, local root-cause work, QA reinstall, or human speech reproduction is required unless the PR head changes or CI exposes a new failure.
