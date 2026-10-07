@@ -121,24 +121,6 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
                 && !element.closest(RESPONSE_EXCLUDED_SELECTOR)
             );
 
-          const containsResponseContent = (root) => {
-            const isContentElement = root.matches
-              && root.matches(RESPONSE_CONTENT_SELECTOR)
-              && isRendered(root)
-              && !root.closest(RESPONSE_EXCLUDED_SELECTOR);
-            return Boolean(isContentElement) || hasResponseContent(root);
-          };
-
-          const hasSiblingResponseContentBranches = (root) => {
-            let foundContentBranch = false;
-            for (const child of Array.from(root.children || [])) {
-              if (!containsResponseContent(child)) continue;
-              if (foundContentBranch) return true;
-              foundContentBranch = true;
-            }
-            return false;
-          };
-
           const hasNonAssistantOwnershipMarker = (root) => {
             const selector = [
               '[data-message-author-role="user"]',
@@ -154,29 +136,37 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
             );
           };
 
-          // Current ChatGPT keeps completed-response controls semantic but may
-          // omit assistant-role attributes. A fallback root is only bounded
-          // when its Regenerate control shares one unambiguous content branch;
-          // broader roots can span unrelated turns and must fail closed.
+          const nearestSemanticConversationTurn = (element) => {
+            let ancestor = element && element.parentElement;
+            while (ancestor
+                   && ancestor !== document.body
+                   && ancestor !== document.documentElement) {
+              if (ancestor.matches
+                  && ancestor.matches('article[data-testid*="conversation-turn"]')) {
+                return ancestor;
+              }
+              ancestor = ancestor.parentElement;
+            }
+            return null;
+          };
+
+          // Completed-response controls may lack assistant-role attributes,
+          // so Regenerate fallback requires a positive semantic turn boundary.
+          // Never widen that ownership to a generic ancestor.
           const latestRegenerateOwnedResponse = () => {
             const controls = Array.from(
               document.querySelectorAll('button,[role="button"]')
             ).filter((element) => isResponseAction(element));
             for (let index = controls.length - 1; index >= 0; index -= 1) {
               const control = controls[index];
-              let ancestor = control.parentElement;
-              while (ancestor
-                     && ancestor !== document.body
-                     && ancestor !== document.documentElement) {
-                if (isRendered(ancestor)
-                    && !isComposerContainer(ancestor)
-                    && responseActions(ancestor).length === 1
-                    && hasResponseContent(ancestor)
-                    && !hasSiblingResponseContentBranches(ancestor)
-                    && !hasNonAssistantOwnershipMarker(ancestor)) {
-                  return ancestor;
-                }
-                ancestor = ancestor.parentElement;
+              const turn = nearestSemanticConversationTurn(control);
+              if (turn
+                  && isRendered(turn)
+                  && !isComposerContainer(turn)
+                  && responseActions(turn).length === 1
+                  && hasResponseContent(turn)
+                  && !hasNonAssistantOwnershipMarker(turn)) {
+                return turn;
               }
             }
             return null;

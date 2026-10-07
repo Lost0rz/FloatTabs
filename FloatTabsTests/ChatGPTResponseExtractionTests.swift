@@ -411,13 +411,13 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
     func testCurrentSemanticResponseRootUsesRegenerateOwnedContainer() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
-        <div class="response-container" data-state="completed">
+        <article data-testid="conversation-turn" data-state="completed">
           <div class="MarkdownRoot-abc123"><p>Current semantic response.</p></div>
           <div role="toolbar">
             <button aria-label="Copy">Copy</button>
             <button aria-label="Regenerate response">Regenerate</button>
           </div>
-        </div>
+        </article>
         """)
         await page.settle()
 
@@ -430,20 +430,20 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         let page = ChatGPTResponsePageHarness()
         page.load("""
         <main class="conversation">
-          <div class="response-container" data-state="completed">
+          <article data-testid="conversation-turn" data-state="completed">
             <div class="MarkdownRoot-old"><p>Historical response.</p></div>
             <div role="toolbar">
               <button aria-label="Copy">Copy</button>
               <button aria-label="Regenerate response">Regenerate</button>
             </div>
-          </div>
-          <div class="response-container" data-state="completed">
+          </article>
+          <article data-testid="conversation-turn" data-state="completed">
             <div class="MarkdownRoot-latest"><p>Latest semantic response.</p></div>
             <div role="toolbar">
               <button aria-label="Copy">Copy</button>
               <button aria-label="Regenerate response">Regenerate</button>
             </div>
-          </div>
+          </article>
         </main>
         """)
         await page.settle()
@@ -482,6 +482,38 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
         )
     }
 
+    func testRegenerateFallbackFailsClosedWithoutPositiveSemanticConversationTurnOwnership() async {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <main class="generic-conversation-shell">
+          <div class="single-content-branch">
+            <section data-testid="message-content">
+              <p>Unrelated predecessor content.</p>
+            </section>
+            <section data-testid="message-content">
+              <p>Intended latest response.</p>
+            </section>
+          </div>
+          <div role="toolbar">
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </main>
+        """)
+        await page.settle()
+
+        let payload = await page.extract()
+        let texts = payload?.blocks.map(\.text) ?? []
+
+        XCTAssertFalse(
+            texts.contains("Unrelated predecessor content."),
+            "A generic ancestor admitted predecessor content without positive semantic conversation-turn ownership."
+        )
+        XCTAssertNil(
+            payload,
+            "Without a qualifying semantic conversation turn, Regenerate fallback must fail closed."
+        )
+    }
+
     func testSemanticResponseRootIgnoresUnrelatedRegenerateControl() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
@@ -502,13 +534,13 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
     func testHiddenSemanticResponseRootIsIgnored() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
-        <div class="response-container" style="display:none">
+        <article data-testid="conversation-turn" style="display:none">
           <div class="MarkdownRoot-hidden"><p>Hidden response.</p></div>
           <div role="toolbar">
             <button aria-label="Copy">Copy</button>
             <button aria-label="Regenerate">Regenerate</button>
           </div>
-        </div>
+        </article>
         """)
         await page.settle()
 
@@ -519,13 +551,13 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
     func testSemanticResponseRootWithoutBlocksIsEmpty() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
-        <div class="response-container" data-state="completed">
+        <article data-testid="conversation-turn" data-state="completed">
           <div class="MarkdownRoot-empty"></div>
           <div role="toolbar">
             <button aria-label="Copy">Copy</button>
             <button aria-label="Regenerate">Regenerate</button>
           </div>
-        </div>
+        </article>
         """)
         await page.settle()
 
@@ -540,13 +572,13 @@ final class ChatGPTResponseExtractionTests: XCTestCase {
           <div contenteditable="true" role="textbox">
             <button aria-label="Regenerate">Regenerate</button>
           </div>
-          <div class="response-container" data-state="completed">
+          <article data-testid="conversation-turn" data-state="completed">
             <div class="MarkdownRoot-latest"><p>Only latest response.</p></div>
             <div role="toolbar">
               <button aria-label="Copy">Copy</button>
               <button aria-label="Regenerate response">Regenerate</button>
             </div>
-          </div>
+          </article>
         </main>
         """)
         await page.settle()
