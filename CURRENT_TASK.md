@@ -1,32 +1,39 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-SPEECH-001
-**Title:** Tag-Agnostic Conversation Turn Fix V3
-**Status:** `WAITING_FOR_USER_FIX_V3_ACCEPTANCE`
-**Mode:** `QA_INSTALLED_WAITING_FOR_HUMAN_ACCEPTANCE`
+**Title:** Positive Assistant Content Ownership V4
+**Status:** `ACTIVE — POSITIVE_ASSISTANT_CONTENT_OWNERSHIP_V4`
+**Mode:** `TEST_FIRST_MINIMAL_PRODUCTION_FIX`
 
 ## Objective
 
-Restore `Read Latest Response` speech while preserving the V2 safety guarantee that user-owned input cannot be admitted through an arbitrary fallback ancestor.
+Restore `Read Latest Response` on the current ChatGPT renderer while preserving the safety guarantee that user-owned input cannot be admitted into speech.
 
-## Canonical evidence
-
-```text
-V1_LIVE_FAILURE=user_message_then_assistant_response
-V2_IMPLEMENTATION_HEAD=3e707eb4725bc4549daf991d4d08ffa9f50745b7
-V2_HUMAN_ACCEPTANCE=FAIL_COMPATIBILITY
-V2_LIVE_OBSERVATION=NO_SPEECH
-UNSAFE_USER_TEXT_SPOKEN_AFTER_V2=NO
-```
-
-Web audit of V2 found a direct implementation mismatch:
+## Canonical live evidence
 
 ```text
-INTENDED_CONTRACT=nearest semantic conversation-turn boundary, tag-agnostic
-ACTUAL_V2_SELECTOR=article[data-testid*="conversation-turn"]
+V1_HUMAN_RESULT=user_message_then_assistant_response
+V2_HUMAN_RESULT=no_speech
+V3_HUMAN_RESULT=no_speech
+V3_IMPLEMENTATION_HEAD=976b6816c84fdf5e03ae5d089d402927c16626c3
 ```
 
-Independent live-site evidence from 2026 confirms ChatGPT conversation turns can be `<section>` while retaining `data-testid="conversation-turn-N"` / `data-turn` semantics. The safe response is to remove the element-tag qualification, not to restore arbitrary ancestor fallback.
+V3 made `conversation-turn` tag-agnostic but still produced no live speech.
+
+## Web code-audit finding
+
+Current production discovery still depends mainly on legacy `data-message-author-role` plus a Regenerate-based fallback.
+
+Current ChatGPT renderer variants use additional positive semantic ownership signals, including:
+
+```text
+[data-testid^="conversation-turn-"][data-turn="assistant"]
+[data-conversation-role="assistant"]
+```
+
+Newer renderer variants can group user and assistant material under one `[data-turn-key]` shell. The shell must not become the extraction root because that can reintroduce the original defect. The assistant-owned descendant itself is the safe root.
+
+Positive assistant ownership must not require a Regenerate action. The existing Regenerate fallback remains legacy-only and fail-closed.
 
 ## Baseline
 
@@ -34,67 +41,90 @@ Independent live-site evidence from 2026 confirms ChatGPT conversation turns can
 - Branch: `fix/chatgpt-speech-response-ownership`
 - Upstream: `origin/fix/chatgpt-speech-response-ownership`
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- PR #102 is separate and must remain unchanged.
+- PR #102 is separate and must remain unchanged
 
-Gate 0: fresh fetch/prune, require clean checkout/worktree, exact local/upstream HEAD, correct accepted merge-base, then re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`. Stop on unexpected drift.
+Gate 0: fresh fetch/prune, exact local/upstream HEAD, clean worktree, accepted merge-base, then re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`. Stop only on unexpected drift/dirty state/wrong base.
 
-## Gate 1 — V3 formal RED
+## Gate 1 — V4 formal RED
 
-Tests first; do not edit production before observed RED.
+Tests first. Do not edit production before observed RED.
 
-Add the smallest fixture:
+### RED A — grouped current renderer
+
+Add the smallest fixture equivalent to:
 
 ```html
-<section data-testid="conversation-turn-42">
-  <div><p>Latest assistant response.</p></div>
-  <div role="toolbar">
-    <button aria-label="Regenerate response">Regenerate</button>
+<div data-turn-key="turn-1">
+  <div data-user-message-bubble>
+    <p>User prompt must not be spoken.</p>
   </div>
+  <div data-conversation-role="assistant">
+    <div data-markdown-text-style="assistant-message">
+      <p>Assistant answer only.</p>
+    </div>
+  </div>
+  <div class="turn-action-controls">
+    <button data-testid="copy-turn-action-button">Copy</button>
+  </div>
+</div>
+```
+
+No Regenerate button. No `data-message-author-role` requirement.
+
+Required contract:
+
+```text
+payload.blocks == ["Assistant answer only."]
+user prompt absent
+```
+
+Against unchanged V3 production, first run must be RED / no response. If not RED, STOP for Web review.
+
+### RED B — semantic turn role
+
+Add a tag-agnostic fixture such as:
+
+```html
+<section data-testid="conversation-turn-42" data-turn="assistant">
+  <div><p>Assistant turn answer.</p></div>
 </section>
 ```
 
-No explicit assistant author-role marker is required for this fallback fixture.
+No Regenerate button.
 
-Required current-V2 behavior on first run:
+Expected: assistant response extracted from the positively owned assistant turn.
 
-```text
-FIRST_RUN_RED=YES
-ACTUAL=payload nil / no response because selector is article-qualified
-EXPECTED=latest assistant response extracted from qualifying semantic turn
-```
+Also retain existing regressions proving:
 
-Also add/retain a safety regression proving a generic ancestor with Regenerate but no semantic conversation-turn still fails closed.
-
-If the new `<section>` test is not RED against unchanged V2 production, STOP for Web review.
+- generic ancestor without semantic ownership fails closed;
+- user-owned content is never included;
+- explicit assistant-role path remains green.
 
 ## Gate 2 — Minimal production fix
 
-Modify only `FloatTabs/Web/ChatGPTResponseExtraction.swift`.
-
-Change the semantic turn matching from tag-qualified:
+Modify only:
 
 ```text
-article[data-testid*="conversation-turn"]
+FloatTabs/Web/ChatGPTResponseExtraction.swift
 ```
 
-to tag-agnostic:
+Implement one shared positive assistant-root policy used consistently by latest-response extraction and trusted assistant-pointer ownership.
 
-```text
-[data-testid*="conversation-turn"]
-```
+Required behavior:
 
-Apply the same semantic boundary consistently where needed for the existing conversation-turn response-root path, without broadening to generated CSS classes or generic ancestors.
+1. preserve existing explicit assistant selectors:
+   - `[data-message-author-role="assistant"]`
+   - `[data-message-role="assistant"]`
+2. recognize rendered `[data-conversation-role="assistant"]` as a positive assistant content root;
+3. recognize rendered semantic turns `[data-testid*="conversation-turn"][data-turn="assistant"]` as positively assistant-owned;
+4. preserve existing role-proven semantic-turn behavior;
+5. do NOT select an entire `[data-turn-key]` group merely because it contains an assistant marker;
+6. do NOT require Regenerate for any positively assistant-owned root;
+7. keep `latestRegenerateOwnedResponse()` only as the legacy last-resort path;
+8. keep legacy fallback fail-closed when no qualifying semantic turn exists;
+9. where fallback/user rejection is evaluated, include stable user markers such as `[data-turn="user"]`, `[data-conversation-role="user"]`, and `[data-user-message-bubble]`.
 
-Preserve all existing validation:
-
-- rendered;
-- response content present;
-- exactly one applicable Regenerate response action for fallback;
-- no explicit user/composer/status/alert/live marker;
-- explicit assistant-role path remains preferred;
-- no qualifying semantic turn => fail closed.
-
-Do not restore arbitrary ancestor traversal as ownership proof.
+Diagnostics in this same file may be updated only as needed to classify the newly supported positive assistant roots; they must remain observational and contain no conversation text.
 
 Do not change:
 
@@ -112,26 +142,26 @@ PR #102
 
 Run at minimum:
 
-- new V3 `<section>` regression;
-- existing ambiguous-generic-fallback fail-closed regression;
+- new grouped-renderer RED regression;
+- new `data-turn="assistant"` regression;
+- existing generic-ancestor fail-closed regression;
 - all `ChatGPTResponseExtractionTests`;
 - relevant `AssistantSpeechCoordinatorTests`.
 
 All must pass.
 
-Do not claim live fix from synthetic GREEN alone.
+Do not claim live success from synthetic GREEN alone.
 
-## Gate 4 — Build/install V3 QA
+## Gate 4 — Build/install V4 QA
 
 After focused GREEN:
 
-- commit the V3 product/test change;
+- commit product/test change;
 - build fresh exact-head arm64 Debug;
 - replace only `/Applications/FloatTabs.app`;
 - preserve Browser Profiles, Slots, cookies, WebKit state, authenticated sessions, Application Support, preferences, and diagnostics;
-- verify exact source revision, app path, version/build, architecture, and running PID.
-
-Do not trigger `Read Latest Response` for the user.
+- verify exact source revision, app path, version/build, architecture, and running PID;
+- do not trigger `Read Latest Response` for the user.
 
 Normal fast-forward push to the implementation branch is allowed only if fresh remote still matches the expected pre-push authority. No force push.
 
@@ -140,6 +170,7 @@ Normal fast-forward push to the implementation branch is allowed only if fresh r
 ```text
 TOPOLOGY_PROBE_AUTHORIZED=NO
 ARBITRARY_ANCESTOR_FALLBACK=NO
+GROUP_SHELL_AS_SPEECH_ROOT=NO
 TTS_CHANGE_AUTHORIZED=NO
 SPEECH_QUEUE_CHANGE_AUTHORIZED=NO
 CONTENT_CLEANER_CHANGE_AUTHORIZED=NO
@@ -150,40 +181,12 @@ MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
 ```
 
-## Execution result — 2026-10-07
-
-```text
-START_CONTROL_HEAD=e3526d1312a91cceffdf815101c6a336618a43ce
-EXECUTION_BRANCH=codex/ft-speech-001-v2
-V3_RED_TEST=testRegenerateFallbackAcceptsTagAgnosticSemanticConversationTurnSection
-FIRST_RUN_RED=YES
-RED_ACTUAL=payload nil / no response
-RED_EXPECTED=Latest assistant response extracted from the section semantic turn
-V3_PRODUCTION_FIX_HEAD=976b6816c84fdf5e03ae5d089d402927c16626c3
-TAG_AGNOSTIC_TURN_CONTRACT=PASS
-GENERIC_ANCESTOR_FAIL_CLOSED_TEST=PASS
-FOCUSED_EXTRACTION_TESTS=PASS (44)
-FOCUSED_SPEECH_TESTS=PASS (98)
-QA_BUILD=PASS (Debug, arm64)
-APP_PATH=/Applications/FloatTabs.app
-INSTALLED_SOURCE_HEAD=976b6816c84fdf5e03ae5d089d402927c16626c3
-INSTALLED_VERSION_BUILD=0.5.2 (20)
-INSTALLED_ARCH=arm64
-RUNNING_PID=45659
-USER_DATA_PRESERVED=YES
-READ_LATEST_RESPONSE_TRIGGERED_BY_EXECUTOR=NO
-```
-
-The pre-install inventory found 26 FloatTabs Application Support entries, 3,285 WebKit entries, 9 cookie files, and 9 diagnostic files. After installation all pre-existing paths remained; cookie files, the profiles/slots configuration, preferences, and diagnostic history were verified unchanged/preserved. No user or WebKit data was cleared or reset.
-
-The V3 QA app is installed and running. Stop here for one human Read Latest Response acceptance; do not trigger speech, rebuild, reinstall, or start another fix before the user result is recorded.
-
 ## Acceptance
 
-Stop after verified V3 QA installation at:
+Stop after verified V4 QA installation at:
 
 ```text
-FINAL_STATE=WAITING_FOR_USER_FIX_V3_ACCEPTANCE
+FINAL_STATE=WAITING_FOR_USER_FIX_V4_ACCEPTANCE
 ```
 
 Receipt:
@@ -192,11 +195,13 @@ Receipt:
 TASK_ID:
 START_HEAD:
 CONTROL_HEAD:
-V3_RED_TEST:
+V4_RED_GROUPED_TEST:
+V4_RED_DATA_TURN_TEST:
 FIRST_RUN_RED:
 RED_ACTUAL_BEHAVIOR:
 PRODUCTION_FIX_HEAD:
-TAG_AGNOSTIC_TURN_CONTRACT:
+POSITIVE_ASSISTANT_ROOT_CONTRACT:
+GROUP_SHELL_NOT_SPEECH_ROOT:
 GENERIC_ANCESTOR_FAIL_CLOSED_TEST:
 FOCUSED_EXTRACTION_TESTS:
 FOCUSED_SPEECH_TESTS:
@@ -210,5 +215,5 @@ USER_DATA_PRESERVED:
 PR102_UNCHANGED:
 REMOTE_SYNC:
 WORKTREE_STATUS:
-FINAL_STATE=WAITING_FOR_USER_FIX_V3_ACCEPTANCE
+FINAL_STATE=WAITING_FOR_USER_FIX_V4_ACCEPTANCE
 ```
