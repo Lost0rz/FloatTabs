@@ -1,13 +1,13 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-SPEECH-001
-**Title:** Final Regression and Independent Web Audit
-**Status:** `ACTIVE — FINAL_REGRESSION_AND_INDEPENDENT_WEB_AUDIT`
-**Mode:** `VALIDATION_ONLY_NO_PRODUCT_CHANGE`
+**Title:** Stale Test Contract Corrective and Final Regression
+**Status:** `ACTIVE — STALE_TEST_CONTRACT_CORRECTIVE`
+**Mode:** `TEST_ONLY_CORRECTIVE_NO_PRODUCT_CHANGE`
 
 ## Objective
 
-Close the already human-accepted `Read Latest Response` fix with final regression evidence and an independent Web merge audit. Do not redesign or modify the accepted V4 product behavior.
+Correct one stale source-contract assertion exposed by the full final suite, then rerun the exact final regression. Do not modify the already human-accepted V4 product behavior.
 
 ## Accepted product result
 
@@ -16,80 +16,129 @@ V4_PRODUCT_HEAD=6b5fb9a780073a26f8060e5be8baee284d511339
 V4_HUMAN_ACCEPTANCE=PASS
 OBSERVED=only latest ChatGPT response was spoken
 USER_PROMPT_SPOKEN=NO
-NO_SPEECH_REGRESSION=NO
 ```
 
-Focused validation already accepted:
+## Web audit verdict on full-suite failure
+
+The only failing test was:
 
 ```text
-ChatGPTResponseExtractionTests=47/47 PASS
-AssistantSpeechCoordinatorTests=98/98 PASS
-QA_BUILD=PASS arm64 Debug
-INSTALLED_SOURCE=6b5fb9a780073a26f8060e5be8baee284d511339
-USER_DATA_PRESERVED=YES
+ChatGPTResponseBridgeTests/testTrustedAssistantPointerProtocolUsesFixedContentFreeContract()
+FloatTabsTests/ChatGPTResponseBridgeTests.swift:735
+XCTAssertTrue(source.contains("article[data-testid*=\"conversation-turn\"]"))
 ```
 
-## Authority and role split
+Web independently inspected the test and production source.
 
-- Web has completed the causal/code audit and owns the final independent merge audit.
-- Local does **not** perform another root-cause investigation or production modification.
-- Local only runs the exact final regression gate and returns evidence.
+Verdict:
 
-## Gate 0 — exact validation baseline
+```text
+FULL_SUITE_FAILURE_CLASS=STALE_TEST_EXPECTATION
+PRODUCT_REGRESSION=NO
+V4_PRODUCT_FIX_REOPEN=NO
+```
+
+The `<article>` requirement is obsolete. V3 intentionally made semantic-turn matching tag-agnostic, and V4 added positive assistant ownership for current renderer content units. The test's actual contract is that trusted assistant pointer ownership is semantic and content-free, not that ChatGPT uses an `article` element.
+
+## Gate 0 — exact baseline
 
 1. fresh `git fetch origin --prune`;
-2. require branch `fix/chatgpt-speech-response-ownership` (or the already-authorized execution worktree tracking this branch);
-3. require clean working tree;
-4. require local HEAD equals freshly fetched upstream after control-plane sync;
-5. re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
-6. verify accepted product commit `6b5fb9a780073a26f8060e5be8baee284d511339` is an ancestor of current HEAD and no product/test file changed after that commit except authorized control-plane files.
+2. sync the already-authorized execution worktree to the current upstream by normal fast-forward only;
+3. require clean worktree and exact local/upstream HEAD;
+4. re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
+5. verify accepted V4 product commit `6b5fb9a780073a26f8060e5be8baee284d511339` remains an ancestor;
+6. verify no production path changed after V4 except control-plane files.
 
-STOP only on an actual mismatch, dirty state, network inability to establish required remote freshness, or unexpected product change.
+## Gate 1 — exact test-only corrective
 
-## Gate 1 — full final regression
+Modify only:
 
-Run the repository's normal complete automated test suite appropriate for the current macOS/Swift project, including the same build/test configuration used for merge qualification.
+```text
+FloatTabsTests/ChatGPTResponseBridgeTests.swift
+```
+
+Inside `testTrustedAssistantPointerProtocolUsesFixedContentFreeContract()`, replace only the obsolete assertion:
+
+```swift
+XCTAssertTrue(source.contains("article[data-testid*=\"conversation-turn\"]"))
+```
+
+with semantic assertions equivalent to:
+
+```swift
+XCTAssertTrue(source.contains("[data-testid*=\"conversation-turn\"]"))
+XCTAssertTrue(source.contains("[data-turn=\"assistant\"]"))
+XCTAssertTrue(source.contains("[data-content-search-unit-key]"))
+XCTAssertTrue(source.contains("[data-conversation-role=\"assistant\"]"))
+XCTAssertFalse(source.contains("article[data-testid*=\"conversation-turn\"]"))
+```
+
+Preserve these existing negative assertions unchanged:
+
+```text
+buttonText
+ariaLabel
+responseContent
+domPath
+clipboard
+selectionText
+```
+
+Do not change production code or any other test unless this exact edit fails to compile. If it does, return the compiler evidence to Web instead of widening scope.
+
+## Gate 2 — focused confirmation
+
+Run only the corrected failing test first.
+
+Required:
+
+```text
+FOCUSED_STALE_TEST_CORRECTIVE=PASS
+PRODUCT_CODE_CHANGED=NO
+```
+
+If it fails, STOP and return evidence. Do not repair beyond the authorized assertion correction.
+
+## Gate 3 — full final regression
+
+Rerun the same full command used in the failed run:
+
+```text
+xcodebuild -project FloatTabs.xcodeproj -scheme FloatTabs
+-configuration Debug -destination 'platform=macOS,arch=arm64'
+-derivedDataPath /private/tmp/ft-speech-001-final-derived-data
+-clonedSourcePackagesDirPath /private/tmp/ft-speech-001-v4-source-packages
+-resultBundlePath <fresh result bundle path>
+CODE_SIGNING_ALLOWED=NO test
+```
 
 Requirements:
 
 ```text
 FULL_FINAL_SUITE=PASS
-PRODUCT_HEAD_UNCHANGED=6b5fb9a780073a26f8060e5be8baee284d511339
-NO_PRODUCT_OR_TEST_CHANGES_DURING_VALIDATION=YES
+V4_PRODUCT_HEAD_UNCHANGED=6b5fb9a780073a26f8060e5be8baee284d511339
+ONLY_AUTHORIZED_TEST_CORRECTIVE_AFTER_V4=YES
 ```
 
-If the full suite fails, do not repair locally. Return the exact failing test/build evidence to Web for audit.
+Do not rebuild/reinstall the QA app solely for this test correction. Do not trigger `Read Latest Response` again.
 
-## Gate 2 — final state evidence
+## Gate 4 — publish test corrective and stop
 
-After tests:
+If focused + full suite pass:
 
+- commit only the authorized test change;
+- normal fast-forward push;
 - working tree clean;
-- no new production/test commit;
 - PR #102 unchanged;
-- report exact local and remote HEADs;
-- report test command(s), passed/failed counts, and any skipped tests.
+- report exact local/remote HEAD and suite counts.
 
-Do not rebuild/reinstall the QA app unless required solely by the repository's normal full validation command. Do not trigger `Read Latest Response` again.
-
-## Web independent audit
-
-Web will independently verify after the local regression receipt:
-
-1. diff from accepted main base to the implementation branch;
-2. changed-file scope;
-3. V4 ownership implementation against the frozen contract;
-4. preservation of legacy paths and fail-closed behavior;
-5. absence of unrelated PR #102 changes;
-6. full-suite evidence and branch freshness.
-
-Local does not duplicate this audit.
+Do not create a PR or merge.
 
 ## Not authorized
 
 ```text
 PRODUCT_CHANGE=NO
-TEST_CHANGE=NO
+OTHER_TEST_CHANGE=NO
 NEW_DIAGNOSTICS=NO
 ROOT_CAUSE_REOPEN=NO
 TOPOLOGY_PROBE=NO
@@ -101,7 +150,7 @@ RELEASE=NO
 
 ## Acceptance
 
-If the full suite passes, stop at:
+If focused and full regression pass, stop at:
 
 ```text
 FINAL_STATE=WAITING_FOR_INDEPENDENT_WEB_FINAL_AUDIT
@@ -114,13 +163,14 @@ TASK_ID: FT-SPEECH-001
 START_HEAD:
 REMOTE_HEAD_AFTER_FETCH:
 BASELINE_GATE:
-V4_PRODUCT_HEAD_ANCESTOR:
-POST_V4_PRODUCT_PATH_CHANGES:
-FULL_FINAL_SUITE_COMMAND:
+STALE_ASSERTION_REMOVED:
+SEMANTIC_CONTRACT_ASSERTIONS_ADDED:
+FOCUSED_STALE_TEST_RESULT:
 FULL_FINAL_SUITE_RESULT:
 FULL_FINAL_SUITE_COUNTS:
 SKIPPED_TESTS:
-PRODUCT_HEAD_UNCHANGED:
+V4_PRODUCT_HEAD_UNCHANGED:
+AUTHORIZED_TEST_ONLY_CHANGE:
 PR102_UNCHANGED:
 LOCAL_FINAL_HEAD:
 REMOTE_FINAL_HEAD:
