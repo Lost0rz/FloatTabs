@@ -1,13 +1,15 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-SPEECH-001
-**Title:** Live Fallback Topology Probe
-**Status:** `ACTIVE — MINIMAL_LIVE_FALLBACK_TOPOLOGY_PROBE`
-**Mode:** `SPEECH_QA_TOPOLOGY_EVIDENCE_ONLY`
+**Title:** Positive Response Ownership Fix V2
+**Status:** `ACTIVE — POSITIVE_RESPONSE_OWNERSHIP_FIX_V2`
+**Mode:** `TEST_FIRST_MINIMAL_PRODUCTION_FIX`
 
 ## Objective
 
-Explain why failed-fix QA source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` still accepted a live ChatGPT fallback root and spoke the user message before the assistant response. This phase is evidence-only. Do not write a second production fix.
+Fix `Read Latest Response` so user-owned input cannot be spoken as part of the latest ChatGPT assistant response.
+
+The previous topology-probe phase is cancelled. Web code audit has established the production defect at the response-extraction root ownership contract; no additional topology probe is required before v2.
 
 ## Canonical evidence
 
@@ -15,21 +17,45 @@ Explain why failed-fix QA source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` stil
 USER_FIX_ACCEPTANCE=FAIL
 FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
 POST_FIX_TRACE_ID=0CEAF62F-7F74-460C-9621-EB8DFD29C250
-POST_FIX_REQUEST_CORRELATION=5EF6B687-C0F3-440E-BB6B-1E8CD344F4A7
-POST_FIX_SESSION=42D75ADB-B191-4C73-95CA-089EC16A281F
 SELECTED_PATH=fallback
 ROOT_ELEMENT=div
 BLOCK_COUNT=73
-BLOCK_UNKNOWN_COUNT=73
 UTTERANCE_COUNT=156
-UTTERANCE_UNKNOWN_COUNT=156
-FIRST_SUBMISSION_OWNERSHIP=unknown
 FIRST_FIX_DID_NOT_REJECT_LIVE_FALLBACK=YES
-CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
-EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
+OBSERVED_AFTER_FIX=user_message_then_assistant_response
 ```
 
-Earlier 8e QA evidence is historical and not the current acceptance.
+Earlier 8e evidence is historical and not current acceptance.
+
+## Web code-audit finding
+
+Current production flow:
+
+```text
+readLatestResponse
+→ assistantResponseRoots
+→ latestRegenerateOwnedResponse fallback
+→ structuredBlocks(root)
+→ payload.blocks
+→ utteranceRequests(payload.blocks)
+→ speech queue / TTS
+```
+
+Production flaw:
+
+- fallback can accept a generic ancestor based on Regenerate + response-like content without positive assistant ownership;
+- `structuredBlocks` recursively extracts all semantic content beneath that root;
+- `SpeechContentBlock` does not carry production author ownership;
+- downstream cleaner/router/queue therefore cannot recover author identity after the wrong root is admitted.
+
+```text
+ROOT_CAUSE_CONFIRMED=YES
+CAUSE_LAYER=CHATGPT_RESPONSE_EXTRACTION_ROOT_OWNERSHIP_CONTRACT
+TTS_CAUSAL=NO
+SPEECH_QUEUE_CAUSAL=NO
+CONTENT_CLEANER_CAUSAL=NO
+FIRST_FIX_FAILURE=NEGATIVE_HEURISTICS_WITHOUT_POSITIVE_OWNERSHIP
+```
 
 ## Baseline
 
@@ -38,112 +64,89 @@ Earlier 8e QA evidence is historical and not the current acceptance.
 - Branch: `fix/chatgpt-speech-response-ownership`
 - Upstream: `origin/fix/chatgpt-speech-response-ownership`
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- PR #102 is separate work and must remain unchanged.
+- PR #102 is separate and must remain unchanged.
 
-Before implementation: fetch/prune, verify branch, verify local HEAD equals upstream, require clean tree, verify merge-base, and re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`. Any mismatch is STOP.
+Gate 0: fetch/prune, require clean tree, exact local/upstream HEAD, correct branch/worktree, accepted merge-base, then re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`. Any mismatch is STOP.
 
-## Gate 1 — Source audit
+## Gate 1 — V2 formal RED
 
-Read the current fallback path and existing QA instrumentation:
+Modify tests first. Do not touch production code before observed RED.
 
-- `latestRegenerateOwnedResponse()`
-- `hasSiblingResponseContentBranches()`
-- `hasNonAssistantOwnershipMarker()`
-- `structuredBlocks()`
-- request-correlated Speech QA diagnostics
+Add the smallest fixture that represents the first-fix blind spot:
 
-Confirm the first fix guards direct-child content fan-out and explicit non-assistant markers but does not establish deeper topology.
+- no explicit assistant/user author-role markers;
+- one semantic Regenerate response action;
+- a generic ancestor has only one direct content-bearing child, so the v1 direct-child fan-out guard does not reject it;
+- inside that one nested content branch are unrelated predecessor text and intended response text;
+- no generic semantic conversation-turn boundary positively owns the Regenerate action.
 
-## Gate 2 — DEBUG/QA-only topology probe
+Required contract:
 
-Add only structural metadata for the selected fallback root. Do not change response selection or speech behavior.
+> A generic ancestor without a positive semantic response-turn ownership boundary must never become the response payload, even when it has one Regenerate action and one direct content-bearing child.
 
-Record bounded fields equivalent to:
+Require first run RED against current production. Confirm the current fallback emits unrelated predecessor content. If first run is not RED, STOP for Web review.
 
-```text
-root_conversation_turn_count
-regenerate_inside_conversation_turn
-regenerate_nearest_turn_present
-block_same_regenerate_turn_count
-block_other_turn_count
-block_no_turn_count
-first_content_fanout_depth
-first_content_fanout_branch_count
-max_content_branch_count
-distinct_block_branch_count
-block_branch_sequence
-selected_root_action_count
-action_branch_id_at_first_fanout
-content_branches_with_action_count
-content_branches_without_action_count
-```
+## Gate 2 — Minimal production fix
 
-Rules:
+After verified RED, change only the fallback response-root selection in `FloatTabs/Web/ChatGPTResponseExtraction.swift`.
 
-- use only generic structural selectors already supported by the codebase, such as generic conversation-turn articles;
-- no author role is required for turn membership;
-- topology depth is bounded to at most 6;
-- branch labels are request-local fixed labels such as `branch_0`, `branch_1`, `unknown`;
-- cap branch count and sequence length;
-- do not record conversation text, DOM HTML/text dumps, URLs, message IDs, DOM IDs, full/generated class lists, or content-derived hashes.
+Production contract:
 
-The probe must not alter selected root, extracted blocks/order, cleaning, utterance contents/order, speech timing, queue, playback, or notification behavior.
+1. preserve explicit assistant-role selection;
+2. preserve role-proven assistant conversation-turn selection;
+3. for semantic Regenerate fallback, find the nearest generic semantic conversation-turn container containing that Regenerate action, using stable semantic selectors already present in the codebase (for example a generic `[data-testid*="conversation-turn"]` boundary; do not use generated classes);
+4. accept that turn only if rendered, response-bearing, contains exactly one applicable Regenerate response action, and does not carry explicit user/composer/status/alert/live ownership markers;
+5. if no qualifying semantic turn exists, fail closed / return no response;
+6. do not ascend to arbitrary generic ancestors to manufacture ownership.
 
-## Gate 3 — Focused tests
+Correctness wins over compatibility. If no semantic ownership boundary is available, no speech is better than speaking the user's input.
 
-Tests must prove:
+Do not change `SpeechContentBlock`, `SpeechContentCleaner`, language routing, queue, playback, `SpeechService`, notifications, response text ordering, or unrelated DOM behavior.
 
-1. direct-child multi-content fixture reports fan-out at depth 0;
-2. nested-wrapper multi-content fixture reports deeper fan-out;
-3. single-response fixture stays one branch;
-4. generic conversation-turn membership works without author-role attributes;
-5. branch labels are bounded request-local categories;
-6. diagnostic metadata contains no conversation content;
-7. payload blocks/order are unchanged by instrumentation;
-8. existing first-fix extraction regressions remain GREEN.
+## Gate 3 — Focused GREEN
 
-Do not add a second production RED.
+Run at minimum:
 
-## Gate 4 — Build/install topology QA
+- the new v2 RED regression;
+- all `ChatGPTResponseExtractionTests`;
+- relevant `AssistantSpeechCoordinatorTests`.
 
-After focused PASS, build fresh exact-head arm64 Debug and replace only `/Applications/FloatTabs.app`.
+Also preserve existing explicit/article response extraction behavior and prove ambiguous generic fallback fails closed.
 
-Preserve Browser Profile/Slots, website state, authenticated sessions, Application Support data, preferences, and diagnostic history. Do not clear/reset persistent state.
+Do not call the issue fixed from synthetic GREEN alone.
 
-Verify:
+## Gate 4 — Build/install v2 QA
 
-```text
-APP_PATH=/Applications/FloatTabs.app
-BUNDLE_ID=com.lost0rz.FloatTabs
-SOURCE_HEAD=<topology QA head>
-VERSION_BUILD=<actual>
-ARCH=arm64
-RUNNING_PID=<actual>
-USER_DATA_PRESERVED=YES
-```
+After focused GREEN:
+
+- build fresh exact-head arm64 Debug;
+- replace only `/Applications/FloatTabs.app`;
+- preserve Browser Profiles, Slots, cookies, WebKit state, authenticated sessions, Application Support, preferences, and diagnostic history;
+- verify exact source provenance, version/build, architecture, signature/path, and running PID.
 
 Then STOP. Do not trigger `Read Latest Response` for the user.
 
 ## Not authorized
 
 ```text
-SECOND_FIX_AUTHORIZED=NO
-NEW_PRODUCTION_RED_AUTHORIZED=NO
+TOPOLOGY_PROBE_AUTHORIZED=NO
+SECOND_HEURISTIC_STACKING=NO
+TTS_CHANGE_AUTHORIZED=NO
+SPEECH_QUEUE_CHANGE_AUTHORIZED=NO
+CONTENT_CLEANER_CHANGE_AUTHORIZED=NO
+BROAD_DOM_REDESIGN_AUTHORIZED=NO
+PR102_CHANGE_AUTHORIZED=NO
 IMPLEMENTATION_PR_AUTHORIZED=NO
 MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
 ```
 
-No TTS, queue/playback, notification, broad DOM redesign, generated-class contract, PR #102 change, unrelated refactor, or user-state reset.
+## Acceptance
 
-## Phase acceptance
-
-PASS only if probe tests pass, production behavior is unchanged, exact-head topology QA is installed and verified, user data is preserved, PR #102 is unchanged, and worktree is clean/local-remote matched.
-
-Final state:
+Stop after exact-head v2 QA installation at:
 
 ```text
-FINAL_STATE=WAITING_FOR_USER_TOPOLOGY_REPRODUCTION
+FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
 ```
 
 Receipt:
@@ -152,23 +155,26 @@ Receipt:
 TASK_ID:
 START_HEAD:
 CONTROL_HEAD:
-SOURCE_AUDIT:
-DIRECT_CHILD_GUARD_CONFIRMED:
-TOPOLOGY_PROBE_HEAD:
-PROBE_SCOPE:
-PROBE_TESTS:
-EXISTING_FIRST_FIX_TESTS:
+CODE_AUDIT_ACKNOWLEDGED:
+V2_RED_TEST:
+FIRST_RUN_RED:
+RED_ACTUAL_BEHAVIOR:
+PRODUCTION_FIX_HEAD:
+FALLBACK_POSITIVE_OWNERSHIP_CONTRACT:
+AMBIGUOUS_GENERIC_FALLBACK_BEHAVIOR:
+FOCUSED_EXTRACTION_TESTS:
+FOCUSED_SPEECH_TESTS:
+QA_BUILD:
 APP_PATH:
 INSTALLED_SOURCE_HEAD:
 INSTALLED_VERSION_BUILD:
 INSTALLED_ARCH:
 RUNNING_PID:
 USER_DATA_PRESERVED:
-PRODUCTION_BEHAVIOR_CHANGED:NO
-SECOND_FIX_WRITTEN:NO
-NEW_PRODUCTION_RED_WRITTEN:NO
+TOPOLOGY_PROBE_ADDED:NO
+TTS_OR_QUEUE_CHANGED:NO
 PR102_UNCHANGED:
 REMOTE_SYNC:
 WORKTREE_STATUS:
-FINAL_STATE=WAITING_FOR_USER_TOPOLOGY_REPRODUCTION
+FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
 ```
