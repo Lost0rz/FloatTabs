@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `BLOCKED — GATE_1_LIVE_DOM_OWNERSHIP_UNOBSERVABLE`
+**Status:** `ACTIVE — GATE_1_PROBE_SESSION_AUTHORIZED`
 **Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -62,9 +62,10 @@ created from it. Gate 1 is now the next active gate.
 ## Authorized scope
 
 - Privacy-safe structural evidence from the current live ChatGPT DOM.
-- A temporary QA/DEBUG-only, one-shot structural probe only if existing debug
-  capabilities cannot establish the selected extraction path or fallback
-  candidate. It must not change response selection or speech behavior.
+- One temporary QA/DEBUG-only, one-shot structural probe session, explicitly
+  authorized on 2026-10-07, including probe-only focused tests, exact-head
+  rebuild/relaunch, and at most one necessary ChatGPT page reload. It must not
+  change response selection or speech behavior.
 - Focused ChatGPT response-extraction tests and a live-shape TDD RED reproduction.
 - A minimal response ownership fix only after Gate 1 and Gate 2 pass.
 - Focused and full validation in Gate 4.
@@ -84,11 +85,17 @@ created from it. Gate 1 is now the next active gate.
   diagnostics, persistence, or WebView lifecycle changes without evidence.
 - Any change to PR #102.
 - Merging the implementation PR.
+- Any repeated reload, new ChatGPT message/response, profile/site-data/cache reset,
+  or replacement of `/Applications/FloatTabs.app` during the probe session.
 
 ## Gate 1 — Live incident root cause, read-only first
 
-Inspect the existing running page without sending a ChatGPT message, changing page
-state, reloading, or resetting.
+Start with the existing running page and prefer existing debug capabilities. The
+user has authorized one minimal controlled probe session if needed: rebuild and
+gracefully relaunch the QA/DEBUG app, restore/open an existing ChatGPT tab, reload
+that page at most once if necessary to load the temporary probe, and invoke one
+ownership snapshot. Do not send a message, generate a response, repeat reloads, or
+reset any state.
 
 Determine:
 
@@ -111,8 +118,16 @@ only these structural fields:
 - `selected_path = explicit/article/fallback`.
 
 Do not emit or save prohibited content listed above. The probe must not alter
-selection or speech behavior and must be removed before the final production
-commit if it is only for incident attribution.
+selection or speech behavior. It may report only fixed-schema structural metadata,
+fixed categories, booleans, and bounded counts. Do not read or emit textContent,
+innerHTML, innerText, conversation text, URLs, message IDs, full class lists, or
+text hashes. The temporary probe and probe-only tests must be removed before the
+formal Gate 2 TDD work if they serve only attribution.
+
+Before building the probe, add the smallest focused tests proving explicit,
+article, and fallback path reporting; boolean-only user/status/live-region fields;
+and absence of response/user-text fields. These tests validate the probe only and
+are not the formal Gate 2 RED test.
 
 ### Gate 1 PASS
 
@@ -129,7 +144,7 @@ not contain user content, stop production changes and report
 `ROOT_CAUSE_CONFIRMED = NO`. Continue read-only source attribution of the actual
 payload path. Do not alter fixtures to force the web-page hypothesis.
 
-### Current execution outcome: BLOCKED
+### Previous execution outcome: BLOCKED (superseded for probe authorization)
 
 The live selected path and candidate subtree are unknown. Existing privacy-safe
 health/page-app diagnostics do not expose response ownership metadata; source
@@ -138,12 +153,41 @@ conversation-shell, composer, loading, and load-error state, while the page-app
 probe reports bounded error/resource/lifecycle categories. No response-path,
 fallback-ancestor, role-marker, or live-region fields exist in those interfaces.
 
-No new ChatGPT message was sent, no page state was changed, and no reload/reset
-was performed. The authorized temporary probe was not loaded into the running
-WebView because doing so requires rebuilding/relaunching and reloading the page,
-contrary to Gate 1's no-reload boundary. Do not enter Gate 2 or modify response
-extraction until a privacy-safe live capture route is available or the user
-authorizes a future probe session that requires a page reload.
+The previous stop remains valid: no live selected path or candidate subtree was
+observed, and root cause is unconfirmed. On 2026-10-07, the user authorized exactly
+one privacy-safe probe session, superseding the earlier no-reload boundary only
+for the minimal reload needed to load this temporary probe. Current freshness gate:
+the clean implementation checkout HEAD must equal
+`origin/fix/chatgpt-speech-response-ownership`; `origin/main` must remain at the
+accepted base `2d2b733407ea57ea66ca380887dfc11b71b6e2be`, and merge-base must equal
+that base absent authorized reconciliation.
+
+### Gate 1 probe session — one-time authorization
+
+1. Add only temporary DEBUG/QA structural probe code and probe-only tests; do not
+   change `latestAssistantResponseRoot()`, `structuredBlocks()`, production
+   response selection, or speech behavior.
+2. Test explicit, article, fallback, and none path classification, plus boolean-
+   only markers and no response/user-text fields. Focused probe tests must pass
+   before building.
+3. Build an arm64 Debug QA app from the exact implementation HEAD at a fresh
+   temporary DerivedData path. Do not replace `/Applications/FloatTabs.app` or
+   mutate user/site state.
+4. Verify current QA process identity/provenance before graceful quit. Launch the
+   exact probe build, restore/open the target existing ChatGPT tab, allow one page
+   reload only if needed, send no message, and call the snapshot once.
+5. Capture only selected path, tag/role/testid fixed categories, bounded ancestor,
+   action and semantic-block counts, and the seven requested structural booleans.
+   No text, HTML, URL, identifier, full class list, token, cookie, or text hash.
+6. Decide Gate 1 from the live result. Fallback plus a user marker can confirm the
+   user-message ownership cause; status/alert/live-region presence alone does not
+   confirm notification causality unless its inclusion in the extraction boundary
+   is separately proven. Explicit/article, or fallback without a user marker,
+   stops without Gate 2 RED or production changes.
+7. If Gate 1 passes, preserve only structural evidence, remove temporary probe
+   code and its probe-only tests, verify no temporary diagnostic capability
+   remains, and only then begin formal Gate 2 test-first RED. If Gate 1 stops,
+   remove the temporary probe and its tests and stop without RED or a fix.
 
 ## Gate 2 — TDD RED
 

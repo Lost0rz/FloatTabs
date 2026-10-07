@@ -24,7 +24,7 @@ The implementation branch was created from freshly fetched `main` at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be` after control PR #114 merged. The
 production base branch remains `main`.
 
-Before any build or installation, refresh remote refs. The authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
+Before any build or probe, refresh remote refs. For FT-SPEECH-001 implementation work, the authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/fix/chatgpt-speech-response-ownership`. The accepted implementation base remains `origin/main` at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`, and the implementation branch merge-base must remain that SHA unless an authorized reconciliation occurs.
 
 ## Closed diagnostic phases
 
@@ -117,7 +117,7 @@ PR #102 remains separate MemoX durable-outbox work and is outside this task.
 
 **FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
 
-**STATUS: BLOCKED — GATE_1_LIVE_DOM_OWNERSHIP_UNOBSERVABLE**
+**STATUS: ACTIVE — GATE_1_PROBE_SESSION_AUTHORIZED**
 
 **CONTROL_PR:** #114 — MERGED at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
 **IMPLEMENTATION_BRANCH:** `fix/chatgpt-speech-response-ownership`.
@@ -148,11 +148,25 @@ booleans. The page-app snapshot reports bounded error, resource and lifecycle
 categories. Neither reports response selection path, fallback ancestor shape,
 user/assistant subtree markers, or status/alert/live-region membership.
 
-Gate 1 did not change the current page, send a message, reload, or reset it. A
-temporary probe has not been added or run: the existing diagnostics cannot expose
-the required metadata, and loading a new QA/DEBUG probe into the already-running
-WebView would require an app/page reload, which Gate 1 forbids. Await a privacy-safe
-live structural capture path or explicit authorization for a future probe session.
+The previous Gate 1 stop remains valid for its evidence and scope. On 2026-10-07,
+the user explicitly authorized one minimal, controlled, privacy-safe QA/DEBUG
+probe session, including rebuild/relaunch and one necessary ChatGPT page reload.
+This authorization supersedes only the earlier no-reload restriction for that
+single session. It does not confirm root cause or authorize a behavior change.
+
+**GATE_1_PROBE_SESSION: AUTHORIZED — ONCE**
+
+Allowed: temporary structural probe, probe-only focused tests, exact-head QA/DEBUG
+rebuild and relaunch, restore/open the target ChatGPT tab, at most one necessary
+page reload, and one ownership snapshot. Output is limited to fixed categories,
+booleans and bounded counts.
+
+Not authorized: user/assistant text or DOM HTML, textContent/innerHTML/innerText,
+URLs, message IDs, cookies, tokens, cache/profile/site-data resets, repeated reloads,
+new messages or responses, response-selection or speech behavior changes,
+speculative fixes, or replacing `/Applications/FloatTabs.app`.
+
+The implementation freshness gate is `HEAD == origin/fix/chatgpt-speech-response-ownership`; `origin/main` must remain the accepted base SHA above and the merge-base must match it. PR #102 remains excluded and must not change.
 
 ### Authorized scope
 
