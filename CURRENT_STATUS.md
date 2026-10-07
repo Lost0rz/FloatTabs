@@ -16,9 +16,13 @@ Machine-specific worktree paths remain local-only.
 
 ## Production authority
 
-**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`  
-**PRODUCTION_BRANCH:** `main`  
-**EXPECTED_UPSTREAM:** `origin/main`
+**PRODUCTION_WORKTREE_ID:** `floattabs-main-production`
+**PRODUCTION_BRANCH:** `fix/chatgpt-speech-response-ownership`
+**EXPECTED_UPSTREAM:** `origin/fix/chatgpt-speech-response-ownership`
+
+The implementation branch was created from freshly fetched `main` at
+`2d2b733407ea57ea66ca380887dfc11b71b6e2be` after control PR #114 merged. The
+production base branch remains `main`.
 
 Before any build or installation, refresh remote refs. The authorized production checkout must be CLEAN and exactly equal freshly fetched `origin/main`.
 
@@ -113,19 +117,19 @@ PR #102 remains separate MemoX durable-outbox work and is outside this task.
 
 **FT-SPEECH-001 — ChatGPT Speech Response Ownership Boundary Regression**
 
-**STATUS: ACTIVE — GATE_0A_CONTROL_PR**
+**STATUS: ACTIVE — GATE_1_LIVE_EVIDENCE**
 
-**CONTROL_PR:** #114 — OPEN; GitHub is authoritative for its current head.
+**CONTROL_PR:** #114 — MERGED at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
+**IMPLEMENTATION_BRANCH:** `fix/chatgpt-speech-response-ownership`.
 
 **MODE:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 Task-start baseline was freshly fetched `main` at
 `8ed28588ec79d6a5c145622ef13a7051ab7076d8`, clean and equal to `origin/main`.
-The authorized production worktree identity remains `floattabs-main-production`
-on `main` tracking `origin/main`. The active control-plane transition is limited
-to `CURRENT_STATUS.md` and `CURRENT_TASK.md`; no product or test files are
-authorized until this control-plane PR is merged and the production checkout is
-aligned to the resulting `origin/main`.
+The authorized production worktree identity remains `floattabs-main-production`.
+The control-plane transition changed only `CURRENT_STATUS.md` and
+`CURRENT_TASK.md`. The production checkout is aligned to the merged
+`origin/main`; implementation is now limited to the gates in `CURRENT_TASK.md`.
 
 The running FloatTabs observed at task start was version 0.5.2, build 20,
 arm64, with exact source revision `8ed28588ec79d6a5c145622ef13a7051ab7076d8`.

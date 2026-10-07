@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `ACTIVE — GATE_0A_CONTROL_PR`
+**Status:** `ACTIVE — GATE_1_LIVE_EVIDENCE`
 **Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -19,9 +19,15 @@ fix before the live root-cause gate and a failing regression test pass.
 
 - Repository: `Lost0rz/FloatTabs`.
 - Authorized production worktree identity: `floattabs-main-production`.
-- Production branch/upstream: `main` / `origin/main`.
+- Task-start production branch/upstream: `main` / `origin/main`.
 - Task-start baseline: freshly fetched clean `main` and `origin/main` at
   `8ed28588ec79d6a5c145622ef13a7051ab7076d8`.
+- Control PR #114 merged at `2d2b733407ea57ea66ca380887dfc11b71b6e2be` after
+  `Build & Test (Apple Silicon arm64)` passed on exact head
+  `829cdfe01d617877f7ee136de51e2b837d5c284e`.
+- Active implementation branch: `fix/chatgpt-speech-response-ownership`, created
+  from that merged authoritative `main`. Expected upstream:
+  `origin/fix/chatgpt-speech-response-ownership`.
 - The running app was observed as FloatTabs 0.5.2 build 20, arm64, with exact
   source revision `8ed28588ec79d6a5c145622ef13a7051ab7076d8`. The separate
   installed copy reported source revision
@@ -48,6 +54,10 @@ Keep FT-QA-001 as historical state; do not erase its history. Do not change
 6. Create the implementation branch from that new authoritative `main`.
 7. Do not modify product or test files until the control PR is merged and this
    branch alignment is verified.
+
+**Gate 0A result: PASS.** Control PR #114 is merged, the authorized checkout was
+fast-forwarded cleanly to the merge commit, and the implementation branch was
+created from it. Gate 1 is now the next active gate.
 
 ## Authorized scope
 
