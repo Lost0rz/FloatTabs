@@ -2,14 +2,14 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** Positive Response Ownership Fix V2
-**Status:** `ACTIVE — POSITIVE_RESPONSE_OWNERSHIP_FIX_V2`
-**Mode:** `TEST_FIRST_MINIMAL_PRODUCTION_FIX`
+**Status:** `WAITING_FOR_USER_FIX_V2_ACCEPTANCE`
+**Mode:** `QA_INSTALLED_WAITING_FOR_HUMAN_ACCEPTANCE`
 
 ## Objective
 
 Fix `Read Latest Response` so user-owned input cannot be spoken as part of the latest ChatGPT assistant response.
 
-The cancelled topology-probe phase produced one unique local commit. Preserve it as historical evidence, realign to the current remote V2 control state, then continue the test-first V2 fix. Do not merge topology instrumentation into V2.
+The cancelled topology-probe commit remains preserved and unchanged in its original checkout. V2 was executed from the exact remote control head in the explicitly user-authorized isolated worktree, then published to the implementation branch by normal fast-forward. The installed V2 QA is now awaiting human acceptance. Do not merge topology instrumentation into V2.
 
 ## Canonical evidence
 
@@ -40,13 +40,15 @@ Fallback must use positive semantic response ownership, not arbitrary ancestor h
 ## Baseline
 
 - Repository: `Lost0rz/FloatTabs`
-- Worktree identity: `floattabs-main-production`
+- Worktree identity: `ft-speech-001-v2-isolated`
 - Branch: `fix/chatgpt-speech-response-ownership`
 - Upstream: `origin/fix/chatgpt-speech-response-ownership`
+- Isolated execution branch: `codex/ft-speech-001-v2`
+- V2 implementation commit: `3e707eb4725bc4549daf991d4d08ffa9f50745b7` (pushed by fast-forward)
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
 - PR #102 is separate and must remain unchanged.
 
-## Gate 0A — Preserve superseded local topology work
+## Gate 0 — Completed: preserve topology work and create isolated V2 worktree
 
 Known local-only commit:
 
@@ -56,33 +58,21 @@ SUPERSEDED_PARENT=777fa7a9390236c14f2ee1a5266818b592eb451c
 DISPOSITION=SUPERSEDED_BY_WEB_CODE_AUDIT
 ```
 
-Do not test, amend, cherry-pick, merge, or continue this commit.
-
-First verify the local commit still exists and is the current divergent local HEAD. If it differs, STOP.
-
-Create and verify a recoverable archive tag:
+The original checkout remains clean at the superseded commit. The remote archive tag
+is verified to point exactly at that commit. It was not reset, tested for V2,
+amended, cherry-picked, merged, rebased, or used as the V2 base.
 
 ```text
 archive/ft-speech-001-topology-probe-superseded-20261007
+ARCHIVE_REMOTE_VERIFIED=YES
+ORIGINAL_CHECKOUT_UNCHANGED=YES
 ```
 
-pointing exactly to `0a3588bf6e4675d897aa02b336c1349ef090b692`, then push only that tag to origin. Verify the remote tag resolves to the exact commit. Do not push the implementation branch while it points to the superseded commit.
+The isolated V2 worktree started at `1e9b8780a6fd6991ab63eb5f8c34f8994308dd5c`,
+with clean status and accepted main merge-base. The original topology checkout was
+left untouched.
 
-## Gate 0B — Realign implementation branch
-
-After archive verification:
-
-1. `git fetch origin --prune`
-2. verify the implementation worktree is clean;
-3. move the local implementation branch to the exact freshly fetched `origin/fix/chatgpt-speech-response-ownership` state;
-4. this destructive branch realignment is explicitly authorized **only because** the unique local commit was preserved and verified by the archive tag;
-5. do not force-push the implementation branch;
-6. require local HEAD == upstream and clean tree;
-7. re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md` after realignment.
-
-If the remote branch advances again after fetch, STOP rather than guessing.
-
-## Gate 1 — V2 formal RED
+## Gate 1 — Complete: V2 formal RED
 
 Modify tests first. Do not touch production code before observed RED.
 
@@ -98,9 +88,10 @@ Required contract:
 
 > A generic ancestor without a positive semantic response-turn ownership boundary must never become the response payload.
 
-Require first run RED and confirm the current fallback emits unrelated predecessor content. If not RED, STOP for Web review.
+First run was RED. The unchanged fallback admitted the generic ancestor and
+emitted both predecessor and intended-response blocks with unknown ownership.
 
-## Gate 2 — Minimal V2 production fix
+## Gate 2 — Complete: minimal V2 production fix
 
 After verified RED, change only fallback response-root selection in `FloatTabs/Web/ChatGPTResponseExtraction.swift`.
 
@@ -113,7 +104,11 @@ After verified RED, change only fallback response-root selection in `FloatTabs/W
 
 Do not change `SpeechContentBlock`, cleaner, language routing, queue, playback, SpeechService, notifications, or unrelated DOM behavior.
 
-## Gate 3 — Focused GREEN
+The committed implementation only changes Regenerate fallback root selection in
+`FloatTabs/Web/ChatGPTResponseExtraction.swift`: it uses the nearest semantic
+conversation-turn boundary and fails closed when none qualifies.
+
+## Gate 3 — Complete: focused GREEN
 
 Run at minimum:
 
@@ -121,9 +116,12 @@ Run at minimum:
 - all `ChatGPTResponseExtractionTests`;
 - relevant `AssistantSpeechCoordinatorTests`.
 
+All 141 tests across the extraction and speech-coordinator classes passed with 0
+failures. No full suite was run.
+
 Preserve explicit/article behavior and prove ambiguous generic fallback fails closed.
 
-## Gate 4 — Build/install V2 QA
+## Gate 4 — Complete: build/install V2 QA
 
 After focused GREEN:
 
@@ -132,6 +130,16 @@ After focused GREEN:
 - preserve Browser Profiles, Slots, cookies, WebKit state, authenticated sessions, Application Support, preferences, and diagnostic history;
 - verify source provenance, version/build, architecture, signature/path, and running PID;
 - stop without triggering `Read Latest Response`.
+
+The installed app reports source `3e707eb4725bc4549daf991d4d08ffa9f50745b7`,
+version `0.5.2` build `20`, arm64, at `/Applications/FloatTabs.app`, running PID
+`38242`. Profiles/Slots state and preferences were byte-identical to the
+pre-install snapshot; all pre-existing WebKit paths and diagnostic-log paths
+remained present. No Read Latest Response action was triggered.
+
+After a fresh fetch confirmed the implementation branch was still at
+`1e9b8780a6fd6991ab63eb5f8c34f8994308dd5c`, the V2 commit was pushed by normal
+fast-forward. No force push, implementation PR, or merge occurred.
 
 ## Not authorized
 
@@ -155,36 +163,39 @@ FORCE_PUSH_IMPLEMENTATION_BRANCH=NO
 FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
 ```
 
+The only next action is human acceptance of the installed QA build. Do not trigger
+speech, send ChatGPT messages, reload/reset, make another fix, rebuild/reinstall,
+run the full suite, open an implementation PR, or merge before that acceptance.
+
 Receipt:
 
 ```text
-TASK_ID:
-START_HEAD:
-SUPERSEDED_LOCAL_COMMIT:
-ARCHIVE_TAG:
-ARCHIVE_REMOTE_VERIFIED:
-REALIGNED_CONTROL_HEAD:
-LOCAL_REMOTE_MATCH_AFTER_REALIGN:
-CODE_AUDIT_ACKNOWLEDGED:
-V2_RED_TEST:
-FIRST_RUN_RED:
-RED_ACTUAL_BEHAVIOR:
-PRODUCTION_FIX_HEAD:
-FALLBACK_POSITIVE_OWNERSHIP_CONTRACT:
-AMBIGUOUS_GENERIC_FALLBACK_BEHAVIOR:
-FOCUSED_EXTRACTION_TESTS:
-FOCUSED_SPEECH_TESTS:
-QA_BUILD:
-APP_PATH:
-INSTALLED_SOURCE_HEAD:
-INSTALLED_VERSION_BUILD:
-INSTALLED_ARCH:
-RUNNING_PID:
-USER_DATA_PRESERVED:
+TASK_ID=FT-SPEECH-001
+START_HEAD=1e9b8780a6fd6991ab63eb5f8c34f8994308dd5c
+SUPERSEDED_LOCAL_COMMIT=0a3588bf6e4675d897aa02b336c1349ef090b692
+ARCHIVE_TAG=archive/ft-speech-001-topology-probe-superseded-20261007
+ARCHIVE_REMOTE_VERIFIED=YES
+ISOLATED_WORKTREE_BASE=1e9b8780a6fd6991ab63eb5f8c34f8994308dd5c
+CODE_AUDIT_ACKNOWLEDGED=YES
+V2_RED_TEST=testRegenerateFallbackFailsClosedWithoutPositiveSemanticConversationTurnOwnership
+FIRST_RUN_RED=YES
+RED_ACTUAL_BEHAVIOR=fallback emitted predecessor and intended-response blocks with unknown ownership
+PRODUCTION_FIX_HEAD=3e707eb4725bc4549daf991d4d08ffa9f50745b7
+FALLBACK_POSITIVE_OWNERSHIP_CONTRACT=nearest semantic conversation-turn only; fail closed without one
+AMBIGUOUS_GENERIC_FALLBACK_BEHAVIOR=no response
+FOCUSED_EXTRACTION_TESTS=43 PASS
+FOCUSED_SPEECH_TESTS=PASS in combined 141-test run
+QA_BUILD=arm64 Debug PASS
+APP_PATH=/Applications/FloatTabs.app
+INSTALLED_SOURCE_HEAD=3e707eb4725bc4549daf991d4d08ffa9f50745b7
+INSTALLED_VERSION_BUILD=0.5.2 (20)
+INSTALLED_ARCH=arm64
+RUNNING_PID=38242
+USER_DATA_PRESERVED=YES
 TOPOLOGY_COMMIT_MERGED:NO
 TTS_OR_QUEUE_CHANGED:NO
-PR102_UNCHANGED:
-REMOTE_SYNC:
-WORKTREE_STATUS:
+PR102_UNCHANGED=YES
+REMOTE_SYNC=PASS; normal fast-forward push completed
+WORKTREE_STATUS=CLEAN
 FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
 ```

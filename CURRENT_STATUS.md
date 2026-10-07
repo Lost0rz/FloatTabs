@@ -10,14 +10,18 @@
 
 ## Mode
 
-**MODE: ACTIVE — POSITIVE_RESPONSE_OWNERSHIP_FIX_V2**
+**MODE: WAITING_FOR_USER_FIX_V2_ACCEPTANCE**
 
 ## Production authority
 
-- Worktree identity: `floattabs-main-production`
+- Worktree identity: `ft-speech-001-v2-isolated`
 - Implementation branch: `fix/chatgpt-speech-response-ownership`
 - Expected upstream: `origin/fix/chatgpt-speech-response-ownership`
 - Accepted implementation base: `main` at `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
+- Execution branch: `codex/ft-speech-001-v2` (user-authorized isolated worktree)
+- V2 implementation commit: `3e707eb4725bc4549daf991d4d08ffa9f50745b7` (pushed by fast-forward)
+- Installed QA source: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
+- Installed app: `/Applications/FloatTabs.app`, build `20`, arm64, running PID `38242`
 - Control PR #114: merged
 - PR #102: separate MemoX work; excluded and unchanged
 
@@ -69,6 +73,23 @@ The fallback can admit a generic ancestor without positive response ownership. `
 - If no qualifying semantic turn exists, fail closed.
 - Never manufacture response ownership by ascending to an arbitrary generic ancestor.
 
+## V2 implementation and QA evidence
+
+```text
+V2_RED_TEST=PASS_ON_FIRST_RUN
+RED_ACTUAL_BEHAVIOR=generic fallback emitted predecessor and intended-response blocks as unknown ownership
+FOCUSED_TESTS=141 passed, 0 failed across ChatGPTResponseExtractionTests and AssistantSpeechCoordinatorTests
+ARM64_DEBUG_BUILD=PASS
+INSTALLED_SOURCE_TREE_STATE=clean
+USER_DATA_PRESERVED=YES
+```
+
+The installed bundle reports `com.lost0rz.FloatTabs`, version `0.5.2` (build `20`),
+arm64, and exact source revision `3e707eb4725bc4549daf991d4d08ffa9f50745b7`. The
+Profiles/Slots state file and preferences retained identical content; all
+pre-existing WebKit paths and diagnostic-log paths remained present. Only the app
+bundle was replaced. No Read Latest Response action was triggered.
+
 ## Superseded local topology commit disposition
 
 A local-only commit was created from the now-cancelled topology-probe scope:
@@ -81,32 +102,25 @@ PRODUCT_BEHAVIOR_CHANGE=NO
 VALIDATION=NOT_FINAL; 73 focused tests passed before the final probe simplification, but this exact commit was not rerun
 ```
 
-This commit must **not** be merged, cherry-picked, rebased into, or used as the base for V2. Because it is unique local work, preserve it first with a recoverable archive tag, then realign the implementation branch exactly to the current remote V2 control HEAD. After archive verification it is historical evidence only.
+This commit remains in the original clean checkout at `0a3588bf6e4675d897aa02b336c1349ef090b692`, preserved by the remote archive tag below. It was not reset, merged, cherry-picked, rebased, tested for V2, or used as the V2 base. Its lifecycle remains `SUPERSEDED_BY_WEB_CODE_AUDIT`.
 
-Authorized disposition:
+Verified archive disposition:
 
 ```text
 ARCHIVE_TAG=archive/ft-speech-001-topology-probe-superseded-20261007
 ARCHIVE_TARGET=0a3588bf6e4675d897aa02b336c1349ef090b692
-ARCHIVE_PUSH_AUTHORIZED=YES
-BRANCH_REALIGN_TO_REMOTE_AFTER_ARCHIVE=YES
+ARCHIVE_REMOTE_VERIFIED=YES
+ORIGINAL_CHECKOUT_UNCHANGED=YES
 FORCE_PUSH_IMPLEMENTATION_BRANCH=NO
 CHERRY_PICK_TOPOLOGY_COMMIT=NO
 ```
 
 ## Current authorization
 
-The topology-probe plan is cancelled.
-
-Authorized now:
-
-1. preserve/archive the superseded local topology commit;
-2. realign the implementation checkout to the exact remote V2 control HEAD;
-3. perform formal V2 RED;
-4. make the minimal fallback root-selection fix only after observed RED;
-5. run focused extraction + speech tests;
-6. build/install exact-head arm64 Debug QA at `/Applications/FloatTabs.app` preserving user data;
-7. stop for human acceptance.
+V2 implementation, focused validation, arm64 Debug QA installation, and normal
+fast-forward publication to the implementation branch are complete. The installed
+build is awaiting human acceptance. The next action is to receive the user's
+observation; do not trigger speech or modify the product before that result.
 
 Not authorized:
 
@@ -123,7 +137,7 @@ FULL_FINAL_SUITE_AUTHORIZED=NO
 
 ## Required next state
 
-After archive + branch reconciliation, execute `CURRENT_TASK.md`. After V2 focused GREEN and verified QA installation, stop at:
+The task is stopped at:
 
 ```text
 FINAL_STATE=WAITING_FOR_USER_FIX_V2_ACCEPTANCE
