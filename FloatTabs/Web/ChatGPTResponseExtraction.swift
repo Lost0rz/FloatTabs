@@ -313,6 +313,120 @@ enum ChatGPTResponseRootElementCategory: String, Equatable, Sendable {
     case none
 }
 
+/// Request-local, bounded structural summary for a Debug fallback extraction.
+/// Values are fixed categories/counts only; this type cannot carry DOM content.
+struct ChatGPTFallbackTopologyDiagnostics: Equatable, Sendable {
+    static let maximumDepth = 6
+    static let maximumBranchCount = 32
+    static let maximumBlockCount = 1024
+    static let maximumSequenceCount = 64
+
+    let rootConversationTurnCount: Int
+    let regenerateInsideConversationTurn: Bool
+    let regenerateNearestTurnPresent: Bool
+    let blockSameRegenerateTurnCount: Int
+    let blockOtherTurnCount: Int
+    let blockNoTurnCount: Int
+    let firstContentFanoutDepth: Int
+    let firstContentFanoutBranchCount: Int
+    let maxContentBranchCount: Int
+    let distinctBlockBranchCount: Int
+    let blockBranchSequence: [String]
+    let blockBranchSequenceTruncated: Bool
+    let selectedRootActionCount: Int
+    let actionBranchIDAtFirstFanout: String
+    let contentBranchesWithActionCount: Int
+    let contentBranchesWithoutActionCount: Int
+    let traversalCapped: Bool
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        [
+            "root_conversation_turn_count": .integer(Int64(rootConversationTurnCount)),
+            "regenerate_inside_conversation_turn": .bool(regenerateInsideConversationTurn),
+            "regenerate_nearest_turn_present": .bool(regenerateNearestTurnPresent),
+            "block_same_regenerate_turn_count": .integer(Int64(blockSameRegenerateTurnCount)),
+            "block_other_turn_count": .integer(Int64(blockOtherTurnCount)),
+            "block_no_turn_count": .integer(Int64(blockNoTurnCount)),
+            "first_content_fanout_depth": .integer(Int64(firstContentFanoutDepth)),
+            "first_content_fanout_branch_count": .integer(Int64(firstContentFanoutBranchCount)),
+            "max_content_branch_count": .integer(Int64(maxContentBranchCount)),
+            "distinct_block_branch_count": .integer(Int64(distinctBlockBranchCount)),
+            "block_branch_sequence": .string(blockBranchSequence.joined(separator: ",")),
+            "block_branch_sequence_truncated": .bool(blockBranchSequenceTruncated),
+            "selected_root_action_count": .integer(Int64(selectedRootActionCount)),
+            "action_branch_id_at_first_fanout": .string(actionBranchIDAtFirstFanout),
+            "content_branches_with_action_count": .integer(Int64(contentBranchesWithActionCount)),
+            "content_branches_without_action_count": .integer(Int64(contentBranchesWithoutActionCount)),
+            "topology_traversal_capped": .bool(traversalCapped)
+        ]
+    }
+
+    static func parse(_ value: Any?) -> ChatGPTFallbackTopologyDiagnostics? {
+        guard let body = value as? [String: Any],
+              let rootConversationTurnCount = body["rootConversationTurnCount"] as? Int,
+              (0...maximumBranchCount).contains(rootConversationTurnCount),
+              let regenerateInsideConversationTurn = body["regenerateInsideConversationTurn"] as? Bool,
+              let regenerateNearestTurnPresent = body["regenerateNearestTurnPresent"] as? Bool,
+              let blockSameRegenerateTurnCount = body["blockSameRegenerateTurnCount"] as? Int,
+              (0...maximumBlockCount).contains(blockSameRegenerateTurnCount),
+              let blockOtherTurnCount = body["blockOtherTurnCount"] as? Int,
+              (0...maximumBlockCount).contains(blockOtherTurnCount),
+              let blockNoTurnCount = body["blockNoTurnCount"] as? Int,
+              (0...maximumBlockCount).contains(blockNoTurnCount),
+              let firstContentFanoutDepth = body["firstContentFanoutDepth"] as? Int,
+              (-1...maximumDepth).contains(firstContentFanoutDepth),
+              let firstContentFanoutBranchCount = body["firstContentFanoutBranchCount"] as? Int,
+              (0...maximumBranchCount).contains(firstContentFanoutBranchCount),
+              let maxContentBranchCount = body["maxContentBranchCount"] as? Int,
+              (0...maximumBranchCount).contains(maxContentBranchCount),
+              let distinctBlockBranchCount = body["distinctBlockBranchCount"] as? Int,
+              (0...maximumBranchCount).contains(distinctBlockBranchCount),
+              let rawBlockBranchSequence = body["blockBranchSequence"] as? [String],
+              rawBlockBranchSequence.count <= maximumSequenceCount,
+              rawBlockBranchSequence.allSatisfy(isFixedBranchLabel),
+              let blockBranchSequenceTruncated = body["blockBranchSequenceTruncated"] as? Bool,
+              let selectedRootActionCount = body["selectedRootActionCount"] as? Int,
+              (0...maximumBranchCount).contains(selectedRootActionCount),
+              let actionBranchIDAtFirstFanout = body["actionBranchIDAtFirstFanout"] as? String,
+              isFixedBranchLabel(actionBranchIDAtFirstFanout),
+              let contentBranchesWithActionCount = body["contentBranchesWithActionCount"] as? Int,
+              (0...maximumBranchCount).contains(contentBranchesWithActionCount),
+              let contentBranchesWithoutActionCount = body["contentBranchesWithoutActionCount"] as? Int,
+              (0...maximumBranchCount).contains(contentBranchesWithoutActionCount),
+              let traversalCapped = body["traversalCapped"] as? Bool else {
+            return nil
+        }
+        return ChatGPTFallbackTopologyDiagnostics(
+            rootConversationTurnCount: rootConversationTurnCount,
+            regenerateInsideConversationTurn: regenerateInsideConversationTurn,
+            regenerateNearestTurnPresent: regenerateNearestTurnPresent,
+            blockSameRegenerateTurnCount: blockSameRegenerateTurnCount,
+            blockOtherTurnCount: blockOtherTurnCount,
+            blockNoTurnCount: blockNoTurnCount,
+            firstContentFanoutDepth: firstContentFanoutDepth,
+            firstContentFanoutBranchCount: firstContentFanoutBranchCount,
+            maxContentBranchCount: maxContentBranchCount,
+            distinctBlockBranchCount: distinctBlockBranchCount,
+            blockBranchSequence: rawBlockBranchSequence,
+            blockBranchSequenceTruncated: blockBranchSequenceTruncated,
+            selectedRootActionCount: selectedRootActionCount,
+            actionBranchIDAtFirstFanout: actionBranchIDAtFirstFanout,
+            contentBranchesWithActionCount: contentBranchesWithActionCount,
+            contentBranchesWithoutActionCount: contentBranchesWithoutActionCount,
+            traversalCapped: traversalCapped
+        )
+    }
+
+    private static func isFixedBranchLabel(_ value: String) -> Bool {
+        if value == "unknown" { return true }
+        guard value.hasPrefix("branch_"),
+              let index = Int(value.dropFirst("branch_".count)) else {
+            return false
+        }
+        return (0..<maximumBranchCount).contains(index)
+    }
+}
+
 /// Fixed, structural metadata produced beside the real response payload. This
 /// model deliberately has no field capable of holding DOM or response text.
 struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
@@ -327,6 +441,7 @@ struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
     let alertMarkerPresent: Bool
     let liveRegionMarkerPresent: Bool
     let blockOwnership: [ChatGPTSpeechOwnershipCategory]
+    let fallbackTopology: ChatGPTFallbackTopologyDiagnostics?
 
     var diagnosticFields: [String: RuntimeDiagnosticValue] {
         var fields: [String: RuntimeDiagnosticValue] = [
@@ -348,6 +463,9 @@ struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
                 Int64(blockOwnership.filter { $0 == category }.count)
             )
         }
+        if let fallbackTopology {
+            fields.merge(fallbackTopology.diagnosticFields) { _, new in new }
+        }
         return fields
     }
 
@@ -367,6 +485,14 @@ struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
               rawOwnership.count <= maximumBlockCount else {
             return nil
         }
+        let fallbackTopology: ChatGPTFallbackTopologyDiagnostics?
+        if body["fallbackTopology"] != nil {
+            guard let parsed = ChatGPTFallbackTopologyDiagnostics.parse(body["fallbackTopology"])
+            else { return nil }
+            fallbackTopology = parsed
+        } else {
+            fallbackTopology = nil
+        }
         let blockOwnership = rawOwnership.compactMap(
             ChatGPTSpeechOwnershipCategory.init(rawValue:)
         )
@@ -380,7 +506,8 @@ struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
             statusMarkerPresent: statusMarkerPresent,
             alertMarkerPresent: alertMarkerPresent,
             liveRegionMarkerPresent: liveRegionMarkerPresent,
-            blockOwnership: blockOwnership
+            blockOwnership: blockOwnership,
+            fallbackTopology: fallbackTopology
         )
     }
 }
@@ -570,6 +697,11 @@ enum ChatGPTResponseExtraction {
             'input,textarea,[contenteditable="true"],[role="textbox"]';
           const speechStatusSelector = '[role="status"],[data-testid*="status"]';
           const speechLiveRegionSelector = '[aria-live]:not([aria-live="off"])';
+          const speechConversationTurnSelector =
+            'article[data-testid*="conversation-turn"]';
+          const speechTopologyMaximumDepth = 6;
+          const speechTopologyMaximumBranchCount = 32;
+          const speechTopologyMaximumSequenceCount = 64;
           const speechHasMarker = (root, selector) => Boolean(root
             && ((root.matches && root.matches(selector))
               || (root.querySelector && root.querySelector(selector))));
@@ -585,7 +717,10 @@ enum ChatGPTResponseExtraction {
             if (!root) return "none";
             if (root.matches && root.matches(speechAssistantSelector)) return "explicit";
             if (root.matches && root.matches('article[data-testid*="conversation-turn"]')) {
-              return "article";
+              const role = root.getAttribute('data-message-author-role')
+                || root.querySelector('[data-message-author-role]')
+                  ?.getAttribute('data-message-author-role');
+              if (role === 'assistant') return "article";
             }
             return "fallback";
           };
@@ -606,20 +741,211 @@ enum ChatGPTResponseExtraction {
             if (hasWithinRoot(speechAssistantSelector)) return "assistant_owned";
             return "unknown";
           };
-          const makeSpeechDiagnostics = (root, blocks) => ({
-            selectedPath: speechSelectedPath(root),
-            rootElement: speechRootElementCategory(root),
-            composerMarkerPresent: speechHasMarker(root, speechComposerSelector),
-            userMarkerPresent: speechHasMarker(root, speechUserSelector),
-            assistantMarkerPresent: speechHasMarker(root, speechAssistantSelector),
-            statusMarkerPresent: speechHasMarker(root, speechStatusSelector),
-            alertMarkerPresent: speechHasMarker(root, '[role="alert"]'),
-            liveRegionMarkerPresent: speechHasMarker(root, speechLiveRegionSelector),
-            blockOwnership: Array.isArray(blocks)
-              ? blocks.slice(0, 1024).map((block) =>
-                  speechOwnershipFor(block.sourceElement, root))
-              : []
-          });
+          const speechIsWithin = (element, ancestor, maximumDepth = 64) => {
+            let current = element;
+            for (let depth = 0; current && depth <= maximumDepth; depth += 1) {
+              if (current === ancestor) return true;
+              current = current.parentElement;
+            }
+            return false;
+          };
+          const speechNearestConversationTurn = (element) => {
+            let current = element;
+            for (let depth = 0; current && depth <= 64; depth += 1) {
+              if (current.matches && current.matches(speechConversationTurnSelector)) {
+                return current;
+              }
+              current = current.parentElement;
+            }
+            return null;
+          };
+          const speechConversationTurnSummary = (root) => {
+            const turns = [];
+            let visited = 0;
+            let capped = false;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let current = root;
+            while (current && visited < 512) {
+              visited += 1;
+              if (current.matches && current.matches(speechConversationTurnSelector)) {
+                turns.push(current);
+                if (turns.length > speechTopologyMaximumBranchCount) {
+                  capped = true;
+                  turns.pop();
+                  break;
+                }
+              }
+              current = walker.nextNode();
+            }
+            if (current && visited >= 512) capped = true;
+            return { turns: turns, capped: capped };
+          };
+          const speechContentBranches = (element, state) => {
+            const branches = [];
+            let child = element.firstElementChild;
+            let visitedChildren = 0;
+            while (child && visitedChildren < 64) {
+              visitedChildren += 1;
+              // Use the same bounded-content predicate as the first-fix
+              // direct-child guard so the topology is comparable to that gate.
+              if (containsResponseContent(child)) {
+                branches.push(child);
+                if (branches.length >= speechTopologyMaximumBranchCount) {
+                  if (child.nextElementSibling) state.capped = true;
+                  break;
+                }
+              }
+              child = child.nextElementSibling;
+            }
+            if (child && visitedChildren >= 64) state.capped = true;
+            return branches;
+          };
+          const speechBranchLabel = (index) =>
+            index >= 0 && index < speechTopologyMaximumBranchCount
+              ? 'branch_' + index
+              : 'unknown';
+          const speechFallbackTopology = (root, blocks) => {
+            const state = { capped: false };
+            const turnSummary = speechConversationTurnSummary(root);
+            state.capped = turnSummary.capped;
+            const actions = responseActions(root);
+            const regenerateTurn = actions.length
+              ? speechNearestConversationTurn(actions[0])
+              : null;
+            const regenerateInsideConversationTurn = Boolean(
+              regenerateTurn && speechIsWithin(regenerateTurn, root)
+            );
+            const blockTurnCounts = {
+              same: 0,
+              other: 0,
+              none: 0
+            };
+            (Array.isArray(blocks) ? blocks : []).forEach((block) => {
+              const turn = speechNearestConversationTurn(block.sourceElement);
+              if (!turn) blockTurnCounts.none += 1;
+              else if (regenerateTurn && turn === regenerateTurn) {
+                blockTurnCounts.same += 1;
+              } else {
+                blockTurnCounts.other += 1;
+              }
+            });
+
+            const queue = [{ element: root, depth: 0 }];
+            let firstFanout = null;
+            let maxContentBranchCount = 0;
+            let visitedTopologyNodes = 0;
+            for (let index = 0; index < queue.length; index += 1) {
+              if (visitedTopologyNodes >= 512) {
+                state.capped = true;
+                break;
+              }
+              const current = queue[index];
+              visitedTopologyNodes += 1;
+              const branches = speechContentBranches(current.element, state);
+              maxContentBranchCount = Math.max(
+                maxContentBranchCount,
+                branches.length
+              );
+              if (!firstFanout && branches.length > 1) {
+                firstFanout = {
+                  element: current.element,
+                  branches: branches,
+                  depth: current.depth
+                };
+              }
+              if (current.depth >= speechTopologyMaximumDepth) {
+                if (branches.length) state.capped = true;
+                continue;
+              }
+              branches.forEach((branch) => {
+                if (queue.length >= 512) {
+                  state.capped = true;
+                  return;
+                }
+                queue.push({ element: branch, depth: current.depth + 1 });
+              });
+            }
+
+            const boundedBlocks = Array.isArray(blocks) ? blocks : [];
+            const branchIndexFor = (element) => {
+              if (!firstFanout) return boundedBlocks.length ? 0 : -1;
+              return firstFanout.branches.findIndex((branch) =>
+                speechIsWithin(element, branch)
+              );
+            };
+            const blockBranchSequence = boundedBlocks
+              .slice(0, speechTopologyMaximumSequenceCount)
+              .map((block) => speechBranchLabel(branchIndexFor(block.sourceElement)));
+            const distinctBranches = new Set(blockBranchSequence);
+            const actionBranchIndex = firstFanout
+              ? firstFanout.branches.findIndex((branch) =>
+                  actions.some((action) => speechIsWithin(action, branch))
+                )
+              : -1;
+            const contentBranchesWithActionCount = firstFanout
+              ? firstFanout.branches.filter((branch) =>
+                  responseActions(branch).length > 0
+                ).length
+              : 0;
+
+            return {
+              rootConversationTurnCount: turnSummary.turns.length,
+              regenerateInsideConversationTurn: regenerateInsideConversationTurn,
+              regenerateNearestTurnPresent: Boolean(regenerateTurn),
+              blockSameRegenerateTurnCount: blockTurnCounts.same,
+              blockOtherTurnCount: blockTurnCounts.other,
+              blockNoTurnCount: blockTurnCounts.none,
+              firstContentFanoutDepth: firstFanout ? firstFanout.depth : -1,
+              firstContentFanoutBranchCount: firstFanout
+                ? firstFanout.branches.length
+                : 0,
+              maxContentBranchCount: maxContentBranchCount,
+              distinctBlockBranchCount: Math.min(
+                distinctBranches.size,
+                speechTopologyMaximumBranchCount
+              ),
+              blockBranchSequence: blockBranchSequence,
+              blockBranchSequenceTruncated:
+                boundedBlocks.length > speechTopologyMaximumSequenceCount,
+              selectedRootActionCount: Math.min(
+                actions.length,
+                speechTopologyMaximumBranchCount
+              ),
+              actionBranchIDAtFirstFanout: speechBranchLabel(actionBranchIndex),
+              contentBranchesWithActionCount: contentBranchesWithActionCount,
+              contentBranchesWithoutActionCount: firstFanout
+                ? firstFanout.branches.length - contentBranchesWithActionCount
+                : 0,
+              traversalCapped: state.capped
+            };
+          };
+          const makeSpeechDiagnostics = (root, blocks) => {
+            const diagnostics = {
+              selectedPath: speechSelectedPath(root),
+              rootElement: speechRootElementCategory(root),
+              composerMarkerPresent: speechHasMarker(root, speechComposerSelector),
+              userMarkerPresent: speechHasMarker(root, speechUserSelector),
+              assistantMarkerPresent: speechHasMarker(root, speechAssistantSelector),
+              statusMarkerPresent: speechHasMarker(root, speechStatusSelector),
+              alertMarkerPresent: speechHasMarker(root, '[role="alert"]'),
+              liveRegionMarkerPresent: speechHasMarker(root, speechLiveRegionSelector),
+              blockOwnership: Array.isArray(blocks)
+                ? blocks.slice(0, 1024).map((block) =>
+                    speechOwnershipFor(block.sourceElement, root))
+                : []
+            };
+            if (diagnostics.selectedPath === 'fallback') {
+              diagnostics.fallbackTopology = speechFallbackTopology(root, blocks);
+            }
+            return diagnostics;
+          };
+          globalThis.__floatTabsDebugSpeechTopologyForSelectorV1 = (selector) => {
+            if (typeof selector !== 'string' || selector.length > 128) return null;
+            const root = document.querySelector(selector);
+            if (!root) return null;
+            const blocks = structuredBlocks(root) || [];
+            return speechFallbackTopology(root, blocks);
+          };
         """
         let speechDiagnosticsResponseAttach =
             "message.speechDiagnostics = makeSpeechDiagnostics(root, blocks);"

@@ -118,7 +118,26 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             "statusMarkerPresent": false,
             "alertMarkerPresent": false,
             "liveRegionMarkerPresent": false,
-            "blockOwnership": ["unknown"]
+            "blockOwnership": ["unknown"],
+            "fallbackTopology": [
+                "rootConversationTurnCount": 2,
+                "regenerateInsideConversationTurn": true,
+                "regenerateNearestTurnPresent": true,
+                "blockSameRegenerateTurnCount": 1,
+                "blockOtherTurnCount": 0,
+                "blockNoTurnCount": 0,
+                "firstContentFanoutDepth": 1,
+                "firstContentFanoutBranchCount": 2,
+                "maxContentBranchCount": 2,
+                "distinctBlockBranchCount": 1,
+                "blockBranchSequence": ["branch_0"],
+                "blockBranchSequenceTruncated": false,
+                "selectedRootActionCount": 1,
+                "actionBranchIDAtFirstFanout": "branch_0",
+                "contentBranchesWithActionCount": 1,
+                "contentBranchesWithoutActionCount": 1,
+                "traversalCapped": false
+            ]
         ]
 
         let baseline = try XCTUnwrap(ChatGPTResponsePayload.parse(baseBody))
@@ -130,6 +149,10 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         )
         XCTAssertEqual(instrumented.speechDiagnostics?.selectedPath, .fallback)
         XCTAssertEqual(instrumented.speechDiagnostics?.blockOwnership, [.unknown])
+        XCTAssertEqual(
+            instrumented.speechDiagnostics?.fallbackTopology?.blockBranchSequence,
+            ["branch_0"]
+        )
 
         let fields = try XCTUnwrap(instrumented.speechDiagnostics?.diagnosticFields)
         let data = try JSONEncoder().encode(fields)
@@ -204,12 +227,56 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(helpers.contains("speechOwnershipFor"))
         XCTAssertTrue(helpers.contains("blockOwnership"))
         XCTAssertTrue(helpers.contains("speechSelectedPath"))
+        XCTAssertTrue(helpers.contains("speechFallbackTopology"))
+        XCTAssertTrue(helpers.contains("firstContentFanoutDepth"))
+        XCTAssertTrue(helpers.contains("blockBranchSequence"))
 
         let correlationID = "speech-request-12345678"
         let requestScript = ChatGPTResponseBridge.debugRequestScript(
             correlationID: correlationID
         )
         XCTAssertTrue(requestScript.contains(correlationID))
+    }
+
+    func testFallbackTopologyDiagnosticsRejectUnboundedOrContentDerivedValues() {
+        let valid: [String: Any] = [
+            "rootConversationTurnCount": 1,
+            "regenerateInsideConversationTurn": true,
+            "regenerateNearestTurnPresent": true,
+            "blockSameRegenerateTurnCount": 2,
+            "blockOtherTurnCount": 0,
+            "blockNoTurnCount": 0,
+            "firstContentFanoutDepth": 1,
+            "firstContentFanoutBranchCount": 2,
+            "maxContentBranchCount": 2,
+            "distinctBlockBranchCount": 2,
+            "blockBranchSequence": ["branch_0", "branch_1"],
+            "blockBranchSequenceTruncated": false,
+            "selectedRootActionCount": 1,
+            "actionBranchIDAtFirstFanout": "unknown",
+            "contentBranchesWithActionCount": 0,
+            "contentBranchesWithoutActionCount": 2,
+            "traversalCapped": false
+        ]
+        let parsed = ChatGPTFallbackTopologyDiagnostics.parse(valid)
+        XCTAssertEqual(parsed?.firstContentFanoutDepth, 1)
+        XCTAssertEqual(parsed?.blockBranchSequence, ["branch_0", "branch_1"])
+
+        var unbounded = valid
+        unbounded["blockBranchSequence"] = [String](
+            repeating: "branch_0",
+            count: ChatGPTFallbackTopologyDiagnostics.maximumSequenceCount + 1
+        )
+        XCTAssertNil(ChatGPTFallbackTopologyDiagnostics.parse(unbounded))
+
+        var contentDerived = valid
+        contentDerived["blockBranchSequence"] = ["PRIVATE_RESPONSE_SENTINEL"]
+        XCTAssertNil(ChatGPTFallbackTopologyDiagnostics.parse(contentDerived))
+
+        var excessiveDepth = valid
+        excessiveDepth["firstContentFanoutDepth"] =
+            ChatGPTFallbackTopologyDiagnostics.maximumDepth + 1
+        XCTAssertNil(ChatGPTFallbackTopologyDiagnostics.parse(excessiveDepth))
     }
 
     func testPayloadParsingRejectsMalformedOrContentlessResponses() {

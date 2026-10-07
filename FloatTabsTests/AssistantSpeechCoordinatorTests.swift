@@ -215,7 +215,8 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
                 statusMarkerPresent: false,
                 alertMarkerPresent: false,
                 liveRegionMarkerPresent: false,
-                blockOwnership: blocks.map { $0.1 }
+                blockOwnership: blocks.map { $0.1 },
+                fallbackTopology: nil
             )
         )
     }
@@ -331,7 +332,8 @@ final class AssistantSpeechCoordinatorTests: XCTestCase {
                 statusMarkerPresent: false,
                 alertMarkerPresent: false,
                 liveRegionMarkerPresent: false,
-                blockOwnership: []
+                blockOwnership: [],
+                fallbackTopology: nil
             )
         ))
 

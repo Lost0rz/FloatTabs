@@ -179,10 +179,134 @@ private final class ChatGPTResponsePageHarness {
             )
         }
     }
+
+    func inspectSpeechTopology(selector: String) async -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(selector),
+              let selectorJSON = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(
+                "globalThis.__floatTabsDebugSpeechTopologyForSelectorV1?.(\(selectorJSON)) ?? null",
+                in: nil,
+                in: ChatGPTResponseExtraction.contentWorld
+            ) { result in
+                switch result {
+                case let .success(value):
+                    continuation.resume(returning: value as? [String: Any])
+                case .failure:
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
 }
 
 @MainActor
 final class ChatGPTResponseExtractionTests: XCTestCase {
+    func testTopologyProbeReportsDirectChildFanoutAndActionBranchWithoutContent() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <div data-testid="topology-fixture-root">
+          <p>QA_PRIVATE_SENTINEL_DIRECT_A
+            <button aria-label="Regenerate response">Regenerate</button>
+          </p>
+          <p>QA_PRIVATE_SENTINEL_DIRECT_B</p>
+        </div>
+        """)
+        await page.settle()
+
+        let topologyValue = await page.inspectSpeechTopology(
+            selector: "[data-testid=topology-fixture-root]"
+        )
+        let topology = try XCTUnwrap(topologyValue)
+        XCTAssertEqual(topology["firstContentFanoutDepth"] as? Int, 0)
+        XCTAssertEqual(topology["firstContentFanoutBranchCount"] as? Int, 2)
+        XCTAssertEqual(topology["maxContentBranchCount"] as? Int, 2)
+        XCTAssertEqual(topology["distinctBlockBranchCount"] as? Int, 2)
+        XCTAssertEqual(topology["blockBranchSequence"] as? [String], ["branch_0", "branch_1"])
+        XCTAssertEqual(topology["actionBranchIDAtFirstFanout"] as? String, "branch_0")
+        XCTAssertEqual(topology["contentBranchesWithActionCount"] as? Int, 1)
+        XCTAssertEqual(topology["contentBranchesWithoutActionCount"] as? Int, 1)
+
+        let serialized = try XCTUnwrap(
+            String(
+                data: JSONSerialization.data(withJSONObject: topology, options: [.sortedKeys]),
+                encoding: .utf8
+            )
+        )
+        XCTAssertFalse(serialized.contains("QA_PRIVATE_SENTINEL_DIRECT_A"))
+        XCTAssertFalse(serialized.contains("QA_PRIVATE_SENTINEL_DIRECT_B"))
+    }
+
+    func testTopologyProbeFindsNestedFanoutAndGenericTurnMembership() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <article data-testid="conversation-turn">
+          <div>
+            <p>QA_PRIVATE_SENTINEL_NESTED_A</p>
+            <div><p>QA_PRIVATE_SENTINEL_NESTED_B</p></div>
+          </div>
+          <div role="toolbar">
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </article>
+        """)
+        await page.settle()
+
+        let payloadValue = await page.extract()
+        let payload = try XCTUnwrap(payloadValue)
+        let diagnostics = try XCTUnwrap(payload.speechDiagnostics)
+        let topology = try XCTUnwrap(diagnostics.fallbackTopology)
+        XCTAssertEqual(diagnostics.selectedPath, .fallback)
+        XCTAssertEqual(topology.rootConversationTurnCount, 1)
+        XCTAssertTrue(topology.regenerateInsideConversationTurn)
+        XCTAssertTrue(topology.regenerateNearestTurnPresent)
+        XCTAssertEqual(topology.blockSameRegenerateTurnCount, 2)
+        XCTAssertEqual(topology.blockOtherTurnCount, 0)
+        XCTAssertEqual(topology.blockNoTurnCount, 0)
+        XCTAssertEqual(topology.firstContentFanoutDepth, 1)
+        XCTAssertEqual(topology.firstContentFanoutBranchCount, 2)
+        XCTAssertEqual(topology.maxContentBranchCount, 2)
+        XCTAssertEqual(topology.blockBranchSequence, ["branch_0", "branch_1"])
+        XCTAssertEqual(topology.actionBranchIDAtFirstFanout, "unknown")
+        XCTAssertEqual(topology.contentBranchesWithActionCount, 0)
+        XCTAssertEqual(topology.contentBranchesWithoutActionCount, 2)
+
+        let serialized = try XCTUnwrap(
+            String(
+                data: JSONEncoder().encode(diagnostics.diagnosticFields),
+                encoding: .utf8
+            )
+        )
+        XCTAssertFalse(serialized.contains("QA_PRIVATE_SENTINEL_NESTED_A"))
+        XCTAssertFalse(serialized.contains("QA_PRIVATE_SENTINEL_NESTED_B"))
+    }
+
+    func testTopologyProbeKeepsSingleResponseInOneBranch() async throws {
+        let page = ChatGPTResponsePageHarness()
+        page.load("""
+        <article data-testid="conversation-turn">
+          <div><p>QA_PRIVATE_SENTINEL_SINGLE_RESPONSE</p></div>
+          <div role="toolbar">
+            <button aria-label="Regenerate response">Regenerate</button>
+          </div>
+        </article>
+        """)
+        await page.settle()
+
+        let payloadValue = await page.extract()
+        let payload = try XCTUnwrap(payloadValue)
+        let diagnostics = try XCTUnwrap(payload.speechDiagnostics)
+        let topology = try XCTUnwrap(diagnostics.fallbackTopology)
+        XCTAssertEqual(payload.blocks.map(\.text), ["QA_PRIVATE_SENTINEL_SINGLE_RESPONSE"])
+        XCTAssertEqual(topology.firstContentFanoutDepth, -1)
+        XCTAssertEqual(topology.firstContentFanoutBranchCount, 0)
+        XCTAssertEqual(topology.maxContentBranchCount, 1)
+        XCTAssertEqual(topology.distinctBlockBranchCount, 1)
+        XCTAssertEqual(topology.blockBranchSequence, ["branch_0"])
+    }
+
     func testTrustedPointerClassifierUsesAssistantStructureNotControlLabels() async {
         let page = ChatGPTResponsePageHarness()
         page.load("""
