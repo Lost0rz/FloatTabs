@@ -2,7 +2,7 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `WAITING_FOR_USER_SPEECH_REPRODUCTION`
+**Status:** `ACTIVE — READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE`
 **Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
@@ -258,8 +258,28 @@ Do not manufacture a ChatGPT response. The user performs the next action.
 
 ## Gate 3 — User-triggered reproduction
 
-The user will normally use the installed FloatTabs QA and perform the simple natural
-reproduction:
+The user reports one fresh reproduction on the installed QA source
+`8e8d6717f698e8c93e80faad7430217c167357e2` at `/Applications/FloatTabs.app`:
+
+```text
+GATE_3_FRESH_REPRODUCTION=PASS
+USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
+SYMPTOM_CONFIRMED=YES
+ROOT_CAUSE_CONFIRMED=NO
+```
+
+This confirms the symptom as a user observation. It does not establish the causal
+boundary without the existing request-correlated QA trace. Do not ask the user to
+repeat `Read Latest Response`.
+
+### Authorized next step
+
+`READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE` only: find and inspect the existing
+diagnostics for this same user-triggered request. Do not trigger speech, send a
+ChatGPT message, reload/reset, add probes or diagnostics, write a RED test, change
+production behavior, rebuild, reinstall, or clear user/WebKit data.
+
+The originally authorized natural reproduction was:
 
 1. open/select a ChatGPT conversation with a normal latest assistant response;
 2. trigger `Read Latest Response` once;

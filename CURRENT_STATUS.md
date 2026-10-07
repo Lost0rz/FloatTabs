@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: WAITING_FOR_USER_SPEECH_REPRODUCTION**
+**STATUS: ACTIVE — READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -197,6 +197,26 @@ normal startup write; it does not claim byte-for-byte immutability of that file.
 PR #102 remains OPEN/DRAFT at
 `db6e886b33dffd93ece130463b184ae371b97684`, unchanged.
 
+### Gate 3 — Fresh user reproduction
+
+```text
+GATE_3_FRESH_REPRODUCTION=PASS
+QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
+USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
+SYMPTOM_CONFIRMED=YES
+ROOT_CAUSE_CONFIRMED=NO
+```
+
+The user reports one fresh reproduction on the installed `/Applications/FloatTabs.app`:
+it spoke the user's question, then the latest ChatGPT response. This confirms the
+reported symptom as a user observation; the causal boundary is not yet established
+by the QA trace.
+
+**Authorized next step:** `READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE` only. Read the
+existing correlated diagnostics from this reproduction. Do not trigger speech,
+send a ChatGPT message, reload/reset, add probes or diagnostics, write a RED test,
+change production behavior, rebuild, reinstall, or clear user/WebKit data.
+
 ## Separate work
 
 PR #102 remains separate MemoX durable-outbox work, OPEN/DRAFT at the previously
@@ -205,11 +225,10 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-Speech QA is installed at `/Applications/FloatTabs.app` and verified. Wait for the
-user to open/select a normal ChatGPT conversation and trigger `Read Latest Response`
-once. Do not send a ChatGPT message, trigger speech on the user's behalf, enter
-formal RED, or implement a production fix before reviewing that user-triggered
-evidence and updating task authority.
+The user has completed one fresh reproduction on the installed QA. Read only the
+existing diagnostics for that same request and classify the evidence. Do not ask
+the user to repeat the action. Stop after the read-only root-cause evidence review;
+formal RED and production changes require a later explicit task-state update.
 
 The implementation PR must not be merged until the task reaches
 `WAITING_FOR_INDEPENDENT_WEB_AUDIT` with exact-head required CI passing.
