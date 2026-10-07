@@ -191,13 +191,18 @@ that base absent authorized reconciliation.
 
 ### Probe test checkpoint
 
-- Probe source/test commit: `3e3f4a8c755225ab5825b2aef20965b5fbe2d88e`.
-- Focused arm64 Debug `ChatGPTAttentionBridgeTests`: PASS, 78/78, 0 failures.
+- Probe implementation commit: `93891215fd150f841c58ad521235e39b7b9340e7`.
+- Focused arm64 Debug checks: PASS, 79/79, 0 failures (78 bridge tests plus one
+  snapshot capture-wiring/privacy test).
 - Probe-only coverage: explicit, article (isolated-world selector test seam),
   fallback, none, strict structural schema, boolean marker types, and diagnostic
-  privacy-sanitizer acceptance.
-- No formal Gate 2 RED test has run. Next: build a separate exact-head arm64 Debug
-  QA artifact and verify its provenance before touching the running QA process.
+  privacy-sanitizer acceptance. The Debug QA button records only the dedicated
+  structural ownership event; it does not invoke the broader stuck-tab snapshot.
+- The previously built app at source `c23c8998…` was not launched and is stale
+  after the capture-route change. No live app has been stopped or reloaded for
+  this task. No formal Gate 2 RED test has run. Next: build a separate exact-head
+  arm64 Debug QA artifact from the current remote-synced HEAD and verify its
+  provenance before touching the running QA process.
 
 ## Gate 2 — TDD RED
 

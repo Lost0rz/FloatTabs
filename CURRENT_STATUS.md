@@ -168,12 +168,15 @@ speculative fixes, or replacing `/Applications/FloatTabs.app`.
 
 The implementation freshness gate is `HEAD == origin/fix/chatgpt-speech-response-ownership`; `origin/main` must remain the accepted base SHA above and the merge-base must match it. PR #102 remains excluded and must not change.
 
-**PROBE_CODE_COMMIT:** `3e3f4a8c755225ab5825b2aef20965b5fbe2d88e`.
-**PROBE_TESTS:** PASS — 78/78 `ChatGPTAttentionBridgeTests`, arm64 Debug; four
-temporary probe-focused cases cover explicit/article/fallback/none and the closed
-privacy-safe schema. No formal Gate 2 RED test has run.
-**CURRENT_PHASE:** Build exact-head temporary arm64 Debug QA app, then perform the
-single authorized live snapshot session.
+**PROBE_CODE_COMMIT:** `93891215fd150f841c58ad521235e39b7b9340e7`.
+**PROBE_TESTS:** PASS — 79/79 arm64 Debug: 78 `ChatGPTAttentionBridgeTests`
+plus one capture-wiring/privacy test. Probe coverage includes explicit/article/
+fallback/none and the closed structural schema. No formal Gate 2 RED test has run.
+The QA capture button now records only the dedicated structural ownership event.
+An earlier app build from `c23c8998…` was not launched and is stale after this
+capture-route change. **CURRENT_PHASE:** Rebuild exact-head temporary arm64 Debug
+QA app from the current remote-synced HEAD, then perform the single authorized live
+snapshot session.
 
 ### Authorized scope
 
