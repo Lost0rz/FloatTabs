@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
+**STATUS: WAITING_FOR_WEB_ROOT_CAUSE_REVIEW**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -119,7 +119,7 @@ ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
 CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
 EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
 EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
-ROOT_CAUSE_CONFIRMED=NO for the latest user reproduction pending its trace review
+ROOT_CAUSE_CONFIRMED=NO for the latest user reproduction; no matching new trace exists
 PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
 ```
@@ -147,6 +147,31 @@ do not conflate their traces. The user action is complete; do not trigger anothe
 read or request another reproduction. Current authorization is read-only review of
 existing Speech QA logs for this reported run. No new probe/diagnostics, RED,
 production fix, build/install, message, reload/reset, or user/WebKit data cleanup.
+
+### Read-only log review for the latest report
+
+The existing logs contain one `app.launch` for QA source
+`8e8d6717f698e8c93e80faad7430217c167357e2` (session
+`BE4E0FFC-743E-4E0A-BA5F-D2383D7128AC`, `2026-10-07T02:39:48Z`) and its previously
+recorded manual-read trace `9296134E-59C9-4591-A991-2E9143430AB9` / correlation
+`B304B982-F43B-49CC-8ACB-B04C6E77F9A8` at `2026-10-07T02:55:02Z`. That older trace
+has four ordered events and no `submission_summary`; it is already recorded under
+the prior Gate 4 evidence. The only later Speech QA trace in the existing logs is
+from source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b` at `04:06:56Z`. No new
+source-8e8d6717 trace/session is present to bind to the latest user report. Do not
+reuse either older trace as evidence for this new reproduction or combine runs.
+
+```text
+LATEST_REPORTED_REPRODUCTION_TRACE_AVAILABLE=NO
+ROOT_CAUSE_CONFIRMED=NO
+NEXT_SCOPE=WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
+PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
+MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+NEW_SPEECH_TRIGGERED=NO
+PRODUCT_CODE_CHANGED=NO
+TEST_CODE_CHANGED=NO
+FINAL_STATE=WAITING_FOR_WEB_ROOT_CAUSE_REVIEW
+```
 
 ### Accepted prior Gate 1 evidence
 
@@ -400,9 +425,9 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-The latest existing post-fix manual-read trace was read and classified as fallback;
-its `unknown` ownership records do not prove which block contained user content.
-Stop at `WAITING_FOR_WEB_FAILED_FIX_REVIEW`; no new fix, RED, diagnostics, build,
+The latest user report has no distinct matching existing trace. Do not reuse older
+8e8d6717 or 9c3337ed evidence as the new run. Stop at
+`WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`; no new fix, RED, diagnostics, build,
 installation, implementation PR, merge, or full suite is authorized.
 
 ## Historical evidence
