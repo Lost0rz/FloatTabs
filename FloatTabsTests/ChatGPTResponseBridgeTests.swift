@@ -89,6 +89,129 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         )
     }
 
+    func testSpeechQADiagnosticsAreFixedBoundedAndDoNotChangePayloadOrUtterances() throws {
+        let sentinel = "PRIVATE_RESPONSE_SENTINEL"
+        let baseBody: [String: Any] = [
+            "version": ChatGPTResponsePayload.currentVersion,
+            "kind": "response",
+            "requestID": "request-12345678",
+            "documentToken": "document-12345678",
+            "responseID": "document-12345678:response-1",
+            "blocks": [[
+                "kind": "paragraph",
+                "text": "\(sentinel).",
+                "level": NSNull(),
+                "sourceLocator": [
+                    "documentToken": "document-12345678",
+                    "responseID": "document-12345678:response-1",
+                    "blockID": "document-12345678:response-1:block-0"
+                ]
+            ]]
+        ]
+        var qaBody = baseBody
+        qaBody["speechDiagnostics"] = [
+            "selectedPath": "fallback",
+            "rootElement": "div",
+            "composerMarkerPresent": true,
+            "userMarkerPresent": false,
+            "assistantMarkerPresent": false,
+            "statusMarkerPresent": false,
+            "alertMarkerPresent": false,
+            "liveRegionMarkerPresent": false,
+            "blockOwnership": ["unknown"]
+        ]
+
+        let baseline = try XCTUnwrap(ChatGPTResponsePayload.parse(baseBody))
+        let instrumented = try XCTUnwrap(ChatGPTResponsePayload.parse(qaBody))
+        XCTAssertEqual(instrumented.blocks, baseline.blocks)
+        XCTAssertEqual(
+            SpeechLanguageRouter.utteranceRequests(for: instrumented.blocks),
+            SpeechLanguageRouter.utteranceRequests(for: baseline.blocks)
+        )
+        XCTAssertEqual(instrumented.speechDiagnostics?.selectedPath, .fallback)
+        XCTAssertEqual(instrumented.speechDiagnostics?.blockOwnership, [.unknown])
+
+        let fields = try XCTUnwrap(instrumented.speechDiagnostics?.diagnosticFields)
+        let data = try JSONEncoder().encode(fields)
+        let serializedFields = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(serializedFields.contains(sentinel))
+        for forbidden in [
+            "textContent", "innerText", "innerHTML", "messageID", "URL",
+            "cookie", "token", "className", "classList"
+        ] {
+            XCTAssertFalse(serializedFields.localizedCaseInsensitiveContains(forbidden))
+        }
+        XCTAssertFalse(fields.keys.contains { $0.localizedCaseInsensitiveContains("text") })
+    }
+
+    func testSpeechQADiagnosticsAcceptOnlyFixedPathAndOwnershipEnums() {
+        for path in ChatGPTResponseExtractionPath.allCases {
+            for ownership in ChatGPTSpeechOwnershipCategory.allCases {
+                let parsed = ChatGPTSpeechExtractionDiagnostics.parse([
+                    "selectedPath": path.rawValue,
+                    "rootElement": "other",
+                    "composerMarkerPresent": false,
+                    "userMarkerPresent": false,
+                    "assistantMarkerPresent": false,
+                    "statusMarkerPresent": false,
+                    "alertMarkerPresent": false,
+                    "liveRegionMarkerPresent": false,
+                    "blockOwnership": [ownership.rawValue]
+                ])
+                XCTAssertEqual(parsed?.selectedPath, path)
+                XCTAssertEqual(parsed?.blockOwnership, [ownership])
+            }
+        }
+
+        let oversized = [String](repeating: "unknown", count: 1025)
+        XCTAssertNil(ChatGPTSpeechExtractionDiagnostics.parse([
+            "selectedPath": "explicit",
+            "rootElement": "div",
+            "composerMarkerPresent": false,
+            "userMarkerPresent": false,
+            "assistantMarkerPresent": true,
+            "statusMarkerPresent": false,
+            "alertMarkerPresent": false,
+            "liveRegionMarkerPresent": false,
+            "blockOwnership": oversized
+        ]))
+        XCTAssertNil(ChatGPTSpeechExtractionDiagnostics.parse([
+            "selectedPath": "explicit",
+            "rootElement": "div",
+            "composerMarkerPresent": false,
+            "userMarkerPresent": false,
+            "assistantMarkerPresent": true,
+            "statusMarkerPresent": false,
+            "alertMarkerPresent": false,
+            "liveRegionMarkerPresent": false,
+            "blockOwnership": ["raw-content"]
+        ]))
+    }
+
+    func testSpeechQADiagnosticScriptUsesOnlyStructuralMetadata() throws {
+        let source = ChatGPTResponseExtraction.scriptSource
+        let start = try XCTUnwrap(source.range(of: "const speechAssistantSelector"))
+        let end = try XCTUnwrap(source.range(
+            of: "const safeStableID",
+            range: start.upperBound..<source.endIndex
+        ))
+        let helpers = String(source[start.lowerBound..<end.lowerBound])
+        for forbidden in [
+            "textContent", "innerText", "innerHTML", "className", "classList", "href"
+        ] {
+            XCTAssertFalse(helpers.localizedCaseInsensitiveContains(forbidden))
+        }
+        XCTAssertTrue(helpers.contains("speechOwnershipFor"))
+        XCTAssertTrue(helpers.contains("blockOwnership"))
+        XCTAssertTrue(helpers.contains("speechSelectedPath"))
+
+        let correlationID = "speech-request-12345678"
+        let requestScript = ChatGPTResponseBridge.debugRequestScript(
+            correlationID: correlationID
+        )
+        XCTAssertTrue(requestScript.contains(correlationID))
+    }
+
     func testPayloadParsingRejectsMalformedOrContentlessResponses() {
         XCTAssertNil(ChatGPTResponsePayload.parse([:]))
         XCTAssertNil(ChatGPTResponsePayload.parse([

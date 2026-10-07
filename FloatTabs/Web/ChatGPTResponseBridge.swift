@@ -4,6 +4,24 @@ import WebKit
 @MainActor
 protocol ChatGPTResponseExtracting: AnyObject {
     func extractLatest(completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void)
+#if DEBUG
+    func extractLatest(
+        correlationID: String,
+        completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void
+    )
+#endif
+}
+
+extension ChatGPTResponseExtracting {
+#if DEBUG
+    func extractLatest(
+        correlationID: String,
+        completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void
+    ) {
+        _ = correlationID
+        extractLatest(completion: completion)
+    }
+#endif
 }
 
 @MainActor
@@ -129,12 +147,32 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     /// Requests one extraction from the currently attached document. The
     /// result is delivered through the independent script-message channel.
     func extractLatest(completion: @escaping ResultHandler) {
+        beginExtraction(requestID: UUID().uuidString, completion: completion)
+    }
+
+    /// The Speech QA path supplies its read-request UUID so the JavaScript
+    /// payload and native utterance submissions share one opaque correlation.
+#if DEBUG
+    func extractLatest(
+        correlationID: String,
+        completion: @escaping ResultHandler
+    ) {
+        guard ChatGPTResponsePayload.isOpaqueIdentifier(correlationID) else {
+            completion(nil)
+            return
+        }
+        beginExtraction(requestID: correlationID, completion: completion)
+    }
+#endif
+
+    private func beginExtraction(
+        requestID: String,
+        completion: @escaping ResultHandler
+    ) {
         guard !isInvalidated, let webView else {
             completion(nil)
             return
         }
-
-        let requestID = UUID().uuidString
         pendingRequests[requestID] = PendingRequest(
             webViewIdentity: ObjectIdentifier(webView),
             completion: completion
@@ -296,11 +334,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             pending.completion(nil)
             return true
         }
-        pending.completion(
-            payload.kind == .response
-                ? payload.assigning(slotID: slotID)
-                : nil
-        )
+        pending.completion(payloadForDelivery(payload))
         return true
     }
 
@@ -477,9 +511,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             pending.completion(nil)
             return
         }
-        pending.completion(
-            payload.kind == .response ? payload.assigning(slotID: slotID) : nil
-        )
+        pending.completion(payloadForDelivery(payload))
     }
 
     @discardableResult
@@ -489,6 +521,19 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
         currentDocumentToken = documentToken
         return true
+    }
+
+    private func payloadForDelivery(
+        _ payload: ChatGPTResponsePayload
+    ) -> ChatGPTResponsePayload? {
+        guard payload.kind == .response else {
+#if DEBUG
+            return payload.speechDiagnostics == nil ? nil : payload
+#else
+            return nil
+#endif
+        }
+        return payload.assigning(slotID: slotID)
     }
 
     private func finishPendingRequests() {
@@ -507,6 +552,12 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
         return "globalThis.__floatTabsChatGPTResponseRequestLatestV3?.(\(encoded)) === true"
     }
+
+#if DEBUG
+    static func debugRequestScript(correlationID: String) -> String {
+        requestScript(requestID: correlationID)
+    }
+#endif
 
     private static let snapshotLatestResponseStatusScript =
         "globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1?.()"

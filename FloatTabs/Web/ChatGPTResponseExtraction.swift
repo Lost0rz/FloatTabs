@@ -254,6 +254,101 @@ enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
     case assistantPointer
 }
 
+enum ChatGPTResponseExtractionPath: String, CaseIterable, Equatable, Sendable {
+    case explicit
+    case article
+    case fallback
+    case none
+}
+
+enum ChatGPTSpeechOwnershipCategory: String, CaseIterable, Equatable, Sendable {
+    case assistantOwned = "assistant_owned"
+    case userOwned = "user_owned"
+    case composer
+    case statusLive = "status_live"
+    case unknown
+}
+
+enum ChatGPTResponseRootElementCategory: String, Equatable, Sendable {
+    case article
+    case div
+    case section
+    case other
+    case none
+}
+
+/// Fixed, structural metadata produced beside the real response payload. This
+/// model deliberately has no field capable of holding DOM or response text.
+struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
+    static let maximumBlockCount = 1024
+
+    let selectedPath: ChatGPTResponseExtractionPath
+    let rootElement: ChatGPTResponseRootElementCategory
+    let composerMarkerPresent: Bool
+    let userMarkerPresent: Bool
+    let assistantMarkerPresent: Bool
+    let statusMarkerPresent: Bool
+    let alertMarkerPresent: Bool
+    let liveRegionMarkerPresent: Bool
+    let blockOwnership: [ChatGPTSpeechOwnershipCategory]
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "selected_path": .string(selectedPath.rawValue),
+            "root_element": .string(rootElement.rawValue),
+            "composer_marker_present": .bool(composerMarkerPresent),
+            "user_marker_present": .bool(userMarkerPresent),
+            "assistant_marker_present": .bool(assistantMarkerPresent),
+            "status_marker_present": .bool(statusMarkerPresent),
+            "alert_marker_present": .bool(alertMarkerPresent),
+            "live_region_marker_present": .bool(liveRegionMarkerPresent),
+            "block_count": .integer(Int64(blockOwnership.count)),
+            "block_ownership_sequence": .string(
+                blockOwnership.map(\.rawValue).joined(separator: ",")
+            )
+        ]
+        for category in ChatGPTSpeechOwnershipCategory.allCases {
+            fields["block_\(category.rawValue)_count"] = .integer(
+                Int64(blockOwnership.filter { $0 == category }.count)
+            )
+        }
+        return fields
+    }
+
+    static func parse(_ value: Any?) -> ChatGPTSpeechExtractionDiagnostics? {
+        guard let body = value as? [String: Any],
+              let rawPath = body["selectedPath"] as? String,
+              let selectedPath = ChatGPTResponseExtractionPath(rawValue: rawPath),
+              let rawRoot = body["rootElement"] as? String,
+              let rootElement = ChatGPTResponseRootElementCategory(rawValue: rawRoot),
+              let composerMarkerPresent = body["composerMarkerPresent"] as? Bool,
+              let userMarkerPresent = body["userMarkerPresent"] as? Bool,
+              let assistantMarkerPresent = body["assistantMarkerPresent"] as? Bool,
+              let statusMarkerPresent = body["statusMarkerPresent"] as? Bool,
+              let alertMarkerPresent = body["alertMarkerPresent"] as? Bool,
+              let liveRegionMarkerPresent = body["liveRegionMarkerPresent"] as? Bool,
+              let rawOwnership = body["blockOwnership"] as? [String],
+              rawOwnership.count <= maximumBlockCount else {
+            return nil
+        }
+        let blockOwnership = rawOwnership.compactMap(
+            ChatGPTSpeechOwnershipCategory.init(rawValue:)
+        )
+        guard blockOwnership.count == rawOwnership.count else { return nil }
+        return ChatGPTSpeechExtractionDiagnostics(
+            selectedPath: selectedPath,
+            rootElement: rootElement,
+            composerMarkerPresent: composerMarkerPresent,
+            userMarkerPresent: userMarkerPresent,
+            assistantMarkerPresent: assistantMarkerPresent,
+            statusMarkerPresent: statusMarkerPresent,
+            alertMarkerPresent: alertMarkerPresent,
+            liveRegionMarkerPresent: liveRegionMarkerPresent,
+            blockOwnership: blockOwnership
+        )
+    }
+}
+
 struct ChatGPTResponsePayload: Equatable, Sendable {
     static let currentVersion = 3
     static let responseKind = ChatGPTResponseMessageKind.response.rawValue
@@ -265,6 +360,25 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
     let documentToken: String
     let responseID: String?
     let blocks: [SpeechContentBlock]
+    let speechDiagnostics: ChatGPTSpeechExtractionDiagnostics?
+
+    init(
+        version: Int,
+        kind: ChatGPTResponseMessageKind,
+        requestID: String,
+        documentToken: String,
+        responseID: String?,
+        blocks: [SpeechContentBlock],
+        speechDiagnostics: ChatGPTSpeechExtractionDiagnostics? = nil
+    ) {
+        self.version = version
+        self.kind = kind
+        self.requestID = requestID
+        self.documentToken = documentToken
+        self.responseID = responseID
+        self.blocks = blocks
+        self.speechDiagnostics = speechDiagnostics
+    }
 
     static func parse(_ body: [String: Any]) -> ChatGPTResponsePayload? {
         guard let version = body["version"] as? Int,
@@ -310,7 +424,8 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
             requestID: requestID,
             documentToken: documentToken,
             responseID: responseID,
-            blocks: blocks
+            blocks: blocks,
+            speechDiagnostics: parseSpeechDiagnostics(body)
         )
     }
 
@@ -329,8 +444,20 @@ struct ChatGPTResponsePayload: Equatable, Sendable {
                     level: block.level,
                     sourceLocator: locator.assigning(slotID: slotID)
                 )
-            }
+            },
+            speechDiagnostics: speechDiagnostics
         )
+    }
+
+    private static func parseSpeechDiagnostics(
+        _ body: [String: Any]
+    ) -> ChatGPTSpeechExtractionDiagnostics? {
+#if DEBUG
+        return ChatGPTSpeechExtractionDiagnostics.parse(body["speechDiagnostics"])
+#else
+        _ = body
+        return nil
+#endif
     }
 
     private static func parseBlock(
@@ -397,6 +524,76 @@ enum ChatGPTResponseExtraction {
 #else
         let debugAssistantPointerClassifier = ""
 #endif
+#if DEBUG
+        let speechDiagnosticsHelpers = """
+          const speechAssistantSelector =
+            '[data-message-author-role="assistant"],[data-message-role="assistant"]';
+          const speechUserSelector =
+            '[data-message-author-role="user"],[data-message-role="user"]';
+          const speechComposerSelector =
+            'input,textarea,[contenteditable="true"],[role="textbox"]';
+          const speechStatusSelector = '[role="status"],[data-testid*="status"]';
+          const speechLiveRegionSelector = '[aria-live]:not([aria-live="off"])';
+          const speechHasMarker = (root, selector) => Boolean(root
+            && ((root.matches && root.matches(selector))
+              || (root.querySelector && root.querySelector(selector))));
+          const speechRootElementCategory = (root) => {
+            if (!root) return "none";
+            const tag = (root.tagName || "").toLowerCase();
+            if (tag === "article") return "article";
+            if (tag === "div") return "div";
+            if (tag === "section") return "section";
+            return "other";
+          };
+          const speechSelectedPath = (root) => {
+            if (!root) return "none";
+            if (root.matches && root.matches(speechAssistantSelector)) return "explicit";
+            if (root.matches && root.matches('article[data-testid*="conversation-turn"]')) {
+              return "article";
+            }
+            return "fallback";
+          };
+          const speechOwnershipFor = (source, root) => {
+            const hasWithinRoot = (selector) => {
+              let element = source;
+              while (element) {
+                if (element.matches && element.matches(selector)) return true;
+                if (element === root) break;
+                element = element.parentElement;
+              }
+              return false;
+            };
+            if (hasWithinRoot(speechUserSelector)) return "user_owned";
+            if (hasWithinRoot(speechComposerSelector)) return "composer";
+            if (hasWithinRoot(speechStatusSelector)
+                || hasWithinRoot(speechLiveRegionSelector)) return "status_live";
+            if (hasWithinRoot(speechAssistantSelector)) return "assistant_owned";
+            return "unknown";
+          };
+          const makeSpeechDiagnostics = (root, blocks) => ({
+            selectedPath: speechSelectedPath(root),
+            rootElement: speechRootElementCategory(root),
+            composerMarkerPresent: speechHasMarker(root, speechComposerSelector),
+            userMarkerPresent: speechHasMarker(root, speechUserSelector),
+            assistantMarkerPresent: speechHasMarker(root, speechAssistantSelector),
+            statusMarkerPresent: speechHasMarker(root, speechStatusSelector),
+            alertMarkerPresent: speechHasMarker(root, '[role="alert"]'),
+            liveRegionMarkerPresent: speechHasMarker(root, speechLiveRegionSelector),
+            blockOwnership: Array.isArray(blocks)
+              ? blocks.slice(0, 1024).map((block) =>
+                  speechOwnershipFor(block.sourceElement, root))
+              : []
+          });
+        """
+        let speechDiagnosticsResponseAttach =
+            "message.speechDiagnostics = makeSpeechDiagnostics(root, blocks);"
+        let speechDiagnosticsEmptyAttach =
+            "message.speechDiagnostics = makeSpeechDiagnostics(root, blocks);"
+#else
+        let speechDiagnosticsHelpers = ""
+        let speechDiagnosticsResponseAttach = ""
+        let speechDiagnosticsEmptyAttach = ""
+#endif
         return """
         (() => {
           "use strict";
@@ -453,6 +650,8 @@ enum ChatGPTResponseExtraction {
           };
 
           \(ChatGPTResponseIdentity.sharedDOMHelperSource)
+
+          \(speechDiagnosticsHelpers)
 
           const safeStableID = (value) => {
             if (!value || value.length > 160) return null;
@@ -977,15 +1176,17 @@ enum ChatGPTResponseExtraction {
             return boundedFallback;
           };
 
-          const postEmpty = (target, requestID) => {
-            target.postMessage({
+          const postEmpty = (target, requestID, root = null, blocks = []) => {
+            const message = {
               version: 3,
               kind: "empty",
               requestID: requestID,
               documentToken: documentToken,
               responseID: null,
               blocks: []
-            });
+            };
+            \(speechDiagnosticsEmptyAttach)
+            target.postMessage(message);
           };
 
           const postManualScroll = () => {
@@ -1129,7 +1330,7 @@ enum ChatGPTResponseExtraction {
             if (!target || typeof requestID !== 'string') return false;
             const root = latestAssistantResponseRoot();
             if (!root) {
-              postEmpty(target, requestID);
+              postEmpty(target, requestID, null, []);
               return true;
             }
             const blocks = structuredBlocks(root);
@@ -1137,7 +1338,7 @@ enum ChatGPTResponseExtraction {
               // Overflow is intentionally represented as the existing empty
               // bridge result. Swift maps it to nil, so no partial response,
               // speech queue item, or new locator set can be created.
-              postEmpty(target, requestID);
+              postEmpty(target, requestID, root, blocks || []);
               return true;
             }
             const responseID = responseIDFor(root);
@@ -1174,14 +1375,16 @@ enum ChatGPTResponseExtraction {
               oldestBlockIDs?.forEach((blockID) => locatorRegistry.delete(blockID));
               responseLocatorKeys.delete(oldestResponseID);
             }
-            target.postMessage({
+            const message = {
               version: 3,
               kind: "response",
               requestID: requestID,
               documentToken: documentToken,
               responseID: responseID,
               blocks: wireBlocks
-            });
+            };
+            \(speechDiagnosticsResponseAttach)
+            target.postMessage(message);
             return true;
           };
 
