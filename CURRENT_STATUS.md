@@ -10,71 +10,67 @@
 
 ## Mode
 
-**MODE: QA_ACCEPTANCE_FAILED — WARM_PREMATURE_RELEASE_ATTRIBUTION**
+**MODE: ROOT_CAUSE_CONFIRMED — WARM_MEMORY_WARNING_CORRECTIVE_AUTHORIZED**
 
 ## Production authority
 
 - Live accepted `main`: `569e43783a98c8caca681ce8139ec87dd4fa276e`
 - Active branch: `fix/residency-lifecycle-semantics`
-- PR: `#116` (Draft; merge blocked)
+- PR: `#116` (Draft; merge blocked until corrective QA passes)
 - Task: `FT-LIFECYCLE-001`
-- Product implementation commit: `9acd6303` (`Fix residency lifecycle semantics`)
-- Independently audited implementation handoff: `94aa9bf1633ccff427d49db09e42e540b65b760e`
+- First product implementation: `9acd6303` (`Fix residency lifecycle semantics`)
 - QA-installed source head: `733f73fad9a955db42401abaececf9c7aeb783dc`
-- QA app: `0.5.2 (20)`, arm64
+- Root-cause attribution control head: `ff2cef575f6f7818e230b7568da319ebc40eb7f1`
 - PR #102 remains unrelated MemoX Draft work and is excluded from this task
 
 ## Accepted implementation facts
 
-The first lifecycle corrective remains code-audited as implemented:
+The first lifecycle corrective remains valid in two respects:
 
 1. ordinary two-Warm LRU eviction was removed from the normal inactive path;
-2. inactive Hot WebContent recovery is residency-aware and uses the existing recovery request path;
-3. no second residency authority was introduced;
-4. no unread/speech/Cold product behavior was intentionally changed.
+2. inactive Hot WebContent recovery is residency-aware and uses the existing recovery request path without selecting/presenting/focusing the Hot Tab.
 
-These facts are not sufficient for merge because human Warm acceptance failed.
+Unread/red-dot behavior remains outside this PR.
 
-## Human QA failure
+## Human QA failure and confirmed root cause
 
-On the QA build from `733f73f...`, the user configured four Tabs as Warm with Warm retention selected as 30 minutes. After some ordinary use, one Warm Tab's icon became gray and clicking it recreated/reloaded the runtime.
+Human QA used four Warm Tabs with Warm retention set to 30 minutes. One Warm runtime became nonresident and reloaded on selection.
 
-The tab-rail gray/released presentation is driven by runtime residency (`isResident == false`), so this is evidence that the `WKWebView` runtime was actually released, not merely that a live resident renderer stalled.
+Machine-local attribution confirmed:
 
-**Verdict:** `WARM_HUMAN_ACCEPTANCE=FAIL`.
+- stored Warm retention was exactly `1800` seconds (`30 minutes`);
+- the affected Warm inactive plan began at `2026-10-07T14:58:08Z`;
+- `slot_lifecycle.memory_pressure` level `warning` occurred at `15:00:02Z`, sequence 454;
+- the same Warm plan was released at `15:00:02Z`, sequence 456;
+- plan lifetime was about 114 seconds, far below the configured 1800-second TTL;
+- this QA window contained one lifecycle release.
 
-Therefore the earlier conclusion that removing only the ordinary two-Warm LRU fully solved the user-visible Warm issue is rejected. PR #116 must not merge in its present state.
+**Root cause:** `MEMORY_PRESSURE_RELEASE` caused by the existing warning-level Warm eviction policy.
 
-## Current attribution boundary
+Current production logic intentionally evicts inactive eligible Warm runtimes on `.warning`, reducing them toward one resident Warm. That behavior makes the user-selected Warm retention value unreliable under a non-critical memory-pressure warning.
 
-Root cause of this fresh QA failure is not yet confirmed. Existing code provides three relevant hypotheses that must be distinguished with existing machine-local evidence:
+## Product decision
 
-1. **Memory-pressure eviction:** production still listens to macOS memory pressure. Warning may reduce inactive eligible Warm runtimes toward one; critical may reduce them to zero, bypassing the configured TTL.
-2. **Effective preference mismatch:** the repository maps 30 minutes to 1800 seconds, but the live stored UserDefaults value must be verified on the QA machine.
-3. **Another explicit release/timer path:** an existing lifecycle release may have fired independently of the removed count-based LRU.
+Warm retention is now defined as a user-visible residency guarantee with one explicit emergency exception:
 
-Do not infer memory pressure solely from the symptom. Use the existing runtime diagnostic journal to attribute the actual incident.
+- ordinary inactivity: configured 2/5/10/30-minute Warm TTL applies;
+- macOS memory-pressure **warning**: record/observe the warning but do **not** proactively release Warm runtimes before their TTL;
+- macOS memory-pressure **critical**: may proactively release inactive, eligible Warm runtimes before TTL as an emergency safety valve;
+- existing media / attention / speech protections remain unchanged;
+- Hot semantics from the first corrective remain unchanged;
+- Cold semantics remain unchanged.
 
-## Existing evidence sources
-
-Runtime diagnostics are already written under:
-
-`~/Library/Application Support/FloatTabs/Diagnostics/Logs/runtime-YYYYMMDD-NNN.jsonl`
-
-Relevant existing events include:
-
-- `slot_lifecycle.memory_pressure`
-- `slot_lifecycle.release`
-
-No new diagnostics are authorized before checking this incident.
+This preserves a meaningful Warm setting while retaining a response to truly critical memory pressure.
 
 ## Next action
 
-Perform one read-only machine-local attribution pass against the currently installed QA incident:
+Implement the smallest test-driven corrective on PR #116:
 
-- verify raw stored `FloatTabs.performance.warmWebViewRetentionDelay`;
-- inspect existing runtime diagnostics around the release for `slot_lifecycle.memory_pressure` and `slot_lifecycle.release`;
-- determine whether the release aligns with memory pressure, a normal TTL timer, or another existing path;
-- do not reproduce, modify code/tests, clear logs/data, reinstall, merge, or test Hot until this Warm incident is attributed.
+1. prove RED that warning-level pressure currently releases an inactive eligible Warm before TTL;
+2. change warning handling to diagnostic-only/no Warm eviction;
+3. preserve critical-level Warm eviction and all existing protection exclusions;
+4. update existing lifecycle tests and Settings/product wording to say that only **critical** memory pressure may shorten Warm retention;
+5. run focused lifecycle tests, full XCTest, Debug/Release arm64 builds;
+6. stop for independent Web audit before reinstalling QA.
 
-Unread/red-dot behavior remains a separate deferred concern.
+Do not modify unread/red-dot behavior, speech, Cold semantics, PR #102, main, or release state.
