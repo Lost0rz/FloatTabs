@@ -1,206 +1,52 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-SPEECH-001
-**Title:** ChatGPT Speech Response Ownership Boundary Regression
-**Status:** `ACTIVE — GATE_1_STOP_WAITING_FOR_WEB_REVIEW`
-**Mode:** `SPEECH_RESPONSE_BOUNDARY_INVESTIGATION_AND_BOUNDED_FIX`
+**Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
+**Status:** `ACTIVE — BUILD_AND_INSTALL_SPEECH_QA`
+**Mode:** `SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX`
 
 ## Objective
 
-Confirm and fix the ChatGPT speech extraction ownership defect that can include the
-user's own message in spoken content. Separately determine whether the reported
-notification speech originates in page status/toast/live-region content or in
-macOS outside FloatTabs.
+Reproduce the reported speech defect through the real user action: the user opens
+FloatTabs, selects a normal ChatGPT conversation, and triggers `Read Latest
+Response`. Capture enough privacy-safe evidence from that exact extraction-to-speech
+request to determine why the user's own message can be spoken before the assistant
+reply.
 
-This is an evidence-first, TDD task. Do not guess a selector or write a production
-fix before the live root-cause gate and a failing regression test pass.
+Do not write a production behavior fix before the live user-triggered reproduction
+establishes the causal boundary and a later formal test-first RED reproduces it.
 
 ## Baseline and identity
 
 - Repository: `Lost0rz/FloatTabs`.
 - Authorized production worktree identity: `floattabs-main-production`.
-- Task-start production branch/upstream: `main` / `origin/main`.
-- Task-start baseline: freshly fetched clean `main` and `origin/main` at
-  `8ed28588ec79d6a5c145622ef13a7051ab7076d8`.
-- Control PR #114 merged at `2d2b733407ea57ea66ca380887dfc11b71b6e2be` after
-  `Build & Test (Apple Silicon arm64)` passed on exact head
-  `829cdfe01d617877f7ee136de51e2b837d5c284e`.
-- Active implementation branch: `fix/chatgpt-speech-response-ownership`, created
-  from that merged authoritative `main`. Expected upstream:
-  `origin/fix/chatgpt-speech-response-ownership`.
-- The running app was observed as FloatTabs 0.5.2 build 20, arm64, with exact
-  source revision `8ed28588ec79d6a5c145622ef13a7051ab7076d8`. The separate
-  installed copy reported source revision
-  `ed452e35b278ced643b546de75533f0ed5dc1c27`. Local paths and transient PID
-  evidence remain local and belong in the execution report, not this public file.
-- PR #102 is separate MemoX work, OPEN Draft at
-  `db6e886b33dffd93ece130463b184ae371b97684`; do not modify, rebase, merge,
-  or use it.
+- Implementation branch: `fix/chatgpt-speech-response-ownership`.
+- Expected upstream: `origin/fix/chatgpt-speech-response-ownership`.
+- Accepted implementation base: main at
+  `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
+- Control PR #114 is merged.
+- PR #102 is separate MemoX work and remains excluded.
 
-## Gate 0A — Control-plane transition
+Refresh refs before every implementation/build/install phase. Local HEAD must be
+clean and exactly equal the freshly fetched implementation upstream. Stop on branch,
+HEAD, worktree identity, dirty-state, merge-base, or PR #102 mismatch.
 
-Only `CURRENT_STATUS.md` and `CURRENT_TASK.md` may change during this gate.
-Keep FT-QA-001 as historical state; do not erase its history. Do not change
-`AGENTS.md`.
+## FT-QA-001 disposition
 
-1. Create a control-only branch from the fresh clean `origin/main`, for example
-   `codex/ft-speech-001-control`.
-2. Record this task contract in these two control-plane files.
-3. Commit and push the control branch, open a PR, and require
-   `Build & Test (Apple Silicon arm64)` to PASS on that exact control commit.
-4. Merge the control PR after that exact required check passes.
-5. Fetch again; fast-forward the authorized production checkout to the merged
-   `origin/main`; verify it is clean and exact.
-6. Create the implementation branch from that new authoritative `main`.
-7. Do not modify product or test files until the control PR is merged and this
-   branch alignment is verified.
+**CLOSED — USER-ACCEPTED STABILITY BASELINE.**
 
-**Gate 0A result: PASS.** Control PR #114 is merged, the authorized checkout was
-fast-forwarded cleanly to the merge commit, and the implementation branch was
-created from it. Gate 1 is now the next active gate.
+The user used the prior QA runtime based on source
+`8ed28588ec79d6a5c145622ef13a7051ab7076d8` for an extended practical period
+without another natural stuck-tab occurrence and accepts that behavior as the
+current stability baseline. This is QA acceptance, not root-cause proof and not a
+claim that the stuck-tab symptom cannot recur.
 
-## Authorized scope
+The accepted source is already contained in current main; intervening accepted
+changes were control-plane only. Do not create another product merge for FT-QA-001.
 
-- Privacy-safe structural evidence from the current live ChatGPT DOM.
-- One temporary QA/DEBUG-only, one-shot structural probe session, explicitly
-  authorized on 2026-10-07, including probe-only focused tests, exact-head
-  rebuild/relaunch, and at most one necessary ChatGPT page reload. It must not
-  change response selection or speech behavior.
-- Focused ChatGPT response-extraction tests and a live-shape TDD RED reproduction.
-- A minimal response ownership fix only after Gate 1 and Gate 2 pass.
-- Focused and full validation in Gate 4.
-- A QA build/install after validation only if needed for acceptance, preserving all
-  user and site state.
+## Accepted prior FT-SPEECH-001 evidence
 
-## Not authorized
-
-- Stuck-tab behavior work.
-- Browser profile, cookie, site-data, cache, or persistent-configuration reset.
-- Broad ChatGPT DOM redesign.
-- Volatile/generated CSS class names as the ownership contract.
-- Raw conversation text, `textContent`, `innerHTML`, URLs, message IDs, full class
-  lists, cookies, tokens, or session information in logs, diagnostics, fixtures,
-  PR text, or committed files.
-- SpeechService, SpeechQueue, SpeechPlaybackSessionController, unrelated
-  diagnostics, persistence, or WebView lifecycle changes without evidence.
-- Any change to PR #102.
-- Merging the implementation PR.
-- Any repeated reload, new ChatGPT message/response, profile/site-data/cache reset,
-  or replacement of `/Applications/FloatTabs.app` during the probe session.
-
-## Gate 1 — Live incident root cause, read-only first
-
-Start with the existing running page and prefer existing debug capabilities. The
-user has authorized one minimal controlled probe session if needed: rebuild and
-gracefully relaunch the QA/DEBUG app, restore/open an existing ChatGPT tab, reload
-that page at most once if necessary to load the temporary probe, and invoke one
-ownership snapshot. Do not send a message, generate a response, repeat reloads, or
-reset any state.
-
-Determine:
-
-A. Whether the latest response uses explicit assistant role, article assistant
-role, or Regenerate fallback.
-B. If fallback is used, the structure of the first qualifying ancestor selected
-by the Regenerate lookup.
-C. Whether that candidate includes user-role and assistant-role subtrees,
-`role=status`, `role=alert`, `aria-live`, composer, or multiple turns.
-D. Whether current `structuredBlocks(candidate)` can include user or live UI
-content.
-
-Prefer existing debug capabilities. If a temporary probe is needed, it may emit
-only these structural fields:
-
-- tag name, role, fixed semantic data-testid category, ancestor depth;
-- response-action count and semantic-block count;
-- booleans `has_user_marker`, `has_assistant_marker`, `has_status`,
-  `has_alert`, `has_aria_live`, `has_composer`, `has_multiple_turns`;
-- `selected_path = explicit/article/fallback`.
-
-Do not emit or save prohibited content listed above. The probe must not alter
-selection or speech behavior. It may report only fixed-schema structural metadata,
-fixed categories, booleans, and bounded counts. Do not read or emit textContent,
-innerHTML, innerText, conversation text, URLs, message IDs, full class lists, or
-text hashes. The temporary probe and probe-only tests must be removed before the
-formal Gate 2 TDD work if they serve only attribution.
-
-Before building the probe, add the smallest focused tests proving explicit,
-article, and fallback path reporting; boolean-only user/status/live-region fields;
-and absence of response/user-text fields. These tests validate the probe only and
-are not the formal Gate 2 RED test.
-
-### Gate 1 PASS
-
-Require `LIVE_SELECTED_PATH: FALLBACK` and evidence the candidate boundary is
-wider than the real assistant response, such as `has_user_marker = true`, or
-equivalent structural proof explaining how user content reaches
-`structuredBlocks()`. Only then set
-`LIVE_INCIDENT_ROOT_CAUSE_CONFIRMED = YES` and enter Gate 2.
-
-### Gate 1 STOP
-
-If the live page uses an explicit/article assistant path or the candidate does
-not contain user content, stop production changes and report
-`ROOT_CAUSE_CONFIRMED = NO`. Continue read-only source attribution of the actual
-payload path. Do not alter fixtures to force the web-page hypothesis.
-
-### Previous execution outcome: BLOCKED (superseded for probe authorization)
-
-The live selected path and candidate subtree are unknown. Existing privacy-safe
-health/page-app diagnostics do not expose response ownership metadata; source
-inspection confirms the health probe reports only document readiness/visibility,
-conversation-shell, composer, loading, and load-error state, while the page-app
-probe reports bounded error/resource/lifecycle categories. No response-path,
-fallback-ancestor, role-marker, or live-region fields exist in those interfaces.
-
-The previous stop remains valid: no live selected path or candidate subtree was
-observed, and root cause is unconfirmed. On 2026-10-07, the user authorized exactly
-one privacy-safe probe session, superseding the earlier no-reload boundary only
-for the minimal reload needed to load this temporary probe. Current freshness gate:
-the clean implementation checkout HEAD must equal
-`origin/fix/chatgpt-speech-response-ownership`; `origin/main` must remain at the
-accepted base `2d2b733407ea57ea66ca380887dfc11b71b6e2be`, and merge-base must equal
-that base absent authorized reconciliation.
-
-### Gate 1 probe session — one-time authorization
-
-1. Add only temporary DEBUG/QA structural probe code and probe-only tests; do not
-   change `latestAssistantResponseRoot()`, `structuredBlocks()`, production
-   response selection, or speech behavior.
-2. Test explicit, article, fallback, and none path classification, plus boolean-
-   only markers and no response/user-text fields. Focused probe tests must pass
-   before building.
-3. Build an arm64 Debug QA app from the exact implementation HEAD at a fresh
-   temporary DerivedData path. Do not replace `/Applications/FloatTabs.app` or
-   mutate user/site state.
-4. Verify current QA process identity/provenance before graceful quit. Launch the
-   exact probe build, restore/open the target existing ChatGPT tab, allow one page
-   reload only if needed, send no message, and call the snapshot once.
-5. Capture only selected path, tag/role/testid fixed categories, bounded ancestor,
-   action and semantic-block counts, and the seven requested structural booleans.
-   No text, HTML, URL, identifier, full class list, token, cookie, or text hash.
-6. Decide Gate 1 from the live result. Fallback plus a user marker can confirm the
-   user-message ownership cause; status/alert/live-region presence alone does not
-   confirm notification causality unless its inclusion in the extraction boundary
-   is separately proven. Explicit/article, or fallback without a user marker,
-   stops without Gate 2 RED or production changes.
-7. If Gate 1 passes, preserve only structural evidence, remove temporary probe
-   code and its probe-only tests, verify no temporary diagnostic capability
-   remains, and only then begin formal Gate 2 test-first RED. If Gate 1 stops,
-   remove the temporary probe and its tests and stop without RED or a fix.
-
-### Gate 1 probe, test, and live snapshot checkpoint
-
-- Probe implementation commit: `93891215fd150f841c58ad521235e39b7b9340e7`.
-- Focused arm64 Debug checks: PASS, 79/79, 0 failures (78 bridge tests plus one
-  snapshot capture-wiring/privacy test). Coverage includes explicit, article
-  (isolated-world selector seam), fallback, none, fixed schema, boolean markers,
-  and privacy-sanitizer acceptance.
-- Exact-head QA app provenance: source `f0bc57143165d2e04bbae7cb0b73a8ba3d2a0539`,
-  bundle `com.lost0rz.FloatTabs`, version/build `0.5.2 (20)`, arm64 Debug.
-- The existing ChatGPT-named Slot was selected. One ownership snapshot completed
-  with the exact fixed schema; no page reload, message send, or response
-  generation occurred.
+A one-shot structural probe previously observed:
 
 ```text
 LIVE_SELECTED_PATH=fallback
@@ -215,178 +61,273 @@ LIVE_FALLBACK_CANDIDATE_HAS_ALERT=false
 LIVE_FALLBACK_CANDIDATE_HAS_ARIA_LIVE=false
 LIVE_FALLBACK_CANDIDATE_HAS_COMPOSER=true
 LIVE_FALLBACK_CANDIDATE_HAS_MULTIPLE_TURNS=false
-LIVE_NOTIFICATION_SEMANTIC_BLOCK_PRESENT=false
-STRUCTURED_BLOCKS_BOUNDARY_PROVEN=true
-ROOT_CAUSE_CONFIRMED=NO
-PAGE_NOTIFICATION_CAUSAL_STATUS=NOT_PRESENT_IN_CAPTURED_CANDIDATE
-MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+STRUCTURED_BLOCKS_ROOT_IS_CANDIDATE=true
 RELOAD_COUNT=0
+ROOT_CAUSE_CONFIRMED=NO
 ```
 
-The extraction request obtains `root = latestAssistantResponseRoot()` and passes
-that same root to `structuredBlocks(root)`. The live sample therefore proves the
-fallback candidate is the extraction root, but its user-marker result does not
-confirm a user-message ownership defect. The candidate includes a composer marker;
-whether composer content entered the 128 blocks remains unknown because no content
-was read and the snapshot has no per-subtree block attribution. The current
-exclusion selector does not explicitly name the composer/textbox boundary. No
-page notification marker or semantic notification block was present in this
-candidate. macOS Notification Center was not observed.
+The temporary static probe was removed. Do not re-create a broader passive DOM
+logging subsystem merely to gather more data. The next evidence must be tied to the
+actual `Read Latest Response` action.
 
-All temporary probe code, probe-only tests, and the QA capture route/button have
-been removed, and the QA Debug process was stopped after capture. No formal Gate 2
-RED test has run and no production behavior changed. Gate 1 is stopped for this
-sample; await Web review before any further task transition.
+## Installation authority
 
-## Gate 2 — TDD RED
+The user explicitly authorizes the current Speech QA build to replace:
 
-Only after Gate 1 PASS, first modify only
-`FloatTabsTests/ChatGPTResponseExtractionTests.swift`. Build the smallest fixture
-matching the observed live structure, including a user prompt branch, assistant
-reply branch, and Regenerate response control.
+`/Applications/FloatTabs.app`
 
-At least one regression test must prove:
+This path is now the canonical user-facing QA launch target. Temporary build paths
+may be used only as intermediates.
 
-- user prompt content never appears in `payload.blocks`;
-- only positively owned assistant response content may be emitted;
-- extraction fails closed if assistant ownership cannot be proven safely.
+Replacement is limited to the app bundle. Preserve all existing:
 
-Run the focused test and record `RED_TEST_NAME`, `RED_EXPECTED_FAILURE`,
-and `RED_ACTUAL_USER_CONTENT_PRESENT`. The test must be RED because current
-production extraction includes the user content. If the test is GREEN on its
-first run, stop: the fixture did not reproduce the defect, so do not write a
-production fix.
+- Browser Profile / Slot configuration;
+- cookies and WebKit website data;
+- authenticated sessions;
+- Application Support data;
+- UserDefaults / persistent preferences;
+- diagnostic history.
 
-Add a second RED test for page notifications only if Gate 1 proves a status,
-alert, toast, or live-region node is inside the extracted boundary and can enter
-speech blocks. If macOS Notification Center is indicated, or page notification
-causality is unproven, record it as separate/unconfirmed and do not include it in
-this fix.
+Do not clear cache/profile/site-data, recreate profiles, or delete persistent data
+as part of installation. Before replacement, identify the existing installed app
+and any running FloatTabs PID using local evidence. Gracefully quit the verified
+FloatTabs process when possible; use a bounded TERM only if graceful quit fails and
+only after PID/bundle identity is verified.
 
-## Gate 3 — Minimal production fix
+After replacement, verify:
 
-Only after a verified RED, read the current product/design contract for this
-boundary and the current release/validation record, then modify
-`FloatTabs/Web/ChatGPTResponseExtraction.swift`.
-
-Positively prove assistant response ownership. Fail closed if ownership is
-ambiguous. Prefer fixing root selection/ownership boundary over appending a
-user-selector filter.
-
-Preserve explicit assistant-role path, article assistant path, valid semantic
-fallback, response identity, locator behavior, speech follow/scroll behavior, and
-generation status behavior. Do not use message text as a heuristic, rely only on
-Regenerate proximity, or re-expand ownership to the whole conversation.
-
-Remove attribution-only temporary probes before the final production commit.
-
-## Gate 4 — GREEN and validation
-
-1. Re-run Gate 2 focused regression; require GREEN.
-2. Run all existing ChatGPT response-extraction related tests.
-3. Run the repository CI contract exactly:
-
-```bash
-xcodebuild \
-  -project FloatTabs.xcodeproj \
-  -scheme FloatTabs \
-  -resolvePackageDependencies \
-  -onlyUsePackageVersionsFromResolvedFile
-
-git diff --exit-code -- \
-  FloatTabs.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-
-xcodebuild \
-  -project FloatTabs.xcodeproj \
-  -scheme FloatTabs \
-  -configuration Debug \
-  -destination 'platform=macOS,arch=arm64' \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-
-xcodebuild \
-  -project FloatTabs.xcodeproj \
-  -scheme FloatTabs \
-  -configuration Release \
-  -destination 'platform=macOS,arch=arm64' \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-
-xcodebuild \
-  -project FloatTabs.xcodeproj \
-  -scheme FloatTabs \
-  -configuration Debug \
-  -destination 'platform=macOS,arch=arm64' \
-  CODE_SIGNING_ALLOWED=NO \
-  test
+```text
+APP_PATH=/Applications/FloatTabs.app
+BUNDLE_ID=com.lost0rz.FloatTabs
+VERSION_BUILD=<actual>
+ARCH=arm64
+SOURCE_HEAD=<exact QA source>
+RUNNING_PID=<actual>
 ```
 
-Require focused regression, existing extraction tests, full XCTest, Debug build,
-Release build, and unchanged Package.resolved to pass. Do not substitute focused
-GREEN for the full suite. Report every existing test failure by name.
+If source provenance cannot be established or another application occupies the
+path unexpectedly, STOP before replacement.
 
-## Gate 5 — Diff audit
+## Authorized scope
 
-The final diff should contain only:
+- Minimal QA/DEBUG-only instrumentation on the real `Read Latest Response` path.
+- Focused tests proving that instrumentation is bounded, correlated, and privacy
+  safe.
+- Building an exact-head arm64 Debug Speech QA.
+- Replacing `/Applications/FloatTabs.app` with that verified QA build.
+- Relaunching it and verifying provenance while preserving all user/site state.
+- One natural user-triggered `Read Latest Response` reproduction and bounded
+  evidence capture.
+- Read-only classification of the captured evidence.
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
-- `FloatTabsTests/ChatGPTResponseExtractionTests.swift`
+## Not authorized yet
 
-Explain any additional file individually. Verify no raw conversation logging,
-cookie/profile/site-data change, Notification Center integration, queue/TTS
-behavior change, unrelated DOM refactor, PR #102 change, or Package.resolved drift.
-Confirm PR #102 remains at its observed state.
+- Production response-selection changes.
+- Production speech/queue/playback behavior changes.
+- Broad ChatGPT DOM redesign.
+- Generated/volatile CSS-class contracts.
+- Cache/profile/cookie/site-data resets.
+- New stuck-tab behavior work.
+- Changes to PR #102.
+- Formal production fix or implementation PR merge before the live reproduction is
+  reviewed and a formal RED gate is authorized.
 
-## Gate 6 — Implementation PR and handoff
+## Privacy boundary
 
-Commit and push the implementation branch, then open a separate PR titled:
+Instrumentation must not persist, print, or export:
 
-`Fix ChatGPT speech response ownership boundary`
+- user or assistant conversation text;
+- `textContent`, `innerText`, or `innerHTML`;
+- URLs or message IDs;
+- cookies, auth tokens, session secrets;
+- full class lists;
+- reversible hashes/encodings of conversation text.
 
-The PR must distinguish confirmed product fallback ownership evidence and RED/GREEN
-validation from any unclaimed stuck-tab or macOS Notification Center cause.
-Wait until GitHub records `Build & Test (Apple Silicon arm64) = PASS` on the exact
-PR HEAD as a required check. A manual workflow run alone is insufficient.
-Stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT`; do not merge the implementation PR.
+Permitted evidence is limited to fixed structural/provenance categories and bounded
+counts needed to identify ownership and stage transitions.
 
-## Stop conditions
+## Gate 0 — Fresh baseline
 
-Stop immediately on any baseline/identity/branch/HEAD/dirty-state mismatch, Gate 1
-failure, first-run GREEN regression, insufficient live evidence, unrelated
-production scope, or validation failure that cannot be resolved within this
-contract. Preserve privacy-safe evidence and do not perform opportunistic fixes.
+Run a fresh remote check and verify:
 
-## Final receipt
+```text
+repo=Lost0rz/FloatTabs
+branch=fix/chatgpt-speech-response-ownership
+HEAD=origin/fix/chatgpt-speech-response-ownership
+working_tree=clean
+merge_base_with_origin_main=2d2b733407ea57ea66ca380887dfc11b71b6e2be
+```
 
-Report these fields:
+Read `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` after the refresh.
+Confirm PR #102 remains OPEN/DRAFT at its verified excluded branch/head. Any
+mismatch is STOP.
+
+## Gate 1 — Minimal real-path QA instrumentation
+
+Instrument only the existing real path:
+
+```text
+user triggers Read Latest Response
+  -> AssistantSpeechCoordinator requestLatestResponse
+  -> ChatGPT response extraction request
+  -> selected response root / structured blocks
+  -> payload returned to native coordinator
+  -> utterance request creation / speech submission
+```
+
+The instrumentation must not alter the selected root, block contents, block order,
+cleaning behavior, utterance contents, or speech timing.
+
+Capture one correlation/request identifier that contains no user content and fixed
+metadata sufficient to answer:
+
+1. extraction selected path: `explicit | article | fallback | none`;
+2. extraction root structural category and whether composer/user/assistant/status/
+   alert/live-region markers are structurally present;
+3. total extracted block count;
+4. block-level ownership/source category where determinable without reading/logging
+   text, e.g. `assistant_owned | user_owned | composer | status_live | unknown`;
+5. ordered category sequence or bounded per-category counts reaching the native
+   payload;
+6. count/categories surviving into utterance requests;
+7. whether one user-triggered read request generated one or multiple speech
+   submissions.
+
+If a requested category cannot be determined safely from DOM ownership markers,
+record `unknown`; do not infer it from text.
+
+### Instrumentation tests
+
+Before installing the QA build, add focused tests proving at minimum:
+
+- correlation stays within one read request;
+- stage/order metadata is emitted without raw response/user text;
+- explicit/article/fallback path classifications are represented;
+- user/composer/status/unknown categories are represented only as fixed enums or
+  counts;
+- diagnostics do not change extracted or spoken content;
+- forbidden fields are absent.
+
+Focused tests must pass before installation.
+
+## Gate 2 — Build and install Speech QA
+
+Build a fresh arm64 Debug app from the exact implementation HEAD after Gate 1 tests
+pass. Record build provenance.
+
+Replace only `/Applications/FloatTabs.app`; preserve all persistent user/site data.
+Relaunch from `/Applications/FloatTabs.app` and verify the running process matches
+the installed exact QA build.
+
+### Gate 2 PASS end state
+
+Stop active code work and report:
+
+```text
+SPEECH_QA_INSTALLED=YES
+APP_PATH=/Applications/FloatTabs.app
+SOURCE_HEAD=<sha>
+VERSION_BUILD=<value>
+ARCH=arm64
+RUNNING_PID=<pid>
+USER_DATA_PRESERVED=YES
+READY_FOR_USER_REPRODUCTION=YES
+```
+
+Do not manufacture a ChatGPT response. The user performs the next action.
+
+## Gate 3 — User-triggered reproduction
+
+The user will normally use the installed FloatTabs QA and perform the simple natural
+reproduction:
+
+1. open/select a ChatGPT conversation with a normal latest assistant response;
+2. trigger `Read Latest Response` once;
+3. report what was heard, especially whether FloatTabs reads the user's own message
+   before the assistant reply.
+
+The QA instrumentation may automatically record the bounded metadata for that exact
+request. Do not require the user to locate temporary app bundles or run terminal
+commands.
+
+After the reproduction, export/query only the correlated bounded diagnostic event(s)
+and report the structural pipeline. Do not expose raw conversation content.
+
+## Gate 4 — Causal classification
+
+Classify the user-triggered run from actual evidence, for example:
+
+- extraction root already spans wrong ownership;
+- extracted blocks are correct but ownership/order changes later;
+- utterance construction introduces or duplicates content;
+- multiple read/speech submissions occur;
+- evidence remains insufficient.
+
+Keep page-notification and macOS Notification Center causality separate unless the
+same live reproduction directly proves one of them.
+
+If the user hears the defect but the instrumentation cannot explain where it enters
+the pipeline, STOP and identify the smallest missing boundary. Do not guess a fix.
+
+## Gate 5 — Formal RED and production fix
+
+Do not enter this gate until the user-triggered evidence has been reviewed and the
+causal boundary is confirmed strongly enough to model a regression test.
+
+Then:
+
+1. write the smallest test matching the observed live mechanism;
+2. require first-run RED for the defect;
+3. implement the minimal ownership/ordering fix at the proven boundary;
+4. require focused GREEN;
+5. run full CI-equivalent Debug, Release, XCTest, and Package.resolved checks;
+6. remove QA-only diagnostic instrumentation if it is not justified as durable
+   privacy-safe observability;
+7. audit the final diff and open the implementation PR;
+8. stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT` after the required exact-head
+   `Build & Test (Apple Silicon arm64)` check passes.
+
+Do not merge the implementation PR from the local execution session.
+
+## Separate work
+
+PR #102 remains outside this task. Do not modify, rebase, merge, or use it.
+
+## Immediate stop conditions
+
+Stop on any:
+
+- repo/branch/HEAD/upstream/worktree mismatch;
+- dirty baseline not explained by this task;
+- PR #102 drift caused by this task;
+- inability to preserve user/site data during app replacement;
+- inability to prove `/Applications/FloatTabs.app` provenance after install;
+- need to log conversation text or sensitive browser/session data;
+- QA instrumentation that changes extraction/speech behavior;
+- unrelated product change.
+
+## Next handoff receipt
+
+After Gate 2, return:
 
 ```text
 TASK_ID:
-CONTROL_BASELINE:
-CONTROL_PR:
-IMPLEMENTATION_BRANCH:
-IMPLEMENTATION_HEAD:
-RUNNING_APP_PROVENANCE:
-LIVE_SELECTED_PATH:
-LIVE_FALLBACK_CANDIDATE_HAS_USER:
-LIVE_FALLBACK_CANDIDATE_HAS_STATUS_ALERT_ARIALIVE:
-USER_MESSAGE_ROOT_CAUSE_CONFIRMED:
-PAGE_NOTIFICATION_CAUSAL_STATUS:
-MACOS_NOTIFICATION_CAUSAL_STATUS:
-RED_TEST:
-RED_PROVEN:
-PRODUCTION_FIX_SCOPE:
-FOCUSED_TESTS:
-FULL_TESTS:
-DEBUG_BUILD:
-RELEASE_BUILD:
-PACKAGE_LOCK_UNCHANGED:
-PR_NUMBER:
-PR_HEAD:
-REQUIRED_CHECK:
-WORKTREE_STATUS:
+START_HEAD:
+FINAL_QA_HEAD:
+FOCUSED_INSTRUMENTATION_TESTS:
+QA_BUILD:
+APP_PATH:
+INSTALLED_SOURCE_HEAD:
+INSTALLED_VERSION_BUILD:
+INSTALLED_ARCH:
+RUNNING_PID:
+USER_DATA_PRESERVED:
 PR102_UNCHANGED:
+WORKTREE_STATUS:
+READY_FOR_USER_REPRODUCTION:
 FINAL_STATE:
 ```
+
+Expected final state for the next local execution is:
+
+`WAITING_FOR_USER_SPEECH_REPRODUCTION`
