@@ -1,97 +1,157 @@
 # FloatTabs Current Task
 
 **Task ID:** FT-LIFECYCLE-001
-**Title:** Warm Premature Release Attribution After QA Failure
-**Status:** `QA_ACCEPTANCE_FAILED — ATTRIBUTION_ONLY`
-**Mode:** `READ_ONLY_INCIDENT_ATTRIBUTION`
+**Title:** Warm Memory-Warning Residency Corrective
+**Status:** `ROOT_CAUSE_CONFIRMED — CORRECTIVE_IMPLEMENTATION_AUTHORIZED`
+**Mode:** `TEST_DRIVEN_CORRECTIVE`
 
 ## Objective
 
-Attribute only the Warm runtime release observed during the latest human QA. Do not change product code or tests, reinstall QA, or reproduce the event.
+Correct the confirmed Warm QA failure without reopening unrelated lifecycle areas.
 
-## Incident identity
+Confirmed incident:
 
-- Repository: `Lost0rz/FloatTabs`
+- Warm setting: `1800` seconds / 30 minutes;
+- Warm inactive plan start: `2026-10-07T14:58:08Z`;
+- memory-pressure warning: `2026-10-07T15:00:02Z`, sequence 454;
+- release of the same Warm plan: `2026-10-07T15:00:02Z`, sequence 456;
+- elapsed inactive lifetime: about 114 seconds;
+- root-cause class: `MEMORY_PRESSURE_RELEASE`.
+
+## Product contract
+
+Warm retention must have stable user-visible meaning:
+
+```text
+ordinary inactivity            -> configured Warm TTL applies
+memory pressure warning        -> observe/diagnose only; do not evict Warm before TTL
+memory pressure critical       -> may evict inactive eligible Warm before TTL
+```
+
+Existing media, attention, and speech protection exclusions remain in force. Hot recovery behavior from the first corrective remains unchanged. Cold behavior remains unchanged. Unread/red-dot behavior remains outside this PR.
+
+## Repository authority
+
+- Base branch: `main`
+- Accepted base: `569e43783a98c8caca681ce8139ec87dd4fa276e`
 - Task branch: `fix/residency-lifecycle-semantics`
-- PR: `#116` (merge blocked)
-- Installed QA source: `733f73fad9a955db42401abaececf9c7aeb783dc`
-- Product implementation: `9acd6303`
-- Human QA: failed — with Warm retention set to 30 minutes and four Warm tabs, one icon became gray after ordinary use; selecting it reloaded the page.
-- Hot acceptance: paused.
+- PR: `#116` (Draft; merge blocked)
+- Root-cause attribution head: `ff2cef575f6f7818e230b7568da319ebc40eb7f1`
+- PR #102 remains unrelated and must not change
 
-## Evidence required
+## Gate 0 — freshness
 
-1. Read the installed app's real Bundle ID, then inspect the raw `UserDefaults` value for `FloatTabs.performance.warmWebViewRetentionDelay`.
-2. Read existing `slot_lifecycle.memory_pressure` events.
-3. Read existing `slot_lifecycle.release` events.
-4. Reconstruct event ordering sufficient to classify the release.
+Before product changes:
 
-Diagnostic logs are under:
+1. fetch/prune;
+2. require the task worktree to be clean;
+3. require local task branch to fast-forward only to the latest remote task head;
+4. reread `AGENTS.md`, `CURRENT_STATUS.md`, and this file;
+5. STOP on unexplained head/worktree drift.
 
-`~/Library/Application Support/FloatTabs/Diagnostics/Logs/`
+## Gate 1 — RED first
 
-Relevant files use the `runtime-YYYYMMDD-NNN.jsonl` naming pattern. Read logs only; do not delete, overwrite, rotate, or clean them. Do not read page content or unrelated private content.
+Add/modify focused lifecycle tests before production code.
 
-## Attribution rules
+Required RED behavior against the current production implementation:
 
-Allowed classifications:
+1. create multiple inactive eligible Warm runtimes with a long Warm TTL;
+2. send `.warning` memory pressure;
+3. assert every eligible Warm runtime remains resident and its inactive plan remains valid;
+4. this test must fail against the current warning-eviction implementation.
 
-- `MEMORY_PRESSURE_RELEASE`
-- `NORMAL_TTL_RELEASE`
-- `OTHER_EXPLICIT_RELEASE_PATH`
-- `SETTING_MISMATCH`
-- `INSUFFICIENT_EVIDENCE`
+Also retain/confirm tests proving:
 
-Classify as memory-pressure release only when a `slot_lifecycle.memory_pressure` event precedes the corresponding Warm release. If the raw preference differs from 1800 seconds, consider `SETTING_MISMATCH`. Without a memory-pressure event, do not infer TTL: compare release timing to the actual configured retention. If evidence is insufficient, report that and stop.
+- `.critical` memory pressure releases inactive eligible Warm runtime(s) before TTL;
+- media/attention/speech-protected Warm runtimes remain protected under critical pressure;
+- three-or-more Warm runtimes remain resident before configured TTL during ordinary operation.
 
-For each relevant release, record its timestamp, slot ID, inactive-plan ID, and other existing fields. For memory pressure, record timestamp, warning/critical level, and other existing fields. If the user's gray Tab cannot be matched to an ID, do not guess; list all releases in the event window.
+If the warning RED does not fail for the expected reason, STOP.
+
+## Gate 2 — minimal production corrective
+
+In `SlotLifecycleCoordinator`:
+
+- keep the existing memory-pressure source and `slot_lifecycle.memory_pressure` diagnostic event;
+- `.warning` must not call Warm eviction/release logic;
+- `.critical` keeps the existing emergency Warm eviction behavior;
+- do not add a second residency authority, timer, keepalive loop, or new diagnostics system;
+- do not change Hot, Cold, media, attention, speech, or unread logic.
+
+The existing `warmMemoryPressureTarget` implementation detail may be simplified only if required by compilation/tests; avoid unrelated refactoring.
+
+## Gate 3 — wording
+
+Update existing Settings/README/product lifecycle wording so it no longer says generic memory pressure may shorten Warm retention. The contract must state that **critical memory pressure** may shorten Warm retention.
+
+Do not redesign Settings UI.
+
+## Gate 4 — validation
+
+Run focused tests covering:
+
+- warning preserves eligible Warm runtimes;
+- critical releases eligible inactive Warm;
+- critical preserves protected Warm runtimes;
+- ordinary >2 Warm retention before TTL;
+- existing Hot recovery policy regression;
+- Cold lifecycle regression.
+
+Then run:
+
+- full XCTest suite;
+- Debug build;
+- Release build;
+- verify Release architecture `arm64`.
+
+No QA reinstall in this implementation pass.
+
+## Gate 5 — handoff
+
+Commit only task-relevant production/test/documentation changes and control handoff updates. Push normally to the task branch.
+
+Stop at:
+
+`FINAL_STATE=WAITING_FOR_INDEPENDENT_WEB_AUDIT`
 
 ## Not authorized
 
 ```ini
-PRODUCT_CHANGE=NO
-TEST_CHANGE=NO
-NEW_DIAGNOSTICS=NO
-REPRODUCTION=NO
-QA_REINSTALL=NO
-HOT_ACCEPTANCE=PAUSED
 UNREAD_BADGE_CHANGE=NO
+NEW_DIAGNOSTICS_SYSTEM=NO
+PROVIDER_KEEPALIVE=NO
+COLD_SEMANTICS_CHANGE=NO
+SPEECH_CHANGE=NO
+ATTENTION_AUTHORITY_CHANGE=NO
 PR102_CHANGE=NO
-MAIN_PUSH=NO
+DIRECT_PUSH_TO_MAIN=NO
 MERGE=NO
 RELEASE=NO
+QA_REINSTALL=NO
 ```
 
-## Control-plane correction
-
-The only authorized repository change in this attribution pass is this `CURRENT_TASK.md` correction. Commit and normally push only this file before continuing with the read-only evidence work. Do not modify `CURRENT_STATUS.md`.
-
-## Stop condition and receipt
-
-Stop after the one read-only attribution pass. Return:
+## Required receipt
 
 ```yaml
 TASK_ID: FT-LIFECYCLE-001
-CONTROL_START_HEAD:
-CONTROL_FINAL_HEAD:
-INSTALLED_QA_SOURCE_HEAD: 733f73fad9a955db42401abaececf9c7aeb783dc
-WARM_SETTING_KEY_EXISTS:
-WARM_SETTING_RAW_SECONDS:
-WARM_SETTING_EFFECTIVE_OPTION:
-DIAGNOSTIC_FILES_READ:
-MEMORY_PRESSURE_EVENT_FOUND:
-MEMORY_PRESSURE_LEVEL:
-MEMORY_PRESSURE_TIMESTAMP:
-RELEASE_EVENT_FOUND:
-RELEASE_SLOT_ID:
-RELEASE_TIMESTAMP:
-RELEASE_FIELDS:
-RELEVANT_EVENT_SEQUENCE:
-ROOT_CAUSE_CLASS:
-EVIDENCE_SUFFICIENT_FOR_FIX:
-CODE_CHANGED: NO
-TEST_CHANGED: NO
-USER_DATA_CHANGED: NO
-WORKING_TREE: CLEAN
-FINAL_STATE: ATTRIBUTION_COMPLETE or STOP_EVIDENCE_INSUFFICIENT
+START_HEAD:
+FINAL_HEAD:
+REMOTE_HEAD:
+LOCAL_REMOTE_MATCH:
+WARNING_RED_PROVEN:
+WARNING_PRESERVES_WARM:
+CRITICAL_EVICTION_PRESERVED:
+PROTECTION_BEHAVIOR_PRESERVED:
+WARM_GT_2_PRE_TTL:
+HOT_REGRESSION:
+COLD_REGRESSION:
+FOCUSED_TESTS:
+FULL_TEST_SUITE:
+DEBUG_BUILD:
+RELEASE_BUILD:
+RELEASE_ARCH:
+CHANGED_FILES:
+PR102_UNCHANGED:
+WORKING_TREE:
+FINAL_STATE: WAITING_FOR_INDEPENDENT_WEB_AUDIT
 ```
