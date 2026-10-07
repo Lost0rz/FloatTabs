@@ -12,7 +12,7 @@ Machine-specific worktree paths remain local-only.
 
 ## Mode
 
-**MODE: SPEECH_USER_TRIGGERED_REPRODUCTION_AND_BOUNDED_FIX**
+**MODE: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
 
 ## Production authority
 
@@ -107,7 +107,7 @@ or website data as part of replacement.
 
 ## FT-SPEECH-001
 
-**STATUS: WAITING_FOR_WEB_FAILED_FIX_REVIEW**
+**STATUS: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE**
 
 **CONTROL_PR:** #114 — merged at
 `2d2b733407ea57ea66ca380887dfc11b71b6e2be`.
@@ -119,6 +119,7 @@ ROOT_CAUSE_BOUNDARY_CONFIRMED=YES
 CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
 EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
 EXACT_LIVE_DOM_SUBTREE_CONFIRMED=NO
+ROOT_CAUSE_CONFIRMED=NO for the latest user reproduction pending its trace review
 PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
 MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
 ```
@@ -127,6 +128,25 @@ The Web root-cause review accepts the fallback extraction ownership boundary as
 the confirmed cause layer: a fallback candidate may currently become the response
 root without proving assistant-only ownership. The exact live DOM subtree remains
 unconfirmed; do not encode generated CSS or a guessed subtree shape.
+
+### Latest user reproduction report — 2026-10-07
+
+```text
+GATE_3_FRESH_REPRODUCTION=PASS
+QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
+USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
+SYMPTOM_CONFIRMED=YES
+ROOT_CAUSE_CONFIRMED=NO
+NEXT_SCOPE=READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
+```
+
+The user reports one fresh reproduction on `/Applications/FloatTabs.app` running
+Speech QA source `8e8d6717f698e8c93e80faad7430217c167357e2`. This source differs
+from the previously recorded failed-fix QA source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`;
+do not conflate their traces. The user action is complete; do not trigger another
+read or request another reproduction. Current authorization is read-only review of
+existing Speech QA logs for this reported run. No new probe/diagnostics, RED,
+production fix, build/install, message, reload/reset, or user/WebKit data cleanup.
 
 ### Accepted prior Gate 1 evidence
 

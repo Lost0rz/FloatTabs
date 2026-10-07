@@ -2,37 +2,32 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** ChatGPT Speech Response Ownership — User-Triggered Reproduction
-**Status:** `WAITING_FOR_WEB_FAILED_FIX_REVIEW`
-**Mode:** `READ_ONLY_POST_FIX_ACCEPTANCE_TRACE`
+**Status:** `READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE`
+**Mode:** `READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE`
 
 ## Current authorized objective
 
-Synchronize the user's failed live acceptance and inspect only the existing
-diagnostic trace from that acceptance on installed source
-`9c3337ed41722e259d3099cc7b6bd7787f44bf5b`. Use schema-backed, privacy-safe
-metadata to classify the extraction path and speech ownership stages. Do not
-reproduce or trigger speech.
+Record the latest user-reported fresh reproduction on installed Speech QA source
+`8e8d6717f698e8c93e80faad7430217c167357e2`, then inspect only existing diagnostic
+logs for that same manual `Read Latest Response` trace. Use schema-backed,
+privacy-safe metadata to classify extraction and speech ownership stages. Do not
+reproduce or trigger speech again.
 
 ```ini
-USER_FIX_ACCEPTANCE=FAIL
-FAILED_FIX_SOURCE=9c3337ed41722e259d3099cc7b6bd7787f44bf5b
-OBSERVED_AFTER_FIX=user_message_then_assistant_response
-FIRST_FIX_DISPOSITION=FAILED_LIVE_ACCEPTANCE
-SYNTHETIC_REGRESSION=PASS
-LIVE_BEHAVIOR_FIXED=NO
+GATE_3_FRESH_REPRODUCTION=PASS
+QA_SOURCE=8e8d6717f698e8c93e80faad7430217c167357e2
+USER_OBSERVED_SPEECH_ORDER=user_message_then_assistant_response
+SYMPTOM_CONFIRMED=YES
+ROOT_CAUSE_CONFIRMED=NO
+NEXT_SCOPE=READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
 IMPLEMENTATION_PR_AUTHORIZED=NO
 MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
-NEXT_SCOPE=READ_ONLY_POST_FIX_ACCEPTANCE_TRACE
-CAUSE_LAYER=CHATGPT_FALLBACK_RESPONSE_EXTRACTION_OWNERSHIP_BOUNDARY
-EXACT_LIVE_STRUCTURAL_MECHANISM=UNCONFIRMED
 ```
 
-This current objective supersedes the earlier reproduction, fix, and acceptance
-instructions recorded below as history. The synthetic fixture passing does not
-prove real DOM structure or live user-visible correction. The first fix used
-`hasSiblingResponseContentBranches` and `hasNonAssistantOwnershipMarker`; do not
-stack a second production fix.
+This active scope supersedes earlier reproduction, fix, and acceptance phases.
+The reported QA source differs from the prior failed-fix source; keep their
+evidence separate. The observation confirms the symptom, not its cause.
 
 ### This turn's hard limits
 
@@ -41,15 +36,37 @@ stack a second production fix.
 - Do not change product or test code; do not build, install, open a PR, merge, or run
   the full suite.
 - Preserve all user, profile, cookie, WebKit, login, preference, and diagnostic data.
-- After trace extraction/classification, stop at
-  `WAITING_FOR_WEB_FAILED_FIX_REVIEW`.
+- If no matching trace exists, record it unavailable and stop without asking the
+  user to reproduce again. After classification, stop at
+  `WAITING_FOR_WEB_ROOT_CAUSE_REVIEW`.
 
 ## Previous-phase history
 
 The original task reproduced the speech defect, added bounded QA instrumentation,
-authorized a first minimal fix after RED, and installed that fix for user
-acceptance. Those gates are closed historical records; the current failed
-acceptance overrides their synthetic-GREEN interpretation.
+authorized a first minimal fix after RED, and recorded a failed live acceptance on
+source `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`. Those facts remain historical.
+The current user-reported reproduction is on source `8e8d6717f698e8c93e80faad7430217c167357e2`;
+do not combine the two runs.
+
+## Current handoff receipt
+
+```yaml
+TASK_ID: FT-SPEECH-001
+GATE_3_FRESH_REPRODUCTION: PASS
+QA_SOURCE: 8e8d6717f698e8c93e80faad7430217c167357e2
+USER_OBSERVED_SPEECH_ORDER: user_message_then_assistant_response
+SYMPTOM_CONFIRMED: YES
+ROOT_CAUSE_CONFIRMED: NO
+NEXT_SCOPE: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
+TRACE_STATUS: PENDING_READ_ONLY_EXISTING_LOG_REVIEW
+NEW_SPEECH_TRIGGERED: NO
+PRODUCT_CODE_CHANGED: NO
+TEST_CODE_CHANGED: NO
+IMPLEMENTATION_PR_AUTHORIZED: NO
+MERGE_AUTHORIZED: NO
+FULL_FINAL_SUITE_AUTHORIZED: NO
+FINAL_STATE: READ_ONLY_EXISTING_SPEECH_QA_EVIDENCE
+```
 
 ## Baseline and identity
 
@@ -510,7 +527,7 @@ Stop on any:
 - QA instrumentation that changes extraction/speech behavior;
 - unrelated product change.
 
-## Current handoff receipt
+## Historical receipt: prior failed-fix QA trace
 
 ```yaml
 TASK_ID: FT-SPEECH-001
