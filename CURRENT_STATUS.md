@@ -301,6 +301,38 @@ from that failed acceptance, then stopping for Web review. Do not trigger speech
 send a ChatGPT message, reload/reset, add probes/diagnostics/tests, change product
 code, rebuild/reinstall, or clear user/WebKit data.
 
+The existing `runtime-20261007-001.jsonl` contains the latest same-session manual
+read trace for the user-reported acceptance: trace
+`0CEAF62F-7F74-460C-9621-EB8DFD29C250`, request correlation
+`5EF6B687-C0F3-440E-BB6B-1E8CD344F4A7`, session
+`42D75ADB-B191-4C73-95CA-089EC16A281F`. The session's `app.launch` record reports
+exact source revision `9c3337ed41722e259d3099cc7b6bd7787f44bf5b`, Debug, arm64,
+version 0.5.2 build 20. Four events occur in order at `2026-10-07T04:06:56Z`,
+sequences 372–375: `read_requested` (`stage=read_latest`), `payload_received`,
+`utterances_created`, and `submission_started`. There is no matching
+`submission_summary`, so the trace is incomplete.
+
+The payload reports `selected_path=fallback`, `root_element=div`, all six
+structural marker flags false, and 73 blocks, all `unknown`. It reports zero
+user-owned and assistant-owned blocks. The utterance event reports 156 utterances,
+all `unknown`, with zero user-owned or assistant-owned utterances. The first
+submission is ordinal 1 of 156 with `ownership=unknown`; total actual submissions
+and completion are not present. The user's audible order is the user-provided
+acceptance fact; the trace does not label a block or utterance `user_owned`.
+
+```text
+FIRST_FIX_DID_NOT_REJECT_LIVE_FALLBACK=YES
+FIRST_FIX_TARGET_PATH_NOT_USED_IN_FAILED_ACCEPTANCE=NO
+SMALLEST_MISSING_BOUNDARY=INFERENCE: require positive response/assistant ownership for the selected fallback subroot or each emitted block; the current direct-child and marker guards admitted a fallback with 73 unknown blocks, while this trace has no positive ownership proof. Exact live DOM structure remains unconfirmed.
+TRACE_COMPLETE=NO
+PAGE_NOTIFICATION_CAUSAL_STATUS=UNCONFIRMED
+MACOS_NOTIFICATION_CAUSAL_STATUS=UNOBSERVED
+NEW_SPEECH_TRIGGERED=NO
+PRODUCT_CODE_CHANGED=NO
+TEST_CODE_CHANGED=NO
+FINAL_STATE=WAITING_FOR_WEB_FAILED_FIX_REVIEW
+```
+
 ### Focused GREEN result
 
 The bounded fallback change and regression are green. On 2026-10-07, the focused
@@ -348,11 +380,9 @@ and must not be modified, rebased, merged, or used by this task.
 
 ## Required next state
 
-Read only the latest existing post-fix manual-read trace for installed source
-`9c3337ed41722e259d3099cc7b6bd7787f44bf5b`, if available. Record schema-backed
-privacy-safe metadata and classify whether the failed acceptance used fallback,
-explicit, or article extraction. Do not infer missing fields. Stop at
-`WAITING_FOR_WEB_FAILED_FIX_REVIEW`; no new fix, RED, diagnostics, build,
+The latest existing post-fix manual-read trace was read and classified as fallback;
+its `unknown` ownership records do not prove which block contained user content.
+Stop at `WAITING_FOR_WEB_FAILED_FIX_REVIEW`; no new fix, RED, diagnostics, build,
 installation, implementation PR, merge, or full suite is authorized.
 
 ## Historical evidence
