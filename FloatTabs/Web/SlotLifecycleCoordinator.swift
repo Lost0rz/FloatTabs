@@ -13,7 +13,7 @@ final class SlotLifecycleCoordinator {
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
-    nonisolated static let defaultWarmResidentLimit = 2
+    nonisolated static let defaultWarmMemoryPressureTarget = 2
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
@@ -44,7 +44,7 @@ final class SlotLifecycleCoordinator {
     private var warmReleaseDelay: TimeInterval
     private let hiddenActiveGraceDelay: TimeInterval
     private let mediaProtectionPollDelay: TimeInterval
-    private let warmResidentLimit: Int
+    private let warmMemoryPressureTarget: Int
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
     private let onRuntimeReleased: RuntimeReleasedHandler
@@ -72,7 +72,7 @@ final class SlotLifecycleCoordinator {
         warmReleaseDelay: TimeInterval = SlotLifecycleCoordinator.defaultWarmReleaseDelay,
         hiddenActiveGraceDelay: TimeInterval = SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay,
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
-        warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
+        warmMemoryPressureTarget: Int = SlotLifecycleCoordinator.defaultWarmMemoryPressureTarget,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
@@ -89,7 +89,7 @@ final class SlotLifecycleCoordinator {
         self.warmReleaseDelay = max(warmReleaseDelay, 0)
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
-        self.warmResidentLimit = max(warmResidentLimit, 0)
+        self.warmMemoryPressureTarget = max(warmMemoryPressureTarget, 0)
         self.mediaPlayingQuery = mediaPlayingQuery ?? { [weak webViewPool] slotID, completion in
             guard let webViewPool else {
                 completion(false)
@@ -181,8 +181,6 @@ final class SlotLifecycleCoordinator {
                 ensureInactivePlan(for: profile, resetWarmRecency: false)
             }
         }
-
-        enforceWarmResidentLimit()
     }
 
     func setPanelVisible(_ visible: Bool, activeProfile: WebAppProfile?) {
@@ -373,13 +371,13 @@ final class SlotLifecycleCoordinator {
         )
         switch level {
         case .warning:
-            evictInactiveWarmUntilResidentLimit(
-                min(1, warmResidentLimit),
+            evictInactiveWarmForMemoryPressure(
+                targetResidentCount: min(1, warmMemoryPressureTarget),
                 protectionBoundary: "memory_pressure"
             )
         case .critical:
-            evictInactiveWarmUntilResidentLimit(
-                0,
+            evictInactiveWarmForMemoryPressure(
+                targetResidentCount: 0,
                 protectionBoundary: "memory_pressure"
             )
         }
@@ -589,11 +587,6 @@ final class SlotLifecycleCoordinator {
             delay = coldReleaseDelay
         }
 
-        if profile.residencyPolicy == .warm {
-            enforceWarmResidentLimit()
-            guard planMatches(plan, slotID: profile.id) else { return }
-        }
-
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self,
                   self.planMatches(plan, slotID: profile.id),
@@ -712,15 +705,11 @@ final class SlotLifecycleCoordinator {
         }
     }
 
-    private func enforceWarmResidentLimit() {
-        evictInactiveWarmUntilResidentLimit(warmResidentLimit)
-    }
-
-    private func evictInactiveWarmUntilResidentLimit(
-        _ targetLimit: Int,
+    private func evictInactiveWarmForMemoryPressure(
+        targetResidentCount: Int,
         protectionBoundary: String? = nil
     ) {
-        let target = max(targetLimit, 0)
+        let target = max(targetResidentCount, 0)
         let candidates = inactiveWarmRecency
             .filter { slotID, _ in
                 guard !isVisibleSlot(slotID) else {

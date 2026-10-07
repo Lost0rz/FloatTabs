@@ -1593,7 +1593,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(SlotLifecycleCoordinator.defaultColdReleaseDelay, 30)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmReleaseDelay, 120)
         XCTAssertEqual(SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay, 120)
-        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmResidentLimit, 2)
+        XCTAssertEqual(SlotLifecycleCoordinator.defaultWarmMemoryPressureTarget, 2)
     }
 
     func testWarmLifecycleDoesNotScheduleColdRelease() async throws {
@@ -1638,7 +1638,7 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmLRULimitKeepsOnlyTwoRecentInactiveResidents() throws {
+    func testThreeInactiveWarmRuntimesRemainUntilTTLWithoutMemoryPressure() throws {
         let pool = makePool()
         let profiles = ["A", "B", "C"].enumerated().map { index, name in
             var profile = makeProfile(name: name)
@@ -1654,7 +1654,7 @@ final class WebViewPoolTests: XCTestCase {
             webViewPool: pool,
             container: container,
             warmReleaseDelay: 60,
-            warmResidentLimit: 2,
+            warmMemoryPressureTarget: 2,
             mediaPlayingQuery: { _, completion in completion(false) },
             installsMemoryPressureSource: false
         )
@@ -1665,10 +1665,11 @@ final class WebViewPoolTests: XCTestCase {
             lifecycle.deactivate(profile: profile)
         }
 
-        XCTAssertEqual(pool.count, 2)
-        XCTAssertFalse(pool.contains(slotID: profiles[0].id))
-        XCTAssertTrue(pool.contains(slotID: profiles[1].id))
-        XCTAssertTrue(pool.contains(slotID: profiles[2].id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertEqual(pool.count, 3)
+        for profile in profiles {
+            XCTAssertTrue(pool.contains(slotID: profile.id))
+        }
     }
 
     func testBackgroundAudioPlayingProtectsColdUntilPlaybackStopsThenStartsFreshGrace() async throws {
@@ -1831,13 +1832,30 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(playing.id))
     }
 
-    func testWebContentRecoveryPolicyReloadsActiveAndDefersInactiveSlots() throws {
+    func testWebContentRecoveryPolicyUsesActivityAndResidency() throws {
+        for policy in [SlotResidencyPolicy.hot, .warm, .cold] {
+            XCTAssertEqual(
+                WebViewPool.recoveryDisposition(
+                    isActive: true,
+                    residencyPolicy: policy
+                ),
+                .reloadNow
+            )
+        }
         XCTAssertEqual(
-            WebViewPool.recoveryDisposition(isActive: true),
+            WebViewPool.recoveryDisposition(isActive: false, residencyPolicy: .hot),
             .reloadNow
         )
         XCTAssertEqual(
-            WebViewPool.recoveryDisposition(isActive: false),
+            WebViewPool.recoveryDisposition(isActive: false, residencyPolicy: .warm),
+            .deferUntilActivation
+        )
+        XCTAssertEqual(
+            WebViewPool.recoveryDisposition(isActive: false, residencyPolicy: .cold),
+            .deferUntilActivation
+        )
+        XCTAssertEqual(
+            WebViewPool.recoveryDisposition(isActive: false, residencyPolicy: nil),
             .deferUntilActivation
         )
     }

@@ -244,6 +244,76 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         super.tearDown()
     }
 
+    func testInactiveHotTerminationRecoversImmediatelyWithoutPresentationSideEffects() throws {
+        let store = makeTabStore(profiles: [
+            spec(name: "Selected", url: "https://example.com/selected"),
+            spec(name: "InactiveHot", url: "https://example.com/hot")
+        ])
+        let selected = try profile(named: "Selected", in: store)
+        let hot = try profile(named: "InactiveHot", in: store)
+        XCTAssertTrue(store.updateResourcePolicy(id: hot.id, residencyPolicy: .hot))
+        XCTAssertTrue(store.select(id: selected.id))
+
+        var loadedRequests: [URLRequest] = []
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let pool = WebViewPool(
+            onURLChange: { slotID, url in
+                store.updateCurrentURL(id: slotID, url: url)
+            },
+            initialLoad: { _, request in loadedRequests.append(request) },
+            isSlotActive: { store.activeTabID == $0 },
+            residencyPolicyProvider: { slotID in
+                store.profiles.first { $0.id == slotID }?.residencyPolicy
+            },
+            diagnostics: diagnostics
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            diagnostics: diagnostics
+        )
+        retainedControllers.append(controller)
+
+        let currentHot = try profile(named: "InactiveHot", in: store)
+        _ = try pool.webView(for: currentHot)
+        let requestCountBeforeTermination = loadedRequests.count
+        XCTAssertGreaterThanOrEqual(requestCountBeforeTermination, 1)
+        let selectedBefore = store.activeTabID
+        let visibilityBefore = controller.isVisible
+        let snapshotBefore = controller.runtimeDiagnosticSnapshot()
+
+        pool.handleContentProcessTermination(slotID: currentHot.id)
+
+        XCTAssertEqual(
+            loadedRequests.count,
+            requestCountBeforeTermination + 1,
+            "Inactive Hot runtime should start its existing recovery load immediately."
+        )
+        XCTAssertEqual(loadedRequests.last?.url, currentHot.currentURL)
+        XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+        XCTAssertEqual(store.activeTabID, selectedBefore)
+        XCTAssertEqual(controller.isVisible, visibilityBefore)
+
+        let snapshotAfter = controller.runtimeDiagnosticSnapshot()
+        for key in [
+            "requested_visibility",
+            "shell_visible",
+            "shell_key",
+            "source_visible",
+            "source_key",
+            "focus_target",
+            "focus_site",
+            "presentation_focus_generation",
+            "presentation_native_focus_pending",
+            "presentation_web_focus_pending"
+        ] {
+            XCTAssertEqual(snapshotAfter.fields[key], snapshotBefore.fields[key], key)
+        }
+    }
+
     func testStuckTabCaptureDoesNotCreateMissingRuntimeOrChangeSelection() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
@@ -1382,10 +1452,10 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingWarmReleaseCount, 0)
     }
 
-    // MARK: 4.3 Warm generating → TTL/LRU → Ready (compressed-delay lifecycle
+    // MARK: 4.3 Warm generating → TTL/memory pressure → Ready (compressed-delay lifecycle
     // reading the SAME real authority the production chain drives)
 
-    func testWarmGeneratingSurvivesTTLLRUAndBecomesReadyOffScreen() async throws {
+    func testWarmGeneratingSurvivesMemoryPressureAndBecomesReadyOffScreen() async throws {
         let (controller, coordinator, store, pool) = makeController(
             profiles: [
                 spec(name: "ChatWarm", url: "https://chatgpt.com/chat-warm"),
@@ -1399,11 +1469,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatWarm")
         let bridge = try attentionBridge(pool: pool, slot: chat)
 
-        // The ordinary pressure controls are materialized AFTER the last
-        // store selection: the controller's own lifecycle coordinator (with
-        // its production resident limit) must not reconcile them into its
-        // own plans and LRU-evict them before the compressed coordinator
-        // under test ever observes them.
+        // Materialize the pressure controls after the last store selection so
+        // the compressed coordinator below owns their inactive plans.
         let ordinaryA = try materializeRuntime(
             pool: pool, store: store, slotName: "OrdinaryA"
         ).profile
@@ -1415,7 +1482,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 0.05,
-            warmResidentLimit: 3,
+            warmMemoryPressureTarget: 3,
             attentionCoordinator: coordinator
         )
 
@@ -1426,8 +1493,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
-        // Proactive LRU pressure must respect the real authority: warning
-        // pressure evicts the oldest ELIGIBLE warm slot, never the
+        // Warning pressure evicts the oldest eligible warm slot, never the
         // Generating-protected runtime.
         lifecycle.handleMemoryPressure(.warning)
         XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
@@ -1491,7 +1557,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let bridge = try attentionBridge(pool: pool, slot: chat)
 
         // Materialized after the last store selection so the controller's
-        // own lifecycle never plans or evicts these pressure controls.
+        // own lifecycle never plans these pressure controls.
         let ordinaryA = try materializeRuntime(
             pool: pool, store: store, slotName: "OrdinaryA"
         ).profile
@@ -1502,7 +1568,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 60,
-            warmResidentLimit: 3,
+            warmMemoryPressureTarget: 3,
             attentionCoordinator: coordinator
         )
 
@@ -3078,7 +3144,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let lifecycle = makeCompressedLifecycle(
             pool: pool,
             warmReleaseDelay: 0.03,
-            warmResidentLimit: 2,
+            warmMemoryPressureTarget: 2,
             attentionCoordinator: coordinator,
             mediaPlayingQuery: { _, completion in completion(mediaPlaying) },
             mediaProtectionPollDelay: 0.005
@@ -5292,7 +5358,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     private func makeCompressedLifecycle(
         pool: WebViewPool,
         warmReleaseDelay: TimeInterval,
-        warmResidentLimit: Int,
+        warmMemoryPressureTarget: Int,
         attentionCoordinator: WebAttentionCoordinator,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         mediaProtectionPollDelay: TimeInterval = 0.01
@@ -5308,7 +5374,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             warmReleaseDelay: warmReleaseDelay,
             hiddenActiveGraceDelay: 120,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
-            warmResidentLimit: warmResidentLimit,
+            warmMemoryPressureTarget: warmMemoryPressureTarget,
             mediaPlayingQuery: mediaPlayingQuery,
             attentionProtectionQuery: { slotID in
                 attentionCoordinator.isAttentionProtected(slotID)

@@ -77,7 +77,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let lifecycle = makeLifecycle(
             pool: pool,
             warmReleaseDelay: 60,
-            warmResidentLimit: 1,
+            warmMemoryPressureTarget: 1,
             speechProtectionQuery: { $0 == protected.id }
         )
 
@@ -205,6 +205,34 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertTrue(pool.contains(slotID: profile.id))
     }
 
+    func testThreeInactiveWarmRuntimesRemainResidentBeforeConfiguredTTL() throws {
+        let pool = makePool()
+        let profiles = [
+            makeProfile(name: "WarmOne", policy: .warm),
+            makeProfile(name: "WarmTwo", policy: .warm),
+            makeProfile(name: "WarmThree", policy: .warm)
+        ]
+        for profile in profiles {
+            _ = try pool.webView(for: profile)
+        }
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 600
+        )
+
+        for profile in profiles {
+            makeInactive(lifecycle, profile: profile)
+        }
+
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        for profile in profiles {
+            XCTAssertTrue(
+                pool.contains(slotID: profile.id),
+                "Warm runtime \(profile.name) should remain resident until its TTL expires."
+            )
+        }
+    }
+
     func testGeneratingToReadyWhileInactiveRemainsProtected() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "GeneratingReady", policy: .cold)
@@ -259,13 +287,14 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let lifecycle = makeLifecycle(
             pool: pool,
             warmReleaseDelay: 60,
-            warmResidentLimit: 1,
+            warmMemoryPressureTarget: 1,
             attentionProtectionQuery: { protectedIDs.contains($0) }
         )
 
         makeInactive(lifecycle, profile: protected)
         makeInactive(lifecycle, profile: eligibleB)
         makeInactive(lifecycle, profile: eligibleC)
+        lifecycle.handleMemoryPressure(.warning)
 
         XCTAssertTrue(pool.contains(slotID: protected.id))
         XCTAssertFalse(pool.contains(slotID: eligibleB.id))
@@ -282,7 +311,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmResidentLimit: 2,
+            warmMemoryPressureTarget: 2,
             attentionProtectionQuery: { $0 == protected.id }
         )
 
@@ -305,7 +334,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
         let lifecycle = makeLifecycle(
             pool: pool,
-            warmResidentLimit: 2,
+            warmMemoryPressureTarget: 2,
             attentionProtectionQuery: { $0 == protected.id }
         )
 
@@ -673,7 +702,26 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testWarmRestartRefreshesRecencyForLaterLRUEviction() throws {
+    func testWarmPreferenceUpdateRebuildsExistingReleaseTimer() async throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "WarmPreferenceUpdate", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            warmReleaseDelay: 0.04
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        try await wait(milliseconds: 15)
+        lifecycle.updateReleaseDelays(coldReleaseDelay: 30, warmReleaseDelay: 0.10)
+
+        try await wait(milliseconds: 45)
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        try await wait(milliseconds: 75)
+        XCTAssertFalse(pool.contains(slotID: profile.id))
+    }
+
+    func testWarmRestartRefreshesRecencyForLaterMemoryPressureEviction() throws {
         let pool = makePool()
         let first = makeProfile(name: "First", policy: .warm)
         let second = makeProfile(name: "Second", policy: .warm)
@@ -685,19 +733,20 @@ final class WebAttentionLifecycleTests: XCTestCase {
         let lifecycle = makeLifecycle(
             pool: pool,
             warmReleaseDelay: 60,
-            warmResidentLimit: 2,
+            warmMemoryPressureTarget: 2,
             attentionProtectionQuery: { protectedIDs.contains($0) }
         )
 
         makeInactive(lifecycle, profile: first)
         makeInactive(lifecycle, profile: second)
+        makeInactive(lifecycle, profile: third)
         protectedIDs.remove(first.id)
         lifecycle.restartAfterAttentionProtectionEnded(profile: first)
-        makeInactive(lifecycle, profile: third)
+        lifecycle.handleMemoryPressure(.warning)
 
         XCTAssertTrue(pool.contains(slotID: first.id))
         XCTAssertFalse(pool.contains(slotID: second.id))
-        XCTAssertTrue(pool.contains(slotID: third.id))
+        XCTAssertFalse(pool.contains(slotID: third.id))
     }
 
     func testSelectedHiddenGeneratingKeepsHiddenGraceAndThenProtectsInactiveRuntime() async throws {
@@ -914,7 +963,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         warmReleaseDelay: TimeInterval = 120,
         hiddenActiveGraceDelay: TimeInterval = 120,
         mediaProtectionPollDelay: TimeInterval = 0.01,
-        warmResidentLimit: Int = 2,
+        warmMemoryPressureTarget: Int = 2,
         mediaPlayingQuery: SlotLifecycleCoordinator.MediaPlayingQuery? = nil,
         prepareRuntimeForRelease: @escaping SlotLifecycleCoordinator.RuntimeReleasePreparation = { _ in },
         onRuntimeReleased: @escaping SlotLifecycleCoordinator.RuntimeReleasedHandler = { _ in },
@@ -934,7 +983,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
             warmReleaseDelay: warmReleaseDelay,
             hiddenActiveGraceDelay: hiddenActiveGraceDelay,
             mediaProtectionPollDelay: mediaProtectionPollDelay,
-            warmResidentLimit: warmResidentLimit,
+            warmMemoryPressureTarget: warmMemoryPressureTarget,
             mediaPlayingQuery: mediaPlayingQuery,
             onRuntimeReleased: onRuntimeReleased,
             prepareRuntimeForRelease: prepareRuntimeForRelease,

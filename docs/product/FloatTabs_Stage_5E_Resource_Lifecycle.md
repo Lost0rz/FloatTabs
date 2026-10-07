@@ -9,7 +9,7 @@ Stage 5D interaction/rendering geometry remains frozen. Stage 5E changes only re
 User policy remains:
 
 - **Hot** — strict resident runtime; highest responsiveness; no proactive eviction.
-- **Warm** — opportunistic resident cache; optimized for the best memory/performance trade-off.
+- **Warm** — resident for the configured inactive retention period during normal operation, subject to memory-pressure release.
 - **Cold** — non-resident after a short grace; behaves like a persistent Web App bookmark when unused.
 
 Active/selected is not itself a Residency policy. Any Slot being actively used gets a complete live WKWebView regardless of Hot/Warm/Cold.
@@ -19,6 +19,7 @@ Active/selected is not itself a Residency policy. Any Slot being actively used g
 ### Hot
 
 - Never proactively release an inactive Hot WKWebView.
+- If WebKit terminates its content process, immediately reload the existing recovery URL in the background without selecting or presenting the Slot or taking keyboard/window focus.
 - `Pause When Inactive` may pause media, but the runtime remains resident.
 - `Allow Background Audio` allows media/background work and also remains resident.
 
@@ -26,7 +27,7 @@ Active/selected is not itself a Residency policy. Any Slot being actively used g
 
 - Inactive Warm remains resident as a short-lived cache.
 - Default inactive TTL: **120 seconds**.
-- At most **2 inactive non-media-protected Warm runtimes** remain resident; older Warm runtimes are evicted LRU-first.
+- The selected Warm retention setting is honored during normal operation; adding another inactive Warm runtime does not evict the oldest one before its TTL.
 - macOS memory-pressure warning reduces inactive Warm cache toward one; critical pressure evicts all inactive non-protected Warm runtimes.
 - Reactivating before eviction cancels the inactive plan and reuses the same WKWebView.
 
@@ -44,7 +45,7 @@ Hiding FloatTabs is not immediately equivalent to abandoning the selected page.
 - Showing FloatTabs during this grace cancels the hidden transition.
 - After the hidden grace, the selected Slot becomes lifecycle-inactive and follows its own policy:
   - Hot stays resident;
-  - Warm enters Warm TTL/LRU handling;
+  - Warm enters its configured TTL;
   - Cold enters its 30 second grace.
 
 ## 4. Background playback is an eviction protection condition
@@ -56,7 +57,7 @@ Hiding FloatTabs is not immediately equivalent to abandoning the selected page.
 - Playback state is checked periodically while protected.
 - When playback becomes paused/none, a fresh policy grace starts from that observation time.
 - Release deadlines re-check playback before destruction, preventing a page that started playing after deactivation from being killed at the old deadline.
-- Media-protected Warm is not evicted by Warm LRU or memory pressure.
+- Media-protected Warm is excluded from TTL release and memory-pressure eviction.
 
 ## 5. Runtime state visualization
 
@@ -83,7 +84,7 @@ Benchmark/debug state exposes:
 - media-protected Slot IDs;
 - hidden-active grace pending state.
 
-These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The final Warm TTL is intentionally compressed from 180 seconds to 120 seconds to favor memory efficiency while retaining a two-minute quick-return cache window.
+These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The default Warm TTL is 120 seconds, and Settings can select a longer retention. Ordinary inactivity honors that configured TTL; explicit memory pressure remains an early-release override.
 
 ## 7. Regression boundary
 

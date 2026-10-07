@@ -70,6 +70,7 @@ private enum WebRuntimeDiagnosticIdentitySequence {
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
+    typealias ResidencyPolicyProvider = @MainActor (UUID) -> SlotResidencyPolicy?
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     typealias AttentionEventHandler = @MainActor (UUID, ChatGPTAttentionEvent) -> Void
     typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
@@ -127,6 +128,7 @@ final class WebViewPool {
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
     private let isSlotActive: IsSlotActiveHandler
+    private let residencyPolicyProvider: ResidencyPolicyProvider
     private let downloadCoordinator: DownloadCoordinator
     private let browserProfileDataStoreProvider: BrowserProfileDataStoreProvider
     private let diagnostics: any RuntimeDiagnosticRecording
@@ -147,6 +149,7 @@ final class WebViewPool {
             webView.load(request)
         },
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
+        residencyPolicyProvider: @escaping ResidencyPolicyProvider = { _ in nil },
         downloadCoordinator: DownloadCoordinator? = nil,
         committedURLProvider: CommittedURLProvider? = nil,
         browserProfileDataStoreProvider: BrowserProfileDataStoreProvider = BrowserProfileDataStoreProvider(),
@@ -161,6 +164,7 @@ final class WebViewPool {
         self.onURLChange = onURLChange
         load = initialLoad
         self.isSlotActive = isSlotActive
+        self.residencyPolicyProvider = residencyPolicyProvider
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.committedURLProvider = committedURLProvider
         self.browserProfileDataStoreProvider = browserProfileDataStoreProvider
@@ -532,17 +536,25 @@ final class WebViewPool {
         Set(webViews.keys)
     }
 
-    static func recoveryDisposition(isActive: Bool) -> WebContentRecoveryDisposition {
-        isActive ? .reloadNow : .deferUntilActivation
+    static func recoveryDisposition(
+        isActive: Bool,
+        residencyPolicy: SlotResidencyPolicy?
+    ) -> WebContentRecoveryDisposition {
+        if isActive || residencyPolicy == .hot {
+            return .reloadNow
+        }
+        return .deferUntilActivation
     }
 
     func handleContentProcessTermination(slotID: UUID) {
         guard let webView = webViews[slotID] else { return }
+        let isActive = isSlotActive(slotID)
+        let residencyPolicy = residencyPolicyProvider(slotID)
 
         var terminationFields = diagnostics.environmentFields()
         terminationFields.merge([
             "slot_id": .string(slotID.uuidString),
-            "is_active": .bool(isSlotActive(slotID))
+            "is_active": .bool(isActive)
         ]) { _, new in new }
         terminationFields.merge(diagnosticSnapshotFields(for: slotID)) { _, new in new }
         diagnostics.record(
@@ -559,7 +571,10 @@ final class WebViewPool {
         responseBridges[slotID]?.handleRuntimeReplacement()
         calibreReaderBridges[slotID]?.handleRuntimeReplacement()
 
-        switch Self.recoveryDisposition(isActive: isSlotActive(slotID)) {
+        switch Self.recoveryDisposition(
+            isActive: isActive,
+            residencyPolicy: residencyPolicy
+        ) {
         case .reloadNow:
             deferredReloadSlotIDs.remove(slotID)
             guard let recoveryURL = recoveryURL(slotID: slotID, webView: webView) else {
