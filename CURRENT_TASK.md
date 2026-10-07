@@ -2,8 +2,8 @@
 
 **Task ID:** FT-SPEECH-001
 **Title:** Tag-Agnostic Conversation Turn Fix V3
-**Status:** `ACTIVE — TAG_AGNOSTIC_CONVERSATION_TURN_FIX_V3`
-**Mode:** `TEST_FIRST_MINIMAL_PRODUCTION_FIX`
+**Status:** `WAITING_FOR_USER_FIX_V3_ACCEPTANCE`
+**Mode:** `QA_INSTALLED_WAITING_FOR_HUMAN_ACCEPTANCE`
 
 ## Objective
 
@@ -149,6 +149,34 @@ IMPLEMENTATION_PR_AUTHORIZED=NO
 MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
 ```
+
+## Execution result — 2026-10-07
+
+```text
+START_CONTROL_HEAD=e3526d1312a91cceffdf815101c6a336618a43ce
+EXECUTION_BRANCH=codex/ft-speech-001-v2
+V3_RED_TEST=testRegenerateFallbackAcceptsTagAgnosticSemanticConversationTurnSection
+FIRST_RUN_RED=YES
+RED_ACTUAL=payload nil / no response
+RED_EXPECTED=Latest assistant response extracted from the section semantic turn
+V3_PRODUCTION_FIX_HEAD=976b6816c84fdf5e03ae5d089d402927c16626c3
+TAG_AGNOSTIC_TURN_CONTRACT=PASS
+GENERIC_ANCESTOR_FAIL_CLOSED_TEST=PASS
+FOCUSED_EXTRACTION_TESTS=PASS (44)
+FOCUSED_SPEECH_TESTS=PASS (98)
+QA_BUILD=PASS (Debug, arm64)
+APP_PATH=/Applications/FloatTabs.app
+INSTALLED_SOURCE_HEAD=976b6816c84fdf5e03ae5d089d402927c16626c3
+INSTALLED_VERSION_BUILD=0.5.2 (20)
+INSTALLED_ARCH=arm64
+RUNNING_PID=45659
+USER_DATA_PRESERVED=YES
+READ_LATEST_RESPONSE_TRIGGERED_BY_EXECUTOR=NO
+```
+
+The pre-install inventory found 26 FloatTabs Application Support entries, 3,285 WebKit entries, 9 cookie files, and 9 diagnostic files. After installation all pre-existing paths remained; cookie files, the profiles/slots configuration, preferences, and diagnostic history were verified unchanged/preserved. No user or WebKit data was cleared or reset.
+
+The V3 QA app is installed and running. Stop here for one human Read Latest Response acceptance; do not trigger speech, rebuild, reinstall, or start another fix before the user result is recorded.
 
 ## Acceptance
 

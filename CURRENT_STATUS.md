@@ -10,7 +10,7 @@
 
 ## Mode
 
-**MODE: ACTIVE — TAG_AGNOSTIC_CONVERSATION_TURN_FIX_V3**
+**MODE: WAITING_FOR_USER_FIX_V3_ACCEPTANCE**
 
 ## Production authority
 
@@ -18,7 +18,9 @@
 - Expected upstream: `origin/fix/chatgpt-speech-response-ownership`
 - Accepted main base: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
 - V2 implementation commit: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
-- Last installed QA source: `3e707eb4725bc4549daf991d4d08ffa9f50745b7`
+- V3 implementation commit: `976b6816c84fdf5e03ae5d089d402927c16626c3`
+- Last installed QA source: `976b6816c84fdf5e03ae5d089d402927c16626c3`
+- Execution branch: `codex/ft-speech-001-v2`, based on the authorized implementation branch at `e3526d1312a91cceffdf815101c6a336618a43ce`
 - PR #102: separate MemoX work; excluded and unchanged
 
 ## FT-SPEECH-001 accepted facts
@@ -69,6 +71,22 @@ EXPECTED_SAFE_FIX=TAG_AGNOSTIC_SEMANTIC_CONVERSATION_TURN_SELECTOR
 
 No topology probe is required before V3.
 
+## V3 QA result
+
+```text
+V3_RED=PASS
+FIRST_RUN_RED=YES
+RED_ACTUAL=payload nil / no response for section semantic turn
+V3_FOCUSED_TESTS=PASS (142 total: 44 extraction, 98 speech coordinator)
+V3_QA_BUILD=PASS (Debug, arm64, version 0.5.2 build 20)
+V3_INSTALLED_SOURCE=976b6816c84fdf5e03ae5d089d402927c16626c3
+V3_RUNNING_PID=45659
+USER_DATA_PRESERVED=YES
+READ_LATEST_RESPONSE_TRIGGERED_BY_EXECUTOR=NO
+```
+
+Before/after verification retained every pre-existing path in FloatTabs Application Support and WebKit storage, all 9 cookie files byte-for-byte, the profiles/slots configuration and preferences byte-for-byte, and all 9 existing diagnostic histories. No existing data was cleared or reset.
+
 ## V3 production contract
 
 - Preserve explicit assistant-role roots.
@@ -79,15 +97,17 @@ No topology probe is required before V3.
 - If no qualifying semantic conversation-turn exists, fail closed.
 - Never restore arbitrary ancestor fallback.
 
-## Authorization
+## Authorization and current stop point
 
-Authorized now:
+The following V3 work was authorized and is complete:
 
 1. one formal RED proving a `<section data-testid="conversation-turn-…">` Regenerate turn is incorrectly rejected by V2;
 2. minimal tag-agnostic selector fix in `ChatGPTResponseExtraction.swift` only;
 3. focused extraction + relevant speech regression tests;
 4. exact-head arm64 Debug build/install at `/Applications/FloatTabs.app` preserving user state;
 5. stop for one human acceptance click.
+
+Current state is `WAITING_FOR_USER_FIX_V3_ACCEPTANCE`. The next action is one user-run Read Latest Response acceptance; do not trigger speech, rebuild, reinstall, or begin another fix before that result is recorded.
 
 Not authorized:
 
@@ -102,10 +122,9 @@ MERGE_AUTHORIZED=NO
 FULL_FINAL_SUITE_AUTHORIZED=NO
 ```
 
-## Required next state
-
-After V3 focused GREEN and verified QA installation:
+## Current state
 
 ```text
-FINAL_STATE=WAITING_FOR_USER_FIX_V3_ACCEPTANCE
+STATUS=WAITING_FOR_USER_FIX_V3_ACCEPTANCE
+NEXT_ACTION=USER_V3_LIVE_ACCEPTANCE
 ```
