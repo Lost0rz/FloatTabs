@@ -118,6 +118,7 @@ struct ChatGPTIncidentHealthProbeValues: Equatable, Sendable {
     let loadingIndicatorPresent: Bool
     let loadingIndicatorVisible: Bool
     let conversationLoadErrorPresent: Bool
+    let responseOwnership: ChatGPTResponseOwnershipProbeValues?
 
     static func parse(_ value: Any) -> ChatGPTIncidentHealthProbeValues? {
         guard let fields = value as? [String: Any],
@@ -133,6 +134,13 @@ struct ChatGPTIncidentHealthProbeValues: Equatable, Sendable {
               let conversationLoadErrorPresent = fields["conversation_load_error_present"] as? Bool else {
             return nil
         }
+        let responseOwnership: ChatGPTResponseOwnershipProbeValues?
+        if let ownershipFields = fields["response_ownership"] {
+            responseOwnership = ChatGPTResponseOwnershipProbeValues.parse(ownershipFields)
+            guard responseOwnership != nil else { return nil }
+        } else {
+            responseOwnership = nil
+        }
         return ChatGPTIncidentHealthProbeValues(
             documentReadyState: documentReadyState,
             visibilityState: visibilityState,
@@ -140,12 +148,13 @@ struct ChatGPTIncidentHealthProbeValues: Equatable, Sendable {
             composerPresent: composerPresent,
             loadingIndicatorPresent: loadingIndicatorPresent,
             loadingIndicatorVisible: loadingIndicatorVisible,
-            conversationLoadErrorPresent: conversationLoadErrorPresent
+            conversationLoadErrorPresent: conversationLoadErrorPresent,
+            responseOwnership: responseOwnership
         )
     }
 
     var diagnosticFields: [String: RuntimeDiagnosticValue] {
-        [
+        var fields: [String: RuntimeDiagnosticValue] = [
             "document_ready_state": .string(documentReadyState),
             "visibility_state": .string(visibilityState),
             "conversation_shell_present": .bool(conversationShellPresent),
@@ -154,6 +163,120 @@ struct ChatGPTIncidentHealthProbeValues: Equatable, Sendable {
             "loading_indicator_visible": .bool(loadingIndicatorVisible),
             "conversation_load_error_present": .bool(conversationLoadErrorPresent)
         ]
+        if let responseOwnership {
+            fields.merge(responseOwnership.diagnosticFields) { _, new in new }
+        }
+        return fields
+    }
+}
+
+/// Temporary, privacy-safe structural metadata emitted only by the explicit
+/// DEBUG incident snapshot. Values are parsed into closed categories before
+/// they can reach diagnostics; this model intentionally has no text fields.
+struct ChatGPTResponseOwnershipProbeValues: Equatable, Sendable {
+    let selectedPath: String
+    let candidateTagCategory: String
+    let candidateRoleCategory: String
+    let candidateTestIDCategory: String
+    let candidateAncestorDepth: Int?
+    let responseActionCount: Int
+    let semanticBlockCount: Int
+    let hasUserMarker: Bool
+    let hasAssistantMarker: Bool
+    let hasStatus: Bool
+    let hasAlert: Bool
+    let hasLiveRegion: Bool
+    let hasComposer: Bool
+    let hasMultipleTurns: Bool
+    let notificationSemanticBlockPresent: Bool
+    let structuredBlocksRootIsCandidate: Bool
+
+    static func parse(_ value: Any) -> ChatGPTResponseOwnershipProbeValues? {
+        guard let fields = value as? [String: Any],
+              Set(fields.keys) == Set([
+                "version", "selected_path", "candidate_tag_category", "candidate_role_category",
+                "candidate_testid_category", "candidate_ancestor_depth", "response_action_count",
+                "semantic_block_count", "has_user_marker", "has_assistant_marker", "has_status",
+                "has_alert", "has_live_region", "has_composer", "has_multiple_turns",
+                "notification_semantic_block_present", "structured_blocks_root_is_candidate"
+              ]),
+              fields["version"] as? Int == 1,
+              let selectedPath = fields["selected_path"] as? String,
+              ["explicit", "article", "fallback", "none"].contains(selectedPath),
+              let candidateTagCategory = fields["candidate_tag_category"] as? String,
+              ["article", "div", "section", "main", "other", "none"].contains(candidateTagCategory),
+              let candidateRoleCategory = fields["candidate_role_category"] as? String,
+              ["assistant", "user", "status", "alert", "textbox", "button", "other", "none"]
+                .contains(candidateRoleCategory),
+              let candidateTestIDCategory = fields["candidate_testid_category"] as? String,
+              ["conversation_turn", "message", "composer", "other", "none"]
+                .contains(candidateTestIDCategory),
+              let responseActionCount = boundedCount(fields["response_action_count"]),
+              let semanticBlockCount = boundedCount(fields["semantic_block_count"]),
+              let hasUserMarker = fields["has_user_marker"] as? Bool,
+              let hasAssistantMarker = fields["has_assistant_marker"] as? Bool,
+              let hasStatus = fields["has_status"] as? Bool,
+              let hasAlert = fields["has_alert"] as? Bool,
+              let hasLiveRegion = fields["has_live_region"] as? Bool,
+              let hasComposer = fields["has_composer"] as? Bool,
+              let hasMultipleTurns = fields["has_multiple_turns"] as? Bool,
+              let notificationSemanticBlockPresent = fields["notification_semantic_block_present"] as? Bool,
+              let structuredBlocksRootIsCandidate = fields["structured_blocks_root_is_candidate"] as? Bool else {
+            return nil
+        }
+        let candidateAncestorDepth: Int?
+        if let depth = fields["candidate_ancestor_depth"] as? Int {
+            guard (0...64).contains(depth) else { return nil }
+            candidateAncestorDepth = depth
+        } else if fields["candidate_ancestor_depth"] is NSNull {
+            candidateAncestorDepth = nil
+        } else {
+            return nil
+        }
+        return ChatGPTResponseOwnershipProbeValues(
+            selectedPath: selectedPath,
+            candidateTagCategory: candidateTagCategory,
+            candidateRoleCategory: candidateRoleCategory,
+            candidateTestIDCategory: candidateTestIDCategory,
+            candidateAncestorDepth: candidateAncestorDepth,
+            responseActionCount: responseActionCount,
+            semanticBlockCount: semanticBlockCount,
+            hasUserMarker: hasUserMarker,
+            hasAssistantMarker: hasAssistantMarker,
+            hasStatus: hasStatus,
+            hasAlert: hasAlert,
+            hasLiveRegion: hasLiveRegion,
+            hasComposer: hasComposer,
+            hasMultipleTurns: hasMultipleTurns,
+            notificationSemanticBlockPresent: notificationSemanticBlockPresent,
+            structuredBlocksRootIsCandidate: structuredBlocksRootIsCandidate
+        )
+    }
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        [
+            "selected_path": .string(selectedPath),
+            "candidate_tag_category": .string(candidateTagCategory),
+            "candidate_role_category": .string(candidateRoleCategory),
+            "candidate_testid_category": .string(candidateTestIDCategory),
+            "candidate_ancestor_depth": candidateAncestorDepth.map { .integer(Int64($0)) } ?? .null,
+            "response_action_count": .integer(Int64(responseActionCount)),
+            "semantic_block_count": .integer(Int64(semanticBlockCount)),
+            "has_user_marker": .bool(hasUserMarker),
+            "has_assistant_marker": .bool(hasAssistantMarker),
+            "has_status": .bool(hasStatus),
+            "has_alert": .bool(hasAlert),
+            "has_live_region": .bool(hasLiveRegion),
+            "has_composer": .bool(hasComposer),
+            "has_multiple_turns": .bool(hasMultipleTurns),
+            "notification_semantic_block_present": .bool(notificationSemanticBlockPresent),
+            "structured_blocks_root_is_candidate": .bool(structuredBlocksRootIsCandidate)
+        ]
+    }
+
+    private static func boundedCount(_ value: Any?) -> Int? {
+        guard let count = value as? Int, (0...255).contains(count) else { return nil }
+        return count
     }
 }
 
@@ -494,6 +617,150 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// constants.
     static let scriptSource = makeScriptSource()
 
+#if DEBUG
+    /// Temporary Gate 1 callable. The page's text nodes are never read; the
+    /// result contains only fixed categories, booleans and bounded counts.
+    static let debugResponseOwnershipSnapshotProbeSource = """
+    globalThis.__floatTabsDebugResponseOwnershipSnapshotV1 = () => {
+      const explicitSelector =
+        '[data-message-author-role="assistant"],[data-message-role="assistant"]';
+      const articleSelector = 'article[data-testid*="conversation-turn"]';
+      const turnMarkerSelector =
+        '[data-message-author-role="user"],[data-message-role="user"],' +
+        '[data-message-author-role="assistant"],[data-message-role="assistant"],' +
+        'article[data-testid*="conversation-turn"]';
+      const composerSelector =
+        '#prompt-textarea, textarea[aria-label="Message ChatGPT"], ' +
+        '[contenteditable="true"][data-testid*="composer"], main [role="textbox"]';
+      const semanticSelector =
+        'h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,table,math,' +
+        '.katex-display,.katex,mjx-container,' +
+        '[data-math],[data-latex],[data-tex],[role="math"]';
+      const explicitNodes = Array.from(document.querySelectorAll(explicitSelector));
+      const articleNodes = explicitNodes.length ? [] : Array.from(
+        document.querySelectorAll(articleSelector)
+      ).filter((article) => {
+        const role = article.getAttribute('data-message-author-role')
+          || article.querySelector('[data-message-author-role]')
+            ?.getAttribute('data-message-author-role');
+        return role === 'assistant' && isRendered(article);
+      });
+      const candidate = latestAssistantResponseRoot();
+      const selectedPath = explicitNodes.length ? 'explicit'
+        : articleNodes.length ? 'article'
+        : candidate ? 'fallback' : 'none';
+      const nodesIncludingRoot = (root, selector) => {
+        if (!root) return [];
+        return (root.matches && root.matches(selector) ? [root] : [])
+          .concat(Array.from(root.querySelectorAll(selector)));
+      };
+      const tagCategory = (root) => {
+        if (!root) return 'none';
+        const tag = String(root.tagName || '').toLowerCase();
+        return ['article', 'div', 'section', 'main'].includes(tag) ? tag : 'other';
+      };
+      const roleCategory = (root) => {
+        if (!root) return 'none';
+        const value = (root.getAttribute('role')
+          || root.getAttribute('data-message-author-role')
+          || root.getAttribute('data-message-role') || '').toLowerCase();
+        return ['assistant', 'user', 'status', 'alert', 'textbox', 'button'].includes(value)
+          ? value : value ? 'other' : 'none';
+      };
+      const testIDCategory = (root) => {
+        if (!root) return 'none';
+        if (root.matches('article[data-testid*="conversation-turn"], [data-testid="conversation-turn"]')) {
+          return 'conversation_turn';
+        }
+        if (root.matches('[data-testid*="message"]')) return 'message';
+        if (root.matches('[data-testid*="composer"]')) return 'composer';
+        return root.hasAttribute('data-testid') ? 'other' : 'none';
+      };
+      const excludedWithinRoot = (node, root) => {
+        let current = node;
+        while (current) {
+          if (current.matches && current.matches(RESPONSE_EXCLUDED_SELECTOR)) return true;
+          if (current === root) return false;
+          current = current.parentElement;
+        }
+        return true;
+      };
+      const semanticNodes = candidate
+        ? nodesIncludingRoot(candidate, semanticSelector).filter((node) =>
+            isRendered(node) && !excludedWithinRoot(node, candidate)
+          )
+        : [];
+      const topLevelSemanticNodes = semanticNodes.filter((node) =>
+        !semanticNodes.some((other) => other !== node && other.contains(node))
+      );
+      const notificationNodes = candidate
+        ? nodesIncludingRoot(candidate, '[role="status"],[role="alert"],[aria-live]')
+        : [];
+      const notificationSemanticBlockPresent = topLevelSemanticNodes.some((node) =>
+        notificationNodes.some((notification) =>
+          notification === node || notification.contains(node)
+        )
+      );
+      let ancestorDepth = null;
+      if (candidate && selectedPath === 'fallback') {
+        const controls = Array.from(
+          document.querySelectorAll('button,[role="button"]')
+        ).filter((element) => isResponseAction(element));
+        for (let index = controls.length - 1; index >= 0 && ancestorDepth === null; index -= 1) {
+          let ancestor = controls[index].parentElement;
+          let depth = 0;
+          while (ancestor
+                 && ancestor !== document.body
+                 && ancestor !== document.documentElement) {
+            depth += 1;
+            if (ancestor === candidate) {
+              ancestorDepth = Math.min(depth, 64);
+              break;
+            }
+            ancestor = ancestor.parentElement;
+          }
+        }
+      }
+      const turnMarkers = nodesIncludingRoot(candidate, turnMarkerSelector);
+      const topLevelTurnMarkers = turnMarkers.filter((node) =>
+        !turnMarkers.some((other) => other !== node && other.contains(node))
+      );
+      const has = (selector) => Boolean(candidate && (
+        (candidate.matches && candidate.matches(selector)) || candidate.querySelector(selector)
+      ));
+      const actionCount = candidate ? responseActions(candidate).length : 0;
+      return {
+        version: 1,
+        selected_path: selectedPath,
+        candidate_tag_category: tagCategory(candidate),
+        candidate_role_category: roleCategory(candidate),
+        candidate_testid_category: testIDCategory(candidate),
+        candidate_ancestor_depth: ancestorDepth,
+        response_action_count: Math.min(actionCount, 255),
+        semantic_block_count: Math.min(topLevelSemanticNodes.length, 255),
+        has_user_marker: has('[data-message-author-role="user"],[data-message-role="user"]'),
+        has_assistant_marker: has('[data-message-author-role="assistant"],[data-message-role="assistant"]'),
+        has_status: has('[role="status"]'),
+        has_alert: has('[role="alert"]'),
+        has_live_region: has('[aria-live]'),
+        has_composer: has(composerSelector),
+        has_multiple_turns: topLevelTurnMarkers.length > 1,
+        notification_semantic_block_present: notificationSemanticBlockPresent,
+        structured_blocks_root_is_candidate: candidate !== null
+      };
+    };
+    """
+    private static let incidentOwnershipProbeExpression = """
+    (() => {
+      const probe = globalThis.__floatTabsDebugResponseOwnershipSnapshotV1;
+      return typeof probe === 'function' ? probe() : null;
+    })()
+    """
+#else
+    private static let debugResponseOwnershipSnapshotProbeSource = ""
+    private static let incidentOwnershipProbeExpression = "null"
+#endif
+
     /// The explicit incident probe reads only fixed booleans and bounded
     /// document-state enums. It never serializes DOM text or page identity.
     static let incidentHealthProbeScript = """
@@ -515,6 +782,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
       const pageError = document.querySelector(
         '[data-testid="conversation-error"], [data-testid="conversation-error-banner"], main [role="alert"]'
       );
+      const responseOwnership = \(incidentOwnershipProbeExpression);
       const isVisible = (element) => {
         if (!element || !element.isConnected || element.hidden ||
             element.getAttribute("aria-hidden") === "true" ||
@@ -531,7 +799,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         composer_present: Boolean(composer),
         loading_indicator_present: Boolean(loading),
         loading_indicator_visible: isVisible(loading),
-        conversation_load_error_present: Boolean(pageError)
+        conversation_load_error_present: Boolean(pageError),
+        ...(responseOwnership ? { response_ownership: responseOwnership } : {})
       };
     })()
     """
@@ -556,6 +825,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private static func makeScriptSource() -> String {
         let hostGate = hostGateExpression()
+#if DEBUG
+        let debugOwnershipProbeSource = debugResponseOwnershipSnapshotProbeSource
+#else
+        let debugOwnershipProbeSource = ""
+#endif
         return """
         (() => {
           "use strict";
@@ -785,6 +1059,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           };
 
           \(ChatGPTResponseIdentity.sharedDOMHelperSource)
+
+          \(debugOwnershipProbeSource)
 
           const evaluate = () => {
             const generating = isGenerating();

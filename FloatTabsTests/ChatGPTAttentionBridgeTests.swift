@@ -724,6 +724,97 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         ]
     }
 
+    private func captureOwnershipSnapshot(
+        _ body: String,
+        isolatedWorldSetupScript: String? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> ChatGPTResponseOwnershipProbeValues {
+        let bridge = ChatGPTAttentionBridge(slotID: UUID()) { _, _ in }
+        let configuration = WKWebViewConfiguration()
+        bridge.install(into: configuration.userContentController)
+        if let isolatedWorldSetupScript {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: isolatedWorldSetupScript,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: true,
+                    in: ChatGPTAttentionBridge.contentWorld
+                )
+            )
+        }
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        bridge.attach(to: webView)
+        defer {
+            bridge.invalidate()
+            webView.stopLoading()
+        }
+        let fixture = """
+        <!doctype html><html><head><style>
+          body, main, article, div { display: block; }
+          p { display: block; width: 20px; height: 1px; }
+          button { display: block; width: 100px; height: 20px; }
+          textarea { display: block; width: 100px; height: 20px; }
+        </style></head><body>\(body)</body></html>
+        """
+        webView.loadHTMLString(fixture, baseURL: URL(string: "https://chatgpt.com/")!)
+
+        let admitted = await waitUntil(timeout: 10) {
+            bridge.diagnosticSnapshotFields["attention_document_admitted"] == .bool(true)
+        }
+        XCTAssertTrue(admitted, file: file, line: line)
+        guard admitted else { throw XCTSkip("ChatGPT fixture document was not admitted") }
+
+        let result: ChatGPTIncidentHealthProbeResult = await withCheckedContinuation { continuation in
+            bridge.captureIncidentHealthSnapshot(
+                for: webView,
+                contextIsCurrent: { true }
+            ) { result in
+                continuation.resume(returning: result)
+            }
+        }
+        XCTAssertEqual(result.outcome, .success, file: file, line: line)
+        return try XCTUnwrap(result.values?.responseOwnership, file: file, line: line)
+    }
+
+    private func assertOwnershipProbeSchema(
+        _ snapshot: ChatGPTResponseOwnershipProbeValues,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let fields = snapshot.diagnosticFields
+        XCTAssertEqual(Set(fields.keys), Set([
+            "selected_path", "candidate_tag_category", "candidate_role_category",
+            "candidate_testid_category", "candidate_ancestor_depth", "response_action_count",
+            "semantic_block_count", "has_user_marker", "has_assistant_marker", "has_status",
+            "has_alert", "has_live_region", "has_composer", "has_multiple_turns",
+            "notification_semantic_block_present", "structured_blocks_root_is_candidate"
+        ]), file: file, line: line)
+        for key in [
+            "has_user_marker", "has_assistant_marker", "has_status", "has_alert",
+            "has_live_region", "has_composer", "has_multiple_turns",
+            "notification_semantic_block_present", "structured_blocks_root_is_candidate"
+        ] {
+            guard case .bool? = fields[key] else {
+                XCTFail("Expected boolean structural field: \(key)", file: file, line: line)
+                continue
+            }
+        }
+        XCTAssertFalse(fields.keys.contains { key in
+            ["text", "content", "answer", "html", "url", "message_id"]
+                .contains { key.localizedCaseInsensitiveContains($0) }
+        }, file: file, line: line)
+        XCTAssertEqual(
+            RuntimeDiagnosticPrivacy.sanitize(fields: fields, mode: .verbose),
+            fields,
+            file: file,
+            line: line
+        )
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 1,
         _ predicate: @MainActor () -> Bool
@@ -868,6 +959,85 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(probe.contains("postMessage"))
         XCTAssertFalse(probe.contains("setTimeout"))
         XCTAssertFalse(probe.contains("MutationObserver"))
+    }
+
+    func testDebugOwnershipProbeReportsExplicitPathWithClosedSchema() async throws {
+        let snapshot = try await captureOwnershipSnapshot(
+            "<main><article data-message-author-role=\"assistant\"><p></p></article></main>"
+        )
+
+        XCTAssertEqual(snapshot.selectedPath, "explicit")
+        XCTAssertEqual(snapshot.candidateTagCategory, "article")
+        XCTAssertTrue(snapshot.hasAssistantMarker)
+        XCTAssertTrue(snapshot.structuredBlocksRootIsCandidate)
+        assertOwnershipProbeSchema(snapshot)
+    }
+
+    func testDebugOwnershipProbeReportsArticleBranch() async throws {
+        let snapshot = try await captureOwnershipSnapshot(
+            """
+            <main><article data-testid=\"conversation-turn\" data-message-author-role=\"assistant\"><p></p></article></main>
+            """,
+            isolatedWorldSetupScript: """
+            const originalQuerySelectorAll = document.querySelectorAll.bind(document);
+            document.querySelectorAll = (selector) =>
+              selector === '[data-message-author-role="assistant"],[data-message-role="assistant"]'
+                ? [] : originalQuerySelectorAll(selector);
+            """
+        )
+
+        XCTAssertEqual(snapshot.selectedPath, "article")
+        XCTAssertEqual(snapshot.candidateTestIDCategory, "conversation_turn")
+        XCTAssertTrue(snapshot.hasAssistantMarker)
+        XCTAssertTrue(snapshot.structuredBlocksRootIsCandidate)
+        assertOwnershipProbeSchema(snapshot)
+    }
+
+    func testDebugOwnershipProbeReportsFallbackAndOnlyStructuralBooleans() async throws {
+        let snapshot = try await captureOwnershipSnapshot(
+            """
+            <main><div data-testid=\"fallback-candidate\">
+              <article data-message-author-role=\"user\"><p></p></article>
+              <article data-message-role=\"user\"><p></p></article>
+              <article><p></p></article>
+              <div role=\"status\"><p></p></div>
+              <div role=\"alert\"><p></p></div>
+              <div aria-live=\"polite\"><p></p></div>
+              <textarea id=\"prompt-textarea\"></textarea>
+              <div><button aria-label=\"Regenerate response\"></button></div>
+            </div></main>
+            """
+        )
+
+        XCTAssertEqual(snapshot.selectedPath, "fallback")
+        XCTAssertEqual(snapshot.candidateTagCategory, "div")
+        XCTAssertEqual(snapshot.responseActionCount, 1)
+        XCTAssertEqual(snapshot.candidateAncestorDepth, 2)
+        XCTAssertTrue(snapshot.hasUserMarker)
+        XCTAssertFalse(snapshot.hasAssistantMarker)
+        XCTAssertTrue(snapshot.hasStatus)
+        XCTAssertTrue(snapshot.hasAlert)
+        XCTAssertTrue(snapshot.hasLiveRegion)
+        XCTAssertTrue(snapshot.hasComposer)
+        XCTAssertTrue(snapshot.hasMultipleTurns)
+        XCTAssertTrue(snapshot.notificationSemanticBlockPresent)
+        XCTAssertGreaterThan(snapshot.semanticBlockCount, 0)
+        XCTAssertTrue(snapshot.structuredBlocksRootIsCandidate)
+        assertOwnershipProbeSchema(snapshot)
+    }
+
+    func testDebugOwnershipProbeReportsNoneWhenThereIsNoCandidate() async throws {
+        let snapshot = try await captureOwnershipSnapshot("<main><p></p></main>")
+
+        XCTAssertEqual(snapshot.selectedPath, "none")
+        XCTAssertEqual(snapshot.candidateTagCategory, "none")
+        XCTAssertEqual(snapshot.candidateRoleCategory, "none")
+        XCTAssertEqual(snapshot.candidateTestIDCategory, "none")
+        XCTAssertNil(snapshot.candidateAncestorDepth)
+        XCTAssertEqual(snapshot.responseActionCount, 0)
+        XCTAssertEqual(snapshot.semanticBlockCount, 0)
+        XCTAssertFalse(snapshot.structuredBlocksRootIsCandidate)
+        assertOwnershipProbeSchema(snapshot)
     }
 
     func testAttentionScriptUsesSharedResponseIdentityAndStopButtonPolicy() {
