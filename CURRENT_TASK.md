@@ -1,134 +1,65 @@
 # FloatTabs Current Task
 
-**Task ID:** FT-SPEECH-001
-**Title:** Implementation PR and Merge Gate
-**Status:** `READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE`
-**Mode:** `PR_CREATION_AND_EXACT_HEAD_CI_GATE`
+**Task ID:** `NONE`
+**Title:** No active product-development task
+**Status:** `PAUSED`
+**Mode:** `OBSERVATION_ONLY`
 
-## Objective
+## Authority
 
-Create the implementation PR for the already human-accepted and independently audited `Read Latest Response` fix, then use GitHub's required exact-head CI as the final merge gate. Do not modify the accepted product behavior.
+There is currently no authorized FloatTabs product-development task.
 
-## Accepted implementation
+The previous task, FT-SPEECH-001, is closed because PR #115 merged into `main`.
 
 ```text
-V4_PRODUCT_HEAD=6b5fb9a780073a26f8060e5be8baee284d511339
-FINAL_TEST_CORRECTIVE=69037473ed0b2c4cb7905ecdfbfdb320d320389c
-V4_HUMAN_ACCEPTANCE=PASS
-FULL_FINAL_SUITE=PASS
-INDEPENDENT_WEB_FINAL_AUDIT=PASS
+FT_SPEECH_001=CLOSED_MERGED
+PR_115_HEAD=c7409a565d8a1fb76c540df9e1fe5f3bb702f50d
+MERGE_HEAD=569e43783a98c8caca681ce8139ec87dd4fa276e
 ```
 
-Final suite:
+The former FT-SPEECH-001 merge-gate instructions are historical only and must not authorize new work.
+
+## Current project posture
+
+Short-term development is paused. Continue normal use and observation. Start development again only when the user reports a real issue or explicitly authorizes a new objective.
+
+## Retained but inactive work
+
+- PR #116 / `fix/residency-lifecycle-semantics`: retained OPEN / DRAFT at last verification, head `8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`; **DEFERRED**, not current authority.
+- PR #102 / `phase2/pr-e-floattabs-durable-outbox-sender`: retained OPEN / DRAFT at last verification, head `db6e886b33dffd93ece130463b184ae371b97684`; **DEFERRED**, not current authority.
+
+Do not infer authorization from an existing branch, worktree, draft PR, old control file, or cached local history.
+
+## Authorized now
 
 ```text
-1300 passed
-0 failed
-2 skipped
-1302 total
-```
-
-## Repository authority
-
-- Base branch: `main`
-- Live/accepted main: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- Head branch: `fix/chatgpt-speech-response-ownership`
-- PR #102 is unrelated MemoX Draft work and must remain unchanged
-- Required branch-protection check: `Build & Test (Apple Silicon arm64)`
-
-## Gate 0 — freshness
-
-Before creating the PR:
-
-1. fresh remote ref check;
-2. require `main` still equals `2d2b733407ea57ea66ca380887dfc11b71b6e2be`, or STOP for Web reconciliation if it advanced;
-3. require implementation branch head equals the freshly fetched remote head and contains the accepted V4 product commit plus the final test corrective;
-4. require no unexpected product/test change after `69037473ed0b2c4cb7905ecdfbfdb320d320389c`; control-plane-only advances are allowed when authorized by Web.
-
-## Gate 1 — implementation PR
-
-Create one PR:
-
-```text
-base=main
-head=fix/chatgpt-speech-response-ownership
-```
-
-The PR description should state:
-
-- user-visible defect: `Read Latest Response` could admit the user's prompt;
-- root cause: response-root ownership in `ChatGPTResponseExtraction`;
-- final behavior: only latest positively assistant-owned response is spoken;
-- human acceptance: PASS;
-- final local suite: 1300 pass / 0 fail / 2 skipped;
-- independent Web final audit: PASS;
-- PR #102 excluded and unchanged.
-
-Do not combine unrelated work into this PR.
-
-## Gate 2 — exact-head CI
-
-After PR creation, wait for GitHub's required PR check:
-
-```text
-Build & Test (Apple Silicon arm64)
-```
-
-Required before merge recommendation:
-
-```text
-PR_HEAD_UNCHANGED=YES
-REQUIRED_CI=PASS
-MERGEABLE=YES
-MERGE_STATE=CLEAN
-```
-
-A local full-suite pass does not replace the required GitHub PR check.
-
-If CI fails, do not modify product code automatically. Return the exact failure to Web for audit.
-
-## Gate 3 — merge authorization boundary
-
-Creating the PR is authorized. Merging is **not yet automatic** from this task file alone.
-
-After the exact PR head has the required GitHub check PASS and GitHub reports the PR mergeable/clean, return the PR number, exact head, CI result, changed-file count, and merge state to Web. Web will issue the final merge authorization or STOP if anything changed.
-
-## Not authorized
-
-```text
+NORMAL_USE=YES
+OBSERVATION=YES
+READ_ONLY_AUDIT=YES
+FRESHNESS_CHECK=YES
 PRODUCT_CHANGE=NO
-NEW_TEST_CHANGE=NO
-NEW_DIAGNOSTICS=NO
-ROOT_CAUSE_REOPEN=NO
-TOPOLOGY_PROBE=NO
-PR102_CHANGE=NO
-DIRECT_PUSH_TO_MAIN=NO
-DIRECT_MERGE_WITHOUT_FINAL_WEB_AUTHORIZATION=NO
+TEST_CHANGE=NO
+DIAGNOSTIC_EXPANSION=NO
+PR_PROGRESS=NO
+MERGE=NO
 RELEASE=NO
 ```
 
-## Acceptance
+## Resume gate
 
-Stop after PR creation + exact-head required CI resolution at:
+Before any future state-changing work:
+
+1. receive a new user-reported issue or explicit development objective;
+2. refresh live Git/GitHub state;
+3. establish the selected physical workspace, branch/ref, HEAD, and working-tree state;
+4. determine whether any retained PR/branch/worktree is relevant to the new objective;
+5. write a fresh task authorization with bounded scope, acceptance, STOP conditions, and required verification;
+6. only then begin implementation.
+
+If a future real problem is evidence-deficient, use the minimum decision-linked incident investigation rather than expanding diagnostics speculatively.
+
+## Final state
 
 ```text
-FINAL_STATE=WAITING_FOR_FINAL_WEB_MERGE_AUTHORIZATION
-```
-
-Receipt:
-
-```text
-TASK_ID: FT-SPEECH-001
-START_HEAD:
-LIVE_MAIN:
-PR_NUMBER:
-PR_HEAD:
-PR_BASE:
-PR_DRAFT:
-CHANGED_FILES:
-REQUIRED_CI:
-MERGEABLE:
-MERGE_STATE:
-PR102_UNCHANGED:
-FINAL_STATE=WAITING_FOR_FINAL_WEB_MERGE_AUTHORIZATION
+FINAL_STATE=PAUSED_NO_ACTIVE_DEVELOPMENT_TASK
 ```
