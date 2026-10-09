@@ -1,76 +1,63 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-07
+**Status date:** 2026-10-09
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Validity
 
-`CURRENT_STATUS.md` defines intended project state; live Git/GitHub refs define actual refs. Refresh before any PR or merge action.
+`CURRENT_STATUS.md` records the last verified project state. Live Git/GitHub refs remain authoritative for current refs and must be refreshed before any future state-changing work.
 
 ## Mode
 
-**MODE: READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE**
+**MODE: STABLE_OBSERVATION_NO_ACTIVE_DEVELOPMENT**
+
+Short-term FloatTabs development is paused. No product-development task is currently authorized. Resume only when the user reports a real issue or explicitly starts a new objective.
 
 ## Production authority
 
-- Implementation branch: `fix/chatgpt-speech-response-ownership`
-- Accepted main base and live `main`: `2d2b733407ea57ea66ca380887dfc11b71b6e2be`
-- Accepted V4 product implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`
-- Final test-only corrective: `69037473ed0b2c4cb7905ecdfbfdb320d320389c`
-- Installed QA remains V4 source `6b5fb9a780073a26f8060e5be8baee284d511339`, Debug arm64, version `0.5.2 (20)`
-- PR #102 remains separate MemoX Draft work and is excluded from FT-SPEECH-001
+- Live `main`: `569e43783a98c8caca681ce8139ec87dd4fa276e`.
+- PR #115 (`fix/chatgpt-speech-response-ownership`) is merged.
+- PR #115 head: `c7409a565d8a1fb76c540df9e1fe5f3bb702f50d`.
+- PR #115 merge commit / current accepted main: `569e43783a98c8caca681ce8139ec87dd4fa276e`.
+- Accepted V4 product implementation: `6b5fb9a780073a26f8060e5be8baee284d511339`.
+- Final test-only corrective: `69037473ed0b2c4cb7905ecdfbfdb320d320389c`.
+- Human acceptance for the speech fix: PASS — only the latest ChatGPT response was spoken; the user's prompt was not spoken.
 
-## Accepted product result
+## Lifecycle reconciliation
 
-```text
-V4_HUMAN_ACCEPTANCE=PASS
-OBSERVED=only latest ChatGPT response was spoken
-USER_PROMPT_SPOKEN=NO
-NO_SPEECH_REGRESSION=NO
-```
-
-## Final regression
-
-The stale source-contract assertion was corrected without product changes.
+FT-SPEECH-001 is complete. Its previous `READY_FOR_IMPLEMENTATION_PR_AND_MERGE_GATE` control state became stale when PR #115 merged and must not authorize further work.
 
 ```text
-FOCUSED_STALE_TEST=1/1 PASS
-FULL_FINAL_SUITE=PASS
-FULL_FINAL_SUITE_COUNTS=1300 passed, 0 failed, 2 skipped, 1302 total
-V4_PRODUCT_HEAD_UNCHANGED=YES
-AUTHORIZED_TEST_ONLY_CHANGE=YES
+FT_SPEECH_001=CLOSED_MERGED
+PR_115=MERGED
+PR_115_HEAD=c7409a565d8a1fb76c540df9e1fe5f3bb702f50d
+MERGE_HEAD=569e43783a98c8caca681ce8139ec87dd4fa276e
+CURRENT_PRODUCT_DEVELOPMENT=PAUSED
 ```
 
-Skipped tests:
+## Deferred work
 
-- `WebAttentionCrossFeatureTests/testNewPresentationSupersedesPendingRestoreBeforeDelayedObservation()`
-- `WebAttentionCrossFeatureTests/testStatusItemPreparationSupersedesPendingRestoreBeforeActivation()`
+These branches/PRs are retained but are not active task authority:
 
-## Independent Web final audit
+- PR #116 — `fix/residency-lifecycle-semantics`, OPEN / DRAFT at last verification, head `8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`; **DEFERRED**. No further implementation, QA, CI progression, or merge is authorized by the current control state.
+- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`, OPEN / DRAFT at last verification, head `db6e886b33dffd93ece130463b184ae371b97684`; **DEFERRED**. It remains separate MemoX integration work.
 
-**Verdict: PASS**
+Open or retained branches/worktrees do not by themselves make those efforts active. A future task must explicitly adopt or supersede them after fresh verification.
 
-Web independently verified:
-
-1. `main` is still exactly the accepted base `2d2b733407ea57ea66ca380887dfc11b71b6e2be`; no rebase/reconciliation is required before PR creation.
-2. The implementation branch is a pure descendant of that base.
-3. The accepted V4 response-root ownership fix remains localized to the ChatGPT speech/response boundary and preserves the fail-closed generic-ancestor behavior.
-4. The current renderer path uses positive assistant ownership, assistant content-unit narrowing, and cross-renderer DOM ordering; the mixed user/assistant group is not a speech root.
-5. Legacy explicit assistant and semantic-turn paths remain supported; Regenerate remains a legacy last-resort path rather than the primary ownership authority.
-6. The final corrective commit changes only `FloatTabsTests/ChatGPTResponseBridgeTests.swift` and updates the stale `<article>`-qualified assertion to the current semantic contract.
-7. Earlier `speech.qa` real-path diagnostics remain bounded QA instrumentation. Diagnostic emission/parsing is DEBUG-gated; it does not create a second production ownership authority and does not alter the accepted Release speech decision path. It is not a merge blocker.
-8. PR #102 remains OPEN/DRAFT/unmerged on its separate branch and was not modified by FT-SPEECH-001.
-
-## Merge recommendation
+## Current posture
 
 ```text
-INDEPENDENT_WEB_FINAL_AUDIT=PASS
-PRODUCT_READY_FOR_PR=YES
-IMPLEMENTATION_PR_CREATE=AUTHORIZED
-DIRECT_MERGE_WITHOUT_PR=NO
+PRODUCT_CHANGE=NO
+NEW_TEST_CHANGE=NO
+NEW_DIAGNOSTICS=NO
+MERGE_OR_RELEASE=NO
+OBSERVATION=YES
+READ_ONLY_AUDIT=YES
 ```
 
-The next gate is an implementation PR from `fix/chatgpt-speech-response-ownership` to `main` at the exact current branch head after control-plane synchronization. The required GitHub branch-protection check `Build & Test (Apple Silicon arm64)` must pass on the exact PR head before merge.
+If a real problem appears, first establish a fresh task and current workspace/ref identity. Use bounded domain navigation only when architecture ownership is unclear. Use incident investigation only when a real blocker lacks enough evidence for a decision.
 
-No additional product coding, diagnostic expansion, local root-cause work, QA reinstall, or human speech reproduction is required unless the PR head changes or CI exposes a new failure.
+## Next milestone
+
+No scheduled development milestone. Observe normal use. When the user reports a problem or explicitly starts a new feature, refresh live refs, reconcile relevant retained work, create a new `CURRENT_TASK.md` authorization, and proceed from that fresh baseline.
