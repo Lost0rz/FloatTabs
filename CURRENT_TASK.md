@@ -1,79 +1,61 @@
 # FloatTabs Current Task
 
-**Task ID:** `NONE`
-**Title:** No active product-development task
-**Status:** `PAUSED`
-**Mode:** `OBSERVATION_ONLY`
+**Task ID:** `FT-GOV-BOOTSTRAP-001`
+**Title:** Establish lightweight governance and Domain Map
+**Status:** `TERMINAL`
+**Mode:** `GOVERNANCE_BOOTSTRAP_COMPLETE`
 
-## Authority
+## Objective
 
-There is currently no authorized FloatTabs product-development task.
+Establish a verified, lightweight project control plane and derived Domain Map so FloatTabs can resume normal governed development from a clean baseline.
 
-Fresh remote baseline verified on 2026-10-09:
+## Result
 
-```text
-LIVE_MAIN=8fd1aa86f604c83f4cd60d935960f6c4d4baf94e
-CURRENT_PRODUCT_DEVELOPMENT=PAUSED
-```
+Completed:
 
-The previous FT-SPEECH-001 work is closed and must not authorize new work.
+- refreshed governance rules in `AGENTS.md`;
+- established `docs/architecture/DOMAIN_MAP.md`;
+- linked current architecture navigation through `docs/architecture/README.md`;
+- reconciled `CURRENT_STATUS.md` to `READY_FOR_DEVELOPMENT`;
+- preserved PR #116 and PR #102 as inactive/deferred work;
+- made no product-source or test changes.
 
-## Completed maintenance closeout
-
-The Air / Jack-Dev lifecycle cleanup is accepted as maintenance evidence, not as product-development authority.
-
-```text
-CANONICAL=/Volumes/Jack-Dev/Projects/FloatTabs
-CANONICAL_HEAD=8fd1aa86f604c83f4cd60d935960f6c4d4baf94e
-CANONICAL_CLEAN=YES
-STASH_COUNT=0
-LOCAL_BRANCH_COUNT=6
-REGISTERED_WORKTREE_COUNT=1
-PRODUCT_SOURCE_MODIFIED=NO
-```
-
-Unique local recovery material was preserved under:
-
-`/Volumes/Jack-Dev/Archives/FloatTabs/lifecycle-closeout-20261009`
-
-The verified repository bundle and archived stash patches are recovery authorities for the retired local history. This maintenance closeout does not authorize restoring, applying, or merging those patches.
-
-## Retained but inactive work
-
-- PR #116 / `fix/residency-lifecycle-semantics`: OPEN / DRAFT, head `8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`; **DEFERRED**, not current authority.
-- PR #102 / `phase2/pr-e-floattabs-durable-outbox-sender`: OPEN / DRAFT, head `db6e886b33dffd93ece130463b184ae371b97684`; **DEFERRED**, not current authority.
-
-Do not infer authorization from an existing branch, draft PR, archive, bundle, patch, or cached local history.
-
-## Authorized now
+## Baseline / Workspace
 
 ```text
-NORMAL_USE=YES
-OBSERVATION=YES
-READ_ONLY_AUDIT=YES
-FRESHNESS_CHECK=YES
-PRODUCT_CHANGE=NO
-TEST_CHANGE=NO
-DIAGNOSTIC_EXPANSION=NO
-PR_PROGRESS=NO
-MERGE=NO
-RELEASE=NO
-LOCAL_HISTORY_RESTORE=NO
+AUDIT_BASE=main@d685bbe7c035332ecc9b7ab6f8641660f813d42f
+WORK_BRANCH=governance/floattabs-domain-bootstrap-20261013
+PRODUCT_SOURCE_CHANGED=NO
+TESTS_CHANGED=NO
 ```
 
-## Resume gate
+The `8fd1aa... -> d685bbe...` movement was lifecycle/control documentation only and did not create a new product delivery identity.
 
-Before any future state-changing work:
+## Acceptance
 
-1. receive a new user-reported issue or explicit development objective;
-2. refresh live Git/GitHub state;
-3. establish the selected physical workspace, branch/ref, HEAD, and working-tree state;
-4. determine whether any retained PR/branch/archive is relevant;
-5. write a fresh task authorization with bounded scope, acceptance, STOP conditions, and required verification;
-6. only then begin implementation.
+- Domain/source/test navigation is available without reconstructing repository structure from chat history.
+- Control-plane roles and task lifecycle are explicit and lightweight.
+- Repository HEAD and Delivery / Semantic HEAD are distinguished.
+- Runtime incidents preserve evidence/root-cause separation.
+- The project can accept the next bounded product objective after this governance branch is integrated.
+
+## Authorization after closeout
+
+There is **no active product-development task** in this file.
+
+The next state-changing product task must:
+
+1. refresh task-relevant repository evidence;
+2. select the affected Domain/Authority using the Domain Map;
+3. update `CURRENT_TASK.md` with the new objective/scope/acceptance/STOP conditions;
+4. only then mutate product source or tests.
+
+Do not regenerate this bootstrap task when the user later says “continue”.
 
 ## Final state
 
 ```text
-FINAL_STATE=PAUSED_NO_ACTIVE_DEVELOPMENT_TASK
+TASK=TERMINAL
+PROJECT=READY_FOR_DEVELOPMENT
+NEXT_PRODUCT_TASK=NOT_YET_AUTHORIZED
 ```

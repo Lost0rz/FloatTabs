@@ -1,87 +1,91 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-09
+**Status date:** 2026-10-13
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
-## Validity
-
-`CURRENT_STATUS.md` records the last verified project state. Live Git/GitHub refs remain authoritative for current refs and must be refreshed before any future state-changing work.
-
 ## Mode
 
-**MODE: STABLE_OBSERVATION_NO_ACTIVE_DEVELOPMENT**
+**MODE: READY_FOR_DEVELOPMENT**
 
-Short-term FloatTabs development is paused. No product-development task is currently authorized. Resume only when the user reports a real issue or explicitly starts a new objective.
+FloatTabs governance/bootstrap is established. The repository is ready to accept a new bounded product-development task, but no product feature is currently authorized.
 
-## Production authority
+## Verified baseline
 
-- Live `main`: `8fd1aa86f604c83f4cd60d935960f6c4d4baf94e`.
-- PR #115 (`fix/chatgpt-speech-response-ownership`) is merged.
-- PR #115 head: `c7409a565d8a1fb76c540df9e1fe5f3bb702f50d`.
-- PR #115 accepted merge lineage remains historical product authority for the speech fix.
-- The later lifecycle/control reconciliation commit advanced `main` to `8fd1aa86f604c83f4cd60d935960f6c4d4baf94e` without reopening product development.
+- Governance audit basis: `main@d685bbe7c035332ecc9b7ab6f8641660f813d42f`.
+- The `8fd1aa... -> d685bbe...` advance was lifecycle/control documentation only; no new product implementation was introduced by that movement.
+- Current governance bootstrap changes are documentation/control/navigation only.
+- Product source and tests are unchanged by `FT-GOV-BOOTSTRAP-001`.
 
-## Accepted Air / Jack-Dev lifecycle maintenance
+Repository HEAD may advance through control/governance commits; distinguish literal Repository HEAD from Delivery / Semantic HEAD.
 
-Accepted local executor evidence for `FLOATTABS_LOCAL_HISTORY_AND_TEMP_CLEANUP`:
+## Governance capability
 
-- canonical path: `/Volumes/Jack-Dev/Projects/FloatTabs`;
-- canonical HEAD: `8fd1aa86f604c83f4cd60d935960f6c4d4baf94e`;
-- canonical clean: YES;
-- `origin/main` match: YES;
-- stash count: `2 -> 0`;
-- local-only commit `0a3588bf6e4675d897aa02b336c1349ef090b692` was proven covered by remote archive tag `archive/ft-speech-001-topology-probe-superseded-20261007` and the verified repository bundle;
-- local branch `fix/chatgpt-speech-response-ownership` was removed only after preservation proof;
-- local branch count after closeout: `6`;
-- registered worktree count after closeout: `1`;
-- no remote branch was deleted;
-- no product source was modified.
+Established/verified:
 
-Durable preservation:
+- `AGENTS.md` as durable repository-specific rules;
+- `CURRENT_STATUS.md` as current-state snapshot;
+- `CURRENT_TASK.md` as the only active task authorization;
+- `docs/architecture/DOMAIN_MAP.md` as a derived navigation projection;
+- current architecture document precedence in `docs/architecture/README.md`;
+- one-writer / predecessor lifecycle rules;
+- control-only drift handling;
+- proportional verification and Control Alignment Gate;
+- incident routing that preserves `ROOT CAUSE UNKNOWN` when evidence is insufficient.
 
-```text
-ARCHIVE_ROOT=/Volumes/Jack-Dev/Archives/FloatTabs/lifecycle-closeout-20261009
-BUNDLE=FloatTabs-all.bundle
-BUNDLE_VERIFY=PASS
-BUNDLE_SHA256=ce1adef45097f70b27da9ea6bdb3681b16e88d577d1fb24d6058717745c9f29f
-STASH_0_PATCH_SHA256=36349549379889bf57bf6091b9a7f5c1c1ca24142adbc1a7d277dee396f94aa5
-STASH_1_PATCH_SHA256=03e91736095e6c6b6d539ebfd2a5853b261364a67964c876955c32d7b844b3d2
-```
+## Domain baseline
 
-Temp cleanup:
+Primary domains are now routed through the Domain Map:
 
-- 109 FloatTabs-related `/private/tmp` candidates audited;
-- 21 exact inactive build/cache paths removed;
-- approximately `1,329,213,440` bytes freed by the executor's `du` accounting;
-- 88 evidence, forensic, baseline, log, rollback, release, or test-result paths intentionally retained;
-- no active process/open-file match was found for removed paths.
+- App Composition
+- Tabs & Profiles
+- Web Runtime
+- Window / Panel / Fullscreen
+- Focus / Input / Commands
+- Persistence & Recovery
+- Speech
+- Attention / Response Projection
+- Diagnostics
+- Website Cache / Storage
+- Menu / Status Projection
 
-## Deferred work
+Important current structural boundaries:
 
-These branches/PRs are retained but are not active task authority:
+- `TabStore` owns canonical Tab/Profile configuration projection.
+- `WebViewPool` + `SlotLifecycleCoordinator` are central Web runtime/lifecycle authorities.
+- `PanelController` is the main presentation/window integration owner and should not absorb unrelated canonical state.
+- `AppCoordinator` is the composition root, not a replacement authority for child domains.
+- Diagnostics are evidence only, not root-cause authority.
 
-- PR #116 — `fix/residency-lifecycle-semantics`, OPEN / DRAFT, head `8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`; **DEFERRED**.
-- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`, OPEN / DRAFT, head `db6e886b33dffd93ece130463b184ae371b97684`; **DEFERRED**.
+## Retained work
 
-Fresh Web verification on 2026-10-09 confirmed both PRs remain OPEN / DRAFT at those exact heads.
+These remain inactive and do not authorize current development:
 
-Open or retained branches do not by themselves make those efforts active. A future task must explicitly adopt or supersede them after fresh verification.
+- PR #116 — `fix/residency-lifecycle-semantics`, OPEN / DRAFT / DEFERRED.
+- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`, OPEN / DRAFT / DEFERRED.
+
+A future task may explicitly adopt, supersede, or close retained work after fresh verification. Do not infer authorization from these PRs.
 
 ## Current posture
 
 ```text
-PRODUCT_CHANGE=NO
-NEW_TEST_CHANGE=NO
-NEW_DIAGNOSTICS=NO
-MERGE_OR_RELEASE=NO
-OBSERVATION=YES
-READ_ONLY_AUDIT=YES
-LOCAL_HISTORY_PRESERVED=YES
-STASH_COUNT=0
-REGISTERED_WORKTREE_COUNT=1
+READY_FOR_NEW_TASK=YES
+ACTIVE_PRODUCT_TASK=NO
+PRODUCT_CHANGE_FROM_BOOTSTRAP=NO
+TEST_CHANGE_FROM_BOOTSTRAP=NO
+DOMAIN_MAP=ESTABLISHED
+CONTROL_PLANE=ESTABLISHED
+DEFERRED_PR_116=RETAINED
+DEFERRED_PR_102=RETAINED
 ```
+
+## Follow-ups
+
+- `PanelController.swift` is a large integration owner; future changes that add new canonical state or responsibilities should trigger a structure/Authority check before expansion.
+- Runtime/lifecycle changes around `WebViewPool` or `SlotLifecycleCoordinator` require higher verification and relevant macOS runtime acceptance.
+
+These Follow-ups do not authorize work by themselves.
 
 ## Next milestone
 
-No scheduled FloatTabs development milestone. Continue normal use. When a real issue or explicit new objective appears, refresh live refs, reconcile any relevant retained PR/branch, write a fresh task authorization, and proceed from that baseline.
+Select the next real product objective, write it into `CURRENT_TASK.md`, obtain fresh task-relevant evidence, and begin normal governed development. No additional governance bootstrap or repeated Domain Map reconstruction is required unless routing becomes stale.
