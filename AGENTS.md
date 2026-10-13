@@ -159,3 +159,24 @@ STOP and report evidence when:
 - safe ownership cannot be established without further navigation/incident evidence.
 
 Do not stop merely because Repository HEAD advanced only through control-plane changes with unchanged task semantics.
+
+## Final Status Receipt
+
+Engineering governance, implementation, audit, CI, PR, merge, release, and status replies end with:
+
+```text
+Governance: engineering-governance → project-governance
+Skills used: <actual skills>
+Router: default / domain-navigation / incident-doctor
+Task state: <ACTIVE / WAITING / TERMINAL / N/A>
+Root cause: <KNOWN / UNKNOWN / N/A>
+Merge: <MERGED / NOT MERGED / N/A>
+Updated files: <files or NONE>
+Control plane: STATUS=<UPDATED/UNCHANGED/STALE>, TASK=<UPDATED/UNCHANGED/STALE>
+PR / workspace: <state or N/A>
+Final state: <short result>
+```
+
+Only report Skills actually used. If no merge occurred, say `NOT MERGED`; if no files changed, say `NONE`; if STATUS/TASK should have changed but did not, say `STALE`. For unresolved runtime failures, keep `Root cause: UNKNOWN`.
+
+The receipt is status visibility only; it never becomes repository Authority.
