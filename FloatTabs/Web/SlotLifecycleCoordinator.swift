@@ -13,7 +13,6 @@ final class SlotLifecycleCoordinator {
     nonisolated static let defaultWarmReleaseDelay: TimeInterval = 120
     nonisolated static let defaultHiddenActiveGraceDelay: TimeInterval = 120
     nonisolated static let defaultMediaProtectionPollDelay: TimeInterval = 10
-    nonisolated static let defaultWarmResidentLimit = 2
 
     typealias MediaPlayingQuery = (UUID, @escaping (Bool) -> Void) -> Void
     typealias MediaPauseAction = (UUID) -> Void
@@ -44,7 +43,6 @@ final class SlotLifecycleCoordinator {
     private var warmReleaseDelay: TimeInterval
     private let hiddenActiveGraceDelay: TimeInterval
     private let mediaProtectionPollDelay: TimeInterval
-    private let warmResidentLimit: Int
     private let mediaPlayingQuery: MediaPlayingQuery
     private let mediaPauseAction: MediaPauseAction
     private let onRuntimeReleased: RuntimeReleasedHandler
@@ -56,8 +54,6 @@ final class SlotLifecycleCoordinator {
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
     private var mediaProtectedSlotIDs = Set<UUID>()
-    private var inactiveWarmRecency: [UUID: UInt64] = [:]
-    private var warmRecencyCounter: UInt64 = 0
     private var hiddenActiveToken: UUID?
     private var activeSlotID: UUID?
     private var fullscreenSourceProfile: WebAppProfile?
@@ -72,7 +68,6 @@ final class SlotLifecycleCoordinator {
         warmReleaseDelay: TimeInterval = SlotLifecycleCoordinator.defaultWarmReleaseDelay,
         hiddenActiveGraceDelay: TimeInterval = SlotLifecycleCoordinator.defaultHiddenActiveGraceDelay,
         mediaProtectionPollDelay: TimeInterval = SlotLifecycleCoordinator.defaultMediaProtectionPollDelay,
-        warmResidentLimit: Int = SlotLifecycleCoordinator.defaultWarmResidentLimit,
         mediaPlayingQuery: MediaPlayingQuery? = nil,
         mediaPauseAction: MediaPauseAction? = nil,
         onRuntimeReleased: @escaping RuntimeReleasedHandler = { _ in },
@@ -89,7 +84,6 @@ final class SlotLifecycleCoordinator {
         self.warmReleaseDelay = max(warmReleaseDelay, 0)
         self.hiddenActiveGraceDelay = max(hiddenActiveGraceDelay, 0)
         self.mediaProtectionPollDelay = max(mediaProtectionPollDelay, 0.01)
-        self.warmResidentLimit = max(warmResidentLimit, 0)
         self.mediaPlayingQuery = mediaPlayingQuery ?? { [weak webViewPool] slotID, completion in
             guard let webViewPool else {
                 completion(false)
@@ -141,7 +135,7 @@ final class SlotLifecycleCoordinator {
                 slotID: profile.id,
                 preservingMediaProtection: preserveMediaProtection
             )
-            createInactivePlan(for: profile, resetWarmRecency: false)
+            createInactivePlan(for: profile)
         }
     }
 
@@ -178,11 +172,9 @@ final class SlotLifecycleCoordinator {
             case .hot:
                 cancelInactivePlan(slotID: profile.id)
             case .warm, .cold:
-                ensureInactivePlan(for: profile, resetWarmRecency: false)
+                ensureInactivePlan(for: profile)
             }
         }
-
-        enforceWarmResidentLimit()
     }
 
     func setPanelVisible(_ visible: Bool, activeProfile: WebAppProfile?) {
@@ -244,7 +236,7 @@ final class SlotLifecycleCoordinator {
         }
         hiddenActiveToken = nil
         container.deactivate(slotID: profile.id, residencyPolicy: profile.residencyPolicy)
-        prepareInactive(profile: profile, resetWarmRecency: true)
+        prepareInactive(profile: profile)
     }
 
     /// Restarts normal Warm/Cold handling after an attention or speech runtime
@@ -273,7 +265,7 @@ final class SlotLifecycleCoordinator {
             slotID: slotID,
             preservingMediaProtection: preserveMediaProtection
         )
-        createInactivePlan(for: profile, resetWarmRecency: true)
+        createInactivePlan(for: profile)
     }
 
     /// Keep the existing attention-specific entry point while sharing the
@@ -331,7 +323,7 @@ final class SlotLifecycleCoordinator {
         supplementalVisibleProfile = nil
         guard prepareAsInactive, activeSlotID != profile.id else { return }
         onSlotBecameInactive(profile)
-        prepareInactive(profile: profile, resetWarmRecency: true)
+        prepareInactive(profile: profile)
     }
 
     func remove(slotID: UUID) {
@@ -356,8 +348,6 @@ final class SlotLifecycleCoordinator {
         supplementalVisibleProfile = nil
         inactivePlans.removeAll()
         mediaProtectedSlotIDs.removeAll()
-        inactiveWarmRecency.removeAll()
-        warmRecencyCounter = 0
         for slotID in slotIDs {
             prepareRuntimeForRelease(slotID)
             container.removeSlot(slotID)
@@ -373,13 +363,9 @@ final class SlotLifecycleCoordinator {
         )
         switch level {
         case .warning:
-            evictInactiveWarmUntilResidentLimit(
-                min(1, warmResidentLimit),
-                protectionBoundary: "memory_pressure"
-            )
+            break
         case .critical:
-            evictInactiveWarmUntilResidentLimit(
-                0,
+            evictInactiveWarmForMemoryPressure(
                 protectionBoundary: "memory_pressure"
             )
         }
@@ -442,7 +428,7 @@ final class SlotLifecycleCoordinator {
         source.resume()
     }
 
-    private func prepareInactive(profile: WebAppProfile, resetWarmRecency: Bool) {
+    private func prepareInactive(profile: WebAppProfile) {
         guard webViewPool.contains(slotID: profile.id) else {
             cancelInactivePlan(slotID: profile.id)
             return
@@ -456,14 +442,11 @@ final class SlotLifecycleCoordinator {
         case .hot:
             cancelInactivePlan(slotID: profile.id)
         case .warm, .cold:
-            ensureInactivePlan(for: profile, resetWarmRecency: resetWarmRecency)
+            ensureInactivePlan(for: profile)
         }
     }
 
-    private func ensureInactivePlan(
-        for profile: WebAppProfile,
-        resetWarmRecency: Bool
-    ) {
+    private func ensureInactivePlan(for profile: WebAppProfile) {
         if let existing = inactivePlans[profile.id],
            existing.residencyPolicy == profile.residencyPolicy,
            existing.backgroundMediaPolicy == profile.backgroundMediaPolicy,
@@ -472,13 +455,10 @@ final class SlotLifecycleCoordinator {
         }
 
         cancelInactivePlan(slotID: profile.id)
-        createInactivePlan(for: profile, resetWarmRecency: resetWarmRecency)
+        createInactivePlan(for: profile)
     }
 
-    private func createInactivePlan(
-        for profile: WebAppProfile,
-        resetWarmRecency: Bool
-    ) {
+    private func createInactivePlan(for profile: WebAppProfile) {
         let plan = InactivePlan(
             token: UUID(),
             profile: profile,
@@ -496,14 +476,6 @@ final class SlotLifecycleCoordinator {
                 "residency": .string(profile.residencyPolicy.rawValue)
             ]
         )
-
-        if profile.residencyPolicy == .warm {
-            if resetWarmRecency || inactiveWarmRecency[profile.id] == nil {
-                markWarmAsMostRecent(profile.id)
-            }
-        } else {
-            inactiveWarmRecency.removeValue(forKey: profile.id)
-        }
 
         if profile.backgroundMediaPolicy == .allowBackgroundAudio {
             evaluateMediaProtection(for: profile, plan: plan)
@@ -539,10 +511,7 @@ final class SlotLifecycleCoordinator {
                 }
                 self.scheduleMediaProtectionRecheck(for: profile, plan: plan)
             } else {
-                let wasProtected = self.mediaProtectedSlotIDs.remove(profile.id) != nil
-                if wasProtected, profile.residencyPolicy == .warm {
-                    self.markWarmAsMostRecent(profile.id)
-                }
+                self.mediaProtectedSlotIDs.remove(profile.id)
                 guard !self.isProactivelyProtected(slotID: profile.id) else {
                     let protection = self.protectionState(slotID: profile.id)
                     self.recordProtectionObservations(
@@ -587,11 +556,6 @@ final class SlotLifecycleCoordinator {
             delay = warmReleaseDelay
         case .cold:
             delay = coldReleaseDelay
-        }
-
-        if profile.residencyPolicy == .warm {
-            enforceWarmResidentLimit()
-            guard planMatches(plan, slotID: profile.id) else { return }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -708,59 +672,43 @@ final class SlotLifecycleCoordinator {
                 slotID: profile.id,
                 residencyPolicy: profile.residencyPolicy
             )
-            self.prepareInactive(profile: profile, resetWarmRecency: true)
+            self.prepareInactive(profile: profile)
         }
     }
 
-    private func enforceWarmResidentLimit() {
-        evictInactiveWarmUntilResidentLimit(warmResidentLimit)
-    }
-
-    private func evictInactiveWarmUntilResidentLimit(
-        _ targetLimit: Int,
-        protectionBoundary: String? = nil
-    ) {
-        let target = max(targetLimit, 0)
-        let candidates = inactiveWarmRecency
-            .filter { slotID, _ in
-                guard !isVisibleSlot(slotID) else {
-                    return false
-                }
-
-                guard !isProactivelyProtected(slotID: slotID) else {
-                    let protection = protectionState(slotID: slotID)
-                    if let protectionBoundary {
-                        recordProtectionObservations(
-                            slotID: slotID,
-                            boundary: protectionBoundary,
-                            planToken: inactivePlans[slotID]?.token,
-                            protection: protection
-                        )
-                    }
-                    return false
-                }
-                guard webViewPool.contains(slotID: slotID),
-                      inactivePlans[slotID]?.residencyPolicy == .warm else {
-                    return false
-                }
-                return true
+    private func evictInactiveWarmForMemoryPressure(protectionBoundary: String? = nil) {
+        let candidates = inactivePlans.compactMap { slotID, plan -> (UUID, InactivePlan)? in
+            guard plan.residencyPolicy == .warm else {
+                return nil
             }
-            .sorted { $0.value < $1.value }
+            guard !isVisibleSlot(slotID) else {
+                return nil
+            }
 
-        let excess = max(candidates.count - target, 0)
-        guard excess > 0 else { return }
-        for candidate in candidates.prefix(excess) {
-            guard let plan = inactivePlans[candidate.key] else { continue }
+            guard !isProactivelyProtected(slotID: slotID) else {
+                let protection = protectionState(slotID: slotID)
+                if let protectionBoundary {
+                    recordProtectionObservations(
+                        slotID: slotID,
+                        boundary: protectionBoundary,
+                        planToken: plan.token,
+                        protection: protection
+                    )
+                }
+                return nil
+            }
+            guard webViewPool.contains(slotID: slotID) else {
+                return nil
+            }
+            return (slotID, plan)
+        }
+
+        for (slotID, plan) in candidates {
             releaseInactiveSlot(
-                slotID: candidate.key,
+                slotID: slotID,
                 expectedPlan: plan
             )
         }
-    }
-
-    private func markWarmAsMostRecent(_ slotID: UUID) {
-        warmRecencyCounter &+= 1
-        inactiveWarmRecency[slotID] = warmRecencyCounter
     }
 
     private func releaseInactiveSlot(
@@ -819,7 +767,6 @@ final class SlotLifecycleCoordinator {
         if !preservingMediaProtection {
             mediaProtectedSlotIDs.remove(slotID)
         }
-        inactiveWarmRecency.removeValue(forKey: slotID)
     }
 
     private func planMatches(_ plan: InactivePlan, slotID: UUID) -> Bool {
