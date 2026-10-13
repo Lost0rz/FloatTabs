@@ -1,79 +1,64 @@
 # FloatTabs Current Task
 
-**Task ID:** `NONE`
-**Title:** No active product-development task
-**Status:** `PAUSED`
-**Mode:** `OBSERVATION_ONLY`
+**Task ID:** `FT-GOV-BOOTSTRAP-001`
+**Title:** Establish lightweight governance and Domain Map
+**Status:** `ACTIVE`
+**Mode:** `GOVERNANCE_BOOTSTRAP`
 
-## Authority
+## Objective
 
-There is currently no authorized FloatTabs product-development task.
+Establish a verified, lightweight project control plane and derived Domain Map so FloatTabs can resume normal governed development from a clean baseline.
 
-Fresh remote baseline verified on 2026-10-09:
+## Authority / Scope
 
-```text
-LIVE_MAIN=8fd1aa86f604c83f4cd60d935960f6c4d4baf94e
-CURRENT_PRODUCT_DEVELOPMENT=PAUSED
-```
+Affected authority: project governance and repository navigation only.
 
-The previous FT-SPEECH-001 work is closed and must not authorize new work.
+In scope:
 
-## Completed maintenance closeout
+- reconcile the current `main` baseline and retained PR lifecycle;
+- refresh `AGENTS.md`, `CURRENT_STATUS.md`, and `CURRENT_TASK.md` where needed;
+- create a concise derived Domain Map from current source/docs/tests;
+- identify canonical domains, primary source entry points, test locations, and authority boundaries;
+- leave the repository in `READY_FOR_DEVELOPMENT` state.
 
-The Air / Jack-Dev lifecycle cleanup is accepted as maintenance evidence, not as product-development authority.
+Out of scope:
 
-```text
-CANONICAL=/Volumes/Jack-Dev/Projects/FloatTabs
-CANONICAL_HEAD=8fd1aa86f604c83f4cd60d935960f6c4d4baf94e
-CANONICAL_CLEAN=YES
-STASH_COUNT=0
-LOCAL_BRANCH_COUNT=6
-REGISTERED_WORKTREE_COUNT=1
-PRODUCT_SOURCE_MODIFIED=NO
-```
+- product/runtime behavior changes;
+- source or test implementation changes;
+- advancing, merging, or deleting PR #116 or PR #102;
+- release work;
+- incident/root-cause diagnosis.
 
-Unique local recovery material was preserved under:
-
-`/Volumes/Jack-Dev/Archives/FloatTabs/lifecycle-closeout-20261009`
-
-The verified repository bundle and archived stash patches are recovery authorities for the retired local history. This maintenance closeout does not authorize restoring, applying, or merging those patches.
-
-## Retained but inactive work
-
-- PR #116 / `fix/residency-lifecycle-semantics`: OPEN / DRAFT, head `8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`; **DEFERRED**, not current authority.
-- PR #102 / `phase2/pr-e-floattabs-durable-outbox-sender`: OPEN / DRAFT, head `db6e886b33dffd93ece130463b184ae371b97684`; **DEFERRED**, not current authority.
-
-Do not infer authorization from an existing branch, draft PR, archive, bundle, patch, or cached local history.
-
-## Authorized now
+## Baseline
 
 ```text
-NORMAL_USE=YES
-OBSERVATION=YES
-READ_ONLY_AUDIT=YES
-FRESHNESS_CHECK=YES
-PRODUCT_CHANGE=NO
-TEST_CHANGE=NO
-DIAGNOSTIC_EXPANSION=NO
-PR_PROGRESS=NO
-MERGE=NO
-RELEASE=NO
-LOCAL_HISTORY_RESTORE=NO
+REPOSITORY=Lost0rz/FloatTabs
+LIVE_MAIN=d685bbe7c035332ecc9b7ab6f8641660f813d42f
+WORK_BRANCH=governance/floattabs-domain-bootstrap-20261013
+OPEN_DEFERRED_PRS=#116,#102
 ```
 
-## Resume gate
+The `8fd1aa... -> d685bbe...` main movement is lifecycle/control documentation only; it does not represent a new product delivery identity.
 
-Before any future state-changing work:
+## Verification / Acceptance
 
-1. receive a new user-reported issue or explicit development objective;
-2. refresh live Git/GitHub state;
-3. establish the selected physical workspace, branch/ref, HEAD, and working-tree state;
-4. determine whether any retained PR/branch/archive is relevant;
-5. write a fresh task authorization with bounded scope, acceptance, STOP conditions, and required verification;
-6. only then begin implementation.
+- Domain Map is evidence-backed and points to current source/test/document locations.
+- Control files agree on baseline, lifecycle, and readiness state.
+- No product source or tests are changed.
+- Deferred PRs remain explicitly inactive.
+- Final state is ready for a future product task without requiring chat-history reconstruction.
 
-## Final state
+## STOP Conditions
 
-```text
-FINAL_STATE=PAUSED_NO_ACTIVE_DEVELOPMENT_TASK
-```
+STOP if fresh evidence shows:
+
+- `main` moved with implementation-relevant changes during this task;
+- a retained PR/workspace contains unknown overlapping authority that blocks clean governance;
+- a Domain/Authority cannot be mapped safely from current evidence;
+- requested work would require product/runtime mutation.
+
+## Lifecycle
+
+Current state: `ACTIVE_GOVERNANCE_BOOTSTRAP`.
+
+On completion, reconcile `CURRENT_STATUS.md` and this file. The next product-development task must be separately authorized before source mutation.
