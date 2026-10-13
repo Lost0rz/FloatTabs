@@ -1,157 +1,161 @@
 # FloatTabs Agent Instructions
 
-This repository uses three control-plane files. Before changing code, diagnostics,
-tests, build configuration, release state, or project documentation, read them in
-this order:
+FloatTabs is a native macOS browser container. Engineering priority is:
 
-1. `AGENTS.md` — durable project rules.
-2. `CURRENT_STATUS.md` — the current state contract.
-3. `CURRENT_TASK.md` — the single currently authorized task and its boundaries.
+**user experience / stability → runtime correctness → diagnosability → governance**.
 
-If the local checkout, branch, HEAD, authorized worktree identity, PR state, or
-task does not match the control-plane files after a fresh remote ref check, STOP.
-The locally resolved absolute path must uniquely satisfy that worktree identity;
-it is local evidence, not a committed repository value. Do not silently substitute
-another checkout or continue from chat history, Memory, an older handoff, or an
-old PR.
+Do not expand governance, telemetry, or generic frameworks ahead of actual product needs.
 
-## Authority model
+## Control plane
 
-- `AGENTS.md` contains durable engineering policy only. Do not put transient
-  branch, HEAD, PR, incident, or release values here.
-- `CURRENT_STATUS.md` defines intended project state, classifications, and
-  authorization. Git/GitHub refs remain authoritative for the actual SHA currently
-  stored at a branch or PR head.
-- `CURRENT_TASK.md` defines the only active task. Work outside its scope requires
-  an explicit task-state update first.
-- If a live Git/GitHub ref differs from `CURRENT_STATUS.md`, the state contract is
-  stale. Stop and reconcile the state file before implementation work.
-- Chat history, Memory, issue comments, historical reports, and superseded stage
-  documents are supporting evidence; they do not override these files.
-- A missing or stale control-plane file is a blocker, not permission to guess.
+Repository authority uses:
 
-## Web audit / local execution split
+- `AGENTS.md` — durable project rules and authority boundaries;
+- `CURRENT_STATUS.md` — verified current-state snapshot;
+- `CURRENT_TASK.md` — the only active task authorization;
+- `docs/architecture/DOMAIN_MAP.md` — derived navigation map, not product truth or task authority.
 
-- When the Web control-plane agent has repository access, it owns source-path audit,
-  causal/root-cause classification, fix-scope selection, and the implementation
-  contract before local production changes begin.
-- Do not ask the local executor to rediscover a root cause that the Web agent can
-  establish by reading the relevant code. Local execution is primarily for exact
-  implementation, focused tests, build/install, runtime reproduction, log/evidence
-  extraction, and machine-specific verification.
-- The local executor may STOP and return evidence when an authorized RED does not
-  reproduce, the prescribed patch conflicts with live source, or machine/runtime
-  facts contradict the contract. It must not expand that STOP into an open-ended
-  code audit or speculative diagnosis unless `CURRENT_TASK.md` explicitly delegates
-  that missing evidence question.
-- For a narrow user-visible regression with a reproducible symptom, prefer a direct
-  business fix once Web source audit establishes the faulty boundary. Add diagnostics
-  only when missing runtime evidence prevents a safe, testable fix; do not build
-  diagnostics in parallel merely because more observability could be useful.
+Chat history, Memory, handoff cards, audit replies, historical reports, old PRs, and archived documents are supporting evidence only.
 
-## Session entry gate
+Before state-changing work, read the three control files, refresh the task-relevant repository evidence, and confirm the requested work is authorized by `CURRENT_TASK.md`.
 
-Before implementation work:
+If the user says “continue” and the active task is still accurate, continue it. Do not generate a second execution contract.
 
-1. refresh remote refs without modifying working files;
-2. read the three control-plane files from the authorized branch;
-3. verify repository identity, branch, HEAD, upstream, authorized worktree identity,
-   locally resolved worktree path, and clean/dirty state against the control-plane
-   contract;
-4. verify the requested work fits `CURRENT_TASK.md`;
-5. stop on any mismatch until the state contract is updated.
+A materially new objective, scope, Authority, acceptance rule, STOP condition, or workspace owner requires task reconciliation before mutation.
 
-Read-only inventory is allowed when the current task explicitly authorizes it even
-if no production worktree is yet authorized.
+## Repository identity
 
-## Project policy
+Distinguish:
 
-1. Preserve FloatTabs as a native macOS shell for persistent Web App Slots; do not
-   silently turn a bounded runtime fix into a broader browser/product redesign.
-2. Existing persistent configuration, Browser Profile identity/session isolation,
-   and user website data are product data. Do not delete/reset them or replace an
-   unreadable configuration with an empty fallback merely to recover a runtime.
-3. Exactly one production worktree identity must be explicitly authorized in
-   `CURRENT_STATUS.md` before production implementation changes. The repository
-   records its logical identity/branch/ref contract; machine-specific absolute
-   paths are resolved locally and must not be committed to this public repository.
-   A different clean-looking checkout is not an acceptable substitute.
-4. Before changing production behavior, read the current product/design contract
-   relevant to the affected boundary plus the current release/validation record.
-   Historical or superseded records are evidence only and must not override the
-   current contract.
-5. Before starting a new branch or PR, reconcile related PRs/branches/worktrees
-   and assign exactly one repository lifecycle state: ACTIVE, MERGED, SUPERSEDED,
-   or ABANDONED. Scope, role, dirty state, and cleanup blockers are separate
-   metadata and must not be encoded as extra lifecycle states.
+- **Repository HEAD** — literal current commit;
+- **Delivery / Semantic HEAD** — implementation identity being verified.
 
-## Runtime / diagnostic evidence
+A commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_DRIFT`. It does not by itself invalidate product implementation evidence or require a new task/PR/test cycle.
 
-6. Symptom recovery, reload success, slot reset success, app restart success, or a
-   watchdog recovery does not by itself prove the underlying root cause.
-7. Keep these conclusions distinct:
-   - observation / diagnostic evidence;
-   - recovery behavior;
-   - causal root-cause evidence;
-   - experimental mitigation;
-   - production fix.
-8. A diagnostic PR is not a production fix unless its production behavior is
-   explicitly authorized and validated as such.
-9. For an incident, bind evidence to the relevant identities when available:
-   source HEAD/build, PR/branch, Slot identity, navigation/document generation or
-   epoch, incident/session identifier, and the runtime timestamps needed to order
-   events. Do not combine evidence from different identities as if it were one run.
-10. Stale callbacks, probes, or events from an earlier navigation/runtime generation
-   must not be treated as evidence about a later generation without explicit
-   correlation.
-11. Separate verified facts, plausible mechanisms, and uninspected areas. Unknown
-    must remain unknown.
+Do not treat every historical recorded SHA as a permanent equality lock. Fresh Git/GitHub refs are authoritative for current branch/PR identity.
 
-## Change discipline
+Preserve unknown staged, unstaged, untracked, local-only, or archived work. Never reset/delete it merely to make a workspace match an expected state.
 
-12. Do not stack a new speculative fix on unresolved diagnostic/recovery branches
-    without first reconciling what each open change proves, what it does not prove,
-    and which behavior is intended for production.
-13. During a controlled incident capture, do not rebuild, reinstall, replace the
-    running app, reset persistent state, or materially change diagnostics unless
-    `CURRENT_TASK.md` explicitly authorizes that mutation.
-14. Preserve Slot-scoped ownership and lifecycle semantics. A fix for one Slot,
-    navigation generation, fullscreen lifecycle, attention state, profile, or
-    recovery path must not silently broaden ownership across unrelated Slots.
-15. Current design/product contracts override older stage records. Historical
-    validation is evidence about that historical build, not automatic proof for the
-    current runtime.
-16. State-governance work must remain docs/control-plane only unless
-    `CURRENT_TASK.md` explicitly changes scope.
+## Domain / Authority boundaries
 
-## State transition discipline
+Use `docs/architecture/DOMAIN_MAP.md` for navigation. Key durable boundaries:
 
-17. When material state changes, update `CURRENT_STATUS.md` and
-    `CURRENT_TASK.md` together when both are affected.
-18. Do not hard-code the SHA of the commit that contains `CURRENT_STATUS.md`
-    inside that same file. That creates an impossible self-reference. Instead,
-    record immutable baselines and require the local HEAD to equal the freshly
-    fetched remote head of the authorized branch.
-19. A status transition is not complete until the updated control-plane files are
-    committed/pushed and the live branch/PR metadata agrees with them.
+- **Tabs** own Tab/Profile identity, selection, ordering, and configuration projection.
+- **Web** owns `WKWebView` runtime, navigation, residency, observer/task lifecycle, runtime health, and recovery.
+- **Panel / Window / Fullscreen** own presentation and window synchronization.
+- **Focus / Input** own native/DOM focus and command/event routing.
+- **Persistence** owns durable user configuration and recovery data.
+- **Speech / Attention** consume bounded runtime/content signals; they do not become Tab/Web authorities.
+- **Diagnostics** record evidence; logs do not become product truth or root-cause authority.
 
-## Validation and handoff
+Keep one writer per canonical state. Do not use persistence to hide runtime bugs or reload to hide runtime-ownership problems.
 
-20. Validate the changed boundary with the smallest sufficient evidence. Use
-    focused tests first; run broader regression when the affected lifecycle,
-    persistence, WebKit behavior, or requested acceptance criteria justify it.
-21. Tests and logs should establish behavioral contracts and causal boundaries,
-    not merely increase coverage volume.
-22. Before recommending merge or release, state unresolved root-cause uncertainty,
-    untested runtime paths, and whether the change is diagnostic, recovery-only,
-    experimental, or production-ready.
-23. Required branch-protection checks must pass on the exact commit proposed for
-    merge and must be recognized by GitHub branch protection for that pull request.
-    A successful `workflow_dispatch` run is supporting evidence only when GitHub
-    actually records it as satisfying the required check; never assume a manual run
-    satisfies PR protection. Required workflows must include control-plane paths (or
-    use another PR-context trigger) so governance-only changes produce the required
-    PR check. An absent or merely "expected" required check is not a pass.
-24. A handoff is complete only when another agent can read the three control-plane
-    files, verify the checkout against them, and continue without reconstructing
-    current state from chat history.
+## Governance routing
+
+Normal repository engineering enters through:
+
+`engineering-governance → project-governance`
+
+Use `domain-navigation` only when the affected Domain, Authority, source location, runtime entry, dependency, or relevant tests cannot be established safely.
+
+Use `incident-doctor` only when a real runtime failure blocks progress and existing evidence is insufficient for the next safe decision. A normal UI bug or evidence-backed defect stays in normal governed development.
+
+## Task lifecycle
+
+### Start
+
+Before state-changing execution:
+
+1. read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`;
+2. refresh task-relevant refs/evidence;
+3. verify current task scope and relevant workspace/branch/PR identity;
+4. stop on material authority ambiguity or unknown overlapping unique work.
+
+A truly new task must first be authorized in `CURRENT_TASK.md`.
+
+### During
+
+Do not expand the task for adjacent issues. Record material non-blocking items as Follow-ups in `CURRENT_STATUS.md`; they become executable only through a future task authorization.
+
+If implementation introduces or changes canonical ownership, writers, shared behavior, module boundaries, or a materially new responsibility, re-check the code-structure boundary before continuing.
+
+### Completion
+
+Every terminal task must run a Control Alignment Gate before successful handoff:
+
+- obtain fresh outcome evidence;
+- reread STATUS and TASK;
+- update only control facts whose owned semantics materially changed;
+- close or explicitly retain task-relevant workspace/PR lifecycle state.
+
+A task is not fully closed merely because its PR merged.
+
+## PR / branch / worktree lifecycle
+
+Default to one writer for overlapping Authority.
+
+A correction that still belongs to the current task should normally stay in the current PR. Do not open a new PR/worktree for every discovered defect.
+
+Before establishing an overlapping successor, resolve a predecessor that remains write-capable, lifecycle-unclear, or contains unknown unique work.
+
+Diagnostic/experimental PRs must eventually have a clear disposition such as `MERGED`, `SUPERSEDED`, `ABANDONED`, or `ARCHIVE_ONLY`.
+
+Routine continuation does not require re-inventorying every historical branch/worktree; inspect the task-relevant lifecycle only.
+
+## Runtime / incident evidence
+
+Keep separate:
+
+- symptom / observation;
+- recovery behavior;
+- causal evidence;
+- experimental mitigation;
+- production fix.
+
+For incidents, correlate evidence where available by source/build identity, Slot, session, runtime generation/WebView instance, navigation generation, timestamps, and recovery request/result.
+
+`reload fixed it`, `reset fixed it`, or `restart fixed it` identifies a recovery boundary only. It does not prove root cause.
+
+If evidence is insufficient, preserve:
+
+`ROOT CAUSE UNKNOWN`
+
+Do not combine stale events from different runtime/navigation generations as one incident.
+
+## Verification
+
+Verification effort follows risk, not change count.
+
+Use focused tests first. Increase verification for changes involving:
+
+- WebView lifecycle / navigation;
+- observer cleanup / task cancellation;
+- runtime reset / recovery;
+- window / fullscreen ownership;
+- focus / event monitors;
+- persistence / migration;
+- canonical state writers.
+
+Real macOS interaction/runtime changes require relevant runtime acceptance; static review alone is insufficient.
+
+Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and applicable runtime acceptance. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
+
+## Product-data safety
+
+Browser Profiles, Web App Slot configuration, persisted website/session data, preferences, backups, and recovery material are user/product data.
+
+Do not delete/reset them or replace unreadable persisted configuration with an empty fallback merely to recover runtime behavior unless the active task explicitly authorizes that behavior and its data-loss implications.
+
+## Stop conditions
+
+STOP and report evidence when:
+
+- active task authorization is missing or materially stale;
+- the requested mutation is outside task scope;
+- task-relevant baseline/Authority changed materially;
+- an overlapping predecessor contains unknown unique work;
+- a required live repository-host gate fails;
+- a linked design/plan change invalidates task acceptance or scope;
+- safe ownership cannot be established without further navigation/incident evidence.
+
+Do not stop merely because Repository HEAD advanced only through control-plane changes with unchanged task semantics.
