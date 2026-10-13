@@ -2,92 +2,66 @@
 
 **Task ID:** `FT-PR-CLOSEOUT-001`
 **Title:** Reconcile and close retained PR lifecycle
-**Status:** `ACTIVE`
-**Mode:** `PR_LIFECYCLE_RECONCILIATION`
+**Status:** `TERMINAL`
+**Mode:** `PR_LIFECYCLE_CLOSEOUT_COMPLETE`
 
 ## Objective
 
-Reconcile the two retained open Draft PRs against current `main`, preserve still-valid product work, and give each PR an explicit terminal disposition before any new global code audit.
+Reconcile the retained open Draft PRs against current `main`, preserve still-valid product work, and give each PR an explicit terminal disposition before any new global code audit.
 
-Process in order:
+## Final result
 
-1. PR #116 — `fix/residency-lifecycle-semantics`;
-2. PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`.
+- PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
+  - Reconciled onto then-current `main` as one clean lifecycle corrective commit.
+  - Exact-head QA DMG and macOS CI passed before merge.
+  - Merge commit: `ec4f7ded7a768bef38933a80af5d7801aa0361d4`.
+- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
+  - Technical design and historical implementation evidence retained.
+  - Not merged because current MemoX delivery authority still defers PR E and FloatTabs integration points have materially evolved since the old branch baseline.
+  - Any future MemoX PR E work requires a new authorization against then-current baselines.
 
-Do not start #102 state-changing reconciliation until #116 is terminal.
+## Scope outcome
 
-## Authority / scope
+Completed in scope:
 
-Primary authority is repository/PR lifecycle plus the domains already changed by each PR.
+- fresh base/head/diff/conflict/CI evidence for both retained PRs;
+- preservation and merge of still-valid PR #116 lifecycle corrections;
+- explicit terminal archive disposition for PR #102;
+- no unrelated product work or broad architecture refactor;
+- no overlapping successor PR used to bypass either predecessor.
 
-In scope:
+## Verification outcome
 
-- fresh base/head/diff/conflict/CI/review evidence;
-- determine which PR changes remain valid against current `main`;
-- resolve conflicts using the existing PR when safe;
-- preserve task-owned corrections that remain semantically valid;
-- proportional focused tests and required CI;
-- relevant real-mac runtime acceptance for Web/runtime lifecycle changes;
-- terminal PR/workspace disposition and control-plane reconciliation.
+PR #116 merge gates:
 
-Out of scope:
+- exact semantic diff established;
+- Hot/Warm lifecycle contract reconciled;
+- historical focused/runtime acceptance evidence retained where still valid;
+- final-head `QA DMG`: PASS;
+- final-head `macOS CI`: PASS;
+- required `Build & Test (Apple Silicon arm64)`: PASS;
+- mergeability: PASS before merge.
 
-- unrelated new product fixes;
-- broad architecture refactors;
-- new diagnostics unless required to verify the retained PR itself;
-- global code audit before both retained PRs are terminal;
-- opening overlapping successor PRs merely to avoid reconciling an existing predecessor.
+PR #102 closeout evidence:
 
-Adjacent issues found during reconciliation become Follow-ups only.
+- one coherent historical implementation commit; no unexplained unique work;
+- historical FloatTabs CI/QA and real MemoX receiver E2E retained as evidence;
+- current MemoX receiver protocol remains compatible in principle;
+- current MemoX authority still defers PR E delivery;
+- current FloatTabs response ownership/completion routing has materially evolved, so stale-branch merge was rejected in favor of `ARCHIVE_ONLY`.
 
-## PR #116 acceptance
+## STOP / lifecycle result
 
-Before terminal disposition, establish against current `main`:
+No unresolved overlapping retained PR remains active.
 
-- exact remaining semantic diff;
-- Hot inactive renderer-recovery contract;
-- Warm TTL contract with no ordinary two-Warm cap;
-- memory-pressure warning vs critical behavior;
-- media / attention / speech protections unchanged;
-- focused lifecycle tests;
-- relevant macOS runtime acceptance;
-- required exact-head GitHub CI and mergeability.
+This task is terminal. Do not regenerate or continue `FT-PR-CLOSEOUT-001` as an active task.
 
-If still valid and safely reconcilable, prefer completing PR #116 rather than replacing it. Otherwise give it an explicit non-merge terminal disposition with evidence.
+## Next milestone
 
-## PR #102 acceptance
+A fresh global read-only FloatTabs audit may now run against the post-closeout baseline. It should classify findings into:
 
-After #116 is terminal, establish against the then-current `main`:
+- confirmed code issues;
+- latent/structural risks;
+- runtime-evidence-required items.
 
-- whether the MemoX integration is still wanted and contract-compatible;
-- exact remaining semantic diff and current dependency/receiver assumptions;
-- no regression to FloatTabs runtime, response ownership, persistence, or user-data safety;
-- focused tests plus any required cross-repository E2E evidence;
-- required exact-head CI and mergeability.
-
-Then give PR #102 an explicit terminal disposition.
-
-## STOP conditions
-
-STOP and report before mutation if:
-
-- a retained branch contains unknown/unique work not explained by its PR;
-- current `main` materially invalidates the PR's accepted product contract;
-- reconciliation would require unrelated product scope;
-- task-relevant Authority cannot be established safely;
-- required runtime or repository-host evidence fails.
-
-## Workspace / branch expectation
-
-Use the existing PR branch as the default writer for that PR. Do not create a new overlapping branch/worktree unless fresh evidence proves the predecessor cannot be safely continued. Preserve unknown local or remote work.
-
-## Task completion
-
-This task is terminal only when both retained PRs are explicitly one of:
-
-- `MERGED`
-- `SUPERSEDED`
-- `ABANDONED`
-- `ARCHIVE_ONLY`
-
-Then reconcile `CURRENT_STATUS.md` / `CURRENT_TASK.md`, confirm the resulting clean baseline, and set the next milestone to a fresh global read-only audit.
+Any state-changing corrective work discovered by that audit requires a new `CURRENT_TASK.md` authorization before mutation.

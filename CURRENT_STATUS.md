@@ -1,36 +1,38 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-13
+**Status date:** 2026-10-14
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: PR_LIFECYCLE_RECONCILIATION**
+**MODE: PR_LIFECYCLE_CLOSEOUT_COMPLETE**
 
-FloatTabs governance/bootstrap is established. The active task is to reconcile and close the two retained Draft PRs before any new global code audit.
+The retained PR reconciliation phase is complete. FloatTabs is ready for a fresh global read-only audit from the current merged baseline.
 
 ## Verified baseline
 
-- Current `main`: `7bc9b5678695af6ebbd35d5d967a0e1f38602c7a`.
-- The governance bootstrap is merged and product source/tests were not changed by that bootstrap.
-- Repository HEAD may advance through control-only commits; distinguish literal Repository HEAD from Delivery / Semantic HEAD.
+- Current product baseline: `main@ec4f7ded7a768bef38933a80af5d7801aa0361d4`.
+- PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
+- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
+- PR #102 remains historical implementation evidence only; no MemoX product code from that PR is present in current `main`.
+- Repository HEAD may later move through control-only commits; distinguish literal Repository HEAD from Delivery / Semantic HEAD.
 
-## Active task
+## Current capability / accepted runtime conclusions
 
-- `FT-PR-CLOSEOUT-001` — reconcile retained PR lifecycle.
-- Order: PR #116 first, PR #102 only after #116 is terminal.
-- No unrelated product work or global audit is authorized inside this task.
+- Hot inactive renderer termination recovery now follows the merged PR #116 contract: Hot may recover in background without selecting/presenting/focus stealing.
+- Ordinary Warm inactivity is governed by configured TTL rather than a hidden two-Warm cap.
+- Memory-pressure `warning` is diagnostic-only for Warm residency; `critical` may release eligible inactive Warm runtimes early.
+- Existing media / attention / speech protections remain part of the lifecycle contract.
 
-## Retained PRs
+## Retained historical evidence
 
-- PR #116 — `fix/residency-lifecycle-semantics`, OPEN / DRAFT / CONFLICTING with current main. Contains previously validated Hot/Warm lifecycle corrections and must be freshly reconciled before terminal disposition.
-- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`, OPEN / DRAFT / CONFLICTING with current main. Remains untouched until #116 is terminal.
+PR #102 retains a previously validated MemoX durable-outbox/sender implementation and related tests, but it is not current product authority. MemoX still retains the PR E technical design and trusted-local receiver contract; delivery remains deferred until separately re-authorized against then-current FloatTabs and MemoX baselines.
 
 ## Domain baseline
 
 - `TabStore` owns canonical Tab/Profile configuration projection.
-- `WebViewPool` + `SlotLifecycleCoordinator` are central Web runtime/lifecycle authorities.
+- `WebViewPool` + `SlotLifecycleCoordinator` own central Web runtime/lifecycle behavior.
 - `PanelController` is the main presentation/window integration owner and should not absorb unrelated canonical state.
 - `AppCoordinator` is the composition root, not a replacement authority for child domains.
 - Diagnostics are evidence only, not root-cause authority.
@@ -38,20 +40,21 @@ FloatTabs governance/bootstrap is established. The active task is to reconcile a
 ## Current posture
 
 ```text
-ACTIVE_TASK=FT-PR-CLOSEOUT-001
-PR_116=OPEN_DRAFT_RECONCILE_FIRST
-PR_102=OPEN_DRAFT_WAITING_ON_116
-NEW_GLOBAL_AUDIT=BLOCKED_UNTIL_PR_CLOSEOUT
-PRODUCT_MUTATION_FROM_CONTROL_UPDATE=NO
+ACTIVE_PRODUCT_TASK=NO
+PR_116=MERGED
+PR_102=ARCHIVE_ONLY_CLOSED
+RETAINED_PR_CLOSEOUT=COMPLETE
+GLOBAL_READ_ONLY_AUDIT=READY
 ```
 
 ## Follow-ups
 
 - `PanelController.swift` is a large integration owner; future changes that add new canonical state or responsibilities should trigger a structure/Authority check before expansion.
 - Runtime/lifecycle changes around `WebViewPool` or `SlotLifecycleCoordinator` require higher verification and relevant macOS runtime acceptance.
+- If MemoX PR E is resumed, start from current baselines and re-integrate against current response ownership/completion routing rather than reviving PR #102 wholesale.
 
-These Follow-ups do not expand the active task.
+These Follow-ups do not authorize product mutation.
 
 ## Next milestone
 
-Reconcile PR #116 against current `main`, give it an explicit terminal disposition, then proceed to PR #102. After both are terminal, establish a clean baseline and start a fresh global read-only audit.
+Run a fresh global read-only audit against the clean post-closeout baseline. Classify findings as confirmed code issues, latent risks, or items requiring runtime evidence before any new corrective task is authorized.
