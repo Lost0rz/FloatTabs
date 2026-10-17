@@ -59,8 +59,8 @@ When collapsed:
 - Settings is hidden;
 - Pin is hidden;
 - the bottom-left fold grip remains available to restore the rail;
-- the 12 pt leading strip remains a window-movement target;
-- the reclaimed 64 pt belongs to Web content and must not be intercepted by shell drag hit testing.
+- the 12 pt leading strip remains physical layout geometry, but is not a window-movement target;
+- the reclaimed 64 pt belongs to Web content and must not be covered by shell movement hit testing.
 
 The shell `NSWindow` frame does **not** resize when the rail folds.
 
@@ -87,19 +87,14 @@ Do not reintroduce independent 0.25 / 0.26 second fold durations.
 
 ## 6. Window movement
 
-Movement hit regions follow the **physical Web frame**.
+The only supported window-movement target is the bounded four-edge band **inside the Web surface**, owned by `WebSourceEdgeDragView` in the ordinary Web source window.
 
-Expanded:
-
-- only uncovered rail gaps and the narrow leading movement gutter may
-  participate in shell movement outside the Web edge;
-- visible Tab/control frames always exclude movement.
-- visible rail controls own their own cursor and click behavior.
-
-Collapsed:
-
-- only the 12 pt leading gutter remains the left-side shell movement target;
-- the reclaimed content column is Web content, not an invisible drag lane.
+- The external shell perimeter, including its top, right and bottom gutters, is not a movement target.
+- The complete left Tab rail is not a movement target in expanded or collapsed state, including uncovered gaps, hover-expanded Tab surroundings and the leading strip.
+- The 12 pt collapsed leading inset remains physical layout geometry; it is not a movement target.
+- The shell has no move cursor, synthetic acquisition drawing or movement hit target.
+- Visible rail controls retain their own click and cursor behavior. Tab drag continues to reorder Tabs.
+- The inner Web-edge movement band retains its bottom-right resize exclusion.
 
 ## 7. Resize
 
@@ -138,10 +133,12 @@ When the shell is re-presented after fullscreen, the normal short workspace auto
 A release candidate changing shell geometry must verify at minimum:
 
 - first click switches Tabs from a background application;
+- hover-expanded Tabs remain fully clickable, and Tab drag continues to reorder Tabs;
 - fold/unfold is visually synchronized;
 - collapsed content begins after the 12 pt leading gutter;
-- the 12 pt gutter still moves the window;
-- reclaimed Web content is not consumed by movement hit testing;
+- the collapsed 12 pt leading gutter and complete expanded/collapsed rail do not move the window;
+- outer top / right / bottom gutters do not move the window or advertise the move cursor;
+- inner Web-edge drag still moves the window and bottom-right resize remains independent;
 - repeated fold/unfold has no geometry drift;
 - collapsed resize then expand restores nominal sizing correctly;
 - collapse state survives relaunch without changing nominal viewport authority;

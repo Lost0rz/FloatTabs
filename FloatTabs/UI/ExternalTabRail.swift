@@ -1050,18 +1050,6 @@ final class ExternalControlZoneView: NSView {
         return tab.convert(tab.bounds, to: ancestor)
     }
 
-    /// Movement may use uncovered rail gaps, but every visible Tab/rail
-    /// control owns its complete animated rectangle. Returning these frames in
-    /// the perimeter view's coordinate space keeps cursor, hit testing, and
-    /// the acquisition surface aligned while Dock magnification runs.
-    func movementExclusionRects(in ancestor: NSView) -> [NSRect] {
-        return railContentViews.compactMap { view in
-            guard !view.isHidden, view.superview === self else { return nil }
-            let rect = view.convert(view.bounds, to: ancestor)
-            return rect.isEmpty ? nil : rect
-        }
-    }
-
     var addControlFrame: NSRect {
         addControl.frame
     }
@@ -2231,10 +2219,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        // A tab's own cursor rect must win so tab hits never advertise window
-        // dragging. Its complete animated frame is also excluded from the
-        // shell movement geometry, so magnification never turns a Tab into a
-        // move target.
+        // Keep the Tab's normal arrow cursor across its complete animated
+        // frame as Dock magnification changes the row width.
         addCursorRect(bounds, cursor: .arrow)
     }
 
@@ -3004,8 +2990,7 @@ final class AddWebAppControl: NSView, RailHoverInteractionOwner {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        // The whole rail column doubles as the shell's blank movement zone. The
-        // control's own cursor rect must win so hits never advertise dragging.
+        // Keep the control's normal arrow cursor across its animated frame.
         addCursorRect(bounds, cursor: .arrow)
     }
 
@@ -3151,8 +3136,7 @@ final class PinPanelControl: NSView, RailHoverInteractionOwner {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        // The whole rail column doubles as the shell's blank movement zone. The
-        // control's own cursor rect must win so hits never advertise dragging.
+        // Keep the control's normal arrow cursor across its animated frame.
         addCursorRect(bounds, cursor: .arrow)
     }
 
@@ -3313,8 +3297,7 @@ final class GlobalSettingsControl: NSView, RailHoverInteractionOwner {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        // The whole rail column doubles as the shell's blank movement zone. The
-        // control's own cursor rect must win so hits never advertise dragging.
+        // Keep the control's normal arrow cursor across its animated frame.
         addCursorRect(bounds, cursor: .arrow)
     }
 

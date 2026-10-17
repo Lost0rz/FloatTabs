@@ -19,9 +19,9 @@ The ChatGPT performance-measurement task is complete and merged. Product work ha
 - Active Draft PR: #123 — `Refine shell movement to inner Web surface only`.
 - Previous task `FT-CHATGPT-PERF-001`: `COMPLETED / MERGED`; long-running performance baseline remains deferred and is not part of the active product task.
 
-## Shell interaction audit
+## Authorization-time shell interaction audit
 
-Current code has two independent window-movement acquisition layers:
+At task authorization, the source had two independent window-movement acquisition layers:
 
 - `PanelPerimeterDragView` in the floating shell owns the **outer** half of the movement target. It advertises move cursors, draws a tiny nonzero acquisition surface, hit-tests outer Web gutters, and adds a narrow `blankRail` leading strip so uncovered Tab-rail space can move the window.
 - `WebSourceEdgeDragView` in the ordinary Web source window owns the **inner** half of the movement target and moves the shell from bounded bands just inside the Web surface.
@@ -32,8 +32,8 @@ Additional verified facts:
 - `PanelMetrics.outerInteractionGutter = 12` is also part of shell/layout geometry. Removing external drag must **not** collapse this spacing or rewrite persisted panel/viewport sizing.
 - `PanelMetrics.collapsedRailLeadingInset = 12` is a physical rail-collapse inset. It must remain 12 pt even though it will cease to be a movement target.
 - Tab, Add, Settings, Pin and speech controls explicitly reject window movement; Tab views also own a separate drag gesture for Tab reordering. Those interaction semantics must be preserved.
-- Current `FloatTabs_UI_Design_System_v1.3.md` still requires uncovered rail gaps / leading gutter to participate in movement, including the collapsed 12 pt strip. That accepted interaction contract must be revised with this task.
-- Existing `ExternalShellTests` contain assertions that outer gutters and the collapsed leading gutter are movement targets; those tests are expected to change with the product contract.
+- The task-authorized v1.3 contract then required uncovered rail gaps / leading gutter to participate in movement, including the collapsed 12 pt strip. The implementation revises that accepted contract.
+- The baseline `ExternalShellTests` expected outer gutters and the collapsed leading gutter to move the window; those tests have been replaced with the new contract.
 
 ## Product decision
 
@@ -61,6 +61,15 @@ The intended UX is to remove accidental FloatTabs movement and reduce intercepti
 - `docs/design/FloatTabs_UI_Design_System_v1.3.md` is the current shell interaction contract and must be updated as part of the implementation.
 - No Tab, Web runtime, persistence, Attention, Speech, Diagnostics or Browser Profile authority changes are authorized.
 
+## Implementation progress
+
+- `PanelPerimeterDragView` remains only as an inert fullscreen stacking anchor. It owns no movement hit testing, move cursor, acquisition drawing or drag handlers.
+- `WebSourceEdgeDragView` remains the only window-movement owner.
+- The 76 pt expanded rail, 12 pt outer/layout gutter, 12 pt collapsed leading inset and persisted sizing formulas are preserved.
+- The accepted v1.3 contract and focused regressions now describe the single inner Web-edge movement owner.
+- Local Apple Silicon macOS verification: focused XCTest `PASS` (35 tests); full Debug XCTest `PASS` (1,303 tests); Debug and Release arm64 builds `PASS`.
+- Real-Mac pointer acceptance is still pending. The task remains ACTIVE until that user-visible interaction gate is complete.
+
 ## Current posture
 
 ```text
@@ -69,6 +78,7 @@ LAST_COMPLETED_TASK=FT-CHATGPT-PERF-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-shell-inner-drag-001
 TASK_PR=123_DRAFT
+RUNTIME_ACCEPTANCE=WAITING_REAL_MAC
 ROOT_CAUSE=N/A
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
 LONG_RUNNING_BASELINE_AUTHORIZED=NO

@@ -7,20 +7,18 @@ struct PanelMetrics {
     static let minimumViewportSize = NSSize(width: 320, height: 400)
     static let externalControlZoneWidth: CGFloat = 76
 
-    /// Movement uses the same depth on both sides of every visible Web edge.
-    /// The shell owns the outer 12 pt and the ordinary Web source window owns
-    /// the inner 12 pt, so the complete 24 pt target remains draggable even
-    /// though the visible surface is split across two AppKit windows.
+    /// Physical shell/layout gutter around the Web viewport. This remains part
+    /// of nominal panel sizing even though the shell perimeter is not draggable.
     static let outerInteractionGutter: CGFloat = 12
-    static let innerMovementOverlap = outerInteractionGutter
+    /// The ordinary Web source window owns the only movement target, a bounded
+    /// band just inside each Web edge.
+    static let innerMovementOverlap: CGFloat = 12
 
     /// Physical-only collapse geometry. Folding the rail away hands its
     /// reserved 76 pt column to the Web content while the shell window frame
-    /// — and every persisted/nominal size formula — stays untouched. Only the
-    /// symmetric movement gutter remains on the left edge so the panel keeps
-    /// its move affordance on every side.
-    static let leadingMovementGutter: CGFloat = outerInteractionGutter
-    static let collapsedRailLeadingInset: CGFloat = leadingMovementGutter
+    /// — and every persisted/nominal size formula — stays untouched. The
+    /// remaining 12 pt leading inset is layout only and is not draggable.
+    static let collapsedRailLeadingInset: CGFloat = 12
 
     /// The visible frame is deliberately much thinner than its hit target.
     /// Its centerline sits only 0.5 pt outside the Web surface. With a 2.5 pt
@@ -76,8 +74,7 @@ struct PanelMetrics {
 
 enum PanelMovementGeometry {
     /// Returns four edge bands around `edgeFrame`, clipped to `clippingBounds`.
-    /// Passing only an outer or inner depth lets the shell and Web source own
-    /// complementary halves of the same visible movement target.
+    /// The Web source uses an inner-only band and can reserve its resize corner.
     static func edgeBands(
         around edgeFrame: NSRect,
         outerDepth: CGFloat,
@@ -130,19 +127,6 @@ enum PanelMovementGeometry {
         return candidates
             .map { $0.intersection(clippingBounds) }
             .filter { !$0.isNull && !$0.isEmpty }
-    }
-
-    static func webFrame(
-        in panelBounds: NSRect,
-        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth
-    ) -> NSRect {
-        let outer = max(PanelMetrics.outerInteractionGutter, 0)
-        return NSRect(
-            x: panelBounds.minX + leadingInset,
-            y: panelBounds.minY + outer,
-            width: max(panelBounds.width - leadingInset - outer, 0),
-            height: max(panelBounds.height - 2 * outer, 0)
-        )
     }
 }
 
