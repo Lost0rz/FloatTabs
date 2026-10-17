@@ -16,6 +16,7 @@ The ChatGPT performance-measurement task is complete and merged. Product work ha
 - PR #122 — `Perf: establish ChatGPT long-running measurement seam`: `MERGED`.
 - Post-merge `Benchmark Tool CI` and `macOS CI` on `main@a4c9ad63831cc15ad75257976982b416e7101c3a`: `PASS`.
 - Fresh open-PR inventory at task authorization: none.
+- Active Draft PR: #123 — `Refine shell movement to inner Web surface only`.
 - Previous task `FT-CHATGPT-PERF-001`: `COMPLETED / MERGED`; long-running performance baseline remains deferred and is not part of the active product task.
 
 ## Shell interaction audit
@@ -67,7 +68,7 @@ ACTIVE_PRODUCT_TASK=FT-SHELL-INNER-DRAG-001
 LAST_COMPLETED_TASK=FT-CHATGPT-PERF-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-shell-inner-drag-001
-TASK_PR=PENDING
+TASK_PR=123_DRAFT
 ROOT_CAUSE=N/A
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
 LONG_RUNNING_BASELINE_AUTHORIZED=NO
