@@ -17,6 +17,8 @@ The post-closeout global audit has identified a measurement gap around long-runn
 - PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
 - PR #102 — historical MemoX implementation evidence only: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
 - Fresh PR inventory before this task found no open overlapping PR.
+- Task branch: `perf/ft-chatgpt-perf-001`.
+- Draft PR: #122 — `Perf: establish ChatGPT long-running measurement seam`.
 
 ## Audit result relevant to this phase
 
@@ -51,6 +53,7 @@ Confirmed code-level costs / measurement needs:
 ACTIVE_PRODUCT_TASK=FT-CHATGPT-PERF-001
 TASK_MODE=MEASUREMENT_IMPLEMENTATION
 TASK_BRANCH=perf/ft-chatgpt-perf-001
+TASK_PR=122_DRAFT
 ROOT_CAUSE=UNKNOWN
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
 MEASUREMENT_IMPLEMENTATION_AUTHORIZED=YES
