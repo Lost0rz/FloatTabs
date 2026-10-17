@@ -155,9 +155,9 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: "FloatTabs.runtimeDiagnostics.retainHistory"))
 
         let labels = descendants.compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertTrue(labels.contains { $0.localizedCaseInsensitiveContains("local")
+        XCTAssertTrue(labels.contains { $0.localizedCaseInsensitiveContains("this Mac")
             && $0.localizedCaseInsensitiveContains("sanitized")
-            && $0.localizedCaseInsensitiveContains("seven days") })
+            && $0.localizedCaseInsensitiveContains("7 days") })
         XCTAssertTrue(labels.contains { $0.localizedCaseInsensitiveContains("low-frequency")
             && $0.localizedCaseInsensitiveContains("content-free") })
     }
@@ -191,6 +191,51 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(controller.exportButton.isEnabled)
         XCTAssertTrue(controller.openLogsButton.isEnabled)
         XCTAssertTrue(defaults.bool(forKey: "FloatTabs.longTermPerformanceObservation.enabled"))
+    }
+
+    func testSavedLogsFolderActionKeepsHandlerAndExplainsDailyOfflineHandoff() throws {
+        var handlerInvocationCount = 0
+        let controller = RuntimeDiagnosticsSettingsViewController(
+            preferencesStore: AppPreferencesStore(),
+            openLogsHandler: { handlerInvocationCount += 1 }
+        )
+        controller.loadView()
+
+        XCTAssertEqual(controller.openLogsButton.title, "Open Saved Logs Folder")
+        XCTAssertEqual(controller.exportButton.title, "Export Recent Diagnostics…")
+        let labels = descendantViews(of: controller.view)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(labels.contains(
+            "Sanitized diagnostics are saved on this Mac and retained for up to 7 days. Logs are normally grouped into one JSONL file per UTC day; large daily logs may be split automatically. Open the saved logs folder and choose one or more daily files to provide later for offline AI analysis."
+        ))
+
+        _ = NSApp.sendAction(
+            try XCTUnwrap(controller.openLogsButton.action),
+            to: controller.openLogsButton.target,
+            from: controller.openLogsButton
+        )
+        XCTAssertEqual(handlerInvocationCount, 1)
+    }
+
+    func testOpeningSavedLogsFolderCreatesMissingDirectoryBeforeOpening() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnosticsFolderTest-\(UUID().uuidString)", isDirectory: true)
+        let directory = root.appendingPathComponent("Logs", isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+        XCTAssertFalse(fileManager.fileExists(atPath: directory.path))
+
+        var openedURL: URL?
+        AppCoordinator.openDiagnosticsLogsFolder(
+            at: directory,
+            fileManager: fileManager
+        ) { url in
+            openedURL = url
+            XCTAssertTrue(fileManager.fileExists(atPath: directory.path))
+        }
+
+        XCTAssertEqual(openedURL, directory)
+        XCTAssertTrue(fileManager.fileExists(atPath: directory.path))
     }
 
     func testVersionDisplayOmitsBuildNumber() {

@@ -22,7 +22,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         action: nil
     )
     let exportButton = NSButton(title: "Export Recent Diagnostics…", target: nil, action: nil)
-    let openLogsButton = NSButton(title: "Open Logs Folder", target: nil, action: nil)
+    let openLogsButton = NSButton(title: "Open Saved Logs Folder", target: nil, action: nil)
 #if DEBUG
     let captureStuckTabButton = NSButton(
         title: "Capture Stuck Tab Snapshot (QA)",
@@ -69,7 +69,7 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         detail.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
 
         let historyDetail = NSTextField(
-            wrappingLabelWithString: "History stays on this Mac and is sanitized before storage. Managed log files are retained locally for up to seven days."
+            wrappingLabelWithString: "Sanitized diagnostics are saved on this Mac and retained for up to 7 days. Logs are normally grouped into one JSONL file per UTC day; large daily logs may be split automatically. Open the saved logs folder and choose one or more daily files to provide later for offline AI analysis."
         )
         historyDetail.textColor = .secondaryLabelColor
         historyDetail.maximumNumberOfLines = 0

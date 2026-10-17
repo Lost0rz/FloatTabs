@@ -12,6 +12,24 @@ final class AppCoordinator {
         subsystem: "com.lost0rz.FloatTabs",
         category: "WebsiteCache"
     )
+
+    static func openDiagnosticsLogsFolder(
+        at directory: URL = RuntimeDiagnosticWriter.defaultDirectory,
+        fileManager: FileManager = .default,
+        open: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    ) {
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+            )
+        } catch {
+            return
+        }
+        open(directory)
+    }
+
     private let panelController: PanelController
     private let diagnostics: RuntimeDiagnostics
     private let diagnosticExporter: RuntimeDiagnosticExporter
@@ -180,7 +198,7 @@ final class AppCoordinator {
                     ?? completion(.failure(.writerUnavailable))
             },
             onOpenDiagnosticsLogs: {
-                NSWorkspace.shared.open(RuntimeDiagnosticWriter.defaultDirectory)
+                Self.openDiagnosticsLogsFolder()
             },
             onCaptureDiagnosticsIncident: captureIncidentHandler
         )

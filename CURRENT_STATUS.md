@@ -26,7 +26,7 @@ FloatTabs already has a mature local diagnostics foundation and does not need a 
 - Current modes are `off / standard / verbose`; default is `standard`.
 - Runtime files live under `~/Library/Application Support/FloatTabs/Diagnostics/Logs/`.
 - `RuntimeDiagnosticWriter` currently uses 10 MiB segments, at most 10 managed segments, seven-day retention, buffered/debounced writes, fail-soft writer behavior, and `0700`/`0600` directory/file permissions where supported.
-- Settings already expose the diagnostics mode, `Export Recent Diagnostics…`, and `Open Logs Folder`.
+- The authorization baseline exposed the diagnostics mode, `Export Recent Diagnostics…`, and `Open Logs Folder`; the current saved-log refinement renames the folder action to `Open Saved Logs Folder` and explains date-grouped local JSONL selection for later analysis.
 - The privacy boundary rejects page/DOM text, prompts, answers, inputs, cookies, auth/tokens, request bodies, raw error text/stacks, window/document titles, IP literals and other sensitive values. URLs are reduced/sanitized.
 - Existing tests cover schema/mode gating/export, privacy sanitization, rotation/retention/failure isolation/order, traces and preference persistence.
 
@@ -141,7 +141,7 @@ The bounded focus-failure identity probe was implemented in semantic candidate `
 
 ## Acceptance posture
 
-This task must prove that optional periodic observation is bounded, privacy-safe, identity-safe and low overhead. Existing RuntimeDiagnostics privacy/rotation tests remain required, and a short Real-Mac Release smoke must show that enabling observation produces sparse checkpoints and a reload marker without obvious interaction regression or unbounded log growth.
+This task must prove that optional periodic observation is bounded, privacy-safe, identity-safe and low overhead, and that users can open the canonical folder and select locally retained daily JSONL files for later offline analysis. Existing RuntimeDiagnostics privacy/rotation tests remain required. Gate 5's revised acceptance also covers sparse checkpoints, reload/runtime evidence, the privacy boundary, and normal interaction. The earlier Gate 5 failure remains historical; this saved-log UI refinement does not rerun that gate or change `ROOT_CAUSE=UNKNOWN`.
 
 ## User-managed saved-log and offline-analysis refinement (2026-10-17)
 
@@ -150,3 +150,11 @@ The active `FT-DIAG-HISTORY-001` task and Draft PR #124 now also support this us
 Settings will label the folder action `Open Saved Logs Folder` and explain that logs are normally grouped into one JSONL file per UTC day, large daily logs may be split automatically, and the user can select one or more days for later analysis. Opening the folder must ensure `RuntimeDiagnosticWriter.defaultDirectory` exists before asking Finder to open it.
 
 This refinement leaves `RuntimeDiagnosticWriter` ownership, daily segmentation, the 10 MiB segment limit, `maxSegments`, seven-day retention, checkpoint cadence, and privacy rules unchanged. The revised Gate 5 contract is recorded in `CURRENT_TASK.md`; the historical Gate 5 failure remains a failure and `ROOT_CAUSE=UNKNOWN`.
+
+## Saved-log handoff implementation (2026-10-17)
+
+- The scope refinement was pushed to the existing task branch before source changes (control-only commit `450800b702b9eb5f3011ac96a20421a45138b8b5`). The implementation changes only `AppCoordinator`, `RuntimeDiagnosticsSettingsViewController`, and `SettingsInformationArchitectureTests`.
+- Settings now labels the action `Open Saved Logs Folder`; its copy describes sanitized local retention for up to 7 days, one JSONL per UTC day normally, automatic splitting for large daily logs, and user selection of daily files for later offline AI analysis. `Export Recent Diagnostics…` remains unchanged.
+- `AppCoordinator` ensures `RuntimeDiagnosticWriter.defaultDirectory` exists with `0700` directory permissions before asking Finder to open it. It does not copy, export, or rewrite logs. `RuntimeDiagnosticWriter` was not modified.
+- Focused Settings/Diagnostics/privacy/rotation/retention/trace/preferences XCTest: 94 passed. Full XCTest: 1,315 passed, 4 skipped, 0 failed. Debug and Release arm64 builds passed; both app executables were verified as arm64.
+- Exact-head hosted CI is required on the pushed implementation and final control-only reconciliation heads. This refinement does not rerun Real-Mac Gate 5. PR #124 remains Draft, task remains ACTIVE, and `ROOT_CAUSE=UNKNOWN`.
