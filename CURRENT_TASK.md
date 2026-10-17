@@ -1,67 +1,87 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-PR-CLOSEOUT-001`
-**Title:** Reconcile and close retained PR lifecycle
-**Status:** `TERMINAL`
-**Mode:** `PR_LIFECYCLE_CLOSEOUT_COMPLETE`
+**Task ID:** `FT-CHATGPT-PERF-001`
+**Title:** Establish ChatGPT long-running performance measurement
+**Status:** `ACTIVE`
+**Mode:** `MEASUREMENT_IMPLEMENTATION`
 
 ## Objective
 
-Reconcile the retained open Draft PRs against current `main`, preserve still-valid product work, and give each PR an explicit terminal disposition before any new global code audit.
+Establish a trustworthy, low-observer-effect measurement seam for long-running ChatGPT Hot runtimes so later performance changes can be evaluated with A/B evidence instead of subjective feel.
 
-## Final result
+This task measures current behavior. It does **not** optimize or change ChatGPT Attention / Web runtime semantics.
 
-- PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
-  - Reconciled onto then-current `main` as one clean lifecycle corrective commit.
-  - Exact-head QA DMG and macOS CI passed before merge.
-  - Merge commit: `ec4f7ded7a768bef38933a80af5d7801aa0361d4`.
-- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
-  - Technical design and historical implementation evidence retained.
-  - Not merged because current MemoX delivery authority still defers PR E and FloatTabs integration points have materially evolved since the old branch baseline.
-  - Any future MemoX PR E work requires a new authorization against then-current baselines.
+## Authority / baseline
 
-## Scope outcome
+- Project rules: `AGENTS.md`.
+- Domain/navigation: `docs/architecture/DOMAIN_MAP.md`.
+- Existing benchmark authority: `docs/performance/FloatTabs_Stage_5_Resource_Benchmark.md`.
+- ChatGPT Attention semantics: `docs/product/FloatTabs_ChatGPT_Attention_Contract_V1.md` and accepted amendments.
+- Authorization-time literal `main`: `871f225e8d6ca66a8adefdf766245717ea56de44`.
+- Current product semantic baseline: `ec4f7ded7a768bef38933a80af5d7801aa0361d4`; later main drift through the authorization-time HEAD is control-only.
 
-Completed in scope:
+## Authorized scope
 
-- fresh base/head/diff/conflict/CI evidence for both retained PRs;
-- preservation and merge of still-valid PR #116 lifecycle corrections;
-- explicit terminal archive disposition for PR #102;
-- no unrelated product work or broad architecture refactor;
-- no overlapping successor PR used to bypass either predecessor.
+- Add DEBUG-only / benchmark-only, content-free, bounded ChatGPT runtime performance measurement.
+- Reuse the existing `BenchmarkControlServer` and Real-Mac benchmark harness rather than emitting high-frequency RuntimeDiagnostics events.
+- Add only the read-only bridge / WebViewPool / Panel benchmark seams needed to capture current-runtime measurements.
+- Extend `tools/benchmark/**`, benchmark reports/self-tests, and focused Swift tests needed to prove measurement correctness and lifecycle safety.
+- If isolated-world measurement requires asynchronous benchmark-control response handling, that change is authorized only inside the DEBUG benchmark path.
+- Keep one canonical runtime owner; measurement state is diagnostic projection only and must not become product authority.
 
-## Verification outcome
+## Minimum useful evidence
 
-PR #116 merge gates:
+The implementation should obtain a low-overhead equivalent of the following where practical:
 
-- exact semantic diff established;
-- Hot/Warm lifecycle contract reconciled;
-- historical focused/runtime acceptance evidence retained where still valid;
-- final-head `QA DMG`: PASS;
-- final-head `macOS CI`: PASS;
-- required `Build & Test (Apple Silicon arm64)`: PASS;
-- mergeability: PASS before merge.
+- ChatGPT observer callback / scheduling / evaluate counts for the current document;
+- evaluate timing aggregate and peak;
+- liveness-probe count / latency / failure / recovered-completion counts;
+- response-identity-resolution count / timing;
+- low-cadence JavaScript round-trip health latency;
+- document visibility / generating state plus runtime/document identity needed to reject stale samples;
+- existing Real-Mac process CPU / RSS evidence from the benchmark harness.
 
-PR #102 closeout evidence:
+Exact field representation may be refined if implementation evidence shows a simpler or lower-overhead equivalent.
 
-- one coherent historical implementation commit; no unexplained unique work;
-- historical FloatTabs CI/QA and real MemoX receiver E2E retained as evidence;
-- current MemoX receiver protocol remains compatible in principle;
-- current MemoX authority still defers PR E delivery;
-- current FloatTabs response ownership/completion routing has materially evolved, so stale-branch merge was rejected in favor of `ARCHIVE_ONLY`.
+## Non-goals
 
-## STOP / lifecycle result
+This task must not:
 
-No unresolved overlapping retained PR remains active.
+- narrow or otherwise redesign the MutationObserver;
+- change generation detection or response-identity semantics;
+- change liveness watchdog interval, probe authority, or completion behavior;
+- gate/remove the existing page-app PerformanceObserver;
+- add automatic reload, reset, runtime rejuvenation, or recovery policy;
+- change Hot / Warm / Cold semantics or timing;
+- change Browser Profiles, cookies, website session/data, persistence, backups, or recovery data;
+- change production RuntimeDiagnostics modes or make benchmark counters durable product state;
+- claim a root cause or performance improvement from measurement code alone.
 
-This task is terminal. Do not regenerate or continue `FT-PR-CLOSEOUT-001` as an active task.
+## Verification gates
 
-## Next milestone
+1. Focused unit / real-WKWebView tests prove enable/reset/snapshot behavior, bounded/content-free fields, current-runtime identity, and cleanup across navigation/runtime replacement.
+2. Existing ChatGPT Attention / Generation / lifecycle regressions remain green.
+3. Benchmark Python compile + self-tests remain green.
+4. macOS CI/build remains green for the exact task head.
+5. A short Real-Mac smoke run produces correlated FloatTabs/WebContent CPU/RSS plus ChatGPT measurement output.
+6. Measurement observer effect is checked by a paired short run with measurement disabled vs enabled. Do not invent a pass threshold before evidence exists; report the observed delta and any noise/limitations.
 
-A fresh global read-only FloatTabs audit may now run against the post-closeout baseline. It should classify findings into:
+The 30-minute / 2-hour / 6-hour long-running baseline is the next validation gate after this implementation is proven usable; it is not required to claim this code-construction task complete.
 
-- confirmed code issues;
-- latent/structural risks;
-- runtime-evidence-required items.
+## STOP conditions
 
-Any state-changing corrective work discovered by that audit requires a new `CURRENT_TASK.md` authorization before mutation.
+STOP and report evidence if:
+
+- measurement requires production persistence or user-data mutation;
+- it changes Attention, response, lifecycle, residency, reload, or recovery semantics;
+- it introduces periodic production polling or high-frequency RuntimeDiagnostics logging;
+- runtime/document identity cannot prevent stale samples from being treated as current;
+- task-relevant `main` / Authority changes materially;
+- overlapping unique work or another canonical writer appears;
+- required focused tests or Real-Mac smoke cannot establish that the measurement seam is usable without material observer effect.
+
+## Completion boundary
+
+This task is complete only when the measurement seam and harness support are implemented, remotely delivered in the task PR, verified by focused/CI evidence, and a short Real-Mac smoke demonstrates usable content-free measurements with observer-effect evidence recorded.
+
+Completion does **not** authorize or perform Observer/Liveness performance optimization. Those changes require evidence from the resulting baseline and a subsequent task decision.
