@@ -212,7 +212,7 @@ The user authorized this scope refinement on the existing task branch and PR #12
 
 `RuntimeDiagnosticWriter` and its ownership, daily segmentation, 10 MiB segment limit, `maxSegments`, seven-day retention, and checkpoint cadence are unchanged. No copy/export/rewrite was added to the folder-opening seam. No focus, Web runtime, navigation, recovery, Browser Profile/session, or performance behavior was changed.
 
-Local verification completed: focused Settings/Diagnostics/privacy/rotation/retention/trace/preferences tests passed (94); full XCTest passed (1,315 passed, 4 skipped, 0 failed); Debug and Release arm64 builds passed and their executables were confirmed arm64. Exact-head hosted CI must pass after the implementation push and on the final control-only reconciliation head. The revised Real-Mac Gate 5 was not run in this scope; the task remains ACTIVE and `ROOT_CAUSE=UNKNOWN`.
+Local verification completed: focused Settings/Diagnostics/privacy/rotation/retention/trace/preferences tests passed (94); full XCTest passed (1,315 passed, 4 skipped, 0 failed); Debug and Release arm64 builds passed and their executables were confirmed arm64. Exact-head hosted CI passed on semantic implementation head `1714c5c4da994be13b6e21bfac0021f1c5266cdc`: Apple Silicon arm64 run `39031408643` and `build-dmg` run `39031408699`. Verify the final control-only reconciliation head against live PR checks before closeout. The revised Real-Mac Gate 5 was not run in this scope; the task remains ACTIVE and `ROOT_CAUSE=UNKNOWN`.
 
 ## STOP conditions
 
