@@ -118,17 +118,30 @@ The continuous timeline records:
 
 Phase and runtime transitions are written as events so resource drops can be matched to the exact lifecycle transition instead of inferred from Activity Monitor.
 
+## 5. ChatGPT measurement observer-effect smoke
+
+Build and launch the Debug app from this checkout. In FloatTabs, leave the intended ChatGPT Slot selected and configured Hot, and keep the panel visible. The command refuses to activate a different Slot or change Slot policy. It runs one disabled window followed by one enabled window on the same runtime/document, checking Slot, runtime generation, WebView, navigation generation, and document epoch for every sample.
+
+```bash
+python3 tools/benchmark/floattabs_benchmark.py chatgpt-ab \
+  --seconds 30 \
+  --interval 2 \
+  --settle 2
+```
+
+The harness asks for administrator authentication when needed for WebKit helper attribution. It changes only the in-memory Debug measurement switch and counters, then tries to disable measurement at closeout. It does not change profile settings or collect page content. A session is written under `.benchmark-results/` with paired CPU/RSS and ChatGPT snapshots, raw CSV samples, and an observer-effect report. The report gives the measured enabled-minus-disabled delta without a pass threshold; sequential-window timing, generation state, document visibility, sample rejection counts, and system/site noise remain relevant when interpreting it.
+
 ### Stable-tail metrics
 
 `lifecycle-summary.json` and `lifecycle-report.md` separate whole-phase load/switch spikes from the final steady-state window. They include stable-tail RSS/CPU, first/all release timestamps, RSS immediately before the first release, post-release stable RSS/CPU, reclaimed RSS, and how long the run observed the fully released state. Override the default window with `--tail-seconds`.
 
-## 5. Baseline policy
+## 6. Baseline policy
 
 The long-cycle baseline forces selected test Slots to `Pause When Inactive` while each Residency policy is measured. This intentionally isolates Hot/Warm/Cold lifecycle behavior from video decode, audio playback and site-specific background activity.
 
 `Allow Background Audio` protection should be measured as a separate media scenario after the residency baseline is accepted.
 
-## 6. Self-tests
+## 7. Self-tests
 
 ```bash
 python3 -m py_compile tools/benchmark/floattabs_benchmark.py

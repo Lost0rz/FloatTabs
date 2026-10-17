@@ -278,6 +278,24 @@ class BenchmarkControlClient:
     def hide(self) -> Dict[str, object]:
         return dict(self.request("hide").get("status") or {})
 
+    def configure_chatgpt_measurement(
+        self,
+        slot_id: str,
+        *,
+        enabled: Optional[bool] = None,
+        reset: bool = False,
+    ) -> Dict[str, object]:
+        payload: Dict[str, object] = {"slot_id": slot_id, "reset": reset}
+        if enabled is not None:
+            payload["enabled"] = enabled
+        return dict(self.request("chatgpt_measurement_configure", **payload).get("measurement") or {})
+
+    def chatgpt_measurement_snapshot(self, slot_id: str) -> Dict[str, object]:
+        return dict(self.request(
+            "chatgpt_measurement_snapshot",
+            slot_id=slot_id,
+        ).get("measurement") or {})
+
 
 def control_profiles(status: Dict[str, object]) -> List[Dict[str, object]]:
     profiles = list(status.get("profiles") or [])
@@ -580,6 +598,103 @@ def write_csv(path: Path, samples: Sequence[Dict[str, object]]) -> None:
         writer.writerows(samples)
 
 
+CHATGPT_IDENTITY_FIELDS = (
+    "slot_id",
+    "runtime_generation",
+    "webview_instance_id",
+    "navigation_generation",
+    "document_epoch",
+)
+CHATGPT_COUNTER_FIELDS = (
+    "mutation_callback_batch_count",
+    "detector_schedule_count",
+    "detector_evaluate_count",
+    "detector_evaluate_total_ms",
+    "detector_evaluate_max_ms",
+    "response_identity_resolution_count",
+    "response_identity_resolution_total_ms",
+    "response_identity_resolution_max_ms",
+    "liveness_probe_count",
+    "confirmation_probe_count",
+    "liveness_probe_total_ms",
+    "liveness_probe_max_ms",
+    "liveness_failure_count",
+    "recovered_completion_count",
+)
+CHATGPT_SAMPLE_FIELDS = (
+    *CHATGPT_IDENTITY_FIELDS,
+    "measurement_enabled",
+    "document_visibility_state",
+    "generating",
+    "js_roundtrip_latency_ms",
+    *CHATGPT_COUNTER_FIELDS,
+)
+
+
+def chatgpt_identity(snapshot: Dict[str, object]) -> Dict[str, object]:
+    return {field: snapshot.get(field) for field in CHATGPT_IDENTITY_FIELDS}
+
+
+def summarize_chatgpt_samples(
+    samples: Sequence[Dict[str, object]],
+    *,
+    expected_enabled: Optional[bool],
+    expected_identity: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    status_counts: Dict[str, int] = {}
+    valid = [sample for sample in samples if sample.get("chatgpt_snapshot_status") == "ok"]
+    identities = {
+        tuple((field, sample.get(f"chatgpt_{field}")) for field in CHATGPT_IDENTITY_FIELDS)
+        for sample in valid
+    }
+    for sample in samples:
+        status = str(sample.get("chatgpt_snapshot_status", "unavailable"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    baseline_identity = (
+        {field: valid[0].get(f"chatgpt_{field}") for field in CHATGPT_IDENTITY_FIELDS}
+        if valid else expected_identity
+    )
+    identity_stable = bool(valid) and len(identities) == 1
+    if expected_identity is not None and baseline_identity != expected_identity:
+        identity_stable = False
+    enabled_states = {sample.get("chatgpt_measurement_enabled") for sample in valid}
+    enabled_state_matches = (
+        len(enabled_states) == 1
+        and (expected_enabled is None or enabled_states == {expected_enabled})
+    )
+    latencies = [
+        float(sample["chatgpt_js_roundtrip_latency_ms"])
+        for sample in valid
+        if isinstance(sample.get("chatgpt_js_roundtrip_latency_ms"), (int, float))
+    ]
+    visibility_counts: Dict[str, int] = {}
+    generating_samples = 0
+    for sample in valid:
+        visibility = str(sample.get("chatgpt_document_visibility_state", "other"))
+        visibility_counts[visibility] = visibility_counts.get(visibility, 0) + 1
+        generating_samples += int(sample.get("chatgpt_generating") is True)
+
+    latest = valid[-1] if valid else {}
+    return {
+        "sample_count": len(samples),
+        "valid_sample_count": len(valid),
+        "status_counts": status_counts,
+        "context_identity": baseline_identity,
+        "identity_stable": identity_stable,
+        "all_samples_current": len(valid) == len(samples),
+        "expected_measurement_enabled": expected_enabled,
+        "enabled_state_matches": enabled_state_matches,
+        "js_roundtrip_latency_ms_median": statistics.median(latencies) if latencies else None,
+        "js_roundtrip_latency_ms_p95": percentile(latencies, 0.95) if latencies else None,
+        "visibility_counts": visibility_counts,
+        "generating_sample_count": generating_samples,
+        "latest_counters": {
+            field: latest.get(f"chatgpt_{field}") for field in CHATGPT_COUNTER_FIELDS
+        } if latest else {},
+    }
+
+
 def collect_capture(
     *,
     session_dir: Path,
@@ -593,10 +708,15 @@ def collect_capture(
     slots: int,
     selected_slot_ids: Sequence[str],
     warnings: Sequence[str],
+    control: Optional[BenchmarkControlClient] = None,
+    chatgpt_slot_id: Optional[str] = None,
+    measurement_enabled: Optional[bool] = None,
+    expected_chatgpt_identity: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     print(f"\nCapturing '{label}' for {seconds}s (interval {interval:.1f}s)...")
     start = time.monotonic()
     samples: List[Dict[str, object]] = []
+    chatgpt_samples: List[Dict[str, object]] = []
     next_tick = start
     while True:
         current = time.monotonic()
@@ -614,6 +734,35 @@ def collect_capture(
         if host_pid not in metrics:
             raise RuntimeError("FloatTabs exited during measurement.")
         sample = aggregate_sample(host_pid, ownership, metrics, elapsed)
+        if control is not None and chatgpt_slot_id is not None:
+            try:
+                chatgpt = control.chatgpt_measurement_snapshot(chatgpt_slot_id)
+            except RuntimeError:
+                chatgpt = {"status": "unavailable", "reason": "control_request_failed"}
+
+            chatgpt_status = str(chatgpt.get("status", "unavailable"))
+            returned_identity = chatgpt_identity(chatgpt) if chatgpt_status == "ok" else None
+            identity_matches = (
+                expected_chatgpt_identity is None
+                or returned_identity == expected_chatgpt_identity
+            )
+            if chatgpt_status == "ok" and not identity_matches:
+                chatgpt_status = "replaced"
+
+            sample["chatgpt_snapshot_status"] = chatgpt_status
+            sample["chatgpt_snapshot_reason"] = str(chatgpt.get("reason", ""))
+            for field in CHATGPT_SAMPLE_FIELDS:
+                sample[f"chatgpt_{field}"] = ""
+            if chatgpt_status == "ok":
+                for field in CHATGPT_SAMPLE_FIELDS:
+                    sample[f"chatgpt_{field}"] = chatgpt.get(field, "")
+            elif chatgpt_status == "replaced" and returned_identity is not None:
+                for field in CHATGPT_IDENTITY_FIELDS:
+                    sample[f"chatgpt_{field}"] = returned_identity.get(field, "")
+                sample["chatgpt_snapshot_reason"] = "runtime_or_document_identity_changed"
+            elif chatgpt_status == "stale":
+                sample["chatgpt_snapshot_reason"] = str(chatgpt.get("reason", "stale"))
+            chatgpt_samples.append(sample)
         samples.append(sample)
         print(
             f"  {elapsed:5.1f}s  total={human_mb(float(sample['total_rss_kb'])):<11} "
@@ -649,6 +798,12 @@ def collect_capture(
             "reason": "External process sampling cannot reliably identify click-to-interactive readiness; app instrumentation is required for trustworthy latency numbers.",
         },
     }
+    if chatgpt_slot_id is not None:
+        capture["chatgpt"] = summarize_chatgpt_samples(
+            chatgpt_samples,
+            expected_enabled=measurement_enabled,
+            expected_identity=expected_chatgpt_identity,
+        )
 
     capture_dir = session_dir / "captures"
     write_csv(capture_dir / f"{label}.csv", samples)
@@ -849,6 +1004,89 @@ def write_report(session_dir: Path) -> Path:
         lines.append(f"- {note}")
     lines.append("")
 
+    chatgpt_captures = [capture for capture in captures if isinstance(capture.get("chatgpt"), dict)]
+    if chatgpt_captures:
+        lines.append("## ChatGPT Runtime Measurement")
+        lines.append("")
+        lines.append("| Capture | Enabled | Valid / total | Stale / unavailable / replaced | JS round-trip median / p95 | Visible / hidden | Generating samples |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        for capture in chatgpt_captures:
+            measurement = capture.get("chatgpt") or {}
+            statuses = measurement.get("status_counts") or {}
+            rejected = sum(int(statuses.get(key, 0)) for key in ("stale", "unavailable", "replaced"))
+            latency_median = measurement.get("js_roundtrip_latency_ms_median")
+            latency_p95 = measurement.get("js_roundtrip_latency_ms_p95")
+            latency_text = (
+                f"{float(latency_median):.2f} / {float(latency_p95):.2f} ms"
+                if latency_median is not None and latency_p95 is not None else "N/A"
+            )
+            visibility = measurement.get("visibility_counts") or {}
+            visibility_text = f"{visibility.get('visible', 0)} / {visibility.get('hidden', 0)}"
+            lines.append(
+                f"| {capture.get('label')} | {measurement.get('expected_measurement_enabled')} | "
+                f"{measurement.get('valid_sample_count', 0)} / {measurement.get('sample_count', 0)} | "
+                f"{rejected} | {latency_text} | {visibility_text} | "
+                f"{measurement.get('generating_sample_count', 0)} |"
+            )
+        lines.append("")
+
+    comparison = chatgpt_observer_effect_comparison(captures)
+    if session_meta.get("chatgpt_ab") or chatgpt_captures:
+        lines.append("## Measurement Disabled vs Enabled")
+        lines.append("")
+        if comparison.get("available"):
+            lines.append(
+                "Both windows used the same Slot/runtime/document identity: "
+                f"{comparison['identity'].get('slot_id')}, runtime generation "
+                f"{comparison['identity'].get('runtime_generation')}, document epoch "
+                f"{comparison['identity'].get('document_epoch')}."
+            )
+            lines.append("")
+            lines.append("| Metric | Disabled | Enabled | Delta (enabled - disabled) |")
+            lines.append("|---|---:|---:|---:|")
+            for label, key, unit, scale in (
+                ("FloatTabs CPU average", "host_cpu_avg", "%", 1),
+                ("WebContent CPU average", "webcontent_cpu_avg", "%", 1),
+                ("FloatTabs RSS median", "host_rss_kb_median", "MB", 1 / 1024),
+                ("WebContent RSS median", "webcontent_rss_kb_median", "MB", 1 / 1024),
+                ("Total RSS median", "total_rss_kb_median", "MB", 1 / 1024),
+                ("JS round-trip median", "js_roundtrip_latency_ms_median", "ms", 1),
+                ("JS round-trip p95", "js_roundtrip_latency_ms_p95", "ms", 1),
+            ):
+                before = comparison["disabled"].get(key)
+                after = comparison["enabled"].get(key)
+                if before is None or after is None:
+                    values = ("N/A", "N/A", "N/A")
+                else:
+                    values = (
+                        f"{float(before) * scale:.2f} {unit}",
+                        f"{float(after) * scale:.2f} {unit}",
+                        f"{(float(after) - float(before)) * scale:+.2f} {unit}",
+                    )
+                lines.append(f"| {label} | {values[0]} | {values[1]} | {values[2]} |")
+            lines.append("")
+            counters = comparison["enabled"].get("latest_counters") or {}
+            lines.append(
+                "Enabled-window detector counts: "
+                f"{counters.get('mutation_callback_batch_count', 0)} mutation batches, "
+                f"{counters.get('detector_schedule_count', 0)} schedules, "
+                f"{counters.get('detector_evaluate_count', 0)} evaluations, "
+                f"{counters.get('response_identity_resolution_count', 0)} response identity resolutions, "
+                f"{counters.get('liveness_probe_count', 0)} liveness probes, "
+                f"{counters.get('liveness_failure_count', 0)} failures, and "
+                f"{counters.get('recovered_completion_count', 0)} recovered completions."
+            )
+            lines.append("")
+            lines.append(
+                "This is an observed paired run, not a threshold verdict. Sequential windows are exposed to "
+                "site activity and system noise; compare the raw CSV samples and generating/visibility counts."
+            )
+        else:
+            lines.append(
+                f"No paired observer-effect comparison is available: {comparison.get('reason', 'missing captures')}."
+            )
+        lines.append("")
+
     lines.append("## Coverage / limitations")
     lines.append("")
     lines.append("- RSS and CPU are automatically sampled from the FloatTabs host plus WebKit helpers attributed by `launchctl procinfo` responsible PID.")
@@ -879,6 +1117,54 @@ def create_session(results_root: Path, session_name: Optional[str]) -> Path:
         }
         session_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return session_dir
+
+
+def chatgpt_observer_effect_comparison(
+    captures: Sequence[Dict[str, object]],
+) -> Dict[str, object]:
+    by_label = {str(capture.get("label")): capture for capture in captures}
+    disabled = by_label.get("chatgpt-disabled")
+    enabled = by_label.get("chatgpt-enabled")
+    if disabled is None or enabled is None:
+        return {"available": False, "reason": "both disabled and enabled captures are required"}
+    disabled_chatgpt = disabled.get("chatgpt") or {}
+    enabled_chatgpt = enabled.get("chatgpt") or {}
+    if not all((
+        disabled_chatgpt.get("all_samples_current"),
+        enabled_chatgpt.get("all_samples_current"),
+        disabled_chatgpt.get("identity_stable"),
+        enabled_chatgpt.get("identity_stable"),
+        disabled_chatgpt.get("enabled_state_matches"),
+        enabled_chatgpt.get("enabled_state_matches"),
+    )):
+        return {
+            "available": False,
+            "reason": "one or more windows had stale, unavailable, replaced, or mismatched samples",
+        }
+    disabled_identity = disabled_chatgpt.get("context_identity")
+    enabled_identity = enabled_chatgpt.get("context_identity")
+    if not isinstance(disabled_identity, dict) or disabled_identity != enabled_identity:
+        return {"available": False, "reason": "runtime/document identity changed between windows"}
+    if disabled_chatgpt.get("expected_measurement_enabled") is not False:
+        return {"available": False, "reason": "disabled window did not report measurement disabled"}
+    if enabled_chatgpt.get("expected_measurement_enabled") is not True:
+        return {"available": False, "reason": "enabled window did not report measurement enabled"}
+    return {
+        "available": True,
+        "identity": disabled_identity,
+        "disabled": {
+            **(disabled.get("summary") or {}),
+            "js_roundtrip_latency_ms_median": disabled_chatgpt.get("js_roundtrip_latency_ms_median"),
+            "js_roundtrip_latency_ms_p95": disabled_chatgpt.get("js_roundtrip_latency_ms_p95"),
+            "latest_counters": disabled_chatgpt.get("latest_counters") or {},
+        },
+        "enabled": {
+            **(enabled.get("summary") or {}),
+            "js_roundtrip_latency_ms_median": enabled_chatgpt.get("js_roundtrip_latency_ms_median"),
+            "js_roundtrip_latency_ms_p95": enabled_chatgpt.get("js_roundtrip_latency_ms_p95"),
+            "latest_counters": enabled_chatgpt.get("latest_counters") or {},
+        },
+    }
 
 
 def wait_for_expected_policy(selected_ids: Sequence[str], expected: str, expected_media: Optional[str]) -> None:
@@ -1313,6 +1599,170 @@ def capture_mode(args: argparse.Namespace) -> int:
     return 0
 
 
+def require_measurement_ok(result: Dict[str, object], operation: str) -> None:
+    if result.get("status") != "ok":
+        reason = result.get("reason", "unknown")
+        raise RuntimeError(f"ChatGPT measurement {operation} unavailable: {reason}")
+
+
+def chatgpt_ab_mode(args: argparse.Namespace) -> int:
+    ensure_macos()
+    host_pid, warnings = choose_host_pid(args.pid)
+    validate_sudo()
+    resolver = OwnershipResolver(host_pid)
+    resolver.refresh(force=True)
+    client = BenchmarkControlClient(host_pid)
+    status = client.status()
+    if status.get("visible") is not True:
+        raise RuntimeError(
+            "FloatTabs panel is not visible. Show the existing panel without changing the active Slot, then retry."
+        )
+    active_slot_id = str(status.get("active_slot_id") or "")
+    slot_id = args.slot_id or active_slot_id
+    if not slot_id:
+        raise RuntimeError("No active Slot is available for the ChatGPT measurement smoke.")
+    if slot_id != active_slot_id:
+        raise RuntimeError("The requested ChatGPT Slot must already be active; this command does not switch Slots.")
+    profiles = {str(item.get("id")): item for item in control_profiles(status)}
+    profile = profiles.get(slot_id)
+    if profile is None:
+        raise RuntimeError("The active Slot is not present in the benchmark control profile list.")
+    if str(profile.get("residency", "")).lower() != "hot":
+        raise RuntimeError(
+            f"The active Slot is configured as {profile.get('residency')}, not Hot. "
+            "Set up the intended Hot Slot in FloatTabs before running this measurement."
+        )
+
+    if args.session:
+        session_name = args.session
+        candidate = Path(args.results_root).expanduser() / session_name
+        if candidate.exists():
+            raise RuntimeError(f"Refusing to overwrite existing benchmark session: {candidate}")
+    else:
+        base_name = f"chatgpt-ab-{now_stamp()}"
+        session_name = base_name
+        suffix = 1
+        while (Path(args.results_root).expanduser() / session_name).exists():
+            suffix += 1
+            session_name = f"{base_name}-{suffix}"
+    session_dir = create_session(Path(args.results_root), session_name)
+    session_meta_path = session_dir / "session.json"
+    session_meta = json.loads(session_meta_path.read_text(encoding="utf-8"))
+    session_meta["chatgpt_ab"] = {
+        "slot_id": slot_id,
+        "duration_s": args.seconds,
+        "interval_s": args.interval,
+        "settle_s": args.settle,
+        "status": "running",
+        "comparison_threshold": None,
+        "note": "No numeric observer-effect pass threshold was pre-authorized.",
+    }
+    session_meta_path.write_text(json.dumps(session_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    baseline_configuration = client.configure_chatgpt_measurement(
+        slot_id,
+        enabled=False,
+        reset=True,
+    )
+    require_measurement_ok(baseline_configuration, "disable/reset")
+    baseline_snapshot = client.chatgpt_measurement_snapshot(slot_id)
+    require_measurement_ok(baseline_snapshot, "preflight snapshot")
+    if baseline_snapshot.get("measurement_enabled") is not False:
+        raise RuntimeError("The ChatGPT document did not confirm measurement disabled.")
+    expected_identity = chatgpt_identity(baseline_snapshot)
+    session_meta["chatgpt_ab"]["context_identity"] = expected_identity
+    session_meta_path.write_text(json.dumps(session_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    captures: List[Dict[str, object]] = []
+    try:
+        for label, enabled in (
+            ("chatgpt-disabled", False),
+            ("chatgpt-enabled", True),
+        ):
+            configuration = client.configure_chatgpt_measurement(
+                slot_id,
+                enabled=enabled,
+                reset=True,
+            )
+            require_measurement_ok(configuration, f"{label} configure")
+            if chatgpt_identity(configuration) != expected_identity:
+                raise RuntimeError(f"Runtime/document identity changed before {label}.")
+            if args.settle > 0:
+                countdown(args.settle, f"Settling {label} instrumentation state...")
+            capture = collect_capture(
+                session_dir=session_dir,
+                label=label,
+                seconds=args.seconds,
+                interval=args.interval,
+                host_pid=host_pid,
+                resolver=resolver,
+                policy="hot",
+                state="visible",
+                slots=1,
+                selected_slot_ids=[slot_id],
+                warnings=warnings,
+                control=client,
+                chatgpt_slot_id=slot_id,
+                measurement_enabled=enabled,
+                expected_chatgpt_identity=expected_identity,
+            )
+            captures.append(capture)
+            chatgpt_summary = capture.get("chatgpt") or {}
+            if not all((
+                chatgpt_summary.get("all_samples_current"),
+                chatgpt_summary.get("identity_stable"),
+                chatgpt_summary.get("enabled_state_matches"),
+            )):
+                session_meta["chatgpt_ab"]["status"] = "incomplete_context_evidence"
+                session_meta["chatgpt_ab"]["reason"] = (
+                    f"{label} contained stale, unavailable, replaced, or measurement-state-mismatched samples."
+                )
+                session_meta_path.write_text(
+                    json.dumps(session_meta, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                write_report(session_dir)
+                raise RuntimeError(session_meta["chatgpt_ab"]["reason"])
+
+        comparison = chatgpt_observer_effect_comparison(captures)
+        session_meta["chatgpt_ab"]["status"] = (
+            "paired_observation_available" if comparison.get("available") else "pair_unavailable"
+        )
+        if not comparison.get("available"):
+            session_meta["chatgpt_ab"]["reason"] = comparison.get("reason")
+        session_meta_path.write_text(json.dumps(session_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        report_path = write_report(session_dir)
+        print(f"\nObserver-effect report: {report_path}")
+        print(f"Raw paired samples: {session_dir / 'captures'}")
+        if comparison.get("available"):
+            print("Both windows matched the same physical runtime and document identity.")
+        else:
+            print(f"Paired comparison unavailable: {comparison.get('reason')}")
+    finally:
+        try:
+            disabled = client.configure_chatgpt_measurement(
+                slot_id,
+                enabled=False,
+                reset=False,
+            )
+        except RuntimeError as exc:
+            disabled = {"status": "unavailable", "reason": str(exc)}
+        if disabled.get("status") != "ok":
+            print(
+                "WARNING: could not confirm measurement disabled at closeout "
+                f"({disabled.get('reason', 'unknown')}).",
+                file=sys.stderr,
+            )
+        session_meta = json.loads(session_meta_path.read_text(encoding="utf-8"))
+        session_meta["chatgpt_ab"]["measurement_disabled_at_closeout"] = (
+            disabled.get("status") == "ok" and disabled.get("measurement_enabled") is False
+        )
+        session_meta_path.write_text(json.dumps(session_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        write_report(session_dir)
+
+    return 0
+
+
 def report_mode(args: argparse.Namespace) -> int:
     session_dir = Path(args.session_dir).expanduser().resolve()
     if not session_dir.exists():
@@ -1359,6 +1809,66 @@ def self_test_mode() -> int:
     assert summary["total_rss_kb_median"] == 375
     assert summary["helper_count_avg"] == 3
 
+    identity = {
+        "slot_id": "slot-1",
+        "runtime_generation": 4,
+        "webview_instance_id": "view-1",
+        "navigation_generation": 7,
+        "document_epoch": 9,
+    }
+    disabled_samples = [{
+        **{f"chatgpt_{field}": value for field, value in identity.items()},
+        "chatgpt_snapshot_status": "ok",
+        "chatgpt_measurement_enabled": False,
+        "chatgpt_js_roundtrip_latency_ms": 1.0,
+    }]
+    disabled_measurement = summarize_chatgpt_samples(
+        disabled_samples,
+        expected_enabled=False,
+        expected_identity=identity,
+    )
+    assert disabled_measurement["all_samples_current"] is True
+    assert disabled_measurement["identity_stable"] is True
+    assert disabled_measurement["enabled_state_matches"] is True
+
+    enabled_samples = [{
+        **{f"chatgpt_{field}": value for field, value in identity.items()},
+        "chatgpt_snapshot_status": "ok",
+        "chatgpt_measurement_enabled": True,
+        "chatgpt_js_roundtrip_latency_ms": 1.5,
+    }]
+    enabled_measurement = summarize_chatgpt_samples(
+        enabled_samples,
+        expected_enabled=True,
+        expected_identity=identity,
+    )
+    paired = chatgpt_observer_effect_comparison([
+        {"label": "chatgpt-disabled", "summary": summary, "chatgpt": disabled_measurement},
+        {"label": "chatgpt-enabled", "summary": summary, "chatgpt": enabled_measurement},
+    ])
+    assert paired["available"] is True
+
+    changed_document_samples = [dict(enabled_samples[0], chatgpt_document_epoch=10)]
+    changed_document = summarize_chatgpt_samples(
+        changed_document_samples,
+        expected_enabled=True,
+        expected_identity=identity,
+    )
+    assert changed_document["identity_stable"] is False
+    rejected_pair = chatgpt_observer_effect_comparison([
+        {"label": "chatgpt-disabled", "summary": summary, "chatgpt": disabled_measurement},
+        {"label": "chatgpt-enabled", "summary": summary, "chatgpt": changed_document},
+    ])
+    assert rejected_pair["available"] is False
+    assert rejected_pair["reason"] == "one or more windows had stale, unavailable, replaced, or mismatched samples"
+
+    unavailable_measurement = summarize_chatgpt_samples(
+        [{"chatgpt_snapshot_status": "unavailable"}],
+        expected_enabled=True,
+        expected_identity=identity,
+    )
+    assert unavailable_measurement["all_samples_current"] is False
+
     print("FloatTabs benchmark harness self-test: PASS")
     return 0
 
@@ -1384,6 +1894,18 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--policy", choices=["hot", "warm", "cold", "mixed", "baseline"], default="mixed")
     capture.add_argument("--state", choices=["active", "steady", "hidden", "cold-evicted", "other"], default="steady")
     capture.add_argument("--slots", type=int, default=0, help="Number of Slots represented by this capture.")
+
+    chatgpt_ab = subparsers.add_parser(
+        "chatgpt-ab",
+        help="Capture equal-duration ChatGPT Hot windows with benchmark measurement disabled and enabled.",
+    )
+    chatgpt_ab.add_argument("--session", default=None, help="New session name; existing result folders are never overwritten.")
+    chatgpt_ab.add_argument("--results-root", default=str(DEFAULT_RESULTS_ROOT))
+    chatgpt_ab.add_argument("--slot-id", default=None, help="Optional active Hot ChatGPT Slot UUID; defaults to the active Slot.")
+    chatgpt_ab.add_argument("--seconds", type=int, default=30)
+    chatgpt_ab.add_argument("--interval", type=float, default=2.0)
+    chatgpt_ab.add_argument("--settle", type=int, default=2)
+    chatgpt_ab.add_argument("--pid", type=int, default=None)
 
     automatic = subparsers.add_parser("auto", help="Fully automatic Hot/Warm/Cold benchmark through the Debug in-app control channel.")
     automatic.add_argument("--session", default=None, help="Optional stable session name. Defaults to timestamp.")
@@ -1422,6 +1944,8 @@ def main() -> int:
             return doctor_mode(args)
         if args.command == "capture":
             return capture_mode(args)
+        if args.command == "chatgpt-ab":
+            return chatgpt_ab_mode(args)
         if args.command == "auto":
             return automatic_mode(args)
         if args.command == "guided":
