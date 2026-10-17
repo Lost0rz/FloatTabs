@@ -2,8 +2,10 @@
 
 **Task ID:** `FT-CHATGPT-PERF-001`
 **Title:** Establish ChatGPT long-running performance measurement
-**Status:** `ACTIVE`
+**Status:** `COMPLETED`
 **Mode:** `MEASUREMENT_IMPLEMENTATION`
+
+> This task is terminal. The authorization below records the completed implementation scope and grants no further implementation authority.
 
 ## Objective
 
@@ -80,8 +82,13 @@ STOP and report evidence if:
 - overlapping unique work or another canonical writer appears;
 - required focused tests or Real-Mac smoke cannot establish that the measurement seam is usable without material observer effect.
 
-## Completion boundary
+## Completion record
 
-This task is complete only when the measurement seam and harness support are implemented, remotely delivered in the task PR, verified by focused/CI evidence, and a short Real-Mac smoke demonstrates usable content-free measurements with observer-effect evidence recorded.
+The completion boundary was satisfied and the measurement implementation was accepted:
 
-Completion does **not** authorize or perform Observer/Liveness performance optimization. Those changes require evidence from the resulting baseline and a subsequent task decision.
+- Implementation and harness evidence are delivered in PR #122 at semantic implementation HEAD `285361ca3670ca6c112a54b8473ec932d3ad677f`.
+- Focused verification and exact-head Benchmark Tool CI, QA DMG, and macOS CI passed.
+- Real-Mac paired session `ft-chatgpt-perf-001-smoke-20261017-104716` produced valid disabled/enabled captures with content-free output and stable current runtime/document identity. Web acceptance: `PASS`.
+- The disabled capture had a large startup CPU transient, making its whole-window CPU delta non-causal. Active-generation measurement remains unvalidated; neither limitation blocks this measurement-implementation task.
+
+This completed task no longer authorizes implementation work, Observer/Liveness optimization, or a long-running baseline. A 30-minute / 2-hour / 6-hour baseline is the next task decision and requires separate authorization before it begins. Any optimization decision must follow baseline evidence and a subsequent task decision.

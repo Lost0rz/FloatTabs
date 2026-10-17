@@ -8,7 +8,7 @@
 
 **MODE: CHATGPT_PERFORMANCE_MEASUREMENT_ACTIVE**
 
-The post-closeout global audit has identified a measurement gap around long-running ChatGPT Hot runtimes. FloatTabs is entering a measurement-first phase before any Observer/Liveness optimization.
+The post-closeout global audit identified a measurement gap around long-running ChatGPT Hot runtimes. The `FT-CHATGPT-PERF-001` measurement implementation is now completed and accepted. Long-running baseline measurement remains the next milestone before any Observer/Liveness optimization.
 
 ## Verified baseline
 
@@ -40,6 +40,13 @@ Confirmed code-level costs / measurement needs:
 - Measurement must remain content-free and tied to current runtime/document identity so stale samples cannot be accepted as current evidence.
 - Production Attention, response, residency, persistence, recovery and user-data semantics remain unchanged in this phase.
 
+## Measurement implementation acceptance
+
+- `FT-CHATGPT-PERF-001` is completed / accepted at implementation HEAD `285361ca3670ca6c112a54b8473ec932d3ad677f`, delivered through PR #122.
+- Exact-head Benchmark Tool CI, QA DMG, and macOS CI passed. The Real-Mac paired observer-effect smoke passed in session `ft-chatgpt-perf-001-smoke-20261017-104716` with content-free captures and stable current runtime/document identity.
+- The disabled window had a large transient CPU burst during its first approximately 14 seconds, so its whole-window CPU delta is not causal evidence of instrumentation overhead. Active-generation measurement behavior remains unvalidated.
+- This acceptance establishes a usable measurement seam; it does not identify root cause or demonstrate a performance improvement. `ROOT CAUSE UNKNOWN` remains in force.
+
 ## Domain baseline
 
 - `WebViewPool` / Web own runtime identity, lifecycle, health and recovery.
@@ -50,13 +57,14 @@ Confirmed code-level costs / measurement needs:
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=FT-CHATGPT-PERF-001
-TASK_MODE=MEASUREMENT_IMPLEMENTATION
+ACTIVE_PRODUCT_TASK=NONE
+LAST_COMPLETED_TASK=FT-CHATGPT-PERF-001
+TASK_STATE=COMPLETED
 TASK_BRANCH=perf/ft-chatgpt-perf-001
 TASK_PR=122_DRAFT
 ROOT_CAUSE=UNKNOWN
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
-MEASUREMENT_IMPLEMENTATION_AUTHORIZED=YES
+MEASUREMENT_IMPLEMENTATION_AUTHORIZED=NO
 ```
 
 ## Deferred follow-ups
@@ -71,4 +79,4 @@ The following remain explicitly deferred until baseline evidence exists:
 
 ## Next milestone
 
-Implement and verify the `FT-CHATGPT-PERF-001` measurement seam, run a short Real-Mac observer-effect smoke, then use the resulting measurement capability for the first long-running baseline before selecting any performance optimization.
+The next milestone is a separately authorized long-running ChatGPT baseline measurement. Use that baseline before selecting any performance optimization. This completed task does not authorize the 30-minute / 2-hour / 6-hour baseline or any Observer/Liveness optimization.
