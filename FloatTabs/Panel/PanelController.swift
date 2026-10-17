@@ -946,14 +946,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             ?? SpeechPlaybackSessionController(speechService: resolvedSpeechService)
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
-        self.preferencesStore = preferencesStore ?? AppPreferencesStore()
+        let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
+        self.preferencesStore = resolvedPreferencesStore
         let savedFrame = frameStore.loadFrame()
         restoredFrame = savedFrame
         preferredPanelSize = savedFrame?.size
 
         let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
-        rootView = PanelRootView()
+        rootView = PanelRootView(preferencesStore: resolvedPreferencesStore)
         sourceHostController = FullscreenSourceHostController(
             container: rootView.webPanelContainerView,
             resizeHandle: rootView.resizeHandleView,
@@ -1748,10 +1749,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try self.renameBrowserProfile(id: id, name: name)
             },
-            setColor: { [weak self] id, color in
-                guard let self else { throw BrowserProfileManagementError.notFound }
-                try self.setBrowserProfileColor(id: id, color: color)
-            },
             delete: { [weak self] id in
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try await self.deleteBrowserProfile(id: id, usageStore: usageStore)
@@ -1982,15 +1979,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         guard tabStore.renameBrowserProfile(id: id, name: trimmedName) else {
-            throw BrowserProfileManagementError.metadataPersistenceFailed
-        }
-    }
-
-    func setBrowserProfileColor(
-        id: UUID?,
-        color: BrowserProfileColor
-    ) throws {
-        guard tabStore.setBrowserProfileColor(profileID: id, color: color) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
     }

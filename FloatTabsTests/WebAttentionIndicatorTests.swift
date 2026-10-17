@@ -24,7 +24,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         }
     }
 
-    func testIdleAndGeneratingSlotsHaveNoUnreadDot() {
+    func testIdleAndGeneratingSlotsHaveNoUnreadResponseSurface() {
         let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
@@ -44,7 +44,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(tab.isShowingUnreadResponse)
     }
 
-    func testGenerationCompletionProjectsUnreadDotAndNewGenerationKeepsIt() {
+    func testGenerationCompletionProjectsUnreadSurfaceAndNewGenerationKeepsIt() {
         let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
@@ -402,7 +402,213 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(beepCount, 0)
     }
 
-    func testUnreadAcknowledgementClearsButRuntimeResetPreservesTheDot() {
+    func testAttentionStylesHaveDistinctSemanticPalettesAndAmbientCycles() {
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.displayName),
+            ["Signal", "Ember", "Aurora", "Spectrum"]
+        )
+        XCTAssertEqual(
+            Set(TabAttentionStyle.allCases.map { $0.configuration.paletteRole }).count,
+            4
+        )
+        XCTAssertNil(TabAttentionStyle.signal.configuration.animationCycleDuration)
+        XCTAssertFalse(TabAttentionStyle.signal.configuration.gentlyBreathes)
+
+        for style in TabAttentionStyle.allCases.dropFirst() {
+            let cycle = try! XCTUnwrap(style.configuration.animationCycleDuration)
+            XCTAssertTrue((3...6).contains(cycle))
+        }
+        XCTAssertTrue(TabAttentionStyle.spectrum.configuration.gentlyBreathes)
+        XCTAssertFalse(TabAttentionStyle.ember.configuration.gentlyBreathes)
+        XCTAssertFalse(TabAttentionStyle.aurora.configuration.gentlyBreathes)
+    }
+
+    func testNotificationsShowsFourSharedRendererPreviewsAndPersistsSelection() throws {
+        let suiteName = "FloatTabsTests.AttentionStyleSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundPlayerSpy(),
+            availableSoundNames: ["Ping"]
+        )
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(controller.attentionStyleChoices.map { $0.style.displayName }, [
+            "Signal", "Ember", "Aurora", "Spectrum",
+        ])
+        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).map(\.style), [.signal])
+        for choice in controller.attentionStyleChoices {
+            XCTAssertTrue(choice.previewSurfaceView.showsAttention)
+            XCTAssertEqual(
+                choice.previewSurfaceView.renderedPaletteRole,
+                choice.style.configuration.paletteRole
+            )
+        }
+
+        let spectrum = try XCTUnwrap(
+            controller.attentionStyleChoices.first(where: { $0.style == .spectrum })
+        )
+        spectrum.performClick(nil)
+
+        XCTAssertEqual(preferences.attentionStyle, .spectrum)
+        XCTAssertTrue(spectrum.isSelectedStyle)
+        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).count, 1)
+    }
+
+    func testAttentionStylePreferenceUpdatesVisibleTabAndOverflowImmediately() throws {
+        let suiteName = "FloatTabsTests.AttentionStyleProjection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let (_, zone) = makeZoneHarness(height: 400, preferencesStore: preferences)
+        let profiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Style Tab \(index)",
+                homeURL: URL(string: "https://example.com/style-\(index)")!
+            )
+        }
+        zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+        zone.layoutSubtreeIfNeeded()
+        let visibleID = try XCTUnwrap(zone.visibleTabIDs.first)
+        let hiddenID = try XCTUnwrap(zone.overflowTabIDs.first)
+        zone.setUnreadSlotIDs([visibleID, hiddenID])
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try XCTUnwrap(zone.tabView(for: visibleID))
+        let hiddenTab = try XCTUnwrap(zone.tabView(for: hiddenID))
+        let overflow = try XCTUnwrap(zone.subviews.compactMap { $0 as? RailOverflowControl }.first)
+        preferences.attentionStyle = .aurora
+        tab.setAttentionStyleReduceMotionOverride(false)
+        overflow.setAttentionStyleReduceMotionOverride(false)
+
+        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
+        XCTAssertEqual(overflow.displayedAttentionStyle, .aurora)
+        XCTAssertTrue(tab.attentionSurfaceUsesSharedRenderer)
+        XCTAssertTrue(overflow.attentionSurfaceUsesSharedRenderer)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
+        XCTAssertTrue(hiddenTab.isShowingUnreadResponse)
+        XCTAssertTrue(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(hiddenTab.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(overflow.attentionSurfaceMotionIsActive)
+        assertColor(
+            tab.unreadResponseColor,
+            equals: ExternalTabSurfacePalette.attentionFill(style: .aurora)
+        )
+
+        tab.setHovered(true)
+        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
+        XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
+
+        tab.setUnreadResponse(false)
+        XCTAssertFalse(tab.attentionSurfaceMotionIsActive)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
+
+        zone.setUnreadSlotIDs([])
+        zone.layoutSubtreeIfNeeded()
+        XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
+    }
+
+    func testReduceMotionKeepsStaticAttentionGradientAndStopsLayerAnimations() {
+        let preview = AttentionStyleChoiceButton(style: .spectrum)
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.setAttentionStyle(.spectrum)
+        tab.setUnreadResponse(true)
+        let overflow = RailOverflowControl()
+        overflow.setItems([RailOverflowItem(slotID: UUID(), title: "Hidden", isUnread: true)])
+        overflow.setAttentionStyle(.spectrum)
+
+        preview.previewSurfaceView.setReduceMotionOverride(false)
+        tab.setAttentionStyleReduceMotionOverride(false)
+        overflow.setAttentionStyleReduceMotionOverride(false)
+
+        XCTAssertTrue(preview.previewSurfaceView.isContinuousMotionActive)
+        XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(overflow.attentionSurfaceMotionIsActive)
+
+        let surface = AttentionStyleSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 40, height: 32),
+            style: .spectrum,
+            showsAttention: true,
+            reduceMotionOverride: false
+        )
+        XCTAssertTrue(surface.isContinuousMotionActive)
+        XCTAssertEqual(surface.renderedGradientStopCount, 9)
+        XCTAssertEqual(surface.renderedAnimationCycleDuration, 4.5)
+
+        surface.setReduceMotionOverride(true)
+        preview.previewSurfaceView.setReduceMotionOverride(true)
+        tab.setAttentionStyleReduceMotionOverride(true)
+        overflow.setAttentionStyleReduceMotionOverride(true)
+
+        XCTAssertTrue(surface.isReduceMotionEnabled)
+        XCTAssertFalse(surface.isContinuousMotionActive)
+        XCTAssertTrue(surface.showsAttention)
+        XCTAssertFalse(surface.isHidden)
+        XCTAssertEqual(surface.renderedGradientStopCount, 9)
+        XCTAssertFalse(preview.previewSurfaceView.isContinuousMotionActive)
+        XCTAssertFalse(tab.attentionSurfaceMotionIsActive)
+        XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(tab.attentionSurfaceReduceMotionIsEnabled)
+        XCTAssertTrue(overflow.attentionSurfaceReduceMotionIsEnabled)
+    }
+
+    func testAllAttentionStyleForegroundsContrastWithTheirSurfaceInLightAndDark() throws {
+        for appearanceName in [NSAppearance.Name.aqua, NSAppearance.Name.darkAqua] {
+            for style in TabAttentionStyle.allCases {
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 80, height: 64),
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.appearance = NSAppearance(named: appearanceName)
+                let tab = ExternalWebAppTabView(slotID: UUID())
+                tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+                window.contentView = tab
+                defer { window.contentView = nil }
+
+                tab.update(
+                    profile: makeProfile(name: "GPT"),
+                    isActive: true,
+                    isResident: true
+                )
+                tab.setAttentionStyle(style)
+                tab.setUnreadResponse(true)
+                tab.layoutSubtreeIfNeeded()
+
+                let fill = try XCTUnwrap(tab.displayedTabFillColor)
+                let foreground = try XCTUnwrap(tab.displayedActiveTabForegroundColor)
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(foreground, fill),
+                    4.5,
+                    "\(style.displayName) must keep readable text in \(appearanceName)"
+                )
+                assertColor(tab.displayedIconTintColor, equals: foreground)
+            }
+        }
+    }
+
+    func testAttentionStylesDoNotRecolorFullColorResidentFavicons() {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        let favicon = NSImage(size: NSSize(width: 16, height: 16))
+        favicon.isTemplate = false
+        tab.setSourceIcon(favicon)
+        tab.setResident(true)
+
+        for style in TabAttentionStyle.allCases {
+            tab.setAttentionStyle(style)
+            tab.setUnreadResponse(true)
+
+            XCTAssertTrue(tab.displayedIcon === favicon)
+            XCTAssertNil(tab.displayedIconTintColor)
+        }
+    }
+
+    func testUnreadAcknowledgementClearsButRuntimeResetPreservesUnreadResponse() {
         let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
@@ -438,7 +644,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(tab.isShowingUnreadResponse)
     }
 
-    func testMultipleSlotsOnlyUnreadIDsDisplayDots() {
+    func testMultipleSlotsProjectUnreadResponseOnlyToReadyIDs() {
         let coordinator = makeUnreadCoordinator()
         let ready = makeProfile(name: "Ready")
         let idle = makeProfile(name: "Idle")
@@ -473,7 +679,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(try! XCTUnwrap(zone.tabView(for: second.id)).isShowingUnreadResponse)
     }
 
-    func testRemovedSlotHasNoVisibleTabOrUnreadDot() {
+    func testRemovedSlotHasNoVisibleTabOrUnreadResponse() {
         let removed = makeProfile(name: "Removed")
         let remaining = makeProfile(name: "Remaining")
         let (_, zone) = makeZoneHarness()
@@ -500,7 +706,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingUnreadResponse)
     }
 
-    func testUnreadDotUsesFaviconGeometryAtRestAndMagnifiedWidths() {
+    func testUnreadReadyUsesWholeTabSurfaceAndSurvivesHoverUntilCleared() {
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
@@ -509,38 +715,29 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
         let restingWidth = tab.frame.width
-        let restingIconFrame = tab.iconFrame
-        let restingDotFrame = tab.unreadResponseFrame
         XCTAssertEqual(restingWidth, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
-        assertUnreadDot(
-            restingDotFrame,
-            isAttachedTo: restingIconFrame,
-            file: #filePath,
-            line: #line
-        )
+        XCTAssertEqual(tab.unreadResponseFrame, tab.bounds)
+        assertRed(tab.displayedTabFillColor)
+        XCTAssertTrue(tab.accessibilityLabel()?.contains("Unread response") == true)
+        let unreadFill = tab.displayedTabFillColor
 
         tab.setHovered(true)
         zone.needsLayout = true
         zone.layoutSubtreeIfNeeded()
 
-        let magnifiedIconFrame = tab.iconFrame
-        let magnifiedDotFrame = tab.unreadResponseFrame
         XCTAssertEqual(tab.frame.width, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
-        XCTAssertEqual(magnifiedIconFrame, restingIconFrame)
-        XCTAssertEqual(
-            magnifiedDotFrame.offsetBy(
-                dx: -magnifiedIconFrame.minX,
-                dy: -magnifiedIconFrame.minY
-            ),
-            restingDotFrame.offsetBy(
-                dx: -restingIconFrame.minX,
-                dy: -restingIconFrame.minY
-            )
-        )
-        XCTAssertLessThan(magnifiedDotFrame.maxX, tab.bounds.maxX)
+        XCTAssertEqual(tab.unreadResponseFrame, tab.bounds)
+        assertColor(tab.displayedTabFillColor, equals: unreadFill)
+
+        tab.setUnreadResponse(false)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
+        XCTAssertFalse(tab.accessibilityLabel()?.contains("Unread response") == true)
+        let neutral = try! XCTUnwrap(tab.displayedTabFillColor?.usingColorSpace(.deviceRGB))
+        XCTAssertLessThan(abs(neutral.redComponent - neutral.greenComponent), 0.15)
+        XCTAssertLessThan(abs(neutral.redComponent - neutral.blueComponent), 0.15)
     }
 
-    func testUnreadDotDoesNotChangeTabWidthOrDockMagnification() {
+    func testUnreadSurfaceDoesNotChangeTabWidthOrDockMagnification() {
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.frame = NSRect(
             x: 0,
@@ -560,21 +757,42 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(tab.preferredWidth, hoveredWidth, accuracy: 0.001)
     }
 
-    func testUnreadDotIsNonInteractiveAndSemanticRed() {
-        let tab = ExternalWebAppTabView(slotID: UUID())
-        tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
-        tab.setUnreadResponse(true)
-        tab.layoutSubtreeIfNeeded()
+    func testUnreadSurfaceForegroundHasContrastInLightAndDarkAppearance() throws {
+        for appearanceName in [NSAppearance.Name.aqua, NSAppearance.Name.darkAqua] {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 80, height: 64),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.appearance = NSAppearance(named: appearanceName)
+            let tab = ExternalWebAppTabView(slotID: UUID())
+            tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+            window.contentView = tab
+            defer { window.contentView = nil }
 
-        XCTAssertTrue(tab.hitTest(tab.unreadResponseFrame.midPoint) === tab)
-        let red = try! XCTUnwrap(
-            tab.unreadResponseColor?.usingColorSpace(.deviceRGB)
-        )
-        XCTAssertGreaterThan(red.redComponent, red.greenComponent)
-        XCTAssertGreaterThan(red.redComponent, red.blueComponent)
+            tab.update(
+                profile: makeProfile(name: "GPT"),
+                isActive: true,
+                isResident: true
+            )
+            tab.setUnreadResponse(true)
+            tab.setHovered(true)
+            tab.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(
+                tab.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
+                appearanceName
+            )
+            assertRed(tab.displayedTabFillColor)
+            let fill = try XCTUnwrap(tab.displayedTabFillColor)
+            let foreground = try XCTUnwrap(tab.displayedActiveTabForegroundColor)
+            XCTAssertGreaterThanOrEqual(contrastRatio(foreground, fill), 4.5)
+            assertColor(tab.displayedIconTintColor, equals: foreground)
+        }
     }
 
-    func testUnreadDotDoesNotChangeResidentOrReleasedFaviconPresentation() {
+    func testUnreadSurfaceDoesNotChangeResidentOrReleasedFaviconPresentation() {
         let tab = ExternalWebAppTabView(slotID: UUID())
 
         tab.setResident(true)
@@ -1147,6 +1365,54 @@ final class WebAttentionIndicatorTests: XCTestCase {
         assertRailFramesAreCollisionFree(defaultZone)
     }
 
+    func testUnreadOverflowUsesWholeControlSurfaceAndKeepsItemSemantics() throws {
+        let (_, zone) = makeZoneHarness(height: 400)
+        let profiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Tab \(index)",
+                homeURL: URL(string: "https://example.com/overflow-\(index)")!
+            )
+        }
+        zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+        zone.layoutSubtreeIfNeeded()
+        let hiddenID = try XCTUnwrap(zone.overflowTabIDs.first)
+        let overflow = try XCTUnwrap(
+            zone.subviews.compactMap { $0 as? RailOverflowControl }.first
+        )
+        let normalFill = try XCTUnwrap(
+            NSColor(cgColor: try XCTUnwrap(overflow.layer?.backgroundColor))
+        )
+
+        zone.setUnreadSlotIDs([hiddenID])
+        zone.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(overflow.isShowingUnreadResponse)
+        XCTAssertEqual(overflow.unreadResponseFrame, overflow.bounds)
+        assertRed(overflow.unreadResponseColor)
+        XCTAssertTrue(zone.overflowControlAccessibilityLabel?.contains("Unread response") == true)
+
+        let menuItem = try XCTUnwrap(
+            overflow.makeMenu().items.first(where: {
+                ($0.representedObject as? String) == hiddenID.uuidString
+            })
+        )
+        let hiddenTitle = try XCTUnwrap(profiles.first(where: { $0.id == hiddenID })).name
+        XCTAssertEqual(menuItem.accessibilityLabel(), "\(hiddenTitle) · Unread response")
+
+        zone.setUnreadSlotIDs([])
+        zone.layoutSubtreeIfNeeded()
+        XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(zone.overflowControlAccessibilityLabel?.contains("Unread response") == true)
+        XCTAssertFalse(overflow.makeMenu().items.contains {
+            $0.accessibilityLabel()?.contains("Unread response") == true
+        })
+        let restoredFill = try XCTUnwrap(
+            NSColor(cgColor: try XCTUnwrap(overflow.layer?.backgroundColor))
+        )
+        assertColor(restoredFill, equals: normalFill)
+    }
+
     func testCompactRailKeepsSpeechActionsSeparateAndAccessible() {
         let (_, zone) = makeZoneHarness(height: 400)
         let profiles = (0..<9).map { index in
@@ -1198,9 +1464,18 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    private func makeZoneHarness(height: CGFloat = 820) -> (host: NSView, zone: ExternalControlZoneView) {
+    private func makeZoneHarness(
+        height: CGFloat = 820,
+        preferencesStore: AppPreferencesStore? = nil
+    ) -> (host: NSView, zone: ExternalControlZoneView) {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: height))
-        let zone = ExternalControlZoneView(frame: host.bounds)
+        let zone: ExternalControlZoneView
+        if let preferencesStore {
+            zone = ExternalControlZoneView(preferencesStore: preferencesStore)
+        } else {
+            zone = ExternalControlZoneView(frame: host.bounds)
+        }
+        zone.frame = host.bounds
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)
@@ -1267,18 +1542,44 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
     }
 
-    private func assertUnreadDot(
-        _ dot: NSRect,
-        isAttachedTo icon: NSRect,
-        file: StaticString,
-        line: UInt
+    private func assertRed(
+        _ actual: NSColor?,
+        file: StaticString = #filePath,
+        line: UInt = #line
     ) {
-        XCTAssertEqual(dot.width, 6, accuracy: 0.001, file: file, line: line)
-        XCTAssertEqual(dot.height, 6, accuracy: 0.001, file: file, line: line)
-        XCTAssertGreaterThan(dot.minX, icon.minX, file: file, line: line)
-        XCTAssertGreaterThan(dot.minY, icon.minY, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(dot.maxX, icon.maxX, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(dot.maxY, icon.maxY, file: file, line: line)
+        let red = try! XCTUnwrap(actual?.usingColorSpace(.deviceRGB), file: file, line: line)
+        XCTAssertGreaterThan(red.redComponent - red.greenComponent, 0.3, file: file, line: line)
+        XCTAssertGreaterThan(red.redComponent - red.blueComponent, 0.3, file: file, line: line)
+    }
+
+    private func assertColor(
+        _ actual: NSColor?,
+        equals expected: NSColor?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let actual = try! XCTUnwrap(actual?.usingColorSpace(.deviceRGB), file: file, line: line)
+        let expected = try! XCTUnwrap(expected?.usingColorSpace(.deviceRGB), file: file, line: line)
+        XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.01, file: file, line: line)
+        XCTAssertEqual(actual.alphaComponent, expected.alphaComponent, accuracy: 0.01, file: file, line: line)
+    }
+
+    private func contrastRatio(_ foreground: NSColor, _ background: NSColor) -> CGFloat {
+        func luminance(_ color: NSColor) -> CGFloat {
+            let rgb = color.usingColorSpace(.sRGB)!
+            func linearized(_ component: CGFloat) -> CGFloat {
+                component <= 0.04045
+                    ? component / 12.92
+                    : pow((component + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linearized(rgb.redComponent)
+                + 0.7152 * linearized(rgb.greenComponent)
+                + 0.0722 * linearized(rgb.blueComponent)
+        }
+        let values = [luminance(foreground), luminance(background)].sorted(by: >)
+        return (values[0] + 0.05) / (values[1] + 0.05)
     }
 
     private func makeUnreadCoordinator() -> ChatGPTUnreadResponseCoordinator {

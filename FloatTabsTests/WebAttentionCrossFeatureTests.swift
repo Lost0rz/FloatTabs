@@ -1126,7 +1126,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
 
     // MARK: 4.1 Live observation → Attention + unread UI projection
 
-    func testLiveBridgeChainProjectsUnreadDotAndNewGenerationKeepsIt() throws {
+    func testLiveBridgeChainProjectsUnreadResponseAndNewGenerationKeepsIt() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let (controller, coordinator, store, pool) = makeController(

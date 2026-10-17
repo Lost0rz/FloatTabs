@@ -42,6 +42,17 @@ The bottom-left fold grip is a separate fold/unfold affordance tied to the Web c
 
 Tabs are favicon-first and expand on hover. Tab / Add / Pin / Settings accept first mouse so a control click is not consumed only by application activation.
 
+### Tab surface and unread attention
+
+- Normal and active/read Tabs use neutral rail surfaces independent of assigned Browser Profile color; the shared page+Tab outline and active typography continue to own selection.
+- A visible Tab with `Unread/Ready` set uses the selected whole-Tab **Attention Style**. `Signal` is restrained and static; `Ember` uses warm red/orange/pink; `Aurora` uses purple/blue/magenta; `Spectrum` uses a full-spectrum rainbow with gentle breathing. Animated styles drift slowly on a roughly 3–6 second cycle and remain in force during hover.
+- The attention surface uses a contrasting foreground for its label and template icon. Favicon color continues to represent runtime residency: resident icons stay full color and released icons stay grayscale/dim.
+- The visible Tab rail does not add a favicon unread dot. In compact layout, the overflow control uses the selected Attention Style when any hidden Tab is unread; its menu item retains a semantic unread marker and accessibility label.
+- Browser Profile color metadata remains persisted for compatibility, but Profile color is not presented as a Tab distinction and has no chooser in Browser Profiles Settings.
+- The Notifications settings surface presents all four Attention Styles as miniature Tab previews in a compact 2×2 choice layout. Previews and real Tabs use the same style renderer, and selection has a clear native accent treatment.
+- Attention motion changes only gradient coordinates and gentle opacity. It never moves, shakes, scales, flashes or re-lays out a Tab. macOS Reduce Motion keeps a static representative treatment for animated styles; `Signal` is already static.
+- The selected style is a single app preference with `Signal` as the default and fallback. It is independent of Browser Profile and Slot data.
+
 ## 4. Collapsed rail
 
 Collapsed state is a **physical presentation change**, not a persisted viewport-size change.

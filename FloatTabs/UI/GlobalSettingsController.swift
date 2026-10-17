@@ -57,26 +57,22 @@ struct BrowserProfileManagementClient {
     typealias SnapshotHandler = () -> BrowserProfileManagementSnapshot
     typealias CreateHandler = (String) throws -> BrowserProfile
     typealias RenameHandler = (UUID?, String) throws -> Void
-    typealias ColorHandler = (UUID?, BrowserProfileColor) throws -> Void
     typealias DeleteHandler = (UUID) async throws -> Void
 
     private let snapshotHandler: SnapshotHandler
     private let createHandler: CreateHandler
     private let renameHandler: RenameHandler
-    private let colorHandler: ColorHandler
     private let deleteHandler: DeleteHandler
 
     init(
         snapshot: @escaping SnapshotHandler,
         create: @escaping CreateHandler,
         rename: @escaping RenameHandler,
-        setColor: @escaping ColorHandler = { _, _ in },
         delete: @escaping DeleteHandler
     ) {
         snapshotHandler = snapshot
         createHandler = create
         renameHandler = rename
-        colorHandler = setColor
         deleteHandler = delete
     }
 
@@ -104,10 +100,6 @@ struct BrowserProfileManagementClient {
 
     func rename(id: UUID?, name: String) throws {
         try renameHandler(id, name)
-    }
-
-    func setColor(id: UUID?, color: BrowserProfileColor) throws {
-        try colorHandler(id, color)
     }
 
     func delete(id: UUID) async throws {
@@ -564,6 +556,143 @@ final class SpeechSettingsViewController: NSViewController {
 }
 
 @MainActor
+final class AttentionStyleChoiceButton: NSButton {
+    let style: TabAttentionStyle
+    let previewSurfaceView: AttentionStyleSurfaceView
+    private let previewIconView = NSImageView()
+    private let previewTitleLabel = NSTextField(labelWithString: "ChatGPT")
+    private let styleNameLabel: NSTextField
+    private let selectionMarkView = NSImageView()
+    private(set) var isSelectedStyle = false
+
+    init(style: TabAttentionStyle) {
+        self.style = style
+        styleNameLabel = NSTextField(labelWithString: style.displayName)
+        previewSurfaceView = AttentionStyleSurfaceView(
+            frame: .zero,
+            style: style,
+            showsAttention: true
+        )
+        super.init(frame: .zero)
+
+        setButtonType(.toggle)
+        title = ""
+        isBordered = false
+        imagePosition = .noImage
+        focusRingType = .default
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel("\(style.displayName) unread Tab attention style")
+
+        previewSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(previewSurfaceView)
+
+        previewIconView.translatesAutoresizingMaskIntoConstraints = false
+        previewIconView.image = NSImage(
+            systemSymbolName: "bubble.left.and.bubble.right.fill",
+            accessibilityDescription: "ChatGPT"
+        )
+        previewIconView.contentTintColor = style.configuration.foregroundColor
+        addSubview(previewIconView)
+
+        previewTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewTitleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        previewTitleLabel.textColor = style.configuration.foregroundColor
+        addSubview(previewTitleLabel)
+
+        styleNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        styleNameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        styleNameLabel.textColor = .labelColor
+        addSubview(styleNameLabel)
+
+        selectionMarkView.translatesAutoresizingMaskIntoConstraints = false
+        selectionMarkView.image = NSImage(
+            systemSymbolName: "checkmark.circle.fill",
+            accessibilityDescription: "Selected"
+        )
+        selectionMarkView.contentTintColor = .controlAccentColor
+        selectionMarkView.isHidden = true
+        addSubview(selectionMarkView)
+
+        NSLayoutConstraint.activate([
+            previewSurfaceView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            previewSurfaceView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            previewSurfaceView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            previewSurfaceView.heightAnchor.constraint(equalToConstant: 38),
+
+            previewIconView.leadingAnchor.constraint(
+                equalTo: previewSurfaceView.leadingAnchor,
+                constant: 10
+            ),
+            previewIconView.centerYAnchor.constraint(equalTo: previewSurfaceView.centerYAnchor),
+            previewIconView.widthAnchor.constraint(equalToConstant: 13),
+            previewIconView.heightAnchor.constraint(equalToConstant: 13),
+            previewTitleLabel.leadingAnchor.constraint(
+                equalTo: previewIconView.trailingAnchor,
+                constant: 5
+            ),
+            previewTitleLabel.centerYAnchor.constraint(equalTo: previewSurfaceView.centerYAnchor),
+            previewTitleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: previewSurfaceView.trailingAnchor,
+                constant: -8
+            ),
+
+            styleNameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
+            styleNameLabel.topAnchor.constraint(
+                equalTo: previewSurfaceView.bottomAnchor,
+                constant: 4
+            ),
+            styleNameLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            selectionMarkView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -11),
+            selectionMarkView.widthAnchor.constraint(equalToConstant: 13),
+            selectionMarkView.heightAnchor.constraint(equalToConstant: 13),
+            selectionMarkView.centerYAnchor.constraint(equalTo: styleNameLabel.centerYAnchor),
+            selectionMarkView.leadingAnchor.constraint(
+                greaterThanOrEqualTo: styleNameLabel.trailingAnchor,
+                constant: 6
+            ),
+        ])
+
+        setSelectedStyle(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
+            previewIconView.contentTintColor = style.configuration.foregroundColor
+            previewTitleLabel.textColor = style.configuration.foregroundColor
+            selectionMarkView.contentTintColor = .controlAccentColor
+            setSelectedStyle(isSelectedStyle)
+        }
+    }
+
+    func setSelectedStyle(_ selected: Bool) {
+        isSelectedStyle = selected
+        state = selected ? .on : .off
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = selected
+                ? NSColor.controlAccentColor.cgColor
+                : NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+            layer?.borderWidth = selected ? 2 : 1
+        }
+        selectionMarkView.isHidden = !selected
+        setAccessibilityValue(selected ? "Selected" : "Not selected")
+    }
+}
+
+@MainActor
 final class NotificationsSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
     private let assetStore: AttentionSoundAssetStore
@@ -578,6 +707,7 @@ final class NotificationsSettingsViewController: NSViewController {
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
+    private(set) var attentionStyleChoices: [AttentionStyleChoiceButton] = []
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -635,6 +765,16 @@ final class NotificationsSettingsViewController: NSViewController {
         removeSelectedAudioButton.target = self
         removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
+        let attentionStyleGrid = makeAttentionStyleGrid()
+        let attentionStyleSection = NSStackView(views: [
+            Self.titleLabel("Unread Tab Attention"),
+            Self.detailLabel("Choose a whole-Tab style. Previews respect Reduce Motion."),
+            attentionStyleGrid,
+        ])
+        attentionStyleSection.orientation = .vertical
+        attentionStyleSection.alignment = .leading
+        attentionStyleSection.spacing = 8
+
         let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
         let soundRow = makeRow(label: "Ready Sound", control: soundPopup)
         let audioActions = NSStackView(views: [importAudioButton, removeSelectedAudioButton])
@@ -657,6 +797,8 @@ final class NotificationsSettingsViewController: NSViewController {
             volumeRow,
             Self.spacer(4),
             previewButton,
+            Self.spacer(8),
+            attentionStyleSection,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -682,6 +824,11 @@ final class NotificationsSettingsViewController: NSViewController {
 
     @objc private func enabledChanged(_ sender: NSSwitch) {
         preferencesStore.attentionSoundEnabled = sender.state == .on
+    }
+
+    @objc private func attentionStyleChanged(_ sender: AttentionStyleChoiceButton) {
+        preferencesStore.attentionStyle = sender.style
+        synchronizeAttentionStyleChoices()
     }
 
     @objc private func soundChanged(_ sender: NSPopUpButton) {
@@ -822,6 +969,36 @@ final class NotificationsSettingsViewController: NSViewController {
         let volumePercent = preferencesStore.attentionSoundVolume * 100
         volumeSlider.doubleValue = volumePercent
         updateVolumeLabel(volumePercent)
+        synchronizeAttentionStyleChoices()
+    }
+
+    private func makeAttentionStyleGrid() -> NSView {
+        attentionStyleChoices = TabAttentionStyle.allCases.map { style in
+            let choice = AttentionStyleChoiceButton(style: style)
+            choice.target = self
+            choice.action = #selector(attentionStyleChanged(_:))
+            choice.widthAnchor.constraint(equalToConstant: 252).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 71).isActive = true
+            return choice
+        }
+        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
+            let row = NSStackView(views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)]))
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 12
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 8
+        return grid
+    }
+
+    private func synchronizeAttentionStyleChoices() {
+        attentionStyleChoices.forEach { choice in
+            choice.setSelectedStyle(choice.style == preferencesStore.attentionStyle)
+        }
     }
 
     private func configureSoundPopup() {
@@ -1894,7 +2071,6 @@ class BrowserProfilesSettingsViewController: NSViewController {
     // Read-only derived seams keep UI tests focused on the injected snapshot;
     // they are never used as an authoritative Profile model.
     private(set) var displayedBrowserProfileNames: [String] = []
-    private(set) var displayedBrowserProfileColors: [BrowserProfileColor] = []
     private(set) var displayedBrowserProfileActionTitles: [[String]] = []
     private(set) var displayedBrowserProfileDeleteEnabled: [Bool] = []
     private(set) var displayedBrowserProfileDeleteToolTips: [String?] = []
@@ -1990,8 +2166,6 @@ class BrowserProfilesSettingsViewController: NSViewController {
         let snapshot = browserProfileManager.snapshot()
         displayedBrowserProfileNames = [snapshot.defaultProfilePresentation.name]
             + snapshot.customProfiles.map(\.name)
-        displayedBrowserProfileColors = [snapshot.defaultProfilePresentation.color]
-            + snapshot.customProfiles.map(\.color)
         displayedBrowserProfileActionTitles = [["Rename…"]] + snapshot.customProfiles.map { _ in
             ["Rename…", "Delete…"]
         }
@@ -2055,11 +2229,7 @@ class BrowserProfilesSettingsViewController: NSViewController {
         )
         renameButton.bezelStyle = .rounded
 
-        let colorPopup = makeProfileColorPopup(
-            profileID: nil,
-            color: presentation.color
-        )
-        let row = NSStackView(views: [label, renameButton, colorPopup])
+        let row = NSStackView(views: [label, renameButton])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -2104,11 +2274,7 @@ class BrowserProfilesSettingsViewController: NSViewController {
             deleteControl = deleteButton
         }
 
-        let colorPopup = makeProfileColorPopup(
-            profileID: profile.id,
-            color: profile.color
-        )
-        let actions = NSStackView(views: [renameButton, colorPopup, deleteControl])
+        let actions = NSStackView(views: [renameButton, deleteControl])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -2133,29 +2299,6 @@ class BrowserProfilesSettingsViewController: NSViewController {
     static func profileDeletionTooltip(for webAppNames: [String]) -> String? {
         guard !webAppNames.isEmpty else { return nil }
         return "Used by Tabs: \(webAppNames.joined(separator: ", ")). Switch them to another Profile before deleting."
-    }
-
-    private func makeProfileColorPopup(
-        profileID: UUID?,
-        color: BrowserProfileColor
-    ) -> NSPopUpButton {
-        let popup = NSPopUpButton()
-        popup.identifier = NSUserInterfaceItemIdentifier(
-            profileID?.uuidString ?? "default"
-        )
-        popup.target = self
-        popup.action = #selector(profileColorPopupChanged(_:))
-        popup.toolTip = "Profile label color"
-        popup.addItems(withTitles: BrowserProfileColorPreset.allCases.map(\.displayName))
-        for (index, preset) in BrowserProfileColorPreset.allCases.enumerated() {
-            popup.item(at: index)?.representedObject = preset.rawValue
-        }
-        let selectedPreset = color.preset
-        if let index = BrowserProfileColorPreset.allCases.firstIndex(of: selectedPreset) {
-            popup.selectItem(at: index)
-        }
-        popup.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        return popup
     }
 
     @objc private func createProfile() {
@@ -2245,59 +2388,6 @@ class BrowserProfilesSettingsViewController: NSViewController {
             } catch {
                 self.showProfileError(error)
             }
-        }
-    }
-
-    @objc private func profileColorPopupChanged(_ sender: NSPopUpButton) {
-        guard let rawPreset = sender.selectedItem?.representedObject as? String,
-              let preset = BrowserProfileColorPreset(rawValue: rawPreset) else {
-            return
-        }
-        let profileIdentifier = sender.identifier?.rawValue ?? "default"
-        let profileID = UUID(uuidString: profileIdentifier)
-        if preset == .custom {
-            let currentColor = browserProfileManager.snapshot().customProfiles.first(where: {
-                $0.id == profileID
-            })?.color ?? browserProfileManager.snapshot().defaultProfilePresentation.color
-            pendingProfileColorIdentifier = profileIdentifier
-            let panel = NSColorPanel.shared
-            panel.color = currentColor.appKitColor
-            panel.isContinuous = true
-            panel.setTarget(self)
-            panel.setAction(#selector(profileColorPanelChanged(_:)))
-            panel.orderFront(nil)
-            return
-        }
-
-        submitProfileColor(
-            profileIdentifier: profileIdentifier,
-            color: BrowserProfileColor(preset: preset)
-        )
-    }
-
-    @objc private func profileColorPanelChanged(_ sender: NSColorPanel) {
-        guard let profileIdentifier = pendingProfileColorIdentifier,
-              let hex = AppPreferencesStore.hex(from: sender.color) else {
-            return
-        }
-        submitProfileColor(
-            profileIdentifier: profileIdentifier,
-            color: BrowserProfileColor(preset: .custom, customSRGBHex: hex)
-        )
-    }
-
-    private var pendingProfileColorIdentifier: String?
-
-    private func submitProfileColor(
-        profileIdentifier: String,
-        color: BrowserProfileColor
-    ) {
-        let profileID = UUID(uuidString: profileIdentifier)
-        do {
-            try browserProfileManager.setColor(id: profileID, color: color)
-            refreshProfiles()
-        } catch {
-            showProfileError(error)
         }
     }
 

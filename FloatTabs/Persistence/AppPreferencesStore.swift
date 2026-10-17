@@ -138,6 +138,9 @@ enum ColdWebViewReleaseOption: Int, CaseIterable, Equatable {
 }
 
 extension Notification.Name {
+    static let floatTabsAttentionStyleDidChange = Notification.Name(
+        "FloatTabs.attentionStyleDidChange"
+    )
     static let floatTabsAppearanceDidChange = Notification.Name(
         "FloatTabs.appearanceDidChange"
     )
@@ -179,6 +182,7 @@ final class AppPreferencesStore {
         "FloatTabs.customAttentionSoundLibrary"
     static let selectedCustomAttentionSoundIDKey =
         "FloatTabs.selectedCustomAttentionSoundID"
+    static let attentionStyleKey = "FloatTabs.unreadTabAttentionStyle"
     static let websiteCacheAutomaticCleanupEnabledKey =
         "FloatTabs.websiteCache.automaticCleanupEnabled"
     static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
@@ -346,6 +350,29 @@ final class AppPreferencesStore {
             return defaults.bool(forKey: Self.attentionSoundEnabledKey)
         }
         set { defaults.set(newValue, forKey: Self.attentionSoundEnabledKey) }
+    }
+
+    var attentionStyle: TabAttentionStyle {
+        get {
+            guard let raw = defaults.string(forKey: Self.attentionStyleKey),
+                  let style = TabAttentionStyle(rawValue: raw) else {
+                return .signal
+            }
+            return style
+        }
+        set {
+            let previousStyle = attentionStyle
+            guard newValue != previousStyle
+                    || defaults.string(forKey: Self.attentionStyleKey) != newValue.rawValue else {
+                return
+            }
+            defaults.set(newValue.rawValue, forKey: Self.attentionStyleKey)
+            guard newValue != previousStyle else { return }
+            NotificationCenter.default.post(
+                name: .floatTabsAttentionStyleDidChange,
+                object: self
+            )
+        }
     }
 
     var attentionSoundName: String {

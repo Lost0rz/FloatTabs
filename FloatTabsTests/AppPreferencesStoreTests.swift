@@ -122,6 +122,49 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(second.attentionSoundVolume, 0.35, accuracy: 0.0001)
     }
 
+    func testUnreadTabAttentionStyleDefaultsToSignalAndRoundTripsEveryPreset() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.attentionStyle, .signal)
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.rawValue),
+            ["signal", "ember", "aurora", "spectrum"]
+        )
+
+        for style in TabAttentionStyle.allCases {
+            first.attentionStyle = style
+            XCTAssertEqual(defaults.string(forKey: AppPreferencesStore.attentionStyleKey), style.rawValue)
+            XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, style)
+        }
+
+        let storedKeys = Set((defaults.persistentDomain(forName: suiteName) ?? [:]).keys)
+        XCTAssertEqual(storedKeys, [AppPreferencesStore.attentionStyleKey])
+    }
+
+    func testUnknownUnreadTabAttentionStyleFallsBackToSignal() {
+        defaults.set("future-style", forKey: AppPreferencesStore.attentionStyleKey)
+
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, .signal)
+    }
+
+    func testUnreadTabAttentionStyleChangePublishesLiveUpdateOnlyWhenChanged() {
+        let store = AppPreferencesStore(defaults: defaults)
+        let change = expectation(description: "attention style change is published")
+        change.assertForOverFulfill = true
+        let observer = NotificationCenter.default.addObserver(
+            forName: .floatTabsAttentionStyleDidChange,
+            object: store,
+            queue: .main
+        ) { _ in
+            change.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        store.attentionStyle = .aurora
+        store.attentionStyle = .aurora
+
+        wait(for: [change], timeout: 0.2)
+    }
+
     func testAttentionSoundVolumeNormalizesInvalidValuesOnWriteAndRead() {
         let store = AppPreferencesStore(defaults: defaults)
 
