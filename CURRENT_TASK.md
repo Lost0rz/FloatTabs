@@ -21,6 +21,7 @@ The user should be able to understand whether local diagnostic history is kept, 
 - PR #123 is merged at that baseline after Real-Mac acceptance and exact-head CI.
 - Post-merge macOS CI for that merge commit was still running at authorization; observe it green before product-code mutation.
 - Authorized task branch: `product/ft-diagnostics-history-001`.
+- Draft PR: #124 — `Add optional long-term diagnostics history`.
 
 ## Audited baseline
 
