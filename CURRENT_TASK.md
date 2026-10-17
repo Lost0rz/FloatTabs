@@ -21,6 +21,7 @@ The requested product behavior is explicit: the left Tab area, including hover-e
 - PR #122 is merged at that baseline; its post-merge Benchmark Tool CI and macOS CI both passed.
 - Fresh open-PR inventory at authorization found no overlapping open PR.
 - Authorized task branch: `product/ft-shell-inner-drag-001`.
+- Draft PR: #123 — `Refine shell movement to inner Web surface only`.
 
 ## Audited implementation boundary
 
@@ -156,5 +157,5 @@ This task is complete only when:
 - only inner Web-surface movement remains;
 - focused regressions and project build/CI are green;
 - Real-Mac acceptance confirms Tab click/reorder, external non-drag, inner drag, resize and fold behavior;
-- the implementation is remotely delivered through one task PR;
+- the implementation is remotely delivered through Draft PR #123;
 - terminal Control Alignment updates `CURRENT_STATUS.md` / `CURRENT_TASK.md` and closes the task/PR/workspace lifecycle cleanly.
