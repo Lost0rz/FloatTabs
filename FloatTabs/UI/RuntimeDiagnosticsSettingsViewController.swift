@@ -10,7 +10,17 @@ typealias RuntimeDiagnosticsIncidentCaptureHandler = @MainActor () -> String
 
 @MainActor
 final class RuntimeDiagnosticsSettingsViewController: NSViewController {
-    let modePopup = NSPopUpButton()
+    let keepLocalHistoryButton = NSButton(
+        checkboxWithTitle: "Keep local diagnostic history",
+        target: nil,
+        action: nil
+    )
+    let detailLevelPopup = NSPopUpButton()
+    let longTermPerformanceObservationButton = NSButton(
+        checkboxWithTitle: "Long-term performance observation",
+        target: nil,
+        action: nil
+    )
     let exportButton = NSButton(title: "Export Recent Diagnostics…", target: nil, action: nil)
     let openLogsButton = NSButton(title: "Open Logs Folder", target: nil, action: nil)
 #if DEBUG
@@ -52,19 +62,37 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         let title = NSTextField(labelWithString: "Runtime Diagnostics")
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         let detail = NSTextField(
-            wrappingLabelWithString: "Collect sanitized diagnostics for troubleshooting."
+            wrappingLabelWithString: "Keep sanitized Runtime Diagnostics locally for troubleshooting."
         )
         detail.textColor = .secondaryLabelColor
         detail.maximumNumberOfLines = 0
         detail.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
 
-        modePopup.removeAllItems()
-        for mode in RuntimeDiagnosticMode.allCases {
-            modePopup.addItem(withTitle: mode.displayName)
-            modePopup.lastItem?.representedObject = mode.rawValue
+        let historyDetail = NSTextField(
+            wrappingLabelWithString: "History stays on this Mac and is sanitized before storage. Managed log files are retained locally for up to seven days."
+        )
+        historyDetail.textColor = .secondaryLabelColor
+        historyDetail.maximumNumberOfLines = 0
+        historyDetail.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+
+        let observationDetail = NSTextField(
+            wrappingLabelWithString: "When enabled, records low-frequency, content-free health and performance checkpoints for the selected Slot, approximately once per minute. Requires local diagnostic history."
+        )
+        observationDetail.textColor = .secondaryLabelColor
+        observationDetail.maximumNumberOfLines = 0
+        observationDetail.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+
+        detailLevelPopup.removeAllItems()
+        for mode in [RuntimeDiagnosticMode.standard, .verbose] {
+            detailLevelPopup.addItem(withTitle: mode.displayName)
+            detailLevelPopup.lastItem?.representedObject = mode.rawValue
         }
-        modePopup.target = self
-        modePopup.action = #selector(modeChanged(_:))
+        keepLocalHistoryButton.target = self
+        keepLocalHistoryButton.action = #selector(historyChanged(_:))
+        detailLevelPopup.target = self
+        detailLevelPopup.action = #selector(detailLevelChanged(_:))
+        longTermPerformanceObservationButton.target = self
+        longTermPerformanceObservationButton.action = #selector(longTermObservationChanged(_:))
 
         exportButton.target = self
         exportButton.action = #selector(exportDiagnostics(_:))
@@ -78,13 +106,13 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.maximumNumberOfLines = 0
 
-        let modeRow = NSStackView(views: [
-            NSTextField(labelWithString: "Collection mode"),
-            modePopup
+        let detailLevelRow = NSStackView(views: [
+            NSTextField(labelWithString: "Detail level"),
+            detailLevelPopup
         ])
-        modeRow.orientation = .horizontal
-        modeRow.alignment = .centerY
-        modeRow.spacing = 16
+        detailLevelRow.orientation = .horizontal
+        detailLevelRow.alignment = .centerY
+        detailLevelRow.spacing = 16
 
         var actionViews: [NSView] = [exportButton, openLogsButton]
 #if DEBUG
@@ -97,7 +125,17 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         actions.alignment = .centerY
         actions.spacing = 8
 
-        let stack = NSStackView(views: [title, detail, modeRow, actions, statusLabel])
+        let stack = NSStackView(views: [
+            title,
+            detail,
+            keepLocalHistoryButton,
+            historyDetail,
+            detailLevelRow,
+            longTermPerformanceObservationButton,
+            observationDetail,
+            actions,
+            statusLabel
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -118,14 +156,40 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
         synchronizeControls()
     }
 
-    @objc private func modeChanged(_ sender: NSPopUpButton) {
+    @objc private func historyChanged(_ sender: NSButton) {
+        if sender.state == .on {
+            if preferencesStore.runtimeDiagnosticsMode == .off {
+                preferencesStore.runtimeDiagnosticsMode = .standard
+            }
+            statusLabel.stringValue = "Local diagnostic history is on."
+        } else {
+            preferencesStore.runtimeDiagnosticsMode = .off
+            statusLabel.stringValue = "Local diagnostic history is off."
+        }
+        synchronizeControls()
+    }
+
+    @objc private func detailLevelChanged(_ sender: NSPopUpButton) {
         guard let rawValue = sender.selectedItem?.representedObject as? String,
               let mode = RuntimeDiagnosticMode(rawValue: rawValue) else {
             synchronizeControls()
             return
         }
+        guard mode == .standard || mode == .verbose else {
+            synchronizeControls()
+            return
+        }
         preferencesStore.runtimeDiagnosticsMode = mode
-        statusLabel.stringValue = "Saved \(mode.displayName) mode."
+        statusLabel.stringValue = "Saved \(mode.displayName) diagnostic detail."
+        synchronizeControls()
+    }
+
+    @objc private func longTermObservationChanged(_ sender: NSButton) {
+        preferencesStore.longTermPerformanceObservationEnabled = sender.state == .on
+        statusLabel.stringValue = sender.state == .on
+            ? "Long-term performance observation is on."
+            : "Long-term performance observation is off."
+        synchronizeControls()
     }
 
     @objc private func exportDiagnostics(_ sender: NSButton) {
@@ -175,10 +239,16 @@ final class RuntimeDiagnosticsSettingsViewController: NSViewController {
     private func synchronizeControls() {
         guard isViewLoaded else { return }
         let mode = preferencesStore.runtimeDiagnosticsMode
-        if let index = modePopup.itemArray.firstIndex(where: {
-            ($0.representedObject as? String) == mode.rawValue
+        keepLocalHistoryButton.state = mode == .off ? .off : .on
+        let detailMode = mode == .verbose ? RuntimeDiagnosticMode.verbose : .standard
+        if let index = detailLevelPopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String) == detailMode.rawValue
         }) {
-            modePopup.selectItem(at: index)
+            detailLevelPopup.selectItem(at: index)
         }
+        detailLevelPopup.isEnabled = mode != .off
+        longTermPerformanceObservationButton.state =
+            preferencesStore.longTermPerformanceObservationEnabled ? .on : .off
+        longTermPerformanceObservationButton.isEnabled = mode != .off
     }
 }

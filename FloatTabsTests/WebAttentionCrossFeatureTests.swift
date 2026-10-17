@@ -337,6 +337,211 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(writer.events.contains { $0.event == "navigation.renderer_probe" })
     }
 
+    func testLongTermCheckpointDoesNotMaterializeMissingRuntime() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CheckpointWithoutRuntime", url: "https://chatgpt.com/")],
+            diagnostics: diagnostics
+        )
+        let slot = try XCTUnwrap(store.activeProfile)
+        let currentURLBefore = slot.currentURL
+        // PanelController initializes the selected Slot's runtime as part of
+        // its existing composition. Release that setup runtime so this probe
+        // starts from the missing-runtime state it must preserve.
+        pool.release(slotID: slot.id)
+        let createdRuntimeCountBefore = writer.events.filter {
+            $0.event == "web_runtime.created"
+        }.count
+        XCTAssertEqual(pool.count, 0)
+
+        await captureLongTermDiagnosticsCheckpoint(on: controller)
+
+        XCTAssertEqual(pool.count, 0)
+        XCTAssertNil(pool.existingWebView(for: slot.id))
+        XCTAssertEqual(store.activeProfile?.currentURL, currentURLBefore)
+        let checkpoint = try XCTUnwrap(
+            writer.events.first { $0.event == "diagnostics.performance_checkpoint" }
+        )
+        XCTAssertEqual(checkpoint.fields["slot_id"], .string(slot.id.uuidString))
+        XCTAssertEqual(checkpoint.fields["active_slot_matches"], .bool(true))
+        XCTAssertEqual(checkpoint.fields["resident"], .bool(false))
+        XCTAssertEqual(checkpoint.fields["resident_slot_count"], .integer(0))
+        XCTAssertEqual(
+            checkpoint.fields["capture_availability"],
+            .string("no_resident_active_runtime")
+        )
+        XCTAssertNil(checkpoint.fields["runtime_generation"])
+        XCTAssertNil(checkpoint.fields["webview_instance_id"])
+        XCTAssertEqual(
+            writer.events.filter { $0.event == "web_runtime.created" }.count,
+            createdRuntimeCountBefore
+        )
+    }
+
+    func testLongTermChatGPTCheckpointPreservesIdentityAndOnlyAggregatePageAppFacts() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CheckpointChatGPT", url: "https://chatgpt.com/")],
+            diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: { _, script in
+                XCTAssertEqual(script, ChatGPTAttentionBridge.incidentHealthProbeScript)
+                return [
+                    "version": 1,
+                    "document_ready_state": "complete",
+                    "visibility_state": "visible",
+                    "conversation_shell_present": true,
+                    "composer_present": true,
+                    "loading_indicator_present": false,
+                    "loading_indicator_visible": false,
+                    "conversation_load_error_present": false
+                ]
+            },
+            incidentPageAppProbeEvaluator: { _, script, documentToken in
+                XCTAssertEqual(script, ChatGPTAttentionBridge.incidentPageAppProbeScript)
+                return Self.pageAppPayload(token: documentToken)
+            }
+        )
+        let webView = try makeResidentWebView(
+            pool: pool,
+            store: store,
+            slotName: "CheckpointChatGPT"
+        )
+        let slot = try profile(named: "CheckpointChatGPT", in: store)
+        let pageURL = URL(string: "https://chatgpt.com/")!
+        _ = webView.loadHTMLString("<html><body><main></main></body></html>", baseURL: pageURL)
+        let pageLoaded = try await waitForWebViewURL(webView, url: pageURL)
+        XCTAssertTrue(pageLoaded)
+        let attentionBridge = try XCTUnwrap(pool.attentionBridge(for: slot.id))
+        let documentAdmitted = try await waitUntil {
+            attentionBridge.diagnosticSnapshotFields["attention_document_admitted"] == .bool(true)
+        }
+        XCTAssertTrue(documentAdmitted)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+
+        await captureLongTermDiagnosticsCheckpoint(on: controller)
+
+        let checkpoint = try XCTUnwrap(
+            writer.events.last { $0.event == "diagnostics.performance_checkpoint" }
+        )
+        XCTAssertEqual(checkpoint.fields["runtime_generation"], .integer(Int64(identity.runtimeGeneration)))
+        XCTAssertEqual(checkpoint.fields["webview_instance_id"], .string(identity.webViewInstanceID.uuidString))
+        XCTAssertNotNil(checkpoint.fields["navigation_generation"])
+        XCTAssertEqual(checkpoint.fields["capture_availability"], .string("captured"))
+        XCTAssertEqual(checkpoint.fields["health_probe_outcome"], .string("success"))
+        XCTAssertEqual(checkpoint.fields["page_app_probe_outcome"], .string("success"))
+        XCTAssertEqual(checkpoint.fields["document_ready_state"], .string("complete"))
+        XCTAssertEqual(checkpoint.fields["visibility_state"], .string("visible"))
+        XCTAssertEqual(checkpoint.fields["conversation_shell_present"], .bool(true))
+        XCTAssertEqual(checkpoint.fields["page_app_javascript_error_count"], .integer(1))
+        XCTAssertEqual(checkpoint.fields["page_app_event_count"], .integer(1))
+        XCTAssertFalse(checkpoint.fields.keys.contains {
+            $0.range(of: #"^page_app_event_[0-9]{2}_"#, options: .regularExpression) != nil
+        })
+        XCTAssertNil(checkpoint.fields["document_identity"])
+        XCTAssertNil(checkpoint.fields["document_token"])
+        XCTAssertNil(checkpoint.fields["error_message"])
+        XCTAssertNil(checkpoint.fields["page_title"])
+        XCTAssertNil(checkpoint.fields["prompt"])
+        XCTAssertNil(checkpoint.fields["response_text"])
+    }
+
+    func testLongTermGenericCheckpointKeepsNativeRuntimeFieldsWithoutChatGPTProbe() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CheckpointGeneric", url: "https://example.com/")],
+            diagnostics: diagnostics
+        )
+        let webView = try makeResidentWebView(
+            pool: pool,
+            store: store,
+            slotName: "CheckpointGeneric"
+        )
+        let slot = try profile(named: "CheckpointGeneric", in: store)
+        _ = webView
+
+        await captureLongTermDiagnosticsCheckpoint(on: controller)
+
+        let checkpoint = try XCTUnwrap(
+            writer.events.last { $0.event == "diagnostics.performance_checkpoint" }
+        )
+        XCTAssertEqual(checkpoint.fields["slot_id"], .string(slot.id.uuidString))
+        XCTAssertEqual(checkpoint.fields["resident"], .bool(true))
+        XCTAssertNotNil(checkpoint.fields["runtime_generation"])
+        XCTAssertNotNil(checkpoint.fields["webview_instance_id"])
+        XCTAssertNotNil(checkpoint.fields["navigation_generation"])
+        XCTAssertNotNil(checkpoint.fields["is_loading"])
+        XCTAssertNil(checkpoint.fields["health_probe_outcome"])
+        XCTAssertNil(checkpoint.fields["page_app_probe_outcome"])
+    }
+
+    func testLongTermCheckpointMarksNavigationReplacedDuringHealthProbeAsStale() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let replacementURL = URL(string: "https://chatgpt.com/replacement")!
+        var pageAppProbeCount = 0
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "CheckpointStaleNavigation", url: "https://chatgpt.com/")],
+            diagnostics: diagnostics,
+            incidentHealthProbeEvaluator: { [self] webView, script in
+                XCTAssertEqual(script, ChatGPTAttentionBridge.incidentHealthProbeScript)
+                webView.loadHTMLString("<html><body><main></main></body></html>", baseURL: replacementURL)
+                let replacementCommitted = try await waitForWebViewURL(webView, url: replacementURL)
+                XCTAssertTrue(replacementCommitted)
+                return [
+                    "version": 1,
+                    "document_ready_state": "complete",
+                    "visibility_state": "visible",
+                    "conversation_shell_present": true,
+                    "composer_present": true,
+                    "loading_indicator_present": false,
+                    "loading_indicator_visible": false,
+                    "conversation_load_error_present": false
+                ]
+            },
+            incidentPageAppProbeEvaluator: { _, _, documentToken in
+                pageAppProbeCount += 1
+                return Self.pageAppPayload(token: documentToken)
+            }
+        )
+        let webView = try makeResidentWebView(
+            pool: pool,
+            store: store,
+            slotName: "CheckpointStaleNavigation"
+        )
+        let slot = try profile(named: "CheckpointStaleNavigation", in: store)
+        let pageURL = URL(string: "https://chatgpt.com/")!
+        webView.loadHTMLString("<html><body><main></main></body></html>", baseURL: pageURL)
+        let initialPageLoaded = try await waitForWebViewURL(webView, url: pageURL)
+        XCTAssertTrue(initialPageLoaded)
+        let attentionBridge = try XCTUnwrap(pool.attentionBridge(for: slot.id))
+        let documentAdmitted = try await waitUntil {
+            attentionBridge.diagnosticSnapshotFields["attention_document_admitted"] == .bool(true)
+        }
+        XCTAssertTrue(documentAdmitted)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: slot.id))
+        let navigationBeforeProbe = pool.diagnosticSnapshotFields(for: slot.id)["navigation_generation"]
+
+        await captureLongTermDiagnosticsCheckpoint(on: controller)
+
+        let checkpoint = try XCTUnwrap(
+            writer.events.last { $0.event == "diagnostics.performance_checkpoint" }
+        )
+        XCTAssertEqual(checkpoint.fields["runtime_generation"], .integer(Int64(identity.runtimeGeneration)))
+        XCTAssertEqual(checkpoint.fields["webview_instance_id"], .string(identity.webViewInstanceID.uuidString))
+        XCTAssertEqual(checkpoint.fields["navigation_generation"], navigationBeforeProbe)
+        XCTAssertEqual(checkpoint.fields["health_probe_outcome"], .string("stale"))
+        XCTAssertEqual(checkpoint.fields["page_app_probe_outcome"], .string("stale"))
+        XCTAssertEqual(checkpoint.fields["runtime_context_current"], .bool(false))
+        XCTAssertNotEqual(
+            pool.diagnosticSnapshotFields(for: slot.id)["navigation_generation"],
+            navigationBeforeProbe
+        )
+        XCTAssertEqual(pageAppProbeCount, 0)
+    }
+
     func testStuckTabCaptureCorrelatesResidentRuntimeWithoutChangingOwners() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
@@ -5328,6 +5533,17 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
             incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator
         )
+    }
+
+    private func captureLongTermDiagnosticsCheckpoint(
+        on controller: PanelController
+    ) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            controller.captureLongTermDiagnosticsCheckpoint(
+                shouldRecord: { true },
+                completion: { continuation.resume() }
+            )
+        }
     }
 
     private static func pageAppPayload(token: String) -> [String: Any] {

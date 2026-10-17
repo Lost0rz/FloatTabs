@@ -439,8 +439,8 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
         )
     }
 
-    var diagnosticFields: [String: RuntimeDiagnosticValue] {
-        var fields: [String: RuntimeDiagnosticValue] = [
+    var aggregateDiagnosticFields: [String: RuntimeDiagnosticValue] {
+        [
             "page_app_event_count": .integer(Int64(events.count)),
             "page_app_dropped_event_count": .integer(Int64(droppedEvents)),
             "page_app_javascript_error_count": .integer(Int64(javascriptErrorCount)),
@@ -454,6 +454,10 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
             "page_app_handled_fetch_xhr_failure_observable": .bool(false),
             "page_app_capture_ring_capacity": .integer(Int64(Self.maximumEvents))
         ]
+    }
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields = aggregateDiagnosticFields
         for (index, event) in events.enumerated() {
             fields.merge(event.diagnosticFields(prefix: String(format: "page_app_event_%02d", index))) {
                 _, new in new
@@ -518,14 +522,14 @@ struct ChatGPTIncidentPageAppProbeResult: Equatable, Sendable {
     let latencyMilliseconds: Double
     let captureUptimeMilliseconds: Int64
 
-    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+    var longTermObservationDiagnosticFields: [String: RuntimeDiagnosticValue] {
         var fields: [String: RuntimeDiagnosticValue] = [
             "page_app_probe_outcome": .string(outcome.rawValue),
             "page_app_probe_latency_ms": .double(min(max(latencyMilliseconds, 0), 5_000)),
             "page_app_capture_uptime_ms": .integer(captureUptimeMilliseconds),
             "chatgpt_document_epoch": documentEpoch.map { .integer(Int64($0)) } ?? .null
         ]
-        let valueFields = values?.diagnosticFields ?? [
+        let aggregateFields = values?.aggregateDiagnosticFields ?? [
             "page_app_event_count": .null,
             "page_app_dropped_event_count": .null,
             "page_app_javascript_error_count": .null,
@@ -539,7 +543,19 @@ struct ChatGPTIncidentPageAppProbeResult: Equatable, Sendable {
             "page_app_handled_fetch_xhr_failure_observable": .bool(false),
             "page_app_capture_ring_capacity": .integer(Int64(ChatGPTIncidentPageAppProbeValues.maximumEvents))
         ]
-        fields.merge(valueFields) { _, new in new }
+        fields.merge(aggregateFields) { _, new in new }
+        return fields
+    }
+
+    var diagnosticFields: [String: RuntimeDiagnosticValue] {
+        var fields = longTermObservationDiagnosticFields
+        if let events = values?.events {
+            for (index, event) in events.enumerated() {
+                fields.merge(event.diagnosticFields(prefix: String(format: "page_app_event_%02d", index))) {
+                    _, new in new
+                }
+            }
+        }
         return fields
     }
 }
