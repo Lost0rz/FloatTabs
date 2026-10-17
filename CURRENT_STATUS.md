@@ -101,7 +101,8 @@ LONG_RUNNING_BASELINE_AUTHORIZED=NO
 
 ## Execution progress (2026-10-17)
 
-- Semantic implementation head: `2c0b6b282f0b3b67c3fea315181206e1b20d4b47`.
+- Earlier semantic implementation head: `2c0b6b282f0b3b67c3fea315181206e1b20d4b47`.
+- Current semantic implementation head: `c8e77d16c1dc349eeeedfb96058e2442d6c9e4de`, including the bounded focus-failure identity probe. Full XCTest (1317/1317), Debug and Release arm64 builds passed. Exact-head hosted macOS CI run `39027508459` and QA DMG run `39027508440` passed; PR #124 remains OPEN / Draft.
 - Exact-head hosted verification passed: `Build & Test (Apple Silicon arm64)` run `39004297098`; `build-dmg` run `39004297194`.
 - A clean-source Release arm64 candidate for the semantic head was built and verified (`source_revision_exact=true`).
 - The prior installed app was `0.5.2` build `20`, arm64, source `b21a83fb40bf86a55c8aa6186150797166fc6981`. After normal user quit, a bundle-only rollback archive was validated and the exact Release arm64 candidate for `2c0b6b282f0b3b67c3fea315181206e1b20d4b47` was installed and launched (`source_revision_exact=true`).
@@ -131,12 +132,21 @@ MISSING_FACT=ACTIVE_SLOT_RUNTIME_AND_NAVIGATION_IDENTITY_AT_PRESENTATION_FOCUS_F
 BLOCKED_DECISION=WEB_RUNTIME_NAVIGATION_FAULT_VS_PRESENTATION_FOCUS_FAULT_BOUNDARY
 INCIDENT_PROBE_AUTHORIZED=YES
 INCIDENT_PROBE_SCOPE=PRESENTATION_FOCUS_FAILURE_IDENTITY_ONLY
-GATE5=FAILED_PENDING_PROBE_AND_RERUN
+FOCUS_IDENTITY_PROBE=IMPLEMENTED_VERIFIED
+GATE5=PRIOR_FAILURE;CURRENT_RERUN=BLOCKED_BEFORE_OBSERVATION
 ROOT_CAUSE=UNKNOWN
 ```
 
-The next authorized mutation is only the single focus-failure identity probe recorded in `CURRENT_TASK.md`. It must reuse current owner projections, materialize no runtime, run no page JavaScript, and change no product behavior. After exact-head automated verification, rerun Gate 5 on that exact Release build before any product correction is selected.
+The bounded focus-failure identity probe was implemented in semantic candidate `c8e77d16c1dc349eeeedfb96058e2442d6c9e4de` and passed its automated verification gate. A later exact-candidate install/launch was attempted, but CUA could not bind the FloatTabs UI; no Settings change, observation window, or Gate 5 interaction was performed. Gate 5 remains unpassed, with no new candidate presentation/focus failure established. The current authorized scope refinement is the user-managed daily-JSONL handoff below; it authorizes no focus, navigation, recovery, or performance correction.
 
 ## Acceptance posture
 
 This task must prove that optional periodic observation is bounded, privacy-safe, identity-safe and low overhead. Existing RuntimeDiagnostics privacy/rotation tests remain required, and a short Real-Mac Release smoke must show that enabling observation produces sparse checkpoints and a reload marker without obvious interaction regression or unbounded log growth.
+
+## User-managed saved-log and offline-analysis refinement (2026-10-17)
+
+The active `FT-DIAG-HISTORY-001` task and Draft PR #124 now also support this user-owned workflow: sanitized JSONL remains on this Mac for up to seven days; the user opens the canonical Logs folder, selects one or more date-grouped JSONL files, and may provide those files later for offline AI analysis. FloatTabs does not run resident AI monitoring, upload logs automatically, copy logs to another store, or rewrite their contents. `Export Recent Diagnostics…` remains available.
+
+Settings will label the folder action `Open Saved Logs Folder` and explain that logs are normally grouped into one JSONL file per UTC day, large daily logs may be split automatically, and the user can select one or more days for later analysis. Opening the folder must ensure `RuntimeDiagnosticWriter.defaultDirectory` exists before asking Finder to open it.
+
+This refinement leaves `RuntimeDiagnosticWriter` ownership, daily segmentation, the 10 MiB segment limit, `maxSegments`, seven-day retention, checkpoint cadence, and privacy rules unchanged. The revised Gate 5 contract is recorded in `CURRENT_TASK.md`; the historical Gate 5 failure remains a failure and `ROOT_CAUSE=UNKNOWN`.

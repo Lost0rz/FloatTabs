@@ -9,7 +9,7 @@
 
 Make local diagnostic history explicit and useful for long-running performance observation without creating a second logging platform or adding high-frequency observer overhead.
 
-The user should be able to understand whether local diagnostic history is kept, opt into low-cadence long-term performance observation, run FloatTabs normally for a period, and later export sanitized evidence for analysis. Manual reloads must remain visible as recovery boundaries so an intermittent slowdown is not erased from the timeline merely because the user reloads the page.
+The user should be able to understand whether local diagnostic history is kept, opt into low-cadence long-term performance observation, run FloatTabs normally for a period, and later choose locally retained JSONL files for offline analysis. Manual reloads must remain visible as recovery boundaries so an intermittent slowdown is not erased from the timeline merely because the user reloads the page.
 
 ## Authority / baseline
 
@@ -51,7 +51,22 @@ Refine the existing Advanced → Runtime Diagnostics surface without creating co
 2. The UI may present this as an explicit `Keep local diagnostic history` enable/disable control plus `Detail level: Standard / Verbose`, but it must project the existing `runtimeDiagnosticsMode` rather than introducing a second canonical retain-history boolean.
 3. Add one new preference: `longTermPerformanceObservationEnabled`, default `false`.
 4. Add a `Long-term performance observation` control. It is effective only while diagnostics mode is not `.off` and must clearly state that it records low-frequency content-free health/performance checkpoints for later analysis.
-5. Preserve `Export Recent Diagnostics…` and `Open Logs Folder`.
+5. Preserve `Export Recent Diagnostics…`.
+6. Provide `Open Saved Logs Folder` for the existing canonical Logs directory. Its description must state that sanitized diagnostics are saved locally for up to seven days, normally grouped into one JSONL file per UTC day with automatic splitting for large daily logs, and that the user can choose one or more days for later offline analysis.
+
+### User-managed saved-log and offline-analysis refinement (2026-10-17)
+
+This is an authorized scope refinement of the same task and PR #124. The product workflow is local rolling save → user-selected daily JSONL files → optional later offline AI analysis. FloatTabs must not require AI to remain running, analyze logs continuously, upload automatically, or change log contents as part of opening the folder.
+
+The Settings description is:
+
+> Sanitized diagnostics are saved on this Mac and retained for up to 7 days. Logs are normally grouped into one JSONL file per UTC day; large daily logs may be split automatically. Open the saved logs folder and choose one or more daily files to provide later for offline AI analysis.
+
+The action label is `Open Saved Logs Folder`. Keep `Export Recent Diagnostics…` unchanged and available.
+
+The existing `AppCoordinator` open-folder seam must continue to use `RuntimeDiagnosticWriter.defaultDirectory`. Before invoking Finder, ensure that directory exists. This is a folder-opening responsibility only: do not change `RuntimeDiagnosticWriter` ownership, segment naming/rotation, 10 MiB segment size, `maxSegments`, seven-day retention, checkpoint cadence, or privacy behavior; do not copy, export, or rewrite log content in this seam.
+
+Focused tests must cover the Settings action title and description, invocation of its existing handler, and safe creation of a missing directory if an ensure-directory helper is introduced. Keep the existing privacy, rotation, and retention tests unchanged and passing. No focus identity probe, Web runtime, navigation/recovery, Browser Profile/session, or performance behavior change is authorized by this refinement.
 
 ### Periodic observation
 
@@ -167,17 +182,19 @@ Run the existing Runtime Diagnostics schema/mode/export, privacy, rotation/reten
 
 Then run the broader project macOS tests plus Debug and Release arm64 builds and exact-head hosted CI.
 
-### Gate 5 — Real-Mac Release smoke
+### Gate 5 — Real-Mac Release saved-log handoff
 
-On the exact Release task build:
+On the exact Release task build, verify the complete user-managed workflow:
 
-- enable diagnostics Standard and long-term performance observation;
-- keep a normal ChatGPT Slot running long enough to observe several scheduled checkpoints;
-- confirm checkpoint cadence is sparse/approximately one per minute rather than callback-level output;
-- manually reload once and confirm a reload boundary appears before the following navigation/recovery evidence;
-- export the retained diagnostics and inspect that no prompt/response/DOM/input/cookie/auth content is present;
-- confirm normal Tab, focus, reload and page interaction remain responsive;
-- report observed log growth and any obvious CPU/UI impact without inventing a pass threshold.
+1. In Settings, enable local diagnostic history at Standard and enable long-term performance observation. Use a normal ChatGPT Slot for several scheduled checkpoints.
+2. Confirm a date-grouped JSONL log exists in the canonical Logs directory. Logs are normally grouped into one JSONL file per UTC day and may split automatically when a daily log is large. Check that checkpoints remain sparse, approximately one per minute.
+3. Perform one normal manual Reload and confirm the reload boundary precedes subsequent navigation/recovery evidence.
+4. Use `Open Saved Logs Folder` and confirm Finder opens `RuntimeDiagnosticWriter.defaultDirectory`, creating the directory first when it did not exist.
+5. Select one or more relevant daily JSONL files and verify they contain the expected sparse checkpoint, reload, and runtime/navigation evidence. Keep the file content private during inspection.
+6. Confirm the selected files can be provided later for offline AI analysis. No AI process must remain running, and FloatTabs must not upload or analyze files automatically.
+7. Structurally inspect the saved logs for the existing privacy boundary. Confirm normal Tab, focus, reload, and page interaction remain responsive; report observed log growth and qualitative UI/CPU impact without inventing a pass threshold.
+
+Keep the existing seven-day retention and rotation behavior. `Export Recent Diagnostics…` remains available as a separate on-demand action; it does not replace user selection of daily files.
 
 ### Gate 5 execution result (2026-10-17)
 
@@ -204,6 +221,7 @@ STOP and report evidence if:
 This task is complete only when:
 
 - Settings clearly expose local history semantics and optional long-term observation;
+- Settings and Finder support the user-managed daily-JSONL handoff for later offline analysis;
 - long-term observation is opt-in, low-cadence, bounded and Release-capable;
 - manual reload boundaries are preserved in diagnostic history;
 - existing writer retention/privacy/export authority is reused unchanged;
@@ -229,7 +247,7 @@ The read-only incident diagnosis following the failed Gate 5 result is accepted 
 
 ### Authorized probe — single existing failure boundary only
 
-The same task and PR are re-authorized for one bounded diagnostic-instrumentation correction before Gate 5 is rerun.
+The same task and PR were re-authorized for one bounded diagnostic-instrumentation correction before Gate 5 was rerun.
 
 Implement the probe at the existing `presentation_focus.failed` event in `PanelController`, because that presentation owner already has access to `TabStore` and `WebViewPool` identity projections. Do not move Web runtime ownership into `WebFocusRouter` and do not create a second failure event stream.
 
@@ -267,6 +285,6 @@ Before a new Real-Mac Gate 5 attempt:
 6. Push to the same branch / PR #124 and require exact-head hosted CI success.
 7. Keep PR #124 Draft.
 
-After the probe passes automated verification, install that exact Release build without resetting Browser Profiles/session data and rerun Gate 5. If the failure recurs, use the new failure-boundary identity to decide whether the minimum correction belongs to Web runtime/navigation or presentation/focus. If the smoke is clean, report the new Gate 5 evidence without inventing causality for the earlier incident.
+The focus-failure identity probe was completed in semantic candidate `c8e77d16c1dc349eeeedfb96058e2442d6c9e4de` and passed its automated verification gate. The attempted Real-Mac rerun could not proceed because CUA did not expose a bindable FloatTabs UI; no Gate 5 observation or product-level result was established. `ROOT_CAUSE=UNKNOWN` remains unchanged. The current authorized implementation is the saved-log/offline-analysis workflow refinement above, with no focus, navigation, recovery, or performance correction.
 
-STOP before expanding beyond this single probe if implementation requires new runtime ownership, new asynchronous Web work, a broader logging redesign, or any behavioral correction.
+STOP before expanding beyond the authorized saved-log/offline-analysis workflow if implementation requires a second durable logging authority, new runtime ownership, new asynchronous Web work, a broader logging redesign, or any focus, navigation, recovery, or performance behavior correction.
