@@ -179,6 +179,12 @@ On the exact Release task build:
 - confirm normal Tab, focus, reload and page interaction remain responsive;
 - report observed log growth and any obvious CPU/UI impact without inventing a pass threshold.
 
+### Gate 5 execution result (2026-10-17)
+
+Gate 5 was attempted on the exact Release task build and did not pass. During the 07:12–07:23 UTC observation window, nine additional checkpoints were recorded at 61–63-second intervals, totaling 22,602 bytes (2,511 bytes average). Observation was turned OFF through Settings, and no later checkpoint appeared through 07:23:14 UTC. The retained export passed the structural content-free inspection recorded in `CURRENT_STATUS.md`. The first authorized manual-reload boundary at 07:17:27 UTC preceded navigation commit and a captured/current ChatGPT checkpoint.
+
+The user reported that Tab focus did not respond and provided a screenshot captured at 07:28:02 UTC showing a blank white Slot beside Runtime Diagnostics Settings. The live log contains a network-category `navigation.failed` (`NSURLErrorDomain`, `-1001`) at 07:22:04 UTC and a later manual-reload boundary at 07:25:57 UTC while that Slot/runtime was already in a failed navigation phase. The later boundary's actor is not attributable from the diagnostic event; the executor did not invoke another reload during this continuation. Focus-failure records were also observed, but do not carry enough runtime identity to tie them to the screenshot's Slot. These observations block the required normal-display/focus acceptance and do not establish a root cause (`ROOT_CAUSE=UNKNOWN`). No product fix or further runtime interaction was authorized by this task; keep the PR Draft and task ACTIVE until diagnosis/correction is separately authorized and Gate 5 is rerun.
+
 ## STOP conditions
 
 STOP and report evidence if:
