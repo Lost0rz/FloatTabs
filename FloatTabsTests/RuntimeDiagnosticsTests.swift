@@ -416,4 +416,161 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertTrue(tracker.accepts(later))
         XCTAssertEqual(tracker.consume(later)?.trace.root, "dismiss-C")
     }
+
+    func testLongTermObservationWaitsSixtySecondsAndDoesNotOverlapSamples() async {
+        let suiteName = "FloatTabsTests.LongTermObservation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.longTermPerformanceObservationEnabled = true
+        let sleeper = ManualLongTermObservationSleeper()
+        var sampleCount = 0
+        var currentChecks: [@MainActor () -> Bool] = []
+        var completions: [@MainActor () -> Void] = []
+        let coordinator = LongTermPerformanceObservationCoordinator(
+            preferencesStore: preferences,
+            interval: 60,
+            sleeper: { try await sleeper.sleep($0) },
+            observe: { isCurrent, completion in
+                sampleCount += 1
+                currentChecks.append(isCurrent)
+                completions.append(completion)
+            }
+        )
+        defer { coordinator.stop() }
+
+        coordinator.start()
+        await waitUntil { sleeper.pendingCount == 1 }
+        XCTAssertEqual(sleeper.requestedIntervals, [60])
+        XCTAssertEqual(sampleCount, 0)
+
+        sleeper.advanceNext()
+        await waitUntil { sampleCount == 1 }
+        XCTAssertTrue(coordinator.isObservationInFlight)
+        XCTAssertTrue(currentChecks[0]())
+        XCTAssertEqual(sleeper.requestedIntervals, [60])
+
+        completions[0]()
+        await waitUntil { sleeper.requestedIntervals.count == 2 }
+        XCTAssertEqual(sleeper.requestedIntervals, [60, 60])
+        XCTAssertEqual(sampleCount, 1)
+        coordinator.stop()
+    }
+
+    func testLongTermObservationRequiresEnabledDiagnosticsAndStopsOnPreferenceChange() async {
+        let suiteName = "FloatTabsTests.LongTermObservation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.runtimeDiagnosticsMode = .off
+        preferences.longTermPerformanceObservationEnabled = true
+        let sleeper = ManualLongTermObservationSleeper()
+        var sampleCount = 0
+        let coordinator = LongTermPerformanceObservationCoordinator(
+            preferencesStore: preferences,
+            sleeper: { try await sleeper.sleep($0) },
+            observe: { _, completion in
+                sampleCount += 1
+                completion()
+            }
+        )
+        defer { coordinator.stop() }
+
+        coordinator.start()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertTrue(sleeper.requestedIntervals.isEmpty)
+        XCTAssertEqual(sampleCount, 0)
+
+        preferences.runtimeDiagnosticsMode = .standard
+        await waitUntil { sleeper.pendingCount == 1 }
+        preferences.longTermPerformanceObservationEnabled = false
+        await waitUntil { sleeper.pendingCount == 0 }
+
+        XCTAssertEqual(sampleCount, 0)
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
+    func testStoppingInvalidatesInFlightCheckpointAndRejectsLateCompletion() async {
+        let suiteName = "FloatTabsTests.LongTermObservation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.longTermPerformanceObservationEnabled = true
+        let sleeper = ManualLongTermObservationSleeper()
+        var shouldContinue: (@MainActor () -> Bool)?
+        var lateCompletion: (@MainActor () -> Void)?
+        let coordinator = LongTermPerformanceObservationCoordinator(
+            preferencesStore: preferences,
+            sleeper: { try await sleeper.sleep($0) },
+            observe: { isCurrent, completion in
+                shouldContinue = isCurrent
+                lateCompletion = completion
+            }
+        )
+
+        coordinator.start()
+        await waitUntil { sleeper.pendingCount == 1 }
+        sleeper.advanceNext()
+        await waitUntil { shouldContinue != nil }
+        XCTAssertTrue(shouldContinue?() == true)
+
+        coordinator.stop()
+
+        XCTAssertFalse(shouldContinue?() ?? true)
+        XCTAssertFalse(coordinator.isObservationInFlight)
+        lateCompletion?()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(sleeper.requestedIntervals, [60])
+    }
+
+    private func waitUntil(
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: @MainActor () -> Bool
+    ) async {
+        for _ in 0..<100 {
+            if condition() { return }
+            await Task.yield()
+        }
+        XCTFail("condition not met", file: file, line: line)
+    }
+}
+
+@MainActor
+private final class ManualLongTermObservationSleeper {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var waiters: [Waiter] = []
+    private(set) var requestedIntervals: [TimeInterval] = []
+
+    var pendingCount: Int { waiters.count }
+
+    func sleep(_ interval: TimeInterval) async throws {
+        let id = UUID()
+        requestedIntervals.append(interval)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters.append(Waiter(id: id, continuation: continuation))
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.resume(id: id, throwing: CancellationError())
+            }
+        }
+    }
+
+    func advanceNext() {
+        guard let waiter = waiters.first else { return }
+        waiters.removeFirst()
+        waiter.continuation.resume()
+    }
+
+    private func resume(id: UUID, throwing error: Error) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(throwing: error)
+    }
 }

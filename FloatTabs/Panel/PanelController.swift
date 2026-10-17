@@ -863,6 +863,188 @@ final class PanelController: NSObject, NSWindowDelegate {
         return "Snapshot recorded for active Slot."
     }
 
+    /// Captures one opt-in periodic checkpoint from the already selected Slot.
+    /// It only reads an existing pooled WebView and never creates a runtime.
+    func captureLongTermDiagnosticsCheckpoint(
+        shouldRecord: @escaping @MainActor () -> Bool,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard shouldRecord() else {
+            completion()
+            return
+        }
+
+        var fields = diagnostics.environmentFields()
+        fields.merge([
+            "observation_source": .string("long_term_performance"),
+            "resident_slot_count": .integer(Int64(webViewPool.count)),
+            "panel_visible": .bool(panel.isVisible),
+            "source_window_visible": .bool(sourceHostController.window.isVisible),
+            "source_window_key": .bool(sourceHostController.window.isKeyWindow),
+            "pinned": .bool(isPinned),
+            "fullscreen_session_state": .string(sourceHostController.sessionState.rawValue),
+            "fullscreen_restore_generation": .integer(
+                Int64(sourceHostController.diagnosticRestoreGeneration)
+            ),
+            "active_slot_id": tabStore.activeTabID.map {
+                .string($0.uuidString)
+            } ?? .null
+        ]) { _, new in new }
+
+        guard let profile = tabStore.activeProfile else {
+            fields["capture_availability"] = .string("no_active_slot")
+            fields["resident"] = .bool(false)
+            fields["active_slot_matches"] = .bool(false)
+            fields["slot_visible"] = .bool(false)
+            recordLongTermDiagnosticsCheckpoint(fields, shouldRecord: shouldRecord)
+            completion()
+            return
+        }
+
+        let slotID = profile.id
+        fields["slot_id"] = .string(slotID.uuidString)
+        fields["active_slot_matches"] = .bool(tabStore.activeTabID == slotID)
+        fields["slot_active"] = .bool(true)
+        fields["slot_visible"] = .bool(isAttentionUserVisible(slotID: slotID))
+        fields["slot_residency_policy"] = .string(profile.residencyPolicy.rawValue)
+        let profileURL = profile.currentURL ?? profile.homeURL
+        if let safeOrigin = RuntimeDiagnosticPrivacy.safeURLString(profileURL, mode: .standard) {
+            fields["origin"] = .string(safeOrigin)
+        }
+
+        guard let webView = webViewPool.existingWebView(for: slotID) else {
+            fields["capture_availability"] = .string("no_resident_active_runtime")
+            fields["resident"] = .bool(false)
+            fields["runtime_context_current"] = .bool(false)
+            recordLongTermDiagnosticsCheckpoint(fields, shouldRecord: shouldRecord)
+            completion()
+            return
+        }
+
+        fields["capture_availability"] = .string("captured")
+        fields["resident"] = .bool(true)
+        fields.merge(webViewPool.diagnosticSnapshotFields(for: slotID)) {
+            current, _ in current
+        }
+
+        let pageURL = webView.url ?? profile.currentURL ?? profile.homeURL
+        let isChatGPT = ChatGPTSitePolicy.isSupportedChatGPTURL(pageURL)
+        fields["page_class"] = .string(isChatGPT ? "chatgpt" : "other_or_unknown")
+
+        if isChatGPT {
+            fields.merge(webViewPool.attentionBridge(for: slotID)?.diagnosticSnapshotFields ?? [
+                "attention_document_admitted": .bool(false),
+                "chatgpt_document_epoch": .null,
+                "chatgpt_generating": .null,
+                "attention_document_admission": .string("unavailable")
+            ]) { current, _ in current }
+            if let responseBridge = webViewPool.responseBridge(for: slotID) {
+                fields["response_current_document_ready"] = .bool(
+                    responseBridge.diagnosticCurrentDocumentReady
+                )
+            } else {
+                fields["response_current_document_ready"] = .null
+            }
+        }
+
+        let runtimeIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID)
+        let capturedNavigationGeneration = fields["navigation_generation"]
+        let isRuntimeContextCurrent: @MainActor () -> Bool = { [weak self, weak webView] in
+            guard let self,
+                  let webView,
+                  let runtimeIdentity,
+                  self.webViewPool.existingWebView(for: slotID) === webView,
+                  self.webViewPool.runtimeDiagnosticIdentity(for: slotID) == runtimeIdentity else {
+                return false
+            }
+            return self.webViewPool.diagnosticSnapshotFields(for: slotID)["navigation_generation"]
+                == capturedNavigationGeneration
+        }
+
+        guard isChatGPT, runtimeIdentity != nil else {
+            fields["runtime_context_current"] = .bool(isRuntimeContextCurrent())
+            fields["selected_slot_current"] = .bool(tabStore.activeTabID == slotID)
+            if runtimeIdentity == nil {
+                fields["capture_availability"] = .string("runtime_identity_unavailable")
+            }
+            recordLongTermDiagnosticsCheckpoint(fields, shouldRecord: shouldRecord)
+            completion()
+            return
+        }
+
+        webViewPool.captureBoundedChatGPTHealthProbe(slotID: slotID) {
+            [weak self, fields] result in
+            guard let self else {
+                completion()
+                return
+            }
+            guard shouldRecord() else {
+                completion()
+                return
+            }
+
+            var checkpoint = fields
+            checkpoint.merge(result.diagnosticFields) { _, new in new }
+            let runtimeIsCurrent = isRuntimeContextCurrent()
+            let selectedSlotIsCurrent = self.tabStore.activeTabID == slotID
+            checkpoint["runtime_context_current"] = .bool(runtimeIsCurrent)
+            checkpoint["selected_slot_current"] = .bool(selectedSlotIsCurrent)
+
+            guard runtimeIsCurrent, selectedSlotIsCurrent else {
+                checkpoint.merge(Self.staleLongTermPageAppProbeResult(
+                    documentEpoch: result.documentEpoch
+                ).longTermObservationDiagnosticFields) { _, new in new }
+                self.recordLongTermDiagnosticsCheckpoint(checkpoint, shouldRecord: shouldRecord)
+                completion()
+                return
+            }
+
+            self.webViewPool.captureBoundedChatGPTPageAppDiagnostics(slotID: slotID) {
+                [weak self] pageAppResult in
+                guard let self else {
+                    completion()
+                    return
+                }
+                guard shouldRecord() else {
+                    completion()
+                    return
+                }
+                checkpoint.merge(pageAppResult.longTermObservationDiagnosticFields) {
+                    _, new in new
+                }
+                checkpoint["runtime_context_current"] = .bool(isRuntimeContextCurrent())
+                checkpoint["selected_slot_current"] = .bool(self.tabStore.activeTabID == slotID)
+                self.recordLongTermDiagnosticsCheckpoint(checkpoint, shouldRecord: shouldRecord)
+                completion()
+            }
+        }
+    }
+
+    private func recordLongTermDiagnosticsCheckpoint(
+        _ fields: [String: RuntimeDiagnosticValue],
+        shouldRecord: @MainActor () -> Bool
+    ) {
+        guard shouldRecord() else { return }
+        diagnostics.record(
+            event: "diagnostics.performance_checkpoint",
+            level: .notice,
+            subsystem: "diagnostics",
+            fields: fields
+        )
+    }
+
+    private static func staleLongTermPageAppProbeResult(
+        documentEpoch: UInt64?
+    ) -> ChatGPTIncidentPageAppProbeResult {
+        ChatGPTIncidentPageAppProbeResult(
+            outcome: .stale,
+            values: nil,
+            documentEpoch: documentEpoch,
+            latencyMilliseconds: 0,
+            captureUptimeMilliseconds: Int64(ProcessInfo.processInfo.systemUptime * 1_000)
+        )
+    }
+
     /// Assemble a one-shot projection from the live business owners. This is
     /// intentionally not stored, restored, or consulted by any decision path.
     func runtimeDiagnosticSnapshot() -> RuntimeDiagnosticSnapshot {
@@ -4719,16 +4901,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             if owner == .externalVoice {
                 presentationWebFocusPending = false
             }
+            var failureFields: [String: RuntimeDiagnosticValue] = [
+                "focus_generation": .integer(Int64(generation)),
+                "focus_owner": .string(owner.rawValue),
+                "reason": .string("dom_input_unavailable")
+            ]
+            failureFields.merge(presentationFocusFailureDiagnosticFields()) {
+                current, _ in current
+            }
             diagnostics.record(
                 event: "presentation_focus.failed",
                 level: .warning,
                 subsystem: "panel",
                 trace: trace,
-                fields: [
-                    "focus_generation": .integer(Int64(generation)),
-                    "focus_owner": .string(owner.rawValue),
-                    "reason": .string("dom_input_unavailable")
-                ]
+                fields: failureFields
             )
             return
         }
@@ -4746,6 +4932,41 @@ final class PanelController: NSObject, NSWindowDelegate {
             ]
         )
         completePresentationFocusIfReady()
+    }
+
+    func presentationFocusFailureDiagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        let activeSlotID = tabStore.activeTabID
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "active_slot_exists": .bool(activeSlotID != nil),
+            "active_slot_id": activeSlotID.map { .string($0.uuidString) } ?? .null
+        ]
+
+        guard let activeSlotID else {
+            fields["resident_runtime_exists"] = .bool(false)
+            fields["focus_runtime_availability"] = .string("no_active_slot")
+            return fields
+        }
+
+        guard webViewPool.existingWebView(for: activeSlotID) != nil else {
+            fields["resident_runtime_exists"] = .bool(false)
+            fields["focus_runtime_availability"] = .string("no_resident_runtime")
+            return fields
+        }
+
+        fields["resident_runtime_exists"] = .bool(true)
+        fields["focus_runtime_availability"] = .string("resident")
+        let runtimeFields = webViewPool.diagnosticSnapshotFields(for: activeSlotID)
+        for key in [
+            "runtime_generation",
+            "webview_instance_id",
+            "navigation_generation",
+            "navigation_phase"
+        ] {
+            if let value = runtimeFields[key] {
+                fields[key] = value
+            }
+        }
+        return fields
     }
 
     private func schedulePresentationWebInputFocus(

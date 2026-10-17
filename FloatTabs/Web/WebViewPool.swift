@@ -69,6 +69,7 @@ private enum WebRuntimeDiagnosticIdentitySequence {
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
+    typealias ReloadHandler = @MainActor (WKWebView) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias ResidencyPolicyProvider = @MainActor (UUID) -> SlotResidencyPolicy?
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
@@ -127,6 +128,7 @@ final class WebViewPool {
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let reloadWebView: ReloadHandler
     private let isSlotActive: IsSlotActiveHandler
     private let residencyPolicyProvider: ResidencyPolicyProvider
     private let downloadCoordinator: DownloadCoordinator
@@ -148,6 +150,7 @@ final class WebViewPool {
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
         },
+        reloadWebView: ReloadHandler? = nil,
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         residencyPolicyProvider: @escaping ResidencyPolicyProvider = { _ in nil },
         downloadCoordinator: DownloadCoordinator? = nil,
@@ -163,6 +166,9 @@ final class WebViewPool {
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.reloadWebView = reloadWebView ?? { webView in
+            webView.reload()
+        }
         self.isSlotActive = isSlotActive
         self.residencyPolicyProvider = residencyPolicyProvider
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
@@ -481,7 +487,17 @@ final class WebViewPool {
     @discardableResult
     func reload(slotID: UUID) -> Bool {
         guard let webView = webViews[slotID] else { return false }
-        webView.reload()
+        var fields = diagnosticSnapshotFields(for: slotID)
+        fields["slot_id"] = .string(slotID.uuidString)
+        fields["reload_source"] = .string("manual")
+        fields["reload_reason"] = .string("user_requested")
+        diagnostics.record(
+            event: "web_runtime.manual_reload_requested",
+            level: .notice,
+            subsystem: "web",
+            fields: fields
+        )
+        reloadWebView(webView)
         return true
     }
 
