@@ -14,7 +14,7 @@ The shell-input refinement `FT-SHELL-INNER-DRAG-001` is completed and merged. Pr
 
 - Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6` — merge commit for PR #123.
 - PR #123 — `Refine shell movement to inner Web surface only`: `MERGED` after exact-head CI and Real-Mac acceptance.
-- Post-merge macOS CI for the new `main` was still running when this task was authorized; Gate 0 must observe it green before product-code mutation.
+- Gate 0: post-merge macOS CI for `main@7d473a4567ec0a7fa000c6b29dfeab95a36ebab6` passed (GitHub run `39002537996`).
 - Active task branch: `product/ft-diagnostics-history-001`.
 - Active Draft PR: #124 — `Add optional long-term diagnostics history`.
 
@@ -98,6 +98,15 @@ ROOT_CAUSE=UNKNOWN
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
 LONG_RUNNING_BASELINE_AUTHORIZED=NO
 ```
+
+## Execution progress (2026-10-17)
+
+- Semantic implementation head: `2c0b6b282f0b3b67c3fea315181206e1b20d4b47`.
+- Exact-head hosted verification passed: `Build & Test (Apple Silicon arm64)` run `39004297098`; `build-dmg` run `39004297194`.
+- A clean-source Release arm64 candidate for the semantic head was built and verified at `/tmp/ft-diag-history-real-mac-2c0b6b2-derived/Build/Products/Release/FloatTabs.app` (`source_revision_exact=true`).
+- Real-Mac Gate 5 is blocked before installation: the currently installed `/Applications/FloatTabs.app` was running when checked. Its embedded source revision is `b21a83fb40bf86a55c8aa6186150797166fc6981`. The user must quit it normally before the application bundle can be archived and replaced.
+- The task candidate has not been installed or launched. No Gate 5 settings interaction, checkpoint window, manual reload, diagnostic export, privacy inspection of an export, log-volume measurement, or interaction/performance observation has occurred.
+- `CURRENT_TASK.md` remains `ACTIVE`; PR #124 remains Draft. Resume Gate 5 after normal application quit, then reconcile terminal state only from the observed smoke result.
 
 ## Acceptance posture
 
