@@ -11,13 +11,13 @@ final class BenchmarkControlServer: @unchecked Sendable {
     static let protocolVersion = 1
 
     private let token = UUID().uuidString
-    private let commandHandler: @MainActor @Sendable ([String: Any]) -> [String: Any]
+    private let commandHandler: @MainActor @Sendable ([String: Any]) async -> [String: Any]
     private let acceptQueue = DispatchQueue(label: "com.lost0rz.FloatTabs.benchmark-control")
     private let stateLock = NSLock()
     private var listenerFD: Int32 = -1
     private var controlInfoURL: URL?
 
-    init(commandHandler: @escaping @MainActor @Sendable ([String: Any]) -> [String: Any]) {
+    init(commandHandler: @escaping @MainActor @Sendable ([String: Any]) async -> [String: Any]) {
         self.commandHandler = commandHandler
     }
 
@@ -162,7 +162,7 @@ final class BenchmarkControlServer: @unchecked Sendable {
                 Darwin.close(fd)
                 return
             }
-            let response = self.commandHandler(request)
+            let response = await self.commandHandler(request)
             self.writeResponse(response, to: fd)
         }
     }

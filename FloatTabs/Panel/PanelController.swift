@@ -2654,6 +2654,28 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard let id = UUID(uuidString: slotIDString) else { return false }
         return tabStore.select(id: id)
     }
+
+    func benchmarkConfigureChatGPTMeasurement(
+        slotIDString: String,
+        enabled: Bool?,
+        reset: Bool
+    ) async -> [String: Any] {
+        guard let slotID = UUID(uuidString: slotIDString) else {
+            return ["status": "unavailable", "reason": "invalid_slot_id"]
+        }
+        return await webViewPool.configureChatGPTBenchmarkMeasurement(
+            slotID: slotID,
+            enabled: enabled,
+            reset: reset
+        )
+    }
+
+    func benchmarkCaptureChatGPTSnapshot(slotIDString: String) async -> [String: Any] {
+        guard let slotID = UUID(uuidString: slotIDString) else {
+            return ["status": "unavailable", "reason": "invalid_slot_id"]
+        }
+        return await webViewPool.captureChatGPTBenchmarkSnapshot(slotID: slotID)
+    }
 #endif
 
     @discardableResult

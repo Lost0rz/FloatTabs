@@ -41,6 +41,7 @@ private final class ChatGPTAttentionBridgeHarness {
         probeValues: [Any?] = [],
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
         incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
+        benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
     ) {
         // The observation callback must not capture the harness itself before
@@ -60,6 +61,7 @@ private final class ChatGPTAttentionBridgeHarness {
             },
             incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
             incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator,
+            benchmarkProbeEvaluator: benchmarkProbeEvaluator,
             incidentHealthProbeTimeout: incidentHealthProbeTimeout
         )
         bridge.attach(to: webView)
@@ -637,6 +639,303 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(values.diagnosticFields.values.contains(.string("DO_NOT_READ_THIS")))
     }
 
+#if DEBUG
+    func testBenchmarkScriptCountsOnlyWhenEnabledAndReturnsContentFreeBoundedFields() throws {
+        let context = try XCTUnwrap(JSContext())
+        context.evaluateScript("""
+        globalThis.window = globalThis;
+        window.top = window;
+        globalThis.location = { hostname: "chatgpt.com" };
+        window.webkit = { messageHandlers: { floatTabsChatGPTAttention: { postMessage: function() {} } } };
+        window.crypto = { randomUUID: function() { return "benchmark-test-token-0001"; } };
+        globalThis.crypto = window.crypto;
+        globalThis.document = {
+          documentElement: {},
+          visibilityState: "visible",
+          addEventListener: function() {},
+          querySelector: function() { return null; },
+          querySelectorAll: function(selector) {
+            return window.generating && selector.includes("stop-button")
+              ? [window.stopButton] : [];
+          }
+        };
+        window.__windowListeners = {};
+        window.addEventListener = function(name, listener) {
+          window.__windowListeners[name] = listener;
+        };
+        window.stopButton = {
+          isConnected: true,
+          disabled: false,
+          hidden: false,
+          getClientRects: function() { return [1]; },
+          getAttribute: function() { return null; },
+          matches: function() { return false; },
+          querySelectorAll: function() { return []; },
+          querySelector: function() { return null; },
+          closest: function() { return null; }
+        };
+        window.generating = false;
+        window.getComputedStyle = function() { return { display: "block", visibility: "visible" }; };
+        window.__mutationCallbacks = [];
+        globalThis.MutationObserver = class {
+          constructor(callback) { window.__mutationCallbacks.push(callback); }
+          observe() {}
+          disconnect() {}
+        };
+        globalThis.PerformanceObserver = undefined;
+        globalThis.PerformanceResourceTiming = undefined;
+        window.__timeouts = [];
+        globalThis.setTimeout = function(callback) {
+          window.__timeouts.push(callback);
+          return window.__timeouts.length;
+        };
+        window.__flushTimeouts = function() {
+          while (window.__timeouts.length) { window.__timeouts.shift()(); }
+        };
+        window.__performanceNowCalls = 0;
+        globalThis.performance = {
+          now: function() { window.__performanceNowCalls += 1; return window.__performanceNowCalls; }
+        };
+        """)
+        context.evaluateScript(ChatGPTAttentionBridge.scriptSource)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Benchmark script did not parse")
+
+        context.evaluateScript("""
+        window.__mutationCallbacks[0]();
+        window.__flushTimeouts();
+        """)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Disabled detector run failed")
+        XCTAssertEqual(context.evaluateScript("window.__performanceNowCalls")?.toInt32(), 0)
+        let disabled = try XCTUnwrap(
+            context.evaluateScript(ChatGPTAttentionBridge.benchmarkSnapshotScript)?.toDictionary()
+        )
+        XCTAssertEqual(disabled["enabled"] as? Bool, false)
+        XCTAssertEqual(disabled["detector_evaluate_count"] as? Int, 0)
+
+        context.evaluateScript("""
+        globalThis.__floatTabsAttentionBenchmarkConfigureV1(true, true);
+        window.generating = true;
+        window.__mutationCallbacks[0]();
+        window.__flushTimeouts();
+        window.generating = false;
+        window.__mutationCallbacks[0]();
+        window.__flushTimeouts();
+        """)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Enabled detector run failed")
+        let enabled = try XCTUnwrap(
+            context.evaluateScript(ChatGPTAttentionBridge.benchmarkSnapshotScript)?.toDictionary()
+        )
+        XCTAssertEqual(enabled["enabled"] as? Bool, true)
+        XCTAssertEqual(enabled["mutation_callback_batch_count"] as? Int, 2)
+        XCTAssertEqual(enabled["detector_schedule_count"] as? Int, 2)
+        XCTAssertEqual(enabled["detector_evaluate_count"] as? Int, 2)
+        XCTAssertEqual(enabled["response_identity_resolution_count"] as? Int, 1)
+        XCTAssertGreaterThan(context.evaluateScript("window.__performanceNowCalls")?.toInt32() ?? 0, 0)
+
+        let rendered = String(describing: enabled)
+        XCTAssertFalse(rendered.contains("prompt"))
+        XCTAssertFalse(rendered.contains("response body"))
+        XCTAssertTrue(rendered.contains("benchmark-test-token-0001"))
+    }
+#endif
+
+#if DEBUG
+    func testBenchmarkCounterHelpersSaturateAndNativeCountersStayInertWhenDisabled() {
+        var counters = ChatGPTAttentionBenchmarkCounters()
+        counters.recordLivenessProbe(durationMilliseconds: 12, isConfirmation: false)
+        counters.recordLivenessFailure()
+        XCTAssertEqual(counters.fields["liveness_probe_count"] as? Int64, 0)
+        XCTAssertEqual(counters.fields["liveness_failure_count"] as? Int64, 0)
+
+        counters.setEnabled(true)
+        counters.recordLivenessProbe(durationMilliseconds: 12, isConfirmation: true)
+        counters.recordLivenessProbe(durationMilliseconds: .infinity, isConfirmation: false)
+        counters.recordLivenessFailure()
+        counters.recordRecoveredCompletion()
+        XCTAssertEqual(counters.fields["liveness_probe_count"] as? Int64, 2)
+        XCTAssertEqual(counters.fields["confirmation_probe_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["liveness_probe_total_ms"] as? Double, 12)
+        XCTAssertEqual(counters.fields["liveness_probe_max_ms"] as? Double, 12)
+        XCTAssertEqual(counters.fields["liveness_failure_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["recovered_completion_count"] as? Int64, 1)
+        XCTAssertEqual(
+            ChatGPTAttentionBenchmarkCounters.saturatedIncrement(.max),
+            ChatGPTAttentionBenchmarkCounters.maximumCounter
+        )
+        XCTAssertEqual(ChatGPTAttentionBenchmarkCounters.boundedDuration(-10), 0)
+        XCTAssertEqual(
+            ChatGPTAttentionBenchmarkCounters.boundedDuration(.infinity),
+            0
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBenchmarkCounters.boundedDuration(.greatestFiniteMagnitude),
+            ChatGPTAttentionBenchmarkCounters.maximumDurationMilliseconds
+        )
+        XCTAssertEqual(
+            Set(counters.fields.keys),
+            [
+                "liveness_probe_count", "confirmation_probe_count",
+                "liveness_probe_total_ms", "liveness_probe_max_ms",
+                "liveness_failure_count", "recovered_completion_count"
+            ]
+        )
+    }
+
+    func testBenchmarkMeasurementEnableResetSnapshotAndLivenessCounters() async {
+        var measurementEnabled = false
+        var javascriptCounters = Self.benchmarkCounterPayload
+        let harness = ChatGPTAttentionBridgeHarness(
+            probeValues: [
+                Self.probePayload(token: tokenA, generating: false),
+                Self.probePayload(token: tokenA, generating: false),
+            ],
+            benchmarkProbeEvaluator: { _, script in
+                if script.contains("BenchmarkConfigureV1") {
+                    let reset = script.hasSuffix(", true)")
+                    if reset { javascriptCounters = Self.zeroBenchmarkCounterPayload }
+                    if script.contains("(true,") { measurementEnabled = true }
+                    if script.contains("(false,") { measurementEnabled = false }
+                    return [
+                        "version": 1,
+                        "token": self.tokenA!,
+                        "enabled": measurementEnabled,
+                    ] as [String: Any]
+                }
+                var payload = Self.benchmarkDocumentPayload(
+                    token: self.tokenA!,
+                    enabled: measurementEnabled
+                )
+                payload.merge(javascriptCounters) { _, new in new }
+                return payload
+            }
+        )
+        harness.accept(false, token: tokenA)
+        let runtimeIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 7,
+            webViewInstanceID: UUID()
+        )
+        let enabled = await harness.bridge.configureBenchmarkMeasurement(
+            enabled: true,
+            reset: true,
+            for: harness.webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: 12,
+            contextIsCurrent: { true }
+        )
+        XCTAssertEqual(enabled["status"] as? String, "ok")
+        XCTAssertEqual(enabled["measurement_enabled"] as? Bool, true)
+        XCTAssertEqual(enabled["runtime_generation"] as? UInt64, 7)
+        XCTAssertEqual(enabled["navigation_generation"] as? Int, 12)
+        XCTAssertNil(enabled["document_token"])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+        let snapshot = await harness.bridge.captureBenchmarkSnapshot(
+            for: harness.webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: 12,
+            contextIsCurrent: { true }
+        )
+        XCTAssertEqual(snapshot["status"] as? String, "ok")
+        XCTAssertEqual(snapshot["measurement_enabled"] as? Bool, true)
+        XCTAssertEqual(snapshot["liveness_probe_count"] as? Int64, 2)
+        XCTAssertEqual(snapshot["confirmation_probe_count"] as? Int64, 1)
+        XCTAssertEqual(snapshot["recovered_completion_count"] as? Int64, 1)
+        XCTAssertEqual(snapshot["document_epoch"] as? UInt64, 1)
+        XCTAssertNil(snapshot["token"])
+        XCTAssertNil(snapshot["document_token"])
+        XCTAssertFalse(String(describing: snapshot).contains(tokenA))
+        XCTAssertEqual(snapshot["mutation_callback_batch_count"] as? Int64, 0)
+
+        let reset = await harness.bridge.configureBenchmarkMeasurement(
+            enabled: true,
+            reset: true,
+            for: harness.webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: 12,
+            contextIsCurrent: { true }
+        )
+        XCTAssertEqual(reset["status"] as? String, "ok")
+        let resetSnapshot = await harness.bridge.captureBenchmarkSnapshot(
+            for: harness.webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: 12,
+            contextIsCurrent: { true }
+        )
+        XCTAssertEqual(resetSnapshot["liveness_probe_count"] as? Int64, 0)
+        XCTAssertEqual(resetSnapshot["recovered_completion_count"] as? Int64, 0)
+    }
+
+    func testBenchmarkSnapshotRejectsNavigationDocumentAndWebViewReplacement() async {
+        let documentGate = IncidentHealthProbeGate()
+        let documentHarness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in try await documentGate.evaluate() }
+        )
+        documentHarness.accept(false, token: tokenA)
+        let runtimeIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 1,
+            webViewInstanceID: UUID()
+        )
+        let documentTask = Task {
+            await documentHarness.bridge.captureBenchmarkSnapshot(
+                for: documentHarness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+        }
+        await documentGate.waitUntilStarted()
+        documentHarness.bridge.handleRuntimeReplacement()
+        documentHarness.accept(false, token: tokenB)
+        documentGate.resolve(Self.benchmarkDocumentPayload(token: tokenA, enabled: false))
+        let documentResult = await documentTask.value
+        XCTAssertEqual(documentResult["status"] as? String, "stale")
+        XCTAssertNil(documentResult["generating"])
+        XCTAssertNil(documentResult["token"])
+
+        let navigationGate = IncidentHealthProbeGate()
+        let navigationHarness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in try await navigationGate.evaluate() }
+        )
+        navigationHarness.accept(false, token: tokenA)
+        var navigationIsCurrent = true
+        let navigationTask = Task {
+            await navigationHarness.bridge.captureBenchmarkSnapshot(
+                for: navigationHarness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 4,
+                contextIsCurrent: { navigationIsCurrent }
+            )
+        }
+        await navigationGate.waitUntilStarted()
+        navigationIsCurrent = false
+        navigationGate.resolve(Self.benchmarkDocumentPayload(token: tokenA, enabled: false))
+        let navigationResult = await navigationTask.value
+        XCTAssertEqual(navigationResult["status"] as? String, "stale")
+        XCTAssertNil(navigationResult["generating"])
+
+        let webViewGate = IncidentHealthProbeGate()
+        let webViewHarness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in try await webViewGate.evaluate() }
+        )
+        webViewHarness.accept(false, token: tokenA)
+        let webViewTask = Task {
+            await webViewHarness.bridge.captureBenchmarkSnapshot(
+                for: webViewHarness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+        }
+        await webViewGate.waitUntilStarted()
+        webViewHarness.bridge.attach(to: WKWebView())
+        webViewGate.resolve(Self.benchmarkDocumentPayload(token: tokenA, enabled: false))
+        let webViewResult = await webViewTask.value
+        XCTAssertEqual(webViewResult["status"] as? String, "stale")
+        XCTAssertNil(webViewResult["generating"])
+    }
+#endif
+
     private func captureHealthProbe(
         _ harness: ChatGPTAttentionBridgeHarness
     ) async -> ChatGPTIncidentHealthProbeResult {
@@ -723,6 +1022,53 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             "conversation_load_error_present": false
         ]
     }
+
+#if DEBUG
+    private static let benchmarkCounterPayload: [String: Any] = [
+        "mutation_callback_batch_count": 9,
+        "detector_schedule_count": 8,
+        "detector_evaluate_count": 7,
+        "detector_evaluate_total_ms": 6.5,
+        "detector_evaluate_max_ms": 2.5,
+        "response_identity_resolution_count": 5,
+        "response_identity_resolution_total_ms": 4.5,
+        "response_identity_resolution_max_ms": 1.5,
+    ]
+
+    private static let zeroBenchmarkCounterPayload: [String: Any] = [
+        "mutation_callback_batch_count": 0,
+        "detector_schedule_count": 0,
+        "detector_evaluate_count": 0,
+        "detector_evaluate_total_ms": 0.0,
+        "detector_evaluate_max_ms": 0.0,
+        "response_identity_resolution_count": 0,
+        "response_identity_resolution_total_ms": 0.0,
+        "response_identity_resolution_max_ms": 0.0,
+    ]
+
+    private static func probePayload(token: String, generating: Bool) -> [String: Any] {
+        [
+            "version": 1,
+            "kind": "baseline",
+            "token": token,
+            "generating": generating,
+            "responseIdentity": NSNull(),
+        ]
+    }
+
+    private static func benchmarkDocumentPayload(
+        token: String,
+        enabled: Bool
+    ) -> [String: Any] {
+        [
+            "version": 1,
+            "token": token,
+            "enabled": enabled,
+            "visibility_state": "visible",
+            "generating": false,
+        ].merging(zeroBenchmarkCounterPayload) { _, new in new }
+    }
+#endif
 
     private func waitUntil(
         timeout: TimeInterval = 1,

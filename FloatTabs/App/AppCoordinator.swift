@@ -293,7 +293,10 @@ final class AppCoordinator {
 
 #if DEBUG
         let benchmarkControlServer = BenchmarkControlServer { [weak self] request in
-            self?.handleBenchmarkControl(request) ?? ["ok": false, "error": "coordinator_unavailable"]
+            guard let self else {
+                return ["ok": false, "error": "coordinator_unavailable"]
+            }
+            return await self.handleBenchmarkControl(request)
         }
         self.benchmarkControlServer = benchmarkControlServer
         _ = try? benchmarkControlServer.start()
@@ -431,7 +434,7 @@ final class AppCoordinator {
     }
 
 #if DEBUG
-    private func handleBenchmarkControl(_ request: [String: Any]) -> [String: Any] {
+    private func handleBenchmarkControl(_ request: [String: Any]) async -> [String: Any] {
         guard let action = request["action"] as? String else {
             return ["ok": false, "error": "missing_action"]
         }
@@ -471,6 +474,28 @@ final class AppCoordinator {
                 panelController.hideFloatTabs()
             }
             return ["ok": true, "status": panelController.benchmarkControlSnapshot()]
+
+        case "chatgpt_measurement_configure":
+            guard let slotID = request["slot_id"] as? String,
+                  request["enabled"] == nil || request["enabled"] is Bool,
+                  request["reset"] == nil || request["reset"] is Bool else {
+                return ["ok": false, "error": "invalid_measurement_configuration"]
+            }
+            let measurement = await panelController.benchmarkConfigureChatGPTMeasurement(
+                slotIDString: slotID,
+                enabled: request["enabled"] as? Bool,
+                reset: request["reset"] as? Bool ?? false
+            )
+            return ["ok": true, "measurement": measurement]
+
+        case "chatgpt_measurement_snapshot":
+            guard let slotID = request["slot_id"] as? String else {
+                return ["ok": false, "error": "missing_slot_id"]
+            }
+            let measurement = await panelController.benchmarkCaptureChatGPTSnapshot(
+                slotIDString: slotID
+            )
+            return ["ok": true, "measurement": measurement]
 
         default:
             return ["ok": false, "error": "unknown_action"]

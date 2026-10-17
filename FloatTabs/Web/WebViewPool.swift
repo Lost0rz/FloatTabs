@@ -367,6 +367,75 @@ final class WebViewPool {
         )
     }
 
+#if DEBUG
+    /// Configures the read-only benchmark counters for one current ChatGPT
+    /// runtime. Pool, bridge, and navigation identities are frozen before the
+    /// isolated-world operation and checked again when it returns.
+    func configureChatGPTBenchmarkMeasurement(
+        slotID: UUID,
+        enabled: Bool?,
+        reset: Bool
+    ) async -> [String: Any] {
+        guard let webView = webViews[slotID],
+              let bridge = attentionBridges[slotID],
+              let observer = navigationObservers[slotID],
+              let runtimeIdentity = runtimeDiagnosticIdentities[slotID] else {
+            return [
+                "status": "unavailable",
+                "reason": "runtime_unavailable",
+                "slot_id": slotID.uuidString
+            ]
+        }
+        let navigationGeneration = observer.currentDiagnosticNavigationGeneration
+        let contextIsCurrent: @MainActor () -> Bool = { [weak self, weak webView, weak bridge, weak observer] in
+            guard let self, let webView, let bridge, let observer else { return false }
+            return self.webViews[slotID] === webView
+                && self.attentionBridges[slotID] === bridge
+                && self.navigationObservers[slotID] === observer
+                && self.runtimeDiagnosticIdentities[slotID] == runtimeIdentity
+                && observer.currentDiagnosticNavigationGeneration == navigationGeneration
+        }
+        return await bridge.configureBenchmarkMeasurement(
+            enabled: enabled,
+            reset: reset,
+            for: webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: navigationGeneration,
+            contextIsCurrent: contextIsCurrent
+        )
+    }
+
+    /// Captures one on-demand isolated-world health sample for the exact
+    /// current physical runtime and navigation generation.
+    func captureChatGPTBenchmarkSnapshot(slotID: UUID) async -> [String: Any] {
+        guard let webView = webViews[slotID],
+              let bridge = attentionBridges[slotID],
+              let observer = navigationObservers[slotID],
+              let runtimeIdentity = runtimeDiagnosticIdentities[slotID] else {
+            return [
+                "status": "unavailable",
+                "reason": "runtime_unavailable",
+                "slot_id": slotID.uuidString
+            ]
+        }
+        let navigationGeneration = observer.currentDiagnosticNavigationGeneration
+        let contextIsCurrent: @MainActor () -> Bool = { [weak self, weak webView, weak bridge, weak observer] in
+            guard let self, let webView, let bridge, let observer else { return false }
+            return self.webViews[slotID] === webView
+                && self.attentionBridges[slotID] === bridge
+                && self.navigationObservers[slotID] === observer
+                && self.runtimeDiagnosticIdentities[slotID] == runtimeIdentity
+                && observer.currentDiagnosticNavigationGeneration == navigationGeneration
+        }
+        return await bridge.captureBenchmarkSnapshot(
+            for: webView,
+            runtimeIdentity: runtimeIdentity,
+            navigationGeneration: navigationGeneration,
+            contextIsCurrent: contextIsCurrent
+        )
+    }
+#endif
+
     func calibreReaderBridge(for slotID: UUID) -> CalibreReaderBridge? {
         calibreReaderBridges[slotID]
     }

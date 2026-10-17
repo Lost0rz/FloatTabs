@@ -1,60 +1,82 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-14
+**Status date:** 2026-10-17
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: PR_LIFECYCLE_CLOSEOUT_COMPLETE**
+**MODE: CHATGPT_PERFORMANCE_MEASUREMENT_ACTIVE**
 
-The retained PR reconciliation phase is complete. FloatTabs is ready for a fresh global read-only audit from the current merged baseline.
+The post-closeout global audit identified a measurement gap around long-running ChatGPT Hot runtimes. The `FT-CHATGPT-PERF-001` measurement implementation is now completed and accepted. Long-running baseline measurement remains the next milestone before any Observer/Liveness optimization.
 
 ## Verified baseline
 
-- Current product baseline: `main@ec4f7ded7a768bef38933a80af5d7801aa0361d4`.
+- Authorization-time literal `main`: `871f225e8d6ca66a8adefdf766245717ea56de44`.
+- Current product semantic baseline: `ec4f7ded7a768bef38933a80af5d7801aa0361d4`; later drift through the authorization-time main HEAD is control-only.
 - PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
-- PR #102 — `phase2/pr-e-floattabs-durable-outbox-sender`: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
-- PR #102 remains historical implementation evidence only; no MemoX product code from that PR is present in current `main`.
-- Repository HEAD may later move through control-only commits; distinguish literal Repository HEAD from Delivery / Semantic HEAD.
+- PR #102 — historical MemoX implementation evidence only: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
+- Fresh PR inventory before this task found no open overlapping PR.
+- Task branch: `perf/ft-chatgpt-perf-001`.
+- Draft PR: #122 — `Perf: establish ChatGPT long-running measurement seam`.
 
-## Current capability / accepted runtime conclusions
+## Audit result relevant to this phase
 
-- Hot inactive renderer termination recovery now follows the merged PR #116 contract: Hot may recover in background without selecting/presenting/focus stealing.
-- Ordinary Warm inactivity is governed by configured TTL rather than a hidden two-Warm cap.
-- Memory-pressure `warning` is diagnostic-only for Warm residency; `critical` may release eligible inactive Warm runtimes early.
-- Existing media / attention / speech protections remain part of the lifecycle contract.
+Confirmed code-level costs / measurement needs:
 
-## Retained historical evidence
+- ChatGPT Attention uses a full-document coalesced MutationObserver and provider DOM generation detection.
+- Generation/liveness paths contain DOM work whose actual long-running cost is not yet quantified.
+- ChatGPT page-app diagnostics include continuously installed observers whose production impact has not yet been isolated.
+- Hot runtimes can remain resident for long periods; current evidence does not quantify runtime-age vs CPU/RSS/JS-latency behavior.
+- Existing functional regression coverage is strong, but the Real-Mac benchmark does not currently expose trustworthy ChatGPT JS/observer latency or long-running soft-renderer degradation.
 
-PR #102 retains a previously validated MemoX durable-outbox/sender implementation and related tests, but it is not current product authority. MemoX still retains the PR E technical design and trusted-local receiver contract; delivery remains deferred until separately re-authorized against then-current FloatTabs and MemoX baselines.
+`ROOT CAUSE UNKNOWN` remains the correct incident conclusion. These findings justify measurement, not a performance-fix claim.
+
+## Measurement design decision
+
+- High-frequency performance counters must not be emitted as ordinary RuntimeDiagnostics events because the measurement path itself would add sanitization/encoding/queue/file overhead.
+- Reuse the existing DEBUG-only `BenchmarkControlServer` and Real-Mac benchmark tools.
+- Keep high-frequency counters bounded and in-memory / isolated-world only; expose read-only snapshots on demand.
+- Measurement must remain content-free and tied to current runtime/document identity so stale samples cannot be accepted as current evidence.
+- Production Attention, response, residency, persistence, recovery and user-data semantics remain unchanged in this phase.
+
+## Measurement implementation acceptance
+
+- `FT-CHATGPT-PERF-001` is completed / accepted at implementation HEAD `285361ca3670ca6c112a54b8473ec932d3ad677f`, delivered through PR #122.
+- Exact-head Benchmark Tool CI, QA DMG, and macOS CI passed. The Real-Mac paired observer-effect smoke passed in session `ft-chatgpt-perf-001-smoke-20261017-104716` with content-free captures and stable current runtime/document identity.
+- The disabled window had a large transient CPU burst during its first approximately 14 seconds, so its whole-window CPU delta is not causal evidence of instrumentation overhead. Active-generation measurement behavior remains unvalidated.
+- This acceptance establishes a usable measurement seam; it does not identify root cause or demonstrate a performance improvement. `ROOT CAUSE UNKNOWN` remains in force.
 
 ## Domain baseline
 
-- `TabStore` owns canonical Tab/Profile configuration projection.
-- `WebViewPool` + `SlotLifecycleCoordinator` own central Web runtime/lifecycle behavior.
-- `PanelController` is the main presentation/window integration owner and should not absorb unrelated canonical state.
-- `AppCoordinator` is the composition root, not a replacement authority for child domains.
-- Diagnostics are evidence only, not root-cause authority.
+- `WebViewPool` / Web own runtime identity, lifecycle, health and recovery.
+- `ChatGPTAttentionBridge` remains an observation source; `WebAttentionCoordinator` remains attention-state authority.
+- `PanelController` may expose read-only benchmark projection but must not become a new runtime/attention authority.
+- Diagnostics remain evidence only.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NO
-PR_116=MERGED
-PR_102=ARCHIVE_ONLY_CLOSED
-RETAINED_PR_CLOSEOUT=COMPLETE
-GLOBAL_READ_ONLY_AUDIT=READY
+ACTIVE_PRODUCT_TASK=NONE
+LAST_COMPLETED_TASK=FT-CHATGPT-PERF-001
+TASK_STATE=COMPLETED
+TASK_BRANCH=perf/ft-chatgpt-perf-001
+TASK_PR=122_DRAFT
+ROOT_CAUSE=UNKNOWN
+PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
+MEASUREMENT_IMPLEMENTATION_AUTHORIZED=NO
 ```
 
-## Follow-ups
+## Deferred follow-ups
 
-- `PanelController.swift` is a large integration owner; future changes that add new canonical state or responsibilities should trigger a structure/Authority check before expansion.
-- Runtime/lifecycle changes around `WebViewPool` or `SlotLifecycleCoordinator` require higher verification and relevant macOS runtime acceptance.
-- If MemoX PR E is resumed, start from current baselines and re-integrate against current response ownership/completion routing rather than reviving PR #102 wholesale.
+The following remain explicitly deferred until baseline evidence exists:
 
-These Follow-ups do not authorize product mutation.
+- removing unnecessary response-root work while generating;
+- minimal generation-only liveness probe;
+- narrowing MutationObserver scope;
+- gating page-app PerformanceObserver;
+- runtime rejuvenation or any automated reload/reset behavior.
 
 ## Next milestone
 
-Run a fresh global read-only audit against the clean post-closeout baseline. Classify findings as confirmed code issues, latent risks, or items requiring runtime evidence before any new corrective task is authorized.
+The next milestone is a separately authorized long-running ChatGPT baseline measurement. Use that baseline before selecting any performance optimization. This completed task does not authorize the 30-minute / 2-hour / 6-hour baseline or any Observer/Liveness optimization.
