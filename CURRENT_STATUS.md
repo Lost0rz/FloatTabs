@@ -6,77 +6,52 @@
 
 ## Mode
 
-**MODE: CHATGPT_PERFORMANCE_MEASUREMENT_ACTIVE**
+**MODE: NO_ACTIVE_PRODUCT_TASK**
 
-The post-closeout global audit identified a measurement gap around long-running ChatGPT Hot runtimes. The `FT-CHATGPT-PERF-001` measurement implementation is now completed and accepted. Long-running baseline measurement remains the next milestone before any Observer/Liveness optimization.
+The shell-input refinement `FT-SHELL-INNER-DRAG-001` is completed and accepted on Real Mac. The outer shell perimeter and complete left Tab rail no longer acquire FloatTabs window movement; the existing inner Web-surface movement affordance remains the only supported movement owner.
 
 ## Verified baseline
 
-- Authorization-time literal `main`: `871f225e8d6ca66a8adefdf766245717ea56de44`.
-- Current product semantic baseline: `ec4f7ded7a768bef38933a80af5d7801aa0361d4`; later drift through the authorization-time main HEAD is control-only.
-- PR #116 — `fix/residency-lifecycle-semantics`: `MERGED`.
-- PR #102 — historical MemoX implementation evidence only: `ARCHIVE_ONLY / CLOSED / UNMERGED`.
-- Fresh PR inventory before this task found no open overlapping PR.
-- Task branch: `perf/ft-chatgpt-perf-001`.
-- Draft PR: #122 — `Perf: establish ChatGPT long-running measurement seam`.
+- Authorization-time `main`: `a4c9ad63831cc15ad75257976982b416e7101c3a`.
+- Task implementation semantic head: `b21a83fb40bf86a55c8aa6186150797166fc6981`.
+- Draft PR #123 — `Refine shell movement to inner Web surface only`.
+- Exact-head macOS CI: PASS.
+- Exact-head QA DMG: PASS.
+- Local Apple Silicon verification: focused XCTest 35 PASS; full XCTest 1,303 PASS; Debug and Release arm64 builds PASS.
+- Exact Release candidate was installed at `/Applications/FloatTabs.app`; running executable and embedded revision were verified as `b21a83fb40bf86a55c8aa6186150797166fc6981` before Real-Mac acceptance.
 
-## Audit result relevant to this phase
+## Real-Mac acceptance
 
-Confirmed code-level costs / measurement needs:
+User acceptance: PASS.
 
-- ChatGPT Attention uses a full-document coalesced MutationObserver and provider DOM generation detection.
-- Generation/liveness paths contain DOM work whose actual long-running cost is not yet quantified.
-- ChatGPT page-app diagnostics include continuously installed observers whose production impact has not yet been isolated.
-- Hot runtimes can remain resident for long periods; current evidence does not quantify runtime-age vs CPU/RSS/JS-latency behavior.
-- Existing functional regression coverage is strong, but the Real-Mac benchmark does not currently expose trustworthy ChatGPT JS/observer latency or long-running soft-renderer degradation.
+The requested external movement change was manually verified on the exact installed Release build: the edge/perimeter interaction now behaves as intended. No regression requiring reopening the task was reported.
 
-`ROOT CAUSE UNKNOWN` remains the correct incident conclusion. These findings justify measurement, not a performance-fix claim.
+The accepted interaction contract remains:
 
-## Measurement design decision
+```text
+WINDOW MOVEMENT OWNER = INNER WEB-SURFACE MOVEMENT BAND ONLY
+```
 
-- High-frequency performance counters must not be emitted as ordinary RuntimeDiagnostics events because the measurement path itself would add sanitization/encoding/queue/file overhead.
-- Reuse the existing DEBUG-only `BenchmarkControlServer` and Real-Mac benchmark tools.
-- Keep high-frequency counters bounded and in-memory / isolated-world only; expose read-only snapshots on demand.
-- Measurement must remain content-free and tied to current runtime/document identity so stale samples cannot be accepted as current evidence.
-- Production Attention, response, residency, persistence, recovery and user-data semantics remain unchanged in this phase.
-
-## Measurement implementation acceptance
-
-- `FT-CHATGPT-PERF-001` is completed / accepted at implementation HEAD `285361ca3670ca6c112a54b8473ec932d3ad677f`, delivered through PR #122.
-- Exact-head Benchmark Tool CI, QA DMG, and macOS CI passed. The Real-Mac paired observer-effect smoke passed in session `ft-chatgpt-perf-001-smoke-20261017-104716` with content-free captures and stable current runtime/document identity.
-- The disabled window had a large transient CPU burst during its first approximately 14 seconds, so its whole-window CPU delta is not causal evidence of instrumentation overhead. Active-generation measurement behavior remains unvalidated.
-- This acceptance establishes a usable measurement seam; it does not identify root cause or demonstrate a performance improvement. `ROOT CAUSE UNKNOWN` remains in force.
-
-## Domain baseline
-
-- `WebViewPool` / Web own runtime identity, lifecycle, health and recovery.
-- `ChatGPTAttentionBridge` remains an observation source; `WebAttentionCoordinator` remains attention-state authority.
-- `PanelController` may expose read-only benchmark projection but must not become a new runtime/attention authority.
-- Diagnostics remain evidence only.
+- outer transparent shell perimeter is not a window-movement target;
+- complete left Tab rail / gaps / collapsed 12 pt leading inset are not window-movement targets;
+- `WebSourceEdgeDragView` remains the inner movement owner;
+- 76 pt expanded rail and 12 pt physical/layout geometry remain unchanged;
+- Tab click/reorder, fold/unfold, bottom-right resize, fullscreen ownership and persisted sizing remain protected.
 
 ## Current posture
 
 ```text
 ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-CHATGPT-PERF-001
+LAST_COMPLETED_TASK=FT-SHELL-INNER-DRAG-001
 TASK_STATE=COMPLETED
-TASK_BRANCH=perf/ft-chatgpt-perf-001
-TASK_PR=122_DRAFT
-ROOT_CAUSE=UNKNOWN
+TASK_BRANCH=product/ft-shell-inner-drag-001
+TASK_PR=123_DRAFT_PENDING_MERGE
+RUNTIME_ACCEPTANCE=PASS
+ROOT_CAUSE=N/A
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
-MEASUREMENT_IMPLEMENTATION_AUTHORIZED=NO
+LONG_RUNNING_BASELINE_AUTHORIZED=NO
 ```
 
-## Deferred follow-ups
+## Deferred / next-product questions
 
-The following remain explicitly deferred until baseline evidence exists:
-
-- removing unnecessary response-root work while generating;
-- minimal generation-only liveness probe;
-- narrowing MutationObserver scope;
-- gating page-app PerformanceObserver;
-- runtime rejuvenation or any automated reload/reset behavior.
-
-## Next milestone
-
-The next milestone is a separately authorized long-running ChatGPT baseline measurement. Use that baseline before selecting any performance optimization. This completed task does not authorize the 30-minute / 2-hour / 6-hour baseline or any Observer/Liveness optimization.
+Long-running ChatGPT performance observation remains a separate product/diagnostics topic. No logging-retention implementation is authorized by the completed shell task. The next task should first audit the existing Diagnostics, benchmark measurement, retention/privacy and Settings preference mechanisms before defining any durable long-running log-retention feature.

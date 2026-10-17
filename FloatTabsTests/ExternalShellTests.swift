@@ -1153,7 +1153,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(zone.isModalPresentationActive)
     }
 
-    func testModalLifecyclePreservesCompactRailExclusions() {
+    func testModalLifecyclePreservesCompactRailControlLayout() {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: 400))
         let zone = ExternalControlZoneView(frame: host.bounds)
         host.addSubview(zone)
@@ -1165,11 +1165,25 @@ final class ExternalShellTests: XCTestCase {
         zone.setModalPresentationActive(true)
         zone.layoutSubtreeIfNeeded()
 
-        let exclusions = zone.movementExclusionRects(in: host)
-        XCTAssertFalse(exclusions.isEmpty)
-        for (index, exclusion) in exclusions.enumerated() {
-            for other in exclusions.dropFirst(index + 1) {
-                XCTAssertFalse(exclusion.intersects(other))
+        let visible = zone.subviews.filter { view in
+            (view is ExternalWebAppTabView
+                || view is AddWebAppControl
+                || view is SpeechRailControl
+                || view is GlobalSettingsControl
+                || view is PinPanelControl
+                || view is RailOverflowControl)
+                && !view.isHidden
+                && !view.frame.isEmpty
+        }
+        for view in visible {
+            XCTAssertTrue(zone.bounds.contains(view.frame))
+            XCTAssertTrue(
+                view.hitTest(NSPoint(x: view.bounds.midX, y: view.bounds.midY)) === view
+            )
+        }
+        for (index, first) in visible.enumerated() {
+            for second in visible.dropFirst(index + 1) {
+                XCTAssertFalse(first.frame.intersects(second.frame))
             }
         }
     }
@@ -1253,7 +1267,7 @@ final class ExternalShellTests: XCTestCase {
         )
     }
 
-    func testTabControlsWinOverPerimeterDragWhenTheyOverlap() {
+    func testExpandedTabKeepsItsHitTargetWithoutAllowingWindowMovement() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         let active = makeProfile(order: 0, name: "GPT")
@@ -1263,6 +1277,7 @@ final class ExternalShellTests: XCTestCase {
         let tab = try! XCTUnwrap(root.externalControlZoneView.tabView(for: active.id))
         let localPoint = NSPoint(x: tab.frame.midX, y: tab.frame.midY)
         XCTAssertTrue(tab.frame.contains(localPoint))
+        XCTAssertFalse(tab.mouseDownCanMoveWindow)
         let rootPoint = root.externalControlZoneView.convert(localPoint, to: root)
 
         XCTAssertTrue(root.hitTest(rootPoint) is ExternalWebAppTabView)
@@ -1335,12 +1350,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertFalse(root.hitTest(outerTransparentCorner) is PanelResizeHandleView)
     }
 
-    func testMovementTargetsUseMatchingInnerAndOuterDepthOnEveryEdge() {
-        XCTAssertEqual(
-            PanelMetrics.innerMovementOverlap,
-            PanelMetrics.outerInteractionGutter
-        )
-
+    func testOnlyInnerWebEdgeBandsRemainMovementTargets() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
@@ -1351,9 +1361,12 @@ final class ExternalShellTests: XCTestCase {
             NSPoint(x: webFrame.midX, y: webFrame.minY - 8),
             NSPoint(x: webFrame.minX - 8, y: webFrame.midY),
             NSPoint(x: webFrame.maxX + 8, y: webFrame.midY),
+            NSPoint(x: PanelMetrics.collapsedRailLeadingInset / 2, y: root.bounds.midY),
+            NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: root.bounds.midY),
         ]
         for point in shellOuterPoints {
-            XCTAssertTrue(root.hitTest(point) is PanelPerimeterDragView)
+            XCTAssertNil(root.perimeterDragView.hitTest(point))
+            XCTAssertFalse(root.hitTest(point) === root.perimeterDragView)
         }
 
         let sourceBounds = NSRect(origin: .zero, size: webFrame.size)
@@ -1369,44 +1382,19 @@ final class ExternalShellTests: XCTestCase {
         }
     }
 
-    func testRightOuterGutterIsARealMovementTargetInsteadOfClickingThrough() {
-        XCTAssertGreaterThan(PanelPerimeterDragView.acquisitionSurfaceAlpha, 0)
-        XCTAssertLessThan(PanelPerimeterDragView.acquisitionSurfaceAlpha, 0.01)
-
+    func testRetainedPerimeterAnchorNeverAcquiresInput() {
         let root = PanelRootView()
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         root.layoutSubtreeIfNeeded()
 
-        let rightGutterPoint = NSPoint(x: root.bounds.maxX - 4, y: root.bounds.midY)
-        XCTAssertTrue(root.hitTest(rightGutterPoint) is PanelPerimeterDragView)
-    }
-
-    func testPerimeterDragHitTestUsesSameLocalGeometryAsMoveCursor() {
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 2400, height: 2400))
-        let drag = PanelPerimeterDragView(frame: NSRect(
-            x: 1000,
-            y: 1000,
-            width: PanelMetrics.defaultPanelSize.width,
-            height: PanelMetrics.defaultPanelSize.height
-        ))
-        host.addSubview(drag)
-
-        let localTop = NSPoint(
-            x: drag.bounds.midX,
-            y: drag.bounds.maxY - PanelMetrics.outerInteractionGutter / 2
-        )
-        XCTAssertTrue(PanelPerimeterDragView.dragRects(in: drag.bounds).contains {
-            $0.contains(localTop)
-        })
-        let topInHost = drag.convert(localTop, to: host)
-        XCTAssertTrue(drag.hitTest(topInHost) === drag)
-
-        let localWebCenter = NSPoint(
-            x: PanelMetrics.externalControlZoneWidth + PanelMetrics.defaultViewportSize.width / 2,
-            y: drag.bounds.midY
-        )
-        let webCenterInHost = drag.convert(localWebCenter, to: host)
-        XCTAssertNil(drag.hitTest(webCenterInHost))
+        for point in [
+            NSPoint(x: root.bounds.midX, y: root.bounds.maxY - 4),
+            NSPoint(x: root.bounds.midX, y: root.bounds.minY + 4),
+            NSPoint(x: root.bounds.maxX - 4, y: root.bounds.midY),
+            NSPoint(x: 6, y: root.bounds.midY),
+        ] {
+            XCTAssertNil(root.perimeterDragView.hitTest(point))
+        }
     }
 
     func testActiveTabExpandsAnimatedPanelOutlineIntoRail() {
@@ -2045,48 +2033,7 @@ final class ExternalShellTests: XCTestCase {
         XCTAssertTrue(requestedURLs.contains(svgURL))
     }
 
-    func testMoveCursorRectsUseSameGeometryAsWindowDrag() {
-        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        let topPoint = NSPoint(
-            x: bounds.midX,
-            y: bounds.maxY - PanelMetrics.outerInteractionGutter / 2
-        )
-        let websiteCenter = NSPoint(
-            x: PanelMetrics.externalControlZoneWidth + PanelMetrics.defaultViewportSize.width / 2,
-            y: bounds.midY
-        )
-
-        let dragRects = PanelPerimeterDragView.dragRects(in: bounds)
-        XCTAssertTrue(dragRects.contains(where: { $0.contains(topPoint) }))
-        XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
-    }
-
-    func testExpandedTabFramesAreExcludedFromMovementGeometry() {
-        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        let expandedTab = NSRect(
-            x: 0,
-            y: ExternalTabMetrics.topOffset,
-            width: ExternalTabMetrics.hoverWidth,
-            height: ExternalTabMetrics.tabHeight
-        )
-        let dragRects = PanelPerimeterDragView.dragRects(
-            in: bounds,
-            excluding: [expandedTab]
-        )
-
-        XCTAssertFalse(
-            dragRects.contains(where: { $0.intersects(expandedTab) }),
-            "An expanded Tab must own its complete width, including the old Web edge band"
-        )
-        XCTAssertTrue(
-            dragRects.contains(where: {
-                $0.contains(NSPoint(x: bounds.maxX - PanelMetrics.outerInteractionGutter / 2, y: 100))
-            }),
-            "An uncovered rail gap should remain eligible for movement"
-        )
-    }
-
-    func testPanelRootSynchronizesExpandedTabExclusionIntoMovementHitTesting() {
+    func testHoverExpandedTabRemainsClickableAndPerimeterRemainsInert() {
         let profile = makeProfile(order: 0, name: "expanded-tab")
         let root = PanelRootView(webView: WKWebView(frame: .zero))
         root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
@@ -2104,34 +2051,33 @@ final class ExternalShellTests: XCTestCase {
         root.externalControlZoneView.layoutSubtreeIfNeeded()
         root.layoutSubtreeIfNeeded()
 
-        let tabFrame = tab.convert(tab.bounds, to: root.perimeterDragView)
+        let tabFrame = tab.convert(tab.bounds, to: root)
         XCTAssertEqual(tabFrame.width, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
-        XCTAssertNil(
-            root.perimeterDragView.hitTest(
-                NSPoint(x: tabFrame.midX, y: tabFrame.midY)
-            ),
-            "Movement hit testing must yield to a magnified Tab's complete frame"
-        )
+        XCTAssertTrue(root.hitTest(NSPoint(x: tabFrame.midX, y: tabFrame.midY)) === tab)
+
+        let perimeterPoints = [
+            NSPoint(x: root.bounds.midX, y: root.bounds.maxY - 6),
+            NSPoint(x: root.bounds.midX, y: root.bounds.minY + 6),
+            NSPoint(x: root.bounds.maxX - 6, y: root.bounds.midY),
+            NSPoint(x: PanelMetrics.externalControlZoneWidth / 2, y: root.bounds.midY),
+            NSPoint(x: ExternalTabMetrics.hoverWidth + 6, y: root.bounds.midY),
+        ]
+        for point in perimeterPoints {
+            XCTAssertNil(root.perimeterDragView.hitTest(point))
+            XCTAssertFalse(root.hitTest(point) === root.perimeterDragView)
+        }
     }
 
-    func testCollapsedMoveCursorRectsCoverLeadingGutterOnly() {
-        let bounds = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
-        let collapsedInset = PanelMetrics.collapsedRailLeadingInset
-        let gutterPoint = NSPoint(x: collapsedInset / 2, y: bounds.midY)
-        let reclaimedPoint = NSPoint(
-            x: collapsedInset + (PanelMetrics.externalControlZoneWidth - collapsedInset) / 2,
-            y: bounds.midY
-        )
-        let websiteCenter = NSPoint(
-            x: collapsedInset
-                + (bounds.width - collapsedInset - PanelMetrics.outerInteractionGutter) / 2,
-            y: bounds.midY
-        )
+    func testCollapsedLeadingInsetIsNotAWindowMovementTarget() {
+        let root = PanelRootView()
+        root.frame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
+        root.layoutSubtreeIfNeeded()
+        root.setTabRailCollapsed(true, animated: false)
+        root.layoutSubtreeIfNeeded()
 
-        let dragRects = PanelPerimeterDragView.dragRects(in: bounds, leadingInset: collapsedInset)
-        XCTAssertTrue(dragRects.contains(where: { $0.contains(gutterPoint) }))
-        XCTAssertFalse(dragRects.contains(where: { $0.contains(reclaimedPoint) }))
-        XCTAssertFalse(dragRects.contains(where: { $0.contains(websiteCenter) }))
+        XCTAssertEqual(root.externalControlZoneView.frame.width, 12, accuracy: 0.001)
+        XCTAssertEqual(root.webViewportLayoutView.frame.minX, 12, accuracy: 0.001)
+        XCTAssertNil(root.perimeterDragView.hitTest(NSPoint(x: 6, y: root.bounds.midY)))
     }
 
     private func makeZoneHarness() -> (host: NSView, zone: ExternalControlZoneView) {

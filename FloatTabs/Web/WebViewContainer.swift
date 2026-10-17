@@ -48,9 +48,9 @@ final class PanelRootView: NSView {
         resizeReadoutView.translatesAutoresizingMaskIntoConstraints = false
         companionRailFoldControlView.translatesAutoresizingMaskIntoConstraints = false
 
-        // WebKit remains visually clean. The movement layer sits above it only
-        // for the deliberately tiny top/bottom overlap, while the animated frame
-        // is presentation-only and never participates in hit testing.
+        // WebKit remains visually clean. The inert perimeter view is retained
+        // as a fullscreen stacking anchor; the animated frame is presentation-
+        // only and never participates in hit testing.
         // The actual WebPanelContainerView lives in an ordinary NSWindow. This
         // transparent layout-only view preserves the shell geometry without
         // making the floating shell WebKit's fullscreen source window.
@@ -177,8 +177,8 @@ final class PanelRootView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         // ExternalControlZoneView is flipped while the shell root is not.
         // Route through its own coordinate space before falling through to
-        // the perimeter movement surface; otherwise a rail click can be
-        // interpreted at the root's mirrored Y position.
+        // other shell content; otherwise a rail click can be interpreted at
+        // the root's mirrored Y position.
         let zonePoint = externalControlZoneView.convert(point, from: self)
         if let railHit = externalControlZoneView.hitTest(zonePoint) {
             return railHit
@@ -189,12 +189,10 @@ final class PanelRootView: NSView {
     private func synchronizeInteractionBorderGeometry() {
         interactionBorderView.targetWebFrame = webViewportLayoutView.frame
         interactionBorderView.activeTabFrame = externalControlZoneView.activeTabFrame(in: self)
-        perimeterDragView.movementExclusionRects = externalControlZoneView
-            .movementExclusionRects(in: perimeterDragView)
     }
 
     /// Collapsing the rail is a physical-only change: the zone column narrows
-    /// to the movement gutter so everything chained off webViewportLayoutView
+    /// to the 12 pt layout inset so everything chained off webViewportLayoutView
     /// — resize grip, readout, companion grip/container, exit placeholder,
     /// border outline — follows the reclaimed Web frame without touching the
     /// shell window frame or any nominal size math.
@@ -202,10 +200,6 @@ final class PanelRootView: NSView {
         let targetInset = collapsed
             ? PanelMetrics.collapsedRailLeadingInset
             : PanelMetrics.externalControlZoneWidth
-        // Movement bands track the physical frame immediately: they are
-        // invisible, and updating them at animation start guarantees no stale
-        // band lingers over content that is sliding into the reclaimed column.
-        perimeterDragView.railLeadingInset = targetInset
         externalControlZoneView.setCollapsed(collapsed, animated: animated)
 
         guard externalZoneWidthConstraint.constant != targetInset else { return }
@@ -607,45 +601,10 @@ enum PanelMoveCursor {
     }
 }
 
-/// This shell view owns the outer half of the uniform movement target around
-/// all four Web edges. `WebSourceEdgeDragView` owns the matching inner half in
-/// the separate source window.
-///
-/// Movement is implemented directly from global pointer deltas instead of
-/// NSWindow.performDrag(with:), which is unreliable for this borderless floating
-/// NSPanel configuration on real hardware.
+/// Inert stacking anchor retained because fullscreen companion and placeholder
+/// views are inserted relative to it. `WebSourceEdgeDragView` is the only window
+/// movement owner.
 final class PanelPerimeterDragView: NSView {
-    /// A fully transparent borderless window can visually track the pointer yet
-    /// still let WindowServer route the following mouse-down to the desktop.
-    /// This alpha is far below the visible threshold, but gives every advertised
-    /// movement band a real composited surface and therefore a reliable hit.
-    static let acquisitionSurfaceAlpha: CGFloat = 0.003
-
-    /// Visible Tab/rail controls own their complete animated rectangles. The
-    /// movement bands may still occupy uncovered rail gaps, but must never
-    /// overlap a control as Dock magnification grows it leftward.
-    var movementExclusionRects: [NSRect] = [] {
-        didSet {
-            guard movementExclusionRects != oldValue else { return }
-            window?.invalidateCursorRects(for: self)
-            needsDisplay = true
-        }
-    }
-
-    /// The shell's bands are glued to the *physical* Web frame, whose leading
-    /// edge shifts when the rail folds away. Cursor rects, the acquisition
-    /// surface and hit testing keep sharing this one value.
-    var railLeadingInset: CGFloat = PanelMetrics.externalControlZoneWidth {
-        didSet {
-            guard railLeadingInset != oldValue else { return }
-            window?.invalidateCursorRects(for: self)
-            needsDisplay = true
-        }
-    }
-
-    private var startingMouseLocation: NSPoint?
-    private var startingWindowOrigin: NSPoint?
-
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -657,179 +616,14 @@ final class PanelPerimeterDragView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
     }
 
-    override var isOpaque: Bool { false }
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
+    convenience init() {
+        self.init(frame: .zero)
     }
+
+    override var isOpaque: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else { return nil }
-        let localPoint = convert(point, from: superview)
-        return Self.dragRects(
-            in: bounds,
-            leadingInset: railLeadingInset,
-            excluding: movementExclusionRects
-        )
-            .contains(where: { $0.contains(localPoint) }) ? self : nil
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
-        startingMouseLocation = NSEvent.mouseLocation
-        startingWindowOrigin = window.frame.origin
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let window,
-              let startingMouseLocation,
-              let startingWindowOrigin else {
-            return
-        }
-
-        let origin = Self.destinationOrigin(
-            startingWindowOrigin: startingWindowOrigin,
-            startingMouseLocation: startingMouseLocation,
-            currentMouseLocation: NSEvent.mouseLocation
-        )
-        window.setFrameOrigin(origin)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        startingMouseLocation = nil
-        startingWindowOrigin = nil
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        for rect in Self.dragRects(
-            in: bounds,
-            leadingInset: railLeadingInset,
-            excluding: movementExclusionRects
-        ) {
-            addCursorRect(rect, cursor: PanelMoveCursor.cursor)
-        }
-    }
-
-    override func layout() {
-        super.layout()
-        window?.invalidateCursorRects(for: self)
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        // Do not tint the entire shell: only the exact rectangles that return
-        // `self` from hitTest receive the acquisition surface. Cursor feedback,
-        // pixel ownership and drag handling consequently share one geometry.
-        NSColor.black.withAlphaComponent(Self.acquisitionSurfaceAlpha).setFill()
-        for rect in Self.dragRects(
-            in: bounds,
-            leadingInset: railLeadingInset,
-            excluding: movementExclusionRects
-        )
-        where rect.intersects(dirtyRect) {
-            rect.fill(using: .sourceOver)
-        }
-    }
-
-    static func destinationOrigin(
-        startingWindowOrigin: NSPoint,
-        startingMouseLocation: NSPoint,
-        currentMouseLocation: NSPoint
-    ) -> NSPoint {
-        NSPoint(
-            x: startingWindowOrigin.x + currentMouseLocation.x - startingMouseLocation.x,
-            y: startingWindowOrigin.y + currentMouseLocation.y - startingMouseLocation.y
-        )
-    }
-
-    static func dragRects(
-        in bounds: NSRect,
-        leadingInset: CGFloat = PanelMetrics.externalControlZoneWidth,
-        excluding exclusionRects: [NSRect] = []
-    ) -> [NSRect] {
-        let edgeBands = PanelMovementGeometry.edgeBands(
-            around: PanelMovementGeometry.webFrame(in: bounds, leadingInset: leadingInset),
-            outerDepth: PanelMetrics.outerInteractionGutter,
-            innerDepth: 0,
-            clippingBounds: bounds
-        )
-        let outer = max(PanelMetrics.outerInteractionGutter, 0)
-        // Keep only a narrow outer gutter in the expanded rail. The previous
-        // full-width blank rail turned the whole empty Tab column into a drag
-        // target and made clicks in that transparent area move the panel.
-        // While collapsed this remains the same 12 pt leading strip; the
-        // source window owns everything right of it.
-        let blankRail = NSRect(
-            x: bounds.minX,
-            y: bounds.minY + outer,
-            width: min(
-                min(leadingInset, bounds.width),
-                PanelMetrics.leadingMovementGutter
-            ),
-            height: max(bounds.height - 2 * outer, 0)
-        )
-        let candidates = edgeBands + (blankRail.isEmpty ? [] : [blankRail])
-        return exclusionRects
-            .map { $0.intersection(bounds) }
-            .filter { !$0.isNull && !$0.isEmpty }
-            .reduce(candidates) { remaining, exclusion in
-                remaining.flatMap { subtracting($0, by: exclusion) }
-            }
-    }
-
-    private static func subtracting(_ rect: NSRect, by exclusion: NSRect) -> [NSRect] {
-        let overlap = rect.intersection(exclusion)
-        guard !overlap.isNull, !overlap.isEmpty else { return [rect] }
-
-        var pieces: [NSRect] = []
-        if overlap.minY > rect.minY {
-            pieces.append(
-                NSRect(
-                    x: rect.minX,
-                    y: rect.minY,
-                    width: rect.width,
-                    height: overlap.minY - rect.minY
-                )
-            )
-        }
-        if overlap.maxY < rect.maxY {
-            pieces.append(
-                NSRect(
-                    x: rect.minX,
-                    y: overlap.maxY,
-                    width: rect.width,
-                    height: rect.maxY - overlap.maxY
-                )
-            )
-        }
-
-        let middleHeight = overlap.height
-        if overlap.minX > rect.minX, middleHeight > 0 {
-            pieces.append(
-                NSRect(
-                    x: rect.minX,
-                    y: overlap.minY,
-                    width: overlap.minX - rect.minX,
-                    height: middleHeight
-                )
-            )
-        }
-        if overlap.maxX < rect.maxX, middleHeight > 0 {
-            pieces.append(
-                NSRect(
-                    x: overlap.maxX,
-                    y: overlap.minY,
-                    width: rect.maxX - overlap.maxX,
-                    height: middleHeight
-                )
-            )
-        }
-
-        return pieces.filter { !$0.isEmpty }
+        nil
     }
 }
 

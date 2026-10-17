@@ -611,7 +611,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
     func testSpeechControlsUseAutoReplayStopSettingsPinBottomUpOrder() {
         let profile = makeProfile(name: "ChatGPT")
-        let (host, zone) = makeZoneHarness()
+        let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
         zone.setSpeechPresentation(
             SpeechRailPresentation(
@@ -648,15 +648,9 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertLessThan(stop.frame.minY, zone.settingsControlFrame.minY)
         XCTAssertLessThan(zone.settingsControlFrame.minY, zone.pinControlFrame.minY)
 
-        let exclusions = zone.movementExclusionRects(in: host)
-        let autoFrameInHost = auto.convert(auto.bounds, to: host)
-        let readFrameInHost = read.convert(read.bounds, to: host)
-        let replayFrameInHost = replay.convert(replay.bounds, to: host)
-        let stopFrameInHost = stop.convert(stop.bounds, to: host)
-        XCTAssertTrue(exclusions.contains(where: { $0 == autoFrameInHost }))
-        XCTAssertTrue(exclusions.contains(where: { $0 == readFrameInHost }))
-        XCTAssertTrue(exclusions.contains(where: { $0 == replayFrameInHost }))
-        XCTAssertTrue(exclusions.contains(where: { $0 == stopFrameInHost }))
+        for control in [auto, read, replay, stop] {
+            XCTAssertTrue(control.hitTest(control.bounds.midPoint) === control)
+        }
     }
 
     func testSpeechControlsCollapseAndExpandWithRail() {
@@ -1104,7 +1098,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
     func testRailCapacityMatrixUsesCollisionFreeCompactOverflowLayout() {
         let counts = [0, 1, 3, 4, 5, 9]
         for count in counts {
-            let (host, zone) = makeZoneHarness(height: 400)
+            let (_, zone) = makeZoneHarness(height: 400)
             let profiles = (0..<count).map { index in
                 WebAppProfile(
                     order: index,
@@ -1126,7 +1120,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 XCTAssertTrue(zone.overflowControlAccessibilityLabel?.contains("More Tabs") == true)
             }
 
-            assertRailFramesAreCollisionFree(zone, host: host)
+            assertRailFramesAreCollisionFree(zone)
 
             zone.setCollapsed(true, animated: false)
             let collapsedViews = railActionableViews(in: zone)
@@ -1134,10 +1128,10 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
             zone.setCollapsed(false, animated: false)
             zone.layoutSubtreeIfNeeded()
-            assertRailFramesAreCollisionFree(zone, host: host)
+            assertRailFramesAreCollisionFree(zone)
         }
 
-        let (defaultHost, defaultZone) = makeZoneHarness(height: 820)
+        let (_, defaultZone) = makeZoneHarness(height: 820)
         let defaultProfiles = (0..<9).map { index in
             WebAppProfile(
                 order: index,
@@ -1150,7 +1144,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(defaultZone.isUsingCompactLayout)
         XCTAssertTrue(defaultZone.overflowTabIDs.isEmpty)
         XCTAssertEqual(defaultZone.visibleTabIDs.count, 9)
-        assertRailFramesAreCollisionFree(defaultZone, host: defaultHost)
+        assertRailFramesAreCollisionFree(defaultZone)
     }
 
     func testCompactRailKeepsSpeechActionsSeparateAndAccessible() {
@@ -1232,7 +1226,6 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
     private func assertRailFramesAreCollisionFree(
         _ zone: ExternalControlZoneView,
-        host: NSView,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -1264,16 +1257,6 @@ final class WebAttentionIndicatorTests: XCTestCase {
             }
         }
 
-        let exclusions = zone.movementExclusionRects(in: host)
-        for view in visible {
-            let frameInHost = view.convert(view.bounds, to: host)
-            XCTAssertTrue(
-                exclusions.contains(where: { $0 == frameInHost }),
-                "Movement exclusion must match visible control frame",
-                file: file,
-                line: line
-            )
-        }
     }
 
     private func synchronizeUnread(
