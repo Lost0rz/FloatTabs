@@ -8,55 +8,62 @@
 
 **MODE: TAB_ATTENTION_VISUAL_REFINEMENT_ACTIVE**
 
-A new bounded product/UI task is active to simplify Tab color semantics and make unread ChatGPT attention visible at Retina/high-resolution scale.
+`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active. The first exact Release candidate proved that whole-Tab attention is visible and functionally correct, but Human Real-Mac review did not accept the visual quality of a single solid-red treatment. The task is therefore refined in-place rather than closed or split into a new task.
 
 ## Verified baseline
 
 - Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6` — PR #123 merge commit.
-- New task branch: `product/ft-tab-attention-highlight-001`.
+- Task branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- The previous shell movement task is completed/merged and grants no further authority.
-- Diagnostics/history PR #124 remains a separate OPEN/Draft line of work pending later user acceptance; it is deliberately not a dependency/base for this task and must not be modified here.
+- First implementation semantic head: `684ca4ec06b9d664e1017cd472cfdeef6ec2c591`.
+- First implementation automated gates: focused/full XCTest, Debug/Release arm64, exact-head macOS CI and QA DMG all PASS.
+- First exact Release candidate was installed and identity-verified on Real Mac.
+- Human Real-Mac result: visibility/function direction accepted, visual design quality not accepted; Gate 5 remains open.
+- Diagnostics/history PR #124 remains separate, parked and untouched.
 
-## Audited current behavior
+## Accepted product direction
 
-Production source on `main` currently shows:
-
-- `ExternalWebAppTabView` renders unread/Ready state as a `6 pt` red dot over the favicon.
-- the active Tab background is derived from the assigned Browser Profile color using a strong profile-color blend;
-- Browser Profiles Settings expose per-profile color selection;
-- attention Ready/acknowledgement, residency protection, runtime color semantics, Tab selection, and Browser Profile session isolation are separate existing authorities.
-
-The small unread dot is insufficiently legible on high-resolution displays. Profile-specific Tab background color no longer serves a useful product purpose and competes with attention color as a visual signal.
-
-## Product direction
-
-The rail should have one clear visual hierarchy:
+The rail keeps the simplified state hierarchy:
 
 ```text
-NORMAL / ACTIVE TAB     = neutral surface; active selection remains identifiable by existing selection treatment
-UNREAD / READY TAB      = whole-tab attention-red surface
+NORMAL / ACTIVE TAB     = neutral profile-independent surface
+UNREAD / READY TAB      = whole-Tab attention treatment
 BROWSER PROFILE COLOR   = no longer a Tab-rail visual signal
 ```
 
-Unread/Ready visual treatment must be large enough to identify without resolving a tiny favicon badge. The whole visible Tab surface becomes the attention indicator. The old favicon red dot is removed from visible Tabs.
+The tiny favicon unread dot remains removed. Browser Profile color remains compatibility metadata only and is not reintroduced as a Tab signal.
 
-Browser Profile color controls should be removed from the user-facing Browser Profiles Settings because the color no longer drives Tab presentation. Existing persisted color metadata is retained for compatibility in this task; no migration, rewrite, or Browser Profile/session data deletion is authorized.
+The unread treatment is now a selectable **Attention Style** rather than one fixed red fill. The approved preset family is:
 
-For compact overflow, a hidden unread Tab must still be discoverable. The overflow control should use the same whole-control attention treatment when any hidden Tab is unread. Individual overflow menu items may retain a bounded semantic unread marker/label because they are menu rows rather than rail Tabs.
+- **Signal** — static, restrained attention emphasis;
+- **Ember** — warm red/orange/pink animated gradient;
+- **Aurora** — purple/blue/magenta animated gradient;
+- **Spectrum** — full-spectrum/rainbow animated gradient with gentle breathing.
+
+Settings must show a live visual preview for each preset so the user can choose by appearance rather than by name alone. The selected style is an app preference and must update the rail without changing attention state ownership.
+
+Animation is visual projection only:
+
+- no Tab translation, shake, scale-jitter or layout movement;
+- no flashing/high-frequency flicker;
+- use bounded Core Animation-style layer animation rather than polling/display-link CPU work;
+- animated styles degrade to a stable static representative treatment when macOS Reduce Motion is enabled;
+- unread hover keeps the chosen attention style instead of reverting to neutral;
+- acknowledgement still clears Ready through the existing authority and returns the Tab to neutral.
 
 ## Protected behavior
 
-This task is presentation-only. It must not change:
+This task still must not change:
 
 - ChatGPT attention state transitions or acknowledgement timing;
-- unread source of truth or persistence semantics;
-- attention residency protection;
+- unread source of truth or attention residency protection;
 - Tab selection/order/reorder behavior;
 - favicon resident/released full-color vs grayscale semantics;
 - Web runtime/navigation/focus/recovery;
 - Browser Profile identity, WebKit data stores, cookies, login/session data, or backup compatibility;
-- rail geometry, Dock magnification, fold/unfold, movement, resize, fullscreen, or speech state behavior.
+- rail geometry, Dock magnification, fold/unfold, movement, resize, fullscreen, or speech behavior.
+
+The new persisted Attention Style preference is ordinary app UI preference data only. It must not be stored in Browser Profile or Slot data.
 
 ## Current posture
 
@@ -65,10 +72,14 @@ ACTIVE_PRODUCT_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-tab-attention-highlight-001
 TASK_PR=125_DRAFT
+FIRST_VISUAL_CANDIDATE=684ca4ec06b9d664e1017cd472cfdeef6ec2c591
+GATE5_VISIBILITY_FUNCTION=PASS
+GATE5_VISUAL_QUALITY=REFINE
+ATTENTION_STYLE_PRESETS=SIGNAL_EMBER_AURORA_SPECTRUM
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
 
 ## Acceptance direction
 
-Automated and Real-Mac acceptance must establish that unread Tabs are unmistakable on Retina/high-resolution displays, Browser Profile assignment/color no longer changes Tab background, attention clears through the existing acknowledgement path, normal/active/hover states remain legible in Light and Dark appearance, and no protected runtime/profile/session behavior changes.
+The next candidate must let the user preview and select Signal, Ember, Aurora or Spectrum in Settings, project that same style onto unread visible Tabs and compact overflow, respect Reduce Motion, preserve favicon/runtime semantics, and pass renewed Real-Mac visual review. Automated verification and hosted CI must be rerun for the new semantic head before Gate 5 resumes.
