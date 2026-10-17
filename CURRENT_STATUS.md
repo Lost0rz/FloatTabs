@@ -115,6 +115,28 @@ LONG_RUNNING_BASELINE_AUTHORIZED=NO
 - Gate 5 did not pass. The user reported that Tab focus did not respond. A screenshot at 07:28:02 UTC shows the Runtime Diagnostics Settings window with observation OFF and the adjacent Slot as a blank white surface. The live log records a network-category `navigation.failed` (`NSURLErrorDomain`, code `-1001`) at 07:22:04 UTC; its Slot/runtime identity matches a later manual-reload boundary at 07:25:57 UTC, whose captured navigation phase was already failed. The later boundary's actor is not identified by the event, and the executor did not invoke another reload in this continuation. Seventeen `web_focus.failed` and seventeen `presentation_focus.failed` events were logged from 07:24:40 through 07:28:36 UTC; those records do not carry enough runtime identity to attribute them to the screenshot's visible Slot. The user-visible blank surface and focus report block the required no-obvious-regression acceptance. The reload/navigation failure is direct diagnostic evidence, not a root-cause finding; `ROOT_CAUSE=UNKNOWN`. No further app interaction, reload, restart, or settings change was performed after the report. `USER_DATA_TOUCHED=YES`; no Browser Profile/session reset, deletion, or intentional mutation was performed, though incidental website/session activity cannot be excluded. PR #124 remains OPEN / Draft and the task remains ACTIVE pending a separately authorized diagnosis or correction and a new Gate 5 result.
 - `CURRENT_TASK.md` remains `ACTIVE`; PR #124 remains Draft. Gate 5 now has an observed failure; reconcile terminal state after a separately authorized diagnosis/correction and a new Gate 5 result.
 
+## Incident diagnosis and next authorized gate (2026-10-17)
+
+A read-only offline correlation of the preserved Gate 5 live JSONL established that the evidence is still insufficient to select a product correction, but it is sufficient to authorize one bounded correlation probe.
+
+- The failed navigation is identified as Slot `00B689D3-8403-43D2-A571-949FD8FA827B`, runtime generation 1, WebView `0F7690AE-2EAB-4D82-9477-B228DBD42606`, navigation generation 1.
+- Later presentation traces select that same Slot, and no runtime release/recreation or WebContent-process termination is recorded across the incident window.
+- The paired `web_focus.failed` / `presentation_focus.failed` records lack runtime/WebView/navigation identity, so same-physical-runtime attribution at each focus failure is not proven.
+- The 07:25:57 reload boundary belongs to an explicit production reload command path; `WebViewPool.reload(slotID:)` is not used by lifecycle or automatic recovery, so the existing `manual/user_requested` semantics are accepted.
+- PR #124 does not change existing focus logic, Tab selection, key-window ownership, navigation policy, WebView lifecycle/residency, or recovery policy. Long-term observation causality is weakened by the absence of checkpoints during the later focus-failure window, but it is not falsified because the navigation failure occurred earlier.
+
+```text
+EVIDENCE_SUFFICIENCY=INSUFFICIENT
+MISSING_FACT=ACTIVE_SLOT_RUNTIME_AND_NAVIGATION_IDENTITY_AT_PRESENTATION_FOCUS_FAILURE
+BLOCKED_DECISION=WEB_RUNTIME_NAVIGATION_FAULT_VS_PRESENTATION_FOCUS_FAULT_BOUNDARY
+INCIDENT_PROBE_AUTHORIZED=YES
+INCIDENT_PROBE_SCOPE=PRESENTATION_FOCUS_FAILURE_IDENTITY_ONLY
+GATE5=FAILED_PENDING_PROBE_AND_RERUN
+ROOT_CAUSE=UNKNOWN
+```
+
+The next authorized mutation is only the single focus-failure identity probe recorded in `CURRENT_TASK.md`. It must reuse current owner projections, materialize no runtime, run no page JavaScript, and change no product behavior. After exact-head automated verification, rerun Gate 5 on that exact Release build before any product correction is selected.
+
 ## Acceptance posture
 
 This task must prove that optional periodic observation is bounded, privacy-safe, identity-safe and low overhead. Existing RuntimeDiagnostics privacy/rotation tests remain required, and a short Real-Mac Release smoke must show that enabling observation produces sparse checkpoints and a reload marker without obvious interaction regression or unbounded log growth.
