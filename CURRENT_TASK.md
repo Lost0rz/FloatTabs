@@ -211,3 +211,62 @@ This task is complete only when:
 - Real-Mac Release smoke establishes sparse usable output with no observed content leak or obvious interaction regression;
 - implementation is remotely delivered through one Draft PR;
 - terminal Control Alignment reconciles STATUS/TASK and PR/workspace lifecycle.
+
+## Incident evidence gate and bounded probe authorization (2026-10-17)
+
+The read-only incident diagnosis following the failed Gate 5 result is accepted as evidence. It established:
+
+- `EVIDENCE_SUFFICIENCY=INSUFFICIENT` for selecting a product correction;
+- the 07:22:04 `navigation.failed` event belongs to Slot `00B689D3-8403-43D2-A571-949FD8FA827B`, runtime generation 1, WebView `0F7690AE-2EAB-4D82-9477-B228DBD42606`, navigation generation 1;
+- subsequent presentation traces select that same Slot, but the paired focus-failure records do not carry physical runtime/navigation identity, so same-runtime attribution at the failure boundary is not proven;
+- no runtime recreation/release or WebContent-process termination was observed across the incident window;
+- `WebViewPool.reload(slotID:)` production callsites are explicit user/command paths; recovery/lifecycle uses separate paths, so the existing `manual/user_requested` event semantics are valid;
+- no evidence establishes that long-term observation caused the failure. Observation causality remains weakened but not falsified; `ROOT_CAUSE=UNKNOWN`.
+
+`MISSING_FACT`: the active Slot's exact runtime/WebView identity and navigation generation/phase at each presentation focus-failure boundary.
+
+`BLOCKED_DECISION`: whether the focus failures belong to the already-failed WebView/navigation context or to a separate presentation/focus condition, which determines the minimum safe fault boundary.
+
+### Authorized probe — single existing failure boundary only
+
+The same task and PR are re-authorized for one bounded diagnostic-instrumentation correction before Gate 5 is rerun.
+
+Implement the probe at the existing `presentation_focus.failed` event in `PanelController`, because that presentation owner already has access to `TabStore` and `WebViewPool` identity projections. Do not move Web runtime ownership into `WebFocusRouter` and do not create a second failure event stream.
+
+On `presentation_focus.failed`, add only a read-only correlation projection derived synchronously from the already-current owners:
+
+- active/selected Slot ID;
+- whether an active Slot exists;
+- whether a resident runtime exists for that Slot;
+- `runtime_generation` when available;
+- `webview_instance_id` when available;
+- `navigation_generation` when available;
+- `navigation_phase` when available.
+
+Use `tabStore.activeTabID` plus the existing `webViewPool.existingWebView(for:)` / `diagnosticSnapshotFields(for:)` seam or an equally bounded existing projection. A missing Slot/runtime must produce a bounded availability fact; it must not create/materialize a WebView.
+
+The probe must not:
+
+- run JavaScript or a page health probe;
+- add timers, retries, async work, polling, or high-frequency output;
+- change focus attempts, focus ownership, Tab selection, navigation, WebView lifecycle, residency, recovery, reload, window/key-window behavior, or presentation timing;
+- add content-bearing fields;
+- change `web_focus.failed` semantics solely to obtain Web runtime ownership;
+- change the long-term observation cadence/retention/settings implementation;
+- attempt a product fix or claim root cause.
+
+### Probe verification gate
+
+Before a new Real-Mac Gate 5 attempt:
+
+1. Add focused regression coverage proving a presentation focus failure includes the active Slot and current runtime/navigation identity when resident.
+2. Add focused coverage for missing active Slot / missing resident runtime proving no WebView is materialized.
+3. Preserve existing focus result, trace, generation, owner and `dom_input_unavailable` semantics.
+4. Run the relevant presentation/focus and Runtime Diagnostics privacy tests.
+5. Run the broader macOS XCTest suite plus Debug and Release arm64 builds.
+6. Push to the same branch / PR #124 and require exact-head hosted CI success.
+7. Keep PR #124 Draft.
+
+After the probe passes automated verification, install that exact Release build without resetting Browser Profiles/session data and rerun Gate 5. If the failure recurs, use the new failure-boundary identity to decide whether the minimum correction belongs to Web runtime/navigation or presentation/focus. If the smoke is clean, report the new Gate 5 evidence without inventing causality for the earlier incident.
+
+STOP before expanding beyond this single probe if implementation requires new runtime ownership, new asynchronous Web work, a broader logging redesign, or any behavioral correction.
