@@ -481,6 +481,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let hiddenTab = try XCTUnwrap(zone.tabView(for: hiddenID))
         let overflow = try XCTUnwrap(zone.subviews.compactMap { $0 as? RailOverflowControl }.first)
         preferences.attentionStyle = .aurora
+        tab.setAttentionStyleReduceMotionOverride(false)
+        overflow.setAttentionStyleReduceMotionOverride(false)
 
         XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
         XCTAssertEqual(overflow.displayedAttentionStyle, .aurora)
