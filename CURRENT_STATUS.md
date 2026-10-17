@@ -105,7 +105,7 @@ LONG_RUNNING_BASELINE_AUTHORIZED=NO
 - Exact-head hosted verification passed: `Build & Test (Apple Silicon arm64)` run `39004297098`; `build-dmg` run `39004297194`.
 - A clean-source Release arm64 candidate for the semantic head was built and verified (`source_revision_exact=true`).
 - The prior installed app was `0.5.2` build `20`, arm64, source `b21a83fb40bf86a55c8aa6186150797166fc6981`. After normal user quit, a bundle-only rollback archive was validated and the exact Release arm64 candidate for `2c0b6b282f0b3b67c3fea315181206e1b20d4b47` was installed and launched (`source_revision_exact=true`).
-- Real-Mac Gate 5 remains incomplete. The app is a menu-bar accessory; the available computer-use bridge times out while attaching to its no-window state. No Settings preference has yet been changed through UI. The user is opening Advanced → Runtime Diagnostics to make the Settings controls available for the smoke.
+- Real-Mac Gate 5 remains incomplete. The app is a menu-bar accessory; the available computer-use bridge times out while attaching to its no-window state, and the Runtime Diagnostics Settings window is not yet visible to that bridge. The user has been asked to open Advanced → Runtime Diagnostics and leave it open. No Settings preference has yet been changed through UI.
 - The existing diagnostics directory contained one JSONL file at the pre-launch inventory. A fresh byte/file/segment baseline will be recorded immediately before enabling observation. No Gate 5 checkpoint window, manual reload, diagnostic export/privacy inspection, or interaction/performance observation has yet occurred.
 - `CURRENT_TASK.md` remains `ACTIVE`; PR #124 remains Draft. Reconcile terminal state only after Gate 5 has an observed result.
 
