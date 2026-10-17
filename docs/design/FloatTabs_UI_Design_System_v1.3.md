@@ -42,6 +42,14 @@ The bottom-left fold grip is a separate fold/unfold affordance tied to the Web c
 
 Tabs are favicon-first and expand on hover. Tab / Add / Pin / Settings accept first mouse so a control click is not consumed only by application activation.
 
+### Tab surface and unread attention
+
+- Normal and active/read Tabs use neutral rail surfaces independent of assigned Browser Profile color; the shared page+Tab outline and active typography continue to own selection.
+- A visible Tab with `Unread/Ready` set uses a whole-Tab dynamic system-red surface. This attention fill remains in force during hover and clears only when the existing attention authority clears Ready.
+- The attention surface uses a contrasting foreground for its label and template icon. Favicon color continues to represent runtime residency: resident icons stay full color and released icons stay grayscale/dim.
+- The visible Tab rail does not add a favicon unread dot. In compact layout, the overflow control uses a whole-control attention surface when any hidden Tab is unread; its menu item retains a semantic unread marker and accessibility label.
+- Browser Profile color metadata remains persisted for compatibility, but Profile color is not presented as a Tab distinction and has no chooser in Browser Profiles Settings.
+
 ## 4. Collapsed rail
 
 Collapsed state is a **physical presentation change**, not a persisted viewport-size change.

@@ -23,36 +23,40 @@ final class BrowserProfileSettingsTests: XCTestCase {
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Default", "Company", "Personal"])
     }
 
-    func testRenamedDefaultAndProfileColorsComeFromFreshSnapshot() {
+    func testProfileColorMetadataRemainsReadableWithoutShowingColorChooser() {
+        let defaultColor = BrowserProfileColor(preset: .blue)
+        let companyColor = BrowserProfileColor(preset: .purple)
         let company = BrowserProfile(
             id: UUID(),
             name: "Company",
             createdAt: Date(timeIntervalSince1970: 1),
-            color: BrowserProfileColor(preset: .purple)
+            color: companyColor
         )
-        let controller = makeSettingsController(
-            snapshot: {
-                BrowserProfileManagementSnapshot(
-                    customProfiles: [company],
-                    defaultProfilePresentation: DefaultBrowserProfilePresentation(
-                        name: "Jack",
-                        color: BrowserProfileColor(preset: .blue)
-                    ),
-                    referencedProfileIDs: [],
-                    customProfilesSupported: true
-                )
-            }
+        let snapshot = BrowserProfileManagementSnapshot(
+            customProfiles: [company],
+            defaultProfilePresentation: DefaultBrowserProfilePresentation(
+                name: "Jack",
+                color: defaultColor
+            ),
+            referencedProfileIDs: [],
+            customProfilesSupported: true
         )
+        let manager = BrowserProfileManagementClient(
+            snapshot: { snapshot },
+            create: { _ in company },
+            rename: { _, _ in },
+            delete: { _ in }
+        )
+        let controller = BrowserProfilesSettingsViewController(browserProfileManager: manager)
 
         controller.loadView()
 
         XCTAssertEqual(controller.displayedBrowserProfileNames, ["Jack", "Company"])
-        XCTAssertEqual(
-            controller.displayedBrowserProfileColors,
-            [BrowserProfileColor(preset: .blue), BrowserProfileColor(preset: .purple)]
-        )
         XCTAssertEqual(controller.displayedBrowserProfileActionTitles, [["Rename…"], ["Rename…", "Delete…"]])
         XCTAssertEqual(controller.displayedBrowserProfileDeleteEnabled, [false, true])
+        XCTAssertEqual(manager.snapshot().defaultProfilePresentation.color, defaultColor)
+        XCTAssertEqual(manager.snapshot().customProfiles.first?.color, companyColor)
+        XCTAssertFalse(allSubviews(in: controller.view).contains { $0 is NSPopUpButton })
     }
 
     func testEmptySnapshotHasDefaultOnlyAndNoPresets() {
@@ -413,6 +417,10 @@ final class BrowserProfileSettingsTests: XCTestCase {
             onRestoreBackup: { _ in URL(fileURLWithPath: "/tmp/rollback.json") },
             browserProfileManager: manager
         )
+    }
+
+    private func allSubviews(in view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + allSubviews(in: $0) }
     }
 
     private func makeBrowserProfile(name: String) -> BrowserProfile {

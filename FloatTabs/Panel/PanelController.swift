@@ -1748,10 +1748,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try self.renameBrowserProfile(id: id, name: name)
             },
-            setColor: { [weak self] id, color in
-                guard let self else { throw BrowserProfileManagementError.notFound }
-                try self.setBrowserProfileColor(id: id, color: color)
-            },
             delete: { [weak self] id in
                 guard let self else { throw BrowserProfileManagementError.notFound }
                 try await self.deleteBrowserProfile(id: id, usageStore: usageStore)
@@ -1982,15 +1978,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         guard tabStore.renameBrowserProfile(id: id, name: trimmedName) else {
-            throw BrowserProfileManagementError.metadataPersistenceFailed
-        }
-    }
-
-    func setBrowserProfileColor(
-        id: UUID?,
-        color: BrowserProfileColor
-    ) throws {
-        guard tabStore.setBrowserProfileColor(profileID: id, color: color) else {
             throw BrowserProfileManagementError.metadataPersistenceFailed
         }
     }
