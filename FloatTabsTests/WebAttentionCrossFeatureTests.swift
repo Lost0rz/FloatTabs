@@ -178,6 +178,39 @@ private final class CountingPresentationFocusAdapter: WebSiteAdapter {
 }
 
 @MainActor
+private final class FailingPresentationFocusAdapter: WebSiteAdapter {
+    private enum Failure: Error {
+        case expected
+    }
+
+    let identifier = "failing-presentation-focus-test"
+
+    func matches(url: URL?, webView: WKWebView) async -> Bool { true }
+
+    func togglePrimaryFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+
+    func focusInput(in webView: WKWebView) async throws {
+        throw Failure.expected
+    }
+
+    func captureInputTargetForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        .captured(kind: .otherEditable)
+    }
+
+    func focusInputForVoice(in webView: WKWebView) async throws -> WebFocusVoiceTarget {
+        throw Failure.expected
+    }
+
+    func focusPage(in webView: WKWebView) async throws {}
+
+    func currentFocus(in webView: WKWebView) async throws -> WebFocusTarget {
+        .input
+    }
+}
+
+@MainActor
 private final class SuspendedPresentationFocusAdapter: WebSiteAdapter {
     let identifier = "suspended-focus-test"
     private(set) var voiceFocusStarted = false
@@ -917,6 +950,112 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             webReady.fields["focus_owner"],
             .string("external_voice")
         )
+    }
+
+    func testPresentationFocusFailureIncludesCurrentSlotAndResidentRuntimeIdentity() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let focusRouter = WebFocusRouter(
+            registry: WebSiteAdapterRegistry(adapters: [FailingPresentationFocusAdapter()]),
+            diagnostics: diagnostics
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "FocusFailureIdentity", url: "https://example.com/")],
+            webFocusRouter: focusRouter,
+            diagnostics: diagnostics,
+            presentationFocusReadinessProvider: { (applicationActive: true, windowKey: true) }
+        )
+        let profile = try XCTUnwrap(store.activeProfile)
+        _ = try pool.webView(for: profile)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let runtimeFields = pool.diagnosticSnapshotFields(for: profile.id)
+        let trace = RuntimeDiagnosticTrace(root: "presentation-focus-failure-identity")
+
+        controller.showFloatTabs(trace: trace)
+
+        let failed = try await waitUntil(timeoutMilliseconds: 2_000) {
+            writer.events.contains { $0.event == "presentation_focus.failed" }
+        }
+        XCTAssertTrue(failed)
+        let event = try XCTUnwrap(
+            writer.events.first { $0.event == "presentation_focus.failed" }
+        )
+        XCTAssertEqual(event.traceID, trace.id)
+        XCTAssertEqual(event.fields["reason"], .string("dom_input_unavailable"))
+        XCTAssertEqual(event.fields["active_slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(event.fields["active_slot_exists"], .bool(true))
+        XCTAssertEqual(event.fields["resident_runtime_exists"], .bool(true))
+        XCTAssertEqual(
+            event.fields["runtime_generation"],
+            .integer(Int64(identity.runtimeGeneration))
+        )
+        XCTAssertEqual(
+            event.fields["webview_instance_id"],
+            .string(identity.webViewInstanceID.uuidString)
+        )
+        XCTAssertEqual(event.fields["navigation_generation"], runtimeFields["navigation_generation"])
+        XCTAssertEqual(event.fields["navigation_phase"], runtimeFields["navigation_phase"])
+        XCTAssertEqual(event.fields["focus_owner"], .string("standard_presentation"))
+        XCTAssertEqual(
+            Set(event.fields.keys),
+            Set([
+                "focus_generation",
+                "focus_owner",
+                "reason",
+                "trace_root",
+                "active_slot_exists",
+                "active_slot_id",
+                "resident_runtime_exists",
+                "focus_runtime_availability",
+                "runtime_generation",
+                "webview_instance_id",
+                "navigation_generation",
+                "navigation_phase"
+            ])
+        )
+    }
+
+    func testPresentationFocusFailureIdentityWithoutActiveSlotDoesNotCreateRuntime() {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let (controller, _, _, pool) = makeController(
+            profiles: [],
+            diagnostics: diagnostics
+        )
+
+        let fields = controller.presentationFocusFailureDiagnosticFields()
+
+        XCTAssertEqual(fields["active_slot_exists"], .bool(false))
+        XCTAssertEqual(fields["active_slot_id"], .null)
+        XCTAssertEqual(fields["resident_runtime_exists"], .bool(false))
+        XCTAssertEqual(fields["focus_runtime_availability"], .string("no_active_slot"))
+        XCTAssertEqual(pool.count, 0)
+    }
+
+    func testPresentationFocusFailureIdentityWithoutResidentRuntimeDoesNotCreateWebView() throws {
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: RuntimeDiagnosticInMemoryWriter()
+        )
+        let (controller, _, store, pool) = makeController(
+            profiles: [spec(name: "FocusFailureWithoutRuntime", url: "https://example.com/")],
+            diagnostics: diagnostics
+        )
+        let profile = try XCTUnwrap(store.activeProfile)
+        pool.release(slotID: profile.id)
+        XCTAssertEqual(pool.count, 0)
+
+        let fields = controller.presentationFocusFailureDiagnosticFields()
+
+        XCTAssertEqual(fields["active_slot_exists"], .bool(true))
+        XCTAssertEqual(fields["active_slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(fields["resident_runtime_exists"], .bool(false))
+        XCTAssertEqual(fields["focus_runtime_availability"], .string("no_resident_runtime"))
+        XCTAssertNil(fields["runtime_generation"])
+        XCTAssertNil(fields["webview_instance_id"])
+        XCTAssertEqual(pool.count, 0)
     }
 
     func testExternalVoiceNativeTransferAndWebFocusShareTrace() async throws {

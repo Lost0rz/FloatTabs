@@ -4901,16 +4901,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             if owner == .externalVoice {
                 presentationWebFocusPending = false
             }
+            var failureFields: [String: RuntimeDiagnosticValue] = [
+                "focus_generation": .integer(Int64(generation)),
+                "focus_owner": .string(owner.rawValue),
+                "reason": .string("dom_input_unavailable")
+            ]
+            failureFields.merge(presentationFocusFailureDiagnosticFields()) {
+                current, _ in current
+            }
             diagnostics.record(
                 event: "presentation_focus.failed",
                 level: .warning,
                 subsystem: "panel",
                 trace: trace,
-                fields: [
-                    "focus_generation": .integer(Int64(generation)),
-                    "focus_owner": .string(owner.rawValue),
-                    "reason": .string("dom_input_unavailable")
-                ]
+                fields: failureFields
             )
             return
         }
@@ -4928,6 +4932,41 @@ final class PanelController: NSObject, NSWindowDelegate {
             ]
         )
         completePresentationFocusIfReady()
+    }
+
+    func presentationFocusFailureDiagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        let activeSlotID = tabStore.activeTabID
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "active_slot_exists": .bool(activeSlotID != nil),
+            "active_slot_id": activeSlotID.map { .string($0.uuidString) } ?? .null
+        ]
+
+        guard let activeSlotID else {
+            fields["resident_runtime_exists"] = .bool(false)
+            fields["focus_runtime_availability"] = .string("no_active_slot")
+            return fields
+        }
+
+        guard webViewPool.existingWebView(for: activeSlotID) != nil else {
+            fields["resident_runtime_exists"] = .bool(false)
+            fields["focus_runtime_availability"] = .string("no_resident_runtime")
+            return fields
+        }
+
+        fields["resident_runtime_exists"] = .bool(true)
+        fields["focus_runtime_availability"] = .string("resident")
+        let runtimeFields = webViewPool.diagnosticSnapshotFields(for: activeSlotID)
+        for key in [
+            "runtime_generation",
+            "webview_instance_id",
+            "navigation_generation",
+            "navigation_phase"
+        ] {
+            if let value = runtimeFields[key] {
+                fields[key] = value
+            }
+        }
+        return fields
     }
 
     private func schedulePresentationWebInputFocus(
