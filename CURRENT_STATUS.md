@@ -6,52 +6,68 @@
 
 ## Mode
 
-**MODE: NO_ACTIVE_PRODUCT_TASK**
+**MODE: TAB_ATTENTION_VISUAL_REFINEMENT_ACTIVE**
 
-The shell-input refinement `FT-SHELL-INNER-DRAG-001` is completed and accepted on Real Mac. The outer shell perimeter and complete left Tab rail no longer acquire FloatTabs window movement; the existing inner Web-surface movement affordance remains the only supported movement owner.
+A new bounded product/UI task is active to simplify Tab color semantics and make unread ChatGPT attention visible at Retina/high-resolution scale.
 
 ## Verified baseline
 
-- Authorization-time `main`: `a4c9ad63831cc15ad75257976982b416e7101c3a`.
-- Task implementation semantic head: `b21a83fb40bf86a55c8aa6186150797166fc6981`.
-- Draft PR #123 — `Refine shell movement to inner Web surface only`.
-- Exact-head macOS CI: PASS.
-- Exact-head QA DMG: PASS.
-- Local Apple Silicon verification: focused XCTest 35 PASS; full XCTest 1,303 PASS; Debug and Release arm64 builds PASS.
-- Exact Release candidate was installed at `/Applications/FloatTabs.app`; running executable and embedded revision were verified as `b21a83fb40bf86a55c8aa6186150797166fc6981` before Real-Mac acceptance.
+- Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6` — PR #123 merge commit.
+- New task branch: `product/ft-tab-attention-highlight-001`.
+- The previous shell movement task is completed/merged and grants no further authority.
+- Diagnostics/history PR #124 remains a separate OPEN/Draft line of work pending later user acceptance; it is deliberately not a dependency/base for this task and must not be modified here.
 
-## Real-Mac acceptance
+## Audited current behavior
 
-User acceptance: PASS.
+Production source on `main` currently shows:
 
-The requested external movement change was manually verified on the exact installed Release build: the edge/perimeter interaction now behaves as intended. No regression requiring reopening the task was reported.
+- `ExternalWebAppTabView` renders unread/Ready state as a `6 pt` red dot over the favicon.
+- the active Tab background is derived from the assigned Browser Profile color using a strong profile-color blend;
+- Browser Profiles Settings expose per-profile color selection;
+- attention Ready/acknowledgement, residency protection, runtime color semantics, Tab selection, and Browser Profile session isolation are separate existing authorities.
 
-The accepted interaction contract remains:
+The small unread dot is insufficiently legible on high-resolution displays. Profile-specific Tab background color no longer serves a useful product purpose and competes with attention color as a visual signal.
+
+## Product direction
+
+The rail should have one clear visual hierarchy:
 
 ```text
-WINDOW MOVEMENT OWNER = INNER WEB-SURFACE MOVEMENT BAND ONLY
+NORMAL / ACTIVE TAB     = neutral surface; active selection remains identifiable by existing selection treatment
+UNREAD / READY TAB      = whole-tab attention-red surface
+BROWSER PROFILE COLOR   = no longer a Tab-rail visual signal
 ```
 
-- outer transparent shell perimeter is not a window-movement target;
-- complete left Tab rail / gaps / collapsed 12 pt leading inset are not window-movement targets;
-- `WebSourceEdgeDragView` remains the inner movement owner;
-- 76 pt expanded rail and 12 pt physical/layout geometry remain unchanged;
-- Tab click/reorder, fold/unfold, bottom-right resize, fullscreen ownership and persisted sizing remain protected.
+Unread/Ready visual treatment must be large enough to identify without resolving a tiny favicon badge. The whole visible Tab surface becomes the attention indicator. The old favicon red dot is removed from visible Tabs.
+
+Browser Profile color controls should be removed from the user-facing Browser Profiles Settings because the color no longer drives Tab presentation. Existing persisted color metadata is retained for compatibility in this task; no migration, rewrite, or Browser Profile/session data deletion is authorized.
+
+For compact overflow, a hidden unread Tab must still be discoverable. The overflow control should use the same whole-control attention treatment when any hidden Tab is unread. Individual overflow menu items may retain a bounded semantic unread marker/label because they are menu rows rather than rail Tabs.
+
+## Protected behavior
+
+This task is presentation-only. It must not change:
+
+- ChatGPT attention state transitions or acknowledgement timing;
+- unread source of truth or persistence semantics;
+- attention residency protection;
+- Tab selection/order/reorder behavior;
+- favicon resident/released full-color vs grayscale semantics;
+- Web runtime/navigation/focus/recovery;
+- Browser Profile identity, WebKit data stores, cookies, login/session data, or backup compatibility;
+- rail geometry, Dock magnification, fold/unfold, movement, resize, fullscreen, or speech state behavior.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-SHELL-INNER-DRAG-001
-TASK_STATE=COMPLETED
-TASK_BRANCH=product/ft-shell-inner-drag-001
-TASK_PR=123_DRAFT_PENDING_MERGE
-RUNTIME_ACCEPTANCE=PASS
+ACTIVE_PRODUCT_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
+TASK_STATE=ACTIVE
+TASK_BRANCH=product/ft-tab-attention-highlight-001
+TASK_PR=PENDING_DRAFT
+DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
-PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
-LONG_RUNNING_BASELINE_AUTHORIZED=NO
 ```
 
-## Deferred / next-product questions
+## Acceptance direction
 
-Long-running ChatGPT performance observation remains a separate product/diagnostics topic. No logging-retention implementation is authorized by the completed shell task. The next task should first audit the existing Diagnostics, benchmark measurement, retention/privacy and Settings preference mechanisms before defining any durable long-running log-retention feature.
+Automated and Real-Mac acceptance must establish that unread Tabs are unmistakable on Retina/high-resolution displays, Browser Profile assignment/color no longer changes Tab background, attention clears through the existing acknowledgement path, normal/active/hover states remain legible in Light and Dark appearance, and no protected runtime/profile/session behavior changes.
