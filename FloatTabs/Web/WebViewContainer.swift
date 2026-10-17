@@ -21,8 +21,8 @@ final class PanelRootView: NSView {
 
     var onResizeEnded: (() -> Void)?
 
-    init() {
-        externalControlZoneView = ExternalControlZoneView()
+    init(preferencesStore: AppPreferencesStore = AppPreferencesStore()) {
+        externalControlZoneView = ExternalControlZoneView(preferencesStore: preferencesStore)
         webViewportLayoutView = NSView()
         webPanelContainerView = WebPanelContainerView()
         perimeterDragView = PanelPerimeterDragView()

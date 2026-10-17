@@ -556,6 +556,143 @@ final class SpeechSettingsViewController: NSViewController {
 }
 
 @MainActor
+final class AttentionStyleChoiceButton: NSButton {
+    let style: TabAttentionStyle
+    let previewSurfaceView: AttentionStyleSurfaceView
+    private let previewIconView = NSImageView()
+    private let previewTitleLabel = NSTextField(labelWithString: "ChatGPT")
+    private let styleNameLabel: NSTextField
+    private let selectionMarkView = NSImageView()
+    private(set) var isSelectedStyle = false
+
+    init(style: TabAttentionStyle) {
+        self.style = style
+        styleNameLabel = NSTextField(labelWithString: style.displayName)
+        previewSurfaceView = AttentionStyleSurfaceView(
+            frame: .zero,
+            style: style,
+            showsAttention: true
+        )
+        super.init(frame: .zero)
+
+        setButtonType(.toggle)
+        title = ""
+        isBordered = false
+        imagePosition = .noImage
+        focusRingType = .default
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel("\(style.displayName) unread Tab attention style")
+
+        previewSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(previewSurfaceView)
+
+        previewIconView.translatesAutoresizingMaskIntoConstraints = false
+        previewIconView.image = NSImage(
+            systemSymbolName: "bubble.left.and.bubble.right.fill",
+            accessibilityDescription: "ChatGPT"
+        )
+        previewIconView.contentTintColor = style.configuration.foregroundColor
+        addSubview(previewIconView)
+
+        previewTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewTitleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        previewTitleLabel.textColor = style.configuration.foregroundColor
+        addSubview(previewTitleLabel)
+
+        styleNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        styleNameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        styleNameLabel.textColor = .labelColor
+        addSubview(styleNameLabel)
+
+        selectionMarkView.translatesAutoresizingMaskIntoConstraints = false
+        selectionMarkView.image = NSImage(
+            systemSymbolName: "checkmark.circle.fill",
+            accessibilityDescription: "Selected"
+        )
+        selectionMarkView.contentTintColor = .controlAccentColor
+        selectionMarkView.isHidden = true
+        addSubview(selectionMarkView)
+
+        NSLayoutConstraint.activate([
+            previewSurfaceView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            previewSurfaceView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            previewSurfaceView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            previewSurfaceView.heightAnchor.constraint(equalToConstant: 38),
+
+            previewIconView.leadingAnchor.constraint(
+                equalTo: previewSurfaceView.leadingAnchor,
+                constant: 10
+            ),
+            previewIconView.centerYAnchor.constraint(equalTo: previewSurfaceView.centerYAnchor),
+            previewIconView.widthAnchor.constraint(equalToConstant: 13),
+            previewIconView.heightAnchor.constraint(equalToConstant: 13),
+            previewTitleLabel.leadingAnchor.constraint(
+                equalTo: previewIconView.trailingAnchor,
+                constant: 5
+            ),
+            previewTitleLabel.centerYAnchor.constraint(equalTo: previewSurfaceView.centerYAnchor),
+            previewTitleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: previewSurfaceView.trailingAnchor,
+                constant: -8
+            ),
+
+            styleNameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
+            styleNameLabel.topAnchor.constraint(
+                equalTo: previewSurfaceView.bottomAnchor,
+                constant: 4
+            ),
+            styleNameLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            selectionMarkView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -11),
+            selectionMarkView.widthAnchor.constraint(equalToConstant: 13),
+            selectionMarkView.heightAnchor.constraint(equalToConstant: 13),
+            selectionMarkView.centerYAnchor.constraint(equalTo: styleNameLabel.centerYAnchor),
+            selectionMarkView.leadingAnchor.constraint(
+                greaterThanOrEqualTo: styleNameLabel.trailingAnchor,
+                constant: 6
+            ),
+        ])
+
+        setSelectedStyle(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
+            previewIconView.contentTintColor = style.configuration.foregroundColor
+            previewTitleLabel.textColor = style.configuration.foregroundColor
+            selectionMarkView.contentTintColor = .controlAccentColor
+            setSelectedStyle(isSelectedStyle)
+        }
+    }
+
+    func setSelectedStyle(_ selected: Bool) {
+        isSelectedStyle = selected
+        state = selected ? .on : .off
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = selected
+                ? NSColor.controlAccentColor.cgColor
+                : NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+            layer?.borderWidth = selected ? 2 : 1
+        }
+        selectionMarkView.isHidden = !selected
+        setAccessibilityValue(selected ? "Selected" : "Not selected")
+    }
+}
+
+@MainActor
 final class NotificationsSettingsViewController: NSViewController {
     private let preferencesStore: AppPreferencesStore
     private let assetStore: AttentionSoundAssetStore
@@ -570,6 +707,7 @@ final class NotificationsSettingsViewController: NSViewController {
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
+    private(set) var attentionStyleChoices: [AttentionStyleChoiceButton] = []
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -627,6 +765,16 @@ final class NotificationsSettingsViewController: NSViewController {
         removeSelectedAudioButton.target = self
         removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
+        let attentionStyleGrid = makeAttentionStyleGrid()
+        let attentionStyleSection = NSStackView(views: [
+            Self.titleLabel("Unread Tab Attention"),
+            Self.detailLabel("Choose a whole-Tab style. Previews respect Reduce Motion."),
+            attentionStyleGrid,
+        ])
+        attentionStyleSection.orientation = .vertical
+        attentionStyleSection.alignment = .leading
+        attentionStyleSection.spacing = 8
+
         let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
         let soundRow = makeRow(label: "Ready Sound", control: soundPopup)
         let audioActions = NSStackView(views: [importAudioButton, removeSelectedAudioButton])
@@ -649,6 +797,8 @@ final class NotificationsSettingsViewController: NSViewController {
             volumeRow,
             Self.spacer(4),
             previewButton,
+            Self.spacer(8),
+            attentionStyleSection,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -674,6 +824,11 @@ final class NotificationsSettingsViewController: NSViewController {
 
     @objc private func enabledChanged(_ sender: NSSwitch) {
         preferencesStore.attentionSoundEnabled = sender.state == .on
+    }
+
+    @objc private func attentionStyleChanged(_ sender: AttentionStyleChoiceButton) {
+        preferencesStore.attentionStyle = sender.style
+        synchronizeAttentionStyleChoices()
     }
 
     @objc private func soundChanged(_ sender: NSPopUpButton) {
@@ -814,6 +969,36 @@ final class NotificationsSettingsViewController: NSViewController {
         let volumePercent = preferencesStore.attentionSoundVolume * 100
         volumeSlider.doubleValue = volumePercent
         updateVolumeLabel(volumePercent)
+        synchronizeAttentionStyleChoices()
+    }
+
+    private func makeAttentionStyleGrid() -> NSView {
+        attentionStyleChoices = TabAttentionStyle.allCases.map { style in
+            let choice = AttentionStyleChoiceButton(style: style)
+            choice.target = self
+            choice.action = #selector(attentionStyleChanged(_:))
+            choice.widthAnchor.constraint(equalToConstant: 252).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 71).isActive = true
+            return choice
+        }
+        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
+            let row = NSStackView(views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)]))
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 12
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 8
+        return grid
+    }
+
+    private func synchronizeAttentionStyleChoices() {
+        attentionStyleChoices.forEach { choice in
+            choice.setSelectedStyle(choice.style == preferencesStore.attentionStyle)
+        }
     }
 
     private func configureSoundPopup() {

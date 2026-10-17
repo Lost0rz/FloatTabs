@@ -22,7 +22,10 @@ final class SettingsInformationArchitectureTests: XCTestCase {
             GlobalSettingsPage.browserPerformance.sections,
             [.browserProfiles, .performance]
         )
-        XCTAssertEqual(GlobalSettingsPage.audio.sections, [.readyAlerts, .speech])
+        XCTAssertEqual(
+            GlobalSettingsPage.audio.sections,
+            [.readyAlerts, .unreadTabAttention, .speech]
+        )
         XCTAssertEqual(GlobalSettingsPage.shortcuts.sections, [.shortcuts])
         XCTAssertEqual(
             GlobalSettingsPage.advanced.sections,

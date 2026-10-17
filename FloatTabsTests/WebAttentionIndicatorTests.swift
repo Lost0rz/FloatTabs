@@ -402,6 +402,210 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(beepCount, 0)
     }
 
+    func testAttentionStylesHaveDistinctSemanticPalettesAndAmbientCycles() {
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.displayName),
+            ["Signal", "Ember", "Aurora", "Spectrum"]
+        )
+        XCTAssertEqual(
+            Set(TabAttentionStyle.allCases.map { $0.configuration.paletteRole }).count,
+            4
+        )
+        XCTAssertNil(TabAttentionStyle.signal.configuration.animationCycleDuration)
+        XCTAssertFalse(TabAttentionStyle.signal.configuration.gentlyBreathes)
+
+        for style in TabAttentionStyle.allCases.dropFirst() {
+            let cycle = try! XCTUnwrap(style.configuration.animationCycleDuration)
+            XCTAssertTrue((3...6).contains(cycle))
+        }
+        XCTAssertTrue(TabAttentionStyle.spectrum.configuration.gentlyBreathes)
+        XCTAssertFalse(TabAttentionStyle.ember.configuration.gentlyBreathes)
+        XCTAssertFalse(TabAttentionStyle.aurora.configuration.gentlyBreathes)
+    }
+
+    func testNotificationsShowsFourSharedRendererPreviewsAndPersistsSelection() throws {
+        let suiteName = "FloatTabsTests.AttentionStyleSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: preferences,
+            attentionSoundPlayer: SoundPlayerSpy(),
+            availableSoundNames: ["Ping"]
+        )
+        controller.loadViewIfNeeded()
+
+        XCTAssertEqual(controller.attentionStyleChoices.map { $0.style.displayName }, [
+            "Signal", "Ember", "Aurora", "Spectrum",
+        ])
+        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).map(\.style), [.signal])
+        for choice in controller.attentionStyleChoices {
+            XCTAssertTrue(choice.previewSurfaceView.showsAttention)
+            XCTAssertEqual(
+                choice.previewSurfaceView.renderedPaletteRole,
+                choice.style.configuration.paletteRole
+            )
+        }
+
+        let spectrum = try XCTUnwrap(
+            controller.attentionStyleChoices.first(where: { $0.style == .spectrum })
+        )
+        spectrum.performClick(nil)
+
+        XCTAssertEqual(preferences.attentionStyle, .spectrum)
+        XCTAssertTrue(spectrum.isSelectedStyle)
+        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).count, 1)
+    }
+
+    func testAttentionStylePreferenceUpdatesVisibleTabAndOverflowImmediately() throws {
+        let suiteName = "FloatTabsTests.AttentionStyleProjection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        let (_, zone) = makeZoneHarness(height: 400, preferencesStore: preferences)
+        let profiles = (0..<9).map { index in
+            WebAppProfile(
+                order: index,
+                name: "Style Tab \(index)",
+                homeURL: URL(string: "https://example.com/style-\(index)")!
+            )
+        }
+        zone.apply(profiles: profiles, activeTabID: profiles.first?.id)
+        zone.layoutSubtreeIfNeeded()
+        let visibleID = try XCTUnwrap(zone.visibleTabIDs.first)
+        let hiddenID = try XCTUnwrap(zone.overflowTabIDs.first)
+        zone.setUnreadSlotIDs([visibleID, hiddenID])
+        zone.layoutSubtreeIfNeeded()
+
+        let tab = try XCTUnwrap(zone.tabView(for: visibleID))
+        let hiddenTab = try XCTUnwrap(zone.tabView(for: hiddenID))
+        let overflow = try XCTUnwrap(zone.subviews.compactMap { $0 as? RailOverflowControl }.first)
+        preferences.attentionStyle = .aurora
+
+        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
+        XCTAssertEqual(overflow.displayedAttentionStyle, .aurora)
+        XCTAssertTrue(tab.attentionSurfaceUsesSharedRenderer)
+        XCTAssertTrue(overflow.attentionSurfaceUsesSharedRenderer)
+        XCTAssertTrue(tab.isShowingUnreadResponse)
+        XCTAssertTrue(hiddenTab.isShowingUnreadResponse)
+        XCTAssertTrue(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(hiddenTab.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(overflow.attentionSurfaceMotionIsActive)
+        assertColor(
+            tab.unreadResponseColor,
+            equals: ExternalTabSurfacePalette.attentionFill(style: .aurora)
+        )
+
+        tab.setHovered(true)
+        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
+        XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
+
+        tab.setUnreadResponse(false)
+        XCTAssertFalse(tab.attentionSurfaceMotionIsActive)
+        XCTAssertFalse(tab.isShowingUnreadResponse)
+
+        zone.setUnreadSlotIDs([])
+        zone.layoutSubtreeIfNeeded()
+        XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
+    }
+
+    func testReduceMotionKeepsStaticAttentionGradientAndStopsLayerAnimations() {
+        let preview = AttentionStyleChoiceButton(style: .spectrum)
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.setAttentionStyle(.spectrum)
+        tab.setUnreadResponse(true)
+        let overflow = RailOverflowControl()
+        overflow.setItems([RailOverflowItem(slotID: UUID(), title: "Hidden", isUnread: true)])
+        overflow.setAttentionStyle(.spectrum)
+
+        preview.previewSurfaceView.setReduceMotionOverride(false)
+        tab.setAttentionStyleReduceMotionOverride(false)
+        overflow.setAttentionStyleReduceMotionOverride(false)
+
+        XCTAssertTrue(preview.previewSurfaceView.isContinuousMotionActive)
+        XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(overflow.attentionSurfaceMotionIsActive)
+
+        let surface = AttentionStyleSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 40, height: 32),
+            style: .spectrum,
+            showsAttention: true,
+            reduceMotionOverride: false
+        )
+        XCTAssertTrue(surface.isContinuousMotionActive)
+        XCTAssertEqual(surface.renderedGradientStopCount, 9)
+        XCTAssertEqual(surface.renderedAnimationCycleDuration, 4.5)
+
+        surface.setReduceMotionOverride(true)
+        preview.previewSurfaceView.setReduceMotionOverride(true)
+        tab.setAttentionStyleReduceMotionOverride(true)
+        overflow.setAttentionStyleReduceMotionOverride(true)
+
+        XCTAssertTrue(surface.isReduceMotionEnabled)
+        XCTAssertFalse(surface.isContinuousMotionActive)
+        XCTAssertTrue(surface.showsAttention)
+        XCTAssertFalse(surface.isHidden)
+        XCTAssertEqual(surface.renderedGradientStopCount, 9)
+        XCTAssertFalse(preview.previewSurfaceView.isContinuousMotionActive)
+        XCTAssertFalse(tab.attentionSurfaceMotionIsActive)
+        XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
+        XCTAssertTrue(tab.attentionSurfaceReduceMotionIsEnabled)
+        XCTAssertTrue(overflow.attentionSurfaceReduceMotionIsEnabled)
+    }
+
+    func testAllAttentionStyleForegroundsContrastWithTheirSurfaceInLightAndDark() throws {
+        for appearanceName in [NSAppearance.Name.aqua, NSAppearance.Name.darkAqua] {
+            for style in TabAttentionStyle.allCases {
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 80, height: 64),
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.appearance = NSAppearance(named: appearanceName)
+                let tab = ExternalWebAppTabView(slotID: UUID())
+                tab.frame = NSRect(x: 0, y: 0, width: 40, height: 32)
+                window.contentView = tab
+                defer { window.contentView = nil }
+
+                tab.update(
+                    profile: makeProfile(name: "GPT"),
+                    isActive: true,
+                    isResident: true
+                )
+                tab.setAttentionStyle(style)
+                tab.setUnreadResponse(true)
+                tab.layoutSubtreeIfNeeded()
+
+                let fill = try XCTUnwrap(tab.displayedTabFillColor)
+                let foreground = try XCTUnwrap(tab.displayedActiveTabForegroundColor)
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(foreground, fill),
+                    4.5,
+                    "\(style.displayName) must keep readable text in \(appearanceName)"
+                )
+                assertColor(tab.displayedIconTintColor, equals: foreground)
+            }
+        }
+    }
+
+    func testAttentionStylesDoNotRecolorFullColorResidentFavicons() {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        let favicon = NSImage(size: NSSize(width: 16, height: 16))
+        favicon.isTemplate = false
+        tab.setSourceIcon(favicon)
+        tab.setResident(true)
+
+        for style in TabAttentionStyle.allCases {
+            tab.setAttentionStyle(style)
+            tab.setUnreadResponse(true)
+
+            XCTAssertTrue(tab.displayedIcon === favicon)
+            XCTAssertNil(tab.displayedIconTintColor)
+        }
+    }
+
     func testUnreadAcknowledgementClearsButRuntimeResetPreservesUnreadResponse() {
         let coordinator = makeUnreadCoordinator()
         let profile = makeProfile(name: "GPT")
@@ -1258,9 +1462,18 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    private func makeZoneHarness(height: CGFloat = 820) -> (host: NSView, zone: ExternalControlZoneView) {
+    private func makeZoneHarness(
+        height: CGFloat = 820,
+        preferencesStore: AppPreferencesStore? = nil
+    ) -> (host: NSView, zone: ExternalControlZoneView) {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 76, height: height))
-        let zone = ExternalControlZoneView(frame: host.bounds)
+        let zone: ExternalControlZoneView
+        if let preferencesStore {
+            zone = ExternalControlZoneView(preferencesStore: preferencesStore)
+        } else {
+            zone = ExternalControlZoneView(frame: host.bounds)
+        }
+        zone.frame = host.bounds
         host.addSubview(zone)
         zone.layoutSubtreeIfNeeded()
         return (host, zone)

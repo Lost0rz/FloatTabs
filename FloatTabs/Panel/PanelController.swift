@@ -946,14 +946,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             ?? SpeechPlaybackSessionController(speechService: resolvedSpeechService)
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
-        self.preferencesStore = preferencesStore ?? AppPreferencesStore()
+        let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
+        self.preferencesStore = resolvedPreferencesStore
         let savedFrame = frameStore.loadFrame()
         restoredFrame = savedFrame
         preferredPanelSize = savedFrame?.size
 
         let initialFrame = NSRect(origin: .zero, size: PanelMetrics.defaultPanelSize)
         panel = FloatingPanel(contentRect: initialFrame)
-        rootView = PanelRootView()
+        rootView = PanelRootView(preferencesStore: resolvedPreferencesStore)
         sourceHostController = FullscreenSourceHostController(
             container: rootView.webPanelContainerView,
             resizeHandle: rootView.resizeHandleView,
