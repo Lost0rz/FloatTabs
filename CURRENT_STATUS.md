@@ -16,6 +16,7 @@ The shell-input refinement `FT-SHELL-INNER-DRAG-001` is completed and merged. Pr
 - PR #123 — `Refine shell movement to inner Web surface only`: `MERGED` after exact-head CI and Real-Mac acceptance.
 - Post-merge macOS CI for the new `main` was still running when this task was authorized; Gate 0 must observe it green before product-code mutation.
 - Active task branch: `product/ft-diagnostics-history-001`.
+- Active Draft PR: #124 — `Add optional long-term diagnostics history`.
 
 ## Diagnostics audit
 
@@ -92,7 +93,7 @@ ACTIVE_PRODUCT_TASK=FT-DIAG-HISTORY-001
 LAST_COMPLETED_TASK=FT-SHELL-INNER-DRAG-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-diagnostics-history-001
-TASK_PR=PENDING_DRAFT_PR
+TASK_PR=124_DRAFT
 ROOT_CAUSE=UNKNOWN
 PERFORMANCE_OPTIMIZATION_AUTHORIZED=NO
 LONG_RUNNING_BASELINE_AUTHORIZED=NO
