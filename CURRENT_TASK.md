@@ -17,6 +17,7 @@ Make unread/new-response state immediately recognizable on high-resolution displ
 - Attention semantics: current `WebAttentionCoordinator` / `ChatGPTUnreadResponseCoordinator` behavior and existing attention tests remain authoritative for state transitions/acknowledgement.
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
+- Draft PR #125 — `Make unread Tabs visually prominent`.
 - Diagnostics/history PR #124 is parked and out of scope; do not base this task on or mutate that branch/PR.
 
 ## Product / interaction contract

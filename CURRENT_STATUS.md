@@ -14,6 +14,7 @@ A new bounded product/UI task is active to simplify Tab color semantics and make
 
 - Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6` — PR #123 merge commit.
 - New task branch: `product/ft-tab-attention-highlight-001`.
+- Draft PR #125 — `Make unread Tabs visually prominent`.
 - The previous shell movement task is completed/merged and grants no further authority.
 - Diagnostics/history PR #124 remains a separate OPEN/Draft line of work pending later user acceptance; it is deliberately not a dependency/base for this task and must not be modified here.
 
@@ -63,7 +64,7 @@ This task is presentation-only. It must not change:
 ACTIVE_PRODUCT_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-tab-attention-highlight-001
-TASK_PR=PENDING_DRAFT
+TASK_PR=125_DRAFT
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
