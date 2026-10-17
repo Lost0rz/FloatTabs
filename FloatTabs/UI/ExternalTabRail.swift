@@ -329,8 +329,18 @@ final class AttentionStyleSurfaceView: NSView {
 
     func configure(
         style: TabAttentionStyle,
+        showsAttention: Bool
+    ) {
+        self.style = style
+        self.showsAttention = showsAttention
+        isHidden = !showsAttention
+        renderStyle()
+    }
+
+    private func configure(
+        style: TabAttentionStyle,
         showsAttention: Bool,
-        reduceMotionOverride: Bool? = nil
+        reduceMotionOverride: Bool?
     ) {
         self.style = style
         self.showsAttention = showsAttention
