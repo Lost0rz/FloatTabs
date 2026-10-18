@@ -1,55 +1,87 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-DIAG-HISTORY-REINTEGRATION-001`
-**Title:** Reintegrate long-term local diagnostics history onto the current v0.5.3 main baseline
-**Status:** `COMPLETED`
-**Mode:** `TERMINAL`
+**Task ID:** `FT-RELEASE-0.5.4-001`
+**Title:** Publish FloatTabs v0.5.4 Build 22 and close the release lifecycle
+**Status:** `ACTIVE`
+**Mode:** `RELEASE`
 
-> This task is terminal. It records completed product reintegration and grants no further product, cleanup, or release mutation authority.
+## Objective
 
-## Completed objective
+Publish the already accepted current `main` product baseline as **FloatTabs v0.5.4 / Build 22** through the existing GitHub Release pipeline, then reconcile the release lifecycle to a clean terminal state.
 
-The previously developed long-term local diagnostics/history functionality from historical Draft PR #124 was selectively reintegrated onto the current post-v0.5.3 main baseline without direct-merging the stale branch and without regressing later accepted product behavior.
+This is a release task only. It does not authorize new product behavior.
 
-## Delivery identity
+## Authority / baseline
 
-- Product PR: #130 — `Reintegrate long-term diagnostics history`.
-- Semantic implementation head: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
-- Final PR head: `b0c0759cd7f17b403a4b883097e205566fa38daf`.
-- Merge commit: `3db8718582e0b10510010b5c4c14044b9834a3d9`.
-- Historical source PR #124: CLOSED / UNMERGED / `SUPERSEDED`.
-- Abandoned lifecycle PR #129: CLOSED / UNMERGED.
+- Authorized source: `main@66de8f18c55d46cf882723c05f0afea8249d9e1b`.
+- Latest completed product task: `FT-DIAG-HISTORY-REINTEGRATION-001`.
+- Product PR #130: MERGED; Human Real-Mac acceptance PASS.
+- Historical PR #124: CLOSED / SUPERSEDED / UNMERGED.
+- Previous public release: `v0.5.3` / Build 21.
 
-## Accepted product outcome
+## Target release
 
-Advanced → Runtime Diagnostics contains:
+- Marketing version: `0.5.4`.
+- Build: `22`.
+- Tag: `v0.5.4`.
+- Distribution: Apple Silicon arm64.
+- Release notes: `docs/release/FloatTabs_v0.5.4.md`.
 
-- `Keep local diagnostic history`;
-- Standard / Verbose `Detail level`;
-- `Long-term performance observation`;
-- `Export Recent Diagnostics…`;
-- `Open Saved Logs Folder`;
-- bounded local sanitized JSONL history using the existing diagnostics pipeline;
-- low-frequency selected-Slot content-free health/performance checkpoints;
-- diagnostics-only runtime/WebView/navigation identity evidence and manual reload boundary;
-- fail-soft behavior with no remote telemetry or automatic AI analysis.
+## Authorized changes
 
-The current unread Tab Attention styles/palette/Settings layout, Browser Profile/session/WebKit ownership, focus/navigation/window/runtime behavior, and v0.5.3 version/build metadata were preserved.
+- `CURRENT_STATUS.md` / `CURRENT_TASK.md` lifecycle state;
+- `FloatTabs.xcodeproj/project.pbxproj` version/build metadata only;
+- `docs/release/FloatTabs_v0.5.4.md`;
+- temporary bounded release-preparation workflow is allowed only if it self-removes before the release PR final diff.
 
-## Verification record
+No production Swift/runtime/persistence behavior change is authorized.
 
-- Focused XCTest: 288 passed / 0 failed.
-- Full XCTest: 1,339 passed / 0 failed / 0 skipped.
-- Local Debug / Release arm64: PASS.
-- Final PR head macOS CI run `39100869890`: PASS.
-- Final PR head QA DMG run `39100869878`: PASS.
-- Human Real-Mac acceptance: PASS on 2026-10-18.
-- No destructive user-data, Browser Profile, Slot, session, cookie, WebKit, backup, or diagnostics migration/reset was performed.
+## Verification gates
 
-## Release boundary
+### Gate 0 — release identity
+- release branch starts from `main@66de8f18...`;
+- target is exactly `v0.5.4 / Build 22`;
+- no unrelated open product PR needs inclusion first.
 
-The latest public release remains `v0.5.3` / Build 21. PR #130 merged after that release lifecycle, so publishing the reintegrated diagnostics baseline requires a separate future release task.
+### Gate 1 — metadata / diff
+- Debug and Release app configurations resolve to `MARKETING_VERSION = 0.5.4` and `CURRENT_PROJECT_VERSION = 22`;
+- no unrelated `project.pbxproj` change;
+- release notes exist at the canonical path;
+- temporary preparation tooling leaves no final diff.
 
-## Terminal boundary
+### Gate 2 — hosted verification
+- exact release PR head macOS CI PASS;
+- exact release PR head QA DMG PASS;
+- final PR mergeable and no unresolved review blockers.
 
-No further mutation is authorized under this task. A new objective requires a new or reconciled `CURRENT_TASK.md` before implementation, release, cleanup, or diagnostics changes.
+### Gate 3 — publication
+- merge the accepted release PR;
+- automatic `Publish Release` workflow completes successfully on merged `main`;
+- GitHub Release `v0.5.4` is non-draft / non-prerelease;
+- release target matches the merged release source;
+- DMG, DMG SHA-256, dSYM ZIP and dSYM SHA-256 assets are present;
+- checksums/package verification in the publisher workflow PASS.
+
+### Gate 4 — lifecycle closeout
+- update `CURRENT_STATUS.md` / `CURRENT_TASK.md` to terminal state on main through a control-only closeout;
+- record release tag/version/build, merge source, publish workflow and public asset state;
+- no active product/release task remains.
+
+## Data safety / boundaries
+
+Do not reset, delete, migrate or rewrite user configuration, Browser Profiles, Web App Slots, website login/session/cookies, WebKit stores, backups, recovery data or existing diagnostics data.
+
+Do not change current attention, focus, navigation, window, runtime, diagnostics ownership or persistence semantics.
+
+## STOP conditions
+
+STOP rather than improvising if:
+- release metadata cannot be changed without unrelated project-file drift;
+- exact-head CI or QA DMG fails;
+- main moves with overlapping release/product work before merge;
+- publication attempts to overwrite an unexpected existing `v0.5.4` release;
+- release asset identity or target commit is ambiguous.
+
+## Completion
+
+Task completes only when `v0.5.4 / Build 22` is publicly downloadable from GitHub, publisher verification passes, controls are reconciled to terminal state, and no active release task remains.

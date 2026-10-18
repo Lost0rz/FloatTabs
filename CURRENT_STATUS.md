@@ -6,68 +6,57 @@
 
 ## Mode
 
-**MODE: NO_ACTIVE_PRODUCT_TASK**
+**MODE: RELEASE_0_5_4_ACTIVE**
 
-`FT-DIAG-HISTORY-REINTEGRATION-001` is completed. Long-term local diagnostics/history has been selectively reintegrated onto the current post-v0.5.3 main baseline and accepted on Real Mac.
+`FT-RELEASE-0.5.4-001` is active. The objective is to publish the accepted current `main` baseline as **FloatTabs v0.5.4 / Build 22** through the repository's existing GitHub Release pipeline, then close the release lifecycle.
 
-## Current main baseline
+## Authorized release baseline
 
-- Product PR #130: MERGED.
-- PR #130 final head: `b0c0759cd7f17b403a4b883097e205566fa38daf`.
-- PR #130 merge commit: `3db8718582e0b10510010b5c4c14044b9834a3d9`.
-- Semantic implementation head: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
-- Historical PR #124: CLOSED / UNMERGED / `SUPERSEDED` at `e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
-- Lifecycle PR #129: CLOSED / ABANDONED / UNMERGED.
+- Release source baseline: `main@66de8f18c55d46cf882723c05f0afea8249d9e1b`.
+- The baseline includes the accepted long-term local diagnostics/history reintegration from PR #130.
+- Human Real-Mac acceptance for that product baseline: PASS on 2026-10-18.
+- Historical PR #124 is CLOSED / SUPERSEDED / UNMERGED.
+- There are no open product PRs at release start.
+- Previous public release: `v0.5.3` / Build 21.
 
-## Accepted diagnostics baseline
+## Release target
 
-Advanced → Runtime Diagnostics now includes:
+- Version: `0.5.4`.
+- Build: `22`.
+- Tag: `v0.5.4`.
+- Distribution: Apple Silicon arm64.
+- Release scope is metadata, release notes, packaging/publication, and control-plane lifecycle only; no new product/runtime/persistence semantics are authorized.
 
-- `Keep local diagnostic history`;
-- `Detail level` with Standard / Verbose;
-- `Long-term performance observation`;
-- `Export Recent Diagnostics…`;
-- `Open Saved Logs Folder`;
-- bounded local sanitized JSONL history with the existing retention/rotation pipeline;
-- low-cadence selected-Slot content-free performance checkpoints;
-- diagnostics-only runtime/WebView/navigation identity evidence;
-- manual reload diagnostic boundary;
-- no second diagnostics writer, remote telemetry, automatic AI upload, or destructive persistence migration.
+## Required release gates
 
-Current later product behavior remains preserved, including the accepted unread Tab Attention styles/palette, Settings IA, Browser Profile/session ownership, focus/navigation/window/runtime behavior, and v0.5.3 app metadata.
+1. Bump app Debug/Release version metadata to `0.5.4 (22)` without unrelated project-file changes.
+2. Add `docs/release/FloatTabs_v0.5.4.md` describing the accepted long-term diagnostics-history delta and inherited accepted baseline.
+3. Release PR changes only control files, release metadata and release notes after temporary preparation tooling self-removes.
+4. Exact release PR head macOS CI: PASS.
+5. Exact release PR head QA DMG: PASS.
+6. Merge release PR only after final merge-readiness audit.
+7. `Publish Release` on merged `main`: PASS.
+8. GitHub Release `v0.5.4` exists as non-draft / non-prerelease with DMG, DMG SHA-256, dSYM ZIP, and dSYM SHA-256 assets.
+9. Reconcile `CURRENT_STATUS.md` / `CURRENT_TASK.md` to terminal release lifecycle state after publication.
 
-## Verification / acceptance
+## Data safety
 
-- Focused XCTest: 288 passed / 0 failed.
-- Full XCTest: 1,339 passed / 0 failed / 0 skipped.
-- Local Debug / Release arm64: PASS.
-- Final PR head GitHub macOS CI run `39100869890`: PASS.
-- Final PR head QA DMG run `39100869878`: PASS.
-- Human Real-Mac acceptance: PASS on 2026-10-18.
-- No Browser Profile, Slot, session, cookie, WebKit, backup, or diagnostics data was reset, deleted, or migrated.
-
-## Release boundary
-
-- Latest public GitHub Release remains `v0.5.3` / Build 21.
-- The reintegrated long-term diagnostics work was merged **after** the v0.5.3 release lifecycle completed, so the existing downloadable v0.5.3 release artifact does not represent this newer main baseline.
-- A future release task is required before publishing this reintegrated diagnostics baseline as a new downloadable version.
+- Do not reset, migrate, delete or rewrite Browser Profiles, Web App Slots, website session/cookie/WebKit data, backups, recovery data, or existing diagnostic history.
+- Do not change runtime/focus/navigation/recovery/attention ownership under this release task.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-DIAG-HISTORY-REINTEGRATION-001
-TASK_STATE=COMPLETED
-PR_130=MERGED
-PR_130_MERGE_COMMIT=3db8718582e0b10510010b5c4c14044b9834a3d9
-PR_124=CLOSED_SUPERSEDED_UNMERGED
-PR_129=CLOSED_ABANDONED_UNMERGED
-HUMAN_UI_ACCEPTANCE=PASS
+ACTIVE_PRODUCT_TASK=FT-RELEASE-0.5.4-001
+TASK_STATE=ACTIVE
+RELEASE_BASE_MAIN=66de8f18c55d46cf882723c05f0afea8249d9e1b
+TARGET_VERSION=0.5.4
+TARGET_BUILD=22
+TARGET_TAG=v0.5.4
 LATEST_RELEASE=v0.5.3_BUILD_21
-MAIN_AHEAD_OF_LATEST_RELEASE=YES
 ROOT_CAUSE=N/A
 ```
 
 ## Next
 
-No active product task is authorized. Start or reconcile a new `CURRENT_TASK.md` before any new product, release, cleanup, or diagnostics mutation. If the merged diagnostics baseline should become downloadable, open a new release task rather than modifying this completed lifecycle.
+Prepare the release metadata and notes on `release/ft-0.5.4`, open the release PR, complete exact-head verification, merge, wait for the automatic Publish Release workflow, verify the published assets, then perform post-release lifecycle closeout.
