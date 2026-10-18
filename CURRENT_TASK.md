@@ -99,6 +99,15 @@ Install exact Release candidate and confirm:
 - existing General/Audio/Browser settings and unread Tab Attention remain correct;
 - no user/session/Profile data regression.
 
+## Current execution evidence (2026-10-18)
+
+- Selective semantic implementation: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Focused XCTest: 288 passed / 0 failed. Full XCTest: 1,339 passed / 0 failed / 0 skipped.
+- Local Debug and Release arm64 builds: PASS. Exact semantic-head GitHub macOS CI and QA DMG: PASS for `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Installed Release candidate: `/Applications/FloatTabs.app`, version 0.5.3 / Build 21, exact embedded source revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`. Prior app bundle rollback: `/Applications/FloatTabs-rollback-ft-diag-reintegration-001.app`.
+- `HUMAN_UI_ACCEPTANCE=PENDING`; leave the candidate running. The human-owned visual / interaction checks above remain outstanding.
+- No destructive user-data operation or Browser Profile / session / WebKit operation was performed.
+
 ## STOP conditions
 
 STOP if reintegration requires:
