@@ -2,112 +2,67 @@
 
 **Task ID:** `FT-LIFECYCLE-CLOSEOUT-002`
 **Title:** Close terminal FloatTabs repository/workspace lifecycle debt after v0.5.4
-**Status:** `ACTIVE`
-**Mode:** `LIFECYCLE_RECONCILE`
+**Status:** `COMPLETED`
+**Mode:** `TERMINAL`
 
-## Objective
+> This task is terminal. It records the completed post-v0.5.4 lifecycle reconciliation and grants no further product, cleanup, branch-deletion, evidence-deletion or diagnostics mutation authority.
 
-Establish a clean, classified post-v0.5.4 development baseline by reconciling terminal Git worktrees, local branches, remote task branches, stashes and related retained workspace evidence without losing unique work or user/product data.
+## Completed objective
 
-This is lifecycle/governance work only. It does not authorize product/runtime/persistence behavior changes.
+The repository/workspace lifecycle was reconciled after FloatTabs v0.5.4 / Build 22. Terminal worktrees/branches were removed only after fresh local dependency and unique-work checks, while unique local commits and retained evidence were preserved explicitly.
 
-## Authority / starting facts
+## Remote baseline and verification
 
-- Starting remote main: `24df6a6538cd00789e85871d3a311d507d0eaa13`.
-- Latest public release: `v0.5.4` / Build 22; release lifecycle is terminal.
-- Open PRs at task start: 0.
-- Fresh remote branch inventory at task start: 33 branches including `main`.
-- `main` is canonical and must remain.
-- `phase2/pr-e-floattabs-durable-outbox-sender` corresponds to PR #102 `ARCHIVE_ONLY`; default disposition is retained/frozen historical evidence unless separately proven safe and explicitly authorized for removal.
-- The other 31 remote branches are terminal cleanup candidates based on remote PR/task lifecycle evidence, but remote evidence alone does not authorize deletion while local dependency/unique-work state is unknown.
+- Lifecycle authorization PR #134 merged to `main` at `842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6`.
+- Latest public release remains `v0.5.4` / Build 22.
+- Fresh Web verification after cleanup found **0 open PRs**.
+- Fresh Web verification found exactly **2 remote branches** before this terminal control PR:
+  - `main@842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6`;
+  - `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684`.
+- PR #102 is CLOSED / UNMERGED / `ARCHIVE_ONLY`; its branch remains intentionally retained/frozen historical evidence.
+- 32 terminal remote branches were deleted during the local reconciliation.
+- No tags or GitHub Releases were deleted.
 
-## Required sequence
+## Local closeout evidence
 
-### Gate 0 — fresh local topology / identity
+Execution receipt: `FT-LIFECYCLE-CLOSEOUT-002-LOCAL-01`.
 
-On the canonical development machine:
+### Worktrees
 
-- resolve the canonical FloatTabs repository root and storage authority;
-- fetch/prune remote refs without changing local work;
-- enumerate all registered worktrees and verify path existence;
-- enumerate all local branches, upstream/tracking state and HEADs;
-- inspect staged, unstaged and untracked state per relevant worktree;
-- identify local-only commits / ahead-of-remote branches;
-- enumerate git stashes;
-- identify retained rollback app bundles / project-controlled evidence bundles relevant to recent tasks where practical;
-- do not substitute old chat/receipt state for fresh local evidence.
+- Six registered worktrees were audited at start.
+- Four terminal worktrees were safely removed.
+- Two remain:
+  1. canonical `/Volumes/Jack-Dev/Projects/FloatTabs`, local `main@d685bbe7c035332ecc9b7ab6f8641660f813d42f`, clean;
+  2. `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001`, `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e`, clean and retained for benchmark evidence.
+- No stale worktree registrations remained.
+- Stashes: none.
 
-### Gate 1 — classify before mutation
+The canonical local `main` was intentionally left untouched rather than reset/overwritten. At audit completion it was 0 ahead / 78 behind fetched `origin/main@842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6`. A future state-changing task must first fast-forward/synchronize this clean checkout to then-current `origin/main` under its Gate 0; this known lag is not current write authority.
 
-Every task-relevant non-canonical workspace/ref must receive a disposition:
+### Preserved local evidence
 
-- terminal / removable;
-- retained frozen/read-only with explicit reason and release condition;
-- unique work preserved with evidence;
-- unresolved blocker.
+- `fix/residency-lifecycle-semantics@8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef` — 13 local-only commits absent from current origin branches; preserved in canonical repository storage; frozen/no current write authority.
+- `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e` — retained worktree/branch plus six ignored benchmark artifacts from the 2026-10-17 paired run; frozen/no current write authority.
+- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` — retained locally/remotely as PR #102 `ARCHIVE_ONLY` evidence; frozen/no current write authority.
 
-No overlapping write-capable predecessor may remain unclassified.
+All retained items have an explicit disposition. `UNCLASSIFIED_RELEVANT_WORKSPACES=0`.
 
-### Gate 2 — preserve unique work
+## Data safety
 
-Before any removal:
+- No production Swift, tests, runtime behavior, version/build metadata or release assets were changed by this lifecycle task.
+- No Browser Profile, Web App Slot, website login/session/cookie, WebKit store, backup, recovery data, diagnostics history or app preference was reset, deleted or migrated.
+- No force/reset/overwrite was used to manufacture a clean workspace.
+- Unique local work and performance evidence were preserved.
 
-- preserve any staged/unstaged/untracked/local-only unique work under the canonical project storage authority or another explicit project-local durable location;
-- record what was preserved and where;
-- do not use force/reset/stash overwrite to bypass ambiguity;
-- unknown ownership => STOP for that item.
+## Terminal boundary
 
-### Gate 3 — close safe local workspace debt
+No active product or lifecycle task remains after this control closeout merges.
 
-For each proven terminal, non-unique item:
+Any future state-changing work must:
 
-- remove obsolete registered worktrees using normal Git worktree commands;
-- remove obsolete local task branches when safe;
-- prune stale worktree metadata;
-- keep canonical main checkout intact;
-- do not delete rollback/evidence bundles whose retention value is not established.
+1. create/reconcile a new task authority;
+2. fetch current refs;
+3. fast-forward/synchronize the clean canonical local `main` checkout to current `origin/main` before construction;
+4. treat the retained residency commits, perf evidence/worktree and PR #102 archive branch as frozen evidence unless a separate explicit retention/deletion decision authorizes change.
 
-### Gate 4 — close safe remote branch debt
-
-Only after local dependency checks:
-
-- delete remote branches proven terminal and no longer needed by local worktrees/collaboration/evidence retention;
-- retain `main`;
-- retain `phase2/pr-e-floattabs-durable-outbox-sender` by default as frozen `ARCHIVE_ONLY` evidence under this task;
-- do not delete tags or GitHub Releases;
-- if any terminal remote branch must remain, record a concrete retention reason and release condition.
-
-### Gate 5 — verify final baseline
-
-After cleanup:
-
-- fetch/prune again;
-- enumerate remaining worktrees/local branches/remote branches/stashes;
-- verify canonical main checkout is usable and not overwritten/reset to achieve cleanliness;
-- report any intentionally retained frozen workspace/ref;
-- target zero unclassified task-relevant workspaces;
-- update `CURRENT_STATUS.md` / `CURRENT_TASK.md` with the actual evidence and terminal disposition through the normal protected-main flow.
-
-## Protected boundaries
-
-Do not modify production Swift, tests, runtime behavior, version/build metadata, release assets/tags, Browser Profiles, Web App Slots, website login/session/cookies, WebKit stores, backups, diagnostics history or application preferences.
-
-Do not remove the canonical repository or current user application bundle as part of Git workspace cleanup.
-
-## STOP conditions
-
-STOP the affected cleanup item rather than guessing if:
-
-- a local worktree/path cannot be tied to a verified repository/ref/task identity;
-- staged/unstaged/untracked/local-only work has unknown ownership or preservation status;
-- a local branch contains unique commits not proven integrated/preserved;
-- remote and local identities disagree materially;
-- cleanup would require force/reset/overwrite or destructive user-data action;
-- the evidence-retention need for an archive/rollback/forensic item is ambiguous;
-- another current writer/task appears during execution.
-
-One blocked item does not authorize deleting it; preserve it and report it. Continue only with clearly independent safe items when that does not obscure the blocker.
-
-## Completion
-
-The task completes only when remote and local lifecycle evidence has been reconciled, safe terminal workspace/ref debt is closed, intentionally retained evidence has explicit ownership/release conditions, zero task-relevant items remain unclassified, and the control plane is updated to a terminal lifecycle state.
+No further mutation is authorized under `FT-LIFECYCLE-CLOSEOUT-002`.
