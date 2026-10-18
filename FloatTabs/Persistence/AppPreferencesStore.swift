@@ -138,6 +138,9 @@ enum ColdWebViewReleaseOption: Int, CaseIterable, Equatable {
 }
 
 extension Notification.Name {
+    static let floatTabsAttentionStyleDidChange = Notification.Name(
+        "FloatTabs.attentionStyleDidChange"
+    )
     static let floatTabsAppearanceDidChange = Notification.Name(
         "FloatTabs.appearanceDidChange"
     )
@@ -159,6 +162,9 @@ extension Notification.Name {
     static let floatTabsRuntimeDiagnosticsModeDidChange = Notification.Name(
         "FloatTabs.runtimeDiagnosticsModeDidChange"
     )
+    static let floatTabsAttentionPaletteDidChange = Notification.Name(
+        "FloatTabs.attentionPaletteDidChange"
+    )
 }
 
 @MainActor
@@ -179,6 +185,8 @@ final class AppPreferencesStore {
         "FloatTabs.customAttentionSoundLibrary"
     static let selectedCustomAttentionSoundIDKey =
         "FloatTabs.selectedCustomAttentionSoundID"
+    static let attentionStyleKey = "FloatTabs.unreadTabAttentionStyle"
+    static let attentionPaletteKey = "FloatTabs.unreadTabAttentionPalette"
     static let websiteCacheAutomaticCleanupEnabledKey =
         "FloatTabs.websiteCache.automaticCleanupEnabled"
     static let websiteCacheRetentionDaysKey = "FloatTabs.websiteCache.retentionDays"
@@ -346,6 +354,58 @@ final class AppPreferencesStore {
             return defaults.bool(forKey: Self.attentionSoundEnabledKey)
         }
         set { defaults.set(newValue, forKey: Self.attentionSoundEnabledKey) }
+    }
+
+    var attentionStyle: TabAttentionStyle {
+        get { TabAttentionStyle.compatibleStoredValue(defaults.string(forKey: Self.attentionStyleKey)) }
+        set {
+            let oldRaw = defaults.string(forKey: Self.attentionStyleKey)
+            let previousStyle = attentionStyle
+            // Preserve the visual color family of old Draft presets as their
+            // old single value becomes two independent preferences.
+            if defaults.object(forKey: Self.attentionPaletteKey) == nil,
+               let oldPalette = TabAttentionPalette.compatibilityPalette(for: oldRaw) {
+                defaults.set(oldPalette.rawValue, forKey: Self.attentionPaletteKey)
+            }
+            guard newValue != previousStyle
+                    || defaults.string(forKey: Self.attentionStyleKey) != newValue.rawValue else {
+                return
+            }
+            defaults.set(newValue.rawValue, forKey: Self.attentionStyleKey)
+            guard newValue != previousStyle else { return }
+            NotificationCenter.default.post(
+                name: .floatTabsAttentionStyleDidChange,
+                object: self
+            )
+        }
+    }
+
+    var attentionPalette: TabAttentionPalette {
+        get {
+            if defaults.object(forKey: Self.attentionPaletteKey) != nil {
+                guard let raw = defaults.string(forKey: Self.attentionPaletteKey),
+                      let palette = TabAttentionPalette(rawValue: raw) else {
+                    return .red
+                }
+                return palette
+            }
+            return TabAttentionPalette.compatibilityPalette(
+                for: defaults.string(forKey: Self.attentionStyleKey)
+            ) ?? .red
+        }
+        set {
+            let previousPalette = attentionPalette
+            guard newValue != previousPalette
+                    || defaults.string(forKey: Self.attentionPaletteKey) != newValue.rawValue else {
+                return
+            }
+            defaults.set(newValue.rawValue, forKey: Self.attentionPaletteKey)
+            guard newValue != previousPalette else { return }
+            NotificationCenter.default.post(
+                name: .floatTabsAttentionPaletteDidChange,
+                object: self
+            )
+        }
     }
 
     var attentionSoundName: String {

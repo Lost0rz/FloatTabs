@@ -96,12 +96,17 @@ final class BrowserProfilePersistenceTests: XCTestCase {
         }
     }
 
-    func testV2CustomProfileAndSlotBindingRoundTrip() throws {
+    func testV2CustomProfileColorAndSlotBindingRoundTrip() throws {
         try withFileRepository { repository, _ in
+            let legacyColor = BrowserProfileColor(
+                preset: .custom,
+                customSRGBHex: "#3366CC"
+            )
             let browserProfile = BrowserProfile(
                 id: UUID(),
                 name: "Company",
-                createdAt: Date(timeIntervalSince1970: 100)
+                createdAt: Date(timeIntervalSince1970: 100),
+                color: legacyColor
             )
             let createdAt = Date(timeIntervalSince1970: 200)
             let slot = WebAppProfile(
@@ -122,7 +127,9 @@ final class BrowserProfilePersistenceTests: XCTestCase {
 
             try repository.save(state)
 
-            XCTAssertEqual(try repository.load(), state)
+            let reloaded = try repository.load()
+            XCTAssertEqual(reloaded, state)
+            XCTAssertEqual(reloaded.browserProfiles.first?.color, legacyColor)
         }
     }
 

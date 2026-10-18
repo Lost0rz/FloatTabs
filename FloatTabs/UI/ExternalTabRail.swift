@@ -96,6 +96,679 @@ struct ExternalTabMetrics {
         return systemControlNormalWidth
             + (systemControlHoverWidth - systemControlNormalWidth) * influence
     }
+
+    static func tabSurfacePath(in bounds: CGRect) -> CGPath {
+        let radius = tabRadius
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: bounds.maxX, y: bounds.minY))
+        path.addLine(to: CGPoint(x: bounds.minX + radius, y: bounds.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: bounds.minX, y: bounds.minY + radius),
+            control: CGPoint(x: bounds.minX, y: bounds.minY)
+        )
+        path.addLine(to: CGPoint(x: bounds.minX, y: bounds.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: bounds.minX + radius, y: bounds.maxY),
+            control: CGPoint(x: bounds.minX, y: bounds.maxY)
+        )
+        path.addLine(to: CGPoint(x: bounds.maxX, y: bounds.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+enum ExternalTabSurfacePalette {
+    static func neutralFill(isHovered: Bool) -> NSColor {
+        NSColor.controlBackgroundColor.withAlphaComponent(isHovered ? 0.96 : 0.82)
+    }
+
+    static func tabFill(
+        isUnread: Bool,
+        isHovered: Bool,
+        style: TabAttentionStyle = .dot
+    ) -> NSColor {
+        // Attention is projected on the separate shared effect renderer. The
+        // production Tab surface stays geometrically and visually neutral.
+        _ = isUnread
+        _ = style
+        return neutralFill(isHovered: isHovered)
+    }
+
+    static func attentionForeground(for background: NSColor) -> NSColor {
+        let luminance = relativeLuminance(background)
+        let blackContrast = (luminance + 0.05) / 0.05
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return blackContrast >= whiteContrast ? .black : .white
+    }
+
+    private static func relativeLuminance(_ color: NSColor) -> CGFloat {
+        guard let color = color.usingColorSpace(.sRGB) else { return 0 }
+        func linearized(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linearized(color.redComponent)
+            + 0.7152 * linearized(color.greenComponent)
+            + 0.0722 * linearized(color.blueComponent)
+    }
+}
+
+enum AttentionStyleEffect: String, CaseIterable, Identifiable, Equatable {
+    case dot
+    case beacon
+    case halo
+    case orbit
+    case pulse
+    case sweep
+
+    var id: String { rawValue }
+}
+
+enum TabAttentionPalette: String, CaseIterable, Identifiable, Equatable {
+    case red
+    case amber
+    case blue
+    case violet
+    case mint
+    case spectrum
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .red: "Red"
+        case .amber: "Amber"
+        case .blue: "Blue"
+        case .violet: "Violet"
+        case .mint: "Mint"
+        case .spectrum: "Spectrum"
+        }
+    }
+
+    var colors: [NSColor] {
+        switch self {
+        case .red: [.systemRed, .systemPink]
+        case .amber: [.systemOrange, .systemYellow]
+        case .blue: [.systemBlue, .systemTeal]
+        case .violet: [.systemPurple, .systemPink]
+        case .mint: [.systemTeal, .systemGreen]
+        case .spectrum:
+            [
+                .systemRed, .systemOrange, .systemYellow, .systemGreen,
+                .systemTeal, .systemBlue, .systemPurple, .systemPink,
+            ]
+        }
+    }
+
+    var representativeColor: NSColor {
+        switch self {
+        case .spectrum: .systemTeal
+        default: colors.first ?? .systemRed
+        }
+    }
+
+    static func compatibilityPalette(for previousStyle: String?) -> TabAttentionPalette? {
+        return switch previousStyle {
+        case "signal": .red
+        case "ember": .amber
+        case "aurora": .violet
+        case "spectrum": .spectrum
+        default: nil
+        }
+    }
+}
+
+enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
+    case dot
+    case beacon
+    case halo
+    case orbit
+    case pulse
+    case sweep
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .dot: "Dot"
+        case .beacon: "Beacon"
+        case .halo: "Halo"
+        case .orbit: "Orbit"
+        case .pulse: "Pulse"
+        case .sweep: "Sweep"
+        }
+    }
+
+    var effect: AttentionStyleEffect {
+        switch self {
+        case .dot: .dot
+        case .beacon: .beacon
+        case .halo: .halo
+        case .orbit: .orbit
+        case .pulse: .pulse
+        case .sweep: .sweep
+        }
+    }
+
+    var configuration: AttentionStyleConfiguration { configuration(for: .red) }
+
+    func configuration(for requestedPalette: TabAttentionPalette) -> AttentionStyleConfiguration {
+        let palette = self == .dot ? TabAttentionPalette.red : requestedPalette
+        let colors = palette.colors
+        let primary = palette.representativeColor
+        let cycle: TimeInterval?
+        switch self {
+        case .dot: cycle = nil
+        case .beacon: cycle = 4.0
+        case .halo: cycle = 4.8
+        case .orbit: cycle = 5.2
+        case .pulse: cycle = 4.4
+        case .sweep: cycle = 5.2
+        }
+        return AttentionStyleConfiguration(
+            effect: effect,
+            palette: palette,
+            paletteRole: "\(rawValue)-\(palette.rawValue)",
+            colors: colors,
+            representativeColor: primary,
+            foregroundColor: ExternalTabSurfacePalette.attentionForeground(
+                for: NSColor.controlBackgroundColor
+            ),
+            animationCycleDuration: cycle,
+            gentlyBreathes: self == .halo || self == .pulse
+        )
+    }
+
+    static func compatibleStoredValue(_ raw: String?) -> TabAttentionStyle {
+        guard let raw else { return .dot }
+        if let style = TabAttentionStyle(rawValue: raw) { return style }
+        return switch raw {
+        case "signal": .dot
+        case "ember": .pulse
+        case "aurora": .halo
+        case "spectrum": .pulse
+        default: .dot
+        }
+    }
+}
+
+struct AttentionStyleConfiguration {
+    let effect: AttentionStyleEffect
+    let palette: TabAttentionPalette
+    let paletteRole: String
+    let colors: [NSColor]
+    let representativeColor: NSColor
+    let foregroundColor: NSColor
+    let animationCycleDuration: TimeInterval?
+    let gentlyBreathes: Bool
+}
+
+enum AttentionSurfaceGeometry: Equatable {
+    case railTab
+    case overflowControl
+    case settingsPreview
+}
+
+/// Shared layer renderer for unread Tabs, overflow, and Settings previews.
+/// Effects stay inside a fixed surface; Sweep moves a broad band over a tinted base,
+/// while Orbit rotates color around a continuous static perimeter.
+@MainActor
+final class AttentionStyleSurfaceView: NSView {
+    private static let haloAnimationKey = "FloatTabs.attentionStyle.halo"
+    private static let beaconAnimationKey = "FloatTabs.attentionStyle.beacon"
+    private static let orbitAnimationKey = "FloatTabs.attentionStyle.orbit"
+    private static let pulseAnimationKey = "FloatTabs.attentionStyle.pulse"
+    private static let sweepStartAnimationKey = "FloatTabs.attentionStyle.sweepStart"
+    private static let sweepEndAnimationKey = "FloatTabs.attentionStyle.sweepEnd"
+    private static let animationEpoch = CACurrentMediaTime()
+
+    private let pulseLayer = CAGradientLayer()
+    private let pulseMaskLayer = CAShapeLayer()
+    private let sweepBaseLayer = CAGradientLayer()
+    private let sweepBaseMaskLayer = CAShapeLayer()
+    private let sweepLayer = CAGradientLayer()
+    private let sweepMaskLayer = CAShapeLayer()
+    private let beaconLayer = CAGradientLayer()
+    private let beaconMaskLayer = CAShapeLayer()
+    private let orbitLayer = CAGradientLayer()
+    private let orbitMaskLayer = CAShapeLayer()
+    private var reduceMotionOverride: Bool?
+    private var workspaceObserverInstalled = false
+    private var isPresentationVisible = true
+
+    private(set) var style: TabAttentionStyle = .dot
+    private(set) var palette: TabAttentionPalette = .red
+    private(set) var geometry: AttentionSurfaceGeometry
+    private(set) var showsAttention = false
+    private(set) var renderedEffect: AttentionStyleEffect = .dot
+    private(set) var renderedPalette: TabAttentionPalette = .red
+    private(set) var renderedPaletteRole = "dot-red"
+    private(set) var renderedAnimationCycleDuration: TimeInterval?
+
+    var isReduceMotionEnabled: Bool {
+        reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    var isContinuousMotionActive: Bool {
+        layer?.animation(forKey: Self.haloAnimationKey) != nil
+            || beaconLayer.animation(forKey: Self.beaconAnimationKey) != nil
+            || orbitLayer.animation(forKey: Self.orbitAnimationKey) != nil
+            || pulseLayer.animation(forKey: Self.pulseAnimationKey) != nil
+            || sweepLayer.animation(forKey: Self.sweepStartAnimationKey) != nil
+            || sweepLayer.animation(forKey: Self.sweepEndAnimationKey) != nil
+    }
+
+    var hasStaticRepresentativeEffect: Bool {
+        showsAttention && (isReduceMotionEnabled || !isContinuousMotionActive)
+    }
+
+    var usesSymmetricPreviewGeometry: Bool {
+        geometry == .settingsPreview
+    }
+
+    var renderedGradientStopCount: Int { pulseLayer.colors?.count ?? sweepLayer.colors?.count ?? 0 }
+
+    init(frame frameRect: NSRect, geometry: AttentionSurfaceGeometry = .railTab) {
+        self.geometry = geometry
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        layer?.backgroundColor = NSColor.clear.cgColor
+        pulseMaskLayer.fillColor = NSColor.white.cgColor
+        sweepBaseMaskLayer.fillColor = NSColor.white.cgColor
+        sweepMaskLayer.fillColor = NSColor.white.cgColor
+        beaconMaskLayer.fillColor = NSColor.white.cgColor
+        orbitMaskLayer.fillColor = NSColor.clear.cgColor
+        orbitMaskLayer.strokeColor = NSColor.white.cgColor
+        pulseLayer.mask = pulseMaskLayer
+        sweepBaseLayer.name = "FloatTabs.attention.sweep.base"
+        sweepBaseLayer.mask = sweepBaseMaskLayer
+        sweepLayer.name = "FloatTabs.attention.sweep.band"
+        sweepLayer.mask = sweepMaskLayer
+        beaconLayer.mask = beaconMaskLayer
+        orbitLayer.mask = orbitMaskLayer
+        for sublayer in [pulseLayer, sweepBaseLayer, sweepLayer, beaconLayer, orbitLayer] {
+            sublayer.actions = [
+                "colors": NSNull(), "locations": NSNull(), "startPoint": NSNull(),
+                "endPoint": NSNull(), "opacity": NSNull(), "path": NSNull(),
+                "lineDashPhase": NSNull(), "shadowOpacity": NSNull(),
+            ]
+            layer?.addSublayer(sublayer)
+        }
+        isHidden = true
+        renderStyle()
+    }
+
+    convenience init(
+        frame: NSRect = .zero,
+        style: TabAttentionStyle,
+        palette: TabAttentionPalette = .red,
+        showsAttention: Bool,
+        reduceMotionOverride: Bool? = nil,
+        geometry: AttentionSurfaceGeometry = .railTab
+    ) {
+        self.init(frame: frame, geometry: geometry)
+        self.reduceMotionOverride = reduceMotionOverride
+        configure(style: style, palette: palette, showsAttention: showsAttention)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(
+        style: TabAttentionStyle,
+        palette: TabAttentionPalette,
+        showsAttention: Bool
+    ) {
+        self.style = style
+        self.palette = palette
+        self.showsAttention = showsAttention
+        isHidden = !showsAttention
+        renderStyle()
+    }
+
+    func setReduceMotionOverride(_ value: Bool?) {
+        reduceMotionOverride = value
+        renderStyle()
+    }
+
+    func setPresentationVisible(_ visible: Bool) {
+        guard isPresentationVisible != visible else { return }
+        isPresentationVisible = visible
+        renderStyle()
+    }
+
+    override func layout() {
+        super.layout()
+        updateLayerGeometry()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            if workspaceObserverInstalled {
+                NSWorkspace.shared.notificationCenter.removeObserver(
+                    self,
+                    name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                    object: nil
+                )
+                workspaceObserverInstalled = false
+            }
+        } else if !workspaceObserverInstalled {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self,
+                selector: #selector(accessibilityDisplayOptionsDidChange(_:)),
+                name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                object: nil
+            )
+            workspaceObserverInstalled = true
+            renderStyle()
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        renderStyle()
+    }
+
+    @objc private func accessibilityDisplayOptionsDidChange(_ notification: Notification) {
+        renderStyle()
+    }
+
+    private func renderStyle() {
+        let configuration = style.configuration(for: palette)
+        renderedEffect = configuration.effect
+        renderedPalette = configuration.palette
+        renderedPaletteRole = configuration.paletteRole
+        renderedAnimationCycleDuration = configuration.animationCycleDuration
+        removeAllEffectAnimations()
+        resetEffectLayers()
+
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            updateLayerGeometry()
+            switch configuration.effect {
+            case .dot:
+                break
+            case .beacon:
+                beaconMaskLayer.path = beaconPath()
+                beaconLayer.colors = configuration.colors.map(\.cgColor)
+                beaconLayer.locations = evenlySpacedLocations(count: configuration.colors.count)
+                beaconLayer.startPoint = CGPoint(x: 0.5, y: 0)
+                beaconLayer.endPoint = CGPoint(x: 0.5, y: 1)
+                beaconLayer.shadowPath = beaconPath()
+                beaconLayer.shadowColor = configuration.representativeColor.cgColor
+                beaconLayer.shadowRadius = 4
+                beaconLayer.shadowOpacity = 0.55
+                beaconLayer.shadowOffset = .zero
+                beaconLayer.isHidden = false
+            case .halo:
+                layer?.shadowPath = surfacePath(in: bounds)
+                layer?.shadowColor = configuration.representativeColor.cgColor
+                layer?.shadowRadius = 11
+                layer?.shadowOffset = .zero
+                layer?.shadowOpacity = 0.42
+            case .orbit:
+                orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
+                orbitMaskLayer.lineWidth = 2.5
+                orbitMaskLayer.lineCap = .round
+                orbitMaskLayer.lineDashPattern = nil
+                orbitMaskLayer.lineDashPhase = 0
+                orbitLayer.type = .conic
+                orbitLayer.colors = configuration.colors.map(\.cgColor)
+                orbitLayer.locations = evenlySpacedLocations(count: configuration.colors.count)
+                orbitLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+                orbitLayer.endPoint = CGPoint(x: 0.5, y: 0.02)
+                orbitLayer.isHidden = false
+            case .pulse:
+                let colors = configuration.colors.map(\.cgColor)
+                pulseLayer.colors = colors.isEmpty ? [configuration.representativeColor.cgColor] : colors
+                pulseLayer.locations = evenlySpacedLocations(count: pulseLayer.colors?.count ?? 1)
+                pulseLayer.startPoint = CGPoint(x: 0, y: 0.5)
+                pulseLayer.endPoint = CGPoint(x: 1, y: 0.5)
+                pulseLayer.opacity = 0.22
+                pulseLayer.isHidden = false
+            case .sweep:
+                sweepBaseLayer.colors = configuration.colors.map {
+                    $0.withAlphaComponent(0.2).cgColor
+                }
+                sweepBaseLayer.locations = evenlySpacedLocations(
+                    count: sweepBaseLayer.colors?.count ?? 0
+                )
+                sweepBaseLayer.startPoint = CGPoint(x: 0, y: 0.5)
+                sweepBaseLayer.endPoint = CGPoint(x: 1, y: 0.5)
+                sweepBaseLayer.opacity = 0.82
+                sweepBaseLayer.isHidden = false
+                sweepLayer.colors = [NSColor.clear.cgColor]
+                    + configuration.colors.map { $0.withAlphaComponent(0.3).cgColor }
+                    + [
+                        configuration.representativeColor.withAlphaComponent(0.56).cgColor,
+                        NSColor.white.withAlphaComponent(0.64).cgColor,
+                        configuration.representativeColor.withAlphaComponent(0.42).cgColor,
+                        NSColor.clear.cgColor,
+                    ]
+                sweepLayer.locations = evenlySpacedLocations(count: sweepLayer.colors?.count ?? 1)
+                sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
+                sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
+                sweepLayer.isHidden = false
+            }
+        }
+
+        guard showsAttention,
+              isPresentationVisible,
+              !isReduceMotionEnabled,
+              let cycle = configuration.animationCycleDuration else { return }
+        addAnimation(for: configuration.effect, cycle: cycle)
+    }
+
+    private func addAnimation(for effect: AttentionStyleEffect, cycle: TimeInterval) {
+        switch effect {
+        case .dot:
+            break
+        case .beacon:
+            let breathe = CABasicAnimation(keyPath: "shadowOpacity")
+            breathe.fromValue = 0.34
+            breathe.toValue = 0.62
+            addSharedTiming(breathe, cycle: cycle, autoreverses: true)
+            beaconLayer.add(breathe, forKey: Self.beaconAnimationKey)
+        case .halo:
+            let breathe = CABasicAnimation(keyPath: "shadowOpacity")
+            breathe.fromValue = 0.32
+            breathe.toValue = 0.53
+            addSharedTiming(breathe, cycle: cycle, autoreverses: true)
+            layer?.add(breathe, forKey: Self.haloAnimationKey)
+        case .orbit:
+            let orbit = CAKeyframeAnimation(keyPath: "endPoint")
+            orbit.values = [
+                CGPoint(x: 0.5, y: 0.02),
+                CGPoint(x: 0.98, y: 0.5),
+                CGPoint(x: 0.5, y: 0.98),
+                CGPoint(x: 0.02, y: 0.5),
+                CGPoint(x: 0.5, y: 0.02),
+            ]
+            orbit.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+            orbit.duration = cycle
+            orbit.repeatCount = .infinity
+            orbit.beginTime = Self.animationEpoch
+            orbit.calculationMode = .linear
+            orbit.timingFunction = CAMediaTimingFunction(name: .linear)
+            orbit.isRemovedOnCompletion = false
+            orbitLayer.add(orbit, forKey: Self.orbitAnimationKey)
+        case .pulse:
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 0.16
+            breathe.toValue = 0.34
+            addSharedTiming(breathe, cycle: cycle, autoreverses: true)
+            pulseLayer.add(breathe, forKey: Self.pulseAnimationKey)
+        case .sweep:
+            let start = CAKeyframeAnimation(keyPath: "startPoint")
+            start.values = [
+                CGPoint(x: -0.42, y: 0.5),
+                CGPoint(x: 1.0, y: 0.5),
+                CGPoint(x: 1.0, y: 0.5),
+            ]
+            let end = CAKeyframeAnimation(keyPath: "endPoint")
+            end.values = [
+                CGPoint(x: 0, y: 0.5),
+                CGPoint(x: 1.42, y: 0.5),
+                CGPoint(x: 1.42, y: 0.5),
+            ]
+            for animation in [start, end] {
+                animation.keyTimes = [0, 0.34, 1]
+                animation.duration = cycle
+                animation.repeatCount = .infinity
+                animation.beginTime = Self.animationEpoch
+                animation.calculationMode = .linear
+                animation.isRemovedOnCompletion = false
+            }
+            sweepLayer.add(start, forKey: Self.sweepStartAnimationKey)
+            sweepLayer.add(end, forKey: Self.sweepEndAnimationKey)
+        }
+    }
+
+    private func addSharedTiming(
+        _ animation: CABasicAnimation,
+        cycle: TimeInterval,
+        autoreverses: Bool
+    ) {
+        animation.duration = cycle / (autoreverses ? 2 : 1)
+        animation.autoreverses = autoreverses
+        animation.repeatCount = .infinity
+        animation.beginTime = Self.animationEpoch
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        animation.isRemovedOnCompletion = false
+    }
+
+    private func removeAllEffectAnimations() {
+        layer?.removeAnimation(forKey: Self.haloAnimationKey)
+        beaconLayer.removeAnimation(forKey: Self.beaconAnimationKey)
+        orbitLayer.removeAnimation(forKey: Self.orbitAnimationKey)
+        pulseLayer.removeAnimation(forKey: Self.pulseAnimationKey)
+        sweepLayer.removeAnimation(forKey: Self.sweepStartAnimationKey)
+        sweepLayer.removeAnimation(forKey: Self.sweepEndAnimationKey)
+    }
+
+    private func resetEffectLayers() {
+        layer?.shadowOpacity = 0
+        layer?.shadowPath = nil
+        layer?.shadowColor = nil
+        layer?.shadowRadius = 0
+        layer?.shadowOffset = .zero
+        beaconLayer.isHidden = true
+        beaconLayer.shadowOpacity = 0
+        beaconLayer.shadowPath = nil
+        beaconLayer.shadowColor = nil
+        beaconLayer.shadowRadius = 0
+        orbitLayer.isHidden = true
+        orbitLayer.type = .axial
+        pulseLayer.isHidden = true
+        pulseLayer.opacity = 0
+        sweepBaseLayer.isHidden = true
+        sweepBaseLayer.opacity = 1
+        sweepLayer.isHidden = true
+        sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
+        sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
+    }
+
+    private func updateLayerGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if geometry == .settingsPreview {
+            let radius = min(bounds.height / 2, 14)
+            layer?.backgroundColor = NSColor.controlBackgroundColor
+                .withAlphaComponent(0.92)
+                .cgColor
+            layer?.cornerRadius = radius
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.34).cgColor
+            layer?.borderWidth = 1
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.cornerRadius = 0
+            layer?.borderWidth = 0
+        }
+        pulseLayer.frame = bounds
+        sweepBaseLayer.frame = bounds
+        sweepLayer.frame = bounds
+        pulseMaskLayer.frame = bounds
+        sweepBaseMaskLayer.frame = bounds
+        sweepMaskLayer.frame = bounds
+        pulseMaskLayer.path = surfacePath(in: bounds)
+        sweepBaseMaskLayer.path = surfacePath(in: bounds)
+        sweepMaskLayer.path = surfacePath(in: bounds)
+        beaconLayer.frame = bounds
+        orbitLayer.frame = bounds
+        beaconMaskLayer.frame = bounds
+        orbitMaskLayer.frame = bounds
+        if style == .beacon {
+            beaconMaskLayer.path = beaconPath()
+        } else if style == .orbit {
+            orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
+        } else if style == .halo {
+            layer?.shadowPath = surfacePath(in: bounds)
+        }
+        CATransaction.commit()
+    }
+
+    private func surfacePath(in rect: CGRect) -> CGPath {
+        return switch geometry {
+        case .railTab, .overflowControl:
+            ExternalTabMetrics.tabSurfacePath(in: rect)
+        case .settingsPreview: settingsPreviewPath(in: rect)
+        }
+    }
+
+    private func settingsPreviewPath(in rect: CGRect) -> CGPath {
+        let radius = min(rect.height / 2, 14)
+        return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+
+    private func beaconPath() -> CGPath {
+        let verticalInset = min(7, bounds.height * 0.18)
+        let leadingInset = geometry == .settingsPreview ? CGFloat(8) : CGFloat(4)
+        let accentWidth: CGFloat = 5.5
+        let rect = CGRect(
+            x: bounds.minX + leadingInset,
+            y: bounds.minY + verticalInset,
+            width: accentWidth,
+            height: max(0, bounds.height - verticalInset * 2)
+        )
+        return CGPath(roundedRect: rect, cornerWidth: accentWidth / 2, cornerHeight: accentWidth / 2, transform: nil)
+    }
+
+    private func evenlySpacedLocations(count: Int) -> [NSNumber] {
+        (0..<count).map { index in
+            NSNumber(value: Double(index) / Double(max(count - 1, 1)))
+        }
+    }
+}
+
+@MainActor
+final class ClassicUnreadDotView: NSView {
+    static let diameter: CGFloat = 11.5
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.systemRed.cgColor
+        layer?.cornerRadius = Self.diameter / 2
+        layer?.borderColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderWidth = 1.1
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.22
+        layer?.shadowRadius = 1.5
+        layer?.shadowOffset = NSSize(width: 0, height: -0.5)
+        isHidden = true
+        setAccessibilityElement(false)
+    }
+
+    convenience init() { self.init(frame: .zero) }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 }
 
 @MainActor
@@ -416,19 +1089,39 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
     var onSelect: ((UUID) -> Void)?
     var onPointerMoved: ((NSEvent) -> Void)?
 
+    private let attentionSurfaceView = AttentionStyleSurfaceView(
+        frame: .zero,
+        geometry: .overflowControl
+    )
     private let imageView = NSImageView()
-    private let unreadResponseLayer = CAShapeLayer()
+    private let unreadDotView = ClassicUnreadDotView()
     private var items: [RailOverflowItem] = []
+    private var attentionStyle: TabAttentionStyle = .dot
+    private var attentionPalette: TabAttentionPalette = .red
     private var trackingAreaReference: NSTrackingArea?
     private var isHoverInteractionSuspended = false
 
-    private static let unreadResponseDiameter: CGFloat = 6
-
     var menuItems: [RailOverflowItem] { items }
-    var isShowingUnreadResponse: Bool { !unreadResponseLayer.isHidden }
-    var unreadResponseFrame: NSRect { unreadResponseLayer.frame }
+    private var hasUnreadItem: Bool { items.contains(where: \.isUnread) }
+    var displayedAttentionStyle: TabAttentionStyle { attentionStyle }
+    var displayedAttentionPalette: TabAttentionPalette { attentionPalette }
+    var attentionSurfaceEffect: AttentionStyleEffect { attentionSurfaceView.renderedEffect }
+    var showsClassicUnreadDot: Bool { !unreadDotView.isHidden }
+    var attentionSurfaceUsesSharedRenderer: Bool {
+        attentionSurfaceView.renderedPaletteRole
+            == attentionStyle.configuration(for: attentionPalette).paletteRole
+    }
+    var attentionSurfaceMotionIsActive: Bool {
+        attentionSurfaceView.isContinuousMotionActive
+    }
+    var attentionSurfaceReduceMotionIsEnabled: Bool {
+        attentionSurfaceView.isReduceMotionEnabled
+    }
+    var isShowingUnreadResponse: Bool { hasUnreadItem }
+    var unreadResponseFrame: NSRect { hasUnreadItem ? bounds : .zero }
     var unreadResponseColor: NSColor? {
-        unreadResponseLayer.fillColor.flatMap(NSColor.init(cgColor:))
+        guard hasUnreadItem, let backgroundColor = layer?.backgroundColor else { return nil }
+        return NSColor(cgColor: backgroundColor)
     }
 
     override init(frame frameRect: NSRect) {
@@ -436,18 +1129,25 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
         wantsLayer = true
         layer?.cornerRadius = ExternalTabMetrics.tabRadius
         layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
-        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
-        unreadResponseLayer.isHidden = true
-        unreadResponseLayer.zPosition = 1
-        layer?.addSublayer(unreadResponseLayer)
-
+        attentionSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(attentionSurfaceView)
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
+        unreadDotView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(unreadDotView, positioned: .above, relativeTo: imageView)
         NSLayoutConstraint.activate([
+            attentionSurfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            attentionSurfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            attentionSurfaceView.topAnchor.constraint(equalTo: topAnchor),
+            attentionSurfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
             imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: 13),
             imageView.heightAnchor.constraint(equalToConstant: 13),
+            unreadDotView.centerXAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -1),
+            unreadDotView.centerYAnchor.constraint(equalTo: imageView.topAnchor, constant: 1),
+            unreadDotView.widthAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
+            unreadDotView.heightAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
         ])
         setAccessibilityRole(.button)
         refreshAppearance()
@@ -511,11 +1211,6 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
         )
     }
 
-    override func layout() {
-        super.layout()
-        updateUnreadResponseGeometry()
-    }
-
     func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -552,18 +1247,39 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             systemSymbolName: "ellipsis",
             accessibilityDescription: label
         )
-        unreadResponseLayer.isHidden = !items.contains(where: \.isUnread)
         setAccessibilityLabel(
-            items.contains(where: \.isUnread)
+            hasUnreadItem
                 ? "\(label) · Unread response"
                 : label
         )
         refreshAppearance()
     }
 
+    func setAttentionStyle(_ style: TabAttentionStyle, palette: TabAttentionPalette? = nil) {
+        let nextPalette = palette ?? attentionPalette
+        guard attentionStyle != style || attentionPalette != nextPalette else { return }
+        attentionStyle = style
+        attentionPalette = nextPalette
+        refreshAppearance()
+    }
+
+    func setAttentionStyleReduceMotionOverride(_ value: Bool?) {
+        attentionSurfaceView.setReduceMotionOverride(value)
+    }
+
+    func setAttentionPresentationVisible(_ visible: Bool) {
+        attentionSurfaceView.setPresentationVisible(visible)
+    }
+
     func refreshAppearance(isHovered: Bool = false) {
-        imageView.contentTintColor = .labelColor
         effectiveAppearance.performAsCurrentDrawingAppearance {
+            attentionSurfaceView.configure(
+                style: attentionStyle,
+                palette: attentionPalette,
+                showsAttention: hasUnreadItem
+            )
+            unreadDotView.isHidden = !(hasUnreadItem && attentionStyle == .dot)
+            imageView.contentTintColor = .labelColor
             layer?.backgroundColor = NSColor.controlBackgroundColor
                 .blended(withFraction: isHovered ? 0.12 : 0.03, of: .labelColor)?
                 .withAlphaComponent(0.94)
@@ -586,23 +1302,6 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             return
         }
         onSelect?(slotID)
-    }
-
-    private func updateUnreadResponseGeometry() {
-        guard layer != nil else { return }
-        let imageFrame = imageView.convert(imageView.bounds, to: self)
-        let diameter = Self.unreadResponseDiameter
-        let frame = NSRect(
-            x: imageFrame.maxX - diameter * 0.75,
-            y: imageFrame.maxY - diameter * 0.75,
-            width: diameter,
-            height: diameter
-        )
-        unreadResponseLayer.frame = frame
-        unreadResponseLayer.path = CGPath(
-            ellipseIn: CGRect(origin: .zero, size: frame.size),
-            transform: nil
-        )
     }
 
     private static func unreadMarkerImage() -> NSImage {
@@ -645,6 +1344,9 @@ final class ExternalControlZoneView: NSView {
     private var activeTabID: UUID?
     private var residentSlotIDs = Set<UUID>()
     private var unreadSlotIDs = Set<UUID>()
+    private var attentionStyle: TabAttentionStyle = .dot
+    private var attentionPalette: TabAttentionPalette = .red
+    private var attentionStylePreferencesStore: AppPreferencesStore?
     private var tabViews: [UUID: ExternalWebAppTabView] = [:]
     private var previewOrderIDs: [UUID]?
     private let addControl = AddWebAppControl()
@@ -722,6 +1424,24 @@ final class ExternalControlZoneView: NSView {
 
     convenience init() {
         self.init(frame: .zero)
+    }
+
+    convenience init(preferencesStore: AppPreferencesStore) {
+        self.init(frame: .zero)
+        attentionStylePreferencesStore = preferencesStore
+        setAttentionStyle(preferencesStore.attentionStyle, palette: preferencesStore.attentionPalette)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(attentionStylePreferenceDidChange(_:)),
+            name: .floatTabsAttentionStyleDidChange,
+            object: preferencesStore
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(attentionPalettePreferenceDidChange(_:)),
+            name: .floatTabsAttentionPaletteDidChange,
+            object: preferencesStore
+        )
     }
 
     @available(*, unavailable)
@@ -841,6 +1561,25 @@ final class ExternalControlZoneView: NSView {
 
     func setPinned(_ isPinned: Bool) {
         pinControl.setPinned(isPinned)
+    }
+
+    func setAttentionStyle(_ style: TabAttentionStyle, palette: TabAttentionPalette? = nil) {
+        let nextPalette = palette ?? attentionPalette
+        guard attentionStyle != style || attentionPalette != nextPalette else { return }
+        attentionStyle = style
+        attentionPalette = nextPalette
+        tabViews.values.forEach { $0.setAttentionStyle(style, palette: nextPalette) }
+        tabOverflowControl.setAttentionStyle(style, palette: nextPalette)
+    }
+
+    @objc private func attentionStylePreferenceDidChange(_ notification: Notification) {
+        guard let preferencesStore = attentionStylePreferencesStore else { return }
+        setAttentionStyle(preferencesStore.attentionStyle, palette: preferencesStore.attentionPalette)
+    }
+
+    @objc private func attentionPalettePreferenceDidChange(_ notification: Notification) {
+        guard let preferencesStore = attentionStylePreferencesStore else { return }
+        setAttentionStyle(preferencesStore.attentionStyle, palette: preferencesStore.attentionPalette)
     }
 
     func setWindowSizeEditingEnabled(_ enabled: Bool) {
@@ -1110,15 +1849,22 @@ final class ExternalControlZoneView: NSView {
 
     private func finishRailVisibility(generation: Int, collapsed: Bool) {
         guard generation == railVisibilityGeneration else { return }
-        railContentViews.forEach {
-            $0.alphaValue = collapsed ? 0 : 1
-            $0.isHidden = collapsed || isHiddenByOverflow($0)
+        railContentViews.forEach { view in
+            view.alphaValue = collapsed ? 0 : 1
+            let isHidden = collapsed || isHiddenByOverflow(view)
+            view.isHidden = isHidden
+            if let tab = view as? ExternalWebAppTabView {
+                tab.setAttentionPresentationVisible(!isHidden)
+            } else if view === tabOverflowControl {
+                tabOverflowControl.setAttentionPresentationVisible(!isHidden)
+            }
         }
         onActiveTabGeometryChange?()
     }
 
     private func makeTabView(for id: UUID) -> ExternalWebAppTabView {
         let view = ExternalWebAppTabView(slotID: id)
+        view.setAttentionStyle(attentionStyle, palette: attentionPalette)
         view.setHoverInteractionSuspended(isModalPresentationActive)
         view.setWindowSizeEditingEnabled(windowSizeEditingEnabled)
         view.setBrowserProfileMenuSnapshot(
@@ -1128,6 +1874,7 @@ final class ExternalControlZoneView: NSView {
         )
         view.alphaValue = isRailCollapsed ? 0 : 1
         view.isHidden = isRailCollapsed
+        view.setAttentionPresentationVisible(!isRailCollapsed)
         tabViews[id] = view
         addSubview(view, positioned: .above, relativeTo: addControl)
 
@@ -1277,10 +2024,12 @@ final class ExternalControlZoneView: NSView {
                 guard visibleSet.contains(id) else {
                     tab.setDockInfluence(0)
                     tab.isHidden = self.isRailCollapsed || overflowIDs.contains(id)
+                    tab.setAttentionPresentationVisible(!tab.isHidden)
                     self.setFrame(.zero, for: tab, animated: animated)
                     continue
                 }
                 tab.isHidden = self.isRailCollapsed
+                tab.setAttentionPresentationVisible(!tab.isHidden)
                 let centerY = y + ExternalTabMetrics.tabHeight / 2
                 let influence = self.pointerY.map {
                     ExternalTabMetrics.dockInfluence(forDistance: $0 - centerY)
@@ -1313,9 +2062,13 @@ final class ExternalControlZoneView: NSView {
                     animated: animated
                 )
                 self.tabOverflowControl.isHidden = self.isRailCollapsed
+                self.tabOverflowControl.setAttentionPresentationVisible(
+                    !self.tabOverflowControl.isHidden
+                )
                 y += ExternalTabMetrics.systemControlHeight + ExternalTabMetrics.addGap
             } else {
                 self.tabOverflowControl.isHidden = true
+                self.tabOverflowControl.setAttentionPresentationVisible(false)
                 self.setFrame(.zero, for: self.tabOverflowControl, animated: animated)
             }
 
@@ -1750,20 +2503,6 @@ enum ExternalTabVisualPalette {
 }
 
 @MainActor
-extension BrowserProfileColor {
-    var appKitColor: NSColor {
-        switch preset {
-        case .custom:
-            return customSRGBHex
-                .flatMap(AppPreferencesStore.color(fromHex:))
-                ?? .systemBlue
-        default:
-            return PanelBorderTheme(rawValue: preset.rawValue)?.solidColor ?? .systemBlue
-        }
-    }
-}
-
-@MainActor
 final class WebsiteFaviconProvider {
     typealias DataLoader = @MainActor @Sendable (
         URLRequest
@@ -2062,11 +2801,15 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var onDragChanged: ((UUID, NSEvent) -> Void)?
     var onDragEnded: ((UUID) -> Void)?
 
+    private let attentionSurfaceView = AttentionStyleSurfaceView(
+        frame: .zero,
+        geometry: .railTab
+    )
     private let iconView = NSImageView()
+    private let unreadDotView = ClassicUnreadDotView()
     private let label = NSTextField(labelWithString: "")
     private let speechBadgeView = NSImageView()
     private let shapeLayer = CAShapeLayer()
-    private let unreadResponseLayer = CAShapeLayer()
     private var trackingAreaReference: NSTrackingArea?
     private var isActive = false
     private var isResident = false
@@ -2081,7 +2824,6 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var backgroundMediaPolicy: BackgroundMediaPolicy = .pauseWhenInactive
     private var webAppName = ""
     private var browserProfileID: UUID?
-    private var browserProfileColor: BrowserProfileColor = .default
     private var browserProfileMenuOptions: [BrowserProfileMenuOption] = [.defaultProfile()]
     private var browserProfileAssignmentEnabled = true
     private var browserProfileDuplicationEnabled = true
@@ -2090,10 +2832,11 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private var grayscaleIcon: NSImage?
     private var isAutoSpeakSource = false
     private var isUnreadResponse = false
+    private var attentionStyle: TabAttentionStyle = .dot
+    private var attentionPalette: TabAttentionPalette = .red
     private var speechPlaybackState: SpeechPlaybackState = .idle
 
     private static let grayscaleContext = CIContext(options: nil)
-    private static let unreadResponseDiameter: CGFloat = 6
 
     var preferredWidth: CGFloat {
         // Resting tabs are icon-only. Only the hovered row fully expands;
@@ -2107,16 +2850,15 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
     var displayedIcon: NSImage? { iconView.image }
-    var isShowingUnreadResponse: Bool { !unreadResponseLayer.isHidden }
-    var unreadResponseFrame: NSRect { unreadResponseLayer.frame }
+    var isShowingUnreadResponse: Bool { isUnreadResponse }
+    var unreadResponseFrame: NSRect { isUnreadResponse ? bounds : .zero }
     var iconFrame: NSRect { iconView.frame }
     var unreadResponseColor: NSColor? {
-        unreadResponseLayer.fillColor.flatMap(NSColor.init(cgColor:))
+        isUnreadResponse ? displayedTabFillColor : nil
     }
-    var displayedBrowserProfileColor: BrowserProfileColor { browserProfileColor }
     var displayedActiveTabFillColor: NSColor? {
         guard isActive else { return nil }
-        return shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
+        return displayedTabFillColor
     }
     var displayedTabFillColor: NSColor? {
         shapeLayer.fillColor.flatMap(NSColor.init(cgColor:))
@@ -2126,6 +2868,20 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         return label.textColor
     }
     var displayedIconTintColor: NSColor? { iconView.contentTintColor }
+    var displayedAttentionStyle: TabAttentionStyle { attentionStyle }
+    var displayedAttentionPalette: TabAttentionPalette { attentionPalette }
+    var attentionSurfaceEffect: AttentionStyleEffect { attentionSurfaceView.renderedEffect }
+    var showsClassicUnreadDot: Bool { !unreadDotView.isHidden }
+    var attentionSurfaceUsesSharedRenderer: Bool {
+        attentionSurfaceView.renderedPaletteRole
+            == attentionStyle.configuration(for: attentionPalette).paletteRole
+    }
+    var attentionSurfaceMotionIsActive: Bool {
+        attentionSurfaceView.isContinuousMotionActive
+    }
+    var attentionSurfaceReduceMotionIsEnabled: Bool {
+        attentionSurfaceView.isReduceMotionEnabled
+    }
     var isShowingAutoSpeakBadge: Bool { isAutoSpeakSource }
     var isShowingSpeakingBadge: Bool { speechPlaybackState == .speaking }
     var isShowingPausedSpeechBadge: Bool { speechPlaybackState == .paused }
@@ -2137,15 +2893,14 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         wantsLayer = true
         layer?.masksToBounds = false
         layer?.addSublayer(shapeLayer)
-        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
-        unreadResponseLayer.isHidden = true
-        unreadResponseLayer.zPosition = 1
-        layer?.addSublayer(unreadResponseLayer)
-
+        attentionSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(attentionSurfaceView)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
         setSourceIcon(Self.fallbackIcon())
         addSubview(iconView)
+        unreadDotView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(unreadDotView, positioned: .above, relativeTo: iconView)
 
         setAccessibilityRole(.button)
 
@@ -2175,10 +2930,18 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         labelTrailingConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
+            attentionSurfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            attentionSurfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            attentionSurfaceView.topAnchor.constraint(equalTo: topAnchor),
+            attentionSurfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 16),
             iconView.heightAnchor.constraint(equalToConstant: 16),
+            unreadDotView.centerXAnchor.constraint(equalTo: iconView.trailingAnchor, constant: -1),
+            unreadDotView.centerYAnchor.constraint(equalTo: iconView.topAnchor, constant: 1),
+            unreadDotView.widthAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
+            unreadDotView.heightAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             labelTrailingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -2214,7 +2977,6 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         // the registered arrow rect always covers the expanded row.
         window?.invalidateCursorRects(for: self)
         updateShape()
-        updateUnreadResponseGeometry()
     }
 
     override func resetCursorRects() {
@@ -2253,8 +3015,24 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     func setUnreadResponse(_ unread: Bool) {
         guard isUnreadResponse != unread else { return }
         isUnreadResponse = unread
-        unreadResponseLayer.isHidden = !unread
+        updateAppearance()
         updateAccessibilityLabel()
+    }
+
+    func setAttentionStyle(_ style: TabAttentionStyle, palette: TabAttentionPalette? = nil) {
+        let nextPalette = palette ?? attentionPalette
+        guard attentionStyle != style || attentionPalette != nextPalette else { return }
+        attentionStyle = style
+        attentionPalette = nextPalette
+        updateAppearance()
+    }
+
+    func setAttentionStyleReduceMotionOverride(_ value: Bool?) {
+        attentionSurfaceView.setReduceMotionOverride(value)
+    }
+
+    func setAttentionPresentationVisible(_ visible: Bool) {
+        attentionSurfaceView.setPresentationVisible(visible)
     }
 
     func setSpeechState(
@@ -2673,45 +3451,19 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     private func applyResolvedAppearance() {
         label.isHidden = !isHovered
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
-        let activeBackground = Self.activeBackgroundColor(
-            profileColor: browserProfileColor.appKitColor
+        let attentionConfiguration = attentionStyle.configuration(for: attentionPalette)
+        let attentionForeground = attentionConfiguration.foregroundColor
+        label.textColor = isUnreadResponse
+            ? attentionForeground
+            : (isActive ? .labelColor : .secondaryLabelColor)
+        applyIconAppearance(attentionForeground: attentionForeground)
+        attentionSurfaceView.configure(
+            style: attentionStyle,
+            palette: attentionPalette,
+            showsAttention: isUnreadResponse
         )
-        label.textColor = isActive
-            ? Self.activeForegroundColor(for: activeBackground)
-            : .secondaryLabelColor
-        applyIconAppearance(activeBackground: activeBackground)
-        updateShape(activeBackground: activeBackground)
-        unreadResponseLayer.fillColor = NSColor.systemRed.cgColor
-        updateUnreadResponseGeometry()
-    }
-
-    static func activeBackgroundColor(
-        profileColor: NSColor,
-        baseColor: NSColor = .windowBackgroundColor
-    ) -> NSColor {
-        baseColor.blended(withFraction: 0.80, of: profileColor) ?? profileColor
-    }
-
-    private static func activeForegroundColor(for background: NSColor) -> NSColor {
-        guard let color = background.usingColorSpace(.sRGB) else {
-            return .white
-        }
-
-        func linearized(_ component: CGFloat) -> CGFloat {
-            component <= 0.04045
-                ? component / 12.92
-                : pow((component + 0.055) / 1.055, 2.4)
-        }
-
-        let luminance =
-            0.2126 * linearized(color.redComponent)
-            + 0.7152 * linearized(color.greenComponent)
-            + 0.0722 * linearized(color.blueComponent)
-
-        // The final 80% profile-color blend keeps bright Yellow readable with
-        // dark text while dark Graphite and Purple remain readable with light
-        // text.
-        return luminance >= 0.35 ? .black : .white
+        unreadDotView.isHidden = !(isUnreadResponse && attentionStyle == .dot)
+        updateShape()
     }
 
     private var browserProfileDisplayName: String {
@@ -2729,9 +3481,6 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     private func refreshProfilePresentation() {
-        browserProfileColor = browserProfileMenuOptions.first(where: {
-            $0.id == browserProfileID
-        })?.color ?? .default
         label.stringValue = displayedPresentationTitle
         updateAccessibilityLabel()
     }
@@ -2798,7 +3547,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         speechBadgeView.contentTintColor = tint
     }
 
-    private func setSourceIcon(_ image: NSImage?) {
+    func setSourceIcon(_ image: NSImage?) {
         sourceIcon = image
         if let image, !image.isTemplate {
             grayscaleIcon = Self.grayscaleImage(from: image)
@@ -2808,12 +3557,10 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         applyIconAppearance()
     }
 
-    private func applyIconAppearance(activeBackground: NSColor? = nil) {
+    private func applyIconAppearance(attentionForeground: NSColor? = nil) {
         let base = sourceIcon ?? Self.fallbackIcon()
-        let resolvedActiveBackground = activeBackground
-            ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
-        let templateTint = isActive
-            ? Self.activeForegroundColor(for: resolvedActiveBackground)
+        let templateTint = isUnreadResponse
+            ? (attentionForeground ?? attentionStyle.configuration(for: attentionPalette).foregroundColor)
             : NSColor.labelColor
         if isResident {
             // Runtime truth owns color: active, Hot, Warm cache and Cold grace
@@ -2824,7 +3571,9 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         } else {
             if base?.isTemplate == true {
                 iconView.image = base
-                iconView.contentTintColor = isActive ? templateTint : .tertiaryLabelColor
+                iconView.contentTintColor = isUnreadResponse
+                    ? templateTint
+                    : (isActive ? .labelColor : .tertiaryLabelColor)
             } else {
                 iconView.image = grayscaleIcon ?? Self.fallbackIcon()
                 iconView.contentTintColor = grayscaleIcon == nil ? .tertiaryLabelColor : nil
@@ -2838,60 +3587,31 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         toolTip = "\(displayedPresentationTitle) · \(state)"
     }
 
-    private func updateShape(activeBackground: NSColor? = nil) {
+    private func updateShape() {
         guard bounds.width > 0, bounds.height > 0 else { return }
         shapeLayer.frame = bounds
-        let radius: CGFloat = 8
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: bounds.maxX, y: bounds.minY))
-        path.addLine(to: CGPoint(x: bounds.minX + radius, y: bounds.minY))
-        path.addQuadCurve(to: CGPoint(x: bounds.minX, y: bounds.minY + radius), control: CGPoint(x: bounds.minX, y: bounds.minY))
-        path.addLine(to: CGPoint(x: bounds.minX, y: bounds.maxY - radius))
-        path.addQuadCurve(to: CGPoint(x: bounds.minX + radius, y: bounds.maxY), control: CGPoint(x: bounds.minX, y: bounds.maxY))
-        path.addLine(to: CGPoint(x: bounds.maxX, y: bounds.maxY))
-        path.closeSubpath()
+        let path = ExternalTabMetrics.tabSurfacePath(in: bounds)
         shapeLayer.path = path
-
+        shapeLayer.fillColor = ExternalTabSurfacePalette.tabFill(
+            isUnread: isUnreadResponse,
+            isHovered: isHovered,
+            style: attentionStyle
+        ).cgColor
+        // The animated PanelInteractionBorderView owns the active outline.
+        // Keep the Tab surface profile-independent and let the shared outline
+        // plus active typography identify selection.
+        shapeLayer.strokeColor = NSColor.clear.cgColor
+        shapeLayer.lineWidth = 0
         if isActive {
-            // The animated PanelInteractionBorderView owns the active outline.
-            // Keep only the tab surface here so page + active tab read as one shape.
-            let resolvedActiveBackground = activeBackground
-                ?? Self.activeBackgroundColor(profileColor: browserProfileColor.appKitColor)
-            shapeLayer.fillColor = resolvedActiveBackground.cgColor
-            shapeLayer.strokeColor = NSColor.clear.cgColor
-            shapeLayer.lineWidth = 0
             layer?.shadowOpacity = 0
             layer?.shadowPath = nil
         } else {
-            shapeLayer.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(isHovered ? 0.96 : 0.82).cgColor
-            // Selection is represented by the shared page+tab rainbow outline.
-            // Inactive tabs have no individual hairline, especially in Light
-            // appearance where a dark separator looked like a second border.
-            shapeLayer.strokeColor = NSColor.clear.cgColor
-            shapeLayer.lineWidth = 0
             layer?.shadowColor = NSColor.black.cgColor
             layer?.shadowOpacity = isHovered ? 0.16 : 0.08
             layer?.shadowRadius = isHovered ? 5 : 2
             layer?.shadowOffset = NSSize(width: -1, height: -1)
             layer?.shadowPath = path
         }
-    }
-
-    private func updateUnreadResponseGeometry() {
-        guard layer != nil else { return }
-        let iconFrame = iconView.convert(iconView.bounds, to: self)
-        let diameter = Self.unreadResponseDiameter
-        let frame = NSRect(
-            x: iconFrame.maxX - diameter * 0.75,
-            y: iconFrame.maxY - diameter * 0.75,
-            width: diameter,
-            height: diameter
-        )
-        unreadResponseLayer.frame = frame
-        unreadResponseLayer.path = CGPath(
-            ellipseIn: CGRect(origin: .zero, size: frame.size),
-            transform: nil
-        )
     }
 
     private static func grayscaleImage(from image: NSImage) -> NSImage? {

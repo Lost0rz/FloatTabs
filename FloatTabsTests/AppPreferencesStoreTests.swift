@@ -122,6 +122,113 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(second.attentionSoundVolume, 0.35, accuracy: 0.0001)
     }
 
+    func testUnreadTabAttentionStyleAndPaletteDefaultIndependentlyAndRoundTrip() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.attentionStyle, .dot)
+        XCTAssertEqual(first.attentionPalette, .red)
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.rawValue),
+            ["dot", "beacon", "halo", "orbit", "pulse", "sweep"]
+        )
+        XCTAssertEqual(
+            TabAttentionPalette.allCases.map(\.rawValue),
+            ["red", "amber", "blue", "violet", "mint", "spectrum"]
+        )
+
+        for style in TabAttentionStyle.allCases {
+            first.attentionStyle = style
+            XCTAssertEqual(defaults.string(forKey: AppPreferencesStore.attentionStyleKey), style.rawValue)
+            XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, style)
+        }
+        for palette in TabAttentionPalette.allCases {
+            first.attentionPalette = palette
+            XCTAssertEqual(
+                defaults.string(forKey: AppPreferencesStore.attentionPaletteKey),
+                palette.rawValue
+            )
+            XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionPalette, palette)
+        }
+
+        let storedKeys = Set((defaults.persistentDomain(forName: suiteName) ?? [:]).keys)
+        XCTAssertEqual(storedKeys, [
+            AppPreferencesStore.attentionStyleKey,
+            AppPreferencesStore.attentionPaletteKey,
+        ])
+    }
+
+    func testUnknownUnreadTabAttentionStyleFallsBackToDotAndRed() {
+        defaults.set("future-style", forKey: AppPreferencesStore.attentionStyleKey)
+        defaults.set("future-palette", forKey: AppPreferencesStore.attentionPaletteKey)
+
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, .dot)
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionPalette, .red)
+    }
+
+    func testPreviousDraftAttentionValuesResolveWithoutRewritingStoredValues() {
+        let expectedStyles: [(String, TabAttentionStyle)] = [
+            ("signal", .dot),
+            ("ember", .pulse),
+            ("aurora", .halo),
+            ("spectrum", .pulse),
+        ]
+        let expectedPalettes: [(String, TabAttentionPalette)] = [
+            ("signal", .red),
+            ("ember", .amber),
+            ("aurora", .violet),
+            ("spectrum", .spectrum),
+        ]
+
+        for (raw, style) in expectedStyles {
+            defaults.set(raw, forKey: AppPreferencesStore.attentionStyleKey)
+            XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, style)
+            XCTAssertEqual(defaults.string(forKey: AppPreferencesStore.attentionStyleKey), raw)
+        }
+        for (raw, palette) in expectedPalettes {
+            defaults.removeObject(forKey: AppPreferencesStore.attentionPaletteKey)
+            defaults.set(raw, forKey: AppPreferencesStore.attentionStyleKey)
+            XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionPalette, palette)
+            XCTAssertNil(defaults.string(forKey: AppPreferencesStore.attentionPaletteKey))
+        }
+    }
+
+    func testUnreadTabAttentionStyleChangePublishesLiveUpdateOnlyWhenChanged() {
+        let store = AppPreferencesStore(defaults: defaults)
+        let change = expectation(description: "attention style change is published")
+        change.assertForOverFulfill = true
+        let observer = NotificationCenter.default.addObserver(
+            forName: .floatTabsAttentionStyleDidChange,
+            object: store,
+            queue: .main
+        ) { _ in
+            change.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        store.attentionStyle = .halo
+        store.attentionStyle = .halo
+
+        wait(for: [change], timeout: 0.2)
+    }
+
+    func testAttentionPalettePublishesLiveUpdateOnlyWhenChanged() {
+        let store = AppPreferencesStore(defaults: defaults)
+        let change = expectation(description: "attention palette change is published")
+        change.assertForOverFulfill = true
+        let observer = NotificationCenter.default.addObserver(
+            forName: .floatTabsAttentionPaletteDidChange,
+            object: store,
+            queue: .main
+        ) { _ in
+            change.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        store.attentionPalette = .mint
+        store.attentionPalette = .mint
+
+        wait(for: [change], timeout: 0.2)
+    }
+
     func testAttentionSoundVolumeNormalizesInvalidValuesOnWriteAndRead() {
         let store = AppPreferencesStore(defaults: defaults)
 
