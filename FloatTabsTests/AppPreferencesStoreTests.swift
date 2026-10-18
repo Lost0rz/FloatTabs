@@ -42,6 +42,19 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         )
     }
 
+    func testLongTermPerformanceObservationDefaultsOffAndPersistsWithoutChangingHistoryMode() {
+        let first = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(first.runtimeDiagnosticsMode, .standard)
+        XCTAssertFalse(first.longTermPerformanceObservationEnabled)
+
+        first.longTermPerformanceObservationEnabled = true
+
+        let second = AppPreferencesStore(defaults: defaults)
+        XCTAssertTrue(second.longTermPerformanceObservationEnabled)
+        XCTAssertEqual(second.runtimeDiagnosticsMode, .standard)
+        XCTAssertTrue(defaults.bool(forKey: AppPreferencesStore.longTermPerformanceObservationEnabledKey))
+    }
+
     func testUnknownRuntimeDiagnosticsModeFallsBackToStandard() {
         defaults.set("future-value", forKey: AppPreferencesStore.runtimeDiagnosticsModeKey)
 

@@ -12,6 +12,24 @@ final class AppCoordinator {
         subsystem: "com.lost0rz.FloatTabs",
         category: "WebsiteCache"
     )
+
+    static func openDiagnosticsLogsFolder(
+        at directory: URL = RuntimeDiagnosticWriter.defaultDirectory,
+        fileManager: FileManager = .default,
+        open: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    ) {
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
+            )
+        } catch {
+            return
+        }
+        open(directory)
+    }
+
     private let panelController: PanelController
     private let diagnostics: RuntimeDiagnostics
     private let diagnosticExporter: RuntimeDiagnosticExporter
@@ -34,6 +52,7 @@ final class AppCoordinator {
     private var globalSettingsController: GlobalSettingsController?
     private var websiteCacheCleanupCoordinator: WebsiteCacheCleanupCoordinator?
     private var websiteCacheAutomaticTask: Task<Void, Never>?
+    private var longTermPerformanceObservationCoordinator: LongTermPerformanceObservationCoordinator?
     private var pendingExternalSlotDelta = 0
     private var externalSlotBatchTrace: RuntimeDiagnosticTrace?
     private var externalSlotFlushScheduled = false
@@ -179,10 +198,25 @@ final class AppCoordinator {
                     ?? completion(.failure(.writerUnavailable))
             },
             onOpenDiagnosticsLogs: {
-                NSWorkspace.shared.open(RuntimeDiagnosticWriter.defaultDirectory)
+                Self.openDiagnosticsLogsFolder()
             },
             onCaptureDiagnosticsIncident: captureIncidentHandler
         )
+        let observationCoordinator = LongTermPerformanceObservationCoordinator(
+            preferencesStore: preferencesStore,
+            observe: { [weak self] shouldRecord, completion in
+                guard let self else {
+                    completion()
+                    return
+                }
+                self.panelController.captureLongTermDiagnosticsCheckpoint(
+                    shouldRecord: shouldRecord,
+                    completion: completion
+                )
+            }
+        )
+        longTermPerformanceObservationCoordinator = observationCoordinator
+        observationCoordinator.start()
         websiteCacheCoordinator.onPolicyChanged = { [weak self] in
             self?.restartWebsiteCacheAutomaticSchedule()
         }
@@ -329,6 +363,8 @@ final class AppCoordinator {
         externalVoiceFocusRequestID = nil
         websiteCacheAutomaticTask?.cancel()
         websiteCacheAutomaticTask = nil
+        longTermPerformanceObservationCoordinator?.stop()
+        longTermPerformanceObservationCoordinator = nil
         websiteCacheCleanupCoordinator?.stop()
 #if DEBUG
         benchmarkControlServer?.stop()

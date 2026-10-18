@@ -162,6 +162,9 @@ extension Notification.Name {
     static let floatTabsRuntimeDiagnosticsModeDidChange = Notification.Name(
         "FloatTabs.runtimeDiagnosticsModeDidChange"
     )
+    static let floatTabsLongTermPerformanceObservationEnabledDidChange = Notification.Name(
+        "FloatTabs.longTermPerformanceObservationEnabledDidChange"
+    )
     static let floatTabsAttentionPaletteDidChange = Notification.Name(
         "FloatTabs.attentionPaletteDidChange"
     )
@@ -203,6 +206,8 @@ final class AppPreferencesStore {
     static let coldWebViewReleaseDelayKey =
         "FloatTabs.performance.coldWebViewReleaseDelay"
     static let runtimeDiagnosticsModeKey = "FloatTabs.runtimeDiagnostics.mode"
+    static let longTermPerformanceObservationEnabledKey =
+        "FloatTabs.longTermPerformanceObservation.enabled"
     static let defaultCustomBorderColorHex = "#0A84FFFF"
     static let defaultFixedViewportSize = CGSize(width: 600, height: 820)
     static let minimumFixedViewportSize = CGSize(width: 320, height: 400)
@@ -243,6 +248,22 @@ final class AppPreferencesStore {
                 object: self
             )
         }
+    }
+
+    var longTermPerformanceObservationEnabled: Bool {
+        get { defaults.bool(forKey: Self.longTermPerformanceObservationEnabledKey) }
+        set {
+            guard newValue != longTermPerformanceObservationEnabled else { return }
+            defaults.set(newValue, forKey: Self.longTermPerformanceObservationEnabledKey)
+            NotificationCenter.default.post(
+                name: .floatTabsLongTermPerformanceObservationEnabledDidChange,
+                object: self
+            )
+        }
+    }
+
+    var isLongTermPerformanceObservationEffective: Bool {
+        longTermPerformanceObservationEnabled && runtimeDiagnosticsMode != .off
     }
 
     var menuBarDisplayMode: MenuBarDisplayMode {
