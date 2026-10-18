@@ -18,7 +18,8 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Current intermediate implementation head: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
+- Previous intermediate implementation reviewed on Real Mac: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
+- Resolve the current candidate from the freshly fetched authorized task branch; exact live Git refs remain authoritative.
 - Diagnostics/history PR #124 remains parked and out of scope.
 
 ## Latest scope refinement

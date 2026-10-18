@@ -402,28 +402,57 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(beepCount, 0)
     }
 
-    func testAttentionStylesHaveDistinctSemanticPalettesAndAmbientCycles() {
-        XCTAssertEqual(
-            TabAttentionStyle.allCases.map(\.displayName),
-            ["Signal", "Ember", "Aurora", "Spectrum"]
-        )
-        XCTAssertEqual(
-            Set(TabAttentionStyle.allCases.map { $0.configuration.paletteRole }).count,
-            4
-        )
-        XCTAssertNil(TabAttentionStyle.signal.configuration.animationCycleDuration)
-        XCTAssertFalse(TabAttentionStyle.signal.configuration.gentlyBreathes)
+    func testAttentionStylesHaveDistinctStructuresAndSlowAmbientCycles() throws {
+        XCTAssertEqual(TabAttentionStyle.allCases.map(\.rawValue), [
+            "dot", "beacon", "halo", "orbit", "pulse", "sweep",
+        ])
+        XCTAssertEqual(TabAttentionStyle.allCases.map(\.displayName), [
+            "Dot", "Beacon", "Halo", "Orbit", "Pulse", "Sweep",
+        ])
+        XCTAssertEqual(Set(TabAttentionStyle.allCases.map(\.effect)).count, 6)
+        XCTAssertNil(TabAttentionStyle.dot.configuration(for: .red).animationCycleDuration)
 
         for style in TabAttentionStyle.allCases.dropFirst() {
-            let cycle = try! XCTUnwrap(style.configuration.animationCycleDuration)
-            XCTAssertTrue((3...6).contains(cycle))
+            let cycle = try XCTUnwrap(style.configuration(for: .red).animationCycleDuration)
+            XCTAssertTrue((3...6).contains(cycle), "\(style.displayName) cycle must be calm")
         }
-        XCTAssertTrue(TabAttentionStyle.spectrum.configuration.gentlyBreathes)
-        XCTAssertFalse(TabAttentionStyle.ember.configuration.gentlyBreathes)
-        XCTAssertFalse(TabAttentionStyle.aurora.configuration.gentlyBreathes)
+        XCTAssertEqual(TabAttentionStyle.dot.configuration(for: .blue).palette, .red)
+        XCTAssertEqual(TabAttentionStyle.sweep.effect, .sweep)
+        XCTAssertNotEqual(
+            TabAttentionStyle.beacon.configuration(for: .red).paletteRole,
+            TabAttentionStyle.beacon.configuration(for: .blue).paletteRole
+        )
+        XCTAssertEqual(
+            TabAttentionPalette.spectrum.colors.count,
+            8,
+            "Spectrum must remain a palette with multiple color stops"
+        )
     }
 
-    func testNotificationsShowsFourSharedRendererPreviewsAndPersistsSelection() throws {
+    func testClassicDotAndFiveOtherStructuresShareTheRuntimeRenderer() {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.setUnreadResponse(true)
+
+        for style in TabAttentionStyle.allCases {
+            tab.setAttentionStyle(style, palette: .violet)
+            XCTAssertEqual(tab.attentionSurfaceEffect, style.effect)
+            XCTAssertTrue(tab.attentionSurfaceUsesSharedRenderer)
+            XCTAssertEqual(tab.showsClassicUnreadDot, style == .dot)
+        }
+    }
+
+    func testRefinedAttentionStylesUseCanonicalSixStyleOrder() {
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.rawValue),
+            ["dot", "beacon", "halo", "orbit", "pulse", "sweep"]
+        )
+        XCTAssertEqual(
+            TabAttentionStyle.allCases.map(\.displayName),
+            ["Dot", "Beacon", "Halo", "Orbit", "Pulse", "Sweep"]
+        )
+    }
+
+    func testNotificationsShowsSixSharedRendererPreviewsAndPersistsStyleAndPalette() throws {
         let suiteName = "FloatTabsTests.AttentionStyleSettings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -436,25 +465,51 @@ final class WebAttentionIndicatorTests: XCTestCase {
         controller.loadViewIfNeeded()
 
         XCTAssertEqual(controller.attentionStyleChoices.map { $0.style.displayName }, [
-            "Signal", "Ember", "Aurora", "Spectrum",
+            "Dot", "Beacon", "Halo", "Orbit", "Pulse", "Sweep",
         ])
-        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).map(\.style), [.signal])
+        XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).map(\.style), [.dot])
         for choice in controller.attentionStyleChoices {
             XCTAssertTrue(choice.previewSurfaceView.showsAttention)
             XCTAssertEqual(
-                choice.previewSurfaceView.renderedPaletteRole,
-                choice.style.configuration.paletteRole
+                choice.previewSurfaceView.renderedEffect,
+                choice.style.effect
             )
+            XCTAssertEqual(choice.previewSurfaceView.geometry, .settingsPreview)
+            XCTAssertTrue(choice.previewSurfaceView.usesSymmetricPreviewGeometry)
         }
+        XCTAssertTrue(controller.attentionStyleChoices[0].showsClassicUnreadDot)
+        XCTAssertEqual(controller.attentionPaletteChoices.count, 6)
+        XCTAssertFalse(controller.attentionPaletteChoices.first(where: { $0.palette == .blue })!.isEnabled)
 
-        let spectrum = try XCTUnwrap(
-            controller.attentionStyleChoices.first(where: { $0.style == .spectrum })
+        let sweep = try XCTUnwrap(
+            controller.attentionStyleChoices.first(where: { $0.style == .sweep })
         )
-        spectrum.performClick(nil)
+        sweep.performClick(nil)
 
-        XCTAssertEqual(preferences.attentionStyle, .spectrum)
-        XCTAssertTrue(spectrum.isSelectedStyle)
+        XCTAssertEqual(preferences.attentionStyle, .sweep)
+        XCTAssertTrue(sweep.isSelectedStyle)
         XCTAssertEqual(controller.attentionStyleChoices.filter(\.isSelectedStyle).count, 1)
+
+        let violet = try XCTUnwrap(
+            controller.attentionPaletteChoices.first(where: { $0.palette == .violet })
+        )
+        violet.performClick(nil)
+        XCTAssertEqual(preferences.attentionPalette, .violet)
+        XCTAssertEqual(sweep.previewSurfaceView.renderedEffect, .sweep)
+        XCTAssertEqual(sweep.previewSurfaceView.renderedPalette, .violet)
+
+        let dot = try XCTUnwrap(
+            controller.attentionStyleChoices.first(where: { $0.style == .dot })
+        )
+        dot.performClick(nil)
+        XCTAssertEqual(preferences.attentionPalette, .violet)
+        XCTAssertTrue(controller.attentionPaletteChoices.first(where: { $0.palette == .red })!.isSelectedPalette)
+        XCTAssertFalse(violet.isSelectedPalette)
+        XCTAssertFalse(violet.isEnabled)
+
+        sweep.performClick(nil)
+        XCTAssertTrue(violet.isEnabled)
+        XCTAssertTrue(violet.isSelectedPalette)
     }
 
     func testAttentionStylePreferenceUpdatesVisibleTabAndOverflowImmediately() throws {
@@ -480,12 +535,15 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let tab = try XCTUnwrap(zone.tabView(for: visibleID))
         let hiddenTab = try XCTUnwrap(zone.tabView(for: hiddenID))
         let overflow = try XCTUnwrap(zone.subviews.compactMap { $0 as? RailOverflowControl }.first)
-        preferences.attentionStyle = .aurora
+        preferences.attentionStyle = .orbit
+        preferences.attentionPalette = .blue
         tab.setAttentionStyleReduceMotionOverride(false)
         overflow.setAttentionStyleReduceMotionOverride(false)
 
-        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
-        XCTAssertEqual(overflow.displayedAttentionStyle, .aurora)
+        XCTAssertEqual(tab.displayedAttentionStyle, .orbit)
+        XCTAssertEqual(overflow.displayedAttentionStyle, .orbit)
+        XCTAssertEqual(tab.displayedAttentionPalette, .blue)
+        XCTAssertEqual(overflow.displayedAttentionPalette, .blue)
         XCTAssertTrue(tab.attentionSurfaceUsesSharedRenderer)
         XCTAssertTrue(overflow.attentionSurfaceUsesSharedRenderer)
         XCTAssertTrue(tab.isShowingUnreadResponse)
@@ -493,13 +551,11 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(overflow.isShowingUnreadResponse)
         XCTAssertFalse(hiddenTab.attentionSurfaceMotionIsActive)
         XCTAssertTrue(overflow.attentionSurfaceMotionIsActive)
-        assertColor(
-            tab.unreadResponseColor,
-            equals: ExternalTabSurfacePalette.attentionFill(style: .aurora)
-        )
+        XCTAssertEqual(tab.attentionSurfaceEffect, .orbit)
+        XCTAssertEqual(overflow.attentionSurfaceEffect, .orbit)
 
         tab.setHovered(true)
-        XCTAssertEqual(tab.displayedAttentionStyle, .aurora)
+        XCTAssertEqual(tab.displayedAttentionStyle, .orbit)
         XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
 
         tab.setUnreadResponse(false)
@@ -513,13 +569,13 @@ final class WebAttentionIndicatorTests: XCTestCase {
     }
 
     func testReduceMotionKeepsStaticAttentionGradientAndStopsLayerAnimations() {
-        let preview = AttentionStyleChoiceButton(style: .spectrum)
+        let preview = AttentionStyleChoiceButton(style: .sweep)
         let tab = ExternalWebAppTabView(slotID: UUID())
-        tab.setAttentionStyle(.spectrum)
+        tab.setAttentionStyle(.sweep)
         tab.setUnreadResponse(true)
         let overflow = RailOverflowControl()
         overflow.setItems([RailOverflowItem(slotID: UUID(), title: "Hidden", isUnread: true)])
-        overflow.setAttentionStyle(.spectrum)
+        overflow.setAttentionStyle(.sweep)
 
         preview.previewSurfaceView.setReduceMotionOverride(false)
         tab.setAttentionStyleReduceMotionOverride(false)
@@ -531,13 +587,13 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         let surface = AttentionStyleSurfaceView(
             frame: NSRect(x: 0, y: 0, width: 40, height: 32),
-            style: .spectrum,
+            style: .sweep,
             showsAttention: true,
             reduceMotionOverride: false
         )
         XCTAssertTrue(surface.isContinuousMotionActive)
-        XCTAssertEqual(surface.renderedGradientStopCount, 9)
-        XCTAssertEqual(surface.renderedAnimationCycleDuration, 4.5)
+        XCTAssertEqual(surface.renderedEffect, .sweep)
+        XCTAssertEqual(surface.renderedAnimationCycleDuration, 5.2)
 
         surface.setReduceMotionOverride(true)
         preview.previewSurfaceView.setReduceMotionOverride(true)
@@ -548,7 +604,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertFalse(surface.isContinuousMotionActive)
         XCTAssertTrue(surface.showsAttention)
         XCTAssertFalse(surface.isHidden)
-        XCTAssertEqual(surface.renderedGradientStopCount, 9)
+        XCTAssertTrue(surface.hasStaticRepresentativeEffect)
         XCTAssertFalse(preview.previewSurfaceView.isContinuousMotionActive)
         XCTAssertFalse(tab.attentionSurfaceMotionIsActive)
         XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
@@ -706,7 +762,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertTrue(try! XCTUnwrap(zone.tabView(for: profile.id)).isShowingUnreadResponse)
     }
 
-    func testUnreadReadyUsesWholeTabSurfaceAndSurvivesHoverUntilCleared() {
+    func testUnreadReadyUsesClassicDotAndSurvivesHoverUntilCleared() {
         let profile = makeProfile(name: "GPT")
         let (_, zone) = makeZoneHarness()
         zone.apply(profiles: [profile], activeTabID: profile.id)
@@ -717,9 +773,12 @@ final class WebAttentionIndicatorTests: XCTestCase {
         let restingWidth = tab.frame.width
         XCTAssertEqual(restingWidth, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
         XCTAssertEqual(tab.unreadResponseFrame, tab.bounds)
-        assertRed(tab.displayedTabFillColor)
+        XCTAssertTrue(tab.showsClassicUnreadDot)
+        assertColor(
+            tab.displayedTabFillColor,
+            equals: ExternalTabSurfacePalette.neutralFill(isHovered: false)
+        )
         XCTAssertTrue(tab.accessibilityLabel()?.contains("Unread response") == true)
-        let unreadFill = tab.displayedTabFillColor
 
         tab.setHovered(true)
         zone.needsLayout = true
@@ -727,10 +786,15 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         XCTAssertEqual(tab.frame.width, ExternalTabMetrics.hoverWidth, accuracy: 0.001)
         XCTAssertEqual(tab.unreadResponseFrame, tab.bounds)
-        assertColor(tab.displayedTabFillColor, equals: unreadFill)
+        XCTAssertTrue(tab.showsClassicUnreadDot)
+        assertColor(
+            tab.displayedTabFillColor,
+            equals: ExternalTabSurfacePalette.neutralFill(isHovered: true)
+        )
 
         tab.setUnreadResponse(false)
         XCTAssertFalse(tab.isShowingUnreadResponse)
+        XCTAssertFalse(tab.showsClassicUnreadDot)
         XCTAssertFalse(tab.accessibilityLabel()?.contains("Unread response") == true)
         let neutral = try! XCTUnwrap(tab.displayedTabFillColor?.usingColorSpace(.deviceRGB))
         XCTAssertLessThan(abs(neutral.redComponent - neutral.greenComponent), 0.15)
@@ -784,7 +848,6 @@ final class WebAttentionIndicatorTests: XCTestCase {
                 tab.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]),
                 appearanceName
             )
-            assertRed(tab.displayedTabFillColor)
             let fill = try XCTUnwrap(tab.displayedTabFillColor)
             let foreground = try XCTUnwrap(tab.displayedActiveTabForegroundColor)
             XCTAssertGreaterThanOrEqual(contrastRatio(foreground, fill), 4.5)
@@ -1365,7 +1428,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         assertRailFramesAreCollisionFree(defaultZone)
     }
 
-    func testUnreadOverflowUsesWholeControlSurfaceAndKeepsItemSemantics() throws {
+    func testUnreadOverflowUsesSelectedStyleAndKeepsItemSemantics() throws {
         let (_, zone) = makeZoneHarness(height: 400)
         let profiles = (0..<9).map { index in
             WebAppProfile(
@@ -1389,7 +1452,8 @@ final class WebAttentionIndicatorTests: XCTestCase {
 
         XCTAssertTrue(overflow.isShowingUnreadResponse)
         XCTAssertEqual(overflow.unreadResponseFrame, overflow.bounds)
-        assertRed(overflow.unreadResponseColor)
+        XCTAssertTrue(overflow.showsClassicUnreadDot)
+        assertColor(overflow.unreadResponseColor, equals: normalFill)
         XCTAssertTrue(zone.overflowControlAccessibilityLabel?.contains("Unread response") == true)
 
         let menuItem = try XCTUnwrap(
@@ -1403,6 +1467,7 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.setUnreadSlotIDs([])
         zone.layoutSubtreeIfNeeded()
         XCTAssertFalse(overflow.isShowingUnreadResponse)
+        XCTAssertFalse(overflow.showsClassicUnreadDot)
         XCTAssertFalse(zone.overflowControlAccessibilityLabel?.contains("Unread response") == true)
         XCTAssertFalse(overflow.makeMenu().items.contains {
             $0.accessibilityLabel()?.contains("Unread response") == true
@@ -1540,16 +1605,6 @@ final class WebAttentionIndicatorTests: XCTestCase {
     ) {
         zone.setUnreadSlotIDs(coordinator.unreadSlotIDs)
         zone.layoutSubtreeIfNeeded()
-    }
-
-    private func assertRed(
-        _ actual: NSColor?,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let red = try! XCTUnwrap(actual?.usingColorSpace(.deviceRGB), file: file, line: line)
-        XCTAssertGreaterThan(red.redComponent - red.greenComponent, 0.3, file: file, line: line)
-        XCTAssertGreaterThan(red.redComponent - red.blueComponent, 0.3, file: file, line: line)
     }
 
     private func assertColor(

@@ -559,19 +559,26 @@ final class SpeechSettingsViewController: NSViewController {
 final class AttentionStyleChoiceButton: NSButton {
     let style: TabAttentionStyle
     let previewSurfaceView: AttentionStyleSurfaceView
+    let previewDotView = ClassicUnreadDotView()
     private let previewIconView = NSImageView()
     private let previewTitleLabel = NSTextField(labelWithString: "ChatGPT")
     private let styleNameLabel: NSTextField
     private let selectionMarkView = NSImageView()
     private(set) var isSelectedStyle = false
+    private(set) var palette: TabAttentionPalette
 
-    init(style: TabAttentionStyle) {
+    var showsClassicUnreadDot: Bool { !previewDotView.isHidden }
+
+    init(style: TabAttentionStyle, palette: TabAttentionPalette = .red) {
         self.style = style
+        self.palette = palette
         styleNameLabel = NSTextField(labelWithString: style.displayName)
         previewSurfaceView = AttentionStyleSurfaceView(
             frame: .zero,
             style: style,
-            showsAttention: true
+            palette: palette,
+            showsAttention: true,
+            geometry: .settingsPreview
         )
         super.init(frame: .zero)
 
@@ -594,12 +601,14 @@ final class AttentionStyleChoiceButton: NSButton {
             systemSymbolName: "bubble.left.and.bubble.right.fill",
             accessibilityDescription: "ChatGPT"
         )
-        previewIconView.contentTintColor = style.configuration.foregroundColor
+        previewIconView.contentTintColor = style.configuration(for: palette).foregroundColor
         addSubview(previewIconView)
+        previewDotView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(previewDotView, positioned: .above, relativeTo: previewIconView)
 
         previewTitleLabel.translatesAutoresizingMaskIntoConstraints = false
         previewTitleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-        previewTitleLabel.textColor = style.configuration.foregroundColor
+        previewTitleLabel.textColor = style.configuration(for: palette).foregroundColor
         addSubview(previewTitleLabel)
 
         styleNameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -629,6 +638,10 @@ final class AttentionStyleChoiceButton: NSButton {
             previewIconView.centerYAnchor.constraint(equalTo: previewSurfaceView.centerYAnchor),
             previewIconView.widthAnchor.constraint(equalToConstant: 13),
             previewIconView.heightAnchor.constraint(equalToConstant: 13),
+            previewDotView.centerXAnchor.constraint(equalTo: previewIconView.trailingAnchor, constant: -1),
+            previewDotView.centerYAnchor.constraint(equalTo: previewIconView.topAnchor, constant: 1),
+            previewDotView.widthAnchor.constraint(equalToConstant: 9),
+            previewDotView.heightAnchor.constraint(equalToConstant: 9),
             previewTitleLabel.leadingAnchor.constraint(
                 equalTo: previewIconView.trailingAnchor,
                 constant: 5
@@ -656,6 +669,7 @@ final class AttentionStyleChoiceButton: NSButton {
         ])
 
         setSelectedStyle(false)
+        updateDotVisibility()
     }
 
     @available(*, unavailable)
@@ -671,8 +685,8 @@ final class AttentionStyleChoiceButton: NSButton {
         super.viewDidChangeEffectiveAppearance()
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.62).cgColor
-            previewIconView.contentTintColor = style.configuration.foregroundColor
-            previewTitleLabel.textColor = style.configuration.foregroundColor
+            previewIconView.contentTintColor = style.configuration(for: palette).foregroundColor
+            previewTitleLabel.textColor = style.configuration(for: palette).foregroundColor
             selectionMarkView.contentTintColor = .controlAccentColor
             setSelectedStyle(isSelectedStyle)
         }
@@ -688,6 +702,88 @@ final class AttentionStyleChoiceButton: NSButton {
             layer?.borderWidth = selected ? 2 : 1
         }
         selectionMarkView.isHidden = !selected
+        setAccessibilityValue(selected ? "Selected" : "Not selected")
+    }
+
+    func setPalette(_ palette: TabAttentionPalette) {
+        guard self.palette != palette else { return }
+        self.palette = palette
+        previewSurfaceView.configure(style: style, palette: palette, showsAttention: true)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            previewIconView.contentTintColor = style.configuration(for: palette).foregroundColor
+            previewTitleLabel.textColor = style.configuration(for: palette).foregroundColor
+        }
+        updateDotVisibility()
+    }
+
+    private func updateDotVisibility() {
+        previewDotView.isHidden = style != .dot
+    }
+}
+
+@MainActor
+final class AttentionPaletteChoiceButton: NSButton {
+    let palette: TabAttentionPalette
+    private let swatchView = NSView()
+    private let paletteNameLabel: NSTextField
+    private(set) var isSelectedPalette = false
+
+    init(palette: TabAttentionPalette) {
+        self.palette = palette
+        paletteNameLabel = NSTextField(labelWithString: palette.displayName)
+        super.init(frame: .zero)
+        setButtonType(.toggle)
+        title = ""
+        isBordered = false
+        imagePosition = .noImage
+        focusRingType = .default
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel("\(palette.displayName) unread Tab attention palette")
+
+        swatchView.wantsLayer = true
+        swatchView.layer?.cornerRadius = 6
+        swatchView.layer?.masksToBounds = true
+        let gradient = CAGradientLayer()
+        gradient.frame = CGRect(x: 0, y: 0, width: 12, height: 12)
+        gradient.colors = palette.colors.map(\.cgColor)
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        swatchView.layer?.addSublayer(gradient)
+        swatchView.layer?.borderWidth = 1
+        swatchView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+        swatchView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(swatchView)
+        paletteNameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        paletteNameLabel.textColor = .labelColor
+        paletteNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(paletteNameLabel)
+        NSLayoutConstraint.activate([
+            swatchView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            swatchView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            swatchView.widthAnchor.constraint(equalToConstant: 12),
+            swatchView.heightAnchor.constraint(equalToConstant: 12),
+            paletteNameLabel.leadingAnchor.constraint(equalTo: swatchView.trailingAnchor, constant: 6),
+            paletteNameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            paletteNameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
+        ])
+        setSelectedPalette(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func setSelectedPalette(_ selected: Bool) {
+        isSelectedPalette = selected
+        state = selected ? .on : .off
+        layer?.borderWidth = selected ? 2 : 1
+        layer?.borderColor = selected
+            ? NSColor.controlAccentColor.cgColor
+            : NSColor.separatorColor.withAlphaComponent(0.35).cgColor
         setAccessibilityValue(selected ? "Selected" : "Not selected")
     }
 }
@@ -708,6 +804,8 @@ final class NotificationsSettingsViewController: NSViewController {
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
     private(set) var attentionStyleChoices: [AttentionStyleChoiceButton] = []
+    private(set) var attentionPaletteChoices: [AttentionPaletteChoiceButton] = []
+    private let attentionPaletteDescriptionLabel = NSTextField(labelWithString: "")
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -734,6 +832,8 @@ final class NotificationsSettingsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        attentionPaletteDescriptionLabel.font = .systemFont(ofSize: 11)
+        attentionPaletteDescriptionLabel.textColor = .secondaryLabelColor
 
         enabledSwitch.target = self
         enabledSwitch.action = #selector(enabledChanged(_:))
@@ -766,10 +866,14 @@ final class NotificationsSettingsViewController: NSViewController {
         removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
         let attentionStyleGrid = makeAttentionStyleGrid()
+        let attentionPaletteGrid = makeAttentionPaletteGrid()
         let attentionStyleSection = NSStackView(views: [
             Self.titleLabel("Unread Tab Attention"),
-            Self.detailLabel("Choose a whole-Tab style. Previews respect Reduce Motion."),
+            Self.detailLabel("Choose an effect style. Previews respect Reduce Motion."),
             attentionStyleGrid,
+            Self.titleLabel("Palette"),
+            attentionPaletteDescriptionLabel,
+            attentionPaletteGrid,
         ])
         attentionStyleSection.orientation = .vertical
         attentionStyleSection.alignment = .leading
@@ -828,6 +932,11 @@ final class NotificationsSettingsViewController: NSViewController {
 
     @objc private func attentionStyleChanged(_ sender: AttentionStyleChoiceButton) {
         preferencesStore.attentionStyle = sender.style
+        synchronizeAttentionStyleChoices()
+    }
+
+    @objc private func attentionPaletteChanged(_ sender: AttentionPaletteChoiceButton) {
+        preferencesStore.attentionPalette = sender.palette
         synchronizeAttentionStyleChoices()
     }
 
@@ -974,11 +1083,14 @@ final class NotificationsSettingsViewController: NSViewController {
 
     private func makeAttentionStyleGrid() -> NSView {
         attentionStyleChoices = TabAttentionStyle.allCases.map { style in
-            let choice = AttentionStyleChoiceButton(style: style)
+            let choice = AttentionStyleChoiceButton(
+                style: style,
+                palette: preferencesStore.attentionPalette
+            )
             choice.target = self
             choice.action = #selector(attentionStyleChanged(_:))
-            choice.widthAnchor.constraint(equalToConstant: 252).isActive = true
-            choice.heightAnchor.constraint(equalToConstant: 71).isActive = true
+            choice.widthAnchor.constraint(equalToConstant: 178).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 88).isActive = true
             return choice
         }
         let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
@@ -996,9 +1108,45 @@ final class NotificationsSettingsViewController: NSViewController {
     }
 
     private func synchronizeAttentionStyleChoices() {
+        let selectedStyle = preferencesStore.attentionStyle
+        let selectedPalette = preferencesStore.attentionPalette
+        let displayedPalette = selectedStyle == .dot ? .red : selectedPalette
         attentionStyleChoices.forEach { choice in
-            choice.setSelectedStyle(choice.style == preferencesStore.attentionStyle)
+            choice.setPalette(selectedPalette)
+            choice.setSelectedStyle(choice.style == selectedStyle)
         }
+        attentionPaletteChoices.forEach { choice in
+            choice.isEnabled = selectedStyle != .dot || choice.palette == .red
+            choice.setSelectedPalette(choice.palette == displayedPalette)
+        }
+        attentionPaletteDescriptionLabel.stringValue = selectedStyle == .dot
+            ? "Dot always uses the classic red indicator."
+            : "Palette changes color while keeping the selected style."
+    }
+
+    private func makeAttentionPaletteGrid() -> NSView {
+        attentionPaletteChoices = TabAttentionPalette.allCases.map { palette in
+            let choice = AttentionPaletteChoiceButton(palette: palette)
+            choice.target = self
+            choice.action = #selector(attentionPaletteChanged(_:))
+            choice.widthAnchor.constraint(equalToConstant: 104).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            return choice
+        }
+        let rows = stride(from: 0, to: attentionPaletteChoices.count, by: 3).map { start in
+            let row = NSStackView(
+                views: Array(attentionPaletteChoices[start..<min(start + 3, attentionPaletteChoices.count)])
+            )
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 6
+        return grid
     }
 
     private func configureSoundPopup() {

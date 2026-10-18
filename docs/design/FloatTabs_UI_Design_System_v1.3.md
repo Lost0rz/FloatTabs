@@ -45,13 +45,14 @@ Tabs are favicon-first and expand on hover. Tab / Add / Pin / Settings accept fi
 ### Tab surface and unread attention
 
 - Normal and active/read Tabs use neutral rail surfaces independent of assigned Browser Profile color; the shared page+Tab outline and active typography continue to own selection.
-- A visible Tab with `Unread/Ready` set uses the selected whole-Tab **Attention Style**. `Signal` is restrained and static; `Ember` uses warm red/orange/pink; `Aurora` uses purple/blue/magenta; `Spectrum` uses a full-spectrum rainbow with gentle breathing. Animated styles drift slowly on a roughly 3–6 second cycle and remain in force during hover.
-- The attention surface uses a contrasting foreground for its label and template icon. Favicon color continues to represent runtime residency: resident icons stay full color and released icons stay grayscale/dim.
-- The visible Tab rail does not add a favicon unread dot. In compact layout, the overflow control uses the selected Attention Style when any hidden Tab is unread; its menu item retains a semantic unread marker and accessibility label.
+- A visible Tab with `Unread/Ready` set uses one selected **Attention Style**: Dot, Beacon, Halo, Orbit, Pulse or Sweep. Dot is the classic static red indicator at the favicon. Beacon is a bounded edge light; Halo is a soft perimeter glow; Orbit sends a highlight around the perimeter; Pulse gently changes whole-surface tint; Sweep sends a narrow highlight across the Tab with a calm interval.
+- **Palette** is a separate app preference from style: Red, Amber, Blue, Violet, Mint or Spectrum. Dot always uses classic red. Palette changes color language while the selected style keeps its structure.
+- Attention effects use presentation layers and do not move, shake, bounce, scale or re-layout Tabs. Slow effects use a shared Core Animation time base, stay visible during hover, and do not use a Timer or display-link. macOS Reduce Motion keeps a static representative treatment.
+- The attention effect does not recolor website favicons. Favicon color continues to represent runtime residency: resident icons stay full color and released icons stay grayscale/dim. Tab labels and template icons remain legible against the neutral rail surface.
+- In compact layout, the overflow control uses the selected Attention Style when any hidden Tab is unread; its menu item retains a semantic unread marker and accessibility label.
 - Browser Profile color metadata remains persisted for compatibility, but Profile color is not presented as a Tab distinction and has no chooser in Browser Profiles Settings.
-- The Notifications settings surface presents all four Attention Styles as miniature Tab previews in a compact 2×2 choice layout. Previews and real Tabs use the same style renderer, and selection has a clear native accent treatment.
-- Attention motion changes only gradient coordinates and gentle opacity. It never moves, shakes, scales, flashes or re-lays out a Tab. macOS Reduce Motion keeps a static representative treatment for animated styles; `Signal` is already static.
-- The selected style is a single app preference with `Signal` as the default and fallback. It is independent of Browser Profile and Slot data.
+- Notifications Settings presents all six styles as selectable miniature Tab previews and a separate palette chooser. Preview surfaces use symmetric rounded geometry suitable for Settings; they share the same effect configuration and renderer as real Tabs without stretching the production rail path. Selection has a clear native accent treatment.
+- Style and palette are app preferences with Dot and Red as defaults. Unknown values use those defaults. Neither preference is stored in Browser Profile or Slot/session data.
 
 ## 4. Collapsed rail
 

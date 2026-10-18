@@ -8,15 +8,17 @@
 
 **MODE: TAB_ATTENTION_VISUAL_REFINEMENT_ACTIVE**
 
-`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. Automated implementation through `fce121e5d95faaadc1f84467735b9589edbb2be8` passed, and the exact Release candidate was installed for Real-Mac review. Human review confirmed that the current Settings previews are too similar because they mostly vary color/gradient while sharing the same whole-surface geometry.
+`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. The previous implementation candidate `fce121e5d95faaadc1f84467735b9589edbb2be8` passed its automated gates and was installed for Real-Mac review. Human review confirmed that its Settings previews were too similar because they mainly varied color/gradient while sharing the same whole-surface geometry.
 
 ## Verified baseline
 
 - Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Task branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Current semantic candidate: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
-- Exact-head macOS CI and QA DMG: PASS.
+- Previous semantic candidate: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
+- Latest scope/control baseline: `15c743efded8be0a6c2c1f0eca8847bcbbf58e7e`.
+- Resolve the current implementation candidate from a fresh `origin/product/ft-tab-attention-highlight-001` ref; do not hard-code the commit containing this status file.
+- The candidate requires exact-head macOS CI and QA DMG before Human Real-Mac Gate 5.
 - Diagnostics/history PR #124 remains separate and untouched.
 - Browser Profile color remains removed from Tab presentation; persisted Profile color metadata remains compatibility data only.
 
@@ -77,12 +79,13 @@ ACTIVE_PRODUCT_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-tab-attention-highlight-001
 TASK_PR=125_DRAFT
-CURRENT_IMPLEMENTATION_HEAD=fce121e5d95faaadc1f84467735b9589edbb2be8
+CURRENT_IMPLEMENTATION_HEAD=RESOLVE_FROM_FRESH_ORIGIN_PRODUCT_FT_TAB_ATTENTION_HIGHLIGHT_001
 GATE5_VISIBILITY_FUNCTION=PASS
 GATE5_CURRENT_VISUAL_FAMILY=REFINE
 CLASSIC_RED_DOT=RETAIN_AS_SELECTABLE_STYLE
 NEXT_STYLE_FAMILY=DOT_BEACON_HALO_ORBIT_PULSE_SWEEP
 PALETTE_DIMENSION=RED_AMBER_BLUE_VIOLET_MINT_SPECTRUM
+NEXT_GATE=EXACT_HEAD_CI_QA_THEN_HUMAN_REAL_MAC_ACCEPTANCE
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
