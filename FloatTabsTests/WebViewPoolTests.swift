@@ -50,6 +50,48 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(created.fields["viewport_height"], .double(820))
     }
 
+    func testManualReloadBoundaryIsRecordedBeforeWebKitReload() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        var eventObservedAtReload: RuntimeDiagnosticEvent?
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            reloadWebView: { _ in
+                eventObservedAtReload = writer.events.last {
+                    $0.event == "web_runtime.manual_reload_requested"
+                }
+            },
+            diagnostics: diagnostics
+        )
+        let profile = makeProfile(name: "ManualReloadBoundary")
+        _ = try pool.webView(for: profile)
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let projection = pool.diagnosticSnapshotFields(for: profile.id)
+
+        XCTAssertTrue(pool.reload(slotID: profile.id))
+
+        let boundary = try XCTUnwrap(eventObservedAtReload)
+        XCTAssertEqual(boundary.fields["slot_id"], .string(profile.id.uuidString))
+        XCTAssertEqual(boundary.fields["reload_source"], .string("manual"))
+        XCTAssertEqual(boundary.fields["reload_reason"], .string("user_requested"))
+        XCTAssertEqual(
+            boundary.fields["runtime_generation"],
+            .integer(Int64(identity.runtimeGeneration))
+        )
+        XCTAssertEqual(
+            boundary.fields["webview_instance_id"],
+            .string(identity.webViewInstanceID.uuidString)
+        )
+        XCTAssertEqual(boundary.fields["navigation_generation"], projection["navigation_generation"])
+        // This fixture has not committed a navigation, so the semantic reload
+        // boundary must not invent an origin from its home URL.
+        XCTAssertEqual(boundary.fields["origin"], .null)
+        XCTAssertNil(boundary.fields["url"])
+        XCTAssertNil(boundary.fields["page_title"])
+        XCTAssertNil(boundary.fields["document_token"])
+    }
+
     func testPhysicalRuntimeDiagnosticIdentityTracksCreateReuseRebuildAndRelease() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)

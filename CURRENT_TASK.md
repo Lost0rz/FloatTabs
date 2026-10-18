@@ -1,53 +1,127 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-RELEASE-0.5.3-001`
-**Title:** Publish FloatTabs v0.5.3 Build 21 and close the release lifecycle
-**Status:** `COMPLETED`
-**Mode:** `TERMINAL`
+**Task ID:** `FT-DIAG-HISTORY-REINTEGRATION-001`
+**Title:** Reintegrate long-term local diagnostics history onto the current v0.5.3 main baseline
+**Status:** `READY_FOR_MERGE`
+**Mode:** `MERGE_READY`
 
-> This task is terminal. It records the completed release and grants no further release or product mutation authority.
+## Objective
 
-## Completed objective
+Restore the already-developed long-term local diagnostics/history functionality from historical Draft PR #124 onto current `main`, preserving all later accepted v0.5.3 product behavior and ownership boundaries.
 
-FloatTabs **v0.5.3 (Build 21)** has been published as a downloadable GitHub Release from the accepted product baseline.
+This is a reintegration task, not a direct stale-branch merge.
 
-## Delivery identity
+## Authority / source evidence
 
-- Release preparation base: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
-- Release PR: #127 — `Release FloatTabs v0.5.3 Build 21`.
-- Final release PR head: `25c3508832e8fa384cc3282f569222c06fc67b16`.
-- Release merge commit / publisher source: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
-- Tag: `v0.5.3`.
-- GitHub Release ID: `416230888`.
-- Published version/build: `0.5.3 (21)`.
+- Authorized base: `main@fef824c4d9f7783dca80e831c3812dae8e5f0833`.
+- Historical source implementation: PR #124 / `product/ft-diagnostics-history-001@e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
+- PR #124 control/history text is not current Authority; only its bounded product implementation and tests are source evidence for the missing feature.
+- Current main and accepted v0.5.3 behavior remain authoritative where later changes overlap.
 
-## Verification record
+## Required product outcome
 
-- Final release PR diff: only `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `FloatTabs.xcodeproj/project.pbxproj`, and `docs/release/FloatTabs_v0.5.3.md`.
-- App target Debug/Release metadata: `MARKETING_VERSION = 0.5.3`, `CURRENT_PROJECT_VERSION = 21`.
-- Exact PR head macOS CI: PASS.
-- Exact PR head QA DMG: PASS.
-- Final PR mergeability/review-thread audit: PASS.
-- Publish Release workflow run `39097105718`: PASS.
-- Package build/verification: PASS.
-- Release filename/checksum verification: PASS.
-- New GitHub Release publication: PASS.
-- Release target commit: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
+Advanced → Runtime Diagnostics must provide the enhanced local-history workflow:
 
-## Published assets
+- `Keep local diagnostic history` enable/disable control;
+- diagnostic `Detail level` with Standard / Verbose behavior;
+- `Long-term performance observation` opt-in control;
+- `Export Recent Diagnostics…`;
+- `Open Saved Logs Folder`;
+- bounded local sanitized JSONL history using the existing diagnostics pipeline;
+- seven-day retention intent with bounded segment/rotation limits from the prior implementation;
+- low-cadence, content-free selected-Slot health/performance checkpoints (approximately once per minute) when enabled;
+- fail-soft behavior and no remote telemetry / automatic AI analysis.
 
-- `FloatTabs-0.5.3.dmg` — uploaded, SHA-256 digest reported by GitHub: `036015d1fbcafd3e0017807c255a7b968a9f62648f51fdb636b93e5ee4755a2b`.
-- `FloatTabs-0.5.3.dmg.sha256` — uploaded.
-- `FloatTabs-0.5.3.dSYM.zip` — uploaded, SHA-256 digest reported by GitHub: `565cd72fa5d4195eb1818bf26bbd9995e464af88cd264989f036b5dc8b88fa1e`.
-- `FloatTabs-0.5.3.dSYM.zip.sha256` — uploaded.
+Preserve the previously accepted implementation semantics from PR #124 where compatible with current main.
 
-## Scope / data safety
+## Protected boundaries
 
-- No production Swift/runtime behavior was changed by the release task.
-- The temporary release-preparation workflow self-deleted before PR #127 and left no net workflow diff.
-- Browser Profile data, Web App Slot configuration, website login/session/cookies, WebKit stores, backups and recovery data were not reset or migrated.
-- Diagnostics/history PR #124 remains separate and was not included in v0.5.3.
+Do not regress or redesign:
 
-## Terminal boundary
+- current unread Tab Attention styles/palette/Settings layout;
+- current Settings IA outside the Runtime Diagnostics section;
+- Browser Profile/session/WebKit data ownership;
+- Tab/Web runtime, focus, navigation, recovery, window/fullscreen ownership;
+- current v0.5.3 version/build metadata during this product task;
+- existing diagnostics export/privacy contract except where required to restore the accepted local-history behavior.
 
-No further work is authorized under `FT-RELEASE-0.5.3-001`. A later release, hotfix, product change, cleanup, or diagnostics-history decision requires a new/reconciled `CURRENT_TASK.md`.
+Do not delete/reset/migrate user configuration, Browser Profiles, website session/cookies, WebKit stores, backups, or diagnostics data.
+
+## Integration strategy
+
+1. Start from the authorized current-main baseline on `product/ft-diagnostics-history-reintegration-001`.
+2. Compare the PR #124 implementation against its merge-base and current main.
+3. Port only the long-term diagnostics product delta and its relevant tests/project-file registration.
+4. Where files changed later on main, merge semantically: current main wins for unrelated later behavior; diagnostics-history additions are reintroduced only within their owned boundaries.
+5. Do not copy stale `CURRENT_STATUS.md` / `CURRENT_TASK.md` from PR #124.
+6. Keep historical PR #124 open until the fresh integration candidate is verified; after PR #130 merges, close it as `SUPERSEDED`.
+
+## Verification gates
+
+### Gate 0 — identity / scope
+- branch starts from `main@fef824c4…`;
+- only this integration branch writes the reintegration;
+- PR #124 remains source-only during implementation;
+- unknown overlapping unique work => STOP.
+
+### Gate 1 — preferences / persistence
+- local-history mode preference round-trips;
+- detail level round-trips;
+- long-term observation preference round-trips;
+- disabling history safely disables dependent observation projection without destructive data deletion;
+- no Profile/Slot/session storage used.
+
+### Gate 2 — Settings / UX
+- Advanced shows `Keep local diagnostic history`, `Detail level`, `Long-term performance observation`, `Export Recent Diagnostics…`, `Open Saved Logs Folder`;
+- controls synchronize correctly across relaunch/view appearance;
+- existing Backup & Restore / About remain intact.
+
+### Gate 3 — writer / retention / observation
+- existing diagnostics writer remains canonical;
+- local history uses bounded rotation/retention from the prior accepted implementation;
+- observation cadence remains low-frequency and content-free;
+- selected Slot only; no second durable diagnostics store;
+- no remote telemetry/upload/AI runtime integration.
+
+### Gate 4 — regression / hosted verification
+- relevant diagnostics, preferences, Settings, attention cross-feature, WebViewPool tests;
+- full XCTest;
+- Debug and Release arm64 builds;
+- exact-head GitHub macOS CI and QA DMG;
+- inspect no regression to later Tab Attention / Settings IA behavior.
+
+### Gate 5 — Human Real-Mac acceptance
+Install exact Release candidate and confirm:
+- Advanced shows the restored controls;
+- enabling local history writes local saved logs as designed;
+- `Open Saved Logs Folder` exposes the retained files;
+- long-term observation can be enabled only with history active and does not visibly disrupt normal use;
+- existing General/Audio/Browser settings and unread Tab Attention remain correct;
+- no user/session/Profile data regression.
+
+**Gate 5 result: PASS.** On 2026-10-18 the user explicitly confirmed the candidate is normal and authorized merge.
+
+## Current execution evidence (2026-10-18)
+
+- Selective semantic implementation: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Focused XCTest: 288 passed / 0 failed. Full XCTest: 1,339 passed / 0 failed / 0 skipped.
+- Local Debug and Release arm64 builds: PASS.
+- Exact semantic-head and final control-head GitHub macOS CI and QA DMG: PASS.
+- Installed Release candidate: `/Applications/FloatTabs.app`, version 0.5.3 / Build 21, exact embedded semantic source revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Human Real-Mac acceptance: PASS.
+- No destructive user-data operation or Browser Profile / session / WebKit operation was performed.
+
+## STOP conditions
+
+STOP if reintegration requires:
+- destructive migration/reset of user or WebKit/Profile/session data;
+- a second canonical diagnostics writer/store;
+- remote telemetry or automatic AI upload/analysis;
+- changes to attention acknowledgement/runtime ownership;
+- unbounded/high-frequency observation polling;
+- unresolved conflict where current-main ownership cannot be preserved safely;
+- required hosted CI failure or Human Real-Mac acceptance failure.
+
+## Completion
+
+Task completes only when PR #130 is merged, post-merge controls are reconciled to terminal state, and historical PR #124 is clearly marked `SUPERSEDED` and closed.

@@ -125,6 +125,7 @@
 		A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */; };
 		A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000078 /* SettingsInformationArchitecture.swift */; };
 		A00000000000000000000079 /* SettingsInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */; };
+		A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -258,6 +259,7 @@
 		B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsSettingsViewController.swift; sourceTree = "<group>"; };
 		B00000000000000000000078 /* SettingsInformationArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitecture.swift; sourceTree = "<group>"; };
 		B00000000000000000000079 /* SettingsInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInformationArchitectureTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LongTermPerformanceObservationCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -330,6 +332,7 @@
 				B00000000000000000000074 /* RuntimeDiagnosticWriter.swift */,
 				B00000000000000000000075 /* RuntimeDiagnosticSnapshot.swift */,
 				B00000000000000000000076 /* RuntimeDiagnosticExporter.swift */,
+				B00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift */,
 			);
 			path = Diagnostics;
 			sourceTree = "<group>";
@@ -658,6 +661,7 @@
 				A00000000000000000000076 /* RuntimeDiagnosticExporter.swift in Sources */,
 				A00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift in Sources */,
 				A00000000000000000000078 /* SettingsInformationArchitecture.swift in Sources */,
+				A00000000000000000000080 /* LongTermPerformanceObservationCoordinator.swift in Sources */,
 				A00000000000000000000003 /* AppCoordinator.swift in Sources */,
 				A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */,
 				A00000000000000000000035 /* AttentionSoundPlayer.swift in Sources */,
