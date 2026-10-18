@@ -30,9 +30,9 @@ jobs:
           s = p.read_text()
           old_version = 'MARKETING_VERSION = 0.5.3;'
           old_build = 'CURRENT_PROJECT_VERSION = 21;'
-          if s.count(old_version) != 4:
+          if s.count(old_version) != 2:
               raise SystemExit(f'unexpected MARKETING_VERSION occurrence count: {s.count(old_version)}')
-          if s.count(old_build) != 4:
+          if s.count(old_build) != 2:
               raise SystemExit(f'unexpected CURRENT_PROJECT_VERSION occurrence count: {s.count(old_build)}')
           s = s.replace(old_version, 'MARKETING_VERSION = 0.5.4;')
           s = s.replace(old_build, 'CURRENT_PROJECT_VERSION = 22;')
