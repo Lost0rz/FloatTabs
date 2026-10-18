@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: TAB_ATTENTION_STYLE_GRID_LAYOUT_CORRECTIVE_ACTIVE**
+**MODE: TAB_ATTENTION_WAITING_HUMAN_SETTINGS_LAYOUT_ACCEPTANCE**
 
-`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. The live candidate at the start of this responsive style-grid corrective is `e77de09db23753168c9eaa0d946592f1a19d681b`, freshly verified against the task branch and PR. Human Real-Mac review accepted the six attention effects. The previous Settings IA corrective placed Unread Tab Attention under General; this iteration makes its six-style chooser a responsive three-column, two-row grid. Final Gate 5 acceptance is a short Human Settings layout check on the exact Release.
+`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. Semantic implementation head `100f014921e91e53e63a30f89e3a81e1396d0e4c` contains the responsive three-column, two-row Style chooser in General. Focused/full XCTest, local Debug/Release arm64 builds, exact-head macOS CI and QA DMG passed. Its exact Release was installed and launched; only the short Human Settings layout check remains.
 
 ## Verified baseline
 
@@ -16,9 +16,10 @@
 - Task branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
 - Candidate at the start of this responsive style-grid corrective: `e77de09db23753168c9eaa0d946592f1a19d681b`.
-- Latest scope/control baseline: `e77de09db23753168c9eaa0d946592f1a19d681b`.
+- Semantic implementation head after the corrective: `100f014921e91e53e63a30f89e3a81e1396d0e4c`.
+- Latest scope/control baseline: `100f014921e91e53e63a30f89e3a81e1396d0e4c`.
 - Resolve the current implementation candidate from a fresh `origin/product/ft-tab-attention-highlight-001` ref; do not hard-code the commit containing this status file.
-- The candidate requires exact-head macOS CI and QA DMG before Human Real-Mac Gate 5.
+- Focused/full XCTest, Debug/Release arm64, exact-head macOS CI and QA DMG passed for semantic implementation head `100f014921e91e53e63a30f89e3a81e1396d0e4c`.
 - Diagnostics/history PR #124 remains separate and untouched.
 - Browser Profile color remains removed from Tab presentation; persisted Profile color metadata remains compatibility data only.
 
@@ -31,7 +32,7 @@
 - The grid follows available content width for resizable Settings windows, with about 10pt horizontal spacing and approximately 82–84pt card height. Keep preview readability, complete animation, and clear selected checks. Palette layout remains unchanged.
 - Do not modify any attention effect, palette, preference, runtime, ownership, or rail geometry.
 
-This responsive style-grid corrective preserves the accepted six-style family, Style/Palette separation, symmetric Settings preview geometry, Reduce Motion, shared preview/runtime effect primitives, real rail geometry, and all protected attention/runtime/Profile/session/focus/navigation/recovery ownership.
+This responsive style-grid corrective preserves the accepted six-style family, Style/Palette separation, symmetric Settings preview geometry, Reduce Motion, shared preview/runtime effect primitives, real rail geometry, and all protected attention/runtime/Profile/session/focus/navigation/recovery ownership. The app bundle at `/Applications/FloatTabs.app` is installed and running for the final human layout check; no Browser Profile or session data was changed.
 
 ## Latest accepted product direction
 
@@ -48,7 +49,7 @@ The first-version style family should include:
 
 Color is a separate presentation dimension where practical. The intended palette family is Red, Amber, Blue, Violet, Mint, and Spectrum. The exact supported palette/style compatibility may be narrowed during implementation if a combination is visually invalid, but style identity must come from structure/motion, not merely different gradients.
 
-The current implementation's attention effects are Human-accepted. The remaining corrective changes only Settings ownership and page composition in this same Draft PR.
+The current implementation's attention effects are Human-accepted. Settings ownership and page composition are already in General/Audio as authorized; the responsive Style grid is implemented and awaits final Human layout acceptance.
 
 ## Preview direction
 
@@ -84,20 +85,21 @@ ACTIVE_PRODUCT_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
 TASK_STATE=ACTIVE
 TASK_BRANCH=product/ft-tab-attention-highlight-001
 TASK_PR=125_DRAFT
-CURRENT_IMPLEMENTATION_HEAD=RESOLVE_FROM_FRESH_ORIGIN_PRODUCT_FT_TAB_ATTENTION_HIGHLIGHT_001
+CURRENT_IMPLEMENTATION_HEAD=100f014921e91e53e63a30f89e3a81e1396d0e4c
 GATE5_VISIBILITY_FUNCTION=PASS
 GATE5_ATTENTION_VISUAL_EFFECTS=ACCEPTED
-GATE5_REMAINING_CORRECTIVE=RESPONSIVE_STYLE_CHOOSER_3_COLUMNS_X_2_ROWS
+GATE5_REMAINING_CORRECTIVE=NONE
+GATE5_STATE=WAITING_HUMAN_SETTINGS_LAYOUT_ACCEPTANCE
 GENERAL_SETTINGS_SECTIONS=INTERFACE_APPEARANCE,UNREAD_TAB_ATTENTION
 AUDIO_SETTINGS_SECTIONS=READY_ALERTS,SPEECH
 CLASSIC_RED_DOT=RETAIN_AS_SELECTABLE_STYLE
 CURRENT_STYLE_FAMILY=DOT_BEACON_HALO_ORBIT_PULSE_SWEEP
 PALETTE_DIMENSION=RED_AMBER_BLUE_VIOLET_MINT_SPECTRUM
-NEXT_GATE=STYLE_GRID_LAYOUT_TESTS_THEN_FOCUSED_AND_FULL_XCTEST_DEBUG_RELEASE_EXACT_HEAD_CI_QA_THEN_HUMAN_SETTINGS_LAYOUT_CHECK
+NEXT_GATE=HUMAN_SETTINGS_LAYOUT_CHECK_ON_INSTALLED_EXACT_RELEASE
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
 
 ## Acceptance direction
 
-The current candidate must keep the accepted Unread Tab Attention controls under General, render Style as a responsive three-column, two-row chooser, keep Audio limited to Ready Alerts and Speech, preserve all accepted effects and protected runtime/profile/session behavior, pass renewed automated verification, and receive a short Human Real-Mac Settings layout check.
+The current candidate keeps the accepted Unread Tab Attention controls under General, renders Style as a responsive three-column, two-row chooser, and keeps Audio limited to Ready Alerts and Speech. Automated verification passed for semantic implementation head `100f014921e91e53e63a30f89e3a81e1396d0e4c`. Final task acceptance now awaits the short Human Settings layout check on the exact Release.

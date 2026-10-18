@@ -19,6 +19,7 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
 - Candidate at the start of this responsive Settings style-grid corrective: `e77de09db23753168c9eaa0d946592f1a19d681b` (freshly verified against PR #125).
+- Semantic implementation head after this corrective: `100f014921e91e53e63a30f89e3a81e1396d0e4c`; resolve the live repository head from fresh refs.
 - Resolve the current candidate from the freshly fetched authorized task branch; exact live Git refs remain authoritative.
 - Diagnostics/history PR #124 remains parked and out of scope.
 
@@ -39,7 +40,7 @@ The accepted Settings hierarchy is:
 
 The Style chooser must use three equal-width choice cards per row and two rows in this order: `Dot / Beacon / Halo`, then `Orbit / Pulse / Sweep`. Its row/grid width follows available Settings content width; do not hardcode three 178pt cards. Target about 10pt horizontal spacing and 82–84pt card height. Preserve readable previews, complete animation, and clear selected checks. Do not change Palette layout.
 
-Tests must prove the six Style cards form two responsive rows of three equal widths in canonical order, retain preview/selection legibility, and leave Palette layout unchanged. Preserve all preference keys/raw values, accepted effects, live rail projection, Reduce Motion, attention acknowledgement/state ownership, Browser Profiles, runtime/focus/navigation/recovery, and real rail geometry. After focused/full tests, Debug/Release arm64, exact-head CI and QA DMG, install the exact Release for the final Human Settings layout check.
+Tests must prove the six Style cards form two responsive rows of three equal widths in canonical order, retain preview/selection legibility, and leave Palette layout unchanged. Preserve all preference keys/raw values, accepted effects, live rail projection, Reduce Motion, attention acknowledgement/state ownership, Browser Profiles, runtime/focus/navigation/recovery, and real rail geometry. Focused/full XCTest, Debug/Release arm64, exact-head macOS CI and QA DMG passed for semantic implementation head `100f014921e91e53e63a30f89e3a81e1396d0e4c`. Its exact Release was installed and launched for the final Human Settings layout check. If a control-only progress update advances repository HEAD, retain the same semantic implementation, rerun exact-head CI/QA and refresh the candidate bundle before the human check.
 
 ## Product / interaction contract
 
@@ -283,7 +284,7 @@ Do not repeat visual-style acceptance. Human confirmation of the responsive layo
 
 Browser Profile metadata, website login/session data, cookies, WebKit stores, backups and Slot configuration are user data. Do not clear/reset them.
 
-The existing task authorizes non-destructive app UI preferences for attention style/palette. This corrective changes only Settings layout plus tests/docs; it performs no preference migration or data changes.
+The existing task authorizes non-destructive app UI preferences for attention style/palette. This corrective changes only Settings layout plus tests/docs; it performs no preference migration or data changes. The exact Release is installed at `/Applications/FloatTabs.app`; the task is waiting for Human Settings layout acceptance.
 
 ## STOP conditions
 
