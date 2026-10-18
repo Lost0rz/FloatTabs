@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-DIAG-HISTORY-REINTEGRATION-001`
 **Title:** Reintegrate long-term local diagnostics history onto the current v0.5.3 main baseline
-**Status:** `ACTIVE`
-**Mode:** `IMPLEMENT_AND_VERIFY`
+**Status:** `READY_FOR_MERGE`
+**Mode:** `MERGE_READY`
 
 ## Objective
 
@@ -54,7 +54,7 @@ Do not delete/reset/migrate user configuration, Browser Profiles, website sessio
 3. Port only the long-term diagnostics product delta and its relevant tests/project-file registration.
 4. Where files changed later on main, merge semantically: current main wins for unrelated later behavior; diagnostics-history additions are reintroduced only within their owned boundaries.
 5. Do not copy stale `CURRENT_STATUS.md` / `CURRENT_TASK.md` from PR #124.
-6. Keep historical PR #124 open until the fresh integration candidate is verified; only then may it be marked SUPERSEDED/CLOSED.
+6. Keep historical PR #124 open until the fresh integration candidate is verified; after PR #130 merges, close it as `SUPERSEDED`.
 
 ## Verification gates
 
@@ -99,13 +99,16 @@ Install exact Release candidate and confirm:
 - existing General/Audio/Browser settings and unread Tab Attention remain correct;
 - no user/session/Profile data regression.
 
+**Gate 5 result: PASS.** On 2026-10-18 the user explicitly confirmed the candidate is normal and authorized merge.
+
 ## Current execution evidence (2026-10-18)
 
 - Selective semantic implementation: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
 - Focused XCTest: 288 passed / 0 failed. Full XCTest: 1,339 passed / 0 failed / 0 skipped.
-- Local Debug and Release arm64 builds: PASS. Exact semantic-head GitHub macOS CI and QA DMG: PASS for `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
-- Installed Release candidate: `/Applications/FloatTabs.app`, version 0.5.3 / Build 21, exact embedded source revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`. Prior app bundle rollback: `/Applications/FloatTabs-rollback-ft-diag-reintegration-001.app`.
-- `HUMAN_UI_ACCEPTANCE=PENDING`; leave the candidate running. The human-owned visual / interaction checks above remain outstanding.
+- Local Debug and Release arm64 builds: PASS.
+- Exact semantic-head and final control-head GitHub macOS CI and QA DMG: PASS.
+- Installed Release candidate: `/Applications/FloatTabs.app`, version 0.5.3 / Build 21, exact embedded semantic source revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Human Real-Mac acceptance: PASS.
 - No destructive user-data operation or Browser Profile / session / WebKit operation was performed.
 
 ## STOP conditions
@@ -117,8 +120,8 @@ STOP if reintegration requires:
 - changes to attention acknowledgement/runtime ownership;
 - unbounded/high-frequency observation polling;
 - unresolved conflict where current-main ownership cannot be preserved safely;
-- required hosted CI or Human Real-Mac acceptance failure.
+- required hosted CI failure or Human Real-Mac acceptance failure.
 
 ## Completion
 
-Task completes only when the fresh current-main-based implementation passes all applicable automated/hosted gates and Human Real-Mac acceptance, is merged, control files are reconciled, and historical PR #124 receives a clear `SUPERSEDED` lifecycle disposition.
+Task completes only when PR #130 is merged, post-merge controls are reconciled to terminal state, and historical PR #124 is clearly marked `SUPERSEDED` and closed.
