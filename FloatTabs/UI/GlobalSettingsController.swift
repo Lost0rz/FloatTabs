@@ -1182,9 +1182,10 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
+            styleGrid.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56),
         ])
 
         view = root
@@ -1214,23 +1215,24 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
             )
             choice.target = self
             choice.action = #selector(attentionStyleChanged(_:))
-            choice.widthAnchor.constraint(equalToConstant: 178).isActive = true
-            choice.heightAnchor.constraint(equalToConstant: 88).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 83).isActive = true
             return choice
         }
-        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
+        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 3).map { start in
             let row = NSStackView(
-                views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)])
+                views: Array(attentionStyleChoices[start..<min(start + 3, attentionStyleChoices.count)])
             )
             row.orientation = .horizontal
             row.alignment = .centerY
-            row.spacing = 12
+            row.distribution = .fillEqually
+            row.spacing = 10
             return row
         }
         let grid = NSStackView(views: rows)
         grid.orientation = .vertical
         grid.alignment = .leading
         grid.spacing = 8
+        rows.forEach { $0.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true }
         return grid
     }
 

@@ -18,7 +18,7 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Candidate at the start of this Settings IA corrective: `ef53a687874132993fe4c8f9c3fe0ce5eda36d06` (freshly verified against PR #125).
+- Candidate at the start of this responsive Settings style-grid corrective: `e77de09db23753168c9eaa0d946592f1a19d681b` (freshly verified against PR #125).
 - Resolve the current candidate from the freshly fetched authorized task branch; exact live Git refs remain authoritative.
 - Diagnostics/history PR #124 remains parked and out of scope.
 
@@ -28,18 +28,18 @@ Human Real-Mac review accepted the current attention visual effects. The remaini
 
 The user explicitly requires the classic **red unread dot to remain available** because it is still an effective reminder. This latest section overrides earlier preset lists where they conflict.
 
-### Human Real-Mac acceptance and Settings IA corrective
+### Human Real-Mac acceptance and responsive Settings style-grid corrective
 
-Human review accepted all six attention visual effects: Dot, Beacon, Halo, Orbit, Pulse and Sweep. Do not redesign or modify their appearance in this corrective.
+Human review accepted all six attention visual effects: Dot, Beacon, Halo, Orbit, Pulse and Sweep. The previous corrective relocated the accepted configuration into General. This iteration changes only the Style chooser layout within General; do not modify the effects or palettes.
 
-The Settings hierarchy is:
+The accepted Settings hierarchy is:
 
 - General: Interface Appearance, Unread Tab Attention.
 - Audio: Ready Alerts, Speech.
 
-Move the complete Unread Tab Attention interface into a dedicated bounded `UnreadTabAttentionSettingsViewController`: six-style chooser, palette chooser, live preview cards, selection synchronization, and style/palette preference handlers. `NotificationsSettingsViewController` owns only Ready alert enablement and Ready Sound controls (sound selection/import/removal, volume, and Play Preview). Compose General from Appearance plus Unread Tab Attention; compose Audio from Notifications plus Speech. Update `SettingsInformationArchitecture` to match these exact sections. Do not add a top-level Appearance tab.
+The Style chooser must use three equal-width choice cards per row and two rows in this order: `Dot / Beacon / Halo`, then `Orbit / Pulse / Sweep`. Its row/grid width follows available Settings content width; do not hardcode three 178pt cards. Target about 10pt horizontal spacing and 82–84pt card height. Preserve readable previews, complete animation, and clear selected checks. Do not change Palette layout.
 
-Tests must prove General owns the feature, Audio does not expose it, all six accepted styles remain selectable/rendered, Palette works, preference changes still apply immediately, and there is one controller/authority for attention preferences. Preserve preference keys/raw values, previews and renderer, live rail projection, Reduce Motion, attention acknowledgement/state ownership, Browser Profiles, runtime/focus/navigation/recovery, and real rail geometry. After focused/full tests, Debug/Release arm64, exact-head CI and QA DMG, install the exact Release for a short Settings-location check only.
+Tests must prove the six Style cards form two responsive rows of three equal widths in canonical order, retain preview/selection legibility, and leave Palette layout unchanged. Preserve all preference keys/raw values, accepted effects, live rail projection, Reduce Motion, attention acknowledgement/state ownership, Browser Profiles, runtime/focus/navigation/recovery, and real rail geometry. After focused/full tests, Debug/Release arm64, exact-head CI and QA DMG, install the exact Release for the final Human Settings layout check.
 
 ## Product / interaction contract
 
@@ -269,20 +269,21 @@ Run relevant attention, shell, preferences, notifications, Browser Profile and p
 
 Inspect implementation to confirm there is no Timer/display-link/high-frequency polling solely for attention decoration.
 
-### Gate 5 — final Human Real-Mac Settings-location check
+### Gate 5 — final Human Real-Mac Settings layout check
 
-Attention visual effects have already been accepted. On the exact Release candidate, check only that:
+Attention visual effects have already been accepted, and Settings IA is already relocated. On the exact Release candidate, check only that:
 
 - Unread Tab Attention appears under General alongside Interface Appearance;
+- the Style chooser shows two rows of three equal-width cards at the current Settings width;
 - Audio contains Ready Alerts and Speech and no Unread Tab Attention section.
 
-Do not repeat the visual-style acceptance unless relocation causes a regression. Human confirmation of the location remains required before completion.
+Do not repeat visual-style acceptance. Human confirmation of the responsive layout remains required before completion.
 
 ## Data safety
 
 Browser Profile metadata, website login/session data, cookies, WebKit stores, backups and Slot configuration are user data. Do not clear/reset them.
 
-The existing task authorizes non-destructive app UI preferences for attention style/palette. This corrective changes only Settings ownership/page composition plus tests/docs; it performs no preference migration or data changes.
+The existing task authorizes non-destructive app UI preferences for attention style/palette. This corrective changes only Settings layout plus tests/docs; it performs no preference migration or data changes.
 
 ## STOP conditions
 

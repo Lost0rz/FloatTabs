@@ -6,30 +6,32 @@
 
 ## Mode
 
-**MODE: TAB_ATTENTION_SETTINGS_IA_CORRECTIVE_ACTIVE**
+**MODE: TAB_ATTENTION_STYLE_GRID_LAYOUT_CORRECTIVE_ACTIVE**
 
-`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. The live candidate at the start of this Settings IA corrective is `ef53a687874132993fe4c8f9c3fe0ce5eda36d06`, freshly verified against the task branch and PR. Human Real-Mac review accepted the attention visual effects. The only remaining Gate 5 corrective is moving Unread Tab Attention configuration from Audio to General.
+`FT-TAB-ATTENTION-HIGHLIGHT-001` remains active in Draft PR #125. The live candidate at the start of this responsive style-grid corrective is `e77de09db23753168c9eaa0d946592f1a19d681b`, freshly verified against the task branch and PR. Human Real-Mac review accepted the six attention effects. The previous Settings IA corrective placed Unread Tab Attention under General; this iteration makes its six-style chooser a responsive three-column, two-row grid. Final Gate 5 acceptance is a short Human Settings layout check on the exact Release.
 
 ## Verified baseline
 
 - Current `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Task branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Candidate at the start of this Settings IA corrective: `ef53a687874132993fe4c8f9c3fe0ce5eda36d06`.
-- Latest scope/control baseline: `15c743efded8be0a6c2c1f0eca8847bcbbf58e7e`.
+- Candidate at the start of this responsive style-grid corrective: `e77de09db23753168c9eaa0d946592f1a19d681b`.
+- Latest scope/control baseline: `e77de09db23753168c9eaa0d946592f1a19d681b`.
 - Resolve the current implementation candidate from a fresh `origin/product/ft-tab-attention-highlight-001` ref; do not hard-code the commit containing this status file.
 - The candidate requires exact-head macOS CI and QA DMG before Human Real-Mac Gate 5.
 - Diagnostics/history PR #124 remains separate and untouched.
 - Browser Profile color remains removed from Tab presentation; persisted Profile color metadata remains compatibility data only.
 
-## Human Real-Mac acceptance and remaining Settings corrective
+## Human Real-Mac acceptance and remaining Settings layout corrective
 
 - Human Real-Mac review accepted the attention visual effects: Dot, Beacon, Halo, Orbit, Pulse and Sweep.
-- No visual redesign or effect changes are authorized by the remaining corrective.
-- Move Unread Tab Attention configuration out of Audio and into General alongside Interface Appearance.
+- The previous corrective moved Unread Tab Attention out of Audio and into General alongside Interface Appearance.
 - General owns Interface Appearance and Unread Tab Attention. Audio owns Ready Alerts and Speech.
+- The remaining corrective changes only the Style chooser layout inside General: three equal-width cards per row, two rows, in canonical order `Dot / Beacon / Halo`, then `Orbit / Pulse / Sweep`.
+- The grid follows available content width for resizable Settings windows, with about 10pt horizontal spacing and approximately 82–84pt card height. Keep preview readability, complete animation, and clear selected checks. Palette layout remains unchanged.
+- Do not modify any attention effect, palette, preference, runtime, ownership, or rail geometry.
 
-The Settings IA corrective preserves the accepted six-style family, Style/Palette separation, symmetric Settings preview geometry, Reduce Motion, shared preview/runtime effect primitives, real rail geometry, and all protected attention/runtime/Profile/session/focus/navigation/recovery ownership.
+This responsive style-grid corrective preserves the accepted six-style family, Style/Palette separation, symmetric Settings preview geometry, Reduce Motion, shared preview/runtime effect primitives, real rail geometry, and all protected attention/runtime/Profile/session/focus/navigation/recovery ownership.
 
 ## Latest accepted product direction
 
@@ -85,17 +87,17 @@ TASK_PR=125_DRAFT
 CURRENT_IMPLEMENTATION_HEAD=RESOLVE_FROM_FRESH_ORIGIN_PRODUCT_FT_TAB_ATTENTION_HIGHLIGHT_001
 GATE5_VISIBILITY_FUNCTION=PASS
 GATE5_ATTENTION_VISUAL_EFFECTS=ACCEPTED
-GATE5_REMAINING_CORRECTIVE=SETTINGS_IA_GENERAL_VS_AUDIO
+GATE5_REMAINING_CORRECTIVE=RESPONSIVE_STYLE_CHOOSER_3_COLUMNS_X_2_ROWS
 GENERAL_SETTINGS_SECTIONS=INTERFACE_APPEARANCE,UNREAD_TAB_ATTENTION
 AUDIO_SETTINGS_SECTIONS=READY_ALERTS,SPEECH
 CLASSIC_RED_DOT=RETAIN_AS_SELECTABLE_STYLE
 CURRENT_STYLE_FAMILY=DOT_BEACON_HALO_ORBIT_PULSE_SWEEP
 PALETTE_DIMENSION=RED_AMBER_BLUE_VIOLET_MINT_SPECTRUM
-NEXT_GATE=FOCUSED_SETTINGS_PREFERENCE_ATTENTION_AND_FULL_XCTEST_DEBUG_RELEASE_EXACT_HEAD_CI_QA_THEN_SHORT_HUMAN_SETTINGS_LOCATION_CHECK
+NEXT_GATE=STYLE_GRID_LAYOUT_TESTS_THEN_FOCUSED_AND_FULL_XCTEST_DEBUG_RELEASE_EXACT_HEAD_CI_QA_THEN_HUMAN_SETTINGS_LAYOUT_CHECK
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
 
 ## Acceptance direction
 
-The next candidate must relocate the accepted Unread Tab Attention controls to General, keep Audio limited to Ready Alerts and Speech, preserve all accepted effects and protected runtime/profile/session behavior, pass renewed automated verification, and receive a short Human Real-Mac Settings-location check.
+The current candidate must keep the accepted Unread Tab Attention controls under General, render Style as a responsive three-column, two-row chooser, keep Audio limited to Ready Alerts and Speech, preserve all accepted effects and protected runtime/profile/session behavior, pass renewed automated verification, and receive a short Human Real-Mac Settings layout check.

@@ -79,6 +79,72 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(audio.embeddedControllers.contains { $0 is UnreadTabAttentionSettingsViewController })
     }
 
+    func testUnreadAttentionStyleGridIsResponsiveThreeColumnLayoutAndKeepsPaletteLayout() throws {
+        let suiteName = "FloatTabsTests.AttentionStyleGridLayout.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.attentionStyle = .dot
+        let controller = UnreadTabAttentionSettingsViewController(
+            preferencesStore: preferences
+        )
+        controller.loadViewIfNeeded()
+
+        let wide = try styleGridRows(controller, contentWidth: 640)
+        let narrow = try styleGridRows(controller, contentWidth: 500)
+
+        for layout in [wide, narrow] {
+            XCTAssertEqual(layout.rows.map { $0.map(\.style.displayName) }, [
+                ["Dot", "Beacon", "Halo"],
+                ["Orbit", "Pulse", "Sweep"],
+            ])
+            XCTAssertEqual(layout.rows.flatMap { $0 }.count, 6)
+            let choices = layout.rows.flatMap { $0 }
+            XCTAssertTrue(choices.allSatisfy { (82...84).contains(Int($0.frame.height.rounded())) })
+            for row in layout.rows {
+                let widths = row.map(\.frame.width)
+                XCTAssertLessThanOrEqual((widths.max() ?? 0) - (widths.min() ?? 0), 1.01)
+            }
+            let cardWidths = choices.map(\.frame.width)
+            XCTAssertLessThanOrEqual((cardWidths.max() ?? 0) - (cardWidths.min() ?? 0), 1.01)
+
+            for row in layout.rows {
+                for pair in zip(row, row.dropFirst()) {
+                    XCTAssertEqual(pair.1.frame.minX - pair.0.frame.maxX, 10, accuracy: 0.5)
+                }
+                for choice in row {
+                    XCTAssertGreaterThan(choice.previewSurfaceView.frame.width, 90)
+                    XCTAssertEqual(choice.previewSurfaceView.frame.height, 38, accuracy: 0.01)
+                    let selectedCheck = try XCTUnwrap(
+                        allDescendants(of: choice).compactMap { $0 as? NSImageView }.first {
+                            $0.image?.accessibilityDescription == "Selected"
+                        }
+                    )
+                    if choice.style == .dot {
+                        XCTAssertTrue(choice.isSelectedStyle)
+                        XCTAssertFalse(selectedCheck.isHidden)
+                    }
+                }
+            }
+        }
+
+        XCTAssertEqual(wide.rowWidth, 640 - 56, accuracy: 1)
+        XCTAssertEqual(narrow.rowWidth, 500 - 56, accuracy: 1)
+        XCTAssertGreaterThan(wide.cardWidth, narrow.cardWidth)
+
+        let paletteRows = groupedRows(controller.attentionPaletteChoices)
+        XCTAssertEqual(paletteRows.map(\.count), [3, 3])
+        XCTAssertEqual(
+            Set(controller.attentionPaletteChoices.map { $0.frame.width }),
+            [104]
+        )
+        for row in paletteRows {
+            for pair in zip(row, row.dropFirst()) {
+                XCTAssertEqual(pair.1.frame.minX - pair.0.frame.maxX, 8, accuracy: 0.5)
+            }
+        }
+    }
+
     func testLanguagePlaceholderIsNotASettingsSection() {
         let sectionNames = GlobalSettingsPage.allCases
             .flatMap(\.sections)
@@ -157,6 +223,55 @@ final class SettingsInformationArchitectureTests: XCTestCase {
             "Version 0.4.0"
         )
     }
+}
+
+@MainActor
+private struct AttentionStyleGridLayout {
+    let rows: [[AttentionStyleChoiceButton]]
+    let rowWidth: CGFloat
+    let cardWidth: CGFloat
+}
+
+@MainActor
+private func styleGridRows(
+    _ controller: UnreadTabAttentionSettingsViewController,
+    contentWidth: CGFloat
+) throws -> AttentionStyleGridLayout {
+    controller.view.setFrameSize(NSSize(width: contentWidth, height: 700))
+    layoutRecursively(controller.view)
+    let rows = groupedRows(controller.attentionStyleChoices)
+    let firstChoice = try XCTUnwrap(controller.attentionStyleChoices.first)
+    let row = try XCTUnwrap(firstChoice.superview)
+    return AttentionStyleGridLayout(
+        rows: rows,
+        rowWidth: row.frame.width,
+        cardWidth: firstChoice.frame.width
+    )
+}
+
+@MainActor
+private func groupedRows<T: NSView>(_ views: [T]) -> [[T]] {
+    var rows: [[T]] = []
+    for view in views {
+        if rows.last?.first?.superview === view.superview {
+            rows[rows.count - 1].append(view)
+        } else {
+            rows.append([view])
+        }
+    }
+    return rows
+}
+
+@MainActor
+private func layoutRecursively(_ view: NSView) {
+    view.needsLayout = true
+    view.layoutSubtreeIfNeeded()
+    view.subviews.forEach(layoutRecursively)
+}
+
+@MainActor
+private func allDescendants(of view: NSView) -> [NSView] {
+    view.subviews + view.subviews.flatMap(allDescendants)
 }
 
 @MainActor
