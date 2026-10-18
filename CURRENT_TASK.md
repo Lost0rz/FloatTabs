@@ -1,64 +1,113 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-RELEASE-0.5.4-001`
-**Title:** Publish FloatTabs v0.5.4 Build 22 and close the release lifecycle
-**Status:** `COMPLETED`
-**Mode:** `TERMINAL`
+**Task ID:** `FT-LIFECYCLE-CLOSEOUT-002`
+**Title:** Close terminal FloatTabs repository/workspace lifecycle debt after v0.5.4
+**Status:** `ACTIVE`
+**Mode:** `LIFECYCLE_RECONCILE`
 
-> This task is terminal. It records the completed v0.5.4 release lifecycle and grants no further product, release, cleanup or diagnostics mutation authority.
+## Objective
 
-## Completed objective
+Establish a clean, classified post-v0.5.4 development baseline by reconciling terminal Git worktrees, local branches, remote task branches, stashes and related retained workspace evidence without losing unique work or user/product data.
 
-FloatTabs **v0.5.4 / Build 22** has been published as a downloadable GitHub Release from the accepted current main baseline containing the reintegrated long-term local diagnostics/history capability.
+This is lifecycle/governance work only. It does not authorize product/runtime/persistence behavior changes.
 
-## Delivery identity
+## Authority / starting facts
 
-- Release preparation base: `main@66de8f18c55d46cf882723c05f0afea8249d9e1b`.
-- Release PR: #132 — `Release FloatTabs v0.5.4 Build 22`.
-- Final release PR head: `b5e3c9951000f67d3ce31f43b41e5e425c7b4d3d`.
-- Release merge commit / publisher source: `439590659a42d52abd985c323dee4e1e0fbe9b47`.
-- Tag: `v0.5.4`.
-- GitHub Release ID: `416270008`.
-- Published version/build: `0.5.4 (22)`.
-- Publish Release workflow: `39103088335` — PASS.
+- Starting remote main: `24df6a6538cd00789e85871d3a311d507d0eaa13`.
+- Latest public release: `v0.5.4` / Build 22; release lifecycle is terminal.
+- Open PRs at task start: 0.
+- Fresh remote branch inventory at task start: 33 branches including `main`.
+- `main` is canonical and must remain.
+- `phase2/pr-e-floattabs-durable-outbox-sender` corresponds to PR #102 `ARCHIVE_ONLY`; default disposition is retained/frozen historical evidence unless separately proven safe and explicitly authorized for removal.
+- The other 31 remote branches are terminal cleanup candidates based on remote PR/task lifecycle evidence, but remote evidence alone does not authorize deletion while local dependency/unique-work state is unknown.
 
-## Verification record
+## Required sequence
 
-- Final release PR changed only `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `FloatTabs.xcodeproj/project.pbxproj`, and `docs/release/FloatTabs_v0.5.4.md`.
-- App target Debug/Release metadata: `MARKETING_VERSION = 0.5.4`, `CURRENT_PROJECT_VERSION = 22`.
-- Exact release PR head macOS CI run `39102628192`: PASS.
-- Exact release PR head QA DMG run `39102628179`: PASS.
-- Final PR mergeability/review-thread audit: PASS.
-- Publish Release package build and Apple Silicon verification: PASS.
-- Release filename/checksum verification: PASS.
-- New GitHub Release publication: PASS.
-- Release target commit: `439590659a42d52abd985c323dee4e1e0fbe9b47`.
+### Gate 0 — fresh local topology / identity
 
-## Published assets
+On the canonical development machine:
 
-- `FloatTabs-0.5.4.dmg` — SHA-256 `ec2c732275bcf85081fbaafd2a6d820eb7064d65cd9ed5aabe40e2d62a2abdde`.
-- `FloatTabs-0.5.4.dmg.sha256`.
-- `FloatTabs-0.5.4.dSYM.zip` — SHA-256 `e9f840292ba804551b41330e0a3ef5386f3253c21b5e823d9840a12541f31084`.
-- `FloatTabs-0.5.4.dSYM.zip.sha256`.
+- resolve the canonical FloatTabs repository root and storage authority;
+- fetch/prune remote refs without changing local work;
+- enumerate all registered worktrees and verify path existence;
+- enumerate all local branches, upstream/tracking state and HEADs;
+- inspect staged, unstaged and untracked state per relevant worktree;
+- identify local-only commits / ahead-of-remote branches;
+- enumerate git stashes;
+- identify retained rollback app bundles / project-controlled evidence bundles relevant to recent tasks where practical;
+- do not substitute old chat/receipt state for fresh local evidence.
 
-## Product baseline delivered
+### Gate 1 — classify before mutation
 
-The release includes the previously accepted current product state, including:
+Every task-relevant non-canonical workspace/ref must receive a disposition:
 
-- long-term local diagnostic history;
-- Standard / Verbose detail level;
-- opt-in low-cadence selected-Slot performance observation;
-- `Open Saved Logs Folder` and bounded sanitized JSONL retention/rotation;
-- diagnostics-only runtime/WebView/navigation identity evidence and manual reload boundary;
-- accepted unread Tab Attention styles/palette and Settings IA;
-- preserved Browser Profile/session/WebKit ownership and current focus/navigation/window/runtime behavior.
+- terminal / removable;
+- retained frozen/read-only with explicit reason and release condition;
+- unique work preserved with evidence;
+- unresolved blocker.
 
-## Scope / data safety
+No overlapping write-capable predecessor may remain unclassified.
 
-- The release task introduced no new Swift/runtime/persistence product semantics.
-- No Browser Profile, Slot, website login/session/cookie, WebKit store, backup, recovery data or existing diagnostic history was reset, deleted or migrated.
-- The temporary release-preparation workflow was absent from the final release PR diff.
+### Gate 2 — preserve unique work
 
-## Terminal boundary
+Before any removal:
 
-No further mutation is authorized under this task. Lifecycle management may now perform read-only inventory/audit. Any branch/worktree/rollback-bundle deletion or other state-changing cleanup requires a new/reconciled task authority before execution.
+- preserve any staged/unstaged/untracked/local-only unique work under the canonical project storage authority or another explicit project-local durable location;
+- record what was preserved and where;
+- do not use force/reset/stash overwrite to bypass ambiguity;
+- unknown ownership => STOP for that item.
+
+### Gate 3 — close safe local workspace debt
+
+For each proven terminal, non-unique item:
+
+- remove obsolete registered worktrees using normal Git worktree commands;
+- remove obsolete local task branches when safe;
+- prune stale worktree metadata;
+- keep canonical main checkout intact;
+- do not delete rollback/evidence bundles whose retention value is not established.
+
+### Gate 4 — close safe remote branch debt
+
+Only after local dependency checks:
+
+- delete remote branches proven terminal and no longer needed by local worktrees/collaboration/evidence retention;
+- retain `main`;
+- retain `phase2/pr-e-floattabs-durable-outbox-sender` by default as frozen `ARCHIVE_ONLY` evidence under this task;
+- do not delete tags or GitHub Releases;
+- if any terminal remote branch must remain, record a concrete retention reason and release condition.
+
+### Gate 5 — verify final baseline
+
+After cleanup:
+
+- fetch/prune again;
+- enumerate remaining worktrees/local branches/remote branches/stashes;
+- verify canonical main checkout is usable and not overwritten/reset to achieve cleanliness;
+- report any intentionally retained frozen workspace/ref;
+- target zero unclassified task-relevant workspaces;
+- update `CURRENT_STATUS.md` / `CURRENT_TASK.md` with the actual evidence and terminal disposition through the normal protected-main flow.
+
+## Protected boundaries
+
+Do not modify production Swift, tests, runtime behavior, version/build metadata, release assets/tags, Browser Profiles, Web App Slots, website login/session/cookies, WebKit stores, backups, diagnostics history or application preferences.
+
+Do not remove the canonical repository or current user application bundle as part of Git workspace cleanup.
+
+## STOP conditions
+
+STOP the affected cleanup item rather than guessing if:
+
+- a local worktree/path cannot be tied to a verified repository/ref/task identity;
+- staged/unstaged/untracked/local-only work has unknown ownership or preservation status;
+- a local branch contains unique commits not proven integrated/preserved;
+- remote and local identities disagree materially;
+- cleanup would require force/reset/overwrite or destructive user-data action;
+- the evidence-retention need for an archive/rollback/forensic item is ambiguous;
+- another current writer/task appears during execution.
+
+One blocked item does not authorize deleting it; preserve it and report it. Continue only with clearly independent safe items when that does not obscure the blocker.
+
+## Completion
+
+The task completes only when remote and local lifecycle evidence has been reconciled, safe terminal workspace/ref debt is closed, intentionally retained evidence has explicit ownership/release conditions, zero task-relevant items remain unclassified, and the control plane is updated to a terminal lifecycle state.
