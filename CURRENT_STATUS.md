@@ -6,88 +6,49 @@
 
 ## Mode
 
-**MODE: NO_ACTIVE_PRODUCT_TASK**
+**MODE: LIFECYCLE_SYNC_ACTIVE**
 
-`FT-LIFECYCLE-CLOSEOUT-002` is completed. The post-v0.5.4 repository/workspace lifecycle debt has been reconciled with unique local work and retained historical/performance evidence explicitly preserved.
+`FT-LIFECYCLE-SYNC-001` is authorized only to fast-forward the canonical local `main` to the freshly fetched `origin/main`, remove the merged terminal control branch `chore/ft-lifecycle-closeout-002-terminal` when local/remote deletion preconditions hold, collect final lifecycle evidence, and close this task through protected-main control updates. No product/runtime behavior change is authorized.
 
-## Stable product / release baseline
+## Release and predecessor
 
 - Latest public release: `v0.5.4` / Build 22.
-- Release PR #132: MERGED.
-- Release closeout PR #133: MERGED.
-- GitHub Release ID: `416270008`.
-- Publish Release workflow `39103088335`: PASS.
-- Lifecycle authorization PR #134: MERGED at `842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6`.
-- No product/runtime/persistence behavior changed during lifecycle cleanup.
+- `FT-LIFECYCLE-CLOSEOUT-002` completed through merged PR #135 at `01d789e0638ffde5a56ca5a69113fec8780399a3`.
+- PR #102 branch `phase2/pr-e-floattabs-durable-outbox-sender` remains frozen `ARCHIVE_ONLY` evidence.
 
-## Lifecycle closeout result
+## Fresh lifecycle-sync baseline
 
-Fresh local reconciliation was completed under `FT-LIFECYCLE-CLOSEOUT-002-LOCAL-01` from the canonical repository at `/Volumes/Jack-Dev/Projects/FloatTabs`.
+Observed after `git fetch --all --prune` on 2026-10-18:
 
-### Worktrees
+- Canonical checkout: `/Volumes/Jack-Dev/Projects/FloatTabs`, branch `main`, HEAD `d685bbe7c035332ecc9b7ab6f8641660f813d42f`, clean, 81 commits behind `origin/main`.
+- `origin/main`: `01d789e0638ffde5a56ca5a69113fec8780399a3`; canonical local `main` is its ancestor, so ff-only sync is permitted.
+- Open PRs: 0.
+- GitHub `origin` branches: `main`, `chore/ft-lifecycle-closeout-002-terminal`, and `phase2/pr-e-floattabs-durable-outbox-sender`.
+- `git branch -r` also shows `pinned-calibre-web/master`, a remote-tracking ref with no configured remote in this checkout; it is outside this task and will be preserved.
+- The terminal control branch is at `5cdc5e5d9d638d53ceeda0d34d1205092f5973e6`, already an ancestor of `origin/main`; it is the only branch authorized for deletion by this task.
+- Registered project worktrees before this authorization writer: canonical `main` and retained `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001` on `perf/ft-chatgpt-perf-001`. Temporary control-authority worktree: `/private/tmp/FloatTabs-lifecycle-sync-authority` on `codex/ft-lifecycle-sync-001`; remove it after protected-main delivery.
 
-- Before: 6 registered FloatTabs worktrees.
-- Removed: 4 terminal worktrees.
-- After: 2 registered worktrees:
-  - canonical `/Volumes/Jack-Dev/Projects/FloatTabs` on local `main@d685bbe7c035332ecc9b7ab6f8641660f813d42f`;
-  - retained performance-evidence worktree `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001` on `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e`.
-- No stale worktree registrations remained after prune verification.
+## Preserved local work and evidence
 
-The canonical local checkout was deliberately not reset or overwritten during cleanup. At audit completion it was clean, 0 commits ahead and 78 commits behind fetched `origin/main@842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6`. Before any future state-changing development, Gate 0 must fast-forward/synchronize this clean canonical checkout to current `origin/main`; do not treat the old local checkout SHA as current repository authority.
-
-### Local branches / unique work
-
-Terminal removable local branches were deleted only after dependency/unique-work checks.
-
-Explicit retained local evidence:
-
-- `fix/residency-lifecycle-semantics@8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef` — contains 13 local-only commits not present on any current origin branch; preserved in the canonical repository storage and frozen as evidence. No current write authority.
-- `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e` — retained with six ignored benchmark artifacts from the 2026-10-17 paired run; frozen as performance evidence. No current write authority.
-- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` — retained/frozen historical `ARCHIVE_ONLY` evidence for PR #102. No current write authority.
-
-No task-relevant local item remains unclassified.
-
-### Remote repository
-
-Fresh Web verification after local cleanup confirms:
-
-- Open pull requests: **0**.
-- Remote branches: **2 total**.
-- `main@842f230ebd0b7cfd8a2bc5cc8c0a60858f260fd6` — canonical retained branch before this terminal control update.
-- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` — retained/frozen `ARCHIVE_ONLY` evidence for closed PR #102.
-- 32 terminal remote branches were removed after local dependency verification.
-- Tags and GitHub Releases were not deleted.
-
-## Data / evidence safety
-
-- Stashes: none before or after cleanup.
-- Staged/unstaged/untracked task work: none in audited worktrees.
-- Unique local commits: preserved, not discarded.
-- Benchmark evidence: preserved at its original project-storage location.
-- Browser Profiles, Web App Slots, website sessions/cookies/WebKit stores, backups, diagnostics history and app preferences: not modified by lifecycle cleanup.
-- User data / live Browser Profile data: no writes; no destructive access.
+- `fix/residency-lifecycle-semantics@8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef` contains 13 local-only commits; preserve unchanged.
+- `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e`, its registered worktree, and benchmark evidence remain frozen and preserved.
+- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` remains frozen `ARCHIVE_ONLY` evidence.
+- Tags and GitHub Releases remain untouched.
+- The prior closeout recorded no changes to Browser Profiles, Slots, sessions/cookies/WebKit data, preferences, backups, or diagnostics history. This task authorizes no such changes.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-LIFECYCLE-CLOSEOUT-002
-TASK_STATE=COMPLETED
-LATEST_RELEASE=v0.5.4_BUILD_22
-OPEN_PRS=0
-REMOTE_BRANCH_COUNT_BEFORE_TERMINAL_CONTROL_PR=2
-REMOTE_CANONICAL_KEEP=main
-REMOTE_ARCHIVE_RETAIN=phase2/pr-e-floattabs-durable-outbox-sender
-REGISTERED_WORKTREES=2
-UNCLASSIFIED_RELEVANT_WORKSPACES=0
-STASH_COUNT=0
-UNIQUE_LOCAL_WORK=PRESERVED
-PERF_EVIDENCE=PRESERVED_FROZEN
+ACTIVE_TASK=FT-LIFECYCLE-SYNC-001
+TASK_STATE=ACTIVE
+CANONICAL_MAIN_SYNC=AUTHORIZED_FF_ONLY
+TERMINAL_BRANCH_DELETE=AUTHORIZED_ONLY_AFTER_MERGED_AND_NO_UNIQUE_WORK_PROOF
+RETAINED_EVIDENCE=UNCHANGED
 USER_DATA_TOUCHED=NO
 BROWSER_PROFILE_DATA_TOUCHED=NO
-ROOT_CAUSE=N/A
+PRODUCT_CODE_CHANGE=NO
 ```
 
 ## Next
 
-There is no active product or cleanup task. Before any future state-changing work, create/reconcile a new `CURRENT_TASK.md` and complete Gate 0 by fetching current refs and fast-forwarding the clean canonical local `main` checkout to current `origin/main`. Any later decision to delete the retained residency commits, performance evidence/worktree, or PR #102 archive branch requires separate explicit evidence-retention authority.
+Follow `CURRENT_TASK.md`. Stop on a dirty or wrong canonical checkout, non-ancestor local `main`, a failed protected-main gate, or any uncertainty about terminal-branch merge/unique-work proof. Do not modify retained/frozen evidence.
