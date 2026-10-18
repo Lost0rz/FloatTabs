@@ -6,76 +6,70 @@
 
 ## Mode
 
-**MODE: NO_ACTIVE_PRODUCT_TASK**
+**MODE: RELEASE_0.5.3_ACTIVE**
 
-`FT-TAB-ATTENTION-HIGHLIGHT-001` is completed, Human-accepted, independently audited PASS, and merged. No further product implementation is authorized by that task.
+`FT-RELEASE-0.5.3-001` is active. The accepted product baseline has already merged and passed Human/runtime acceptance; this task is release-only and targets **FloatTabs v0.5.3 (Build 21)**.
 
-## Delivery identity
+## Release baseline
 
-- Accepted semantic implementation head: `100f014921e91e53e63a30f89e3a81e1396d0e4c`.
-- Accepted exact installed/control candidate before closeout: `dc080f56f9a7c23cd7e6df7280e33ad592d4c49b`.
-- Final PR #125 head after control reconciliation: `9d9464620097f6ce246a4a6dafa0ff3f9f7db507`.
-- PR #125 merge commit: `7859eabc95c1fa90d69fdda31d1cf1e1aec9a74a`.
-- Resolve the literal current `main` from the live repository; any later control-only closeout merge does not change the accepted product semantics above.
-- Diagnostics/history PR #124 remains separate and untouched at `e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
+- Current release-task base: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
+- Previous public release: `v0.5.2` / Build 20.
+- Release branch: `release/v0.5.3`.
+- Current project metadata before release prep: `0.5.2 (20)`.
+- Target metadata: `0.5.3 (21)`.
+- Existing publisher: `.github/workflows/publish-release.yml`.
+- Existing package builder: `tools/release/build_dmg.sh`.
+- Distribution remains Apple Silicon arm64.
+- Diagnostics/history PR #124 remains parked, separate and untouched.
 
-## Final verification
+## Accepted product baseline included in v0.5.3
 
-- Focused XCTest reported: 93 PASS.
-- Full XCTest reported: 1,323 PASS / 4 skipped / 0 failed.
-- Debug arm64: PASS.
-- Release arm64: PASS.
-- Semantic head `100f014...`: exact-head macOS CI PASS; exact-head QA DMG PASS.
-- Pre-closeout installed head `dc080f56...`: exact-head macOS CI PASS; exact-head QA DMG PASS.
-- Final literal PR head `9d946462...`: required `Build & Test (Apple Silicon arm64)` PASS and QA DMG PASS.
-- Final PR audit: base/head current, mergeable before merge, no unresolved review threads, and closeout drift beyond `dc080f56...` was limited to `CURRENT_STATUS.md` / `CURRENT_TASK.md`.
-- Human Real-Mac acceptance: PASS for all six attention effects, Settings location and final responsive 3×2 layout.
-- PR #125: MERGED.
+The release packages already-merged, accepted work since v0.5.2. User-facing/reliability highlights include:
 
-## Accepted product result
+- selectable unread/Ready Tab attention styles: Dot, Beacon, Halo, Orbit, Pulse and Sweep;
+- independent Red / Amber / Blue / Violet / Mint / Spectrum attention palettes, with classic red Dot retained;
+- Browser Profile color removed from Tab presentation while compatibility metadata remains preserved;
+- General owns Interface Appearance + Unread Tab Attention; Audio owns Ready Alerts + Speech;
+- responsive 3×2 Attention Style chooser and Reduce Motion-safe decorative animation;
+- outer shell/complete Tab rail no longer acquire window movement; the bounded inner Web-surface movement affordance remains;
+- Read Latest Response uses positively assistant-owned latest-response content rather than a mixed user/assistant ancestor;
+- corrected Hot background recovery and Warm retention/memory-pressure semantics;
+- expanded privacy-bounded runtime/navigation/page-app diagnostic evidence;
+- DEBUG/benchmark measurement support for long-running ChatGPT performance.
 
-- Browser Profile color no longer determines Tab presentation; persisted `BrowserProfileColor` remains compatibility metadata and is not destructively migrated.
-- Unread/Ready projection supports Dot, Beacon, Halo, Orbit, Pulse and Sweep.
-- Palette is a separate app preference: Red, Amber, Blue, Violet, Mint or Spectrum; Dot remains classic red.
-- Animated styles use bounded Core Animation, respect Reduce Motion, and do not add Timer/display-link polling or Tab geometry motion.
-- Settings previews, visible Tabs and compact overflow share bounded attention-effect primitives.
-- General owns Interface Appearance + Unread Tab Attention.
-- Audio owns Ready Alerts + Speech.
-- The Style chooser is a responsive equal-width 3-column × 2-row grid ordered `Dot / Beacon / Halo`, then `Orbit / Pulse / Sweep`.
-- Real rail geometry, attention acknowledgement/state authority, favicon residency semantics, Browser Profile/session ownership, Web runtime/navigation/focus/recovery and speech behavior remain protected.
+The unmerged long-term diagnostics-history work in PR #124 is not part of this release.
 
-## Authority alignment
+## Release gates
 
-`docs/design/FloatTabs_UI_Design_System_v1.3.md` is the current rail/attention visual contract. `docs/architecture/README.md` states that older versioned design statements yield to newer accepted contracts/current production behavior when they disagree. The older frozen Attention V1 document therefore remains applicable to runtime state/residency/acknowledgement semantics, while its original dot-only visual wording is historical where it conflicts with the accepted v1.3 projection contract.
+- release/control-only diff;
+- exact app metadata `0.5.3 (21)`;
+- exact-head macOS CI PASS;
+- exact-head QA DMG PASS;
+- final mergeability/review-thread audit PASS;
+- `Publish Release` PASS after merge;
+- `v0.5.3` tag and GitHub Release verified;
+- DMG/checksum/dSYM/checksum assets verified downloadable;
+- post-release STATUS/TASK lifecycle closeout merged.
 
 ## Data safety
 
-- USER_DATA_TOUCHED=NO during installation/acceptance.
-- BROWSER_PROFILE_DATA_TOUCHED=NO.
-- Website login/session/cookie/WebKit stores were not reset, migrated or deleted.
-- Existing rollback app bundles remain retained; this closeout does not authorize cleanup.
+No release step is authorized to clear/reset/migrate Browser Profiles, Web App Slots, website sessions/cookies/WebKit data, backups, recovery data, or user configuration.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-TAB-ATTENTION-HIGHLIGHT-001
-TASK_STATE=COMPLETED
-TASK_PR=125_MERGED
-TASK_PR_FINAL_HEAD=9d9464620097f6ce246a4a6dafa0ff3f9f7db507
-TASK_MERGE_COMMIT=7859eabc95c1fa90d69fdda31d1cf1e1aec9a74a
-SEMANTIC_IMPLEMENTATION_HEAD=100f014921e91e53e63a30f89e3a81e1396d0e4c
-GATE5_ATTENTION_VISUAL_EFFECTS=PASS
-GATE5_SETTINGS_LOCATION=PASS
-GATE5_SETTINGS_LAYOUT=PASS
-GENERAL_SETTINGS_SECTIONS=INTERFACE_APPEARANCE,UNREAD_TAB_ATTENTION
-AUDIO_SETTINGS_SECTIONS=READY_ALERTS,SPEECH
-CURRENT_STYLE_FAMILY=DOT_BEACON_HALO_ORBIT_PULSE_SWEEP
-PALETTE_DIMENSION=RED_AMBER_BLUE_VIOLET_MINT_SPECTRUM
+ACTIVE_PRODUCT_TASK=FT-RELEASE-0.5.3-001
+TASK_STATE=ACTIVE
+TASK_MODE=RELEASE
+RELEASE_BRANCH=release/v0.5.3
+RELEASE_BASE_MAIN=869bfaeb7eb6b00d9f2460fd638cb922f3200981
+PREVIOUS_RELEASE=v0.5.2_BUILD_20
+TARGET_RELEASE=v0.5.3_BUILD_21
+PRODUCT_SOURCE_CHANGE_AUTHORIZED=NO
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
 
 ## Next
 
-No active product task is authorized. Start or reconcile a new `CURRENT_TASK.md` before any new product mutation.
+Prepare the bounded release metadata and notes, pass exact-head hosted release gates, merge the release PR, verify GitHub publication/assets, then perform control-only lifecycle closeout.
