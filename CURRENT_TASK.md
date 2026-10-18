@@ -1,74 +1,67 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-TAB-ATTENTION-HIGHLIGHT-001`
-**Title:** Make unread Tabs unmistakable with selectable attention styles
-**Status:** `COMPLETED`
-**Mode:** `TERMINAL`
+**Task ID:** `FT-RELEASE-0.5.3-001`
+**Title:** Publish FloatTabs v0.5.3 Build 21 and close the release lifecycle
+**Status:** `ACTIVE`
+**Mode:** `RELEASE`
 
-> This task is terminal. It records the accepted result and grants no further implementation authority.
+## Objective
 
-## Completed objective
+Publish the current accepted `main` product baseline as **FloatTabs v0.5.3 (Build 21)** with downloadable GitHub Release assets, then reconcile the release lifecycle back to a clean no-active-task state.
 
-FloatTabs now presents unread/new-response state with a configurable, visually distinct attention system while keeping Browser Profile color out of Tab presentation and preserving existing attention/runtime ownership.
+## Authority / baseline
 
-## Accepted product result
+- Project rules: `AGENTS.md`.
+- Current release baseline: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
+- Previous public release: `v0.5.2` / Build 20.
+- Release branch: `release/v0.5.3`.
+- Release publisher: `.github/workflows/publish-release.yml`.
+- Release packaging: `tools/release/build_dmg.sh`.
+- Diagnostics/history PR #124 remains separate and out of scope.
 
-- Browser Profile color no longer determines Tab appearance; stored `BrowserProfileColor` remains compatibility metadata and its persistence schema is preserved.
-- The user can select one reminder style: **Dot / Beacon / Halo / Orbit / Pulse / Sweep**.
-- Style and Palette are separate app preferences; palettes are **Red / Amber / Blue / Violet / Mint / Spectrum**. Dot remains classic red.
-- Dot is a clearly visible classic unread indicator; Beacon is a thick leading-side accent; Halo is a soft glow; Orbit is a continuous full-perimeter treatment; Pulse is restrained whole-surface breathing; Sweep uses a tinted base and broad moving band with a calm interval.
-- Animated effects use bounded Core Animation, have Reduce Motion fallbacks, and do not move/re-layout the Tab or add Timer/display-link polling.
-- Settings previews use symmetric rounded geometry and share attention-effect primitives with real Tabs/overflow.
-- General owns **Interface Appearance** and **Unread Tab Attention**.
-- Audio owns **Ready Alerts** and **Speech**.
-- The Style chooser is a responsive equal-width **3 columns × 2 rows** grid in canonical order `Dot / Beacon / Halo`, then `Orbit / Pulse / Sweep`; Palette layout remains separate.
+## Authorized release delta
 
-## Protected behavior preserved
+Release preparation may change only release/control material:
 
-- Existing `WebAttentionCoordinator` / `ChatGPTUnreadResponseCoordinator` runtime state and acknowledgement semantics remain authoritative.
-- Real rail geometry, selection/order/reorder, hover/magnification and first-click behavior are not redefined by this task.
-- Resident favicon remains full color; released favicon remains grayscale/dim; attention does not reinterpret runtime residency.
-- Browser Profile identity, WebKit data stores, login/session/cookies, Slot configuration, Web runtime/navigation/focus/recovery and speech ownership remain unchanged.
-- Compact overflow preserves unread semantics/accessibility and projects the selected attention style when hidden unread Slots exist.
+- `FloatTabs.xcodeproj/project.pbxproj`: `MARKETING_VERSION 0.5.2 → 0.5.3`, `CURRENT_PROJECT_VERSION 20 → 21` for the app target Debug and Release configurations;
+- `docs/release/FloatTabs_v0.5.3.md`;
+- `CURRENT_STATUS.md` / `CURRENT_TASK.md` for release authorization and closeout;
+- a temporary release-preparation workflow is permitted only if required to apply the bounded project-file metadata edit safely through GitHub, must be branch-scoped, self-delete before the release PR is merged, and must leave no workflow delta in the final release PR.
 
-## Preference / compatibility result
+No production Swift/runtime behavior change is authorized.
 
-- Canonical app preferences: `FloatTabs.unreadTabAttentionStyle` and `FloatTabs.unreadTabAttentionPalette`.
-- Missing/unknown style falls back to Dot; missing/unknown palette falls back to Red.
-- Old Draft candidate values (`signal`, `ember`, `aurora`, `spectrum`) resolve compatibly without destructive rewriting.
-- These preferences are not stored in Browser Profile, Web App Slot or website/session data.
+## Release content
 
-## Verification record
+The release summarizes accepted changes already merged since v0.5.2, including:
 
-- Accepted semantic implementation head: `100f014921e91e53e63a30f89e3a81e1396d0e4c`.
-- Pre-closeout exact installed/control candidate: `dc080f56f9a7c23cd7e6df7280e33ad592d4c49b`.
-- Focused XCTest reported: **93 passed**.
-- Full XCTest reported: **1,323 passed / 4 skipped / 0 failed**.
-- Local Debug arm64: PASS.
-- Local Release arm64: PASS.
-- Exact-head hosted macOS CI: PASS for both semantic and pre-closeout control heads.
-- Exact-head hosted QA DMG: PASS for both semantic and pre-closeout control heads.
-- Human Real-Mac acceptance: **PASS** for all six effects, Settings placement and final responsive 3×2 layout.
-- Installed accepted candidate: `/Applications/FloatTabs.app`, `0.5.2 (20)`, arm64, embedded revision `dc080f56...` before final Human acceptance.
-- Destructive user-data operations: NONE.
+- selectable unread/Ready Tab attention styles and palettes, with Browser Profile color removed from Tab presentation;
+- shell movement refinement that keeps window movement on the bounded inner Web-surface affordance rather than the external shell/Tab rail;
+- ChatGPT latest-response speech ownership correction so Read Latest targets the latest assistant-owned response;
+- Hot/Warm residency lifecycle reliability corrections;
+- privacy-bounded runtime/navigation/page-app diagnostic evidence improvements;
+- DEBUG/benchmark measurement support for long-running ChatGPT performance.
 
-## Authority alignment
+Do not claim the unmerged long-term diagnostics-history feature from PR #124.
 
-Current visual behavior is governed by `docs/design/FloatTabs_UI_Design_System_v1.3.md`, production source/tests and this accepted task result. The older frozen `FloatTabs_ChatGPT_Attention_Contract_V1.md` remains applicable to attention state/residency/acknowledgement semantics; its original dot-only presentation text is historical where it conflicts with the newer accepted visual contract, consistent with `docs/architecture/README.md`.
+## Verification gates
 
-## PR / lifecycle
-
-- Authorized branch: `product/ft-tab-attention-highlight-001`.
-- PR #125 is the delivery PR.
-- Diagnostics/history PR #124 remains separate, parked and untouched.
-- Closeout changes after semantic head are control-plane only unless fresh evidence proves otherwise.
-- Before merge, the literal final PR head must pass the required GitHub-hosted gate(s), remain mergeable against current `main`, and have no unresolved required review/thread blocker.
-- The user explicitly authorized merge after a clean final audit.
+1. Final release PR diff is release/control-only and contains no product/runtime source changes.
+2. Version resolves exactly to `0.5.3 (21)` in the app target Debug and Release configurations.
+3. Exact release PR head passes required `Build & Test (Apple Silicon arm64)` and QA DMG.
+4. Final PR is current/mergeable with no unresolved review-thread blocker.
+5. Merge to `main` triggers `Publish Release` successfully.
+6. GitHub tag `v0.5.3` and Release exist and target the release merge identity.
+7. Release exposes downloadable `FloatTabs-0.5.3.dmg`, DMG SHA-256, dSYM archive and dSYM SHA-256.
+8. After publication, reconcile STATUS/TASK as terminal with `ACTIVE_PRODUCT_TASK=NONE`.
 
 ## Data safety
 
-Browser Profile metadata, Web App Slot configuration, website/session/cookie/WebKit data, backups and recovery material remain user data and were not cleared/reset/migrated by this task.
+Release preparation and publication must not clear, migrate, reset, or rewrite Browser Profile data, Web App Slot configuration, website login/session/cookies, WebKit stores, backups, or recovery material.
 
-## Terminal boundary
+## STOP conditions
 
-No further implementation is authorized under `FT-TAB-ATTENTION-HIGHLIGHT-001`. Any later visual redesign, new reminder style/palette, generic multi-site attention behavior, or unrelated Settings restructuring requires a new/reconciled task.
+STOP if the version/build edit requires product source changes, the final PR contains unexpected runtime changes, required hosted checks fail, the publisher fails, the release/tag identity is ambiguous, or PR #124 would need to be incorporated.
+
+## Completion boundary
+
+This task is complete only after v0.5.3 Build 21 is published and downloadable on GitHub, publication identity/assets are verified, and the release lifecycle/control plane is closed on `main`.
