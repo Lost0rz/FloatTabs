@@ -311,7 +311,8 @@ enum AttentionSurfaceGeometry: Equatable {
 }
 
 /// Shared layer renderer for unread Tabs, overflow, and Settings previews.
-/// Effects change layers inside a fixed surface; only Sweep's highlight travels.
+/// Effects stay inside a fixed surface; Sweep moves a broad band over a tinted base,
+/// while Orbit rotates color around a continuous static perimeter.
 @MainActor
 final class AttentionStyleSurfaceView: NSView {
     private static let haloAnimationKey = "FloatTabs.attentionStyle.halo"
@@ -324,6 +325,8 @@ final class AttentionStyleSurfaceView: NSView {
 
     private let pulseLayer = CAGradientLayer()
     private let pulseMaskLayer = CAShapeLayer()
+    private let sweepBaseLayer = CAGradientLayer()
+    private let sweepBaseMaskLayer = CAShapeLayer()
     private let sweepLayer = CAGradientLayer()
     private let sweepMaskLayer = CAShapeLayer()
     private let beaconLayer = CAGradientLayer()
@@ -350,7 +353,7 @@ final class AttentionStyleSurfaceView: NSView {
     var isContinuousMotionActive: Bool {
         layer?.animation(forKey: Self.haloAnimationKey) != nil
             || beaconLayer.animation(forKey: Self.beaconAnimationKey) != nil
-            || orbitMaskLayer.animation(forKey: Self.orbitAnimationKey) != nil
+            || orbitLayer.animation(forKey: Self.orbitAnimationKey) != nil
             || pulseLayer.animation(forKey: Self.pulseAnimationKey) != nil
             || sweepLayer.animation(forKey: Self.sweepStartAnimationKey) != nil
             || sweepLayer.animation(forKey: Self.sweepEndAnimationKey) != nil
@@ -373,15 +376,19 @@ final class AttentionStyleSurfaceView: NSView {
         layer?.masksToBounds = false
         layer?.backgroundColor = NSColor.clear.cgColor
         pulseMaskLayer.fillColor = NSColor.white.cgColor
+        sweepBaseMaskLayer.fillColor = NSColor.white.cgColor
         sweepMaskLayer.fillColor = NSColor.white.cgColor
         beaconMaskLayer.fillColor = NSColor.white.cgColor
         orbitMaskLayer.fillColor = NSColor.clear.cgColor
         orbitMaskLayer.strokeColor = NSColor.white.cgColor
         pulseLayer.mask = pulseMaskLayer
+        sweepBaseLayer.name = "FloatTabs.attention.sweep.base"
+        sweepBaseLayer.mask = sweepBaseMaskLayer
+        sweepLayer.name = "FloatTabs.attention.sweep.band"
         sweepLayer.mask = sweepMaskLayer
         beaconLayer.mask = beaconMaskLayer
         orbitLayer.mask = orbitMaskLayer
-        for sublayer in [pulseLayer, sweepLayer, beaconLayer, orbitLayer] {
+        for sublayer in [pulseLayer, sweepBaseLayer, sweepLayer, beaconLayer, orbitLayer] {
             sublayer.actions = [
                 "colors": NSNull(), "locations": NSNull(), "startPoint": NSNull(),
                 "endPoint": NSNull(), "opacity": NSNull(), "path": NSNull(),
@@ -504,15 +511,16 @@ final class AttentionStyleSurfaceView: NSView {
                 layer?.shadowOffset = .zero
                 layer?.shadowOpacity = 0.42
             case .orbit:
-                orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.5, dy: 1.5))
-                orbitMaskLayer.lineWidth = 2.2
+                orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
+                orbitMaskLayer.lineWidth = 2.5
                 orbitMaskLayer.lineCap = .round
-                orbitMaskLayer.lineDashPattern = [3, 46]
+                orbitMaskLayer.lineDashPattern = nil
                 orbitMaskLayer.lineDashPhase = 0
+                orbitLayer.type = .conic
                 orbitLayer.colors = configuration.colors.map(\.cgColor)
                 orbitLayer.locations = evenlySpacedLocations(count: configuration.colors.count)
-                orbitLayer.startPoint = CGPoint(x: 0, y: 0.5)
-                orbitLayer.endPoint = CGPoint(x: 1, y: 0.5)
+                orbitLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+                orbitLayer.endPoint = CGPoint(x: 0.5, y: 0.02)
                 orbitLayer.isHidden = false
             case .pulse:
                 let colors = configuration.colors.map(\.cgColor)
@@ -523,12 +531,27 @@ final class AttentionStyleSurfaceView: NSView {
                 pulseLayer.opacity = 0.22
                 pulseLayer.isHidden = false
             case .sweep:
+                sweepBaseLayer.colors = configuration.colors.map {
+                    $0.withAlphaComponent(0.2).cgColor
+                }
+                sweepBaseLayer.locations = evenlySpacedLocations(
+                    count: sweepBaseLayer.colors?.count ?? 0
+                )
+                sweepBaseLayer.startPoint = CGPoint(x: 0, y: 0.5)
+                sweepBaseLayer.endPoint = CGPoint(x: 1, y: 0.5)
+                sweepBaseLayer.opacity = 0.82
+                sweepBaseLayer.isHidden = false
                 sweepLayer.colors = [NSColor.clear.cgColor]
-                    + configuration.colors.map { $0.withAlphaComponent(0.78).cgColor }
-                    + [NSColor.white.withAlphaComponent(0.9).cgColor, NSColor.clear.cgColor]
+                    + configuration.colors.map { $0.withAlphaComponent(0.3).cgColor }
+                    + [
+                        configuration.representativeColor.withAlphaComponent(0.56).cgColor,
+                        NSColor.white.withAlphaComponent(0.64).cgColor,
+                        configuration.representativeColor.withAlphaComponent(0.42).cgColor,
+                        NSColor.clear.cgColor,
+                    ]
                 sweepLayer.locations = evenlySpacedLocations(count: sweepLayer.colors?.count ?? 1)
-                sweepLayer.startPoint = CGPoint(x: 0.45, y: 0.5)
-                sweepLayer.endPoint = CGPoint(x: 0.55, y: 0.5)
+                sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
+                sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
                 sweepLayer.isHidden = false
             }
         }
@@ -557,12 +580,22 @@ final class AttentionStyleSurfaceView: NSView {
             addSharedTiming(breathe, cycle: cycle, autoreverses: true)
             layer?.add(breathe, forKey: Self.haloAnimationKey)
         case .orbit:
-            let orbit = CABasicAnimation(keyPath: "lineDashPhase")
-            orbit.fromValue = 0
-            orbit.toValue = -49
-            addSharedTiming(orbit, cycle: cycle, autoreverses: false)
+            let orbit = CAKeyframeAnimation(keyPath: "endPoint")
+            orbit.values = [
+                CGPoint(x: 0.5, y: 0.02),
+                CGPoint(x: 0.98, y: 0.5),
+                CGPoint(x: 0.5, y: 0.98),
+                CGPoint(x: 0.02, y: 0.5),
+                CGPoint(x: 0.5, y: 0.02),
+            ]
+            orbit.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+            orbit.duration = cycle
+            orbit.repeatCount = .infinity
+            orbit.beginTime = Self.animationEpoch
+            orbit.calculationMode = .linear
             orbit.timingFunction = CAMediaTimingFunction(name: .linear)
-            orbitMaskLayer.add(orbit, forKey: Self.orbitAnimationKey)
+            orbit.isRemovedOnCompletion = false
+            orbitLayer.add(orbit, forKey: Self.orbitAnimationKey)
         case .pulse:
             let breathe = CABasicAnimation(keyPath: "opacity")
             breathe.fromValue = 0.16
@@ -572,15 +605,15 @@ final class AttentionStyleSurfaceView: NSView {
         case .sweep:
             let start = CAKeyframeAnimation(keyPath: "startPoint")
             start.values = [
-                CGPoint(x: -0.35, y: 0.5),
-                CGPoint(x: 1.05, y: 0.5),
-                CGPoint(x: 1.05, y: 0.5),
+                CGPoint(x: -0.42, y: 0.5),
+                CGPoint(x: 1.0, y: 0.5),
+                CGPoint(x: 1.0, y: 0.5),
             ]
             let end = CAKeyframeAnimation(keyPath: "endPoint")
             end.values = [
-                CGPoint(x: -0.19, y: 0.5),
-                CGPoint(x: 1.21, y: 0.5),
-                CGPoint(x: 1.21, y: 0.5),
+                CGPoint(x: 0, y: 0.5),
+                CGPoint(x: 1.42, y: 0.5),
+                CGPoint(x: 1.42, y: 0.5),
             ]
             for animation in [start, end] {
                 animation.keyTimes = [0, 0.34, 1]
@@ -611,7 +644,7 @@ final class AttentionStyleSurfaceView: NSView {
     private func removeAllEffectAnimations() {
         layer?.removeAnimation(forKey: Self.haloAnimationKey)
         beaconLayer.removeAnimation(forKey: Self.beaconAnimationKey)
-        orbitMaskLayer.removeAnimation(forKey: Self.orbitAnimationKey)
+        orbitLayer.removeAnimation(forKey: Self.orbitAnimationKey)
         pulseLayer.removeAnimation(forKey: Self.pulseAnimationKey)
         sweepLayer.removeAnimation(forKey: Self.sweepStartAnimationKey)
         sweepLayer.removeAnimation(forKey: Self.sweepEndAnimationKey)
@@ -629,11 +662,14 @@ final class AttentionStyleSurfaceView: NSView {
         beaconLayer.shadowColor = nil
         beaconLayer.shadowRadius = 0
         orbitLayer.isHidden = true
+        orbitLayer.type = .axial
         pulseLayer.isHidden = true
         pulseLayer.opacity = 0
+        sweepBaseLayer.isHidden = true
+        sweepBaseLayer.opacity = 1
         sweepLayer.isHidden = true
-        sweepLayer.startPoint = CGPoint(x: 0.42, y: 0.5)
-        sweepLayer.endPoint = CGPoint(x: 0.58, y: 0.5)
+        sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
+        sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
     }
 
     private func updateLayerGeometry() {
@@ -653,10 +689,13 @@ final class AttentionStyleSurfaceView: NSView {
             layer?.borderWidth = 0
         }
         pulseLayer.frame = bounds
+        sweepBaseLayer.frame = bounds
         sweepLayer.frame = bounds
         pulseMaskLayer.frame = bounds
+        sweepBaseMaskLayer.frame = bounds
         sweepMaskLayer.frame = bounds
         pulseMaskLayer.path = surfacePath(in: bounds)
+        sweepBaseMaskLayer.path = surfacePath(in: bounds)
         sweepMaskLayer.path = surfacePath(in: bounds)
         beaconLayer.frame = bounds
         orbitLayer.frame = bounds
@@ -665,7 +704,7 @@ final class AttentionStyleSurfaceView: NSView {
         if style == .beacon {
             beaconMaskLayer.path = beaconPath()
         } else if style == .orbit {
-            orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.5, dy: 1.5))
+            orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
         } else if style == .halo {
             layer?.shadowPath = surfacePath(in: bounds)
         }
@@ -687,14 +726,15 @@ final class AttentionStyleSurfaceView: NSView {
 
     private func beaconPath() -> CGPath {
         let verticalInset = min(7, bounds.height * 0.18)
-        let xInset = geometry == .settingsPreview ? CGFloat(8) : CGFloat(4)
+        let leadingInset = geometry == .settingsPreview ? CGFloat(8) : CGFloat(4)
+        let accentWidth: CGFloat = 5.5
         let rect = CGRect(
-            x: bounds.maxX - xInset - 3,
+            x: bounds.minX + leadingInset,
             y: bounds.minY + verticalInset,
-            width: 3,
+            width: accentWidth,
             height: max(0, bounds.height - verticalInset * 2)
         )
-        return CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil)
+        return CGPath(roundedRect: rect, cornerWidth: accentWidth / 2, cornerHeight: accentWidth / 2, transform: nil)
     }
 
     private func evenlySpacedLocations(count: Int) -> [NSNumber] {
@@ -706,11 +746,13 @@ final class AttentionStyleSurfaceView: NSView {
 
 @MainActor
 final class ClassicUnreadDotView: NSView {
+    static let diameter: CGFloat = 11.5
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.systemRed.cgColor
-        layer?.cornerRadius = 4.5
+        layer?.cornerRadius = Self.diameter / 2
         layer?.borderColor = NSColor.controlBackgroundColor.cgColor
         layer?.borderWidth = 1.1
         layer?.shadowColor = NSColor.black.cgColor
@@ -1104,8 +1146,8 @@ final class RailOverflowControl: NSView, RailHoverInteractionOwner {
             imageView.heightAnchor.constraint(equalToConstant: 13),
             unreadDotView.centerXAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -1),
             unreadDotView.centerYAnchor.constraint(equalTo: imageView.topAnchor, constant: 1),
-            unreadDotView.widthAnchor.constraint(equalToConstant: 9),
-            unreadDotView.heightAnchor.constraint(equalToConstant: 9),
+            unreadDotView.widthAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
+            unreadDotView.heightAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
         ])
         setAccessibilityRole(.button)
         refreshAppearance()
@@ -2898,8 +2940,8 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
             iconView.heightAnchor.constraint(equalToConstant: 16),
             unreadDotView.centerXAnchor.constraint(equalTo: iconView.trailingAnchor, constant: -1),
             unreadDotView.centerYAnchor.constraint(equalTo: iconView.topAnchor, constant: 1),
-            unreadDotView.widthAnchor.constraint(equalToConstant: 9),
-            unreadDotView.heightAnchor.constraint(equalToConstant: 9),
+            unreadDotView.widthAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
+            unreadDotView.heightAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
             label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
             labelTrailingConstraint,
             label.centerYAnchor.constraint(equalTo: centerYAnchor),

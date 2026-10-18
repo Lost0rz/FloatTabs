@@ -18,7 +18,7 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Previous intermediate implementation reviewed on Real Mac: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
+- Candidate at the start of this visual refinement: `b57bbd4c65942aaccb24845b5d8d058e7885729d` (freshly verified against PR #125).
 - Resolve the current candidate from the freshly fetched authorized task branch; exact live Git refs remain authoritative.
 - Diagnostics/history PR #124 remains parked and out of scope.
 
@@ -27,6 +27,18 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 Human Real-Mac review established that the current `Signal / Ember / Aurora / Spectrum` family is visually too similar because the variants mainly change gradient color while keeping the same whole-surface treatment. The Settings preview also makes the production rail Tab path look awkward when stretched into a large asymmetric/trapezoid-like preview.
 
 The user explicitly requires the classic **red unread dot to remain available** because it is still an effective reminder. This latest section overrides earlier preset lists where they conflict.
+
+### Latest Human Real-Mac refinement
+
+Human review of the current candidate requests these visual adjustments within this same task and PR:
+
+- Dot remains classic red and grows to approximately 10–12 pt for high-resolution visibility.
+- Beacon becomes a thicker, clearer leading/left-side accent strip. It remains a localized accent and must not fill the whole Tab surface.
+- Halo keeps its current structural concept; only minor polish is in scope.
+- Orbit becomes a complete continuous perimeter outline around the whole Tab. Slow color/brightness flow is allowed; dotted or dashed point-runs are rejected.
+- Sweep adds a restrained tinted base and a wider/longer moving color band, with a calm interval between passes.
+
+Update tests for these semantics, Reduce Motion fallback, overflow projection consistency and Style/Palette persistence compatibility. Keep the existing symmetric Settings preview geometry, shared preview/runtime renderer, real rail geometry and all protected state/runtime ownership unchanged. After local validation and exact-head macOS CI/QA DMG, install the exact Release candidate and wait for another Human Real-Mac visual acceptance.
 
 ## Product / interaction contract
 
@@ -61,7 +73,7 @@ The first-version style family is:
 
 #### Beacon
 
-- bounded bright edge/accent strip or localized light source;
+- thick, clearly visible leading/left-side accent strip or localized light source;
 - should visually point to the Tab without turning the full Tab into a solid color block;
 - may use gentle glow but no geometry movement.
 
@@ -73,7 +85,8 @@ The first-version style family is:
 
 #### Orbit
 
-- moving highlight around the Tab perimeter;
+- continuous full outline around the whole Tab perimeter with slow color/brightness flow;
+- do not use dotted or dashed point-runs;
 - the Tab itself never translates, shakes, scales or reflows;
 - motion should feel polished rather than urgent.
 
@@ -85,7 +98,7 @@ The first-version style family is:
 
 #### Sweep
 
-- a narrow highlight travels across the Tab, followed by a calm interval;
+- a restrained tinted base remains under a broad, longer color band that travels across the Tab, followed by a calm interval;
 - should communicate “new content arrived” rather than constant activity;
 - no perpetual high-frequency shimmer.
 

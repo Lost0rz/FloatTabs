@@ -429,6 +429,162 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
+    func testDotUsesLargeClassicRedIndicatorOnTabOverflowAndSettingsPreview() throws {
+        let tab = ExternalWebAppTabView(slotID: UUID())
+        tab.frame = NSRect(x: 0, y: 0, width: 40, height: ExternalTabMetrics.tabHeight)
+        tab.setUnreadResponse(true)
+        tab.layoutSubtreeIfNeeded()
+        let tabDot = try XCTUnwrap(tab.subviews.compactMap { $0 as? ClassicUnreadDotView }.first)
+
+        XCTAssertTrue(tab.showsClassicUnreadDot)
+        XCTAssertEqual(ClassicUnreadDotView.diameter, 11.5, accuracy: 0.001)
+        XCTAssertTrue((10...12).contains(Int(tabDot.frame.width.rounded())))
+        XCTAssertTrue((10...12).contains(Int(tabDot.frame.height.rounded())))
+        assertColor(
+            tabDot.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) },
+            equals: .systemRed
+        )
+
+        let overflow = RailOverflowControl(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        overflow.setItems([RailOverflowItem(slotID: UUID(), title: "Unread", isUnread: true)])
+        overflow.layoutSubtreeIfNeeded()
+        let overflowDot = try XCTUnwrap(
+            overflow.subviews.compactMap { $0 as? ClassicUnreadDotView }.first
+        )
+        XCTAssertTrue(overflow.showsClassicUnreadDot)
+        XCTAssertTrue((10...12).contains(Int(overflowDot.frame.width.rounded())))
+        XCTAssertTrue((10...12).contains(Int(overflowDot.frame.height.rounded())))
+        assertColor(
+            overflowDot.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) },
+            equals: .systemRed
+        )
+
+        let preview = AttentionStyleChoiceButton(style: .dot)
+        preview.frame = NSRect(x: 0, y: 0, width: 230, height: 84)
+        preview.layoutSubtreeIfNeeded()
+        XCTAssertTrue(preview.showsClassicUnreadDot)
+        XCTAssertTrue((10...12).contains(Int(preview.previewDotView.frame.width.rounded())))
+        XCTAssertTrue((10...12).contains(Int(preview.previewDotView.frame.height.rounded())))
+        assertColor(
+            preview.previewDotView.layer?.backgroundColor.flatMap { NSColor(cgColor: $0) },
+            equals: .systemRed
+        )
+    }
+
+    func testBeaconUsesThickLeadingAccentAcrossSharedRendererGeometries() throws {
+        for geometry in [
+            AttentionSurfaceGeometry.railTab,
+            .overflowControl,
+            .settingsPreview,
+        ] {
+            let surface = AttentionStyleSurfaceView(
+                frame: NSRect(x: 0, y: 0, width: 80, height: 40),
+                style: .beacon,
+                showsAttention: true,
+                reduceMotionOverride: true,
+                geometry: geometry
+            )
+            surface.layoutSubtreeIfNeeded()
+            let beacon = try XCTUnwrap(
+                surface.layer?.sublayers?.compactMap { $0 as? CAGradientLayer }
+                    .first(where: { !$0.isHidden })
+            )
+            let path = try XCTUnwrap((beacon.mask as? CAShapeLayer)?.path)
+            let accent = path.boundingBoxOfPath
+
+            XCTAssertGreaterThanOrEqual(accent.width, 5.5, "Beacon must read as a thick strip")
+            XCTAssertLessThan(accent.midX, surface.bounds.midX, "Beacon belongs on the leading side")
+            XCTAssertLessThan(accent.height, surface.bounds.height)
+        }
+    }
+
+    func testOrbitUsesContinuousFullPerimeterOutlineWithoutPointRuns() throws {
+        for geometry in [
+            AttentionSurfaceGeometry.railTab,
+            .overflowControl,
+            .settingsPreview,
+        ] {
+            for reduceMotion in [false, true] {
+                let surface = AttentionStyleSurfaceView(
+                    frame: NSRect(x: 0, y: 0, width: 80, height: 40),
+                    style: .orbit,
+                    showsAttention: true,
+                    reduceMotionOverride: reduceMotion,
+                    geometry: geometry
+                )
+                surface.layoutSubtreeIfNeeded()
+                let orbit = try XCTUnwrap(
+                    surface.layer?.sublayers?.compactMap { $0 as? CAGradientLayer }
+                        .first(where: { !$0.isHidden })
+                )
+                let outline = try XCTUnwrap(orbit.mask as? CAShapeLayer)
+
+                XCTAssertEqual(orbit.type, .conic, "Orbit color flow follows the perimeter")
+                XCTAssertNil(outline.lineDashPattern, "Orbit must use one continuous outline")
+                XCTAssertGreaterThanOrEqual(outline.lineWidth, 2.2)
+                let perimeter = try XCTUnwrap(
+                    outline.path,
+                    "The whole Tab perimeter remains outlined under Reduce Motion"
+                ).boundingBoxOfPath
+                XCTAssertGreaterThanOrEqual(perimeter.width, surface.bounds.width - 4)
+                XCTAssertGreaterThanOrEqual(perimeter.height, surface.bounds.height - 4)
+                XCTAssertEqual(surface.isContinuousMotionActive, !reduceMotion)
+                XCTAssertEqual(surface.renderedAnimationCycleDuration, 5.2)
+            }
+        }
+    }
+
+    func testSweepUsesTintedBaseAndBroadLongMovingBandWithCalmInterval() throws {
+        for geometry in [
+            AttentionSurfaceGeometry.railTab,
+            .overflowControl,
+            .settingsPreview,
+        ] {
+            for reduceMotion in [false, true] {
+                let surface = AttentionStyleSurfaceView(
+                    frame: NSRect(x: 0, y: 0, width: 80, height: 40),
+                    style: .sweep,
+                    showsAttention: true,
+                    reduceMotionOverride: reduceMotion,
+                    geometry: geometry
+                )
+                surface.layoutSubtreeIfNeeded()
+                let base = try XCTUnwrap(
+                    surface.layer?.sublayers?.first(where: {
+                        $0.name == "FloatTabs.attention.sweep.base"
+                    }) as? CAGradientLayer
+                )
+                let band = try XCTUnwrap(
+                    surface.layer?.sublayers?.first(where: {
+                        $0.name == "FloatTabs.attention.sweep.band"
+                    }) as? CAGradientLayer
+                )
+
+                XCTAssertFalse(base.isHidden)
+                XCTAssertGreaterThan(base.opacity, 0.1, "Sweep needs a visible tinted base")
+                XCTAssertFalse(band.isHidden)
+                XCTAssertGreaterThanOrEqual(
+                    abs(band.endPoint.x - band.startPoint.x),
+                    0.38,
+                    "Sweep should read as a broad color band"
+                )
+                XCTAssertEqual(surface.isContinuousMotionActive, !reduceMotion)
+                if reduceMotion {
+                    XCTAssertTrue(surface.hasStaticRepresentativeEffect)
+                    XCTAssertEqual(band.startPoint.x, 0.29, accuracy: 0.01)
+                    XCTAssertEqual(band.endPoint.x, 0.71, accuracy: 0.01)
+                } else {
+                    let start = try XCTUnwrap(
+                        band.animation(forKey: "FloatTabs.attentionStyle.sweepStart")
+                            as? CAKeyframeAnimation
+                    )
+                    XCTAssertEqual(start.duration, 5.2, accuracy: 0.001)
+                    XCTAssertEqual(start.keyTimes?.map(\.doubleValue), [0, 0.34, 1])
+                }
+            }
+        }
+    }
+
     func testClassicDotAndFiveOtherStructuresShareTheRuntimeRenderer() {
         let tab = ExternalWebAppTabView(slotID: UUID())
         tab.setUnreadResponse(true)
@@ -554,8 +710,20 @@ final class WebAttentionIndicatorTests: XCTestCase {
         XCTAssertEqual(tab.attentionSurfaceEffect, .orbit)
         XCTAssertEqual(overflow.attentionSurfaceEffect, .orbit)
 
+        for style in [TabAttentionStyle.beacon, .orbit, .sweep] {
+            preferences.attentionStyle = style
+            XCTAssertEqual(tab.displayedAttentionStyle, style)
+            XCTAssertEqual(overflow.displayedAttentionStyle, style)
+            XCTAssertEqual(tab.displayedAttentionPalette, .blue)
+            XCTAssertEqual(overflow.displayedAttentionPalette, .blue)
+            XCTAssertEqual(tab.attentionSurfaceEffect, style.effect)
+            XCTAssertEqual(overflow.attentionSurfaceEffect, style.effect)
+            XCTAssertTrue(tab.attentionSurfaceUsesSharedRenderer)
+            XCTAssertTrue(overflow.attentionSurfaceUsesSharedRenderer)
+        }
+
         tab.setHovered(true)
-        XCTAssertEqual(tab.displayedAttentionStyle, .orbit)
+        XCTAssertEqual(tab.displayedAttentionStyle, .sweep)
         XCTAssertTrue(tab.attentionSurfaceMotionIsActive)
 
         tab.setUnreadResponse(false)
@@ -566,6 +734,30 @@ final class WebAttentionIndicatorTests: XCTestCase {
         zone.layoutSubtreeIfNeeded()
         XCTAssertFalse(overflow.isShowingUnreadResponse)
         XCTAssertFalse(overflow.attentionSurfaceMotionIsActive)
+    }
+
+    func testStyleAndPalettePersistIndependentlyAcrossRendererCompatibilityFallbacks() {
+        let suiteName = "FloatTabsTests.AttentionStylePaletteCompatibility.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = AppPreferencesStore(defaults: defaults)
+        first.attentionStyle = .orbit
+        first.attentionPalette = .violet
+
+        let reopened = AppPreferencesStore(defaults: defaults)
+        XCTAssertEqual(reopened.attentionStyle, .orbit)
+        XCTAssertEqual(reopened.attentionPalette, .violet)
+        XCTAssertEqual(reopened.attentionStyle.configuration(for: reopened.attentionPalette).effect, .orbit)
+
+        reopened.attentionStyle = .dot
+        XCTAssertEqual(reopened.attentionPalette, .violet, "Choosing Dot must not erase the saved palette")
+        XCTAssertEqual(reopened.attentionStyle.configuration(for: reopened.attentionPalette).palette, .red)
+        XCTAssertEqual(defaults.string(forKey: AppPreferencesStore.attentionPaletteKey), TabAttentionPalette.violet.rawValue)
+
+        defaults.set("future-style", forKey: AppPreferencesStore.attentionStyleKey)
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionStyle, .dot)
+        XCTAssertEqual(AppPreferencesStore(defaults: defaults).attentionPalette, .violet)
     }
 
     func testReduceMotionKeepsStaticAttentionGradientAndStopsLayerAnimations() {

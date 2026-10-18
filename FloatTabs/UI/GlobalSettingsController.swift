@@ -640,8 +640,8 @@ final class AttentionStyleChoiceButton: NSButton {
             previewIconView.heightAnchor.constraint(equalToConstant: 13),
             previewDotView.centerXAnchor.constraint(equalTo: previewIconView.trailingAnchor, constant: -1),
             previewDotView.centerYAnchor.constraint(equalTo: previewIconView.topAnchor, constant: 1),
-            previewDotView.widthAnchor.constraint(equalToConstant: 9),
-            previewDotView.heightAnchor.constraint(equalToConstant: 9),
+            previewDotView.widthAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
+            previewDotView.heightAnchor.constraint(equalToConstant: ClassicUnreadDotView.diameter),
             previewTitleLabel.leadingAnchor.constraint(
                 equalTo: previewIconView.trailingAnchor,
                 constant: 5

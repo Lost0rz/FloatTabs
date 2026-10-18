@@ -45,7 +45,7 @@ Tabs are favicon-first and expand on hover. Tab / Add / Pin / Settings accept fi
 ### Tab surface and unread attention
 
 - Normal and active/read Tabs use neutral rail surfaces independent of assigned Browser Profile color; the shared page+Tab outline and active typography continue to own selection.
-- A visible Tab with `Unread/Ready` set uses one selected **Attention Style**: Dot, Beacon, Halo, Orbit, Pulse or Sweep. Dot is the classic static red indicator at the favicon. Beacon is a bounded edge light; Halo is a soft perimeter glow; Orbit sends a highlight around the perimeter; Pulse gently changes whole-surface tint; Sweep sends a narrow highlight across the Tab with a calm interval.
+- A visible Tab with `Unread/Ready` set uses one selected **Attention Style**: Dot, Beacon, Halo, Orbit, Pulse or Sweep. Dot is a classic static red indicator approximately 10–12 pt at the favicon. Beacon is a thick, localized leading-side accent strip; Halo is a soft perimeter glow; Orbit is a continuous full-perimeter outline with slow color/brightness flow; Pulse gently changes whole-surface tint; Sweep layers a restrained tinted base under a broad moving color band with a calm interval.
 - **Palette** is a separate app preference from style: Red, Amber, Blue, Violet, Mint or Spectrum. Dot always uses classic red. Palette changes color language while the selected style keeps its structure.
 - Attention effects use presentation layers and do not move, shake, bounce, scale or re-layout Tabs. Slow effects use a shared Core Animation time base, stay visible during hover, and do not use a Timer or display-link. macOS Reduce Motion keeps a static representative treatment.
 - The attention effect does not recolor website favicons. Favicon color continues to represent runtime residency: resident icons stay full color and released icons stay grayscale/dim. Tab labels and template icons remain legible against the neutral rail surface.
@@ -53,6 +53,7 @@ Tabs are favicon-first and expand on hover. Tab / Add / Pin / Settings accept fi
 - Browser Profile color metadata remains persisted for compatibility, but Profile color is not presented as a Tab distinction and has no chooser in Browser Profiles Settings.
 - Notifications Settings presents all six styles as selectable miniature Tab previews and a separate palette chooser. Preview surfaces use symmetric rounded geometry suitable for Settings; they share the same effect configuration and renderer as real Tabs without stretching the production rail path. Selection has a clear native accent treatment.
 - Style and palette are app preferences with Dot and Red as defaults. Unknown values use those defaults. Neither preference is stored in Browser Profile or Slot/session data.
+- Beacon stays local instead of filling the Tab. Orbit does not use dotted/dashed point-runs. Sweep's base remains visible under Reduce Motion, while its moving band becomes a static representative treatment.
 
 ## 4. Collapsed rail
 
