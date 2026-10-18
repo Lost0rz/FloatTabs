@@ -6,70 +6,84 @@
 
 ## Mode
 
-**MODE: RELEASE_0.5.3_ACTIVE**
+**MODE: NO_ACTIVE_PRODUCT_TASK**
 
-`FT-RELEASE-0.5.3-001` is active. The accepted product baseline has already merged and passed Human/runtime acceptance; this task is release-only and targets **FloatTabs v0.5.3 (Build 21)**.
+`FT-RELEASE-0.5.3-001` is completed. **FloatTabs v0.5.3 (Build 21)** is published on GitHub with downloadable release assets. No active product or release task is authorized.
 
-## Release baseline
+## Current release
 
-- Current release-task base: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
-- Previous public release: `v0.5.2` / Build 20.
-- Release branch: `release/v0.5.3`.
-- Current project metadata before release prep: `0.5.2 (20)`.
-- Target metadata: `0.5.3 (21)`.
-- Existing publisher: `.github/workflows/publish-release.yml`.
-- Existing package builder: `tools/release/build_dmg.sh`.
+- Latest public release: `v0.5.3` / Build 21.
+- Release PR #127: MERGED.
+- Release PR final head: `25c3508832e8fa384cc3282f569222c06fc67b16`.
+- Release merge commit / publication source: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
+- GitHub Release ID: `416230888`.
+- Release title: `FloatTabs v0.5.3`.
+- Draft: NO.
+- Prerelease: NO.
+- Publish Release workflow run `39097105718`: PASS.
 - Distribution remains Apple Silicon arm64.
-- Diagnostics/history PR #124 remains parked, separate and untouched.
 
-## Accepted product baseline included in v0.5.3
+## Published assets
 
-The release packages already-merged, accepted work since v0.5.2. User-facing/reliability highlights include:
+- `FloatTabs-0.5.3.dmg` — uploaded; GitHub SHA-256 digest `036015d1fbcafd3e0017807c255a7b968a9f62648f51fdb636b93e5ee4755a2b`.
+- `FloatTabs-0.5.3.dmg.sha256` — uploaded.
+- `FloatTabs-0.5.3.dSYM.zip` — uploaded; GitHub SHA-256 digest `565cd72fa5d4195eb1818bf26bbd9995e464af88cd264989f036b5dc8b88fa1e`.
+- `FloatTabs-0.5.3.dSYM.zip.sha256` — uploaded.
 
-- selectable unread/Ready Tab attention styles: Dot, Beacon, Halo, Orbit, Pulse and Sweep;
-- independent Red / Amber / Blue / Violet / Mint / Spectrum attention palettes, with classic red Dot retained;
-- Browser Profile color removed from Tab presentation while compatibility metadata remains preserved;
-- General owns Interface Appearance + Unread Tab Attention; Audio owns Ready Alerts + Speech;
-- responsive 3×2 Attention Style chooser and Reduce Motion-safe decorative animation;
-- outer shell/complete Tab rail no longer acquire window movement; the bounded inner Web-surface movement affordance remains;
-- Read Latest Response uses positively assistant-owned latest-response content rather than a mixed user/assistant ancestor;
-- corrected Hot background recovery and Warm retention/memory-pressure semantics;
-- expanded privacy-bounded runtime/navigation/page-app diagnostic evidence;
-- DEBUG/benchmark measurement support for long-running ChatGPT performance.
+## Release verification
 
-The unmerged long-term diagnostics-history work in PR #124 is not part of this release.
+- Release PR changed only control files, app version/build metadata, and v0.5.3 release notes.
+- App target Debug and Release configurations resolve to `0.5.3 (21)`.
+- Exact release PR head macOS CI: PASS.
+- Exact release PR head QA DMG: PASS.
+- Final PR mergeability/review-thread audit: PASS.
+- Release package build and Apple Silicon verification: PASS.
+- Release filename and checksum verification: PASS.
+- New GitHub Release publication: PASS.
+- Tag/release target is `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
+- Diagnostics/history PR #124 remains separate and is not part of v0.5.3.
 
-## Release gates
+## v0.5.3 product baseline
 
-- release/control-only diff;
-- exact app metadata `0.5.3 (21)`;
-- exact-head macOS CI PASS;
-- exact-head QA DMG PASS;
-- final mergeability/review-thread audit PASS;
-- `Publish Release` PASS after merge;
-- `v0.5.3` tag and GitHub Release verified;
-- DMG/checksum/dSYM/checksum assets verified downloadable;
-- post-release STATUS/TASK lifecycle closeout merged.
+This release includes already-accepted work since v0.5.2, including:
+
+- Dot / Beacon / Halo / Orbit / Pulse / Sweep unread attention styles and separate palettes;
+- Browser Profile color removed from Tab presentation while compatibility metadata is preserved;
+- General: Interface Appearance + Unread Tab Attention; Audio: Ready Alerts + Speech;
+- responsive 3×2 Attention Style chooser and Reduce Motion-safe effects;
+- shell movement refinement to the bounded inner Web-surface movement affordance;
+- latest-assistant-response speech ownership correction;
+- Hot background recovery and Warm retention/memory-pressure reliability corrections;
+- privacy-bounded runtime/navigation/page-app diagnostic evidence improvements;
+- DEBUG/benchmark long-running ChatGPT measurement support.
+
+The long-term diagnostics-history work in PR #124 remains unmerged/parked and is not part of this release.
 
 ## Data safety
 
-No release step is authorized to clear/reset/migrate Browser Profiles, Web App Slots, website sessions/cookies/WebKit data, backups, recovery data, or user configuration.
+- Browser Profile data was not reset or migrated.
+- Web App Slot configuration was not reset or migrated.
+- Website login/session/cookie/WebKit stores were not cleared.
+- Backups/recovery data were not destructively modified.
+- Existing rollback bundles are outside this remote release closeout and are not authorized for deletion here.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=FT-RELEASE-0.5.3-001
-TASK_STATE=ACTIVE
-TASK_MODE=RELEASE
-RELEASE_BRANCH=release/v0.5.3
-RELEASE_BASE_MAIN=869bfaeb7eb6b00d9f2460fd638cb922f3200981
-PREVIOUS_RELEASE=v0.5.2_BUILD_20
-TARGET_RELEASE=v0.5.3_BUILD_21
-PRODUCT_SOURCE_CHANGE_AUTHORIZED=NO
+ACTIVE_PRODUCT_TASK=NONE
+LAST_COMPLETED_TASK=FT-RELEASE-0.5.3-001
+TASK_STATE=COMPLETED
+LATEST_RELEASE=v0.5.3
+LATEST_RELEASE_BUILD=21
+RELEASE_PR=127_MERGED
+RELEASE_PR_FINAL_HEAD=25c3508832e8fa384cc3282f569222c06fc67b16
+RELEASE_MERGE_COMMIT=7d275762de0e2abba9fd1efcb0efb1dc87e00a99
+RELEASE_WORKFLOW=39097105718_PASS
+RELEASE_ASSETS=DMG,DMG_SHA256,DSYM_ZIP,DSYM_SHA256
 DIAGNOSTICS_PR_124=PARKED_UNCHANGED
 ROOT_CAUSE=N/A
 ```
 
 ## Next
 
-Prepare the bounded release metadata and notes, pass exact-head hosted release gates, merge the release PR, verify GitHub publication/assets, then perform control-only lifecycle closeout.
+The release lifecycle is complete. Start or reconcile a new `CURRENT_TASK.md` before any new product, release, cleanup, or diagnostics mutation.

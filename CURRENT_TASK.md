@@ -2,66 +2,52 @@
 
 **Task ID:** `FT-RELEASE-0.5.3-001`
 **Title:** Publish FloatTabs v0.5.3 Build 21 and close the release lifecycle
-**Status:** `ACTIVE`
-**Mode:** `RELEASE`
+**Status:** `COMPLETED`
+**Mode:** `TERMINAL`
 
-## Objective
+> This task is terminal. It records the completed release and grants no further release or product mutation authority.
 
-Publish the current accepted `main` product baseline as **FloatTabs v0.5.3 (Build 21)** with downloadable GitHub Release assets, then reconcile the release lifecycle back to a clean no-active-task state.
+## Completed objective
 
-## Authority / baseline
+FloatTabs **v0.5.3 (Build 21)** has been published as a downloadable GitHub Release from the accepted product baseline.
 
-- Project rules: `AGENTS.md`.
-- Current release baseline: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
-- Previous public release: `v0.5.2` / Build 20.
-- Release branch: `release/v0.5.3`.
-- Release publisher: `.github/workflows/publish-release.yml`.
-- Release packaging: `tools/release/build_dmg.sh`.
-- Diagnostics/history PR #124 remains separate and out of scope.
+## Delivery identity
 
-## Authorized release delta
+- Release preparation base: `main@869bfaeb7eb6b00d9f2460fd638cb922f3200981`.
+- Release PR: #127 — `Release FloatTabs v0.5.3 Build 21`.
+- Final release PR head: `25c3508832e8fa384cc3282f569222c06fc67b16`.
+- Release merge commit / publisher source: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
+- Tag: `v0.5.3`.
+- GitHub Release ID: `416230888`.
+- Published version/build: `0.5.3 (21)`.
 
-Release preparation may change only release/control material:
+## Verification record
 
-- `FloatTabs.xcodeproj/project.pbxproj`: `MARKETING_VERSION 0.5.2 → 0.5.3`, `CURRENT_PROJECT_VERSION 20 → 21` for the app target Debug and Release configurations;
-- `docs/release/FloatTabs_v0.5.3.md`;
-- `CURRENT_STATUS.md` / `CURRENT_TASK.md` for release authorization and closeout;
-- a temporary release-preparation workflow is permitted only if required to apply the bounded project-file metadata edit safely through GitHub, must be branch-scoped, self-delete before the release PR is merged, and must leave no workflow delta in the final release PR.
+- Final release PR diff: only `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `FloatTabs.xcodeproj/project.pbxproj`, and `docs/release/FloatTabs_v0.5.3.md`.
+- App target Debug/Release metadata: `MARKETING_VERSION = 0.5.3`, `CURRENT_PROJECT_VERSION = 21`.
+- Exact PR head macOS CI: PASS.
+- Exact PR head QA DMG: PASS.
+- Final PR mergeability/review-thread audit: PASS.
+- Publish Release workflow run `39097105718`: PASS.
+- Package build/verification: PASS.
+- Release filename/checksum verification: PASS.
+- New GitHub Release publication: PASS.
+- Release target commit: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
 
-No production Swift/runtime behavior change is authorized.
+## Published assets
 
-## Release content
+- `FloatTabs-0.5.3.dmg` — uploaded, SHA-256 digest reported by GitHub: `036015d1fbcafd3e0017807c255a7b968a9f62648f51fdb636b93e5ee4755a2b`.
+- `FloatTabs-0.5.3.dmg.sha256` — uploaded.
+- `FloatTabs-0.5.3.dSYM.zip` — uploaded, SHA-256 digest reported by GitHub: `565cd72fa5d4195eb1818bf26bbd9995e464af88cd264989f036b5dc8b88fa1e`.
+- `FloatTabs-0.5.3.dSYM.zip.sha256` — uploaded.
 
-The release summarizes accepted changes already merged since v0.5.2, including:
+## Scope / data safety
 
-- selectable unread/Ready Tab attention styles and palettes, with Browser Profile color removed from Tab presentation;
-- shell movement refinement that keeps window movement on the bounded inner Web-surface affordance rather than the external shell/Tab rail;
-- ChatGPT latest-response speech ownership correction so Read Latest targets the latest assistant-owned response;
-- Hot/Warm residency lifecycle reliability corrections;
-- privacy-bounded runtime/navigation/page-app diagnostic evidence improvements;
-- DEBUG/benchmark measurement support for long-running ChatGPT performance.
+- No production Swift/runtime behavior was changed by the release task.
+- The temporary release-preparation workflow self-deleted before PR #127 and left no net workflow diff.
+- Browser Profile data, Web App Slot configuration, website login/session/cookies, WebKit stores, backups and recovery data were not reset or migrated.
+- Diagnostics/history PR #124 remains separate and was not included in v0.5.3.
 
-Do not claim the unmerged long-term diagnostics-history feature from PR #124.
+## Terminal boundary
 
-## Verification gates
-
-1. Final release PR diff is release/control-only and contains no product/runtime source changes.
-2. Version resolves exactly to `0.5.3 (21)` in the app target Debug and Release configurations.
-3. Exact release PR head passes required `Build & Test (Apple Silicon arm64)` and QA DMG.
-4. Final PR is current/mergeable with no unresolved review-thread blocker.
-5. Merge to `main` triggers `Publish Release` successfully.
-6. GitHub tag `v0.5.3` and Release exist and target the release merge identity.
-7. Release exposes downloadable `FloatTabs-0.5.3.dmg`, DMG SHA-256, dSYM archive and dSYM SHA-256.
-8. After publication, reconcile STATUS/TASK as terminal with `ACTIVE_PRODUCT_TASK=NONE`.
-
-## Data safety
-
-Release preparation and publication must not clear, migrate, reset, or rewrite Browser Profile data, Web App Slot configuration, website login/session/cookies, WebKit stores, backups, or recovery material.
-
-## STOP conditions
-
-STOP if the version/build edit requires product source changes, the final PR contains unexpected runtime changes, required hosted checks fail, the publisher fails, the release/tag identity is ambiguous, or PR #124 would need to be incorporated.
-
-## Completion boundary
-
-This task is complete only after v0.5.3 Build 21 is published and downloadable on GitHub, publication identity/assets are verified, and the release lifecycle/control plane is closed on `main`.
+No further work is authorized under `FT-RELEASE-0.5.3-001`. A later release, hotfix, product change, cleanup, or diagnostics-history decision requires a new/reconciled `CURRENT_TASK.md`.
