@@ -1,0 +1,55 @@
+name: Prepare FloatTabs v0.5.3 Metadata
+
+on:
+  push:
+    branches:
+      - release/v0.5.3
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/v0.5.3
+          fetch-depth: 0
+
+      - name: Apply bounded version/build edit and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT='FloatTabs.xcodeproj/project.pbxproj'
+          WORKFLOW='.github/workflows/prepare-v0.5.3.yml'
+
+          OLD_VERSION_COUNT="$(grep -Ec '^[[:space:]]*MARKETING_VERSION = 0\.5\.2;$' "$PROJECT" || true)"
+          OLD_BUILD_COUNT="$(grep -Ec '^[[:space:]]*CURRENT_PROJECT_VERSION = 20;$' "$PROJECT" || true)"
+          NEW_VERSION_COUNT="$(grep -Ec '^[[:space:]]*MARKETING_VERSION = 0\.5\.3;$' "$PROJECT" || true)"
+          NEW_BUILD_COUNT="$(grep -Ec '^[[:space:]]*CURRENT_PROJECT_VERSION = 21;$' "$PROJECT" || true)"
+
+          if [[ "$NEW_VERSION_COUNT" == '2' && "$NEW_BUILD_COUNT" == '2' ]]; then
+            echo 'Release metadata is already at 0.5.3 (21); only retiring temporary workflow.'
+          else
+            if [[ "$OLD_VERSION_COUNT" != '2' || "$OLD_BUILD_COUNT" != '2' ]]; then
+              echo "error: expected exactly two app-target 0.5.2/20 settings; found version=$OLD_VERSION_COUNT build=$OLD_BUILD_COUNT" >&2
+              exit 1
+            fi
+            perl -0pi -e 's/MARKETING_VERSION = 0\.5\.2;/MARKETING_VERSION = 0.5.3;/g; s/CURRENT_PROJECT_VERSION = 20;/CURRENT_PROJECT_VERSION = 21;/g' "$PROJECT"
+          fi
+
+          test "$(grep -Ec '^[[:space:]]*MARKETING_VERSION = 0\.5\.3;$' "$PROJECT")" -eq 2
+          test "$(grep -Ec '^[[:space:]]*CURRENT_PROJECT_VERSION = 21;$' "$PROJECT")" -eq 2
+          test "$(grep -Ec '^[[:space:]]*MARKETING_VERSION = 0\.5\.2;$' "$PROJECT" || true)" -eq 0
+          test "$(grep -Ec '^[[:space:]]*CURRENT_PROJECT_VERSION = 20;$' "$PROJECT" || true)" -eq 0
+
+          rm -f "$WORKFLOW"
+          git add "$PROJECT" "$WORKFLOW"
+          git diff --cached --check
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Bump FloatTabs to v0.5.3 build 21'
+          git push origin HEAD:release/v0.5.3
