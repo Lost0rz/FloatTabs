@@ -6,84 +6,52 @@
 
 ## Mode
 
-**MODE: NO_ACTIVE_PRODUCT_TASK**
+**MODE: DIAGNOSTICS_HISTORY_REINTEGRATION_ACTIVE**
 
-`FT-RELEASE-0.5.3-001` is completed. **FloatTabs v0.5.3 (Build 21)** is published on GitHub with downloadable release assets. No active product or release task is authorized.
+`FT-DIAG-HISTORY-REINTEGRATION-001` is active. The objective is to restore the already-developed long-term local diagnostics/history product semantics from historical Draft PR #124 onto the current post-v0.5.3 `main` baseline without regressing later accepted Tab Attention, Settings IA, release metadata, runtime ownership, or user data.
 
-## Current release
+## Verified baseline
 
+- Current remote `main`: `fef824c4d9f7783dca80e831c3812dae8e5f0833`.
 - Latest public release: `v0.5.3` / Build 21.
-- Release PR #127: MERGED.
-- Release PR final head: `25c3508832e8fa384cc3282f569222c06fc67b16`.
-- Release merge commit / publication source: `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
-- GitHub Release ID: `416230888`.
-- Release title: `FloatTabs v0.5.3`.
-- Draft: NO.
-- Prerelease: NO.
-- Publish Release workflow run `39097105718`: PASS.
-- Distribution remains Apple Silicon arm64.
+- `main` and `v0.5.3` contain the earlier Runtime Diagnostics surface (`Collection mode`, `Export Recent Diagnostics…`, `Open Logs Folder`).
+- Historical Draft PR #124 (`FT-DIAG-HISTORY-001`) is still OPEN / Draft / unmerged at `e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
+- PR #124 contains the missing enhanced local-history semantics, including `Keep local diagnostic history`, diagnostic detail level, `Long-term performance observation`, saved-log workflow, seven-day bounded retention/rotation integration, and low-cadence performance checkpoints.
+- PR #124 diverged from current main and must not be merged as a stale branch wholesale.
+- The abandoned lifecycle PR #129 was CLOSED / UNMERGED after this baseline mismatch was discovered; it did not modify main.
 
-## Published assets
+## Reintegration posture
 
-- `FloatTabs-0.5.3.dmg` — uploaded; GitHub SHA-256 digest `036015d1fbcafd3e0017807c255a7b968a9f62648f51fdb636b93e5ee4755a2b`.
-- `FloatTabs-0.5.3.dmg.sha256` — uploaded.
-- `FloatTabs-0.5.3.dSYM.zip` — uploaded; GitHub SHA-256 digest `565cd72fa5d4195eb1818bf26bbd9995e464af88cd264989f036b5dc8b88fa1e`.
-- `FloatTabs-0.5.3.dSYM.zip.sha256` — uploaded.
+The accepted source of product intent is the implemented product delta in PR #124, not its stale control files or old branch baseline. Reintegration must start from current `main` and selectively preserve current production behavior where later work overlaps.
 
-## Release verification
+Protected current-baseline behavior includes:
 
-- Release PR changed only control files, app version/build metadata, and v0.5.3 release notes.
-- App target Debug and Release configurations resolve to `0.5.3 (21)`.
-- Exact release PR head macOS CI: PASS.
-- Exact release PR head QA DMG: PASS.
-- Final PR mergeability/review-thread audit: PASS.
-- Release package build and Apple Silicon verification: PASS.
-- Release filename and checksum verification: PASS.
-- New GitHub Release publication: PASS.
-- Tag/release target is `7d275762de0e2abba9fd1efcb0efb1dc87e00a99`.
-- Diagnostics/history PR #124 remains separate and is not part of v0.5.3.
-
-## v0.5.3 product baseline
-
-This release includes already-accepted work since v0.5.2, including:
-
-- Dot / Beacon / Halo / Orbit / Pulse / Sweep unread attention styles and separate palettes;
-- Browser Profile color removed from Tab presentation while compatibility metadata is preserved;
-- General: Interface Appearance + Unread Tab Attention; Audio: Ready Alerts + Speech;
-- responsive 3×2 Attention Style chooser and Reduce Motion-safe effects;
-- shell movement refinement to the bounded inner Web-surface movement affordance;
-- latest-assistant-response speech ownership correction;
-- Hot background recovery and Warm retention/memory-pressure reliability corrections;
-- privacy-bounded runtime/navigation/page-app diagnostic evidence improvements;
-- DEBUG/benchmark long-running ChatGPT measurement support.
-
-The long-term diagnostics-history work in PR #124 remains unmerged/parked and is not part of this release.
+- v0.5.3 version/build and release baseline;
+- Dot / Beacon / Halo / Orbit / Pulse / Sweep unread attention system and Settings IA;
+- current Browser Profile/session/WebKit ownership and data safety;
+- current shell/window/focus/navigation/recovery behavior;
+- current diagnostics ownership rule: Diagnostics records evidence and does not define product truth/root cause.
 
 ## Data safety
 
-- Browser Profile data was not reset or migrated.
-- Web App Slot configuration was not reset or migrated.
-- Website login/session/cookie/WebKit stores were not cleared.
-- Backups/recovery data were not destructively modified.
-- Existing rollback bundles are outside this remote release closeout and are not authorized for deletion here.
+- No Browser Profile, Web App Slot, cookie/session/WebKit data migration or reset is authorized.
+- No destructive cleanup of existing diagnostics or recovery data is authorized.
+- Long-term diagnostics remain local/sanitized; no remote telemetry or automatic AI upload/analysis is authorized.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=NONE
-LAST_COMPLETED_TASK=FT-RELEASE-0.5.3-001
-TASK_STATE=COMPLETED
-LATEST_RELEASE=v0.5.3
-LATEST_RELEASE_BUILD=21
-RELEASE_PR=127_MERGED
-RELEASE_PR_FINAL_HEAD=25c3508832e8fa384cc3282f569222c06fc67b16
-RELEASE_MERGE_COMMIT=7d275762de0e2abba9fd1efcb0efb1dc87e00a99
-RELEASE_WORKFLOW=39097105718_PASS
-RELEASE_ASSETS=DMG,DMG_SHA256,DSYM_ZIP,DSYM_SHA256
-DIAGNOSTICS_PR_124=PARKED_UNCHANGED
+ACTIVE_PRODUCT_TASK=FT-DIAG-HISTORY-REINTEGRATION-001
+TASK_STATE=ACTIVE
+BASE_MAIN=fef824c4d9f7783dca80e831c3812dae8e5f0833
+SOURCE_PR=124_OPEN_DRAFT
+SOURCE_PR_HEAD=e8bc90ad5d9897585974a84aef92e89bf3c2f2cb
+SOURCE_PR_DISPOSITION=REINTEGRATE_PRODUCT_SEMANTICS
+LIFECYCLE_PR_129=CLOSED_ABANDONED_UNMERGED
+LATEST_RELEASE=v0.5.3_BUILD_21
 ROOT_CAUSE=N/A
 ```
 
 ## Next
 
-The release lifecycle is complete. Start or reconcile a new `CURRENT_TASK.md` before any new product, release, cleanup, or diagnostics mutation.
+Reconcile the PR #124 product implementation onto the current-main integration branch, run focused/full verification and exact-head hosted CI, then install an exact Release candidate for Human Real-Mac diagnostics acceptance before merge.
