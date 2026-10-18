@@ -199,12 +199,13 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         return window
     }
 
-    private func makeSettingsPage(for page: GlobalSettingsPage) -> NSViewController {
+    func makeSettingsPage(for page: GlobalSettingsPage) -> NSViewController {
         let children: [NSViewController]
         switch page {
         case .general:
             children = [
-                AppearanceSettingsViewController(preferencesStore: preferencesStore)
+                AppearanceSettingsViewController(preferencesStore: preferencesStore),
+                UnreadTabAttentionSettingsViewController(preferencesStore: preferencesStore),
             ]
         case .browserPerformance:
             children = [
@@ -803,9 +804,6 @@ final class NotificationsSettingsViewController: NSViewController {
     let volumeSlider = NSSlider(value: 100, minValue: 0, maxValue: 100, target: nil, action: nil)
     private let volumeValueLabel = NSTextField(labelWithString: "100%")
     let previewButton = NSButton(title: "Play Preview", target: nil, action: nil)
-    private(set) var attentionStyleChoices: [AttentionStyleChoiceButton] = []
-    private(set) var attentionPaletteChoices: [AttentionPaletteChoiceButton] = []
-    private let attentionPaletteDescriptionLabel = NSTextField(labelWithString: "")
 
     init(
         preferencesStore: AppPreferencesStore,
@@ -832,8 +830,6 @@ final class NotificationsSettingsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
-        attentionPaletteDescriptionLabel.font = .systemFont(ofSize: 11)
-        attentionPaletteDescriptionLabel.textColor = .secondaryLabelColor
 
         enabledSwitch.target = self
         enabledSwitch.action = #selector(enabledChanged(_:))
@@ -865,20 +861,6 @@ final class NotificationsSettingsViewController: NSViewController {
         removeSelectedAudioButton.target = self
         removeSelectedAudioButton.action = #selector(removeSelectedAudio(_:))
 
-        let attentionStyleGrid = makeAttentionStyleGrid()
-        let attentionPaletteGrid = makeAttentionPaletteGrid()
-        let attentionStyleSection = NSStackView(views: [
-            Self.titleLabel("Unread Tab Attention"),
-            Self.detailLabel("Choose an effect style. Previews respect Reduce Motion."),
-            attentionStyleGrid,
-            Self.titleLabel("Palette"),
-            attentionPaletteDescriptionLabel,
-            attentionPaletteGrid,
-        ])
-        attentionStyleSection.orientation = .vertical
-        attentionStyleSection.alignment = .leading
-        attentionStyleSection.spacing = 8
-
         let enabledRow = makeRow(label: "Play sound when ChatGPT is ready", control: enabledSwitch)
         let soundRow = makeRow(label: "Ready Sound", control: soundPopup)
         let audioActions = NSStackView(views: [importAudioButton, removeSelectedAudioButton])
@@ -901,8 +883,6 @@ final class NotificationsSettingsViewController: NSViewController {
             volumeRow,
             Self.spacer(4),
             previewButton,
-            Self.spacer(8),
-            attentionStyleSection,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -928,16 +908,6 @@ final class NotificationsSettingsViewController: NSViewController {
 
     @objc private func enabledChanged(_ sender: NSSwitch) {
         preferencesStore.attentionSoundEnabled = sender.state == .on
-    }
-
-    @objc private func attentionStyleChanged(_ sender: AttentionStyleChoiceButton) {
-        preferencesStore.attentionStyle = sender.style
-        synchronizeAttentionStyleChoices()
-    }
-
-    @objc private func attentionPaletteChanged(_ sender: AttentionPaletteChoiceButton) {
-        preferencesStore.attentionPalette = sender.palette
-        synchronizeAttentionStyleChoices()
     }
 
     @objc private func soundChanged(_ sender: NSPopUpButton) {
@@ -1078,75 +1048,6 @@ final class NotificationsSettingsViewController: NSViewController {
         let volumePercent = preferencesStore.attentionSoundVolume * 100
         volumeSlider.doubleValue = volumePercent
         updateVolumeLabel(volumePercent)
-        synchronizeAttentionStyleChoices()
-    }
-
-    private func makeAttentionStyleGrid() -> NSView {
-        attentionStyleChoices = TabAttentionStyle.allCases.map { style in
-            let choice = AttentionStyleChoiceButton(
-                style: style,
-                palette: preferencesStore.attentionPalette
-            )
-            choice.target = self
-            choice.action = #selector(attentionStyleChanged(_:))
-            choice.widthAnchor.constraint(equalToConstant: 178).isActive = true
-            choice.heightAnchor.constraint(equalToConstant: 88).isActive = true
-            return choice
-        }
-        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
-            let row = NSStackView(views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)]))
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 12
-            return row
-        }
-        let grid = NSStackView(views: rows)
-        grid.orientation = .vertical
-        grid.alignment = .leading
-        grid.spacing = 8
-        return grid
-    }
-
-    private func synchronizeAttentionStyleChoices() {
-        let selectedStyle = preferencesStore.attentionStyle
-        let selectedPalette = preferencesStore.attentionPalette
-        let displayedPalette = selectedStyle == .dot ? .red : selectedPalette
-        attentionStyleChoices.forEach { choice in
-            choice.setPalette(selectedPalette)
-            choice.setSelectedStyle(choice.style == selectedStyle)
-        }
-        attentionPaletteChoices.forEach { choice in
-            choice.isEnabled = selectedStyle != .dot || choice.palette == .red
-            choice.setSelectedPalette(choice.palette == displayedPalette)
-        }
-        attentionPaletteDescriptionLabel.stringValue = selectedStyle == .dot
-            ? "Dot always uses the classic red indicator."
-            : "Palette changes color while keeping the selected style."
-    }
-
-    private func makeAttentionPaletteGrid() -> NSView {
-        attentionPaletteChoices = TabAttentionPalette.allCases.map { palette in
-            let choice = AttentionPaletteChoiceButton(palette: palette)
-            choice.target = self
-            choice.action = #selector(attentionPaletteChanged(_:))
-            choice.widthAnchor.constraint(equalToConstant: 104).isActive = true
-            choice.heightAnchor.constraint(equalToConstant: 34).isActive = true
-            return choice
-        }
-        let rows = stride(from: 0, to: attentionPaletteChoices.count, by: 3).map { start in
-            let row = NSStackView(
-                views: Array(attentionPaletteChoices[start..<min(start + 3, attentionPaletteChoices.count)])
-            )
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 8
-            return row
-        }
-        let grid = NSStackView(views: rows)
-        grid.orientation = .vertical
-        grid.alignment = .leading
-        grid.spacing = 6
-        return grid
     }
 
     private func configureSoundPopup() {
@@ -1237,6 +1138,157 @@ final class NotificationsSettingsViewController: NSViewController {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
+    }
+}
+
+@MainActor
+final class UnreadTabAttentionSettingsViewController: NSViewController {
+    private let preferencesStore: AppPreferencesStore
+    private(set) var attentionStyleChoices: [AttentionStyleChoiceButton] = []
+    private(set) var attentionPaletteChoices: [AttentionPaletteChoiceButton] = []
+    private let attentionPaletteDescriptionLabel = NSTextField(labelWithString: "")
+
+    init(preferencesStore: AppPreferencesStore) {
+        self.preferencesStore = preferencesStore
+        super.init(nibName: nil, bundle: nil)
+        title = "Unread Tab Attention"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let root = NSView()
+        attentionPaletteDescriptionLabel.font = .systemFont(ofSize: 11)
+        attentionPaletteDescriptionLabel.textColor = .secondaryLabelColor
+
+        let styleGrid = makeAttentionStyleGrid()
+        let paletteGrid = makeAttentionPaletteGrid()
+        let stack = NSStackView(views: [
+            Self.titleLabel("Unread Tab Attention"),
+            Self.detailLabel("Choose an effect style. Previews respect Reduce Motion."),
+            styleGrid,
+            Self.titleLabel("Palette"),
+            attentionPaletteDescriptionLabel,
+            paletteGrid,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -28),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
+        ])
+
+        view = root
+        synchronizeAttentionStyleChoices()
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        synchronizeAttentionStyleChoices()
+    }
+
+    @objc private func attentionStyleChanged(_ sender: AttentionStyleChoiceButton) {
+        preferencesStore.attentionStyle = sender.style
+        synchronizeAttentionStyleChoices()
+    }
+
+    @objc private func attentionPaletteChanged(_ sender: AttentionPaletteChoiceButton) {
+        preferencesStore.attentionPalette = sender.palette
+        synchronizeAttentionStyleChoices()
+    }
+
+    private func makeAttentionStyleGrid() -> NSView {
+        attentionStyleChoices = TabAttentionStyle.allCases.map { style in
+            let choice = AttentionStyleChoiceButton(
+                style: style,
+                palette: preferencesStore.attentionPalette
+            )
+            choice.target = self
+            choice.action = #selector(attentionStyleChanged(_:))
+            choice.widthAnchor.constraint(equalToConstant: 178).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 88).isActive = true
+            return choice
+        }
+        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
+            let row = NSStackView(
+                views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)])
+            )
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 12
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 8
+        return grid
+    }
+
+    private func synchronizeAttentionStyleChoices() {
+        let selectedStyle = preferencesStore.attentionStyle
+        let selectedPalette = preferencesStore.attentionPalette
+        let displayedPalette = selectedStyle == .dot ? .red : selectedPalette
+        attentionStyleChoices.forEach { choice in
+            choice.setPalette(selectedPalette)
+            choice.setSelectedStyle(choice.style == selectedStyle)
+        }
+        attentionPaletteChoices.forEach { choice in
+            choice.isEnabled = selectedStyle != .dot || choice.palette == .red
+            choice.setSelectedPalette(choice.palette == displayedPalette)
+        }
+        attentionPaletteDescriptionLabel.stringValue = selectedStyle == .dot
+            ? "Dot always uses the classic red indicator."
+            : "Palette changes color while keeping the selected style."
+    }
+
+    private func makeAttentionPaletteGrid() -> NSView {
+        attentionPaletteChoices = TabAttentionPalette.allCases.map { palette in
+            let choice = AttentionPaletteChoiceButton(palette: palette)
+            choice.target = self
+            choice.action = #selector(attentionPaletteChanged(_:))
+            choice.widthAnchor.constraint(equalToConstant: 104).isActive = true
+            choice.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            return choice
+        }
+        let rows = stride(from: 0, to: attentionPaletteChoices.count, by: 3).map { start in
+            let row = NSStackView(
+                views: Array(attentionPaletteChoices[start..<min(start + 3, attentionPaletteChoices.count)])
+            )
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            return row
+        }
+        let grid = NSStackView(views: rows)
+        grid.orientation = .vertical
+        grid.alignment = .leading
+        grid.spacing = 6
+        return grid
+    }
+
+    private static func titleLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        return label
+    }
+
+    private static func detailLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 0
+        label.widthAnchor.constraint(lessThanOrEqualToConstant: 540).isActive = true
+        return label
     }
 }
 

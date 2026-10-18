@@ -608,16 +608,12 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    func testNotificationsShowsSixSharedRendererPreviewsAndPersistsStyleAndPalette() throws {
+    func testUnreadTabAttentionSettingsShowsSixSharedRendererPreviewsAndPersistsStyleAndPalette() throws {
         let suiteName = "FloatTabsTests.AttentionStyleSettings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferencesStore(defaults: defaults)
-        let controller = NotificationsSettingsViewController(
-            preferencesStore: preferences,
-            attentionSoundPlayer: SoundPlayerSpy(),
-            availableSoundNames: ["Ping"]
-        )
+        let controller = UnreadTabAttentionSettingsViewController(preferencesStore: preferences)
         controller.loadViewIfNeeded()
 
         XCTAssertEqual(controller.attentionStyleChoices.map { $0.style.displayName }, [

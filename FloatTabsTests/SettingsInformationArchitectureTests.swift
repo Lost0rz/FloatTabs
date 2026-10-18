@@ -17,20 +17,66 @@ final class SettingsInformationArchitectureTests: XCTestCase {
     }
 
     func testSettingsPagesRetainAllExistingFeatureSections() {
-        XCTAssertEqual(GlobalSettingsPage.general.sections, [.interfaceAppearance])
+        XCTAssertEqual(
+            GlobalSettingsPage.general.sections,
+            [.interfaceAppearance, .unreadTabAttention]
+        )
         XCTAssertEqual(
             GlobalSettingsPage.browserPerformance.sections,
             [.browserProfiles, .performance]
         )
         XCTAssertEqual(
             GlobalSettingsPage.audio.sections,
-            [.readyAlerts, .unreadTabAttention, .speech]
+            [.readyAlerts, .speech]
         )
         XCTAssertEqual(GlobalSettingsPage.shortcuts.sections, [.shortcuts])
         XCTAssertEqual(
             GlobalSettingsPage.advanced.sections,
             [.runtimeDiagnostics, .backupRestore, .about]
         )
+    }
+
+    func testNotificationsControllerExposesReadyAudioControlsOnly() {
+        let controller = NotificationsSettingsViewController(
+            preferencesStore: AppPreferencesStore(),
+            attentionSoundPlayer: SilentAttentionSoundPlayer(),
+            availableSoundNames: ["Ping"]
+        )
+        controller.loadViewIfNeeded()
+
+        let strings = allControlStrings(in: controller.view)
+        XCTAssertTrue(strings.contains("Ready Alerts"))
+        XCTAssertTrue(strings.contains("Play sound when ChatGPT is ready"))
+        XCTAssertTrue(strings.contains("Ready Sound"))
+        XCTAssertTrue(strings.contains("Volume"))
+        XCTAssertTrue(strings.contains("Play Preview"))
+        XCTAssertFalse(strings.contains("Unread Tab Attention"))
+        XCTAssertFalse(strings.contains("Palette"))
+        XCTAssertFalse(strings.contains("Dot"))
+    }
+
+    func testGeneralAndAudioComposeOneDedicatedAttentionController() throws {
+        let settings = GlobalSettingsController(preferencesStore: AppPreferencesStore())
+        let general = try XCTUnwrap(
+            settings.makeSettingsPage(for: .general) as? SettingsPageViewController
+        )
+        let audio = try XCTUnwrap(
+            settings.makeSettingsPage(for: .audio) as? SettingsPageViewController
+        )
+
+        XCTAssertEqual(
+            general.embeddedControllers.map { String(describing: type(of: $0)) },
+            ["AppearanceSettingsViewController", "UnreadTabAttentionSettingsViewController"]
+        )
+        XCTAssertEqual(
+            audio.embeddedControllers.map { String(describing: type(of: $0)) },
+            ["NotificationsSettingsViewController", "SpeechSettingsViewController"]
+        )
+        XCTAssertEqual(
+            general.embeddedControllers.filter { $0 is UnreadTabAttentionSettingsViewController }.count,
+            1
+        )
+        XCTAssertFalse(audio.embeddedControllers.contains { $0 is UnreadTabAttentionSettingsViewController })
     }
 
     func testLanguagePlaceholderIsNotASettingsSection() {
@@ -111,6 +157,26 @@ final class SettingsInformationArchitectureTests: XCTestCase {
             "Version 0.4.0"
         )
     }
+}
+
+@MainActor
+private struct SilentAttentionSoundPlayer: AttentionSoundPlaying {
+    func play(source: AttentionSoundPlaybackSource, volume: Double) {}
+}
+
+@MainActor
+private func allControlStrings(in view: NSView) -> [String] {
+    let current: [String] = switch view {
+    case let field as NSTextField:
+        [field.stringValue]
+    case let button as NSButton:
+        [button.title]
+    case let popup as NSPopUpButton:
+        [popup.titleOfSelectedItem ?? ""]
+    default:
+        []
+    }
+    return current + view.subviews.flatMap(allControlStrings)
 }
 
 @MainActor

@@ -54,11 +54,11 @@ enum GlobalSettingsPage: CaseIterable, Equatable {
     var sections: [GlobalSettingsSection] {
         switch self {
         case .general:
-            return [.interfaceAppearance]
+            return [.interfaceAppearance, .unreadTabAttention]
         case .browserPerformance:
             return [.browserProfiles, .performance]
         case .audio:
-            return [.readyAlerts, .unreadTabAttention, .speech]
+            return [.readyAlerts, .speech]
         case .shortcuts:
             return [.shortcuts]
         case .advanced:
@@ -69,7 +69,7 @@ enum GlobalSettingsPage: CaseIterable, Equatable {
 
 @MainActor
 final class SettingsPageViewController: NSViewController {
-    private let embeddedControllers: [NSViewController]
+    let embeddedControllers: [NSViewController]
 
     init(childViewControllers: [NSViewController]) {
         self.embeddedControllers = childViewControllers

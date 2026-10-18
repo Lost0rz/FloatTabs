@@ -18,27 +18,28 @@ Replace the old Browser-Profile color distinction and tiny-only unread treatment
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- Candidate at the start of this visual refinement: `b57bbd4c65942aaccb24845b5d8d058e7885729d` (freshly verified against PR #125).
+- Candidate at the start of this Settings IA corrective: `ef53a687874132993fe4c8f9c3fe0ce5eda36d06` (freshly verified against PR #125).
 - Resolve the current candidate from the freshly fetched authorized task branch; exact live Git refs remain authoritative.
 - Diagnostics/history PR #124 remains parked and out of scope.
 
 ## Latest scope refinement
 
-Human Real-Mac review established that the current `Signal / Ember / Aurora / Spectrum` family is visually too similar because the variants mainly change gradient color while keeping the same whole-surface treatment. The Settings preview also makes the production rail Tab path look awkward when stretched into a large asymmetric/trapezoid-like preview.
+Human Real-Mac review accepted the current attention visual effects. The remaining issue is Settings information architecture: Unread Tab Attention configuration is visual/appearance configuration and must live under General, not Audio. This is a bounded corrective within the existing task and PR.
 
 The user explicitly requires the classic **red unread dot to remain available** because it is still an effective reminder. This latest section overrides earlier preset lists where they conflict.
 
-### Latest Human Real-Mac refinement
+### Human Real-Mac acceptance and Settings IA corrective
 
-Human review of the current candidate requests these visual adjustments within this same task and PR:
+Human review accepted all six attention visual effects: Dot, Beacon, Halo, Orbit, Pulse and Sweep. Do not redesign or modify their appearance in this corrective.
 
-- Dot remains classic red and grows to approximately 10–12 pt for high-resolution visibility.
-- Beacon becomes a thicker, clearer leading/left-side accent strip. It remains a localized accent and must not fill the whole Tab surface.
-- Halo keeps its current structural concept; only minor polish is in scope.
-- Orbit becomes a complete continuous perimeter outline around the whole Tab. Slow color/brightness flow is allowed; dotted or dashed point-runs are rejected.
-- Sweep adds a restrained tinted base and a wider/longer moving color band, with a calm interval between passes.
+The Settings hierarchy is:
 
-Update tests for these semantics, Reduce Motion fallback, overflow projection consistency and Style/Palette persistence compatibility. Keep the existing symmetric Settings preview geometry, shared preview/runtime renderer, real rail geometry and all protected state/runtime ownership unchanged. After local validation and exact-head macOS CI/QA DMG, install the exact Release candidate and wait for another Human Real-Mac visual acceptance.
+- General: Interface Appearance, Unread Tab Attention.
+- Audio: Ready Alerts, Speech.
+
+Move the complete Unread Tab Attention interface into a dedicated bounded `UnreadTabAttentionSettingsViewController`: six-style chooser, palette chooser, live preview cards, selection synchronization, and style/palette preference handlers. `NotificationsSettingsViewController` owns only Ready alert enablement and Ready Sound controls (sound selection/import/removal, volume, and Play Preview). Compose General from Appearance plus Unread Tab Attention; compose Audio from Notifications plus Speech. Update `SettingsInformationArchitecture` to match these exact sections. Do not add a top-level Appearance tab.
+
+Tests must prove General owns the feature, Audio does not expose it, all six accepted styles remain selectable/rendered, Palette works, preference changes still apply immediately, and there is one controller/authority for attention preferences. Preserve preference keys/raw values, previews and renderer, live rail projection, Reduce Motion, attention acknowledgement/state ownership, Browser Profiles, runtime/focus/navigation/recovery, and real rail geometry. After focused/full tests, Debug/Release arm64, exact-head CI and QA DMG, install the exact Release for a short Settings-location check only.
 
 ## Product / interaction contract
 
@@ -203,16 +204,14 @@ Because `fce121e...` may already have stored `signal/ember/aurora/spectrum` valu
 
 ## Implementation boundary
 
-Expected affected areas:
+Expected affected areas for this corrective:
 
-- `FloatTabs/UI/ExternalTabRail.swift` — attention effect renderer/projection;
-- `FloatTabs/Persistence/AppPreferencesStore.swift` — selected style/palette preferences and compatibility fallback;
-- Notifications Settings UI in `FloatTabs/UI/GlobalSettingsController.swift`;
-- bounded preference projection where required;
+- `FloatTabs/UI/GlobalSettingsController.swift` — page composition, dedicated General attention settings, and audio-only Notifications settings;
+- `FloatTabs/UI/SettingsInformationArchitecture.swift` — General/Audio section ownership;
 - matching tests under `FloatTabsTests/`;
-- `docs/design/FloatTabs_UI_Design_System_v1.3.md`.
+- `docs/design/FloatTabs_UI_Design_System_v1.3.md` — Settings location.
 
-Real rail geometry must remain unchanged. Preview geometry may be independent presentation geometry.
+This corrective must not change the existing `AppPreferencesStore` keys/raw values, attention renderer/effects, runtime projection, or rail geometry. Preview geometry remains unchanged.
 
 Do not change canonical attention, Tab, Web runtime, Profile-session, focus, navigation, recovery or lifecycle ownership.
 
@@ -270,28 +269,20 @@ Run relevant attention, shell, preferences, notifications, Browser Profile and p
 
 Inspect implementation to confirm there is no Timer/display-link/high-frequency polling solely for attention decoration.
 
-### Gate 5 — renewed Human Real-Mac visual acceptance
+### Gate 5 — final Human Real-Mac Settings-location check
 
-On the exact Release candidate verify:
+Attention visual effects have already been accepted. On the exact Release candidate, check only that:
 
-- Dot remains effective and visually clean;
-- Beacon, Halo, Orbit, Pulse and Sweep are visibly different from one another;
-- Settings previews no longer look like stretched trapezoid banners;
-- style can be understood by watching the preview;
-- palette selection, if present, changes color language without changing style identity;
-- motion is polished and not distracting;
-- selected preference survives relaunch;
-- acknowledgement restores neutral state;
-- hover/reorder/first-click/overflow/favicon/speech remain coherent;
-- no focus/window/runtime regression is observed.
+- Unread Tab Attention appears under General alongside Interface Appearance;
+- Audio contains Ready Alerts and Speech and no Unread Tab Attention section.
 
-Human visual approval remains required before completion.
+Do not repeat the visual-style acceptance unless relocation causes a regression. Human confirmation of the location remains required before completion.
 
 ## Data safety
 
 Browser Profile metadata, website login/session data, cookies, WebKit stores, backups and Slot configuration are user data. Do not clear/reset them.
 
-This task authorizes only non-destructive app UI preferences for attention style/palette plus presentation code/tests/docs.
+The existing task authorizes non-destructive app UI preferences for attention style/palette. This corrective changes only Settings ownership/page composition plus tests/docs; it performs no preference migration or data changes.
 
 ## STOP conditions
 
@@ -308,4 +299,4 @@ STOP and report evidence if:
 
 ## Completion boundary
 
-Task is complete only when the classic Dot reminder remains available, structurally distinct reminder styles are implemented and previewable, Browser Profile color remains removed from Tab presentation, preferences are compatibility-safe, automated/hosted verification passes, Human Real-Mac visual acceptance passes, and STATUS/TASK plus PR/workspace lifecycle are reconciled.
+Task is complete only when the accepted Dot/Beacon/Halo/Orbit/Pulse/Sweep effects remain available, General owns Interface Appearance and Unread Tab Attention, Audio owns Ready Alerts and Speech, Browser Profile color remains removed from Tab presentation, preferences are compatibility-safe, automated/hosted verification passes, the final Human Real-Mac Settings-location check passes, and STATUS/TASK plus PR/workspace lifecycle are reconciled.
