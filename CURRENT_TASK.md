@@ -1,152 +1,204 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-TAB-ATTENTION-HIGHLIGHT-001`
-**Title:** Replace Browser-Profile Tab colors and tiny unread dots with selectable whole-Tab attention styles
+**Title:** Make unread Tabs unmistakable with selectable attention styles
 **Status:** `ACTIVE`
 **Mode:** `DESIGN_IMPLEMENT`
 
 ## Objective
 
-Make unread/new-response state immediately recognizable on high-resolution displays by using the whole Tab surface as the attention signal, while removing Browser Profile color as a Tab-rail visual distinction and letting the user choose among a small set of designed attention styles with live Settings previews.
+Replace the old Browser-Profile color distinction and tiny-only unread treatment with a configurable unread-attention system that is obvious on high-resolution displays, visually diverse, and safe for long-running native macOS use.
 
 ## Authority / baseline
 
 - Project rules: `AGENTS.md`.
 - Domain/navigation: `docs/architecture/DOMAIN_MAP.md`.
 - Current visual contract: `docs/design/FloatTabs_UI_Design_System_v1.3.md` plus current production source/tests.
-- Attention semantics: current `WebAttentionCoordinator` / `ChatGPTUnreadResponseCoordinator` behavior and existing attention tests remain authoritative for state transitions/acknowledgement.
+- Attention semantics: existing `WebAttentionCoordinator` / `ChatGPTUnreadResponseCoordinator` behavior and tests remain authoritative for state/acknowledgement.
 - Baseline `main`: `7d473a4567ec0a7fa000c6b29dfeab95a36ebab6`.
 - Authorized branch: `product/ft-tab-attention-highlight-001`.
 - Draft PR #125 — `Make unread Tabs visually prominent`.
-- First implementation semantic head: `684ca4ec06b9d664e1017cd472cfdeef6ec2c591`.
-- First exact Release candidate passed automated gates and was installed on Real Mac. Human review accepted visibility/function direction but rejected the single solid-red visual as insufficiently designed. This scope refinement stays in the same task/PR.
-- Diagnostics/history PR #124 is parked and out of scope; do not base this task on or mutate that branch/PR.
+- Current intermediate implementation head: `fce121e5d95faaadc1f84467735b9589edbb2be8`.
+- Diagnostics/history PR #124 remains parked and out of scope.
+
+## Latest scope refinement
+
+Human Real-Mac review established that the current `Signal / Ember / Aurora / Spectrum` family is visually too similar because the variants mainly change gradient color while keeping the same whole-surface treatment. The Settings preview also makes the production rail Tab path look awkward when stretched into a large asymmetric/trapezoid-like preview.
+
+The user explicitly requires the classic **red unread dot to remain available** because it is still an effective reminder. This latest section overrides earlier preset lists where they conflict.
 
 ## Product / interaction contract
 
 ### 1. Browser Profile color remains removed from Tab presentation
 
-The assigned Browser Profile must not determine a Tab background/fill color.
+- Normal and active/read Tabs are profile-independent neutral surfaces.
+- Browser Profile name/identity, assignment, WebKit data-store isolation and sessions remain unchanged.
+- The Browser Profile color chooser remains removed from user-facing Settings.
+- Persisted `BrowserProfileColor` metadata/schema remains readable for compatibility; no migration/deletion/rewrite is authorized.
 
-- Normal and active/read Tabs use profile-independent neutral rail styling.
-- Preserve the existing active-selection ownership/treatment, including the shared page+Tab outline and active typography.
-- Browser Profile name/identity, assignment menus, WebKit data-store isolation, and session behavior remain unchanged.
-- The per-profile color chooser stays removed from Browser Profiles Settings.
-- Existing persisted `BrowserProfileColor` metadata/schema and backup compatibility remain intact. Do not migrate, delete or rewrite existing Profile color data.
+### 2. Classic red dot remains a first-class reminder style
 
-### 2. Whole-Tab unread attention remains the signal
+Add/retain **Dot** as the minimal reminder option.
 
-For visible rail Tabs:
+- Dot uses the classic red unread indicator attached to the favicon region.
+- Dot is static and does not animate.
+- Dot must be clearly visible at normal Retina/high-resolution viewing distance.
+- Dot preserves `Unread response` accessibility semantics.
+- Dot is selectable as a complete reminder style; do not automatically overlay it on every other style in this task.
 
-- `Unread/Ready == false`: neutral surface, no unread dot.
-- `Unread/Ready == true`: the whole Tab surface renders the selected Attention Style.
-- The old 6 pt favicon unread dot stays removed from visible Tabs.
-- The chosen attention treatment has priority over ordinary active/hover fill until existing acknowledgement clears Ready.
-- Hover may adjust emphasis/shadow but must not replace the unread style with neutral.
-- Preserve accessibility semantic `Unread response`.
+This restores the useful visual concept without restoring Browser Profile colors.
 
-### 3. Selectable Attention Style presets
+### 3. Structurally distinct reminder styles
 
-Add exactly these first-version presets:
+The first-version style family is:
 
-#### Signal
+#### Dot
 
-- restrained/static attention treatment;
-- visually obvious at 40 × 32 pt without motion;
-- system/dynamic red-family emphasis, not a tiny indicator.
+- classic red unread dot;
+- minimal/static/proven-effective baseline;
+- no whole-surface animation required.
 
-#### Ember
+#### Beacon
 
-- warm red/orange/pink gradient;
-- slow continuous gradient drift and/or gentle brightness breathing;
-- should read as warm/new activity rather than error state.
+- bounded bright edge/accent strip or localized light source;
+- should visually point to the Tab without turning the full Tab into a solid color block;
+- may use gentle glow but no geometry movement.
 
-#### Aurora
+#### Halo
 
-- purple/blue/magenta gradient;
-- slow continuous gradient drift;
-- visually expressive but not flashing or neon-strobing.
+- soft glow around/behind the Tab surface;
+- slow breathing intensity is allowed;
+- interior content/favicons remain readable and comparatively calm.
 
-#### Spectrum
+#### Orbit
 
-- multi-stop full-spectrum/rainbow gradient;
-- slow horizontal/diagonal color travel with gentle breathing;
-- Tab geometry itself remains fixed.
+- moving highlight around the Tab perimeter;
+- the Tab itself never translates, shakes, scales or reflows;
+- motion should feel polished rather than urgent.
 
-Preset names and order are canonical for this task: `Signal`, `Ember`, `Aurora`, `Spectrum`.
+#### Pulse
 
-Do not add arbitrary user color editing, custom gradients or a second theme editor in this task.
+- restrained whole-surface brightness/tint breathing;
+- visually calmer than Orbit/Sweep;
+- no rapid flashing.
 
-### 4. Motion contract
+#### Sweep
+
+- a narrow highlight travels across the Tab, followed by a calm interval;
+- should communicate “new content arrived” rather than constant activity;
+- no perpetual high-frequency shimmer.
+
+Canonical first-version order: `Dot`, `Beacon`, `Halo`, `Orbit`, `Pulse`, `Sweep`.
+
+The current `Signal / Ember / Aurora / Spectrum` presets are intermediate implementation concepts and are not final product authority after this refinement.
+
+### 4. Color / palette is a separate dimension
+
+Where technically/visually valid, support these palette choices independently from style:
+
+- Red
+- Amber
+- Blue
+- Violet
+- Mint
+- Spectrum
+
+Style answers **how attention is shown**. Palette answers **which color language is used**.
+
+Do not create arbitrary custom color/gradient editing in this task.
+
+Compatibility rules:
+
+- Dot defaults to classic red and may remain red-only if palette variants reduce semantic clarity.
+- Spectrum is a palette, not a style.
+- A style/palette combination may be disabled if it cannot meet contrast/legibility or would become visually nonsensical.
+- Defaults/fallbacks must be deterministic and safe.
+
+### 5. Settings previews
+
+Replace the current stretched production-tab preview geometry.
+
+Settings must show compact preview cards/surfaces that are:
+
+- symmetric rounded rectangles/capsules suitable for Settings;
+- visually representative of the real attention effect;
+- not a literal horizontally stretched copy of the production rail Tab path;
+- able to demonstrate actual motion/effect using the same underlying style/effect configuration as the real Tab;
+- clearly selectable with native macOS selection treatment.
+
+The user should be able to distinguish the reminder style without relying only on labels.
+
+Recommended composition:
+
+- style chooser grid with all six styles visible in a compact layout;
+- palette chooser as a separate row/group below the style chooser;
+- preview selection updates real unread presentation immediately without restart.
+
+### 6. Motion contract
 
 Animated styles are decorative projection only.
 
-- Do not translate, shake, bounce, scale-jitter or re-layout Tabs.
-- Do not flash or use rapid color changes.
-- Use bounded layer/Core Animation style animation; do not add Timer/display-link/high-frequency CPU polling solely for these effects.
-- Motion cycles should be slow enough to feel ambient rather than urgent; approximately 3–6 seconds per cycle is the intended range.
-- Multiple unread Tabs should not create independent chaotic motion. Shared/similar animation timing is preferred.
-- When macOS Reduce Motion is enabled, animated presets render a stable static representative gradient/treatment with no continuous motion.
-- When Ready clears, attention animation/treatment stops and the Tab returns to neutral.
+- No Tab translation, shake, bounce, scale-jitter or layout motion.
+- No flashing/high-frequency flicker.
+- Prefer Core Animation/layer animation; do not add Timer/display-link/high-frequency polling solely for decoration.
+- Slow ambient cycles; generally 3–6 seconds where continuous motion is used.
+- Sweep may include a deliberate calm interval between passes.
+- Multiple unread Tabs should share stable timing rather than look independently chaotic.
+- macOS Reduce Motion disables continuous motion and leaves a clear static representative state.
+- When Ready clears, all attention projection stops immediately and returns to neutral.
 
-### 5. Settings selection with live preview
-
-Add an **Unread Tab Attention** settings section to the existing Notifications surface.
-
-The user must be able to:
-
-- see all four presets at once or in a compact 2×2 layout appropriate to the current Settings width;
-- see a miniature live Tab-style preview for each preset, using the same rendering/style source as the real Tab rather than a separately hard-coded approximation;
-- click/select one preset directly;
-- clearly see which preset is selected;
-- have the selected preference take effect on current unread rail/overflow presentation without requiring app restart.
-
-The selected style is one app preference with a safe default. Use `Signal` as the compatibility/default value when no preference is stored or an unknown raw value is encountered.
-
-The preference must live in `AppPreferencesStore` (or its existing canonical preference mechanism) and must not be written into Browser Profile, Web App Slot or website/session data.
-
-### 6. Preserve favicon runtime semantics
-
-Do not reinterpret favicon color:
+### 7. Favicon/runtime semantics
 
 - resident runtime favicon remains full color;
-- released runtime favicon remains grayscale/dim according to the existing contract;
-- whole-Tab attention background/motion is a separate projection;
-- do not force ordinary full-color website favicons into black/white merely because a style is animated. Only template icon/label foreground may resolve contrast as needed.
+- released runtime favicon remains grayscale/dim according to existing behavior;
+- full-color non-template favicons are not recolored solely because of attention style;
+- attention effects are separate presentation layers.
 
-### 7. Compact overflow
+### 8. Compact overflow
 
-When compact layout hides one or more unread Tabs:
+If hidden overflow Tabs contain unread state:
 
-- the overflow rail control uses the selected Attention Style when any hidden item is unread;
-- clearing all hidden unread state restores normal overflow appearance;
-- individual overflow menu items continue to expose which hidden item is unread through a bounded semantic marker and accessibility label;
-- overflow motion obeys the same Reduce Motion rule.
+- overflow must expose that attention using a bounded equivalent of the selected style;
+- individual menu items keep unread semantic indication/accessibility;
+- clearing hidden unread state restores neutral overflow presentation;
+- Reduce Motion applies consistently.
 
-### 8. State precedence
+### 9. State ownership / precedence
 
-Rendering remains deterministic:
+Existing attention authority remains canonical.
 
 ```text
-Unread/Ready selected Attention Style
+Unread/Ready selected reminder style
     > ordinary active/read neutral surface
     > ordinary hover/inactive neutral surface
 ```
 
-The existing attention authority remains responsible for clearing Ready when the Slot actually becomes user-visible. This task changes only the visual projection and its user preference.
+This task changes presentation/preferences only. It does not change Ready/Idle/Generating state transitions or acknowledgement timing.
+
+## Preference model
+
+Use the canonical app preference mechanism.
+
+- selected reminder style is an app preference;
+- selected palette is an app preference if palette support is implemented;
+- missing/unknown values fall back deterministically;
+- settings changes update current unread Tab/overflow presentation without restart;
+- preferences must not be stored in Browser Profile, Web App Slot or website/session data.
+
+Because `fce121e...` may already have stored `signal/ember/aurora/spectrum` values from test candidates, handle those old values safely during this Draft PR refinement. Do not crash or destructively rewrite unrelated user data.
 
 ## Implementation boundary
 
-Expected affected areas now include:
+Expected affected areas:
 
-- `FloatTabs/UI/ExternalTabRail.swift` — shared attention-style renderer/projection;
-- `FloatTabs/Persistence/AppPreferencesStore.swift` — canonical selected-style preference + change notification if needed;
-- Notifications Settings UI in `FloatTabs/UI/GlobalSettingsController.swift` — selectable live previews;
-- bounded App/Panel preference projection only where needed to deliver the canonical preference to the rail;
+- `FloatTabs/UI/ExternalTabRail.swift` — attention effect renderer/projection;
+- `FloatTabs/Persistence/AppPreferencesStore.swift` — selected style/palette preferences and compatibility fallback;
+- Notifications Settings UI in `FloatTabs/UI/GlobalSettingsController.swift`;
+- bounded preference projection where required;
 - matching tests under `FloatTabsTests/`;
-- `docs/design/FloatTabs_UI_Design_System_v1.3.md` updated for the preset/motion contract.
+- `docs/design/FloatTabs_UI_Design_System_v1.3.md`.
 
-Prefer one shared style description/renderer so preview, visible Tab and overflow do not drift into separate visual implementations.
+Real rail geometry must remain unchanged. Preview geometry may be independent presentation geometry.
 
 Do not change canonical attention, Tab, Web runtime, Profile-session, focus, navigation, recovery or lifecycle ownership.
 
@@ -154,99 +206,92 @@ Do not change canonical attention, Tab, Web runtime, Profile-session, focus, nav
 
 ### Gate 0 — refreshed scope / ownership
 
-Before source mutation after this refinement:
+Before source mutation:
 
-- refresh the task branch and confirm the control refinement is present;
-- task worktree must be clean or only contain known authorized work;
-- diagnostics PR #124 remains separate and untouched;
-- stop on overlapping unknown unique writer work.
+- refresh task branch and read this refined contract;
+- task worktree must be clean or contain only known authorized work;
+- PR #124 remains separate and untouched;
+- stop on unknown overlapping writer work.
 
-### Gate 1 — preference and style model
-
-Focused tests must prove:
-
-- all four preset raw values round-trip through the canonical preference;
-- missing/unknown stored value resolves safely to `Signal`;
-- style changes publish/update presentation without restart;
-- preference is not stored in Browser Profile or Slot data;
-- Browser Profile color metadata compatibility remains unchanged.
-
-### Gate 2 — Settings live preview
+### Gate 1 — style/palette preference model
 
 Focused tests must prove:
 
-- all four preset names/previews are present;
-- selection is obvious and updates the canonical preference;
-- previews use the shared style renderer/configuration rather than independent color constants;
-- previews remain usable in Light and Dark appearance;
-- Reduce Motion produces static previews for animated styles.
+- all canonical style raw values round-trip;
+- missing/unknown/old Draft-candidate values resolve safely;
+- preference change updates presentation without restart;
+- palette preference, if implemented, is independent from style;
+- preference does not enter Browser Profile/Slot/session data;
+- persisted Browser Profile color compatibility remains unchanged.
 
-### Gate 3 — visible Tab / overflow rendering
+### Gate 2 — Settings preview
 
 Focused tests must prove:
 
-- Signal, Ember, Aurora and Spectrum each project a distinct whole-surface unread treatment;
-- no visible favicon unread dot returns;
-- unread treatment remains dominant during hover/magnification;
-- acknowledgement/clear restores neutral presentation;
-- resident/released favicon semantics remain unchanged;
-- full-color non-template favicons are not recolored solely by attention style;
-- overflow uses the selected style when hidden unread items exist and restores neutral when cleared;
-- Reduce Motion disables continuous animation while preserving an obvious static attention treatment.
+- Dot / Beacon / Halo / Orbit / Pulse / Sweep are all visible/selectable;
+- previews use symmetric Settings geometry rather than stretched production rail geometry;
+- each style is structurally distinguishable in renderer/configuration terms;
+- Dot preview visibly contains the classic red unread dot;
+- previews and real Tabs share effect configuration/renderer primitives where applicable;
+- palette controls are separate from style controls if palette support is implemented;
+- Reduce Motion produces static usable previews.
+
+### Gate 3 — real Tab / overflow rendering
+
+Focused tests must prove:
+
+- Dot restores the classic red indicator behavior as a selectable style;
+- Beacon/Halo/Orbit/Pulse/Sweep produce meaningfully different attention structures, not only different colors;
+- hover/magnification does not erase attention;
+- acknowledgement clears attention and restores neutral styling;
+- real rail geometry does not change;
+- favicon residency semantics remain unchanged;
+- full-color favicons remain full color;
+- overflow represents selected unread style without losing menu semantics;
+- Reduce Motion disables continuous decorative motion.
 
 ### Gate 4 — broader regression / performance boundary
 
-Run relevant:
+Run relevant attention, shell, preferences, notifications, Browser Profile and persistence suites; then full macOS XCTest, Debug arm64, Release arm64, exact-head hosted macOS CI and QA DMG.
 
-- `WebAttentionIndicatorTests`
-- `WebAttentionPresentationTests`
-- `WebAttentionCrossFeatureTests`
-- `ExternalShellTests`
-- AppPreferencesStore tests
-- Notifications Settings tests
-- Browser Profile settings/persistence tests
+Inspect implementation to confirm there is no Timer/display-link/high-frequency polling solely for attention decoration.
 
-Then run full macOS XCTest, Debug arm64, Release arm64, exact-head hosted macOS CI and QA DMG.
+### Gate 5 — renewed Human Real-Mac visual acceptance
 
-Inspect implementation to confirm no Timer/display-link/high-frequency polling was introduced for the visual effects.
+On the exact Release candidate verify:
 
-### Gate 5 — renewed Real-Mac visual acceptance
+- Dot remains effective and visually clean;
+- Beacon, Halo, Orbit, Pulse and Sweep are visibly different from one another;
+- Settings previews no longer look like stretched trapezoid banners;
+- style can be understood by watching the preview;
+- palette selection, if present, changes color language without changing style identity;
+- motion is polished and not distracting;
+- selected preference survives relaunch;
+- acknowledgement restores neutral state;
+- hover/reorder/first-click/overflow/favicon/speech remain coherent;
+- no focus/window/runtime regression is observed.
 
-On the exact Release candidate verify in Light and Dark appearance where practical:
-
-- Settings shows all four previews and selection is immediate/understandable;
-- each preview reasonably matches the corresponding real unread Tab treatment;
-- Signal is clear and restrained;
-- Ember reads warm/active rather than error-like;
-- Aurora is expressive but not distracting;
-- Spectrum is lively/rainbow without looking like flashing/jittering UI;
-- unread state is obvious at normal Retina/high-resolution viewing distance;
-- selected preset survives relaunch;
-- acknowledgement restores neutral styling;
-- hover/magnification, reordering, first-click selection, compact overflow, favicon residency state and speech badges remain coherent;
-- no Tab/focus/window/runtime regression is observed.
-
-Human Real-Mac visual approval remains required before completion.
+Human visual approval remains required before completion.
 
 ## Data safety
 
 Browser Profile metadata, website login/session data, cookies, WebKit stores, backups and Slot configuration are user data. Do not clear/reset them.
 
-This refinement authorizes one non-destructive app preference for selected Attention Style. It does not authorize Browser Profile/website/session migration or destructive persistence changes.
+This task authorizes only non-destructive app UI preferences for attention style/palette plus presentation code/tests/docs.
 
 ## STOP conditions
 
 STOP and report evidence if:
 
-- implementation requires changing unread/attention state ownership or acknowledgement semantics;
-- preview and real Tab cannot share a bounded visual style source without duplicating authority;
-- animation requires high-frequency CPU polling or changes rail geometry/layout;
-- removing Profile color presentation requires destructive migration or Profile/session rewrite;
-- unread styling requires Web runtime/lifecycle/residency changes;
-- focus, navigation, recovery or window ownership must change;
-- diagnostics PR #124 or another overlapping branch contains unique work that must be incorporated first;
+- implementation requires changing attention state ownership or acknowledgement semantics;
+- reminder effects require real Tab geometry/layout changes;
+- preview/effect implementation requires high-frequency polling;
+- Profile/session data would need migration/reset;
+- Web runtime/lifecycle/residency behavior must change;
+- focus/navigation/recovery/window ownership must change;
+- PR #124 or another overlapping branch contains unique work that must be incorporated first;
 - required hosted CI or renewed Real-Mac acceptance fails.
 
 ## Completion boundary
 
-Task is complete only when profile-independent Tabs, removed profile-color UI, whole-Tab unread attention, selectable Signal/Ember/Aurora/Spectrum styles, live Settings previews, Reduce Motion behavior, compatibility-preserving persistence, focused/full verification, exact-head CI/QA, renewed Real-Mac visual acceptance, and STATUS/TASK plus PR/workspace lifecycle reconciliation are all complete.
+Task is complete only when the classic Dot reminder remains available, structurally distinct reminder styles are implemented and previewable, Browser Profile color remains removed from Tab presentation, preferences are compatibility-safe, automated/hosted verification passes, Human Real-Mac visual acceptance passes, and STATUS/TASK plus PR/workspace lifecycle are reconciled.
