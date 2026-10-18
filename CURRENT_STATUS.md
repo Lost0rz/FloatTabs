@@ -6,63 +6,68 @@
 
 ## Mode
 
-**MODE: DIAGNOSTICS_HISTORY_REINTEGRATION_MERGE_READY**
+**MODE: NO_ACTIVE_PRODUCT_TASK**
 
-`FT-DIAG-HISTORY-REINTEGRATION-001` has completed implementation, automated verification, hosted verification, and Human Real-Mac acceptance. The remaining lifecycle actions are merge of PR #130, disposition of historical PR #124 as `SUPERSEDED`, and post-merge control reconciliation.
+`FT-DIAG-HISTORY-REINTEGRATION-001` is completed. Long-term local diagnostics/history has been selectively reintegrated onto the current post-v0.5.3 main baseline and accepted on Real Mac.
 
-## Verified baseline
+## Current main baseline
 
-- Current remote `main`: `fef824c4d9f7783dca80e831c3812dae8e5f0833`.
-- Latest public release: `v0.5.3` / Build 21.
-- `main` and `v0.5.3` contain the earlier Runtime Diagnostics surface (`Collection mode`, `Export Recent Diagnostics…`, `Open Logs Folder`).
-- Historical Draft PR #124 (`FT-DIAG-HISTORY-001`) is still OPEN / Draft / unmerged at `e8bc90ad5d9897585974a84aef92e89bf3c2f2cb` and is source-only.
-- PR #124 contains the missing enhanced local-history semantics, including `Keep local diagnostic history`, diagnostic detail level, `Long-term performance observation`, saved-log workflow, seven-day bounded retention/rotation integration, and low-cadence performance checkpoints.
-- PR #124 diverged from current main and must not be merged as a stale branch wholesale.
-- The abandoned lifecycle PR #129 was CLOSED / UNMERGED after this baseline mismatch was discovered; it did not modify main.
+- Product PR #130: MERGED.
+- PR #130 final head: `b0c0759cd7f17b403a4b883097e205566fa38daf`.
+- PR #130 merge commit: `3db8718582e0b10510010b5c4c14044b9834a3d9`.
+- Semantic implementation head: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Historical PR #124: CLOSED / UNMERGED / `SUPERSEDED` at `e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
+- Lifecycle PR #129: CLOSED / ABANDONED / UNMERGED.
 
-## Reintegration posture
+## Accepted diagnostics baseline
 
-The accepted source of product intent is the implemented product delta in PR #124, not its stale control files or old branch baseline. Reintegration started from current `main` and selectively preserved current production behavior where later work overlaps.
+Advanced → Runtime Diagnostics now includes:
 
-Protected current-baseline behavior includes:
+- `Keep local diagnostic history`;
+- `Detail level` with Standard / Verbose;
+- `Long-term performance observation`;
+- `Export Recent Diagnostics…`;
+- `Open Saved Logs Folder`;
+- bounded local sanitized JSONL history with the existing retention/rotation pipeline;
+- low-cadence selected-Slot content-free performance checkpoints;
+- diagnostics-only runtime/WebView/navigation identity evidence;
+- manual reload diagnostic boundary;
+- no second diagnostics writer, remote telemetry, automatic AI upload, or destructive persistence migration.
 
-- v0.5.3 version/build and release baseline;
-- Dot / Beacon / Halo / Orbit / Pulse / Sweep unread attention system and Settings IA;
-- current Browser Profile/session/WebKit ownership and data safety;
-- current shell/window/focus/navigation/recovery behavior;
-- current diagnostics ownership rule: Diagnostics records evidence and does not define product truth/root cause.
+Current later product behavior remains preserved, including the accepted unread Tab Attention styles/palette, Settings IA, Browser Profile/session ownership, focus/navigation/window/runtime behavior, and v0.5.3 app metadata.
 
-## Data safety
+## Verification / acceptance
 
-- No Browser Profile, Web App Slot, cookie/session/WebKit data migration or reset is authorized or was performed.
-- No destructive cleanup of existing diagnostics or recovery data is authorized or was performed.
-- Long-term diagnostics remain local/sanitized; no remote telemetry or automatic AI upload/analysis is authorized.
+- Focused XCTest: 288 passed / 0 failed.
+- Full XCTest: 1,339 passed / 0 failed / 0 skipped.
+- Local Debug / Release arm64: PASS.
+- Final PR head GitHub macOS CI run `39100869890`: PASS.
+- Final PR head QA DMG run `39100869878`: PASS.
+- Human Real-Mac acceptance: PASS on 2026-10-18.
+- No Browser Profile, Slot, session, cookie, WebKit, backup, or diagnostics data was reset, deleted, or migrated.
 
-## Execution / acceptance state
+## Release boundary
 
-- Selective semantic implementation: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2` on PR #130.
-- Focused XCTest: 288 passed / 0 failed. Full XCTest: 1,339 passed / 0 failed / 0 skipped. Local Debug and Release arm64 builds passed.
-- Exact semantic-head and final control-head GitHub macOS CI and QA DMG passed.
-- Exact Release candidate ran from `/Applications/FloatTabs.app`; embedded semantic revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`, version 0.5.3 / Build 21.
-- Human Real-Mac acceptance: PASS on 2026-10-18. The user confirmed the restored Advanced Runtime Diagnostics controls and normal behavior are acceptable, including local history / saved logs / long-term observation and no observed regression to ordinary use.
-- No Browser Profile, Slot, session, cookie, WebKit, backup, or diagnostic data was reset, deleted, or migrated.
+- Latest public GitHub Release remains `v0.5.3` / Build 21.
+- The reintegrated long-term diagnostics work was merged **after** the v0.5.3 release lifecycle completed, so the existing downloadable v0.5.3 release artifact does not represent this newer main baseline.
+- A future release task is required before publishing this reintegrated diagnostics baseline as a new downloadable version.
 
 ## Current posture
 
 ```text
-ACTIVE_PRODUCT_TASK=FT-DIAG-HISTORY-REINTEGRATION-001
-TASK_STATE=MERGE_READY
-BASE_MAIN=fef824c4d9f7783dca80e831c3812dae8e5f0833
-SEMANTIC_IMPLEMENTATION_HEAD=c12e18650f2fb96412f7bd208814a4dccfbfbcc2
-SOURCE_PR=124_OPEN_DRAFT_SOURCE_ONLY
-SOURCE_PR_HEAD=e8bc90ad5d9897585974a84aef92e89bf3c2f2cb
-SOURCE_PR_DISPOSITION=SUPERSEDE_AFTER_PR130_MERGE
-LIFECYCLE_PR_129=CLOSED_ABANDONED_UNMERGED
-LATEST_RELEASE=v0.5.3_BUILD_21
+ACTIVE_PRODUCT_TASK=NONE
+LAST_COMPLETED_TASK=FT-DIAG-HISTORY-REINTEGRATION-001
+TASK_STATE=COMPLETED
+PR_130=MERGED
+PR_130_MERGE_COMMIT=3db8718582e0b10510010b5c4c14044b9834a3d9
+PR_124=CLOSED_SUPERSEDED_UNMERGED
+PR_129=CLOSED_ABANDONED_UNMERGED
 HUMAN_UI_ACCEPTANCE=PASS
+LATEST_RELEASE=v0.5.3_BUILD_21
+MAIN_AHEAD_OF_LATEST_RELEASE=YES
 ROOT_CAUSE=N/A
 ```
 
 ## Next
 
-Complete the final exact-head merge-readiness check, merge PR #130, close PR #124 as `SUPERSEDED`, then reconcile `CURRENT_STATUS.md` / `CURRENT_TASK.md` on `main` to terminal lifecycle state.
+No active product task is authorized. Start or reconcile a new `CURRENT_TASK.md` before any new product, release, cleanup, or diagnostics mutation. If the merged diagnostics baseline should become downloadable, open a new release task rather than modifying this completed lifecycle.

@@ -2,126 +2,54 @@
 
 **Task ID:** `FT-DIAG-HISTORY-REINTEGRATION-001`
 **Title:** Reintegrate long-term local diagnostics history onto the current v0.5.3 main baseline
-**Status:** `READY_FOR_MERGE`
-**Mode:** `MERGE_READY`
+**Status:** `COMPLETED`
+**Mode:** `TERMINAL`
 
-## Objective
+> This task is terminal. It records completed product reintegration and grants no further product, cleanup, or release mutation authority.
 
-Restore the already-developed long-term local diagnostics/history functionality from historical Draft PR #124 onto current `main`, preserving all later accepted v0.5.3 product behavior and ownership boundaries.
+## Completed objective
 
-This is a reintegration task, not a direct stale-branch merge.
+The previously developed long-term local diagnostics/history functionality from historical Draft PR #124 was selectively reintegrated onto the current post-v0.5.3 main baseline without direct-merging the stale branch and without regressing later accepted product behavior.
 
-## Authority / source evidence
+## Delivery identity
 
-- Authorized base: `main@fef824c4d9f7783dca80e831c3812dae8e5f0833`.
-- Historical source implementation: PR #124 / `product/ft-diagnostics-history-001@e8bc90ad5d9897585974a84aef92e89bf3c2f2cb`.
-- PR #124 control/history text is not current Authority; only its bounded product implementation and tests are source evidence for the missing feature.
-- Current main and accepted v0.5.3 behavior remain authoritative where later changes overlap.
+- Product PR: #130 — `Reintegrate long-term diagnostics history`.
+- Semantic implementation head: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
+- Final PR head: `b0c0759cd7f17b403a4b883097e205566fa38daf`.
+- Merge commit: `3db8718582e0b10510010b5c4c14044b9834a3d9`.
+- Historical source PR #124: CLOSED / UNMERGED / `SUPERSEDED`.
+- Abandoned lifecycle PR #129: CLOSED / UNMERGED.
 
-## Required product outcome
+## Accepted product outcome
 
-Advanced → Runtime Diagnostics must provide the enhanced local-history workflow:
+Advanced → Runtime Diagnostics contains:
 
-- `Keep local diagnostic history` enable/disable control;
-- diagnostic `Detail level` with Standard / Verbose behavior;
-- `Long-term performance observation` opt-in control;
+- `Keep local diagnostic history`;
+- Standard / Verbose `Detail level`;
+- `Long-term performance observation`;
 - `Export Recent Diagnostics…`;
 - `Open Saved Logs Folder`;
 - bounded local sanitized JSONL history using the existing diagnostics pipeline;
-- seven-day retention intent with bounded segment/rotation limits from the prior implementation;
-- low-cadence, content-free selected-Slot health/performance checkpoints (approximately once per minute) when enabled;
-- fail-soft behavior and no remote telemetry / automatic AI analysis.
+- low-frequency selected-Slot content-free health/performance checkpoints;
+- diagnostics-only runtime/WebView/navigation identity evidence and manual reload boundary;
+- fail-soft behavior with no remote telemetry or automatic AI analysis.
 
-Preserve the previously accepted implementation semantics from PR #124 where compatible with current main.
+The current unread Tab Attention styles/palette/Settings layout, Browser Profile/session/WebKit ownership, focus/navigation/window/runtime behavior, and v0.5.3 version/build metadata were preserved.
 
-## Protected boundaries
+## Verification record
 
-Do not regress or redesign:
+- Focused XCTest: 288 passed / 0 failed.
+- Full XCTest: 1,339 passed / 0 failed / 0 skipped.
+- Local Debug / Release arm64: PASS.
+- Final PR head macOS CI run `39100869890`: PASS.
+- Final PR head QA DMG run `39100869878`: PASS.
+- Human Real-Mac acceptance: PASS on 2026-10-18.
+- No destructive user-data, Browser Profile, Slot, session, cookie, WebKit, backup, or diagnostics migration/reset was performed.
 
-- current unread Tab Attention styles/palette/Settings layout;
-- current Settings IA outside the Runtime Diagnostics section;
-- Browser Profile/session/WebKit data ownership;
-- Tab/Web runtime, focus, navigation, recovery, window/fullscreen ownership;
-- current v0.5.3 version/build metadata during this product task;
-- existing diagnostics export/privacy contract except where required to restore the accepted local-history behavior.
+## Release boundary
 
-Do not delete/reset/migrate user configuration, Browser Profiles, website session/cookies, WebKit stores, backups, or diagnostics data.
+The latest public release remains `v0.5.3` / Build 21. PR #130 merged after that release lifecycle, so publishing the reintegrated diagnostics baseline requires a separate future release task.
 
-## Integration strategy
+## Terminal boundary
 
-1. Start from the authorized current-main baseline on `product/ft-diagnostics-history-reintegration-001`.
-2. Compare the PR #124 implementation against its merge-base and current main.
-3. Port only the long-term diagnostics product delta and its relevant tests/project-file registration.
-4. Where files changed later on main, merge semantically: current main wins for unrelated later behavior; diagnostics-history additions are reintroduced only within their owned boundaries.
-5. Do not copy stale `CURRENT_STATUS.md` / `CURRENT_TASK.md` from PR #124.
-6. Keep historical PR #124 open until the fresh integration candidate is verified; after PR #130 merges, close it as `SUPERSEDED`.
-
-## Verification gates
-
-### Gate 0 — identity / scope
-- branch starts from `main@fef824c4…`;
-- only this integration branch writes the reintegration;
-- PR #124 remains source-only during implementation;
-- unknown overlapping unique work => STOP.
-
-### Gate 1 — preferences / persistence
-- local-history mode preference round-trips;
-- detail level round-trips;
-- long-term observation preference round-trips;
-- disabling history safely disables dependent observation projection without destructive data deletion;
-- no Profile/Slot/session storage used.
-
-### Gate 2 — Settings / UX
-- Advanced shows `Keep local diagnostic history`, `Detail level`, `Long-term performance observation`, `Export Recent Diagnostics…`, `Open Saved Logs Folder`;
-- controls synchronize correctly across relaunch/view appearance;
-- existing Backup & Restore / About remain intact.
-
-### Gate 3 — writer / retention / observation
-- existing diagnostics writer remains canonical;
-- local history uses bounded rotation/retention from the prior accepted implementation;
-- observation cadence remains low-frequency and content-free;
-- selected Slot only; no second durable diagnostics store;
-- no remote telemetry/upload/AI runtime integration.
-
-### Gate 4 — regression / hosted verification
-- relevant diagnostics, preferences, Settings, attention cross-feature, WebViewPool tests;
-- full XCTest;
-- Debug and Release arm64 builds;
-- exact-head GitHub macOS CI and QA DMG;
-- inspect no regression to later Tab Attention / Settings IA behavior.
-
-### Gate 5 — Human Real-Mac acceptance
-Install exact Release candidate and confirm:
-- Advanced shows the restored controls;
-- enabling local history writes local saved logs as designed;
-- `Open Saved Logs Folder` exposes the retained files;
-- long-term observation can be enabled only with history active and does not visibly disrupt normal use;
-- existing General/Audio/Browser settings and unread Tab Attention remain correct;
-- no user/session/Profile data regression.
-
-**Gate 5 result: PASS.** On 2026-10-18 the user explicitly confirmed the candidate is normal and authorized merge.
-
-## Current execution evidence (2026-10-18)
-
-- Selective semantic implementation: `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
-- Focused XCTest: 288 passed / 0 failed. Full XCTest: 1,339 passed / 0 failed / 0 skipped.
-- Local Debug and Release arm64 builds: PASS.
-- Exact semantic-head and final control-head GitHub macOS CI and QA DMG: PASS.
-- Installed Release candidate: `/Applications/FloatTabs.app`, version 0.5.3 / Build 21, exact embedded semantic source revision `c12e18650f2fb96412f7bd208814a4dccfbfbcc2`.
-- Human Real-Mac acceptance: PASS.
-- No destructive user-data operation or Browser Profile / session / WebKit operation was performed.
-
-## STOP conditions
-
-STOP if reintegration requires:
-- destructive migration/reset of user or WebKit/Profile/session data;
-- a second canonical diagnostics writer/store;
-- remote telemetry or automatic AI upload/analysis;
-- changes to attention acknowledgement/runtime ownership;
-- unbounded/high-frequency observation polling;
-- unresolved conflict where current-main ownership cannot be preserved safely;
-- required hosted CI failure or Human Real-Mac acceptance failure.
-
-## Completion
-
-Task completes only when PR #130 is merged, post-merge controls are reconciled to terminal state, and historical PR #124 is clearly marked `SUPERSEDED` and closed.
+No further mutation is authorized under this task. A new objective requires a new or reconciled `CURRENT_TASK.md` before implementation, release, cleanup, or diagnostics changes.
