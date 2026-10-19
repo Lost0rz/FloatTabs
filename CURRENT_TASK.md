@@ -1,92 +1,80 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-DIAG-POST-FINISH-STALL-001`
-**Title:** Discriminate post-finish Web runtime stalls with cross-world liveness and bounded resource evidence
-**Status:** `ACTIVE — GATE 5 REAL-MAC CAPTURE`
+**Title:** Prepare bounded post-finish Web runtime diagnostics for long-term Air observation
+**Status:** `ACTIVE — DIAGNOSTIC OBSERVATION RELEASE PREP`
 **Mode:** `DIAGNOSTIC`
 **Task class:** `INCIDENT_INVESTIGATION`
 **Base:** `main@3511297d5f573598556739519bae859322578768`
 **Branch:** `codex/ft-post-finish-stall-diag-001`
 **Draft PR:** `#138`
-**Validated semantic head:** `292d6225808ebc66a12dd36e100fe309e53a335d`
+**Diagnostic implementation identity:** `292d6225808ebc66a12dd36e100fe309e53a335d`
+**Current control-record head before this reconciliation:** `4265baa34bec55cbd74171fe78a4162675dc7e05`
 
-## Evidence boundary
+## Objective
 
-Fresh v0.5.4 / Build 22 evidence proves a post-navigation runtime failure boundary: an active ChatGPT WKWebView can remain `navigation_phase=finished`, `is_loading=false`, and progress `1` while bounded JavaScript execution stops responding. Native host processing continues and the fresh stall did not emit a WebContent termination callback.
+Audit and, only if needed, minimally correct PR #138 so the diagnostic infrastructure can be published for long-term normal-use observation on the Air. A fresh Air stall is not a prerequisite for merging diagnostic infrastructure; it remains evidence for the later causal investigation. Root cause remains `UNKNOWN`, and this task does not claim the bug is fixed.
 
-The causal root cause remains **UNKNOWN**. Remote code audit and implementation have now supplied the missing discriminator rather than changing recovery behavior.
+Mac mini is the development, probe, audit, build, and release-preparation machine. Air is the long-term real-use observation and fresh-incident capture target.
 
-## Remote implementation disposition
+## Current verified basis
 
-Remote diagnostic implementation is complete for this task stage:
+- Gate 5 Air host verification passed on 2026-10-19 with the exact arm64 Release app built from branch revision `4265baa34bec55cbd74171fe78a4162675dc7e05`.
+- Installed/running identity was `/Applications/FloatTabs.app`, v0.5.4 / Build 22, PID `91025`, arm64, exact embedded source revision.
+- Release runtime logs contained `web_runtime.cross_world_liveness` and the required fields. No stall occurred (`NO_INCIDENT_YET`).
+- External harness attributed one WebContent, one Networking, and one GPU process to the host PID; its five-sample/five-second passive capture completed without warnings and reported 430.1 MB average combined RSS.
+- Current exact branch-head macOS CI run `39193807897` and QA DMG run `39193807895` were observed PASS before this control-only reconciliation. Recheck exact final semantic head before readiness.
+- Root cause remains `UNKNOWN`; no recovery behavior is authorized.
 
-- ordinary main page-world and FloatTabs isolated-world liveness are sampled independently on the same Web Runtime authority;
-- in-flight results are stale-guarded by runtime/navigation context;
-- a single finished-state dual timeout is candidate evidence only;
-- two consecutive finished-state dual timeouts are required for confirmed `POST_FINISH_RUNTIME_STALL` evidence;
-- observed Web-process epoch/termination count is distinct from WKWebView object identity and advances only on the documented termination callback;
-- host resident memory/system physical memory are recorded with public APIs;
-- WebContent child-process attribution is explicitly unavailable in production when it cannot be proven;
-- no page text, prompt, response, document token, cookie, session, or other user content is logged.
+## Authorized scope
 
-Ownership remains in `SlotNavigationObserver` / Web Runtime. Focus and persistence ownership were not broadened.
+1. Reconcile this task's status and merge gate in `CURRENT_STATUS.md` and `CURRENT_TASK.md`, commit those control-only changes, and push the existing task branch before semantic work.
+2. Audit PR #138 for Release probe availability, incident-state discrimination, bounded diagnostic retention, a usable Release export/log access path, provenance, privacy, and long-run probe/task/observer lifecycle safety.
+3. If a concrete gap blocks reliable first-round incident evidence, make only the smallest diagnostics-related correction and focused regression tests within PR #138.
+4. Run verification proportional to the changed boundary. Required for final readiness: relevant focused diagnostics/Web Runtime tests, Debug arm64 build, Release arm64 build, Release-field verification, privacy regression, and applicable retention/export regression. Run full XCTest if semantic production code changes.
+5. Push the exact authorized branch head, keep PR #138 Draft, and return an evidence-based release-readiness report for Web audit before merge.
 
-## Remote validation
+## Merge and release gate
 
-Exact semantic head: `292d6225808ebc66a12dd36e100fe309e53a335d`
+PR #138 may enter merge review when all of the following pass on the final semantic head:
 
-- macOS CI `#1062` / run `39193066565`: PASS
-  - Debug build PASS
-  - Release build PASS
-  - arm64 verification PASS
-  - XCTest PASS
-- QA DMG `#487` / run `39193066576`: PASS
-- XCTest artifact independently confirmed all four new regression tests executed and passed.
+- diagnostic-observability audit;
+- required tests and Debug/Release arm64 validation;
+- exact-head CI and QA DMG checks;
+- live PR base/head, required review, and mergeability checks at the repository-host boundary.
 
-## Gate 5 — Fresh Air real-Mac capture
+A fresh Air incident is not a merge prerequisite. It is required only for the later causal investigation. This task does not authorize merging PR #138 or publishing an observation release. Keep the PR Draft through this work.
 
-This is the only active construction/validation gate now.
+## Diagnostic evidence requirements
 
-Required:
+The standard Release diagnostic path must emit `web_runtime.cross_world_liveness` with:
 
-1. Check out the exact remote diagnostic head authorized by the latest control state.
-2. Audit the currently installed `/Applications/FloatTabs.app` before replacement; do not assume its version/build.
-3. Build/install the diagnostic app for arm64 without deleting or rewriting any FloatTabs user data.
-4. Verify the running process uses the diagnostic source revision and that standard runtime logs include `web_runtime.cross_world_liveness`.
-5. Confirm expected fields are present:
-   - `main_world_probe_outcome`
-   - `isolated_world_probe_outcome`
-   - `navigation_phase`
-   - `observed_web_process_epoch`
-   - `observed_web_process_termination_count`
-   - `host_resident_size_bytes`
-   - `web_process_resource_attribution`
-6. Pre-validate the repository's external benchmark/process-attribution harness before an incident, but do not stress the app or mutate Slot policies.
-7. Use FloatTabs normally.
-8. If a fresh stall occurs, preserve raw runtime diagnostics and external memory/process evidence before any recovery action.
-9. If recovery is necessary after evidence capture, one manual reload may be recorded as a recovery-boundary observation. Do not infer root cause from recovery.
-10. Return the raw files and execution receipt for Web-side joint audit.
+- `main_world_probe_outcome`;
+- `isolated_world_probe_outcome`;
+- `navigation_phase`;
+- `observed_web_process_epoch`;
+- `observed_web_process_termination_count`;
+- `host_resident_size_bytes`;
+- `web_process_resource_attribution` (remain explicitly unavailable when public APIs cannot prove child attribution).
 
-## Forbidden actions
+The audit must establish that evidence can distinguish main success / isolated timeout, dual timeout, and Web-process termination/epoch changes. “Both success but UI frozen” must remain a possible reported observation that does not establish root cause. No single event is causal proof.
 
-- No automatic reload, hard rebuild, reset, restart, eviction, cache clearing, or session clearing as a diagnostic shortcut.
-- No change to Hot / Warm / Cold policy merely to reproduce the issue.
-- No deletion/recreation of Browser Profiles, cookies, WebsiteData, sessions, backups, preferences, Slots, or configuration.
-- No private WebKit API and no guessed WebContent PID/RSS attribution.
-- No page-content logging.
-- No merge of PR #138 before fresh real-Mac evidence is audited.
+Local diagnostic history must be bounded through rotation/retention and normal flush behavior. An Air user must be able to save first-round evidence from the Release app without Xcode, a repository checkout, sudo, or the benchmark harness. Exported evidence must preserve app/build/source identity, exact/tree state, architecture, session ID, and schema version.
 
-## Gate 5 acceptance
+Instrumentation must remain privacy-safe and bounded over long runtimes: no prompt/response body, page text, cookies, session/token, or Browser Profile secrets; no unbounded polling/task/observer accumulation or repeated timer leak.
 
-`CAPTURED` only when a fresh incident has raw diagnostics plus process/resource context sufficient to classify at least:
+## Explicitly unauthorized
 
-- main world success/timeout/stale;
-- isolated world success/timeout/stale;
-- candidate/confirmed post-finish stall state;
-- observed Web-process epoch/termination count;
-- host RSS and independently attributable WebContent RSS/CPU when attribution is proven;
-- whether a documented WebContent termination callback occurred.
+- Root-cause claims or claims that the stall is fixed before evidence supports them.
+- Automatic or new reload/reset/rebuild/recovery behavior; changes to WebView recovery semantics.
+- Hot/Warm/Cold product-policy changes or synthetic stress/stall reproduction.
+- Deleting, clearing, resetting, or rewriting Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or user configuration.
+- Unrelated product fixes, merging PR #138, or publishing a release.
 
-If no incident occurs during normal use, report `NO_INCIDENT_YET`; that is not a failure and does not authorize synthetic stress.
+## Stop conditions
 
-The task remains open until fresh real-Mac evidence (or sufficient negative evidence) supports the next causal decision.
+Stop and report if the task branch/PR/authority changes materially, the worktree contains unknown work, a proposed correction expands beyond diagnostics, safe lifecycle ownership cannot be established, or a required exact-head validation fails. Keep unsupported required claims `UNKNOWN`; do not infer root cause from a recovery boundary.
+
+## Handoff acceptance
+
+Return audit findings, any concrete gaps and minimal corrections, changed files, test/build/CI/QA evidence, exact local and remote head, PR state, root-cause status, and remaining merge/release gates. Final state is a Web-audit handoff, not merge or release.
