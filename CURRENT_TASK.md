@@ -1,53 +1,60 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-LIFECYCLE-SYNC-001`
-**Title:** Synchronize canonical FloatTabs main and remove the merged terminal control branch
-**Status:** `TERMINAL`
-**Mode:** `TERMINAL`
-**Task class:** `CLOSEOUT`
+**Task ID:** `FT-DIAG-POST-FINISH-STALL-001`
+**Title:** Merge bounded Web runtime diagnostics for long-term Air observation
+**Status:** `AUTHORIZED — FINAL MERGE GATE`
+**Mode:** `DIAGNOSTIC`
+**Task class:** `INCIDENT_INVESTIGATION`
+**Base:** `main@3511297d5f573598556739519bae859322578768`
+**Branch:** `codex/ft-post-finish-stall-diag-001`
+**PR:** `#138`
+**Final semantic implementation identity:** `1745acaab91185727901cc7ed48a43f4326ef73e`
 
-> This task is terminal and grants no further sync, branch-deletion, evidence-deletion, product, or diagnostics authority.
+## Objective
 
-## Completed result
+Merge the audited diagnostic infrastructure so FloatTabs can be released as a long-term observation build for normal use on the Air. Root cause remains `UNKNOWN`; this task does not claim the stall is fixed.
 
-The objective completed through protected-main control updates. Authorization PR #136 merged at `65fc59a8e285d1d41a3ce728692a2b83d39add4f` after the required `Build & Test (Apple Silicon arm64)` check passed.
+Mac mini remains the development/release-preparation machine. Air remains the long-term normal-use observation and fresh-incident capture machine.
 
-### Canonical synchronization
+## Verified basis
 
-- Canonical repository: `/Volumes/Jack-Dev/Projects/FloatTabs`.
-- Before the authorized ff-only sync: local `main@d685bbe7c035332ecc9b7ab6f8641660f813d42f`, clean and on branch `main`.
-- Initial fresh `origin/main`: `01d789e0638ffde5a56ca5a69113fec8780399a3`; after PR #136 it advanced to `65fc59a8e285d1d41a3ce728692a2b83d39add4f`.
-- The canonical checkout was a strict ancestor of fetched `origin/main`; `git merge --ff-only origin/main` succeeded and advanced local `main` to `65fc59a8…` without conflicts.
-- After this terminal control update merged, `git fetch --all --prune` and a final ff-only synchronization left canonical `main` equal to freshly fetched `origin/main`, with clean status. Do not hard-code this file's containing commit as its own baseline; the live ref is authoritative.
+- Independent Web re-audit passed on 2026-10-19 against repository head `4f1b6b7f7c507970d055f9d4ac77b61b0090dc7e`.
+- Semantic implementation head `1745acaab91185727901cc7ed48a43f4326ef73e` contains bounded cross-world liveness plus content-free event-loop/frame responsiveness evidence.
+- Focused responsiveness/Web Runtime XCTest: 7 passed.
+- Full XCTest: 1,349 passed, 0 skipped, 0 failed.
+- Debug arm64 and Release arm64 builds passed.
+- Pre-merge audited-head macOS CI `39216559333` passed.
+- Pre-merge audited-head QA DMG `39216559277` passed.
+- PR #138 was open, draft, clean, and mergeable at the last audit.
+- Fresh Air incident capture is later causal evidence and is not a merge prerequisite.
 
-### Branches and workspaces
+## Authorized scope
 
-- Deleted remote `chore/ft-lifecycle-closeout-002-terminal@5cdc5e5d9d638d53ceeda0d34d1205092f5973e6` only after proving it was merged into `origin/main` and had zero branch-only commits. No local branch with that name existed.
-- The temporary authority branch `codex/ft-lifecycle-sync-001` was merged by PR #136, then its temporary worktree and local branch were removed after verifying clean state and ancestry.
-- Remaining GitHub `origin` branches: `main`, `phase2/pr-e-floattabs-durable-outbox-sender`.
-- Remaining local branches: `main`, `fix/residency-lifecycle-semantics`, `perf/ft-chatgpt-perf-001`, `phase2/pr-e-floattabs-durable-outbox-sender`.
-- Remaining registered worktrees: canonical `/Volumes/Jack-Dev/Projects/FloatTabs` and retained `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001`.
-- A `pinned-calibre-web/master` remote-tracking ref remains visible in `git branch -r`, but no remote with that name is configured. It was not part of the authorized deletion scope and was preserved. It is not a GitHub `origin` branch.
-- Final open PR count: 0. Stashes: none.
+1. Record this user-authorized merge state in `CURRENT_TASK.md` / `CURRENT_STATUS.md` and push it on the existing PR branch.
+2. Re-run/verify the required exact-head CI and QA DMG for the resulting control-only head.
+3. If exact-head checks pass and PR #138 remains clean/mergeable, mark it Ready for Review and merge it into protected `main` using an expected-head guard.
+4. Verify the merge landed on `main` and the required post-merge repository state is healthy.
+5. Do not perform further product-code changes in this task.
+6. After merge, close this task and create a separate release task from the merged `main` baseline for the observation release.
 
-### Explicitly retained evidence
+## Merge gate
 
-- `fix/residency-lifecycle-semantics@8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef`: 13 local-only commits preserved.
-- `perf/ft-chatgpt-perf-001@6b87c0eb15c3370d378de58d040f1ab307cb7c5e`, its worktree, and benchmark evidence preserved at `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001/.benchmark-results/ft-chatgpt-perf-001-smoke-20261017-104716/`.
-- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` remains frozen `ARCHIVE_ONLY` evidence for PR #102.
-- Tags and GitHub Releases were not modified.
-- Browser Profiles, Slots, sessions/cookies/WebKit data, backups, preferences, diagnostics history, and the application bundle were not touched.
+Merge only if all remain true on the literal final PR head:
 
-## Final state
+- Web re-audit = PASS;
+- required `Build & Test (Apple Silicon arm64)` = PASS;
+- QA DMG = PASS;
+- PR state = open / clean / mergeable;
+- head/base identity unchanged except for this authorized control reconciliation.
 
-```text
-CANONICAL_MAIN_EQUALS_ORIGIN_MAIN=YES
-CANONICAL_STATUS=CLEAN
-TARGET_TERMINAL_BRANCH=DELETED_REMOTE_LOCAL_BRANCH_ABSENT
-ORIGIN_BRANCHES=main,phase2/pr-e-floattabs-durable-outbox-sender
-OPEN_PRS=0
-USER_DATA_TOUCHED=NO
-BROWSER_PROFILE_DATA_TOUCHED=NO
-```
+## Explicitly unauthorized
 
-No further work is authorized under `FT-LIFECYCLE-SYNC-001`.
+- Any claim that root cause is known or the bug is fixed.
+- New reload/reset/rebuild/recovery behavior.
+- Hot/Warm/Cold policy changes.
+- Browser Profile, cookie, session, WebsiteData, Slot, preference, backup, or user-configuration mutation.
+- Any additional semantic product change before merge.
+
+## After merge
+
+This task becomes terminal. The successor task is a release-only task that will bump version/build, add release notes, validate the package, merge through protected `main`, and allow the existing `Publish Release` workflow to publish the observation release.

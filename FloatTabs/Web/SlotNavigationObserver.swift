@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import WebKit
 
@@ -11,6 +12,216 @@ typealias RendererJavaScriptEvaluator = @MainActor (
     WKWebView,
     String
 ) async throws -> RendererProbeValues
+
+enum WebRuntimeLivenessWorld: String, Equatable, Hashable, Sendable {
+    case mainPage = "main_page"
+    case floatTabsIsolated = "floattabs_isolated"
+}
+
+enum WebRuntimeLivenessOutcome: String, Equatable, Sendable {
+    case success
+    case timeout
+    case failed
+    case stale
+    case suppressed
+}
+
+struct WebRuntimeLivenessProbeResult: Equatable, Sendable {
+    let outcome: WebRuntimeLivenessOutcome
+    let readyState: String?
+    let visibilityState: String?
+    let latencyMilliseconds: Double
+
+    static func success(
+        readyState: String,
+        visibilityState: String,
+        latencyMilliseconds: Double
+    ) -> Self {
+        Self(
+            outcome: .success,
+            readyState: readyState,
+            visibilityState: visibilityState,
+            latencyMilliseconds: latencyMilliseconds
+        )
+    }
+
+    static func terminal(
+        _ outcome: WebRuntimeLivenessOutcome,
+        latencyMilliseconds: Double
+    ) -> Self {
+        Self(
+            outcome: outcome,
+            readyState: nil,
+            visibilityState: nil,
+            latencyMilliseconds: latencyMilliseconds
+        )
+    }
+
+    var stale: Self {
+        .terminal(.stale, latencyMilliseconds: latencyMilliseconds)
+    }
+
+    func diagnosticFields(prefix: String) -> [String: RuntimeDiagnosticValue] {
+        [
+            "\(prefix)_probe_outcome": .string(outcome.rawValue),
+            "\(prefix)_probe_latency_ms": .double(min(max(latencyMilliseconds, 0), 5_000)),
+            "\(prefix)_document_ready_state": readyState.map(RuntimeDiagnosticValue.string) ?? .null,
+            "\(prefix)_document_visibility_state": visibilityState.map(RuntimeDiagnosticValue.string) ?? .null
+        ]
+    }
+}
+
+enum WebRuntimeResponsivenessOutcome: String, Equatable, Sendable {
+    case success
+    case timeout
+    case failed
+    case stale
+    case suppressed
+    case notRun = "not_run"
+    case notVisible = "not_visible"
+}
+
+enum WebRuntimeFrameCallbackOutcome: String, Equatable, Sendable {
+    case sampled
+    case notVisible = "not_visible"
+    case unavailable
+    case measurementWindowElapsed = "measurement_window_elapsed"
+}
+
+struct WebRuntimeResponsivenessProbeResult: Equatable, Sendable {
+    let outcome: WebRuntimeResponsivenessOutcome
+    let probeLatencyMilliseconds: Double
+    let eventLoopSchedulingLatencyMilliseconds: Double?
+    let frameCallbackOutcome: WebRuntimeFrameCallbackOutcome?
+    let frameCallbackLatencyMilliseconds: Double?
+
+    static func success(
+        probeLatencyMilliseconds: Double,
+        eventLoopSchedulingLatencyMilliseconds: Double,
+        frameCallbackOutcome: WebRuntimeFrameCallbackOutcome,
+        frameCallbackLatencyMilliseconds: Double?
+    ) -> Self {
+        Self(
+            outcome: .success,
+            probeLatencyMilliseconds: probeLatencyMilliseconds,
+            eventLoopSchedulingLatencyMilliseconds: eventLoopSchedulingLatencyMilliseconds,
+            frameCallbackOutcome: frameCallbackOutcome,
+            frameCallbackLatencyMilliseconds: frameCallbackLatencyMilliseconds
+        )
+    }
+
+    static func terminal(
+        _ outcome: WebRuntimeResponsivenessOutcome,
+        probeLatencyMilliseconds: Double
+    ) -> Self {
+        Self(
+            outcome: outcome,
+            probeLatencyMilliseconds: probeLatencyMilliseconds,
+            eventLoopSchedulingLatencyMilliseconds: nil,
+            frameCallbackOutcome: nil,
+            frameCallbackLatencyMilliseconds: nil
+        )
+    }
+
+    static func notVisible() -> Self {
+        Self(
+            outcome: .notVisible,
+            probeLatencyMilliseconds: 0,
+            eventLoopSchedulingLatencyMilliseconds: nil,
+            frameCallbackOutcome: .notVisible,
+            frameCallbackLatencyMilliseconds: nil
+        )
+    }
+
+    static func notRun() -> Self {
+        terminal(.notRun, probeLatencyMilliseconds: 0)
+    }
+
+    var stale: Self {
+        .terminal(.stale, probeLatencyMilliseconds: probeLatencyMilliseconds)
+    }
+
+    func diagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        [
+            "main_world_responsiveness_probe_outcome": .string(outcome.rawValue),
+            "main_world_responsiveness_probe_latency_ms": .double(
+                Self.bounded(probeLatencyMilliseconds)
+            ),
+            "main_world_event_loop_schedule_latency_ms": eventLoopSchedulingLatencyMilliseconds
+                .map { .double(Self.bounded($0)) } ?? .null,
+            "main_world_frame_callback_outcome": frameCallbackOutcome.map {
+                .string($0.rawValue)
+            } ?? .null,
+            "main_world_frame_callback_latency_ms": frameCallbackLatencyMilliseconds
+                .map { .double(Self.bounded($0)) } ?? .null
+        ]
+    }
+
+    private static func bounded(_ value: Double) -> Double {
+        min(max(value.isFinite ? value : 0, 0), 5_000)
+    }
+}
+
+typealias WebRuntimeLivenessProbeEvaluator = @MainActor (
+    WKWebView,
+    WebRuntimeLivenessWorld
+) async -> WebRuntimeLivenessProbeResult
+
+typealias WebRuntimeResponsivenessProbeEvaluator = @MainActor (
+    WKWebView,
+    Bool
+) async -> WebRuntimeResponsivenessProbeResult
+
+@MainActor
+final class WebRuntimeLivenessRequestBudget {
+    static let maximumPendingRequestsPerWorld = 2
+
+    private var pendingRequestIDs: [WebRuntimeLivenessWorld: Set<UUID>] = [:]
+
+    func reserve(_ world: WebRuntimeLivenessWorld) -> UUID? {
+        var requestIDs = pendingRequestIDs[world, default: []]
+        guard requestIDs.count < Self.maximumPendingRequestsPerWorld else { return nil }
+        let requestID = UUID()
+        requestIDs.insert(requestID)
+        pendingRequestIDs[world] = requestIDs
+        return requestID
+    }
+
+    func complete(_ requestID: UUID, in world: WebRuntimeLivenessWorld) {
+        guard var requestIDs = pendingRequestIDs[world] else { return }
+        requestIDs.remove(requestID)
+        pendingRequestIDs[world] = requestIDs
+    }
+
+    func pendingCount(in world: WebRuntimeLivenessWorld) -> Int {
+        pendingRequestIDs[world]?.count ?? 0
+    }
+}
+
+@MainActor
+private final class WebRuntimeProbeGate<Value> {
+    private var continuation: CheckedContinuation<Value, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var finished = false
+
+    func install(_ continuation: CheckedContinuation<Value, Never>) {
+        self.continuation = continuation
+    }
+
+    func installTimeoutTask(_ task: Task<Void, Never>) {
+        timeoutTask = task
+    }
+
+    func finish(_ result: Value) {
+        guard !finished else { return }
+        finished = true
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        let continuation = self.continuation
+        self.continuation = nil
+        continuation?.resume(returning: result)
+    }
+}
 
 @MainActor
 final class DownloadCoordinator: NSObject, WKDownloadDelegate {
@@ -258,8 +469,16 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let navigationStallTimeout: TimeInterval
     private let rendererProbeTimeout: TimeInterval
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
+    private let livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator
+    private let responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator
+    private let livenessProbeIntervalNanoseconds: UInt64
     private var nextNavigationGeneration: UInt64 = 0
     private var currentNavigationTicket: DiagnosticNavigationTicket?
+    /// Public WebKit does not expose a stable child-process identifier. This
+    /// epoch advances only when FloatTabs observes the documented termination
+    /// callback; it is correlation evidence, not proof of every process swap.
+    private var observedContentProcessEpoch: UInt64 = 1
+    private var observedContentProcessTerminationCount: UInt64 = 0
     private var navigationStallTask: Task<Void, Never>?
     private var pendingRendererProbeID: UUID?
     private var rendererProbeTimeoutTask: Task<Void, Never>?
@@ -267,6 +486,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var rendererProbeTrigger: String?
     private var rendererProbeIncidentID: UUID?
     private var rendererProbeCompletion: (@MainActor (String) -> Void)?
+    private var livenessObservationTask: Task<Void, Never>?
+    private var livenessContextGeneration: UInt64 = 1
+    private var consecutivePostFinishDualTimeouts = 0
+
+    static let defaultCrossWorldLivenessInterval: TimeInterval = 30
+    static let defaultCrossWorldLivenessTimeout: TimeInterval = 5
+    static let postFinishStallConfirmationCount = 2
 
     private struct PendingInstantBack {
         let targetItem: WKBackForwardListItem
@@ -311,6 +537,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationStallTimeout: TimeInterval = 120,
         rendererProbeTimeout: TimeInterval = 5,
         rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
+        crossWorldLivenessInterval: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessInterval,
+        crossWorldLivenessTimeout: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessTimeout,
+        livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator? = nil,
+        responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator? = nil,
         instantBackURLSafetyCheck: @escaping (URL) -> Bool = WebAppURL.isSafe,
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
@@ -333,6 +563,26 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.navigationStallTimeout = max(0, navigationStallTimeout)
         self.rendererProbeTimeout = max(0, rendererProbeTimeout)
         self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
+        let normalizedLivenessInterval = min(max(crossWorldLivenessInterval, 1), 300)
+        let normalizedLivenessTimeout = min(max(crossWorldLivenessTimeout, 0.1), 5)
+        livenessProbeIntervalNanoseconds = UInt64(normalizedLivenessInterval * 1_000_000_000)
+        let livenessProbeRequestBudget = WebRuntimeLivenessRequestBudget()
+        self.responsivenessProbeEvaluator = responsivenessProbeEvaluator ?? { webView, shouldMeasureFrame in
+            await Self.productionResponsivenessProbe(
+                webView: webView,
+                shouldMeasureFrame: shouldMeasureFrame,
+                timeout: normalizedLivenessTimeout,
+                requestBudget: livenessProbeRequestBudget
+            )
+        }
+        self.livenessProbeEvaluator = livenessProbeEvaluator ?? { webView, world in
+            await Self.productionLivenessProbe(
+                webView: webView,
+                world: world,
+                timeout: normalizedLivenessTimeout,
+                requestBudget: livenessProbeRequestBudget
+            )
+        }
         self.instantBackURLSafetyCheck = instantBackURLSafetyCheck
         self.loadHandler = loadHandler
         super.init()
@@ -352,10 +602,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
 
         webView.navigationDelegate = self
+        startCrossWorldLivenessObservation(for: webView)
     }
 
     deinit {
         observation?.invalidate()
+        livenessObservationTask?.cancel()
     }
 
     func webView(
@@ -557,6 +809,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        advanceObservedContentProcessEpoch()
+        consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: .terminated)
         diagnostics.record(
             event: "web_content_process_terminated",
@@ -634,6 +888,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func invalidateDiagnosticNavigation() {
+        livenessObservationTask?.cancel()
+        livenessObservationTask = nil
+        if livenessContextGeneration < UInt64.max {
+            livenessContextGeneration += 1
+        }
+        consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: nil)
     }
 
@@ -644,6 +904,141 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     var currentDiagnosticNavigationGeneration: UInt64? {
         currentNavigationTicket?.generation
+    }
+
+    var currentContentProcessDiagnosticFields: [String: RuntimeDiagnosticValue] {
+        [
+            "observed_web_process_epoch": Self.diagnosticInteger(observedContentProcessEpoch),
+            "observed_web_process_termination_count": Self.diagnosticInteger(
+                observedContentProcessTerminationCount
+            )
+        ]
+    }
+
+    var currentRuntimeCorrelationFields: [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString)
+        ]
+        fields.merge(runtimeDiagnosticIdentity?.fields ?? [:]) { current, _ in current }
+        let navigationFields = currentNavigationDiagnosticFields
+        fields.merge(navigationFields.isEmpty ? [
+            "navigation_generation": RuntimeDiagnosticValue.null,
+            "navigation_phase": .string("none"),
+            "navigation_callback_stale": .bool(false)
+        ] : navigationFields) { current, _ in current }
+        fields.merge(currentContentProcessDiagnosticFields) { current, _ in current }
+        return fields
+    }
+
+    /// Captures one bounded main-page-world + FloatTabs-isolated-world sample.
+    /// This is evidence only: it never reloads, rebuilds, releases, or mutates
+    /// persistent site/profile data.
+    func captureCrossWorldLivenessOnce() async {
+        guard let webView,
+              let url = webView.url,
+              ChatGPTSitePolicy.isSupportedChatGPTURL(url) else {
+            return
+        }
+
+        let expectedContextGeneration = livenessContextGeneration
+        let expectedNavigationGeneration = currentNavigationTicket?.generation
+        let expectedNavigationPhase = currentNavigationTicket?.phase
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        async let mainRaw = livenessProbeEvaluator(webView, .mainPage)
+        async let isolatedRaw = livenessProbeEvaluator(webView, .floatTabsIsolated)
+        let (mainCaptured, isolatedCaptured) = await (mainRaw, isolatedRaw)
+
+        let contextAfterLiveness = self.webView === webView
+            && livenessContextGeneration == expectedContextGeneration
+            && currentNavigationTicket?.generation == expectedNavigationGeneration
+            && currentNavigationTicket?.phase == expectedNavigationPhase
+        let responsivenessCaptured: WebRuntimeResponsivenessProbeResult
+        if !contextAfterLiveness {
+            responsivenessCaptured = .terminal(.stale, probeLatencyMilliseconds: 0)
+        } else if mainCaptured.outcome != .success {
+            responsivenessCaptured = .notRun()
+        } else {
+            let pageVisible = mainCaptured.visibilityState == "visible"
+            let nativeVisible = !webView.isHidden && webView.window?.isVisible == true
+            if pageVisible && nativeVisible {
+                responsivenessCaptured = await responsivenessProbeEvaluator(
+                    webView,
+                    true
+                )
+            } else {
+                responsivenessCaptured = .notVisible()
+            }
+        }
+
+        let runtimeContextCurrent = self.webView === webView
+            && livenessContextGeneration == expectedContextGeneration
+            && currentNavigationTicket?.generation == expectedNavigationGeneration
+            && currentNavigationTicket?.phase == expectedNavigationPhase
+        let main = runtimeContextCurrent ? mainCaptured : mainCaptured.stale
+        let isolated = runtimeContextCurrent ? isolatedCaptured : isolatedCaptured.stale
+        let responsiveness = runtimeContextCurrent
+            ? responsivenessCaptured
+            : responsivenessCaptured.stale
+        let navigationFinished = currentNavigationTicket?.phase == .finished
+        let nativeFinishedFacts = !webView.isLoading && webView.estimatedProgress >= 0.999
+        let postFinishBoundary = runtimeContextCurrent && navigationFinished && nativeFinishedFacts
+        let dualTimeout = main.outcome == .timeout && isolated.outcome == .timeout
+
+        if postFinishBoundary && dualTimeout {
+            consecutivePostFinishDualTimeouts += 1
+        } else {
+            consecutivePostFinishDualTimeouts = 0
+        }
+
+        var fields = runtimeFields(for: webView)
+        fields.merge(main.diagnosticFields(prefix: "main_world")) { _, new in new }
+        fields.merge(isolated.diagnosticFields(prefix: "isolated_world")) { _, new in new }
+        fields.merge(responsiveness.diagnosticFields()) { _, new in new }
+        fields.merge([
+            "runtime_context_current": .bool(runtimeContextCurrent),
+            "navigation_finished": .bool(navigationFinished),
+            "native_finished_facts": .bool(nativeFinishedFacts),
+            "is_loading": .bool(webView.isLoading),
+            "estimated_progress": .double(webView.estimatedProgress),
+            "webview_hidden": .bool(webView.isHidden),
+            "webview_window_visible": .bool(webView.window?.isVisible == true),
+            "post_finish_dual_timeout_count": .integer(Int64(consecutivePostFinishDualTimeouts)),
+            "probe_cycle_latency_ms": .double(
+                min(max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000, 10_000)
+            ),
+            "system_physical_memory_bytes": Self.diagnosticInteger(ProcessInfo.processInfo.physicalMemory),
+            "web_process_resource_attribution": .string("unavailable_public_api")
+        ]) { _, new in new }
+        if let residentSize = Self.currentProcessResidentSizeBytes() {
+            fields["host_resident_size_bytes"] = Self.diagnosticInteger(residentSize)
+        } else {
+            fields["host_resident_size_bytes"] = .null
+        }
+
+        diagnostics.record(
+            event: "web_runtime.cross_world_liveness",
+            level: dualTimeout ? .warning : .notice,
+            subsystem: "web",
+            fields: fields
+        )
+
+        guard postFinishBoundary, dualTimeout else { return }
+        var stallFields = fields
+        stallFields["stall_class"] = .string("POST_FINISH_RUNTIME_STALL")
+        stallFields["stall_confirmation_state"] = .string(
+            consecutivePostFinishDualTimeouts >= Self.postFinishStallConfirmationCount
+                ? "confirmed"
+                : "candidate"
+        )
+        diagnostics.record(
+            event: consecutivePostFinishDualTimeouts >= Self.postFinishStallConfirmationCount
+                ? "web_runtime.post_finish_stall_detected"
+                : "web_runtime.post_finish_stall_candidate",
+            level: .warning,
+            subsystem: "web",
+            fields: stallFields
+        )
     }
 
     private var staleNavigationFields: [String: RuntimeDiagnosticValue] {
@@ -674,6 +1069,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
 
         invalidateDiagnosticNavigation(phase: nil)
+        consecutivePostFinishDualTimeouts = 0
         precondition(nextNavigationGeneration < UInt64.max, "Navigation diagnostic generation exhausted")
         nextNavigationGeneration += 1
         let ticket = DiagnosticNavigationTicket(
@@ -981,6 +1377,250 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationStallTask = nil
     }
 
+    private func startCrossWorldLivenessObservation(for webView: WKWebView) {
+        livenessObservationTask?.cancel()
+        livenessObservationTask = Task { @MainActor [weak self, weak webView] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: self?.livenessProbeIntervalNanoseconds ?? 0)
+                } catch {
+                    return
+                }
+                guard let self, let webView, self.webView === webView else { return }
+                await self.captureCrossWorldLivenessOnce()
+            }
+        }
+    }
+
+    private static let runtimeLivenessProbeScript = """
+    (() => ({
+      ready_state: ["loading", "interactive", "complete"].includes(document.readyState)
+        ? document.readyState : "other",
+      visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
+        ? document.visibilityState : "other"
+    }))()
+    """
+
+    /// Maximum wait for one frame callback; this is a measurement bound, not a degraded threshold.
+    private static let frameCallbackMeasurementWindowMilliseconds = 4_000
+
+    private static let runtimeResponsivenessProbeScript = """
+    const eventLoopStartedAt = performance.now();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const eventLoopScheduleLatency = performance.now() - eventLoopStartedAt;
+
+    let frameCallbackOutcome = "not_visible";
+    let frameCallbackLatency = null;
+    if (shouldMeasureFrame && document.visibilityState === "visible") {
+      if (typeof requestAnimationFrame !== "function") {
+        frameCallbackOutcome = "unavailable";
+      } else {
+        const frameStartedAt = performance.now();
+        const frameResult = await new Promise(resolve => {
+          let completed = false;
+          let frameRequestID = null;
+          const measurementTimerID = setTimeout(() => {
+            if (completed) return;
+            completed = true;
+            if (frameRequestID !== null) cancelAnimationFrame(frameRequestID);
+            resolve({ outcome: "measurement_window_elapsed", latency: null });
+          }, \(frameCallbackMeasurementWindowMilliseconds));
+
+          frameRequestID = requestAnimationFrame(() => {
+            if (completed) return;
+            completed = true;
+            clearTimeout(measurementTimerID);
+            resolve({
+              outcome: "sampled",
+              latency: performance.now() - frameStartedAt
+            });
+          });
+        });
+        frameCallbackOutcome = frameResult.outcome;
+        frameCallbackLatency = frameResult.latency;
+      }
+    }
+
+    return {
+      event_loop_schedule_latency_ms: eventLoopScheduleLatency,
+      frame_callback_outcome: frameCallbackOutcome,
+      frame_callback_latency_ms: frameCallbackLatency
+    };
+    """
+
+    private static func productionLivenessProbe(
+        webView: WKWebView,
+        world: WebRuntimeLivenessWorld,
+        timeout: TimeInterval,
+        requestBudget: WebRuntimeLivenessRequestBudget
+    ) async -> WebRuntimeLivenessProbeResult {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        guard let requestID = requestBudget.reserve(world) else {
+            return .terminal(
+                .suppressed,
+                latencyMilliseconds: min(
+                    max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                    5_000
+                )
+            )
+        }
+        let gate = WebRuntimeProbeGate<WebRuntimeLivenessProbeResult>()
+        return await withCheckedContinuation { continuation in
+            gate.install(continuation)
+            let timeoutTask = Task { @MainActor [weak gate] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                } catch {
+                    return
+                }
+                gate?.finish(.terminal(.timeout, latencyMilliseconds: timeout * 1_000))
+            }
+            gate.installTimeoutTask(timeoutTask)
+
+            let finishValue: @MainActor (Any?, Error?) -> Void = { value, error in
+                requestBudget.complete(requestID, in: world)
+                let latency = min(
+                    max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                    5_000
+                )
+                guard error == nil,
+                      let fields = value as? [String: Any],
+                      let readyState = fields["ready_state"] as? String,
+                      let visibilityState = fields["visibility_state"] as? String,
+                      ["loading", "interactive", "complete", "other"].contains(readyState),
+                      ["visible", "hidden", "prerender", "unloaded", "other"].contains(visibilityState) else {
+                    gate.finish(.terminal(.failed, latencyMilliseconds: latency))
+                    return
+                }
+                gate.finish(
+                    .success(
+                        readyState: readyState,
+                        visibilityState: visibilityState,
+                        latencyMilliseconds: latency
+                    )
+                )
+            }
+
+            switch world {
+            case .mainPage:
+                webView.evaluateJavaScript(Self.runtimeLivenessProbeScript) { value, error in
+                    finishValue(value, error)
+                }
+            case .floatTabsIsolated:
+                webView.evaluateJavaScript(
+                    Self.runtimeLivenessProbeScript,
+                    in: nil,
+                    in: ChatGPTAttentionBridge.contentWorld
+                ) { result in
+                    switch result {
+                    case let .success(value):
+                        finishValue(value, nil)
+                    case let .failure(error):
+                        finishValue(nil, error)
+                    }
+                }
+            }
+        }
+    }
+
+    static func productionResponsivenessProbe(
+        webView: WKWebView,
+        shouldMeasureFrame: Bool,
+        timeout: TimeInterval,
+        requestBudget: WebRuntimeLivenessRequestBudget
+    ) async -> WebRuntimeResponsivenessProbeResult {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        guard let requestID = requestBudget.reserve(.mainPage) else {
+            return .terminal(
+                .suppressed,
+                probeLatencyMilliseconds: min(
+                    max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                    5_000
+                )
+            )
+        }
+        let gate = WebRuntimeProbeGate<WebRuntimeResponsivenessProbeResult>()
+        return await withCheckedContinuation { continuation in
+            gate.install(continuation)
+            let timeoutTask = Task { @MainActor [weak gate] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                } catch {
+                    return
+                }
+                gate?.finish(
+                    .terminal(.timeout, probeLatencyMilliseconds: timeout * 1_000)
+                )
+            }
+            gate.installTimeoutTask(timeoutTask)
+
+            webView.callAsyncJavaScript(
+                Self.runtimeResponsivenessProbeScript,
+                arguments: ["shouldMeasureFrame": shouldMeasureFrame],
+                in: nil,
+                in: .page,
+                completionHandler: { result in
+                    requestBudget.complete(requestID, in: .mainPage)
+                    let latency = min(
+                        max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                        5_000
+                    )
+                    guard case let .success(value) = result,
+                          let fields = value as? [String: Any],
+                          let eventLoopLatency = fields["event_loop_schedule_latency_ms"] as? NSNumber,
+                          eventLoopLatency.doubleValue.isFinite,
+                          eventLoopLatency.doubleValue >= 0,
+                          let rawFrameOutcome = fields["frame_callback_outcome"] as? String,
+                          let frameOutcome = WebRuntimeFrameCallbackOutcome(rawValue: rawFrameOutcome) else {
+                        gate.finish(
+                            .terminal(.failed, probeLatencyMilliseconds: latency)
+                        )
+                        return
+                    }
+
+                    let frameLatency = fields["frame_callback_latency_ms"] as? NSNumber
+                    guard (frameOutcome == .sampled && frameLatency != nil)
+                        || (frameOutcome != .sampled && frameLatency == nil),
+                        frameLatency?.doubleValue.isFinite != false,
+                        (frameLatency?.doubleValue ?? 0) >= 0 else {
+                        gate.finish(
+                            .terminal(.failed, probeLatencyMilliseconds: latency)
+                        )
+                        return
+                    }
+
+                    gate.finish(
+                        .success(
+                            probeLatencyMilliseconds: latency,
+                            eventLoopSchedulingLatencyMilliseconds: eventLoopLatency.doubleValue,
+                            frameCallbackOutcome: frameOutcome,
+                            frameCallbackLatencyMilliseconds: frameLatency?.doubleValue
+                        )
+                    )
+                }
+            )
+        }
+    }
+
+    private static func currentProcessResidentSizeBytes() -> UInt64? {
+        var info = mach_task_basic_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    rebound,
+                    &count
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return UInt64(info.resident_size)
+    }
+
     /// Pure fallback decision: a connection-level failure of exactly the
     /// pending inferred entry URL yields the http candidate. Certificate-trust
     /// failures, other URLs, and absent pending state never downgrade.
@@ -1039,6 +1679,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             "page_zoom": .double(Double(webView.pageZoom))
         ]) { _, new in new }
         fields.merge(runtimeDiagnosticIdentity?.fields ?? [:]) { current, _ in current }
+        fields.merge(currentContentProcessDiagnosticFields) { current, _ in current }
         let navigationFields = currentNavigationDiagnosticFields
         fields.merge(navigationFields.isEmpty ? [
             "navigation_generation": RuntimeDiagnosticValue.null,
@@ -1046,6 +1687,19 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             "navigation_callback_stale": .bool(false)
         ] : navigationFields) { current, _ in current }
         return fields
+    }
+
+    private func advanceObservedContentProcessEpoch() {
+        if observedContentProcessTerminationCount < UInt64.max {
+            observedContentProcessTerminationCount += 1
+        }
+        if observedContentProcessEpoch < UInt64.max {
+            observedContentProcessEpoch += 1
+        }
+    }
+
+    private static func diagnosticInteger(_ value: UInt64) -> RuntimeDiagnosticValue {
+        .integer(value > UInt64(Int64.max) ? Int64.max : Int64(value))
     }
 
     private func failingURLForDiagnostics(

@@ -582,3 +582,366 @@ final class WebFocusAdapterTests: XCTestCase {
         }
     }
 }
+
+@MainActor
+extension WebFocusAdapterTests {
+    func testRuntimeLivenessDistinguishesMainPageFromIsolatedWorld() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, world in
+                world == .mainPage
+                    ? .success(readyState: "complete", visibilityState: "visible", latencyMilliseconds: 1.25)
+                    : .terminal(.timeout, latencyMilliseconds: 5_000)
+            }
+        )
+        load("<main>Cross-world probe</main>", in: webView)
+        await settle(webView)
+        XCTAssertEqual(observer.currentNavigationDiagnosticFields["navigation_phase"], .string("finished"))
+
+        await observer.captureCrossWorldLivenessOnce()
+
+        let event = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertEqual(event.fields["main_world_probe_outcome"], .string("success"))
+        XCTAssertEqual(event.fields["isolated_world_probe_outcome"], .string("timeout"))
+        XCTAssertEqual(event.fields["navigation_finished"], .bool(true))
+        XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
+        XCTAssertEqual(event.fields["web_process_resource_attribution"], .string("unavailable_public_api"))
+        XCTAssertNotNil(event.fields["host_resident_size_bytes"])
+        XCTAssertNil(event.fields["page_text"])
+        XCTAssertNil(event.fields["prompt"])
+        XCTAssertNil(event.fields["response_text"])
+        XCTAssertNil(event.fields["document_token"])
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_candidate" })
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+    }
+
+    func testRuntimeResponsivenessDistinguishesSlowSuccessFromTimeoutWithoutPageContent() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        var responsivenessResults = [
+            WebRuntimeResponsivenessProbeResult.success(
+                probeLatencyMilliseconds: 2_812,
+                eventLoopSchedulingLatencyMilliseconds: 1_247.5,
+                frameCallbackOutcome: .sampled,
+                frameCallbackLatencyMilliseconds: 1_530.25
+            ),
+            WebRuntimeResponsivenessProbeResult.terminal(
+                .timeout,
+                probeLatencyMilliseconds: 5_000
+            )
+        ]
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in
+                .success(readyState: "complete", visibilityState: "visible", latencyMilliseconds: 2)
+            },
+            responsivenessProbeEvaluator: { _, shouldMeasureFrame in
+                XCTAssertTrue(shouldMeasureFrame)
+                return responsivenessResults.removeFirst()
+            }
+        )
+        load("<main>CONTENT_SENTINEL sidebar button response</main>", in: webView)
+        await settle(webView)
+
+        await observer.captureCrossWorldLivenessOnce()
+        await observer.captureCrossWorldLivenessOnce()
+
+        let events = writer.events.filter { $0.event == "web_runtime.cross_world_liveness" }
+        XCTAssertEqual(events.count, 2)
+        let slowSuccess = events[0]
+        XCTAssertEqual(slowSuccess.fields["main_world_probe_outcome"], .string("success"))
+        XCTAssertEqual(slowSuccess.fields["main_world_responsiveness_probe_outcome"], .string("success"))
+        XCTAssertEqual(slowSuccess.fields["main_world_responsiveness_probe_latency_ms"], .double(2_812))
+        XCTAssertEqual(slowSuccess.fields["main_world_event_loop_schedule_latency_ms"], .double(1_247.5))
+        XCTAssertEqual(slowSuccess.fields["main_world_frame_callback_outcome"], .string("sampled"))
+        XCTAssertEqual(slowSuccess.fields["main_world_frame_callback_latency_ms"], .double(1_530.25))
+
+        let timeout = events[1]
+        XCTAssertEqual(timeout.fields["main_world_probe_outcome"], .string("success"))
+        XCTAssertEqual(timeout.fields["main_world_responsiveness_probe_outcome"], .string("timeout"))
+        XCTAssertEqual(timeout.fields["main_world_event_loop_schedule_latency_ms"], .null)
+        XCTAssertEqual(timeout.fields["main_world_frame_callback_latency_ms"], .null)
+
+        for event in events {
+            XCTAssertFalse(event.fields.keys.contains { key in
+                ["page_text", "prompt", "response_text", "selector", "clicked_control"].contains(key)
+            })
+            XCTAssertFalse(event.fields.values.contains { value in
+                if case let .string(string) = value {
+                    return string.contains("CONTENT_SENTINEL") || string.contains("sidebar button")
+                }
+                return false
+            })
+            XCTAssertFalse(event.fields.keys.contains { $0.contains("degraded_classification") })
+        }
+    }
+
+    func testRuntimeResponsivenessFromReplacedContextIsStaleNotSlow() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let gate = RuntimeResponsivenessProbeTestGate()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in
+                .success(readyState: "complete", visibilityState: "visible", latencyMilliseconds: 1)
+            },
+            responsivenessProbeEvaluator: { _, _ in await gate.evaluate() }
+        )
+        load("<main>Stale responsiveness probe</main>", in: webView)
+        await settle(webView)
+
+        let capture = Task { @MainActor in await observer.captureCrossWorldLivenessOnce() }
+        await gate.waitUntilStarted()
+        observer.invalidateDiagnosticNavigation()
+        gate.resolve(
+            .success(
+                probeLatencyMilliseconds: 3_900,
+                eventLoopSchedulingLatencyMilliseconds: 3_700,
+                frameCallbackOutcome: .sampled,
+                frameCallbackLatencyMilliseconds: 3_800
+            )
+        )
+        await capture.value
+
+        let event = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertEqual(event.fields["runtime_context_current"], .bool(false))
+        XCTAssertEqual(event.fields["main_world_probe_outcome"], .string("stale"))
+        XCTAssertEqual(event.fields["main_world_responsiveness_probe_outcome"], .string("stale"))
+        XCTAssertEqual(event.fields["main_world_event_loop_schedule_latency_ms"], .null)
+        XCTAssertEqual(event.fields["main_world_frame_callback_latency_ms"], .null)
+        XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+    }
+
+    func testRuntimeResponsivenessProbeUsesExistingBoundedCallbackBudget() async {
+        let budget = WebRuntimeLivenessRequestBudget()
+        _ = budget.reserve(.mainPage)
+        _ = budget.reserve(.mainPage)
+        let result = await SlotNavigationObserver.productionResponsivenessProbe(
+            webView: makeWebView(),
+            shouldMeasureFrame: true,
+            timeout: 5,
+            requestBudget: budget
+        )
+
+        XCTAssertEqual(result.outcome, .suppressed)
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 2)
+        XCTAssertLessThanOrEqual(
+            budget.pendingCount(in: .mainPage),
+            WebRuntimeLivenessRequestBudget.maximumPendingRequestsPerWorld
+        )
+    }
+
+    func testProductionRuntimeResponsivenessProbeReturnsContentFreeSchedulingMetrics() async {
+        let webView = makeWebView()
+        load(
+            "<script>Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });</script><main>CONTENT_SENTINEL private page content</main>",
+            in: webView
+        )
+        await settle(webView)
+        let budget = WebRuntimeLivenessRequestBudget()
+
+        let result = await SlotNavigationObserver.productionResponsivenessProbe(
+            webView: webView,
+            shouldMeasureFrame: true,
+            timeout: 5,
+            requestBudget: budget
+        )
+
+        XCTAssertEqual(result.outcome, .success)
+        XCTAssertGreaterThanOrEqual(result.probeLatencyMilliseconds, 0)
+        XCTAssertGreaterThanOrEqual(result.eventLoopSchedulingLatencyMilliseconds ?? -1, 0)
+        XCTAssertTrue(
+            result.frameCallbackOutcome == .sampled
+                || result.frameCallbackOutcome == .measurementWindowElapsed
+        )
+        if result.frameCallbackOutcome == .sampled {
+            XCTAssertGreaterThanOrEqual(result.frameCallbackLatencyMilliseconds ?? -1, 0)
+        } else {
+            XCTAssertNil(result.frameCallbackLatencyMilliseconds)
+        }
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 0)
+    }
+
+    func testRuntimeLivenessSuppressionIsNotMisclassifiedAsTimeout() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, world in
+                .terminal(
+                    world == .mainPage ? .suppressed : .timeout,
+                    latencyMilliseconds: 5_000
+                )
+            }
+        )
+        load("<main>Suppressed cross-world probe</main>", in: webView)
+        await settle(webView)
+
+        await observer.captureCrossWorldLivenessOnce()
+
+        let event = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertEqual(event.fields["main_world_probe_outcome"], .string("suppressed"))
+        XCTAssertEqual(event.fields["isolated_world_probe_outcome"], .string("timeout"))
+        XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_candidate" })
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+    }
+
+    func testRuntimeLivenessPendingRequestBudgetIsBoundedPerWorld() throws {
+        let budget = WebRuntimeLivenessRequestBudget()
+        let mainOne = try XCTUnwrap(budget.reserve(.mainPage))
+        let mainTwo = try XCTUnwrap(budget.reserve(.mainPage))
+        XCTAssertNil(budget.reserve(.mainPage))
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 2)
+
+        let isolatedOne = try XCTUnwrap(budget.reserve(.floatTabsIsolated))
+        let isolatedTwo = try XCTUnwrap(budget.reserve(.floatTabsIsolated))
+        XCTAssertNil(budget.reserve(.floatTabsIsolated))
+        XCTAssertEqual(budget.pendingCount(in: .floatTabsIsolated), 2)
+
+        budget.complete(mainOne, in: .mainPage)
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 1)
+        XCTAssertNotNil(budget.reserve(.mainPage))
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 2)
+
+        budget.complete(mainTwo, in: .mainPage)
+        budget.complete(isolatedOne, in: .floatTabsIsolated)
+        budget.complete(isolatedTwo, in: .floatTabsIsolated)
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 1)
+        XCTAssertEqual(budget.pendingCount(in: .floatTabsIsolated), 0)
+    }
+
+    func testRuntimeLivenessNeedsTwoFinishedDualTimeoutsToConfirmStall() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in .terminal(.timeout, latencyMilliseconds: 5_000) }
+        )
+        load("<main>Dual timeout</main>", in: webView)
+        await settle(webView)
+        XCTAssertEqual(observer.currentNavigationDiagnosticFields["navigation_phase"], .string("finished"))
+
+        await observer.captureCrossWorldLivenessOnce()
+        let candidate = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.post_finish_stall_candidate" })
+        XCTAssertEqual(candidate.fields["stall_confirmation_state"], .string("candidate"))
+        XCTAssertEqual(candidate.fields["post_finish_dual_timeout_count"], .integer(1))
+
+        await observer.captureCrossWorldLivenessOnce()
+        let confirmed = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+        XCTAssertEqual(confirmed.fields["stall_class"], .string("POST_FINISH_RUNTIME_STALL"))
+        XCTAssertEqual(confirmed.fields["stall_confirmation_state"], .string("confirmed"))
+        XCTAssertEqual(confirmed.fields["post_finish_dual_timeout_count"], .integer(2))
+        XCTAssertEqual(confirmed.fields["navigation_phase"], .string("finished"))
+    }
+
+    func testRuntimeLivenessMarksInFlightResultsStaleAfterInvalidation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let gate = RuntimeLivenessProbeTestGate()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in await gate.evaluate() }
+        )
+        load("<main>Stale probe</main>", in: webView)
+        await settle(webView)
+
+        let capture = Task { @MainActor in await observer.captureCrossWorldLivenessOnce() }
+        await gate.waitUntilStarted(count: 2)
+        observer.invalidateDiagnosticNavigation()
+        gate.resolveAll(.success(readyState: "complete", visibilityState: "visible", latencyMilliseconds: 1))
+        await capture.value
+
+        let event = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertEqual(event.fields["runtime_context_current"], .bool(false))
+        XCTAssertEqual(event.fields["main_world_probe_outcome"], .string("stale"))
+        XCTAssertEqual(event.fields["isolated_world_probe_outcome"], .string("stale"))
+        XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+    }
+
+    func testObservedWebProcessEpochAdvancesOnlyAtTerminationCallback() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let identity = WebRuntimeDiagnosticIdentity(runtimeGeneration: 42, webViewInstanceID: UUID())
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, runtimeDiagnosticIdentity: identity,
+            websiteMode: .desktop, onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300
+        )
+
+        XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_epoch"], .integer(1))
+        XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_termination_count"], .integer(0))
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+        let first = try XCTUnwrap(writer.events.last { $0.event == "web_content_process_terminated" })
+        XCTAssertEqual(first.fields["observed_web_process_epoch"], .integer(2))
+        XCTAssertEqual(first.fields["observed_web_process_termination_count"], .integer(1))
+        XCTAssertEqual(first.fields["runtime_generation"], .integer(42))
+        XCTAssertEqual(first.fields["webview_instance_id"], .string(identity.webViewInstanceID.uuidString))
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+        XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_epoch"], .integer(3))
+        XCTAssertEqual(observer.currentContentProcessDiagnosticFields["observed_web_process_termination_count"], .integer(2))
+    }
+}
+
+@MainActor
+private final class RuntimeLivenessProbeTestGate {
+    private var continuations: [CheckedContinuation<WebRuntimeLivenessProbeResult, Never>] = []
+
+    func evaluate() async -> WebRuntimeLivenessProbeResult {
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    func waitUntilStarted(count: Int) async {
+        while continuations.count < count { await Task.yield() }
+    }
+
+    func resolveAll(_ result: WebRuntimeLivenessProbeResult) {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume(returning: result) }
+    }
+}
+
+@MainActor
+private final class RuntimeResponsivenessProbeTestGate {
+    private var continuation: CheckedContinuation<WebRuntimeResponsivenessProbeResult, Never>?
+
+    func evaluate() async -> WebRuntimeResponsivenessProbeResult {
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while continuation == nil { await Task.yield() }
+    }
+
+    func resolve(_ result: WebRuntimeResponsivenessProbeResult) {
+        let pending = continuation
+        continuation = nil
+        pending?.resume(returning: result)
+    }
+}

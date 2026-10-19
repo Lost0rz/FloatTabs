@@ -1,48 +1,63 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-18
+**Status date:** 2026-10-19
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: NO_ACTIVE_TASK**
+**MODE: AUTHORIZED — FINAL MERGE GATE**
+Active task: `FT-DIAG-POST-FINISH-STALL-001` on `codex/ft-post-finish-stall-diag-001`.
+PR: `#138 — Diagnose post-finish Web runtime stalls across JavaScript worlds`.
 
-`FT-LIFECYCLE-SYNC-001` is terminal. The authorized local synchronization and terminal control-branch cleanup completed; no product or lifecycle task is active.
+## Current facts
 
-## Product baseline
-
+- Protected baseline before merge: `main@3511297d5f573598556739519bae859322578768`.
 - Latest public release: `v0.5.4` / Build 22.
-- `FT-LIFECYCLE-CLOSEOUT-002` terminal control PR #135 merged at `01d789e0638ffde5a56ca5a69113fec8780399a3`.
-- The lifecycle-sync authorization PR #136 merged through protected main at `65fc59a8e285d1d41a3ce728692a2b83d39add4f`; its required `Build & Test (Apple Silicon arm64)` check passed.
-- No product-source edits were made for this lifecycle task. The canonical checkout was advanced only by fast-forwarding the already published `origin/main` history.
+- Final semantic implementation identity: `1745acaab91185727901cc7ed48a43f4326ef73e`.
+- Independent Web re-audit: `PASS` on 2026-10-19.
+- Pre-merge audited repository head: `4f1b6b7f7c507970d055f9d4ac77b61b0090dc7e`.
+- Pre-merge audited-head macOS CI `39216559333`: PASS.
+- Pre-merge audited-head QA DMG `39216559277`: PASS.
+- Focused responsiveness/Web Runtime XCTest: 7 passed.
+- Full XCTest: 1,349 passed, 0 skipped, 0 failed.
+- Root cause: `UNKNOWN`.
+- Fresh incident: `NOT_OBSERVED`.
 
-## Terminal lifecycle-sync receipt
+## Diagnostic observation baseline
 
-- Canonical path: `/Volumes/Jack-Dev/Projects/FloatTabs`.
-- Before sync: local `main@d685bbe7c035332ecc9b7ab6f8641660f813d42f`, clean. Initial fetched `origin/main@01d789e0638ffde5a56ca5a69113fec8780399a3`; PR #136 then advanced `origin/main` to `65fc59a8e285d1d41a3ce728692a2b83d39add4f`.
-- The canonical checkout passed the ancestor/clean/main Gate 0. `git merge --ff-only origin/main` advanced local `main` from `d685bbe7…` to `65fc59a8…` with no conflict. After the terminal control PR merged, the canonical checkout was fetched and fast-forwarded again; final local `main` equals freshly fetched `origin/main` and is clean. Live refs are the final SHA authority.
-- Remote `chore/ft-lifecycle-closeout-002-terminal@5cdc5e5d9d638d53ceeda0d34d1205092f5973e6` was proven an ancestor of `origin/main` with zero branch-only commits and deleted. No local branch of that name existed.
-- GitHub `origin` branches after cleanup: `main` and frozen `phase2/pr-e-floattabs-durable-outbox-sender` only. The unrelated remote-tracking ref `pinned-calibre-web/master` remains visible in `git branch -r`; no remote with that name is configured, so it was preserved outside scope.
-- Open PR count after terminal protected-main delivery: 0.
+The Release diagnostic path now preserves bounded, content-free evidence for:
 
-## Preserved work and data
+- main-page and FloatTabs-isolated-world liveness;
+- navigation phase and Web-process epoch/termination count;
+- host resident memory and explicit attribution availability;
+- main-world JavaScript round-trip latency;
+- main-world event-loop scheduling latency;
+- visible-page frame callback outcome/latency.
 
-- Remaining local branches: `main`, `fix/residency-lifecycle-semantics`, `perf/ft-chatgpt-perf-001`, and `phase2/pr-e-floattabs-durable-outbox-sender`.
-- Remaining registered worktrees: canonical `/Volumes/Jack-Dev/Projects/FloatTabs` on `main`; preserved `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001` on `perf/ft-chatgpt-perf-001`.
-- `fix/residency-lifecycle-semantics@8e86f22e8a3e088a1e3fd6c53cffd3eebeedc9ef` retains 13 local-only commits.
-- Perf evidence remains at `/Volumes/Jack-Dev/Projects/FloatTabs-perf-ft-chatgpt-perf-001/.benchmark-results/ft-chatgpt-perf-001-smoke-20261017-104716/`: `session.json`, `report.md`, and the four `captures/chatgpt-{enabled,disabled}.{csv,summary.json}` files.
-- `phase2/pr-e-floattabs-durable-outbox-sender@db6e886b33dffd93ece130463b184ae371b97684` remains frozen `ARCHIVE_ONLY` evidence for PR #102.
-- Stashes: 0. Tags and GitHub Releases: untouched.
-- Browser Profiles, Slots, sessions/cookies/WebKit data, backups, preferences, diagnostics history, and the application bundle were not touched.
+Sampling remains low-frequency at 30-second intervals. It can show persistent/recurring degradation but may miss a brief episode entirely between samples. No fixed degraded threshold or causal classification is introduced.
 
-```text
-TASK_STATE=TERMINAL
-CANONICAL_MAIN_EQUALS_ORIGIN_MAIN=YES
-CANONICAL_STATUS=CLEAN
-OPEN_PRS=0
-ORIGIN_BRANCH_COUNT=2
-RETAINED_EVIDENCE=PRESERVED
-USER_DATA_TOUCHED=NO
-BROWSER_PROFILE_DATA_TOUCHED=NO
-```
+Probe lifecycle remains bounded: one cancelable observation task per observer, at most two pending callbacks per JS world, bounded timeout/window behavior, and no persistent page listener or high-frequency polling.
+
+Diagnostics remain content-free and do not record prompt/response text, page text, clicked control, selector, cookies, tokens, sessions, or Browser Profile secrets.
+
+## Merge authorization
+
+The user authorized merge and subsequent observation release on 2026-10-19.
+
+PR #138 may be marked Ready and merged only after the literal final control-only head re-passes exact-head required CI and QA DMG and remains clean/mergeable.
+
+No further semantic code change is authorized in this task.
+
+## Release path after merge
+
+After PR #138 merges and main is verified healthy:
+
+1. close `FT-DIAG-POST-FINISH-STALL-001` as merged;
+2. create a separate release-only task from merged `main`;
+3. bump version/build and add release notes;
+4. validate exact release head;
+5. merge the release PR through protected main;
+6. allow the repository `Publish Release` workflow to publish the observation build for Air long-term use.
+
+The release must state that root cause remains unknown and that the stall is not claimed fixed.
