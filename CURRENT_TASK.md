@@ -1,8 +1,8 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-DIAG-POST-FINISH-STALL-001`
-**Title:** Prepare bounded post-finish Web runtime diagnostics for long-term Air observation
-**Status:** `WAITING — WEB AUDIT BEFORE MERGE`
+**Title:** Prepare bounded Web runtime diagnostics for long-term Air observation, including partial SPA interaction degradation
+**Status:** `ACTIVE — PARTIAL INTERACTION DEGRADATION CORRECTIVE`
 **Mode:** `DIAGNOSTIC`
 **Task class:** `INCIDENT_INVESTIGATION`
 **Base:** `main@3511297d5f573598556739519bae859322578768`
@@ -11,6 +11,7 @@
 **Initial diagnostic source identity:** `292d6225808ebc66a12dd36e100fe309e53a335d`
 **Control reconciliation commit:** `e7e790a98fc7da473a99d7c289ecd6bf39b3c908`
 **Final semantic implementation identity:** `0bfb2be83adda65e883931a49806c5c12364eaf2`
+**Current repository head before this corrective:** `a7fea702cde83eeb515bf90274ed49e6a2cc5fb1`
 
 ## Objective
 
@@ -28,14 +29,18 @@ Mac mini is the development, probe, audit, build, and release-preparation machin
 - Full XCTest passed: 1,342 passed, 3 skipped, 0 failed. The two focused callback-budget/classification tests also passed. Debug arm64 and clean-head Release arm64 builds passed. The Release QA DMG passed codesign and image verification and remains local-only under `/private/tmp`.
 - Gate 5 Release runtime evidence remains from revision `4265baa34bec55cbd74171fe78a4162675dc7e05`; the final correction only bounds hung probe callbacks and distinguishes `suppressed` from timeout. The Release build of final semantic head is `0bfb2be83adda65e883931a49806c5c12364eaf2`, version 0.5.4 / Build 22, arm64, with exact source revision and clean tree metadata.
 - Root cause remains `UNKNOWN`; no recovery behavior is authorized.
+- New user report: after long ChatGPT Slot use, page access and control input may remain available while SPA controls respond slowly. This is a user report, not a fresh directly observed incident.
+- Read-only audit found the main-world probe records `evaluateJavaScript` round-trip time but no explicit event-loop scheduling or frame-callback delay. A fast round-trip success cannot establish those responsiveness dimensions. The fixed 30-second interval can miss a short, several-second episode between samples.
+- The current GitHub PR body still says fresh Air incident capture is required before merge, contrary to the reconciled observation-release gate; body alignment is authorized in this task.
 
 ## Authorized scope
 
 1. Reconcile this task's status and merge gate in `CURRENT_STATUS.md` and `CURRENT_TASK.md`, commit those control-only changes, and push the existing task branch before semantic work.
-2. Audit PR #138 for Release probe availability, incident-state discrimination, bounded diagnostic retention, a usable Release export/log access path, provenance, privacy, and long-run probe/task/observer lifecycle safety.
-3. If a concrete gap blocks reliable first-round incident evidence, make only the smallest diagnostics-related correction and focused regression tests within PR #138.
-4. Run verification proportional to the changed boundary. Required for final readiness: relevant focused diagnostics/Web Runtime tests, Debug arm64 build, Release arm64 build, Release-field verification, privacy regression, and applicable retention/export regression. Run full XCTest if semantic production code changes.
-5. Push the exact authorized branch head, keep PR #138 Draft, and return an evidence-based release-readiness report for Web audit before merge.
+2. The partial-interaction read-only audit is complete and insufficient: add one content-free, bounded main-world event-loop scheduling and visible-page frame-callback measurement to the existing supported-ChatGPT sample. Preserve the existing 30-second cadence, existing per-world maximum of two pending WebKit callbacks, timeout boundary, and task/observer ownership. Record raw bounded latency/outcomes; do not invent a degraded threshold or claim UI/SPA responsiveness from a single sample.
+3. Add focused regression coverage distinguishing slow success from timeout, proving the added fields are content-free, ensuring runtime replacement/invalidation yields stale rather than degraded evidence, and preserving bounded pending callbacks/task lifecycle.
+4. Keep the periodic observer to one cancelable task per observer. The new one-shot measurement may schedule only its bounded per-sample callbacks; add no persistent listener, high-frequency polling, accumulating observer, recovery behavior, or product/UI changes.
+5. Update the PR #138 body to describe the diagnostic-observation release path, state root cause remains unknown, identify fresh Air evidence as later causal evidence, include the current semantic/final head, and remove the obsolete fresh-incident-before-merge gate. Keep PR #138 Draft.
+6. Run focused diagnostics/Web Runtime XCTest, full XCTest for the semantic production change, Debug arm64 and Release arm64 builds, verify Release field availability, privacy regression, exact-head macOS CI, and QA DMG. Push the exact authorized branch head; update controls only with actual outcomes; return for Web re-audit.
 
 ## Merge and release gate
 
@@ -74,6 +79,8 @@ The standard Release diagnostic path must emit `web_runtime.cross_world_liveness
 - `web_process_resource_attribution` (remain explicitly unavailable when public APIs cannot prove child attribution).
 
 The audit must establish that evidence can distinguish main success / isolated timeout, dual timeout, and Web-process termination/epoch changes. “Both success but UI frozen” must remain a possible reported observation that does not establish root cause. No single event is causal proof.
+
+For partial SPA interaction degradation, standard Release diagnostics must additionally preserve raw bounded main-world event-loop scheduling latency and, when the page and native WebView are visible, the delay until a `requestAnimationFrame` callback. These are content-free scheduling/render-opportunity measurements, not proof that a particular control rendered or a causal diagnosis. Preserve explicit outcome distinctions for sampled, unavailable/not-visible, timeout, stale, and suppressed results as applicable. No arbitrary degraded threshold is authorized. The 30-second cadence remains low-frequency and may miss a transient episode that begins and ends between samples; report this limit rather than implying complete capture.
 
 Local diagnostic history must be bounded through rotation/retention and normal flush behavior. An Air user must be able to save first-round evidence from the Release app without Xcode, a repository checkout, sudo, or the benchmark harness. Exported evidence must preserve app/build/source identity, exact/tree state, architecture, session ID, and schema version.
 

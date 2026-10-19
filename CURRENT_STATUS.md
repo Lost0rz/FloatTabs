@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: WAITING — WEB AUDIT BEFORE MERGE**
+**MODE: ACTIVE — PARTIAL INTERACTION DEGRADATION CORRECTIVE**
 Active task: `FT-DIAG-POST-FINISH-STALL-001` on `codex/ft-post-finish-stall-diag-001`.
 Draft PR: `#138 — Diagnose post-finish Web runtime stalls across JavaScript worlds`.
 
@@ -63,6 +63,21 @@ USER_DATA_CHANGE_AUTHORIZED=NO
 BROWSER_PROFILE_DATA_CHANGE_AUTHORIZED=NO
 ```
 
+## Partial SPA interaction degradation audit
+
+- User report: after long ChatGPT Slot use, a page may remain accessible and accept controls while in-page SPA controls respond or expand slowly. This report has not been reproduced in a fresh incident capture.
+- Read-only source/test audit at repository head `a7fea702cde83eeb515bf90274ed49e6a2cc5fb1` found that the current main-world probe records only the `evaluateJavaScript` round-trip latency and document state. It does not measure a scheduled event-loop turn or visible-page frame callback. A quick successful evaluation therefore cannot distinguish those later scheduling/rendering delays.
+- The fixed 30-second cadence can miss a degradation episode lasting only a few seconds when it occurs between samples. It can provide trend evidence for persistent or recurring degradation, but does not guarantee capture of every short episode.
+- `CURRENT_SIGNAL_SUFFICIENT_FOR_PARTIAL_DEGRADATION=NO`. The missing fact is content-free main-world scheduling/frame-callback delay during the reported slow-success case; the blocked decision is whether page JavaScript scheduling or visible-page frame scheduling also degrades while the existing round-trip probe still succeeds.
+- The current task now authorizes one bounded, content-free scheduling/frame-callback measurement on the existing supported-ChatGPT sampling path, preserving the 30-second cadence and per-world pending-request budget. Record raw bounded latency/outcomes only; do not add a degraded threshold or product classification. Keep navigation, Web-process, and confirmed dual-timeout stall semantics unchanged.
+- The current GitHub PR body is stale and still says fresh Air incident capture is required before merge. Updating it to the observation-release path is included in the active task.
+
+```text
+PARTIAL_INTERACTION_AUDIT=INSUFFICIENT
+ROOT_CAUSE=UNKNOWN
+FRESH_INCIDENT=NOT_OBSERVED
+```
+
 ## Observation release path
 
 The user-approved deployment strategy is:
@@ -72,4 +87,4 @@ The user-approved deployment strategy is:
 
 Fresh Air incident evidence is for the subsequent causal investigation and no longer blocks publication of the diagnostic infrastructure. PR #138 may enter merge review only after the diagnostic-observability audit, required tests, and exact-head CI/QA gates pass. It remains Draft during this preparation; this task does not authorize merging or publishing a release. Any observation release must state that root cause is unknown and the stall is not claimed fixed.
 
-Next: Web audit of the pushed exact head before any merge review. Fresh Air incident evidence remains for later causal investigation; no merge or observation release has been performed or authorized here.
+Next: implement and validate the authorized bounded responsiveness evidence, align the PR body and control files, then return the pushed exact head for Web re-audit. Fresh Air incident evidence remains for later causal investigation; no merge or observation release has been performed or authorized here.
