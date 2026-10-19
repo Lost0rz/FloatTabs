@@ -71,10 +71,106 @@ struct WebRuntimeLivenessProbeResult: Equatable, Sendable {
     }
 }
 
+enum WebRuntimeResponsivenessOutcome: String, Equatable, Sendable {
+    case success
+    case timeout
+    case failed
+    case stale
+    case suppressed
+    case notRun = "not_run"
+    case notVisible = "not_visible"
+}
+
+enum WebRuntimeFrameCallbackOutcome: String, Equatable, Sendable {
+    case sampled
+    case notVisible = "not_visible"
+    case unavailable
+    case measurementWindowElapsed = "measurement_window_elapsed"
+}
+
+struct WebRuntimeResponsivenessProbeResult: Equatable, Sendable {
+    let outcome: WebRuntimeResponsivenessOutcome
+    let probeLatencyMilliseconds: Double
+    let eventLoopSchedulingLatencyMilliseconds: Double?
+    let frameCallbackOutcome: WebRuntimeFrameCallbackOutcome?
+    let frameCallbackLatencyMilliseconds: Double?
+
+    static func success(
+        probeLatencyMilliseconds: Double,
+        eventLoopSchedulingLatencyMilliseconds: Double,
+        frameCallbackOutcome: WebRuntimeFrameCallbackOutcome,
+        frameCallbackLatencyMilliseconds: Double?
+    ) -> Self {
+        Self(
+            outcome: .success,
+            probeLatencyMilliseconds: probeLatencyMilliseconds,
+            eventLoopSchedulingLatencyMilliseconds: eventLoopSchedulingLatencyMilliseconds,
+            frameCallbackOutcome: frameCallbackOutcome,
+            frameCallbackLatencyMilliseconds: frameCallbackLatencyMilliseconds
+        )
+    }
+
+    static func terminal(
+        _ outcome: WebRuntimeResponsivenessOutcome,
+        probeLatencyMilliseconds: Double
+    ) -> Self {
+        Self(
+            outcome: outcome,
+            probeLatencyMilliseconds: probeLatencyMilliseconds,
+            eventLoopSchedulingLatencyMilliseconds: nil,
+            frameCallbackOutcome: nil,
+            frameCallbackLatencyMilliseconds: nil
+        )
+    }
+
+    static func notVisible() -> Self {
+        Self(
+            outcome: .notVisible,
+            probeLatencyMilliseconds: 0,
+            eventLoopSchedulingLatencyMilliseconds: nil,
+            frameCallbackOutcome: .notVisible,
+            frameCallbackLatencyMilliseconds: nil
+        )
+    }
+
+    static func notRun() -> Self {
+        terminal(.notRun, probeLatencyMilliseconds: 0)
+    }
+
+    var stale: Self {
+        .terminal(.stale, probeLatencyMilliseconds: probeLatencyMilliseconds)
+    }
+
+    func diagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        [
+            "main_world_responsiveness_probe_outcome": .string(outcome.rawValue),
+            "main_world_responsiveness_probe_latency_ms": .double(
+                Self.bounded(probeLatencyMilliseconds)
+            ),
+            "main_world_event_loop_schedule_latency_ms": eventLoopSchedulingLatencyMilliseconds
+                .map { .double(Self.bounded($0)) } ?? .null,
+            "main_world_frame_callback_outcome": frameCallbackOutcome.map {
+                .string($0.rawValue)
+            } ?? .null,
+            "main_world_frame_callback_latency_ms": frameCallbackLatencyMilliseconds
+                .map { .double(Self.bounded($0)) } ?? .null
+        ]
+    }
+
+    private static func bounded(_ value: Double) -> Double {
+        min(max(value.isFinite ? value : 0, 0), 5_000)
+    }
+}
+
 typealias WebRuntimeLivenessProbeEvaluator = @MainActor (
     WKWebView,
     WebRuntimeLivenessWorld
 ) async -> WebRuntimeLivenessProbeResult
+
+typealias WebRuntimeResponsivenessProbeEvaluator = @MainActor (
+    WKWebView,
+    Bool
+) async -> WebRuntimeResponsivenessProbeResult
 
 @MainActor
 final class WebRuntimeLivenessRequestBudget {
@@ -103,12 +199,12 @@ final class WebRuntimeLivenessRequestBudget {
 }
 
 @MainActor
-private final class WebRuntimeLivenessProbeGate {
-    private var continuation: CheckedContinuation<WebRuntimeLivenessProbeResult, Never>?
+private final class WebRuntimeProbeGate<Value> {
+    private var continuation: CheckedContinuation<Value, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var finished = false
 
-    func install(_ continuation: CheckedContinuation<WebRuntimeLivenessProbeResult, Never>) {
+    func install(_ continuation: CheckedContinuation<Value, Never>) {
         self.continuation = continuation
     }
 
@@ -116,7 +212,7 @@ private final class WebRuntimeLivenessProbeGate {
         timeoutTask = task
     }
 
-    func finish(_ result: WebRuntimeLivenessProbeResult) {
+    func finish(_ result: Value) {
         guard !finished else { return }
         finished = true
         timeoutTask?.cancel()
@@ -374,6 +470,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let rendererProbeTimeout: TimeInterval
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
     private let livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator
+    private let responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator
     private let livenessProbeIntervalNanoseconds: UInt64
     private var nextNavigationGeneration: UInt64 = 0
     private var currentNavigationTicket: DiagnosticNavigationTicket?
@@ -443,6 +540,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         crossWorldLivenessInterval: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessInterval,
         crossWorldLivenessTimeout: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessTimeout,
         livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator? = nil,
+        responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator? = nil,
         instantBackURLSafetyCheck: @escaping (URL) -> Bool = WebAppURL.isSafe,
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
@@ -469,6 +567,14 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let normalizedLivenessTimeout = min(max(crossWorldLivenessTimeout, 0.1), 5)
         livenessProbeIntervalNanoseconds = UInt64(normalizedLivenessInterval * 1_000_000_000)
         let livenessProbeRequestBudget = WebRuntimeLivenessRequestBudget()
+        self.responsivenessProbeEvaluator = responsivenessProbeEvaluator ?? { webView, shouldMeasureFrame in
+            await Self.productionResponsivenessProbe(
+                webView: webView,
+                shouldMeasureFrame: shouldMeasureFrame,
+                timeout: normalizedLivenessTimeout,
+                requestBudget: livenessProbeRequestBudget
+            )
+        }
         self.livenessProbeEvaluator = livenessProbeEvaluator ?? { webView, world in
             await Self.productionLivenessProbe(
                 webView: webView,
@@ -843,12 +949,37 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         async let isolatedRaw = livenessProbeEvaluator(webView, .floatTabsIsolated)
         let (mainCaptured, isolatedCaptured) = await (mainRaw, isolatedRaw)
 
+        let contextAfterLiveness = self.webView === webView
+            && livenessContextGeneration == expectedContextGeneration
+            && currentNavigationTicket?.generation == expectedNavigationGeneration
+            && currentNavigationTicket?.phase == expectedNavigationPhase
+        let responsivenessCaptured: WebRuntimeResponsivenessProbeResult
+        if !contextAfterLiveness {
+            responsivenessCaptured = .terminal(.stale, probeLatencyMilliseconds: 0)
+        } else if mainCaptured.outcome != .success {
+            responsivenessCaptured = .notRun()
+        } else {
+            let pageVisible = mainCaptured.visibilityState == "visible"
+            let nativeVisible = !webView.isHidden && webView.window?.isVisible == true
+            if pageVisible && nativeVisible {
+                responsivenessCaptured = await responsivenessProbeEvaluator(
+                    webView,
+                    true
+                )
+            } else {
+                responsivenessCaptured = .notVisible()
+            }
+        }
+
         let runtimeContextCurrent = self.webView === webView
             && livenessContextGeneration == expectedContextGeneration
             && currentNavigationTicket?.generation == expectedNavigationGeneration
             && currentNavigationTicket?.phase == expectedNavigationPhase
         let main = runtimeContextCurrent ? mainCaptured : mainCaptured.stale
         let isolated = runtimeContextCurrent ? isolatedCaptured : isolatedCaptured.stale
+        let responsiveness = runtimeContextCurrent
+            ? responsivenessCaptured
+            : responsivenessCaptured.stale
         let navigationFinished = currentNavigationTicket?.phase == .finished
         let nativeFinishedFacts = !webView.isLoading && webView.estimatedProgress >= 0.999
         let postFinishBoundary = runtimeContextCurrent && navigationFinished && nativeFinishedFacts
@@ -863,6 +994,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         var fields = runtimeFields(for: webView)
         fields.merge(main.diagnosticFields(prefix: "main_world")) { _, new in new }
         fields.merge(isolated.diagnosticFields(prefix: "isolated_world")) { _, new in new }
+        fields.merge(responsiveness.diagnosticFields()) { _, new in new }
         fields.merge([
             "runtime_context_current": .bool(runtimeContextCurrent),
             "navigation_finished": .bool(navigationFinished),
@@ -1269,6 +1401,53 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }))()
     """
 
+    /// Maximum wait for one frame callback; this is a measurement bound, not a degraded threshold.
+    private static let frameCallbackMeasurementWindowMilliseconds = 4_000
+
+    private static let runtimeResponsivenessProbeScript = """
+    const eventLoopStartedAt = performance.now();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const eventLoopScheduleLatency = performance.now() - eventLoopStartedAt;
+
+    let frameCallbackOutcome = "not_visible";
+    let frameCallbackLatency = null;
+    if (shouldMeasureFrame && document.visibilityState === "visible") {
+      if (typeof requestAnimationFrame !== "function") {
+        frameCallbackOutcome = "unavailable";
+      } else {
+        const frameStartedAt = performance.now();
+        const frameResult = await new Promise(resolve => {
+          let completed = false;
+          let frameRequestID = null;
+          const measurementTimerID = setTimeout(() => {
+            if (completed) return;
+            completed = true;
+            if (frameRequestID !== null) cancelAnimationFrame(frameRequestID);
+            resolve({ outcome: "measurement_window_elapsed", latency: null });
+          }, \(frameCallbackMeasurementWindowMilliseconds));
+
+          frameRequestID = requestAnimationFrame(() => {
+            if (completed) return;
+            completed = true;
+            clearTimeout(measurementTimerID);
+            resolve({
+              outcome: "sampled",
+              latency: performance.now() - frameStartedAt
+            });
+          });
+        });
+        frameCallbackOutcome = frameResult.outcome;
+        frameCallbackLatency = frameResult.latency;
+      }
+    }
+
+    return {
+      event_loop_schedule_latency_ms: eventLoopScheduleLatency,
+      frame_callback_outcome: frameCallbackOutcome,
+      frame_callback_latency_ms: frameCallbackLatency
+    };
+    """
+
     private static func productionLivenessProbe(
         webView: WKWebView,
         world: WebRuntimeLivenessWorld,
@@ -1285,7 +1464,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 )
             )
         }
-        let gate = WebRuntimeLivenessProbeGate()
+        let gate = WebRuntimeProbeGate<WebRuntimeLivenessProbeResult>()
         return await withCheckedContinuation { continuation in
             gate.install(continuation)
             let timeoutTask = Task { @MainActor [weak gate] in
@@ -1341,6 +1520,85 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                     }
                 }
             }
+        }
+    }
+
+    static func productionResponsivenessProbe(
+        webView: WKWebView,
+        shouldMeasureFrame: Bool,
+        timeout: TimeInterval,
+        requestBudget: WebRuntimeLivenessRequestBudget
+    ) async -> WebRuntimeResponsivenessProbeResult {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        guard let requestID = requestBudget.reserve(.mainPage) else {
+            return .terminal(
+                .suppressed,
+                probeLatencyMilliseconds: min(
+                    max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                    5_000
+                )
+            )
+        }
+        let gate = WebRuntimeProbeGate<WebRuntimeResponsivenessProbeResult>()
+        return await withCheckedContinuation { continuation in
+            gate.install(continuation)
+            let timeoutTask = Task { @MainActor [weak gate] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                } catch {
+                    return
+                }
+                gate?.finish(
+                    .terminal(.timeout, probeLatencyMilliseconds: timeout * 1_000)
+                )
+            }
+            gate.installTimeoutTask(timeoutTask)
+
+            webView.callAsyncJavaScript(
+                Self.runtimeResponsivenessProbeScript,
+                arguments: ["shouldMeasureFrame": shouldMeasureFrame],
+                in: nil,
+                in: .page,
+                completionHandler: { result in
+                    requestBudget.complete(requestID, in: .mainPage)
+                    let latency = min(
+                        max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                        5_000
+                    )
+                    guard case let .success(value) = result,
+                          let fields = value as? [String: Any],
+                          let eventLoopLatency = fields["event_loop_schedule_latency_ms"] as? NSNumber,
+                          eventLoopLatency.doubleValue.isFinite,
+                          eventLoopLatency.doubleValue >= 0,
+                          let rawFrameOutcome = fields["frame_callback_outcome"] as? String,
+                          let frameOutcome = WebRuntimeFrameCallbackOutcome(rawValue: rawFrameOutcome) else {
+                        gate.finish(
+                            .terminal(.failed, probeLatencyMilliseconds: latency)
+                        )
+                        return
+                    }
+
+                    let frameLatency = fields["frame_callback_latency_ms"] as? NSNumber
+                    guard (frameOutcome == .sampled && frameLatency != nil)
+                        || (frameOutcome != .sampled && frameLatency == nil),
+                        frameLatency?.doubleValue.isFinite != false,
+                        (frameLatency?.doubleValue ?? 0) >= 0 else {
+                        gate.finish(
+                            .terminal(.failed, probeLatencyMilliseconds: latency)
+                        )
+                        return
+                    }
+
+                    gate.finish(
+                        .success(
+                            probeLatencyMilliseconds: latency,
+                            eventLoopSchedulingLatencyMilliseconds: eventLoopLatency.doubleValue,
+                            frameCallbackOutcome: frameOutcome,
+                            frameCallbackLatencyMilliseconds: frameLatency?.doubleValue
+                        )
+                    )
+                }
+            )
         }
     }
 
