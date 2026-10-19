@@ -620,6 +620,58 @@ extension WebFocusAdapterTests {
         XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
     }
 
+    func testRuntimeLivenessSuppressionIsNotMisclassifiedAsTimeout() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, world in
+                .terminal(
+                    world == .mainPage ? .suppressed : .timeout,
+                    latencyMilliseconds: 5_000
+                )
+            }
+        )
+        load("<main>Suppressed cross-world probe</main>", in: webView)
+        await settle(webView)
+
+        await observer.captureCrossWorldLivenessOnce()
+
+        let event = try XCTUnwrap(writer.events.last { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertEqual(event.fields["main_world_probe_outcome"], .string("suppressed"))
+        XCTAssertEqual(event.fields["isolated_world_probe_outcome"], .string("timeout"))
+        XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_candidate" })
+        XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
+    }
+
+    func testRuntimeLivenessPendingRequestBudgetIsBoundedPerWorld() throws {
+        let budget = WebRuntimeLivenessRequestBudget()
+        let mainOne = try XCTUnwrap(budget.reserve(.mainPage))
+        let mainTwo = try XCTUnwrap(budget.reserve(.mainPage))
+        XCTAssertNil(budget.reserve(.mainPage))
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 2)
+
+        let isolatedOne = try XCTUnwrap(budget.reserve(.floatTabsIsolated))
+        let isolatedTwo = try XCTUnwrap(budget.reserve(.floatTabsIsolated))
+        XCTAssertNil(budget.reserve(.floatTabsIsolated))
+        XCTAssertEqual(budget.pendingCount(in: .floatTabsIsolated), 2)
+
+        budget.complete(mainOne, in: .mainPage)
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 1)
+        XCTAssertNotNil(budget.reserve(.mainPage))
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 2)
+
+        budget.complete(mainTwo, in: .mainPage)
+        budget.complete(isolatedOne, in: .floatTabsIsolated)
+        budget.complete(isolatedTwo, in: .floatTabsIsolated)
+        XCTAssertEqual(budget.pendingCount(in: .mainPage), 1)
+        XCTAssertEqual(budget.pendingCount(in: .floatTabsIsolated), 0)
+    }
+
     func testRuntimeLivenessNeedsTwoFinishedDualTimeoutsToConfirmStall() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

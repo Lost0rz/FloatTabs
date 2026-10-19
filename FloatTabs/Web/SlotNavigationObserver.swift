@@ -13,7 +13,7 @@ typealias RendererJavaScriptEvaluator = @MainActor (
     String
 ) async throws -> RendererProbeValues
 
-enum WebRuntimeLivenessWorld: String, Equatable, Sendable {
+enum WebRuntimeLivenessWorld: String, Equatable, Hashable, Sendable {
     case mainPage = "main_page"
     case floatTabsIsolated = "floattabs_isolated"
 }
@@ -23,6 +23,7 @@ enum WebRuntimeLivenessOutcome: String, Equatable, Sendable {
     case timeout
     case failed
     case stale
+    case suppressed
 }
 
 struct WebRuntimeLivenessProbeResult: Equatable, Sendable {
@@ -74,6 +75,32 @@ typealias WebRuntimeLivenessProbeEvaluator = @MainActor (
     WKWebView,
     WebRuntimeLivenessWorld
 ) async -> WebRuntimeLivenessProbeResult
+
+@MainActor
+final class WebRuntimeLivenessRequestBudget {
+    static let maximumPendingRequestsPerWorld = 2
+
+    private var pendingRequestIDs: [WebRuntimeLivenessWorld: Set<UUID>] = [:]
+
+    func reserve(_ world: WebRuntimeLivenessWorld) -> UUID? {
+        var requestIDs = pendingRequestIDs[world, default: []]
+        guard requestIDs.count < Self.maximumPendingRequestsPerWorld else { return nil }
+        let requestID = UUID()
+        requestIDs.insert(requestID)
+        pendingRequestIDs[world] = requestIDs
+        return requestID
+    }
+
+    func complete(_ requestID: UUID, in world: WebRuntimeLivenessWorld) {
+        guard var requestIDs = pendingRequestIDs[world] else { return }
+        requestIDs.remove(requestID)
+        pendingRequestIDs[world] = requestIDs
+    }
+
+    func pendingCount(in world: WebRuntimeLivenessWorld) -> Int {
+        pendingRequestIDs[world]?.count ?? 0
+    }
+}
 
 @MainActor
 private final class WebRuntimeLivenessProbeGate {
@@ -441,11 +468,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let normalizedLivenessInterval = min(max(crossWorldLivenessInterval, 1), 300)
         let normalizedLivenessTimeout = min(max(crossWorldLivenessTimeout, 0.1), 5)
         livenessProbeIntervalNanoseconds = UInt64(normalizedLivenessInterval * 1_000_000_000)
+        let livenessProbeRequestBudget = WebRuntimeLivenessRequestBudget()
         self.livenessProbeEvaluator = livenessProbeEvaluator ?? { webView, world in
             await Self.productionLivenessProbe(
                 webView: webView,
                 world: world,
-                timeout: normalizedLivenessTimeout
+                timeout: normalizedLivenessTimeout,
+                requestBudget: livenessProbeRequestBudget
             )
         }
         self.instantBackURLSafetyCheck = instantBackURLSafetyCheck
@@ -1243,9 +1272,19 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private static func productionLivenessProbe(
         webView: WKWebView,
         world: WebRuntimeLivenessWorld,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        requestBudget: WebRuntimeLivenessRequestBudget
     ) async -> WebRuntimeLivenessProbeResult {
         let startedAt = ProcessInfo.processInfo.systemUptime
+        guard let requestID = requestBudget.reserve(world) else {
+            return .terminal(
+                .suppressed,
+                latencyMilliseconds: min(
+                    max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
+                    5_000
+                )
+            )
+        }
         let gate = WebRuntimeLivenessProbeGate()
         return await withCheckedContinuation { continuation in
             gate.install(continuation)
@@ -1260,6 +1299,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             gate.installTimeoutTask(timeoutTask)
 
             let finishValue: @MainActor (Any?, Error?) -> Void = { value, error in
+                requestBudget.complete(requestID, in: world)
                 let latency = min(
                     max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000,
                     5_000
