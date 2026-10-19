@@ -773,8 +773,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     var currentContentProcessDiagnosticFields: [String: RuntimeDiagnosticValue] {
         [
-            "observed_content_process_epoch": Self.diagnosticInteger(observedContentProcessEpoch),
-            "observed_content_process_termination_count": Self.diagnosticInteger(
+            "observed_web_process_epoch": Self.diagnosticInteger(observedContentProcessEpoch),
+            "observed_web_process_termination_count": Self.diagnosticInteger(
                 observedContentProcessTerminationCount
             )
         ]
@@ -847,7 +847,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 min(max(ProcessInfo.processInfo.systemUptime - startedAt, 0) * 1_000, 10_000)
             ),
             "system_physical_memory_bytes": Self.diagnosticInteger(ProcessInfo.processInfo.physicalMemory),
-            "webcontent_resource_attribution": .string("unavailable_public_api")
+            "web_process_resource_attribution": .string("unavailable_public_api")
         ]) { _, new in new }
         if let residentSize = Self.currentProcessResidentSizeBytes() {
             fields["host_resident_size_bytes"] = Self.diagnosticInteger(residentSize)

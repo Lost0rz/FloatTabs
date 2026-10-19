@@ -44,7 +44,7 @@ final class SlotNavigationObserverLivenessTests: XCTestCase {
         XCTAssertEqual(event.fields["isolated_world_probe_outcome"], .string("timeout"))
         XCTAssertEqual(event.fields["navigation_finished"], .bool(true))
         XCTAssertEqual(event.fields["post_finish_dual_timeout_count"], .integer(0))
-        XCTAssertEqual(event.fields["webcontent_resource_attribution"], .string("unavailable_public_api"))
+        XCTAssertEqual(event.fields["web_process_resource_attribution"], .string("unavailable_public_api"))
         XCTAssertNotNil(event.fields["host_resident_size_bytes"])
         XCTAssertNil(event.fields["page_text"])
         XCTAssertNil(event.fields["prompt"])
@@ -135,7 +135,7 @@ final class SlotNavigationObserverLivenessTests: XCTestCase {
         XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
     }
 
-    func testObservedContentProcessEpochAdvancesOnlyAtDocumentedTerminationCallback() throws {
+    func testObservedWebProcessEpochAdvancesOnlyAtDocumentedTerminationCallback() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let webView = makeWebView()
@@ -154,11 +154,11 @@ final class SlotNavigationObserverLivenessTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            observer.currentContentProcessDiagnosticFields["observed_content_process_epoch"],
+            observer.currentContentProcessDiagnosticFields["observed_web_process_epoch"],
             .integer(1)
         )
         XCTAssertEqual(
-            observer.currentContentProcessDiagnosticFields["observed_content_process_termination_count"],
+            observer.currentContentProcessDiagnosticFields["observed_web_process_termination_count"],
             .integer(0)
         )
 
@@ -166,8 +166,8 @@ final class SlotNavigationObserverLivenessTests: XCTestCase {
         let first = try XCTUnwrap(
             writer.events.last { $0.event == "web_content_process_terminated" }
         )
-        XCTAssertEqual(first.fields["observed_content_process_epoch"], .integer(2))
-        XCTAssertEqual(first.fields["observed_content_process_termination_count"], .integer(1))
+        XCTAssertEqual(first.fields["observed_web_process_epoch"], .integer(2))
+        XCTAssertEqual(first.fields["observed_web_process_termination_count"], .integer(1))
         XCTAssertEqual(first.fields["runtime_generation"], .integer(42))
         XCTAssertEqual(
             first.fields["webview_instance_id"],
@@ -176,11 +176,11 @@ final class SlotNavigationObserverLivenessTests: XCTestCase {
 
         observer.webViewWebContentProcessDidTerminate(webView)
         XCTAssertEqual(
-            observer.currentContentProcessDiagnosticFields["observed_content_process_epoch"],
+            observer.currentContentProcessDiagnosticFields["observed_web_process_epoch"],
             .integer(3)
         )
         XCTAssertEqual(
-            observer.currentContentProcessDiagnosticFields["observed_content_process_termination_count"],
+            observer.currentContentProcessDiagnosticFields["observed_web_process_termination_count"],
             .integer(2)
         )
     }
