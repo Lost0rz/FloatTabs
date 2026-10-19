@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-DIAG-POST-FINISH-STALL-001`
 **Title:** Prepare bounded Web runtime diagnostics for long-term Air observation, including partial SPA interaction degradation
-**Status:** `ACTIVE — PARTIAL INTERACTION DEGRADATION CORRECTIVE`
+**Status:** `WAITING — WEB REAUDIT BEFORE MERGE`
 **Mode:** `DIAGNOSTIC`
 **Task class:** `INCIDENT_INVESTIGATION`
 **Base:** `main@3511297d5f573598556739519bae859322578768`
@@ -10,7 +10,7 @@
 **Draft PR:** `#138`
 **Initial diagnostic source identity:** `292d6225808ebc66a12dd36e100fe309e53a335d`
 **Control reconciliation commit:** `e7e790a98fc7da473a99d7c289ecd6bf39b3c908`
-**Final semantic implementation identity:** `0bfb2be83adda65e883931a49806c5c12364eaf2`
+**Final semantic implementation identity:** `1745acaab91185727901cc7ed48a43f4326ef73e`
 **Current repository head before this corrective:** `a7fea702cde83eeb515bf90274ed49e6a2cc5fb1`
 
 ## Objective
@@ -25,17 +25,19 @@ Mac mini is the development, probe, audit, build, and release-preparation machin
 - Installed/running identity was `/Applications/FloatTabs.app`, v0.5.4 / Build 22, PID `91025`, arm64, exact embedded source revision.
 - Release runtime logs contained `web_runtime.cross_world_liveness` and the required fields. No stall occurred (`NO_INCIDENT_YET`).
 - External harness attributed one WebContent, one Networking, and one GPU process to the host PID; its five-sample/five-second passive capture completed without warnings and reported 430.1 MB average combined RSS.
-- Exact semantic-head macOS CI run `39208850435` and QA DMG run `39208850566` both passed; PR #138 is OPEN, DRAFT, and MERGEABLE.
-- Full XCTest passed: 1,342 passed, 3 skipped, 0 failed. The two focused callback-budget/classification tests also passed. Debug arm64 and clean-head Release arm64 builds passed. The Release QA DMG passed codesign and image verification and remains local-only under `/private/tmp`.
-- Gate 5 Release runtime evidence remains from revision `4265baa34bec55cbd74171fe78a4162675dc7e05`; the final correction only bounds hung probe callbacks and distinguishes `suppressed` from timeout. The Release build of final semantic head is `0bfb2be83adda65e883931a49806c5c12364eaf2`, version 0.5.4 / Build 22, arm64, with exact source revision and clean tree metadata.
+- The partial-interaction correction is semantic commit `1745acaab91185727901cc7ed48a43f4326ef73e`, pushed to the existing branch. Exact semantic-head macOS CI run `39215541125` and QA DMG run `39215541225` both passed.
+- Full XCTest passed: 1,349 passed, 0 skipped, 0 failed. Seven focused responsiveness/Web runtime tests passed. Exact semantic-head Debug arm64 and Release arm64 builds passed. Release binary field availability and exact/clean source metadata were verified; QA DMG arm64 verification passed in CI and was not installed or published.
+- Gate 5 Air runtime evidence remains from revision `4265baa34bec55cbd74171fe78a4162675dc7e05`; it predates the callback-budget and responsiveness corrections. The Release arm64 build of current semantic head `1745acaab91185727901cc7ed48a43f4326ef73e` is v0.5.4 / Build 22, with exact source revision and clean tree metadata.
 - Root cause remains `UNKNOWN`; no recovery behavior is authorized.
 - New user report: after long ChatGPT Slot use, page access and control input may remain available while SPA controls respond slowly. This is a user report, not a fresh directly observed incident.
 - Read-only audit found the main-world probe records `evaluateJavaScript` round-trip time but no explicit event-loop scheduling or frame-callback delay. A fast round-trip success cannot establish those responsiveness dimensions. The fixed 30-second interval can miss a short, several-second episode between samples.
-- The current GitHub PR body still says fresh Air incident capture is required before merge, contrary to the reconciled observation-release gate; body alignment is authorized in this task.
+- At the start of this correction, the GitHub PR body still said fresh Air incident capture was required before merge, contrary to the reconciled observation-release gate; body alignment remains an in-scope closeout action.
+- The latest Release arm64 build embeds source revision `1745acaab91185727901cc7ed48a43f4326ef73e`, exact=true, tree=clean, v0.5.4 / Build 22, and includes all new responsiveness field names in the binary.
+- The new fields preserve raw event-loop scheduling latency, frame callback outcome/latency, and an independent probe outcome. No fixed degraded threshold or causal classification was added. A 30-second sample can still miss a transient lasting only a few seconds.
 
 ## Authorized scope
 
-1. Reconcile this task's status and merge gate in `CURRENT_STATUS.md` and `CURRENT_TASK.md`, commit those control-only changes, and push the existing task branch before semantic work.
+1. Reconcile this task's status and merge gate in `CURRENT_STATUS.md` and `CURRENT_TASK.md`; this control-only reconciliation was committed and pushed as `2d0aaee3` before semantic work.
 2. The partial-interaction read-only audit is complete and insufficient: add one content-free, bounded main-world event-loop scheduling and visible-page frame-callback measurement to the existing supported-ChatGPT sample. Preserve the existing 30-second cadence, existing per-world maximum of two pending WebKit callbacks, timeout boundary, and task/observer ownership. Record raw bounded latency/outcomes; do not invent a degraded threshold or claim UI/SPA responsiveness from a single sample.
 3. Add focused regression coverage distinguishing slow success from timeout, proving the added fields are content-free, ensuring runtime replacement/invalidation yields stale rather than degraded evidence, and preserving bounded pending callbacks/task lifecycle.
 4. Keep the periodic observer to one cancelable task per observer. The new one-shot measurement may schedule only its bounded per-sample callbacks; add no persistent listener, high-frequency polling, accumulating observer, recovery behavior, or product/UI changes.
@@ -55,16 +57,17 @@ A fresh Air incident is not a merge prerequisite. It is required only for the la
 
 ## Audit outcome and current handoff
 
-- Probe availability: Release production code records both world outcomes and the required navigation, Web-process, host-memory, and attribution fields in standard Runtime Diagnostics. Gate 5 observed 70 such Release events.
-- Incident discrimination: main success / isolated timeout, dual timeout, and Web-process termination/epoch changes remain distinguishable. Both worlds succeeding cannot establish a responsive UI. No single event establishes cause.
+- Probe availability: Release production code records both world outcomes and the required navigation, Web-process, host-memory, and attribution fields in standard Runtime Diagnostics. Gate 5 observed 70 such Release events on the earlier installed diagnostic build. The exact current Release binary includes the new standard responsiveness fields and exact source identity.
+- Partial interaction evidence: a content-free main-world timer turn and visible-page `requestAnimationFrame` callback now contribute raw bounded latency/outcome fields. Slow-success remains distinct from timeout; hidden/not-visible, failed, stale, suppressed, and not-run cases remain distinct as applicable. No product threshold classifies samples as healthy/degraded. Thirty-second cadence may miss a transient between samples.
+- Incident discrimination: main success / isolated timeout, dual timeout, responsiveness slow-success/timeout, and Web-process termination/epoch changes remain distinguishable. Both liveness worlds succeeding cannot establish a responsive UI. No single event establishes cause.
 - Retention/export: local history uses 10 MiB segments, a 10-segment cap, and 7-day retention. Warning/error/fault events flush immediately; export flushes pending data first. Release Settings → Advanced provides `Export Recent Diagnostics…` and `Open Saved Logs Folder`.
 - Provenance/privacy: exported metadata includes app version, build number, source revision, exact/tree state, architecture, session ID, and schema version. Sanitization is applied before OSLog and again before disk persistence; no content, cookie, token, session, or Browser Profile secret is recorded by this instrumentation.
 - Lifecycle gap found and corrected: WebKit JavaScript completion handlers cannot be cancelled after the Swift timeout. The new per-world request budget caps outstanding callbacks at two, emits `suppressed` after saturation, and does not count suppression as a timeout. The periodic observer remains one cancelable task per observer at 30-second intervals.
-- Changed files: `FloatTabs/Web/SlotNavigationObserver.swift` and `FloatTabsTests/WebFocusAdapterTests.swift` in semantic commit `0bfb2be8`; `CURRENT_STATUS.md` and `CURRENT_TASK.md` contain the control reconciliation and final audit state.
+- Changed files: `FloatTabs/Web/SlotNavigationObserver.swift` and `FloatTabsTests/WebFocusAdapterTests.swift` in semantic commit `1745acaab`; `CURRENT_STATUS.md` and `CURRENT_TASK.md` contain the task reconciliation and this final audit receipt.
 - Release XCTest could not compile the existing test target because unrelated tests reference `DEBUG`-only helper methods. The production Release app/DMG build passes, and Gate 5 supplied actual Release runtime field evidence.
 - No fresh stall was observed. `ROOT_CAUSE=UNKNOWN`; no product recovery behavior or user data changes were made.
 
-All task-local technical gates are complete. The remaining handoff is independent Web audit before PR #138 can enter merge review. The task remains unmerged and unpublished.
+All local semantic and remote CI/QA gates are complete. The remaining handoff is independent Web re-audit before merge review. The task remains unmerged and unpublished.
 
 ## Diagnostic evidence requirements
 
