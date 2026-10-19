@@ -204,6 +204,10 @@ final class WebFocusRouter: ObservableObject {
         }
     }
 
+    /// Initialize the website's primary input focus after FloatTabs is
+    /// presented from another application. Native NSWindow focus alone is not
+    /// enough for WebKit: keyboard navigation can remain associated with the
+    /// previously active application until the page has a DOM input focus.
     @discardableResult
     func captureInputTargetForExternalVoice() async -> WebFocusVoiceTarget {
         guard let webView = currentWebView else { return .none }
@@ -233,8 +237,12 @@ final class WebFocusRouter: ObservableObject {
             )
             var failureFields = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
             failureFields["focus_owner"] = .string("external_voice")
-            failureFields["voice_target_kind"] = .string(WebFocusVoiceTargetKind.none.rawValue)
-            failureFields["voice_target_source"] = .string(WebFocusVoiceTargetSource.none.rawValue)
+            failureFields["voice_target_kind"] = .string(
+                WebFocusVoiceTargetKind.none.rawValue
+            )
+            failureFields["voice_target_source"] = .string(
+                WebFocusVoiceTargetSource.none.rawValue
+            )
             diagnostics.record(
                 event: "web_focus.failed",
                 level: .warning,
@@ -250,6 +258,11 @@ final class WebFocusRouter: ObservableObject {
         trace: RuntimeDiagnosticTrace? = nil
     ) async -> Bool {
         guard let webView = currentWebView else { return false }
+
+        // inputFocusScript keeps the ordinary presentation fast path in one
+        // WebKit evaluation. The external voice path deliberately bypasses
+        // post-activation activeElement history and uses its captured marker
+        // or adapter scoring instead.
         let adapter = await registry.adapter(for: webView.url, webView: webView)
         currentAdapter = adapter
         currentWebsiteIdentifier = adapter.identifier
@@ -274,7 +287,9 @@ final class WebFocusRouter: ObservableObject {
                     "site": .string(adapter.identifier),
                     "preserved_capture": .bool(preservingCapturedTarget),
                     "focus_owner": .string(
-                        preservingCapturedTarget ? "external_voice" : "standard_presentation"
+                        preservingCapturedTarget
+                            ? "external_voice"
+                            : "standard_presentation"
                     ),
                     "voice_target_kind": .string(voiceTarget.kind.rawValue),
                     "voice_target_source": .string(voiceTarget.source.rawValue)
@@ -288,8 +303,12 @@ final class WebFocusRouter: ObservableObject {
             var failureFields = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)
             if preservingCapturedTarget {
                 failureFields["focus_owner"] = .string("external_voice")
-                failureFields["voice_target_kind"] = .string(WebFocusVoiceTargetKind.none.rawValue)
-                failureFields["voice_target_source"] = .string(WebFocusVoiceTargetSource.none.rawValue)
+                failureFields["voice_target_kind"] = .string(
+                    WebFocusVoiceTargetKind.none.rawValue
+                )
+                failureFields["voice_target_source"] = .string(
+                    WebFocusVoiceTargetSource.none.rawValue
+                )
             }
             diagnostics.record(
                 event: "web_focus.failed",
@@ -302,6 +321,9 @@ final class WebFocusRouter: ObservableObject {
         }
     }
 
+    /// Verifies the current DOM target without moving focus again. Callers
+    /// combine this with native key-window/first-responder checks before they
+    /// acknowledge an external voice request.
     func isInputFocusReady() async -> Bool {
         guard let webView = currentWebView else { return false }
         let adapter = await registry.adapter(for: webView.url, webView: webView)
@@ -341,6 +363,8 @@ final class WebFocusRouter: ObservableObject {
         }
         currentTarget = from
 
+        // An unclear or non-primary focus always defaults to the input. This
+        // keeps the first invocation useful after load, refresh, or tab switch.
         let destination: WebFocusTarget = from == .input ? .page : .input
         do {
             let focused = try await adapter.togglePrimaryFocus(in: webView)
@@ -528,8 +552,10 @@ final class WebFocusRouter: ObservableObject {
                     in: ChatGPTAttentionBridge.contentWorld
                 ) { result in
                     switch result {
-                    case let .success(value): finishValue(value, nil)
-                    case let .failure(error): finishValue(nil, error)
+                    case let .success(value):
+                        finishValue(value, nil)
+                    case let .failure(error):
+                        finishValue(nil, error)
                     }
                 }
             }
@@ -635,7 +661,9 @@ final class WebFocusRouter: ObservableObject {
         guard let value = RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)["error_category"] else {
             return "runtime"
         }
-        if case let .string(category) = value { return category }
+        if case let .string(category) = value {
+            return category
+        }
         return "runtime"
     }
 }

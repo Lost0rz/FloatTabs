@@ -258,6 +258,9 @@ final class WebFocusAdapterTests: XCTestCase {
         let marked = await router.captureInputTargetForExternalVoice()
         XCTAssertTrue(marked.succeeded)
 
+        // Simulate WebKit restoring the other editor while the FloatTabs
+        // window becomes key. The voice restore must use the pre-presentation
+        // marker, not this newer document.activeElement.
         _ = await boolValue(
             """
             (() => {
@@ -613,12 +616,6 @@ final class WebFocusAdapterTests: XCTestCase {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
         let firstWebView = makeWebView()
-        _ = SlotNavigationObserver(
-            slotID: UUID(),
-            webView: firstWebView,
-            websiteMode: .desktop,
-            onURLChange: { _, _ in }
-        )
         load("<main>First runtime</main>", in: firstWebView)
         await settle(firstWebView)
 

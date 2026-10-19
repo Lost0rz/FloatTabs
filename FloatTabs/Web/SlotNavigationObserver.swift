@@ -117,6 +117,9 @@ final class DownloadCoordinator: NSObject, WKDownloadDelegate {
 
             let id = ObjectIdentifier(download)
             let stagingURL = Self.stagingURL(for: finalURL)
+            // WKDownload requires an unused destination. Always download into a
+            // same-directory staging file so an existing user file is never
+            // deleted before the transfer has actually succeeded.
             if self.fileManager.fileExists(atPath: stagingURL.path) {
                 try? self.fileManager.removeItem(at: stagingURL)
             }
@@ -258,9 +261,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var nextNavigationGeneration: UInt64 = 0
     private var currentNavigationTicket: DiagnosticNavigationTicket?
     /// Public WebKit does not expose a stable child-process identifier. This
-    /// epoch therefore advances only when FloatTabs observes the documented
-    /// `webViewWebContentProcessDidTerminate` boundary. It must not be read as
-    /// proof that no other WebKit process swap happened between callbacks.
+    /// epoch advances only when FloatTabs observes the documented termination
+    /// callback; it is correlation evidence, not proof of every process swap.
     private var observedContentProcessEpoch: UInt64 = 1
     private var observedContentProcessTerminationCount: UInt64 = 0
     private var navigationStallTask: Task<Void, Never>?
@@ -276,12 +278,20 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let targetURL: URL?
     }
 
+    /// Set only for a FloatTabs-issued entry whose `https://` scheme was
+    /// inferred from a bare user address. Any successful commit or a handled
+    /// failure consumes the one-shot permission.
     private var pendingHTTPEntryFallback: URL?
 
+    /// Whether an entry load is currently eligible for the http fallback.
+    /// Exposed for tests and diagnostics.
     var isHTTPEntryFallbackPending: Bool {
         pendingHTTPEntryFallback != nil
     }
 
+    /// Whether WebKit has asked us to correlate a possible Instant Back
+    /// activation. This marker is transient and is never a committed-URL
+    /// authority.
     var isInstantBackActivationPending: Bool {
         pendingInstantBack != nil
     }
@@ -408,6 +418,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         downloadCoordinator.attach(download, presentingWindow: webView.window)
     }
 
+    /// Historical Stage 3 regression seam. New Stage 4 policy tests should call
+    /// `WebNavigationCoordinator` directly; this remains only so the accepted
+    /// Stage 3 fixture continues to guard the original Bilibili fix.
     static func shouldOpenInCurrentSlot(targetFrame: WKFrameInfo?, url: URL?) -> Bool {
         WebNavigationCoordinator.stage3FallbackDisposition(
             hasTargetFrame: targetFrame != nil,
@@ -426,6 +439,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: runtimeFields(for: webView).merging(callbackFields) { _, new in new }
         )
+        // If Instant Back falls back to normal loading, ordinary didCommit is
+        // authoritative again. A new provisional navigation also invalidates
+        // any older correlation marker.
         cancelPendingInstantBack()
     }
 
@@ -433,6 +449,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         cancelPendingInstantBack()
+        // Once an https entry commits, later in-page failures can never inherit
+        // the entry-only downgrade permission.
         pendingHTTPEntryFallback = nil
         let ticket = navigation.flatMap(commitDiagnosticNavigation)
         var commitFields = runtimeFields(for: webView).merging(
@@ -447,6 +465,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: commitFields
         )
+        // At this delegate boundary WebKit's visible URL is the final
+        // committed destination for this navigation. Pass it as a narrow,
+        // transient commit fact; shared presentation lookup remains history
+        // based and must not broaden to generic `webView.url` observation.
         onNavigationCommit(slotID, webView.url)
     }
 
@@ -551,6 +573,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onContentProcessTermination(slotID)
     }
 
+    /// Called by WebKit before a back/forward transition. The request itself
+    /// is not evidence that the historical page became current, so Instant
+    /// Back only records the target and waits for the existing URL observation
+    /// (or didFinish) to verify WebKit's current history item.
     @available(macOS 26.0, *)
     func webView(
         _ webView: WKWebView,
@@ -558,6 +584,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         willUseInstantBack: Bool,
         completionHandler: @escaping (Bool) -> Void
     ) {
+        // A new request supersedes any older pending target before its own
+        // transient marker is installed.
         cancelPendingInstantBack()
         if willUseInstantBack {
             pendingInstantBack = PendingInstantBack(
@@ -576,6 +604,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         completionHandler(true)
     }
 
+    /// Deterministic policy gate used by the production correlation path and
+    /// by tests on runners that cannot force WebKit's Instant Back runtime.
+    /// The current history-item identity remains the authority; URLs only
+    /// verify that the observed WebView URL and target item agree.
     static func confirmedInstantBackURL(
         expectedItemID: ObjectIdentifier,
         currentItemID: ObjectIdentifier?,
@@ -596,6 +628,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         return currentItemURL
     }
 
+    /// Configures one-shot fallback for the next FloatTabs-issued entry load.
+    /// `allowed` must represent user-input provenance: true only when FloatTabs
+    /// supplied the https scheme. Passing false also clears any stale pending
+    /// permission before an explicit HTTPS, HTTP, reload-equivalent, or internal
+    /// navigation is started.
     func configureHTTPEntryFallback(for url: URL, allowed: Bool) {
         pendingHTTPEntryFallback = allowed && WebAppURL.httpFallbackCandidate(for: url) != nil
             ? url
@@ -974,6 +1011,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationStallTask = nil
     }
 
+    /// Pure fallback decision: a connection-level failure of exactly the
+    /// pending inferred entry URL yields the http candidate. Certificate-trust
+    /// failures, other URLs, and absent pending state never downgrade.
     static func httpFallbackURL(pending: URL?, failingURL: URL?, error: Error) -> URL? {
         guard let pending,
               let failingURL,
@@ -1068,6 +1108,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         WebViewFactory.configureHiddenScrollers(in: webView)
     }
 
+    // Internal visibility keeps the deterministic history-item correlation
+    // path directly testable on runners that cannot force WebKit's native
+    // Instant Back callback sequence.
     func confirmInstantBackActivation(
         in webView: WKWebView,
         observedURL: URL
@@ -1085,6 +1128,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             observedURL: observedURL,
             isSafeURL: instantBackURLSafetyCheck
         ) != nil else {
+            // A URL observation matching another current history item proves
+            // that this request was superseded. If the observed URL is only a
+            // transient value ahead of WebKit's current item, retain the marker
+            // for the next authoritative observation.
             if currentItem.url.absoluteString == observedURL.absoluteString,
                currentItem !== pendingInstantBack.targetItem {
                 cancelPendingInstantBack()
