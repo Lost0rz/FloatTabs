@@ -1,60 +1,58 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-DIAG-POST-FINISH-STALL-001`
-**Title:** Merge bounded Web runtime diagnostics for long-term Air observation
-**Status:** `AUTHORIZED — FINAL MERGE GATE`
-**Mode:** `DIAGNOSTIC`
-**Task class:** `INCIDENT_INVESTIGATION`
-**Base:** `main@3511297d5f573598556739519bae859322578768`
-**Branch:** `codex/ft-post-finish-stall-diag-001`
-**PR:** `#138`
-**Final semantic implementation identity:** `1745acaab91185727901cc7ed48a43f4326ef73e`
+**Task ID:** `FT-RELEASE-V0.5.5-001`
+**Title:** Publish FloatTabs v0.5.5 diagnostic observation release
+**Status:** `ACTIVE — RELEASE PREP`
+**Mode:** `RELEASE`
+**Task class:** `RELEASE`
+**Base:** `main@1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`
+**Branch:** `release/ft-v0.5.5`
+**Target version:** `0.5.5`
+**Target build:** `23`
 
 ## Objective
 
-Merge the audited diagnostic infrastructure so FloatTabs can be released as a long-term observation build for normal use on the Air. Root cause remains `UNKNOWN`; this task does not claim the stall is fixed.
-
-Mac mini remains the development/release-preparation machine. Air remains the long-term normal-use observation and fresh-incident capture machine.
+Publish the already-merged bounded diagnostic infrastructure as FloatTabs v0.5.5 / Build 23 for long-term normal-use observation on the Air. Root cause remains `UNKNOWN`; this release must not claim the stall is fixed.
 
 ## Verified basis
 
-- Independent Web re-audit passed on 2026-10-19 against repository head `4f1b6b7f7c507970d055f9d4ac77b61b0090dc7e`.
-- Semantic implementation head `1745acaab91185727901cc7ed48a43f4326ef73e` contains bounded cross-world liveness plus content-free event-loop/frame responsiveness evidence.
-- Focused responsiveness/Web Runtime XCTest: 7 passed.
-- Full XCTest: 1,349 passed, 0 skipped, 0 failed.
-- Debug arm64 and Release arm64 builds passed.
-- Pre-merge audited-head macOS CI `39216559333` passed.
-- Pre-merge audited-head QA DMG `39216559277` passed.
-- PR #138 was open, draft, clean, and mergeable at the last audit.
-- Fresh Air incident capture is later causal evidence and is not a merge prerequisite.
+- PR #138 merged to protected `main` at `1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`.
+- Post-merge main macOS CI run `39227623989` passed, including Debug build, Release build, native arm64 verification, and unit tests.
+- Latest published release before this task is v0.5.4 / Build 22.
+- Tag/release `v0.5.5` does not exist at task start.
+- Repository `Publish Release` workflow is the canonical publisher and reads version/build metadata from `FloatTabs.xcodeproj/project.pbxproj` plus matching `docs/release/FloatTabs_v<version>.md`.
 
 ## Authorized scope
 
-1. Record this user-authorized merge state in `CURRENT_TASK.md` / `CURRENT_STATUS.md` and push it on the existing PR branch.
-2. Re-run/verify the required exact-head CI and QA DMG for the resulting control-only head.
-3. If exact-head checks pass and PR #138 remains clean/mergeable, mark it Ready for Review and merge it into protected `main` using an expected-head guard.
-4. Verify the merge landed on `main` and the required post-merge repository state is healthy.
-5. Do not perform further product-code changes in this task.
-6. After merge, close this task and create a separate release task from the merged `main` baseline for the observation release.
+1. Bump only the app release metadata from v0.5.4 / Build 22 to v0.5.5 / Build 23 in the app target Debug/Release configurations.
+2. Add `docs/release/FloatTabs_v0.5.5.md` describing the diagnostic-observation release and its limitations.
+3. Keep product semantics unchanged from merged main; no additional runtime/recovery behavior is authorized.
+4. Open a release PR to protected `main` and require exact-head CI + QA DMG PASS before merge.
+5. After merge, verify post-merge CI and the `Publish Release` workflow.
+6. Verify the public `v0.5.5` release, tag target, DMG, checksum, dSYM, and dSYM checksum assets before declaring publication complete.
+7. Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, and existing diagnostics history must not be touched.
 
-## Merge gate
+## Release gate
 
-Merge only if all remain true on the literal final PR head:
+The release PR may merge only when:
 
-- Web re-audit = PASS;
-- required `Build & Test (Apple Silicon arm64)` = PASS;
-- QA DMG = PASS;
-- PR state = open / clean / mergeable;
-- head/base identity unchanged except for this authorized control reconciliation.
+- diff is limited to release controls, version/build metadata, and the v0.5.5 release note;
+- app metadata is exactly `0.5.5` / `23` for Debug and Release;
+- exact-head `Build & Test (Apple Silicon arm64)` passes;
+- exact-head QA DMG passes;
+- PR remains clean/mergeable;
+- release note explicitly preserves `ROOT_CAUSE=UNKNOWN` and no-fix claim.
+
+Publication completes only after the repository publisher succeeds and the public release assets are verified.
 
 ## Explicitly unauthorized
 
-- Any claim that root cause is known or the bug is fixed.
-- New reload/reset/rebuild/recovery behavior.
-- Hot/Warm/Cold policy changes.
-- Browser Profile, cookie, session, WebsiteData, Slot, preference, backup, or user-configuration mutation.
-- Any additional semantic product change before merge.
+- Product feature or runtime semantic changes.
+- Root-cause claims or claims that the stall is fixed.
+- Automatic reload/reset/rebuild/recovery changes.
+- Residency-policy changes.
+- User-data or Browser Profile/session mutations.
 
-## After merge
+## Expected terminal state
 
-This task becomes terminal. The successor task is a release-only task that will bump version/build, add release notes, validate the package, merge through protected `main`, and allow the existing `Publish Release` workflow to publish the observation release.
+`v0.5.5 / Build 23` is publicly downloadable for Air long-term observation, with diagnostic export/log access preserved. A later fresh Air incident remains causal evidence for the continuing investigation.

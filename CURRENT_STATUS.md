@@ -6,58 +6,41 @@
 
 ## Mode
 
-**MODE: AUTHORIZED — FINAL MERGE GATE**
-Active task: `FT-DIAG-POST-FINISH-STALL-001` on `codex/ft-post-finish-stall-diag-001`.
-PR: `#138 — Diagnose post-finish Web runtime stalls across JavaScript worlds`.
+**MODE: ACTIVE — RELEASE PREP**
+Active task: `FT-RELEASE-V0.5.5-001` on `release/ft-v0.5.5`.
 
-## Current facts
+## Accepted product baseline
 
-- Protected baseline before merge: `main@3511297d5f573598556739519bae859322578768`.
-- Latest public release: `v0.5.4` / Build 22.
-- Final semantic implementation identity: `1745acaab91185727901cc7ed48a43f4326ef73e`.
-- Independent Web re-audit: `PASS` on 2026-10-19.
-- Pre-merge audited repository head: `4f1b6b7f7c507970d055f9d4ac77b61b0090dc7e`.
-- Pre-merge audited-head macOS CI `39216559333`: PASS.
-- Pre-merge audited-head QA DMG `39216559277`: PASS.
-- Focused responsiveness/Web Runtime XCTest: 7 passed.
-- Full XCTest: 1,349 passed, 0 skipped, 0 failed.
-- Root cause: `UNKNOWN`.
-- Fresh incident: `NOT_OBSERVED`.
+- PR #138 merged to protected `main` at `1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`.
+- Post-merge main macOS CI run `39227623989`: PASS.
+- Merged diagnostics preserve bounded cross-world liveness, event-loop/frame responsiveness evidence, Web-process epoch/termination correlation, and host-memory evidence.
+- Root cause remains `UNKNOWN`; no recovery behavior was added and the stall is not claimed fixed.
+- Latest public release before this task: `v0.5.4` / Build 22.
 
-## Diagnostic observation baseline
+## Release target
 
-The Release diagnostic path now preserves bounded, content-free evidence for:
+```text
+VERSION=0.5.5
+BUILD=23
+CHANNEL=public GitHub Release
+ARCH=arm64
+PURPOSE=long-term Air observation
+ROOT_CAUSE=UNKNOWN
+BUG_FIXED_CLAIM=NO
+```
 
-- main-page and FloatTabs-isolated-world liveness;
-- navigation phase and Web-process epoch/termination count;
-- host resident memory and explicit attribution availability;
-- main-world JavaScript round-trip latency;
-- main-world event-loop scheduling latency;
-- visible-page frame callback outcome/latency.
+The release preparation is metadata/documentation/package-only. No product runtime semantic change is authorized after the accepted main baseline.
 
-Sampling remains low-frequency at 30-second intervals. It can show persistent/recurring degradation but may miss a brief episode entirely between samples. No fixed degraded threshold or causal classification is introduced.
+## Observation expectations
 
-Probe lifecycle remains bounded: one cancelable observation task per observer, at most two pending callbacks per JS world, bounded timeout/window behavior, and no persistent page listener or high-frequency polling.
+Air is the long-term real-use observation machine. Sampling remains low-frequency and content-free. Short transient slowdowns may occur entirely between 30-second samples; the diagnostics provide trend/incident evidence, not proof that every interaction was responsive.
 
-Diagnostics remain content-free and do not record prompt/response text, page text, clicked control, selector, cookies, tokens, sessions, or Browser Profile secrets.
+If a fresh slow/stall incident occurs on Air, preserve/export diagnostics before reload/restart when practical. Fresh incident evidence remains necessary for later causal investigation.
 
-## Merge authorization
+## Data safety
 
-The user authorized merge and subsequent observation release on 2026-10-19.
+This release task must not modify or reset Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or existing diagnostic history.
 
-PR #138 may be marked Ready and merged only after the literal final control-only head re-passes exact-head required CI and QA DMG and remains clean/mergeable.
+## Next
 
-No further semantic code change is authorized in this task.
-
-## Release path after merge
-
-After PR #138 merges and main is verified healthy:
-
-1. close `FT-DIAG-POST-FINISH-STALL-001` as merged;
-2. create a separate release-only task from merged `main`;
-3. bump version/build and add release notes;
-4. validate exact release head;
-5. merge the release PR through protected main;
-6. allow the repository `Publish Release` workflow to publish the observation build for Air long-term use.
-
-The release must state that root cause remains unknown and that the stall is not claimed fixed.
+Bump release metadata to v0.5.5 / Build 23, add matching release notes, open a release PR, require exact-head CI/QA PASS, merge through protected main, then verify the repository Publish Release workflow and public assets.
