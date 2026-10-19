@@ -2,57 +2,64 @@
 
 **Task ID:** `FT-RELEASE-V0.5.5-001`
 **Title:** Publish FloatTabs v0.5.5 diagnostic observation release
-**Status:** `ACTIVE — RELEASE PREP`
-**Mode:** `RELEASE`
+**Status:** `TERMINAL — PUBLISHED / VERIFIED`
+**Mode:** `TERMINAL`
 **Task class:** `RELEASE`
-**Base:** `main@1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`
-**Branch:** `release/ft-v0.5.5`
-**Target version:** `0.5.5`
-**Target build:** `23`
 
-## Objective
+> This release task is complete and grants no further product, release, branch, data, or recovery authority.
 
-Publish the already-merged bounded diagnostic infrastructure as FloatTabs v0.5.5 / Build 23 for long-term normal-use observation on the Air. Root cause remains `UNKNOWN`; this release must not claim the stall is fixed.
+## Terminal result
 
-## Verified basis
+FloatTabs v0.5.5 / Build 23 has been merged, published, and independently verified as the current public observation release for long-term normal use on the Air.
 
-- PR #138 merged to protected `main` at `1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`.
-- Post-merge main macOS CI run `39227623989` passed, including Debug build, Release build, native arm64 verification, and unit tests.
-- Latest published release before this task is v0.5.4 / Build 22.
-- Tag/release `v0.5.5` does not exist at task start.
-- Repository `Publish Release` workflow is the canonical publisher and reads version/build metadata from `FloatTabs.xcodeproj/project.pbxproj` plus matching `docs/release/FloatTabs_v<version>.md`.
+```text
+VERSION=0.5.5
+BUILD=23
+ARCH=arm64
+ROOT_CAUSE=UNKNOWN
+BUG_FIXED_CLAIM=NO
+RELEASE_STATE=PUBLISHED_VERIFIED
+```
 
-## Authorized scope
+## Verified release identity
 
-1. Bump only the app release metadata from v0.5.4 / Build 22 to v0.5.5 / Build 23 in the app target Debug/Release configurations.
-2. Add `docs/release/FloatTabs_v0.5.5.md` describing the diagnostic-observation release and its limitations.
-3. Keep product semantics unchanged from merged main; no additional runtime/recovery behavior is authorized.
-4. Open a release PR to protected `main` and require exact-head CI + QA DMG PASS before merge.
-5. After merge, verify post-merge CI and the `Publish Release` workflow.
-6. Verify the public `v0.5.5` release, tag target, DMG, checksum, dSYM, and dSYM checksum assets before declaring publication complete.
-7. Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, and existing diagnostics history must not be touched.
+- Diagnostic infrastructure PR #138 merged to protected `main` at `1d6f80a9e59a2fcbee1c846be562b14c6b6e2fea`.
+- Release PR #139 merged to protected `main` at `45c9d4af15a2472327b796f2b87b88b3efb6717c`.
+- Release metadata is v0.5.5 / Build 23 for both Debug and Release app configurations.
+- Release PR exact-head macOS CI `39230237508`: PASS.
+- Release PR exact-head QA DMG `39230237645`: PASS.
+- Post-merge main macOS CI `39231229582`: PASS.
+- Publish Release workflow `39231229592`: PASS.
+- Public GitHub Release: `v0.5.5`, non-draft, non-prerelease, published 2026-10-19.
+- `refs/tags/v0.5.5` points directly to `45c9d4af15a2472327b796f2b87b88b3efb6717c`.
+- Published assets verified present:
+  - `FloatTabs-0.5.5.dmg`
+  - `FloatTabs-0.5.5.dmg.sha256`
+  - `FloatTabs-0.5.5.dSYM.zip`
+  - `FloatTabs-0.5.5.dSYM.zip.sha256`
+- DMG release asset SHA-256 digest metadata: `d574f15d93d8ea55cb3189e4c2df54af2c58ed20b760b4c0f1527e9833fadac5`.
 
-## Release gate
+## Product / diagnostic state
 
-The release PR may merge only when:
+The published observation release includes bounded, content-free evidence for:
 
-- diff is limited to release controls, version/build metadata, and the v0.5.5 release note;
-- app metadata is exactly `0.5.5` / `23` for Debug and Release;
-- exact-head `Build & Test (Apple Silicon arm64)` passes;
-- exact-head QA DMG passes;
-- PR remains clean/mergeable;
-- release note explicitly preserves `ROOT_CAUSE=UNKNOWN` and no-fix claim.
+- main-page and FloatTabs-isolated-world JavaScript liveness;
+- navigation phase and observed Web-process epoch/termination count;
+- host resident memory and explicit public attribution availability;
+- main-world JavaScript round-trip latency;
+- event-loop scheduling latency;
+- visible-page frame callback outcome/latency.
 
-Publication completes only after the repository publisher succeeds and the public release assets are verified.
+Sampling remains approximately every 30 seconds. A brief slowdown may occur entirely between samples. No fixed healthy/degraded threshold or causal classification is defined.
 
-## Explicitly unauthorized
+Root cause remains `UNKNOWN`. No automatic reload/reset/rebuild or new recovery behavior was introduced.
 
-- Product feature or runtime semantic changes.
-- Root-cause claims or claims that the stall is fixed.
-- Automatic reload/reset/rebuild/recovery changes.
-- Residency-policy changes.
-- User-data or Browser Profile/session mutations.
+## Data safety
 
-## Expected terminal state
+No release or diagnostic action authorized by this task clears or rewrites Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or existing diagnostic history.
 
-`v0.5.5 / Build 23` is publicly downloadable for Air long-term observation, with diagnostic export/log access preserved. A later fresh Air incident remains causal evidence for the continuing investigation.
+## Operational next state
+
+No engineering mutation task is active after this closeout.
+
+Air is the long-term real-use observation host. If a fresh slow/stall incident occurs, preserve/export Runtime Diagnostics before reload/restart when practical and return that evidence for a new causal-investigation decision.
