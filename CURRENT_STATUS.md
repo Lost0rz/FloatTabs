@@ -6,31 +6,45 @@
 
 ## Mode
 
-**MODE: ACTIVE_DIAGNOSTIC_TASK**
+**MODE: READY_FOR_REAL_MAC_CAPTURE**
 
 Active task: `FT-DIAG-POST-FINISH-STALL-001` on `codex/ft-post-finish-stall-diag-001`.
+Draft PR: `#138 — Diagnose post-finish Web runtime stalls across JavaScript worlds`.
 
-## Baseline
+## Baseline and validated implementation
 
-- Task branch was created from protected `main@3511297d5f573598556739519bae859322578768`.
+- Protected baseline remains `main@3511297d5f573598556739519bae859322578768`.
 - Latest public release remains `v0.5.4` / Build 22.
-- The fresh incident logs under review came from clean Release source revision `439590659a42d52abd985c323dee4e1e0fbe9b47`.
-- Previous lifecycle-sync task `FT-LIFECYCLE-SYNC-001` remains terminal; it grants no authority to this work.
-- Browser Profiles, Slots, sessions/cookies/WebKit data, backups, preferences, diagnostics history, and installed app data are outside remote diagnostic implementation scope.
+- Fresh incident evidence came from clean Release source revision `439590659a42d52abd985c323dee4e1e0fbe9b47`.
+- Diagnostic semantic implementation head validated remotely: `292d6225808ebc66a12dd36e100fe309e53a335d`.
+- Exact-head macOS CI `#1062` / run `39193066565`: `PASS`.
+  - Debug build: PASS.
+  - Release build: PASS.
+  - native arm64 verification: PASS.
+  - XCTest: PASS.
+- Exact-head QA DMG `#487` / run `39193066576`: `PASS`.
+- XCTest artifact confirms the four new regression tests actually executed and passed:
+  - main-page vs FloatTabs-isolated-world discrimination;
+  - stale in-flight result handling after runtime/navigation invalidation;
+  - two finished-state dual timeouts required before confirmed post-finish stall;
+  - observed Web-process epoch/count progression only at documented termination callbacks.
 
-## Current incident evidence
+## Implemented diagnostic boundary
 
-The latest joint log/code audit has narrowed the failure to a post-navigation Web runtime boundary:
+The production diagnostic change is owned by `SlotNavigationObserver` in the Web Runtime domain. It does not move runtime ownership into Focus or Diagnostics.
 
-- A ChatGPT Slot can report `navigation_phase=finished`, `is_loading=false`, and progress `1` while bounded JavaScript evaluation stops responding.
-- Normal page-world focus JavaScript and trusted interaction still succeeded shortly before the fresh 2026-10-19 stall.
-- FloatTabs' Native host continued processing window, timeout, lifecycle, tab and reload events during the stall.
-- No WebContent termination callback was emitted for that fresh stall.
-- The memory-pressure warning arrived after the failed probe cycle had already begun; it is correlated evidence, not a proven trigger.
-- A manual reload established a fresh admitted ChatGPT document epoch but the subsequent checkpoint could still time out; a later navigation on the same WKWebView recovered to sub-millisecond probes.
-- Current Health and Page-App probes both execute in `FloatTabsChatGPTAttention` isolated world, so their simultaneous timeout does not yet distinguish an isolated-world failure from a broader WebContent/renderer stall.
+For supported ChatGPT runtimes it now records bounded, content-free cross-world liveness evidence:
 
-## Current decision
+- ordinary main page-world JavaScript result;
+- `FloatTabsChatGPTAttention` isolated-world JavaScript result;
+- exact navigation phase/generation and WKWebView diagnostic identity;
+- `observed_web_process_epoch` and `observed_web_process_termination_count`, advanced only on `webViewWebContentProcessDidTerminate`;
+- FloatTabs host resident memory and system physical memory;
+- child WebContent process attribution explicitly marked `unavailable_public_api` when production public APIs cannot prove it.
+
+A first dual timeout after a finished navigation emits only a `POST_FINISH_RUNTIME_STALL` candidate. A second consecutive finished-state dual timeout emits confirmed diagnostic evidence. Neither path reloads, rebuilds, releases, evicts, resets, or mutates persistent data.
+
+## Current incident decision
 
 ```text
 FAULT_BOUNDARY=POST_FINISH_WEB_RUNTIME_JS_EXECUTION
@@ -41,32 +55,41 @@ NATIVE_HOST_STALL=NOT_SUPPORTED
 NAVIGATION_STALL=NOT_SUPPORTED
 FRESH_CONTENT_PROCESS_TERMINATION=NOT_OBSERVED
 STALE_DOCUMENT_ONLY_FAILURE=NOT_SUPPORTED
-NEXT_SAFE_ACTION=BOUNDED_DIAGNOSTIC_INSTRUMENTATION
+REMOTE_DIAGNOSTIC_IMPLEMENTATION=PASS
+NEXT_SAFE_ACTION=AIR_REAL_MAC_FRESH_INCIDENT_CAPTURE
 ```
 
-## Authorized next work
+## Safety state
 
-The branch may add only the evidence required to distinguish:
+No change was made to:
 
-1. main page-world JavaScript responsiveness;
-2. FloatTabs isolated-world responsiveness;
-3. finished-navigation post-finish stall classification;
-4. bounded, truthful host/residency resource context;
-5. WebContent termination epoch/count distinct from WKWebView identity.
+- Hot / Warm / Cold product semantics;
+- automatic recovery policy;
+- Browser Profiles or WebKit website data;
+- cookies or login/session state;
+- persistence, backups, preferences, or Slot configuration.
 
-No automatic recovery or product-policy change is authorized.
+The privacy sanitizer was not weakened. Metadata keys were named so standard Release diagnostics retain them without adding a privacy exception.
 
-## Required next validation
+## Next gate
 
-1. Focused Web runtime / ChatGPT bridge / diagnostics tests on the exact diagnostic head.
-2. Required Apple Silicon build/test CI.
-3. Air real-Mac installation of the diagnostic build while preserving all Browser Profile/session data.
-4. Normal-use fresh incident capture and Web-side joint audit.
+Gate 5 is now authoritative:
+
+1. Build/install the exact diagnostic branch head on the Air while preserving current FloatTabs user data and Browser Profiles.
+2. Verify `web_runtime.cross_world_liveness` is present in the Release runtime log with the expected fields.
+3. Use FloatTabs normally; do not synthetic-stress or change Residency policy for the first fresh sample.
+4. If a stall occurs, capture raw runtime log plus independently attributed process/memory evidence **before** reload/reset/restart.
+5. Return the raw evidence and local execution receipt for Web-side joint audit.
+
+PR #138 stays Draft / Unmerged until Gate 5 evidence is audited.
 
 ```text
-TASK_STATE=ACTIVE
+TASK_STATE=ACTIVE_GATE_5
 BASE_MAIN=3511297d5f573598556739519bae859322578768
 BRANCH=codex/ft-post-finish-stall-diag-001
+VALIDATED_SEMANTIC_HEAD=292d6225808ebc66a12dd36e100fe309e53a335d
+MACOS_CI_1062=PASS
+QA_DMG_487=PASS
 PRODUCT_RECOVERY_CHANGE_AUTHORIZED=NO
 USER_DATA_CHANGE_AUTHORIZED=NO
 BROWSER_PROFILE_DATA_CHANGE_AUTHORIZED=NO
