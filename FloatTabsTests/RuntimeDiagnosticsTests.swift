@@ -417,6 +417,140 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertEqual(tracker.consume(later)?.trace.root, "dismiss-C")
     }
 
+    func testPeriodicSamplesDropRepeatedProvenanceAndKeepIdentitySafeCounterDeltas() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        var currentUptime = 100.0
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: writer,
+            uptime: { currentUptime }
+        )
+
+        func checkpoint(
+            runtimeGeneration: Int64 = 1,
+            webViewInstanceID: String = "webview-a",
+            documentEpoch: Int64 = 7,
+            javascriptErrors: Int64,
+            droppedEvents: Int64
+        ) {
+            var fields = diagnostics.environmentFields()
+            fields.merge([
+                "slot_id": .string("slot-a"),
+                "runtime_generation": .integer(runtimeGeneration),
+                "webview_instance_id": .string(webViewInstanceID),
+                "chatgpt_document_epoch": .integer(documentEpoch),
+                "page_app_javascript_error_count": .integer(javascriptErrors),
+                "page_app_unhandled_rejection_count": .integer(2),
+                "page_app_resource_load_failure_count": .integer(3),
+                "page_app_resource_http_error_count": .integer(4),
+                "page_app_slow_resource_count": .integer(5),
+                "page_app_dropped_event_count": .integer(droppedEvents),
+                "page_app_lifecycle_event_count": .integer(6)
+            ]) { _, new in new }
+            diagnostics.record(
+                event: "diagnostics.performance_checkpoint",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: fields
+            )
+        }
+
+        checkpoint(javascriptErrors: 10, droppedEvents: 20)
+        let first = writer.events[0]
+        XCTAssertNil(first.fields["app_version"])
+        XCTAssertNil(first.fields["source_revision"])
+        XCTAssertEqual(first.fields["runtime_generation"], .integer(1))
+        XCTAssertEqual(first.fields["page_app_delta_baseline"], .string("established"))
+        XCTAssertEqual(first.fields["page_app_javascript_error_delta"], .null)
+
+        currentUptime = 110
+        checkpoint(javascriptErrors: 16, droppedEvents: 25)
+        let second = writer.events[1]
+        XCTAssertEqual(second.fields["page_app_delta_baseline"], .string("continuing"))
+        XCTAssertEqual(second.fields["page_app_javascript_error_delta"], .integer(6))
+        XCTAssertEqual(second.fields["page_app_dropped_event_delta"], .integer(5))
+        XCTAssertEqual(second.fields["page_app_javascript_error_rate_per_minute"], .double(36))
+        XCTAssertEqual(second.fields["page_app_delta_interval_s"], .double(10))
+
+        currentUptime = 120
+        checkpoint(runtimeGeneration: 2, javascriptErrors: 1, droppedEvents: 1)
+        let replacement = writer.events[2]
+        XCTAssertEqual(
+            replacement.fields["page_app_delta_baseline"],
+            .string("reset_identity_change")
+        )
+        XCTAssertEqual(replacement.fields["page_app_javascript_error_delta"], .null)
+
+        currentUptime = 130
+        checkpoint(runtimeGeneration: 2, javascriptErrors: 4, droppedEvents: 3)
+        let resumed = writer.events[3]
+        XCTAssertEqual(resumed.fields["page_app_javascript_error_delta"], .integer(3))
+        XCTAssertEqual(resumed.fields["page_app_dropped_event_delta"], .integer(2))
+    }
+
+    func testPeriodicLogVolumeFixtureReportsEquivalentBeforeAndAfterBytes() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        var currentUptime = 1.0
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: writer,
+            uptime: { currentUptime }
+        )
+        let dynamicFields: [String: RuntimeDiagnosticValue] = [
+            "observation_source": .string("long_term_performance"),
+            "slot_id": .string("slot-a"),
+            "runtime_generation": .integer(1),
+            "webview_instance_id": .string("webview-a"),
+            "chatgpt_document_epoch": .integer(7),
+            "capture_availability": .string("captured"),
+            "resident": .bool(true),
+            "page_app_javascript_error_count": .integer(20),
+            "page_app_unhandled_rejection_count": .integer(2),
+            "page_app_resource_load_failure_count": .integer(3),
+            "page_app_resource_http_error_count": .integer(4),
+            "page_app_slow_resource_count": .integer(5),
+            "page_app_dropped_event_count": .integer(6),
+            "page_app_lifecycle_event_count": .integer(7)
+        ]
+        let staticFields = diagnostics.environmentFields()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let sessionID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        var beforeBytes = 0
+        for sequence in 1...20 {
+            let event = RuntimeDiagnosticEvent(
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(sequence)),
+                uptime: Double(sequence),
+                sequence: UInt64(sequence),
+                sessionID: sessionID,
+                traceID: nil,
+                level: .notice,
+                subsystem: "diagnostics",
+                event: "web_runtime.cross_world_liveness",
+                fields: staticFields.merging(dynamicFields) { _, new in new }
+            )
+            beforeBytes += try encoder.encode(event).count + 1
+        }
+
+        for sequence in 1...20 {
+            currentUptime = Double(sequence)
+            diagnostics.record(
+                event: "web_runtime.cross_world_liveness",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: dynamicFields
+            )
+        }
+        let afterBytes = writer.lines.reduce(0) { $0 + $1.count }
+        let reduction = Double(beforeBytes - afterBytes) / Double(beforeBytes) * 100
+        print(
+            "LOG_VOLUME_FIXTURE before_bytes=\(beforeBytes) after_bytes=\(afterBytes) "
+                + "reduction_percent=\(reduction) before_events=20 after_events=20"
+        )
+        XCTAssertEqual(writer.events.count, 20)
+        XCTAssertLessThan(afterBytes, beforeBytes)
+    }
+
     func testLongTermObservationWaitsSixtySecondsAndDoesNotOverlapSamples() async {
         let suiteName = "FloatTabsTests.LongTermObservation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -991,7 +991,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             consecutivePostFinishDualTimeouts = 0
         }
 
-        var fields = runtimeFields(for: webView)
+        var fields = runtimeFields(for: webView, includeEnvironment: false)
         fields.merge(main.diagnosticFields(prefix: "main_world")) { _, new in new }
         fields.merge(isolated.diagnosticFields(prefix: "isolated_world")) { _, new in new }
         fields.merge(responsiveness.diagnosticFields()) { _, new in new }
@@ -1652,7 +1652,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         (webView as? FloatTabsWebView)?.setWebsiteMode(websiteMode)
     }
 
-    private func runtimeFields(for webView: WKWebView) -> [String: RuntimeDiagnosticValue] {
+    private func runtimeFields(
+        for webView: WKWebView,
+        includeEnvironment: Bool = true
+    ) -> [String: RuntimeDiagnosticValue] {
         let contentMode: String = switch webView.configuration.defaultWebpagePreferences.preferredContentMode {
         case .desktop: "desktop"
         case .mobile: "mobile"
@@ -1662,7 +1665,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         let websiteMode = (webView as? FloatTabsWebView)?.websiteMode.rawValue
             ?? contentMode
         let customUserAgent = webView.customUserAgent
-        var fields = diagnostics.environmentFields()
+        var fields = includeEnvironment ? diagnostics.environmentFields() : [:]
         fields.merge([
             "slot_id": .string(slotID.uuidString),
             "website_mode": .string(websiteMode),

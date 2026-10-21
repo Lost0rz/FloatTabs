@@ -205,6 +205,50 @@ final class RuntimeDiagnosticsRotationTests: XCTestCase {
         }
         XCTAssertEqual(sequences, Array(1...12).map(UInt64.init))
     }
+
+    func testOrdinaryFlushesDoNotRescanRetentionDirectoryUntilInterval() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FloatTabsDiagnostics-prune-throttle-" + UUID().uuidString)
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        let pruneCount = LockedInteger()
+        let flushCount = LockedInteger()
+        let flushExpectations = (1...3).map {
+            expectation(description: "flush \($0)")
+        }
+        let writer = RuntimeDiagnosticWriter(
+            directory: directory,
+            pruneInterval: 60,
+            dateProvider: { now },
+            debounceInterval: 0.01,
+            flushObserver: {
+                let index = flushCount.incrementAndReturn()
+                if index <= flushExpectations.count {
+                    flushExpectations[index - 1].fulfill()
+                }
+            },
+            pruneObserver: {
+                pruneCount.increment()
+            }
+        )
+
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 1))
+        wait(for: [flushExpectations[0]], timeout: 2)
+        XCTAssertEqual(pruneCount.value, 1)
+
+        now.addTimeInterval(1)
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 2))
+        wait(for: [flushExpectations[1]], timeout: 2)
+        XCTAssertEqual(pruneCount.value, 1)
+
+        now.addTimeInterval(60)
+        writer.enqueue(RuntimeDiagnosticEvent.test(sequence: 3))
+        wait(for: [flushExpectations[2]], timeout: 2)
+        XCTAssertEqual(pruneCount.value, 2)
+
+        let finished = expectation(description: "writer closed")
+        writer.requestFinalFlush(timeout: 1) { finished.fulfill() }
+        wait(for: [finished], timeout: 2)
+    }
 }
 
 private final class LockedInteger: @unchecked Sendable {
@@ -217,10 +261,17 @@ private final class LockedInteger: @unchecked Sendable {
         return storage
     }
 
-    func increment() {
+    @discardableResult
+    func incrementAndReturn() -> Int {
         lock.lock()
         storage += 1
+        let result = storage
         lock.unlock()
+        return result
+    }
+
+    func increment() {
+        _ = incrementAndReturn()
     }
 }
 

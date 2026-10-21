@@ -961,7 +961,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 == capturedNavigationGeneration
         }
 
-        guard isChatGPT, runtimeIdentity != nil else {
+        guard isChatGPT, let runtimeIdentity else {
             fields["runtime_context_current"] = .bool(isRuntimeContextCurrent())
             fields["selected_slot_current"] = .bool(tabStore.activeTabID == slotID)
             if runtimeIdentity == nil {
@@ -1014,8 +1014,41 @@ final class PanelController: NSObject, NSWindowDelegate {
                 }
                 checkpoint["runtime_context_current"] = .bool(isRuntimeContextCurrent())
                 checkpoint["selected_slot_current"] = .bool(self.tabStore.activeTabID == slotID)
-                self.recordLongTermDiagnosticsCheckpoint(checkpoint, shouldRecord: shouldRecord)
-                completion()
+                let workloadBridge = self.webViewPool.attentionBridge(for: slotID)
+                let navigationGeneration: UInt64? = {
+                    guard case let .integer(value) = fields["navigation_generation"],
+                          value >= 0 else { return nil }
+                    return UInt64(value)
+                }()
+                guard runtimeIsCurrent,
+                      self.tabStore.activeTabID == slotID,
+                      let workloadBridge else {
+                    checkpoint["attention_workload_probe_status"] = .string("stale")
+                    self.recordLongTermDiagnosticsCheckpoint(checkpoint, shouldRecord: shouldRecord)
+                    completion()
+                    return
+                }
+                Task { @MainActor [weak self, weak webView, weak workloadBridge] in
+                    guard let self, let webView, let workloadBridge else {
+                        completion()
+                        return
+                    }
+                    let workloadFields = await workloadBridge.captureLongTermWorkloadDiagnosticFields(
+                        for: webView,
+                        runtimeIdentity: runtimeIdentity,
+                        navigationGeneration: navigationGeneration,
+                        contextIsCurrent: isRuntimeContextCurrent
+                    )
+                    guard shouldRecord() else {
+                        completion()
+                        return
+                    }
+                    checkpoint.merge(workloadFields) { _, new in new }
+                    checkpoint["runtime_context_current"] = .bool(isRuntimeContextCurrent())
+                    checkpoint["selected_slot_current"] = .bool(self.tabStore.activeTabID == slotID)
+                    self.recordLongTermDiagnosticsCheckpoint(checkpoint, shouldRecord: shouldRecord)
+                    completion()
+                }
             }
         }
     }
@@ -2412,13 +2445,9 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
 
-        diagnostics.record(
-            event: "panel.auto_hide.observed",
-            level: .info,
-            subsystem: "panel",
-            trace: trace,
-            fields: fields
-        )
+        // The decision event is the authoritative production auto-hide
+        // record. It retains the complete final decision/reason and avoids
+        // persisting an identical pre-decision copy for every candidate.
         diagnostics.record(
             event: "panel.auto_hide.decision",
             level: .info,

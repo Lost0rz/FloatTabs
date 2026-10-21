@@ -499,8 +499,13 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertNil(ChatGPTIncidentPageAppProbeValues.parse(oversized, expectedDocumentToken: tokenA))
 
         var overflowingCounter = Self.pageAppPayload(token: tokenA)
-        overflowingCounter["javascript_error_count"] = 256
-        XCTAssertNil(ChatGPTIncidentPageAppProbeValues.parse(overflowingCounter, expectedDocumentToken: tokenA))
+        overflowingCounter["javascript_error_count"] = Int64.max
+        XCTAssertNil(
+            ChatGPTIncidentPageAppProbeValues.parse(
+                overflowingCounter,
+                expectedDocumentToken: tokenA
+            )
+        )
 
         var maliciousEnum = Self.pageAppPayload(token: tokenA)
         maliciousEnum["events"] = [[
@@ -587,6 +592,33 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("pageEvents.length === PAGE_EVENT_LIMIT"))
         XCTAssertTrue(source.contains("pageDroppedEvents < PAGE_COUNTER_LIMIT"))
         XCTAssertTrue(source.contains("pageCounts[key] < PAGE_COUNTER_LIMIT"))
+        XCTAssertEqual(
+            source.components(separatedBy: "new MutationObserver").count - 1,
+            2,
+            "Workload measurement must reuse the existing attention and boot observers"
+        )
+        XCTAssertFalse(source.contains("setInterval"))
+    }
+
+    func testReleaseWorkloadSnapshotContractIsContentFreeAndLongRunBounded() {
+        let source = ChatGPTAttentionBridge.scriptSource
+        for expected in [
+            "__floatTabsAttentionBenchmarkSnapshotV1",
+            "mutation_callback_batch_count",
+            "detector_schedule_count",
+            "detector_evaluate_count",
+            "detector_evaluate_total_ms",
+            "detector_evaluate_max_ms",
+            "response_identity_resolution_count",
+            "response_identity_resolution_total_ms",
+            "response_identity_resolution_max_ms"
+        ] {
+            XCTAssertTrue(source.contains(expected), "Missing workload field \(expected)")
+        }
+        XCTAssertTrue(source.contains("Number.MAX_SAFE_INTEGER"))
+        XCTAssertTrue(source.contains("BENCHMARK_TOTAL_DURATION_LIMIT_MS"))
+        XCTAssertFalse(source.contains("document.body.innerText"))
+        XCTAssertFalse(source.contains("document.documentElement.innerText"))
     }
 
     func testInstalledPageAppRecorderKeepsRingAndCountersBounded() throws {
@@ -631,7 +663,7 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
         XCTAssertEqual(values.events.count, 16)
         XCTAssertEqual(values.droppedEvents, 246)
-        XCTAssertEqual(values.javascriptErrorCount, 255)
+        XCTAssertEqual(values.javascriptErrorCount, 260)
         XCTAssertEqual(values.resourceLoadFailureCount, 1)
         XCTAssertEqual(values.unhandledRejectionCount, 1)
         XCTAssertFalse(values.resourceTimingAvailable)
