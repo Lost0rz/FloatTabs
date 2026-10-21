@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RELEASE-V0.5.6-001`
 **Title:** Publish FloatTabs v0.5.6 diagnostics-efficiency observation release
-**Status:** `ACTIVE — RELEASE PREPARATION`
+**Status:** `ACTIVE — RELEASE PR OPEN / GATES PENDING`
 **Mode:** `RELEASE`
 **Task class:** `RELEASE`
 
@@ -33,7 +33,7 @@ This is an observation release. It does **not** claim that the ChatGPT control s
 - Bump `CURRENT_PROJECT_VERSION` from `23` to `24` for all app build configurations.
 - Add `docs/release/FloatTabs_v0.5.6.md` describing the accepted diagnostics changes, validation evidence, privacy/data-safety boundary, and observation intent.
 - Update `CURRENT_STATUS.md` / `CURRENT_TASK.md` with verified release lifecycle facts.
-- Use branch `release/ft-v0.5.6` and one release PR against protected `main`.
+- Use branch `release/ft-v0.5.6` and release PR #142 against protected `main`.
 
 ## Required gates
 
@@ -45,6 +45,23 @@ This is an observation release. It does **not** claim that the ChatGPT control s
 6. After release PR merge, post-merge `main` CI must pass.
 7. `Publish Release` must complete successfully and create public GitHub Release `v0.5.6` with DMG, DMG SHA-256, dSYM archive, and dSYM SHA-256 assets.
 8. Tag/release target must match the release merge commit.
+
+## Current release preparation evidence
+
+```text
+RELEASE_BRANCH=release/ft-v0.5.6
+RELEASE_PR=142
+METADATA_VERSION=0.5.6
+METADATA_BUILD=24
+METADATA_CONFIGS=DEBUG_AND_RELEASE_VERIFIED
+RELEASE_NOTES=docs/release/FloatTabs_v0.5.6.md
+FINAL_DIFF_SCOPE=CONTROL + VERSION_METADATA + RELEASE_NOTES
+SOURCE_POST_MERGE_CI_RUN=39620963744
+SOURCE_POST_MERGE_CI=PENDING
+RELEASE_PR_CI=PENDING
+RELEASE_PR_QA_DMG=PENDING
+ROOT_CAUSE=UNKNOWN
+```
 
 ## Safety / non-goals
 
@@ -69,9 +86,9 @@ STOP before merge/publication if:
 
 ```text
 BRANCH=release/ft-v0.5.6
-PR=TO_BE_CREATED
+PR=142
 TARGET_VERSION=0.5.6
 TARGET_BUILD=24
 ROOT_CAUSE=UNKNOWN
-NEXT=RELEASE_METADATA_AND_NOTES
+NEXT=WAIT_FOR_SOURCE_AND_RELEASE_PR_GATES
 ```
