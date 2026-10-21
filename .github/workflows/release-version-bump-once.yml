@@ -1,0 +1,49 @@
+name: Release Version Bump Once
+
+on:
+  push:
+    branches:
+      - release/ft-v0.5.6
+    paths:
+      - '.github/workflows/release-version-bump-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: release/ft-v0.5.6
+          fetch-depth: 0
+
+      - name: Bump release metadata exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('FloatTabs.xcodeproj/project.pbxproj')
+          text = path.read_text()
+          old_build = 'CURRENT_PROJECT_VERSION = 23;'
+          old_version = 'MARKETING_VERSION = 0.5.5;'
+          assert text.count(old_build) == 2, text.count(old_build)
+          assert text.count(old_version) == 2, text.count(old_version)
+          text = text.replace(old_build, 'CURRENT_PROJECT_VERSION = 24;')
+          text = text.replace(old_version, 'MARKETING_VERSION = 0.5.6;')
+          assert text.count('CURRENT_PROJECT_VERSION = 24;') == 2
+          assert text.count('MARKETING_VERSION = 0.5.6;') == 2
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff --exit-code -- . ':!FloatTabs.xcodeproj/project.pbxproj' || {
+            echo 'Unexpected files changed' >&2
+            exit 1
+          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add FloatTabs.xcodeproj/project.pbxproj
+          git commit -m 'release: bump FloatTabs to v0.5.6 build 24'
+          git push origin HEAD:release/ft-v0.5.6
