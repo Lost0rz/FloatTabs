@@ -6,82 +6,73 @@
 
 ## Mode
 
-**MODE: ACTIVE RELEASE — v0.5.6 / Build 24 / PR #142 GATES PENDING**
+**MODE: NO_ACTIVE_ENGINEERING_TASK — AIR OBSERVATION**
 
-Current task: `FT-RELEASE-V0.5.6-001`
+The v0.5.6 diagnostics-efficiency observation release is published and verified. No product/release mutation task remains active after this control closeout.
 
-## Current verified baseline
+## Current public baseline
 
 ```text
-MAIN_AFTER_PR141=940fd8e80792eb32c5571bc6b159ffb7db13017f
-SOURCE_PR=141
-SOURCE_SEMANTIC_HEAD=e6f0fd8c671c720721fdc4b8ca71d2e993db3a89
-LATEST_PUBLIC_RELEASE=v0.5.5
-LATEST_PUBLIC_BUILD=23
-TARGET_RELEASE=v0.5.6
-TARGET_BUILD=24
-RELEASE_PR=142
+LATEST_RELEASE=v0.5.6
+BUILD=24
 ARCH=arm64
+RELEASE_COMMIT=17f1bf1760625833d0b82397009223b2165521c7
 ROOT_CAUSE=UNKNOWN
+INCIDENT_STATE=WAITING_FOR_FRESH_AIR_EVIDENCE
 ```
 
-PR #141 is merged. Its accepted diagnostics-efficiency implementation reduces repetitive long-run logging, preserves identity-safe page-app deltas/rates, exposes bounded Release observer/workload evidence, and keeps long-term workload WebKit capture bounded by timeout and a single outstanding request budget.
+## Verified release lifecycle
 
-The accepted source validation before merge included:
+- Diagnostics source PR #141 merged to protected `main` at `940fd8e80792eb32c5571bc6b159ffb7db13017f`.
+- Release PR #142 merged to protected `main` at `17f1bf1760625833d0b82397009223b2165521c7`.
+- Source post-merge main macOS CI `39620963744`: PASS.
+- Release PR exact-head macOS CI `39622419627`: PASS.
+- Release PR exact-head QA DMG `39622419742`: PASS.
+- Publish Release workflow `39623668661`: PASS.
+- Post-release-merge main macOS CI `39623668662`: PASS.
+- Public GitHub Release `v0.5.6`: published, non-draft, non-prerelease.
+- `refs/tags/v0.5.6` points directly to `17f1bf1760625833d0b82397009223b2165521c7`.
+- Published assets verified present:
+  - `FloatTabs-0.5.6.dmg`
+  - `FloatTabs-0.5.6.dmg.sha256`
+  - `FloatTabs-0.5.6.dSYM.zip`
+  - `FloatTabs-0.5.6.dSYM.zip.sha256`
 
-- focused bridge/diagnostics tests: 105 passed, 0 failed;
-- privacy/rotation tests: 35 passed, 0 failed;
-- full XCTest: 1,357 passed, 0 failed;
-- Debug arm64 and Release arm64 builds: PASS;
-- exact-head macOS CI and QA DMG: PASS;
-- independent Web/runtime acceptance: PASS;
-- representative periodic-log fixture reduction: 21,382 bytes to 13,702 bytes, 35.918% reduction; the 50% target was not claimed.
-
-## Release preparation
-
-Release branch `release/ft-v0.5.6` and Draft PR #142 are open against protected `main`.
-
-Verified release-only tree delta currently consists of:
-
-- `FloatTabs.xcodeproj/project.pbxproj` — app Debug/Release metadata at v0.5.6 / Build 24;
-- `docs/release/FloatTabs_v0.5.6.md`;
-- `CURRENT_STATUS.md`;
-- `CURRENT_TASK.md`.
-
-The temporary one-time metadata helper used on the release branch was removed before PR creation and is not part of the release PR tree delta.
-
-## Release intent
-
-v0.5.6 is an observation release for continued Air normal use. It publishes the accepted diagnostics-efficiency changes without adding new recovery or product behavior.
-
-The release preserves these boundaries:
-
-- no Browser Profile, cookie, session, WebsiteData, Slot, preference, backup, or diagnostic-history clearing/migration;
-- no new automatic reload/reset/rebuild behavior;
-- no private WebKit process attribution;
-- no page text, prompt/response, selector text, cookies, tokens, or session values in diagnostics;
-- root cause of the existing ChatGPT/WebKit slowdown/termination incident remains **UNKNOWN**.
-
-## Release gates
-
-Before publication:
-
-1. merged source `main` at `940fd8e...` must pass post-merge macOS CI run `39620963744`;
-2. release metadata must remain exactly v0.5.6 / Build 24 / arm64;
-3. release PR #142 literal head must pass macOS CI and QA DMG;
-4. release PR must not contain new product/runtime behavior;
-5. post-merge release `main` CI must pass;
-6. Publish Release must succeed and expose the expected DMG/checksum/dSYM assets with tag/target integrity.
-
-Current gate state:
+Verified release asset digests:
 
 ```text
-SOURCE_POST_MERGE_CI=PENDING
-RELEASE_PR_CI=PENDING
-RELEASE_PR_QA_DMG=PENDING
-PUBLICATION=PENDING
+DMG_SHA256=d3773236177489426371663782321b6473775285282fd7223575ad57c155097a
+DSYM_ZIP_SHA256=9f217713b2e722bc5895fea9054f590cd27083a6f5a4c70fa3a22b16aa1c4ec2
 ```
 
-## Observation after release
+Publisher verification confirmed both checksum sidecars with `shasum -a 256 -c`; `hdiutil verify` reported the DMG as valid. The built app reported v0.5.6 / Build 24 and arm64.
 
-Install v0.5.6 / Build 24 on the Air and use FloatTabs normally. If the sidebar/share/image-viewer slowdown, WebContent termination, or another runtime degradation occurs, preserve/export Runtime Diagnostics before reload/restart when practical and correlate the fresh evidence by time, Slot, runtime identity, page-app trend, observer workload, and termination boundaries.
+## Observation baseline
+
+v0.5.6 preserves lower-volume, higher-value long-run diagnostics for:
+
+- main-page and FloatTabs-isolated-world JavaScript liveness;
+- navigation phase and observed Web-process epoch/termination count;
+- host resident memory and public attribution availability;
+- main-world JavaScript round-trip, event-loop, and visible-frame responsiveness;
+- long-run page-app totals plus identity-safe deltas/rates;
+- existing ChatGPT attention observer/detector/liveness workload;
+- bounded workload-capture outcomes including timeout/suppressed/stale/evaluation-failed.
+
+A representative equivalent periodic-log fixture measured 21,382 bytes before and 13,702 bytes after, a 35.918% reduction. The earlier 50% target was not reached and is not claimed.
+
+No individual diagnostic event establishes root cause by itself.
+
+## Data and recovery boundary
+
+- Root cause remains `UNKNOWN`; the slowdown/termination incident is not claimed fixed.
+- No automatic reload/reset/rebuild or new recovery behavior is part of v0.5.6.
+- No Browser Profile, cookie, session, WebsiteData, Slot, preference, backup, or diagnostic-history reset/migration is part of this release.
+- No private WebKit process attribution or page-content capture was added.
+- Diagnostic logs remain local/content-free under the existing bounded retention/export design.
+
+## Operational next step
+
+Install v0.5.6 / Build 24 on the Air and use FloatTabs normally for long-term observation.
+
+If a fresh sidebar/share/image-viewer slowdown, WebContent termination, or another slow/stall incident occurs, preserve/export Runtime Diagnostics before reload/restart when practical and provide the evidence with an approximate incident time. A later causal-investigation task should be authorized from that fresh evidence rather than guessing a root cause now.
