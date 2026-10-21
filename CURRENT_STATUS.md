@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / RUNTIME EVIDENCE**
+**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / GATE 3 LOCAL VERIFIED**
 
 Current task: `FT-DIAG-EFFICIENCY-EVIDENCE-001`
 
@@ -42,6 +42,23 @@ The existing long-run diagnostics design has two material weaknesses:
 2. **Periodic logs are oversized.** Repeated cross-world samples, performance checkpoints, and paired auto-hide events copy redundant context and consume most of the observed JSONL volume.
 
 The implementation task therefore prioritizes evidence quality and lower observer/logging overhead before another long Air observation cycle.
+
+## Verified local implementation evidence
+
+The bounded corrective is implemented in commit `14fa074` on
+`codex/ft-diag-efficiency-evidence-001`:
+
+- duplicate `panel.auto_hide.observed` production recording was removed; the final `panel.auto_hide.decision` remains authoritative;
+- periodic provenance is filtered while runtime identity remains, page-app counters are retained in bounded rings/totals and checkpoint deltas/rates reset on runtime/document identity changes;
+- retention pruning is throttled for ordinary flushes while rotation, export, and final-flush boundaries remain forced;
+- Release-safe workload fields reuse the existing ChatGPT observer/detector and liveness work, with no new observer, timer, polling loop, or independent JS cadence;
+- focused diagnostics/attention/rotation tests: 109 passed, 0 failed;
+- full Debug arm64 XCTest: 1,353 passed, 0 failed;
+- Release arm64 build: succeeded;
+- deterministic periodic fixture: 21,382 bytes before, 13,702 after, 35.918% reduction across 20 equivalent events. The 50% target was not claimed because the measured result is lower;
+- Release binary inspection exposes the new workload fields and snapshot contract and no longer contains `panel.auto_hide.observed`.
+
+Remote exact-head CI and independent Web/runtime acceptance remain pending. No root-cause conclusion is made.
 
 ## Active construction plan
 

@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-DIAG-EFFICIENCY-EVIDENCE-001`
 **Title:** Reduce diagnostics overhead and preserve long-term runtime evidence
-**Status:** `ACTIVE — GATE 1 LOG EFFICIENCY`
+**Status:** `ACTIVE — GATE 3 LOCAL VERIFIED / REMOTE CHECKS PENDING`
 **Mode:** `IMPLEMENTATION`
 **Task class:** `DIAGNOSTICS / RUNTIME EVIDENCE`
 
@@ -48,6 +48,22 @@ The next Air observation build must make it possible to compare runtime health, 
 - Debug arm64 and Release arm64 build verification.
 - Compare representative before/after diagnostics volume for the same synthetic workload; target at least 50% reduction in periodic-log bytes unless evidence shows a smaller reduction is the safer design.
 - Verify Release logs expose the new trend/workload fields and remain content-free.
+
+### Local verification receipt
+
+```text
+IMPLEMENTATION_COMMIT=14fa074
+FOCUSED_TESTS=109_PASS_0_FAIL
+FULL_DEBUG_XCTEST=1353_PASS_0_FAIL
+RELEASE_ARM64_BUILD=PASS
+RELEASE_FIELD_SURFACE=VERIFIED_IN_BUILT_BINARY
+LOG_VOLUME_BEFORE_BYTES=21382
+LOG_VOLUME_AFTER_BYTES=13702
+LOG_VOLUME_REDUCTION_PERCENT=35.91806192124217
+LOG_VOLUME_TARGET_50_PERCENT=NOT_REACHED_AND_NOT_CLAIMED
+REMOTE_EXACT_HEAD_CI=PENDING
+WEB_RUNTIME_ACCEPTANCE=PENDING
+```
 
 ## Acceptance
 
