@@ -427,6 +427,7 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         )
 
         func checkpoint(
+            slotID: String = "slot-a",
             runtimeGeneration: Int64 = 1,
             webViewInstanceID: String = "webview-a",
             documentEpoch: Int64 = 7,
@@ -435,7 +436,7 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         ) {
             var fields = diagnostics.environmentFields()
             fields.merge([
-                "slot_id": .string("slot-a"),
+                "slot_id": .string(slotID),
                 "runtime_generation": .integer(runtimeGeneration),
                 "webview_instance_id": .string(webViewInstanceID),
                 "chatgpt_document_epoch": .integer(documentEpoch),
@@ -472,9 +473,28 @@ final class RuntimeDiagnosticsTests: XCTestCase {
         XCTAssertEqual(second.fields["page_app_javascript_error_rate_per_minute"], .double(36))
         XCTAssertEqual(second.fields["page_app_delta_interval_s"], .double(10))
 
+        currentUptime = 115
+        checkpoint(
+            slotID: "slot-b",
+            runtimeGeneration: 3,
+            webViewInstanceID: "webview-b",
+            documentEpoch: 8,
+            javascriptErrors: 100,
+            droppedEvents: 200
+        )
+        let firstB = writer.events[2]
+        XCTAssertEqual(firstB.fields["page_app_delta_baseline"], .string("established"))
+
+        currentUptime = 120
+        checkpoint(slotID: "slot-a", javascriptErrors: 22, droppedEvents: 30)
+        let resumedA = writer.events[3]
+        XCTAssertEqual(resumedA.fields["page_app_delta_baseline"], .string("continuing"))
+        XCTAssertEqual(resumedA.fields["page_app_javascript_error_delta"], .integer(6))
+        XCTAssertEqual(resumedA.fields["page_app_dropped_event_delta"], .integer(5))
+
         currentUptime = 120
         checkpoint(runtimeGeneration: 2, javascriptErrors: 1, droppedEvents: 1)
-        let replacement = writer.events[2]
+        let replacement = writer.events[4]
         XCTAssertEqual(
             replacement.fields["page_app_delta_baseline"],
             .string("reset_identity_change")
@@ -483,9 +503,88 @@ final class RuntimeDiagnosticsTests: XCTestCase {
 
         currentUptime = 130
         checkpoint(runtimeGeneration: 2, javascriptErrors: 4, droppedEvents: 3)
-        let resumed = writer.events[3]
+        let resumed = writer.events[5]
         XCTAssertEqual(resumed.fields["page_app_javascript_error_delta"], .integer(3))
         XCTAssertEqual(resumed.fields["page_app_dropped_event_delta"], .integer(2))
+
+        currentUptime = 140
+        checkpoint(
+            slotID: "slot-b",
+            runtimeGeneration: 3,
+            webViewInstanceID: "webview-b",
+            documentEpoch: 8,
+            javascriptErrors: 106,
+            droppedEvents: 205
+        )
+        let resumedB = writer.events[6]
+        XCTAssertEqual(resumedB.fields["page_app_delta_baseline"], .string("continuing"))
+        XCTAssertEqual(resumedB.fields["page_app_javascript_error_delta"], .integer(6))
+        XCTAssertEqual(resumedB.fields["page_app_dropped_event_delta"], .integer(5))
+    }
+
+    func testPerSlotDeltaBaselinesResetOnlyTheAffectedIdentityOrCounter() {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        var currentUptime = 1.0
+        let diagnostics = RuntimeDiagnostics(
+            mode: .standard,
+            writer: writer,
+            uptime: { currentUptime }
+        )
+
+        func checkpoint(
+            webViewInstanceID: String = "webview-a",
+            documentEpoch: Int64 = 7,
+            javascriptErrors: Int64
+        ) {
+            diagnostics.record(
+                event: "diagnostics.performance_checkpoint",
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: [
+                    "slot_id": .string("slot-a"),
+                    "runtime_generation": .integer(1),
+                    "webview_instance_id": .string(webViewInstanceID),
+                    "chatgpt_document_epoch": .integer(documentEpoch),
+                    "page_app_javascript_error_count": .integer(javascriptErrors),
+                    "page_app_unhandled_rejection_count": .integer(0),
+                    "page_app_resource_load_failure_count": .integer(0),
+                    "page_app_resource_http_error_count": .integer(0),
+                    "page_app_slow_resource_count": .integer(0),
+                    "page_app_dropped_event_count": .integer(0),
+                    "page_app_lifecycle_event_count": .integer(0)
+                ]
+            )
+        }
+
+        checkpoint(javascriptErrors: 10)
+        currentUptime = 2
+        checkpoint(webViewInstanceID: "webview-b", javascriptErrors: 11)
+        XCTAssertEqual(
+            writer.events[1].fields["page_app_delta_baseline"],
+            .string("reset_identity_change")
+        )
+
+        currentUptime = 3
+        checkpoint(webViewInstanceID: "webview-b", javascriptErrors: 13)
+        XCTAssertEqual(writer.events[2].fields["page_app_javascript_error_delta"], .integer(2))
+
+        currentUptime = 4
+        checkpoint(documentEpoch: 8, javascriptErrors: 14)
+        XCTAssertEqual(
+            writer.events[3].fields["page_app_delta_baseline"],
+            .string("reset_identity_change")
+        )
+
+        currentUptime = 5
+        checkpoint(documentEpoch: 8, javascriptErrors: 12)
+        XCTAssertEqual(
+            writer.events[4].fields["page_app_delta_baseline"],
+            .string("reset_counter_regression")
+        )
+
+        currentUptime = 6
+        checkpoint(documentEpoch: 8, javascriptErrors: 15)
+        XCTAssertEqual(writer.events[5].fields["page_app_javascript_error_delta"], .integer(3))
     }
 
     func testPeriodicLogVolumeFixtureReportsEquivalentBeforeAndAfterBytes() throws {

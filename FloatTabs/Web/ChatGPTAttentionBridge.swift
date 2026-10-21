@@ -644,6 +644,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let contentWorldName = "FloatTabsChatGPTAttention"
     static let messageHandlerName = "floatTabsChatGPTAttention"
     static let defaultIncidentHealthProbeTimeout: TimeInterval = 5
+    static let defaultLongTermWorkloadTimeout: TimeInterval = 5
     static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
@@ -1274,6 +1275,23 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let webViewIdentity: ObjectIdentifier
     }
 
+    private enum PendingLongTermWorkloadCapture {
+        case active(
+            id: UUID,
+            continuation: CheckedContinuation<[String: Any], Never>
+        )
+        case timedOut(id: UUID)
+
+        var id: UUID {
+            switch self {
+            case let .active(id, _):
+                return id
+            case let .timedOut(id):
+                return id
+            }
+        }
+    }
+
     private static let resyncAttemptLimit = 2
 
     let slotID: UUID
@@ -1285,6 +1303,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator
     private let incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator
     private let incidentHealthProbeTimeout: TimeInterval
+    private let longTermWorkloadTimeout: TimeInterval
     private let benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator
     private var benchmarkCounters = ChatGPTAttentionBenchmarkCounters()
     private var benchmarkOperationInFlight = false
@@ -1308,6 +1327,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var incidentHealthProbeTimeoutTask: Task<Void, Never>?
     private var pendingIncidentPageAppProbeID: UUID?
     private var incidentPageAppProbeTimeoutTask: Task<Void, Never>?
+    private var pendingLongTermWorkloadCapture: PendingLongTermWorkloadCapture?
+    private var longTermWorkloadTimeoutTask: Task<Void, Never>?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -1705,6 +1726,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout,
+        longTermWorkloadTimeout: TimeInterval = ChatGPTAttentionBridge.defaultLongTermWorkloadTimeout,
         onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
     ) {
         self.slotID = slotID
@@ -1722,6 +1744,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         self.incidentHealthProbeTimeout = min(
             max(incidentHealthProbeTimeout, 0),
             Self.defaultIncidentHealthProbeTimeout
+        )
+        self.longTermWorkloadTimeout = min(
+            max(longTermWorkloadTimeout, 0),
+            Self.defaultLongTermWorkloadTimeout
         )
         super.init()
     }
@@ -1901,20 +1927,127 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         navigationGeneration: UInt64?,
         contextIsCurrent: @escaping @MainActor () -> Bool
     ) async -> [String: RuntimeDiagnosticValue] {
-        let raw = await captureBenchmarkSnapshot(
-            for: expectedWebView,
-            runtimeIdentity: runtimeIdentity,
-            navigationGeneration: navigationGeneration,
-            contextIsCurrent: contextIsCurrent
-        )
+        guard pendingLongTermWorkloadCapture == nil else {
+            return Self.longTermWorkloadStatusFields(
+                status: "suppressed",
+                reason: "pending_request_budget"
+            )
+        }
+        guard !benchmarkOperationInFlight else {
+            return Self.longTermWorkloadStatusFields(
+                status: "suppressed",
+                reason: "benchmark_operation_in_flight"
+            )
+        }
+
+        let requestID = UUID()
+        let raw = await withCheckedContinuation { continuation in
+            pendingLongTermWorkloadCapture = .active(
+                id: requestID,
+                continuation: continuation
+            )
+            let timeoutNanoseconds = UInt64(longTermWorkloadTimeout * 1_000_000_000)
+            longTermWorkloadTimeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                } catch {
+                    return
+                }
+                self?.finishLongTermWorkloadCapture(
+                    id: requestID,
+                    raw: [
+                        "status": "timeout",
+                        "reason": "deadline_exceeded",
+                        "measurement_enabled": self?.benchmarkCounters.isEnabled ?? false
+                    ],
+                    timedOut: true
+                )
+            }
+            Task { @MainActor [weak self, weak expectedWebView] in
+                guard let self else {
+                    continuation.resume(returning: [
+                        "status": "evaluation_failed",
+                        "reason": "bridge_unavailable"
+                    ])
+                    return
+                }
+                guard let expectedWebView else {
+                    self.finishLongTermWorkloadCapture(
+                        id: requestID,
+                        raw: [
+                            "status": "evaluation_failed",
+                            "reason": "webview_unavailable"
+                        ],
+                        timedOut: false
+                    )
+                    return
+                }
+                let result = await self.captureBenchmarkSnapshot(
+                    for: expectedWebView,
+                    runtimeIdentity: runtimeIdentity,
+                    navigationGeneration: navigationGeneration,
+                    contextIsCurrent: contextIsCurrent
+                )
+                self.finishLongTermWorkloadCapture(
+                    id: requestID,
+                    raw: result,
+                    timedOut: false
+                )
+            }
+        }
         return Self.longTermWorkloadDiagnosticFields(from: raw)
+    }
+
+    /// Completes one bounded workload request. A timeout resumes the caller
+    /// immediately but retains the timed-out request marker until its WebKit
+    /// completion returns, so a stuck callback cannot be replaced by an
+    /// unbounded queue of additional requests.
+    private func finishLongTermWorkloadCapture(
+        id: UUID,
+        raw: [String: Any],
+        timedOut: Bool
+    ) {
+        guard let pendingLongTermWorkloadCapture,
+              pendingLongTermWorkloadCapture.id == id else {
+            return
+        }
+
+        switch pendingLongTermWorkloadCapture {
+        case let .active(_, continuation):
+            longTermWorkloadTimeoutTask?.cancel()
+            longTermWorkloadTimeoutTask = nil
+            self.pendingLongTermWorkloadCapture = timedOut
+                ? .timedOut(id: id)
+                : nil
+            continuation.resume(returning: raw)
+        case .timedOut:
+            // The caller already received the timeout outcome. This is the
+            // late WebKit completion boundary: release the single outstanding
+            // request budget, but never invoke or overwrite the old outcome.
+            guard !timedOut else { return }
+            self.pendingLongTermWorkloadCapture = nil
+        }
+    }
+
+    private static func longTermWorkloadStatusFields(
+        status: String,
+        reason: String
+    ) -> [String: RuntimeDiagnosticValue] {
+        [
+            "attention_workload_probe_status": .string(status),
+            "attention_workload_probe_reason": .string(reason)
+        ]
     }
 
     private static func longTermWorkloadDiagnosticFields(
         from raw: [String: Any]
     ) -> [String: RuntimeDiagnosticValue] {
         var fields: [String: RuntimeDiagnosticValue] = [:]
-        if let status = raw["status"] as? String {
+        if let rawStatus = raw["status"] as? String {
+            let status = rawStatus == "unavailable"
+                && raw["reason"] as? String == "operation_in_flight"
+                ? "suppressed"
+                : rawStatus
             fields["attention_workload_probe_status"] = .string(status)
         }
         if let reason = raw["reason"] as? String {

@@ -42,7 +42,8 @@ private final class ChatGPTAttentionBridgeHarness {
         incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator? = nil,
         incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator? = nil,
-        incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout
+        incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout,
+        longTermWorkloadTimeout: TimeInterval = ChatGPTAttentionBridge.defaultLongTermWorkloadTimeout
     ) {
         // The observation callback must not capture the harness itself before
         // initialization completes; the log reference it captures is enough.
@@ -62,7 +63,8 @@ private final class ChatGPTAttentionBridgeHarness {
             incidentHealthProbeEvaluator: incidentHealthProbeEvaluator,
             incidentPageAppProbeEvaluator: incidentPageAppProbeEvaluator,
             benchmarkProbeEvaluator: benchmarkProbeEvaluator,
-            incidentHealthProbeTimeout: incidentHealthProbeTimeout
+            incidentHealthProbeTimeout: incidentHealthProbeTimeout,
+            longTermWorkloadTimeout: longTermWorkloadTimeout
         )
         bridge.attach(to: webView)
         probeCount = { probes.count }
@@ -114,6 +116,45 @@ private final class IncidentHealthProbeGate {
         guard let continuation else { return }
         self.continuation = nil
         continuation.resume(returning: value)
+    }
+}
+
+@MainActor
+private final class ChatGPTLongTermObservationSleeper {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var waiters: [Waiter] = []
+    private(set) var requestedIntervals: [TimeInterval] = []
+
+    var pendingCount: Int { waiters.count }
+
+    func sleep(_ interval: TimeInterval) async throws {
+        let id = UUID()
+        requestedIntervals.append(interval)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters.append(Waiter(id: id, continuation: continuation))
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.resume(id: id, throwing: CancellationError())
+            }
+        }
+    }
+
+    func advanceNext() {
+        guard let waiter = waiters.first else { return }
+        waiters.removeFirst()
+        waiter.continuation.resume()
+    }
+
+    private func resume(id: UUID, throwing error: Error) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(throwing: error)
     }
 }
 
@@ -968,6 +1009,194 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
     }
 #endif
 
+    func testLongTermWorkloadTimeoutCompletesOnceAndBoundsLateCallbackBudget() async {
+        let gate = IncidentHealthProbeGate()
+        var evaluationCount = 0
+        var lateEvaluationReturned = false
+        let harness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in
+                evaluationCount += 1
+                if evaluationCount == 1 {
+                    let value = try await gate.evaluate()
+                    lateEvaluationReturned = true
+                    return value
+                }
+                return Self.longTermWorkloadPayload(
+                    token: self.tokenA,
+                    enabled: Self.benchmarkMeasurementEnabledForTest
+                )
+            },
+            longTermWorkloadTimeout: 0.02
+        )
+        harness.accept(false, token: tokenA)
+        let runtimeIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 1,
+            webViewInstanceID: UUID()
+        )
+
+        let firstTask = Task {
+            await harness.bridge.captureLongTermWorkloadDiagnosticFields(
+                for: harness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+        }
+        await gate.waitUntilStarted()
+        let timedOut = await firstTask.value
+        XCTAssertEqual(
+            timedOut["attention_workload_probe_status"],
+            RuntimeDiagnosticValue.string("timeout")
+        )
+        XCTAssertEqual(
+            timedOut["attention_workload_probe_reason"],
+            RuntimeDiagnosticValue.string("deadline_exceeded")
+        )
+        XCTAssertEqual(evaluationCount, 1)
+
+        for _ in 0..<4 {
+            let suppressed = await harness.bridge.captureLongTermWorkloadDiagnosticFields(
+                for: harness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+            XCTAssertEqual(
+                suppressed["attention_workload_probe_status"],
+                RuntimeDiagnosticValue.string("suppressed")
+            )
+            XCTAssertEqual(
+                suppressed["attention_workload_probe_reason"],
+                RuntimeDiagnosticValue.string("pending_request_budget")
+            )
+        }
+        XCTAssertEqual(evaluationCount, 1)
+
+        gate.resolve(Self.longTermWorkloadPayload(
+            token: tokenA,
+            enabled: Self.benchmarkMeasurementEnabledForTest
+        ))
+        let lateEvaluationFinished = await waitUntil { lateEvaluationReturned }
+        XCTAssertTrue(lateEvaluationFinished)
+
+        var lateResult: [String: RuntimeDiagnosticValue] = [:]
+        for _ in 0..<100 {
+            lateResult = await harness.bridge.captureLongTermWorkloadDiagnosticFields(
+                for: harness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+            if lateResult["attention_workload_probe_status"] == RuntimeDiagnosticValue.string("ok") {
+                break
+            }
+            await Task.yield()
+        }
+        XCTAssertEqual(
+            lateResult["attention_workload_probe_status"],
+            RuntimeDiagnosticValue.string("ok")
+        )
+        XCTAssertEqual(evaluationCount, 2)
+    }
+
+    func testLongTermWorkloadLateRuntimeDocumentCompletionRemainsStale() async {
+        let gate = IncidentHealthProbeGate()
+        let harness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in try await gate.evaluate() },
+            longTermWorkloadTimeout: 0.5
+        )
+        harness.accept(false, token: tokenA)
+        let runtimeIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 1,
+            webViewInstanceID: UUID()
+        )
+        let task = Task {
+            await harness.bridge.captureLongTermWorkloadDiagnosticFields(
+                for: harness.webView,
+                runtimeIdentity: runtimeIdentity,
+                navigationGeneration: 1,
+                contextIsCurrent: { true }
+            )
+        }
+        await gate.waitUntilStarted()
+
+        harness.bridge.handleRuntimeReplacement()
+        harness.accept(false, token: tokenB)
+        gate.resolve(Self.longTermWorkloadPayload(
+            token: tokenA,
+            enabled: Self.benchmarkMeasurementEnabledForTest
+        ))
+
+        let stale = await task.value
+        XCTAssertEqual(
+            stale["attention_workload_probe_status"],
+            RuntimeDiagnosticValue.string("stale")
+        )
+        XCTAssertEqual(
+            stale["attention_workload_probe_reason"],
+            RuntimeDiagnosticValue.string("stale_context")
+        )
+    }
+
+    func testLongTermCoordinatorSchedulesLaterCheckpointAfterTimedOutWorkloadSample() async {
+        let suiteName = "FloatTabsTests.LongTermWorkloadTimeout.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferencesStore(defaults: defaults)
+        preferences.longTermPerformanceObservationEnabled = true
+
+        let gate = IncidentHealthProbeGate()
+        var evaluationCount = 0
+        let harness = ChatGPTAttentionBridgeHarness(
+            benchmarkProbeEvaluator: { _, _ in
+                evaluationCount += 1
+                return try await gate.evaluate()
+            },
+            longTermWorkloadTimeout: 0.02
+        )
+        harness.accept(false, token: tokenA)
+        let runtimeIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: 1,
+            webViewInstanceID: UUID()
+        )
+        let sleeper = ChatGPTLongTermObservationSleeper()
+        var sampleCount = 0
+        let coordinator = LongTermPerformanceObservationCoordinator(
+            preferencesStore: preferences,
+            interval: 60,
+            sleeper: { try await sleeper.sleep($0) },
+            observe: { isCurrent, completion in
+                sampleCount += 1
+                Task { @MainActor in
+                    _ = await harness.bridge.captureLongTermWorkloadDiagnosticFields(
+                        for: harness.webView,
+                        runtimeIdentity: runtimeIdentity,
+                        navigationGeneration: 1,
+                        contextIsCurrent: isCurrent
+                    )
+                    completion()
+                }
+            }
+        )
+        defer { coordinator.stop() }
+
+        coordinator.start()
+        await waitUntil { sleeper.pendingCount == 1 }
+        sleeper.advanceNext()
+        await waitUntil { sampleCount == 1 && !coordinator.isObservationInFlight }
+        XCTAssertEqual(evaluationCount, 1)
+
+        await waitUntil { sleeper.pendingCount == 1 }
+        sleeper.advanceNext()
+        await waitUntil { sampleCount == 2 && !coordinator.isObservationInFlight }
+        XCTAssertEqual(evaluationCount, 1)
+
+        gate.resolve(Self.longTermWorkloadPayload(
+            token: tokenA,
+            enabled: Self.benchmarkMeasurementEnabledForTest
+        ))
+    }
+
     private func captureHealthProbe(
         _ harness: ChatGPTAttentionBridgeHarness
     ) async -> ChatGPTIncidentHealthProbeResult {
@@ -1052,6 +1281,35 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             "loading_indicator_present": false,
             "loading_indicator_visible": false,
             "conversation_load_error_present": false
+        ]
+    }
+
+    private static var benchmarkMeasurementEnabledForTest: Bool {
+#if DEBUG
+        false
+#else
+        true
+#endif
+    }
+
+    private static func longTermWorkloadPayload(
+        token: String,
+        enabled: Bool
+    ) -> [String: Any] {
+        [
+            "version": 1,
+            "token": token,
+            "enabled": enabled,
+            "visibility_state": "visible",
+            "generating": false,
+            "mutation_callback_batch_count": 0,
+            "detector_schedule_count": 0,
+            "detector_evaluate_count": 0,
+            "detector_evaluate_total_ms": 0.0,
+            "detector_evaluate_max_ms": 0.0,
+            "response_identity_resolution_count": 0,
+            "response_identity_resolution_total_ms": 0.0,
+            "response_identity_resolution_max_ms": 0.0
         ]
     }
 

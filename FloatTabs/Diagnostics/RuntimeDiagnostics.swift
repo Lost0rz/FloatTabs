@@ -141,7 +141,12 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
         "page_app_lifecycle_event_count"
     ]
 
-    private var baseline: Baseline?
+    /// One transient baseline per observed Slot. The LRU cap prevents an
+    /// arbitrary stream of unowned identifiers from turning diagnostics into
+    /// a durable or unbounded store.
+    private static let maximumTrackedSlots = 64
+    private var baselines: [String: Baseline] = [:]
+    private var baselineRecency: [String] = []
 
     mutating func decorate(
         fields: [String: RuntimeDiagnosticValue],
@@ -170,8 +175,8 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
         }
 
         result["page_app_delta_identity_available"] = .bool(true)
-        guard let previous = baseline else {
-            baseline = Baseline(identity: identity, uptime: uptime, counters: counters)
+        guard let previous = baseline(for: identity.slotID) else {
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
             result["page_app_delta_baseline"] = .string("established")
             for key in deltaKeys { result["page_app_\(key)"] = .null }
             for key in rateKeys { result["page_app_\(key)"] = .null }
@@ -179,7 +184,7 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
         }
 
         guard previous.identity == identity else {
-            baseline = Baseline(identity: identity, uptime: uptime, counters: counters)
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
             result["page_app_delta_baseline"] = .string("reset_identity_change")
             for key in deltaKeys { result["page_app_\(key)"] = .null }
             for key in rateKeys { result["page_app_\(key)"] = .null }
@@ -187,7 +192,7 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
         }
 
         guard Self.countersAreMonotonic(counters, comparedTo: previous.counters) else {
-            baseline = Baseline(identity: identity, uptime: uptime, counters: counters)
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
             result["page_app_delta_baseline"] = .string("reset_counter_regression")
             for key in deltaKeys { result["page_app_\(key)"] = .null }
             for key in rateKeys { result["page_app_\(key)"] = .null }
@@ -213,8 +218,29 @@ struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
                 result["page_app_\(rateKeys[index])"] = .null
             }
         }
-        baseline = Baseline(identity: identity, uptime: uptime, counters: counters)
+        replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
         return result
+    }
+
+    private mutating func baseline(for slotID: String) -> Baseline? {
+        guard let baseline = baselines[slotID] else { return nil }
+        touch(slotID)
+        return baseline
+    }
+
+    private mutating func replaceBaseline(_ baseline: Baseline) {
+        let slotID = baseline.identity.slotID
+        baselines[slotID] = baseline
+        touch(slotID)
+        if baselineRecency.count > Self.maximumTrackedSlots {
+            let evictedSlotID = baselineRecency.removeFirst()
+            baselines.removeValue(forKey: evictedSlotID)
+        }
+    }
+
+    private mutating func touch(_ slotID: String) {
+        baselineRecency.removeAll { $0 == slotID }
+        baselineRecency.append(slotID)
     }
 
     private static func identity(
