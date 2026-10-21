@@ -28,7 +28,7 @@ RELEASE_PR_EXACT_CI=39622419627_PASS
 RELEASE_PR_EXACT_QA_DMG=39622419742_PASS
 PUBLISH_RUN=39623668661_PASS
 POST_MERGE_MAIN_CI=39623668662_PASS
-PUBLIC_RELEASE_ID=256913481
+PUBLIC_RELEASE_ID=419708920
 ROOT_CAUSE=UNKNOWN
 BUG_FIXED_CLAIM=NO
 RELEASE_STATE=PUBLISHED_VERIFIED
@@ -43,11 +43,11 @@ The public GitHub Release exposes exactly the expected four assets:
 - `FloatTabs-0.5.6.dSYM.zip`
 - `FloatTabs-0.5.6.dSYM.zip.sha256`
 
-Verified release asset digests:
+GitHub release asset digests:
 
 ```text
-DMG_SHA256=d3773236177489426371663782321b6473775285282fd7223575ad57c155097a
-DSYM_ZIP_SHA256=9f217713b2e722bc5895fea9054f590cd27083a6f5a4c70fa3a22b16aa1c4ec2
+DMG_ASSET_SHA256=d377b027b8e2c8503f62c60a698ed39668937ec86c0e14416bfac93804e6e55a
+DSYM_ZIP_ASSET_SHA256=9f215607adb516509bc61d616e3a1e567ca5d28a4086029900a45ccfe5998a5d
 ```
 
 The publisher also verified both checksum sidecars against the built artifacts with `shasum -a 256 -c`, and `hdiutil verify` reported the DMG checksum as valid.
