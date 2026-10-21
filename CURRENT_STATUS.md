@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / GATE 3 REMOTE CI VERIFIED**
+**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / FINAL MERGE AUDIT PENDING**
 
 Current task: `FT-DIAG-EFFICIENCY-EVIDENCE-001`
 
@@ -58,7 +58,9 @@ The bounded corrective is implemented in commit `14fa074` on
 - deterministic periodic fixture: 21,382 bytes before, 13,702 after, 35.918% reduction across 20 equivalent events. The 50% target was not claimed because the measured result is lower;
 - Release binary inspection exposes the new workload fields and snapshot contract and no longer contains `panel.auto_hide.observed`.
 
-Remote exact-head CI and DMG gates passed at delivery head `1214ceafe65917ef3eddce45c7dca4ab7dacfafb`. Independent Web/runtime acceptance remains pending. No root-cause conclusion is made.
+The earlier implementation delivery head `1214ceafe65917ef3eddce45c7dca4ab7dacfafb`
+passed its original remote CI and DMG gates. The current corrective exact-head
+gates are recorded below. No root-cause conclusion is made.
 
 ## Corrective audit evidence — 2026-10-21
 
@@ -81,8 +83,10 @@ The two independent Web/runtime audit blockers are corrected in commit
 - QA DMG packaging, arm64/signature verification, and `hdiutil verify`
   passed for `/private/tmp/FloatTabs-ft-diag-qa.FpO89h/FloatTabs-0.5.5.dmg`.
 
-The corrective remains subject to exact-head remote CI and independent Web
-runtime re-audit. Root cause remains unknown.
+The corrective exact-head macOS CI run `39616724913` and QA DMG run
+`39616725083` both passed for `926ec463973dfa32988868e64f4713f3a34ef6a3`.
+Independent Web/runtime acceptance is recorded as `PASS`; the next state is
+the final merge audit. Root cause remains unknown.
 
 ## Active construction plan
 
