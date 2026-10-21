@@ -202,12 +202,19 @@ typealias ChatGPTBenchmarkProbeEvaluator = @MainActor (
     String
 ) async throws -> Any
 
-#if DEBUG
 struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
-    static let maximumCounter: Int64 = 1_000_000_000
+    /// JS counters are carried as exact integers through Number.MAX_SAFE_INTEGER.
+    /// This is far above the old 255 cap while remaining representable in JSON
+    /// and Int64 without introducing an unbounded collection.
+    static let maximumCounter: Int64 = 9_007_199_254_740_991
     static let maximumDurationMilliseconds = 3_600_000.0
+    static let maximumTotalDurationMilliseconds = 9_007_199_254_740_991.0
 
+#if DEBUG
     private(set) var isEnabled = false
+#else
+    private(set) var isEnabled = true
+#endif
     private(set) var livenessProbeCount: Int64 = 0
     private(set) var confirmationProbeCount: Int64 = 0
     private(set) var livenessProbeTotalMilliseconds = 0.0
@@ -238,7 +245,7 @@ struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
             confirmationProbeCount = Self.saturatedIncrement(confirmationProbeCount)
         }
         let duration = Self.boundedDuration(durationMilliseconds)
-        livenessProbeTotalMilliseconds = Self.boundedDuration(
+        livenessProbeTotalMilliseconds = Self.boundedTotalDuration(
             livenessProbeTotalMilliseconds + duration
         )
         livenessProbeMaximumMilliseconds = max(
@@ -276,6 +283,11 @@ struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), maximumDurationMilliseconds)
     }
+
+    static func boundedTotalDuration(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), maximumTotalDurationMilliseconds)
+    }
 }
 
 private struct ChatGPTAttentionBenchmarkDocumentValues {
@@ -304,10 +316,10 @@ private struct ChatGPTAttentionBenchmarkDocumentValues {
               let mutationCallbackBatchCount = boundedCount(fields["mutation_callback_batch_count"]),
               let detectorScheduleCount = boundedCount(fields["detector_schedule_count"]),
               let detectorEvaluateCount = boundedCount(fields["detector_evaluate_count"]),
-              let detectorEvaluateTotalMilliseconds = boundedDuration(fields["detector_evaluate_total_ms"]),
+              let detectorEvaluateTotalMilliseconds = boundedTotalDuration(fields["detector_evaluate_total_ms"]),
               let detectorEvaluateMaximumMilliseconds = boundedDuration(fields["detector_evaluate_max_ms"]),
               let responseIdentityResolutionCount = boundedCount(fields["response_identity_resolution_count"]),
-              let responseIdentityResolutionTotalMilliseconds = boundedDuration(fields["response_identity_resolution_total_ms"]),
+              let responseIdentityResolutionTotalMilliseconds = boundedTotalDuration(fields["response_identity_resolution_total_ms"]),
               let responseIdentityResolutionMaximumMilliseconds = boundedDuration(fields["response_identity_resolution_max_ms"]) else {
             return nil
         }
@@ -359,8 +371,18 @@ private struct ChatGPTAttentionBenchmarkDocumentValues {
               result <= ChatGPTAttentionBenchmarkCounters.maximumDurationMilliseconds else { return nil }
         return result
     }
+
+    private static func boundedTotalDuration(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber else { return nil }
+        let result = number.doubleValue
+        guard result.isFinite,
+              result >= 0,
+              result <= ChatGPTAttentionBenchmarkCounters.maximumTotalDurationMilliseconds else {
+            return nil
+        }
+        return result
+    }
 }
-#endif
 
 enum ChatGPTIncidentPageAppProbeOutcome: String, Equatable, Sendable {
     case success
@@ -395,13 +417,13 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
     static let maximumEvents = 16
 
     let events: [ChatGPTIncidentPageAppEvent]
-    let droppedEvents: Int
-    let javascriptErrorCount: Int
-    let unhandledRejectionCount: Int
-    let resourceLoadFailureCount: Int
-    let resourceHTTPErrorCount: Int
-    let slowResourceCount: Int
-    let lifecycleEventCount: Int
+    let droppedEvents: Int64
+    let javascriptErrorCount: Int64
+    let unhandledRejectionCount: Int64
+    let resourceLoadFailureCount: Int64
+    let resourceHTTPErrorCount: Int64
+    let slowResourceCount: Int64
+    let lifecycleEventCount: Int64
     let resourceTimingAvailable: Bool
     let responseStatusAvailable: Bool
 
@@ -466,9 +488,18 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
         return fields
     }
 
-    private static func boundedCounter(_ value: Any?) -> Int? {
-        guard let value = value as? Int, (0...255).contains(value) else { return nil }
-        return value
+    static let maximumCounter: Int64 = 9_007_199_254_740_991
+
+    private static func boundedCounter(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber else { return nil }
+        let result = number.int64Value
+        guard result >= 0,
+              result <= maximumCounter,
+              number.doubleValue.isFinite,
+              number.doubleValue == Double(result) else {
+            return nil
+        }
+        return result
     }
 
     private static func parseEvent(_ raw: [String: Any]) -> ChatGPTIncidentPageAppEvent? {
@@ -613,12 +644,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let contentWorldName = "FloatTabsChatGPTAttention"
     static let messageHandlerName = "floatTabsChatGPTAttention"
     static let defaultIncidentHealthProbeTimeout: TimeInterval = 5
+    static let defaultLongTermWorkloadTimeout: TimeInterval = 5
     static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
-#if DEBUG
     static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
-#endif
 
     typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
     typealias LivenessSleeper = @MainActor (UInt64) async -> Bool
@@ -668,7 +698,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-#if DEBUG
     private static let productionBenchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator = {
         webView, script in
         try await withCheckedThrowingContinuation { continuation in
@@ -681,7 +710,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
         }
     }
-#endif
 
     /// The single shared world instance used for both the injected script and
     /// the message handler. One instance is required: worlds with equal names
@@ -756,12 +784,32 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private static func makeScriptSource() -> String {
         let hostGate = hostGateExpression()
 #if DEBUG
+        let defaultBenchmarkMeasurementEnabled = "false"
+        let benchmarkConfigurationExport = """
+          globalThis.__floatTabsAttentionBenchmarkConfigureV1 = (enabled, reset) => {
+            if (reset === true) { resetBenchmarkCounters(); }
+            if (typeof enabled === "boolean") {
+              benchmarkMeasurementEnabled = enabled;
+            }
+            return {
+              version: 1,
+              token: TOKEN,
+              enabled: benchmarkMeasurementEnabled
+            };
+          };
+        """
+#else
+        let defaultBenchmarkMeasurementEnabled = "true"
+        let benchmarkConfigurationExport = ""
+#endif
         let benchmarkInitialization = """
-          // Measurement remains inert until explicitly enabled by the local
-          // Debug benchmark control. Values are bounded and content-free.
+          // These counters instrument existing attention work only. Release
+          // enables them by default; Debug keeps its explicit benchmark
+          // switch so tests and local experiments remain opt-in.
           const BENCHMARK_COUNTER_LIMIT = Number.MAX_SAFE_INTEGER;
           const BENCHMARK_DURATION_LIMIT_MS = 3600000;
-          let benchmarkMeasurementEnabled = false;
+          const BENCHMARK_TOTAL_DURATION_LIMIT_MS = Number.MAX_SAFE_INTEGER;
+          let benchmarkMeasurementEnabled = \(defaultBenchmarkMeasurementEnabled);
           const benchmarkCounters = {
             mutation_callback_batch_count: 0,
             detector_schedule_count: 0,
@@ -781,9 +829,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             if (!Number.isFinite(duration)) { return 0; }
             return Math.min(Math.max(duration, 0), BENCHMARK_DURATION_LIMIT_MS);
           };
+          const boundedBenchmarkTotal = (duration) => {
+            if (!Number.isFinite(duration)) { return 0; }
+            return Math.min(Math.max(duration, 0), BENCHMARK_TOTAL_DURATION_LIMIT_MS);
+          };
           const recordBenchmarkDuration = (totalKey, maximumKey, duration) => {
             const bounded = boundedBenchmarkDuration(duration);
-            benchmarkCounters[totalKey] = boundedBenchmarkDuration(
+            benchmarkCounters[totalKey] = boundedBenchmarkTotal(
               benchmarkCounters[totalKey] + bounded
             );
             benchmarkCounters[maximumKey] = Math.max(
@@ -849,17 +901,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           }
         """
         let benchmarkExports = """
-          globalThis.__floatTabsAttentionBenchmarkConfigureV1 = (enabled, reset) => {
-            if (reset === true) { resetBenchmarkCounters(); }
-            if (typeof enabled === "boolean") {
-              benchmarkMeasurementEnabled = enabled;
-            }
-            return {
-              version: 1,
-              token: TOKEN,
-              enabled: benchmarkMeasurementEnabled
-            };
-          };
+          \(benchmarkConfigurationExport)
 
           globalThis.__floatTabsAttentionBenchmarkSnapshotV1 = () => ({
             version: 1,
@@ -872,22 +914,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           });
         """
         let responseIdentityResolver = "resolveResponseIdentity"
-#else
-        let benchmarkInitialization = ""
-        let benchmarkIdentityResolver = ""
-        let benchmarkEvaluate = """
-          const evaluate = () => {
-            const generating = isGenerating();
-            if (generating === lastSent) { return; }
-            post(generating);
-            lastSent = generating;
-          };
-        """
-        let benchmarkScheduleCounter = ""
-        let benchmarkMutationObserverCallback = "schedule"
-        let benchmarkExports = ""
-        let responseIdentityResolver = "canonicalResponseIdentityFor"
-#endif
         return """
         (() => {
           "use strict";
@@ -915,7 +941,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           // Passive, bounded page-app observation. No application networking
           // or navigation API is replaced, and no event text or URL is read.
           const PAGE_EVENT_LIMIT = 16;
-          const PAGE_COUNTER_LIMIT = 255;
+          const PAGE_COUNTER_LIMIT = Number.MAX_SAFE_INTEGER;
           const pageEvents = [];
           const pageCounts = {
             javascript_error_count: 0,
@@ -1249,6 +1275,23 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let webViewIdentity: ObjectIdentifier
     }
 
+    private enum PendingLongTermWorkloadCapture {
+        case active(
+            id: UUID,
+            continuation: CheckedContinuation<[String: Any], Never>
+        )
+        case timedOut(id: UUID)
+
+        var id: UUID {
+            switch self {
+            case let .active(id, _):
+                return id
+            case let .timedOut(id):
+                return id
+            }
+        }
+    }
+
     private static let resyncAttemptLimit = 2
 
     let slotID: UUID
@@ -1260,11 +1303,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private let incidentHealthProbeEvaluator: ChatGPTIncidentHealthProbeEvaluator
     private let incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator
     private let incidentHealthProbeTimeout: TimeInterval
-#if DEBUG
+    private let longTermWorkloadTimeout: TimeInterval
     private let benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator
     private var benchmarkCounters = ChatGPTAttentionBenchmarkCounters()
     private var benchmarkOperationInFlight = false
-#endif
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
     private var document: DocumentSession?
@@ -1285,6 +1327,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var incidentHealthProbeTimeoutTask: Task<Void, Never>?
     private var pendingIncidentPageAppProbeID: UUID?
     private var incidentPageAppProbeTimeoutTask: Task<Void, Never>?
+    private var pendingLongTermWorkloadCapture: PendingLongTermWorkloadCapture?
+    private var longTermWorkloadTimeoutTask: Task<Void, Never>?
 #if DEBUG
     private(set) var debugLivenessWatchdogStartCount = 0
 #endif
@@ -1682,6 +1726,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         incidentPageAppProbeEvaluator: ChatGPTIncidentPageAppProbeEvaluator? = nil,
         benchmarkProbeEvaluator: ChatGPTBenchmarkProbeEvaluator? = nil,
         incidentHealthProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultIncidentHealthProbeTimeout,
+        longTermWorkloadTimeout: TimeInterval = ChatGPTAttentionBridge.defaultLongTermWorkloadTimeout,
         onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
     ) {
         self.slotID = slotID
@@ -1694,13 +1739,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             ?? Self.productionIncidentHealthProbeEvaluator
         self.incidentPageAppProbeEvaluator = incidentPageAppProbeEvaluator
             ?? Self.productionIncidentPageAppProbeEvaluator
-#if DEBUG
         self.benchmarkProbeEvaluator = benchmarkProbeEvaluator
             ?? Self.productionBenchmarkProbeEvaluator
-#endif
         self.incidentHealthProbeTimeout = min(
             max(incidentHealthProbeTimeout, 0),
             Self.defaultIncidentHealthProbeTimeout
+        )
+        self.longTermWorkloadTimeout = min(
+            max(longTermWorkloadTimeout, 0),
+            Self.defaultLongTermWorkloadTimeout
         )
         super.init()
     }
@@ -1801,6 +1848,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return benchmarkUnavailable(reason: "evaluation_failed")
         }
     }
+#endif
 
     /// Reads only bounded scalar values from the current isolated document.
     /// It rejects a callback if the Slot runtime, navigation, WebView, document
@@ -1868,6 +1916,181 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    /// Adapts the existing benchmark snapshot seam into Release-safe,
+    /// content-free periodic fields. This is a read of counters maintained by
+    /// the already-installed attention observer; it does not add an observer,
+    /// timer, polling loop, or separate sampling cadence.
+    @MainActor
+    func captureLongTermWorkloadDiagnosticFields(
+        for expectedWebView: WKWebView,
+        runtimeIdentity: WebRuntimeDiagnosticIdentity,
+        navigationGeneration: UInt64?,
+        contextIsCurrent: @escaping @MainActor () -> Bool
+    ) async -> [String: RuntimeDiagnosticValue] {
+        guard pendingLongTermWorkloadCapture == nil else {
+            return Self.longTermWorkloadStatusFields(
+                status: "suppressed",
+                reason: "pending_request_budget"
+            )
+        }
+        guard !benchmarkOperationInFlight else {
+            return Self.longTermWorkloadStatusFields(
+                status: "suppressed",
+                reason: "benchmark_operation_in_flight"
+            )
+        }
+
+        let requestID = UUID()
+        let raw = await withCheckedContinuation { continuation in
+            pendingLongTermWorkloadCapture = .active(
+                id: requestID,
+                continuation: continuation
+            )
+            let timeoutNanoseconds = UInt64(longTermWorkloadTimeout * 1_000_000_000)
+            longTermWorkloadTimeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                } catch {
+                    return
+                }
+                self?.finishLongTermWorkloadCapture(
+                    id: requestID,
+                    raw: [
+                        "status": "timeout",
+                        "reason": "deadline_exceeded",
+                        "measurement_enabled": self?.benchmarkCounters.isEnabled ?? false
+                    ],
+                    timedOut: true
+                )
+            }
+            Task { @MainActor [weak self, weak expectedWebView] in
+                guard let self else {
+                    continuation.resume(returning: [
+                        "status": "evaluation_failed",
+                        "reason": "bridge_unavailable"
+                    ])
+                    return
+                }
+                guard let expectedWebView else {
+                    self.finishLongTermWorkloadCapture(
+                        id: requestID,
+                        raw: [
+                            "status": "evaluation_failed",
+                            "reason": "webview_unavailable"
+                        ],
+                        timedOut: false
+                    )
+                    return
+                }
+                let result = await self.captureBenchmarkSnapshot(
+                    for: expectedWebView,
+                    runtimeIdentity: runtimeIdentity,
+                    navigationGeneration: navigationGeneration,
+                    contextIsCurrent: contextIsCurrent
+                )
+                self.finishLongTermWorkloadCapture(
+                    id: requestID,
+                    raw: result,
+                    timedOut: false
+                )
+            }
+        }
+        return Self.longTermWorkloadDiagnosticFields(from: raw)
+    }
+
+    /// Completes one bounded workload request. A timeout resumes the caller
+    /// immediately but retains the timed-out request marker until its WebKit
+    /// completion returns, so a stuck callback cannot be replaced by an
+    /// unbounded queue of additional requests.
+    private func finishLongTermWorkloadCapture(
+        id: UUID,
+        raw: [String: Any],
+        timedOut: Bool
+    ) {
+        guard let pendingLongTermWorkloadCapture,
+              pendingLongTermWorkloadCapture.id == id else {
+            return
+        }
+
+        switch pendingLongTermWorkloadCapture {
+        case let .active(_, continuation):
+            longTermWorkloadTimeoutTask?.cancel()
+            longTermWorkloadTimeoutTask = nil
+            self.pendingLongTermWorkloadCapture = timedOut
+                ? .timedOut(id: id)
+                : nil
+            continuation.resume(returning: raw)
+        case .timedOut:
+            // The caller already received the timeout outcome. This is the
+            // late WebKit completion boundary: release the single outstanding
+            // request budget, but never invoke or overwrite the old outcome.
+            guard !timedOut else { return }
+            self.pendingLongTermWorkloadCapture = nil
+        }
+    }
+
+    private static func longTermWorkloadStatusFields(
+        status: String,
+        reason: String
+    ) -> [String: RuntimeDiagnosticValue] {
+        [
+            "attention_workload_probe_status": .string(status),
+            "attention_workload_probe_reason": .string(reason)
+        ]
+    }
+
+    private static func longTermWorkloadDiagnosticFields(
+        from raw: [String: Any]
+    ) -> [String: RuntimeDiagnosticValue] {
+        var fields: [String: RuntimeDiagnosticValue] = [:]
+        if let rawStatus = raw["status"] as? String {
+            let status = rawStatus == "unavailable"
+                && raw["reason"] as? String == "operation_in_flight"
+                ? "suppressed"
+                : rawStatus
+            fields["attention_workload_probe_status"] = .string(status)
+        }
+        if let reason = raw["reason"] as? String {
+            fields["attention_workload_probe_reason"] = .string(reason)
+        }
+
+        let integerKeys = [
+            "document_epoch": "attention_workload_document_epoch",
+            "mutation_callback_batch_count": "attention_mutation_callback_batch_count",
+            "detector_schedule_count": "attention_detector_schedule_count",
+            "detector_evaluate_count": "attention_detector_evaluate_count",
+            "response_identity_resolution_count": "attention_response_resolution_count",
+            "liveness_probe_count": "attention_liveness_probe_count",
+            "confirmation_probe_count": "attention_confirmation_probe_count",
+            "liveness_failure_count": "attention_liveness_failure_count",
+            "recovered_completion_count": "attention_recovered_completion_count",
+            "captured_uptime_ms": "attention_workload_captured_uptime_ms"
+        ]
+        let doubleKeys = [
+            "js_roundtrip_latency_ms": "attention_workload_js_roundtrip_latency_ms",
+            "detector_evaluate_total_ms": "attention_detector_evaluate_total_ms",
+            "detector_evaluate_max_ms": "attention_detector_evaluate_max_ms",
+            "response_identity_resolution_total_ms": "attention_response_resolution_total_ms",
+            "response_identity_resolution_max_ms": "attention_response_resolution_max_ms",
+            "liveness_probe_total_ms": "attention_liveness_probe_total_ms",
+            "liveness_probe_max_ms": "attention_liveness_probe_max_ms"
+        ]
+
+        for (rawKey, diagnosticKey) in integerKeys {
+            guard let number = raw[rawKey] as? NSNumber else { continue }
+            fields[diagnosticKey] = .integer(number.int64Value)
+        }
+        for (rawKey, diagnosticKey) in doubleKeys {
+            guard let number = raw[rawKey] as? NSNumber,
+                  number.doubleValue.isFinite else { continue }
+            fields[diagnosticKey] = .double(number.doubleValue)
+        }
+        if let enabled = raw["measurement_enabled"] as? Bool {
+            fields["attention_workload_measurement_enabled"] = .bool(enabled)
+        }
+        return fields
+    }
+
     private func currentBenchmarkDocument(
         for expectedWebView: WKWebView
     ) -> DocumentSession? {
@@ -1925,7 +2148,6 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             "measurement_enabled": benchmarkCounters.isEnabled
         ]
     }
-#endif
 
     // MARK: WKScriptMessageHandler
 
@@ -2098,9 +2320,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func resetRuntime(admission: DocumentAdmission) {
         stopLivenessWatchdog()
-#if DEBUG
-        disableBenchmarkMeasurementForRuntimeReplacement()
-#endif
+        resetBenchmarkMeasurementForRuntimeReplacement()
         invalidatePendingCurrentDocumentResync()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
@@ -2117,9 +2337,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// later callback. Forwards one reset boundary if a document was active.
     func invalidate() {
         guard !isInvalidated else { return }
-#if DEBUG
-        disableBenchmarkMeasurementForRuntimeReplacement()
-#endif
+        resetBenchmarkMeasurementForRuntimeReplacement()
         isInvalidated = true
         stopLivenessWatchdog()
         invalidatePendingCurrentDocumentResync()
@@ -2138,8 +2356,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    private func resetBenchmarkMeasurementForRuntimeReplacement() {
+        benchmarkCounters.resetValues()
 #if DEBUG
-    private func disableBenchmarkMeasurementForRuntimeReplacement() {
         let shouldDisableDocumentCounters = benchmarkCounters.isEnabled || benchmarkOperationInFlight
         benchmarkCounters.setEnabled(false)
         benchmarkCounters.resetValues()
@@ -2149,8 +2368,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             in: nil,
             in: Self.contentWorld
         ) { _ in }
-    }
+#else
+        benchmarkCounters.setEnabled(true)
 #endif
+    }
 
     private func observeGeneration(
         _ generating: Bool,
@@ -2235,15 +2456,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func recordLivenessProbeFailure() {
-#if DEBUG
         benchmarkCounters.recordLivenessFailure()
-#endif
         diagnostics.record(event: "attention.liveness_probe.failed", level: .debug, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
     }
 
-#if DEBUG
     @MainActor
-#endif
     private func performLivenessCycle(watchdogGeneration: UInt64, documentEpoch: UInt64, webView: WKWebView, webViewIdentity: ObjectIdentifier, token: String) async {
         guard livenessCycleOwnerGeneration == nil, isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else { return }
         livenessCycleOwnerGeneration = watchdogGeneration
@@ -2253,18 +2470,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
         }
         let generation = livenessGeneration
-#if DEBUG
-        let firstProbeStartedAt = benchmarkCounters.isEnabled
-            ? ProcessInfo.processInfo.systemUptime
-            : nil
-#endif
+        let firstProbeStartedAt = ProcessInfo.processInfo.systemUptime
         let firstValue = await livenessProbe(webView)
-#if DEBUG
         recordBenchmarkLivenessProbe(
             startedAt: firstProbeStartedAt,
             isConfirmation: false
         )
-#endif
         guard let firstValue,
               let firstProbe = parseLivenessProbe(firstValue),
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token),
@@ -2281,18 +2492,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
         }
-#if DEBUG
-        let secondProbeStartedAt = benchmarkCounters.isEnabled
-            ? ProcessInfo.processInfo.systemUptime
-            : nil
-#endif
+        let secondProbeStartedAt = ProcessInfo.processInfo.systemUptime
         let secondValue = await livenessProbe(webView)
-#if DEBUG
         recordBenchmarkLivenessProbe(
             startedAt: secondProbeStartedAt,
             isConfirmation: true
         )
-#endif
         guard let secondValue,
               let secondProbe = parseLivenessProbe(secondValue),
               secondProbe.token == token,
@@ -2310,9 +2515,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             false,
             responseIdentity: secondProbe.responseIdentity
         ) == .generationFinished else { return }
-#if DEBUG
         benchmarkCounters.recordRecoveredCompletion()
-#endif
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
             "confirmation_count": .integer(2),
@@ -2321,19 +2524,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         ])
     }
 
-#if DEBUG
     private func recordBenchmarkLivenessProbe(
-        startedAt: TimeInterval?,
+        startedAt: TimeInterval,
         isConfirmation: Bool
     ) {
-        guard let startedAt else { return }
         let durationMilliseconds = (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
         benchmarkCounters.recordLivenessProbe(
             durationMilliseconds: durationMilliseconds,
             isConfirmation: isConfirmation
         )
     }
-#endif
 
 #if DEBUG
     var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }

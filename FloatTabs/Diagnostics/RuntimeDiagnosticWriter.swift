@@ -62,9 +62,11 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private let maxSegmentBytes: UInt64
     private let maxSegments: Int
     private let retention: TimeInterval
+    private let pruneInterval: TimeInterval
     private let dateProvider: DateProvider
     private let debounceInterval: TimeInterval
     private let flushObserver: FlushObserver?
+    private let pruneObserver: FlushObserver?
     private let queue = DispatchQueue(
         label: "com.lost0rz.FloatTabs.runtime-diagnostics-writer",
         qos: .utility
@@ -85,6 +87,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private var delayedFlushWorkItem: DispatchWorkItem?
     private var isDisabled = false
     private var hasReportedFailure = false
+    private var lastPruneDate: Date?
 
     init(
         directory: URL,
@@ -92,18 +95,22 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         maxSegmentBytes: UInt64 = 10 * 1024 * 1024,
         maxSegments: Int = 10,
         retention: TimeInterval = 7 * 24 * 60 * 60,
+        pruneInterval: TimeInterval = 5 * 60,
         dateProvider: @escaping DateProvider = Date.init,
         debounceInterval: TimeInterval = 1.5,
-        flushObserver: FlushObserver? = nil
+        flushObserver: FlushObserver? = nil,
+        pruneObserver: FlushObserver? = nil
     ) {
         self.directory = directory
         self.fileManager = fileManager
         self.maxSegmentBytes = max(1, maxSegmentBytes)
         self.maxSegments = max(1, maxSegments)
         self.retention = max(0, retention)
+        self.pruneInterval = max(0, pruneInterval)
         self.dateProvider = dateProvider
         self.debounceInterval = max(0, debounceInterval)
         self.flushObserver = flushObserver
+        self.pruneObserver = pruneObserver
     }
 
     func exportRecent(
@@ -127,6 +134,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
 
             self.cancelDelayedFlush()
             self.flushBuffer()
+            self.pruneFilesIfNeeded(now: self.dateProvider(), force: true)
             do {
                 let encoder = JSONEncoder()
                 encoder.dateEncodingStrategy = .iso8601
@@ -224,7 +232,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             self.cancelDelayedFlush()
             if !self.isDisabled {
                 self.flushBuffer()
-                self.pruneFiles(now: self.dateProvider())
+                self.pruneFilesIfNeeded(now: self.dateProvider(), force: true)
             }
             self.closeCurrentFile()
             gate.finish()
@@ -241,13 +249,14 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
     private func flushBuffer() {
         guard !bufferedLines.isEmpty, !isDisabled else { return }
         do {
+            var didRotate = false
             for line in bufferedLines {
-                try appendLine(line)
+                didRotate = try appendLine(line) || didRotate
             }
             try currentFileHandle?.synchronize()
             bufferedLines.removeAll(keepingCapacity: true)
             bufferedBytes = 0
-            pruneFiles(now: dateProvider())
+            pruneFilesIfNeeded(now: dateProvider(), force: didRotate)
             flushObserver?()
         } catch {
             disableAfterFailure("write", error: error)
@@ -278,13 +287,15 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         delayedFlushWorkItem = nil
     }
 
-    private func appendLine(_ line: Data) throws {
+    private func appendLine(_ line: Data) throws -> Bool {
         try ensureCurrentFile()
+        var didRotate = false
         if currentFileSize > 0,
            currentFileSize + UInt64(line.count) > maxSegmentBytes {
             closeCurrentFile()
             currentSegmentIndex += 1
             try ensureCurrentFile()
+            didRotate = true
         }
 
         guard let currentFileHandle else {
@@ -293,6 +304,7 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
         try currentFileHandle.seekToEnd()
         try currentFileHandle.write(contentsOf: line)
         currentFileSize += UInt64(line.count)
+        return didRotate
     }
 
     private func ensureCurrentFile() throws {
@@ -388,12 +400,25 @@ final class RuntimeDiagnosticWriter: RuntimeDiagnosticWriting, @unchecked Sendab
             }
             return $0.url.lastPathComponent < $1.url.lastPathComponent
         }
-        guard remaining.count > maxSegments else { return }
-        let deleteCount = remaining.count - maxSegments
-        let deletable = remaining.filter({ $0.url.standardizedFileURL != currentURL })
-        for segment in deletable.prefix(deleteCount) {
-            try? fileManager.removeItem(at: segment.url)
+        if remaining.count > maxSegments {
+            let deleteCount = remaining.count - maxSegments
+            let deletable = remaining.filter({ $0.url.standardizedFileURL != currentURL })
+            for segment in deletable.prefix(deleteCount) {
+                try? fileManager.removeItem(at: segment.url)
+            }
         }
+        pruneObserver?()
+    }
+
+    private func pruneFilesIfNeeded(now: Date, force: Bool = false) {
+        if !force,
+           let lastPruneDate,
+           pruneInterval > 0,
+           now.timeIntervalSince(lastPruneDate) < pruneInterval {
+            return
+        }
+        pruneFiles(now: now)
+        lastPruneDate = now
     }
 
     private func closeCurrentFile() {

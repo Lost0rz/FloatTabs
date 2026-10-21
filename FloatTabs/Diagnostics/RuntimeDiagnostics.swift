@@ -113,6 +113,181 @@ struct RuntimeDiagnosticSourceProvenance: Equatable {
     }
 }
 
+/// Adds long-run page-app trend evidence to an existing periodic checkpoint.
+/// The baseline is deliberately kept in the native diagnostics recorder so a
+/// page-provided counter can never be compared across a different physical
+/// runtime or document epoch.
+struct RuntimeDiagnosticCheckpointDeltaTracker: Sendable {
+    private struct Identity: Equatable, Sendable {
+        let slotID: String
+        let runtimeGeneration: Int64
+        let webViewInstanceID: String
+        let documentEpoch: Int64
+    }
+
+    private struct Baseline: Sendable {
+        let identity: Identity
+        let uptime: TimeInterval
+        let counters: [String: Int64]
+    }
+
+    private static let counterFields = [
+        "page_app_javascript_error_count",
+        "page_app_unhandled_rejection_count",
+        "page_app_resource_load_failure_count",
+        "page_app_resource_http_error_count",
+        "page_app_slow_resource_count",
+        "page_app_dropped_event_count",
+        "page_app_lifecycle_event_count"
+    ]
+
+    /// One transient baseline per observed Slot. The LRU cap prevents an
+    /// arbitrary stream of unowned identifiers from turning diagnostics into
+    /// a durable or unbounded store.
+    private static let maximumTrackedSlots = 64
+    private var baselines: [String: Baseline] = [:]
+    private var baselineRecency: [String] = []
+
+    mutating func decorate(
+        fields: [String: RuntimeDiagnosticValue],
+        uptime: TimeInterval
+    ) -> [String: RuntimeDiagnosticValue] {
+        var result = fields
+        let prefix = "page_app_"
+        let deltaKeys = Self.counterFields.map {
+            $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : $0
+        }.map { suffix in
+            suffix.replacingOccurrences(of: "_count", with: "_delta")
+        }
+        let rateKeys = deltaKeys.map { $0.replacingOccurrences(of: "_delta", with: "_rate_per_minute") }
+
+        func setUnavailable(_ state: String) {
+            result["page_app_delta_baseline"] = .string(state)
+            result["page_app_delta_identity_available"] = .bool(false)
+            for key in deltaKeys { result["page_app_\(key)"] = .null }
+            for key in rateKeys { result["page_app_\(key)"] = .null }
+        }
+
+        guard let identity = Self.identity(from: fields),
+              let counters = Self.counters(from: fields) else {
+            setUnavailable("unavailable_identity_or_counters")
+            return result
+        }
+
+        result["page_app_delta_identity_available"] = .bool(true)
+        guard let previous = baseline(for: identity.slotID) else {
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
+            result["page_app_delta_baseline"] = .string("established")
+            for key in deltaKeys { result["page_app_\(key)"] = .null }
+            for key in rateKeys { result["page_app_\(key)"] = .null }
+            return result
+        }
+
+        guard previous.identity == identity else {
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
+            result["page_app_delta_baseline"] = .string("reset_identity_change")
+            for key in deltaKeys { result["page_app_\(key)"] = .null }
+            for key in rateKeys { result["page_app_\(key)"] = .null }
+            return result
+        }
+
+        guard Self.countersAreMonotonic(counters, comparedTo: previous.counters) else {
+            replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
+            result["page_app_delta_baseline"] = .string("reset_counter_regression")
+            for key in deltaKeys { result["page_app_\(key)"] = .null }
+            for key in rateKeys { result["page_app_\(key)"] = .null }
+            return result
+        }
+
+        let interval = uptime - previous.uptime
+        result["page_app_delta_baseline"] = .string("continuing")
+        result["page_app_delta_interval_s"] = interval.isFinite && interval >= 0
+            ? .double(interval)
+            : .null
+        for (index, field) in Self.counterFields.enumerated() {
+            guard let current = counters[field], let old = previous.counters[field] else {
+                continue
+            }
+            let delta = current - old
+            result["page_app_\(deltaKeys[index])"] = .integer(delta)
+            if interval.isFinite, interval > 0 {
+                result["page_app_\(rateKeys[index])"] = .double(
+                    Double(delta) / (interval / 60)
+                )
+            } else {
+                result["page_app_\(rateKeys[index])"] = .null
+            }
+        }
+        replaceBaseline(Baseline(identity: identity, uptime: uptime, counters: counters))
+        return result
+    }
+
+    private mutating func baseline(for slotID: String) -> Baseline? {
+        guard let baseline = baselines[slotID] else { return nil }
+        touch(slotID)
+        return baseline
+    }
+
+    private mutating func replaceBaseline(_ baseline: Baseline) {
+        let slotID = baseline.identity.slotID
+        baselines[slotID] = baseline
+        touch(slotID)
+        if baselineRecency.count > Self.maximumTrackedSlots {
+            let evictedSlotID = baselineRecency.removeFirst()
+            baselines.removeValue(forKey: evictedSlotID)
+        }
+    }
+
+    private mutating func touch(_ slotID: String) {
+        baselineRecency.removeAll { $0 == slotID }
+        baselineRecency.append(slotID)
+    }
+
+    private static func identity(
+        from fields: [String: RuntimeDiagnosticValue]
+    ) -> Identity? {
+        guard case let .string(slotID) = fields["slot_id"],
+              case let .integer(runtimeGeneration) = fields["runtime_generation"],
+              case let .string(webViewInstanceID) = fields["webview_instance_id"],
+              case let .integer(documentEpoch) = fields["chatgpt_document_epoch"],
+              runtimeGeneration >= 0,
+              documentEpoch >= 0 else {
+            return nil
+        }
+        return Identity(
+            slotID: slotID,
+            runtimeGeneration: runtimeGeneration,
+            webViewInstanceID: webViewInstanceID,
+            documentEpoch: documentEpoch
+        )
+    }
+
+    private static func counters(
+        from fields: [String: RuntimeDiagnosticValue]
+    ) -> [String: Int64]? {
+        var counters: [String: Int64] = [:]
+        for field in counterFields {
+            guard case let .integer(value) = fields[field], value >= 0 else {
+                return nil
+            }
+            counters[field] = value
+        }
+        return counters
+    }
+
+    private static func countersAreMonotonic(
+        _ current: [String: Int64],
+        comparedTo previous: [String: Int64]
+    ) -> Bool {
+        counterFields.allSatisfy { field in
+            guard let currentValue = current[field], let previousValue = previous[field] else {
+                return false
+            }
+            return currentValue >= previousValue
+        }
+    }
+}
+
 @MainActor
 final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
     typealias TimestampProvider = () -> Date
@@ -129,6 +304,22 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         category: "RuntimeDiagnostics"
     )
     private var nextSequence: UInt64 = 1
+    private var checkpointDeltaTracker = RuntimeDiagnosticCheckpointDeltaTracker()
+
+    private static let staticEnvironmentFieldNames: Set<String> = [
+        "app_version",
+        "build_number",
+        "source_revision",
+        "source_tree_state",
+        "source_revision_exact",
+        "build_channel",
+        "qa_label",
+        "macos_version",
+        "architecture",
+        "session_id",
+        "schema_version",
+        "diagnostics_mode"
+    ]
 
     var mode: RuntimeDiagnosticMode {
         modeProvider()
@@ -217,12 +408,24 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
             mode: currentMode
         )
         var eventFields = sanitizedFields
+        if Self.isPeriodicSample(event) {
+            eventFields = eventFields.filter { key, _ in
+                !Self.staticEnvironmentFieldNames.contains(key)
+            }
+        }
+        let eventUptime = uptime()
+        if event == "diagnostics.performance_checkpoint" {
+            eventFields = checkpointDeltaTracker.decorate(
+                fields: eventFields,
+                uptime: eventUptime
+            )
+        }
         if let trace {
             eventFields["trace_root"] = .string(trace.root)
         }
         let diagnosticEvent = RuntimeDiagnosticEvent(
             timestamp: timestamp(),
-            uptime: uptime(),
+            uptime: eventUptime,
             sequence: nextSequence,
             sessionID: sessionID,
             traceID: trace?.id,
@@ -235,6 +438,11 @@ final class RuntimeDiagnostics: RuntimeDiagnosticRecording {
         log(diagnosticEvent)
         writer.enqueue(diagnosticEvent)
         return diagnosticEvent
+    }
+
+    private static func isPeriodicSample(_ event: String) -> Bool {
+        event == "diagnostics.performance_checkpoint"
+            || event == "web_runtime.cross_world_liveness"
     }
 
     func requestFinalFlush(
