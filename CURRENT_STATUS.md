@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / GATE 3 LOCAL VERIFIED**
+**MODE: ACTIVE ENGINEERING — DIAGNOSTICS EFFICIENCY / GATE 3 REMOTE CI VERIFIED**
 
 Current task: `FT-DIAG-EFFICIENCY-EVIDENCE-001`
 
@@ -58,7 +58,7 @@ The bounded corrective is implemented in commit `14fa074` on
 - deterministic periodic fixture: 21,382 bytes before, 13,702 after, 35.918% reduction across 20 equivalent events. The 50% target was not claimed because the measured result is lower;
 - Release binary inspection exposes the new workload fields and snapshot contract and no longer contains `panel.auto_hide.observed`.
 
-Remote exact-head CI and independent Web/runtime acceptance remain pending. No root-cause conclusion is made.
+Remote exact-head CI and DMG gates passed at delivery head `5c315f8e0e20ed1a5235670af9353d263f597a45`. Independent Web/runtime acceptance remains pending. No root-cause conclusion is made.
 
 ## Active construction plan
 
