@@ -39,6 +39,8 @@ The next Air observation build must make it possible to compare runtime health, 
 - Replace saturating long-run page-app counters with bounded-memory totals plus checkpoint deltas/rates or equivalent non-saturating trend evidence.
 - Key delta baselines by physical/runtime/document identity so runtime or document replacement resets the baseline cleanly.
 - Promote low-cost observer/detector workload counters needed for Release long-run diagnosis by counting work already performed; do not add another observer, timer, polling loop, or independent JavaScript sampling cadence.
+- Bound long-term workload capture to one outstanding WebKit request with an explicit timeout/status outcome; late completion is ignored after timeout and does not trigger recovery.
+- Keep delta baselines as transient, bounded per-Slot state and never compare counters across physical runtime, WebView, or document identities.
 - Preserve the recent bounded event ring for categorical incident context without retaining page text, prompt, response, selector text, cookies, session data, or DOM content.
 
 ### Gate 3 — Verification / observation release readiness
@@ -53,6 +55,7 @@ The next Air observation build must make it possible to compare runtime health, 
 
 ```text
 IMPLEMENTATION_COMMIT=14fa074
+CORRECTIVE_IMPLEMENTATION_COMMIT=e6f0fd8
 FOCUSED_TESTS=109_PASS_0_FAIL
 FULL_DEBUG_XCTEST=1353_PASS_0_FAIL
 RELEASE_ARM64_BUILD=PASS
@@ -64,6 +67,27 @@ LOG_VOLUME_TARGET_50_PERCENT=NOT_REACHED_AND_NOT_CLAIMED
 REMOTE_EXACT_HEAD_CI=PASS
 REMOTE_DMG_GATE=PASS
 WEB_RUNTIME_ACCEPTANCE=PENDING
+```
+
+## Corrective audit receipt — 2026-10-21
+
+```text
+WORKLOAD_CAPTURE_TIMEOUT=5_SECONDS_MAX
+WORKLOAD_OUTSTANDING_BUDGET=ONE_REQUEST
+WORKLOAD_LATE_CALLBACK=IGNORED_AFTER_TIMEOUT
+WORKLOAD_TIMEOUT_CHECKPOINT=COMPLETES
+WORKLOAD_TIMEOUT_RECOVERY=NO
+DELTA_BASELINES=TRANSIENT_PER_SLOT_BOUNDED_LRU_64
+CORRECTIVE_FOCUSED_TESTS=105_PASS_0_FAIL
+CORRECTIVE_PRIVACY_ROTATION_TESTS=35_PASS_0_FAIL
+CORRECTIVE_FULL_XCTEST=1357_PASS_0_FAIL
+CORRECTIVE_DEBUG_ARM64=PASS
+CORRECTIVE_RELEASE_ARM64=PASS
+CORRECTIVE_QA_DMG=PASS_LOCAL
+CORRECTIVE_REMOTE_EXACT_HEAD_CI=PENDING
+WEB_RUNTIME_ACCEPTANCE=PENDING
+ROOT_CAUSE=UNKNOWN
+NEXT=WEB_REAUDIT
 ```
 
 ## Acceptance

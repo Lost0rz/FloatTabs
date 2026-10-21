@@ -60,6 +60,30 @@ The bounded corrective is implemented in commit `14fa074` on
 
 Remote exact-head CI and DMG gates passed at delivery head `1214ceafe65917ef3eddce45c7dca4ab7dacfafb`. Independent Web/runtime acceptance remains pending. No root-cause conclusion is made.
 
+## Corrective audit evidence — 2026-10-21
+
+The two independent Web/runtime audit blockers are corrected in commit
+`e6f0fd8`, following the bounded diagnostics implementation above:
+
+- long-term workload capture has a five-second maximum, one outstanding
+  WebKit request budget, explicit `timeout` / `suppressed` / `stale` /
+  `evaluation_failed` outcomes, and a late-completion boundary that cannot
+  double-complete or overwrite the timed-out checkpoint;
+- a workload timeout completes the enclosing observation checkpoint without
+  reload/reset/rebuild or recovery classification;
+- delta baselines are transient per-Slot state with a bounded 64-Slot LRU;
+  runtime generation, WebView instance, document epoch, and counter
+  regression reset only the affected Slot baseline;
+- focused bridge/diagnostics tests: 105 passed, 0 failed; privacy/rotation
+  tests: 35 passed, 0 failed; full XCTest: 1,357 passed, 0 failed;
+- Debug arm64 and Release arm64 builds passed; the Release binary contains no
+  benchmark-control debug markers;
+- QA DMG packaging, arm64/signature verification, and `hdiutil verify`
+  passed for `/private/tmp/FloatTabs-ft-diag-qa.FpO89h/FloatTabs-0.5.5.dmg`.
+
+The corrective remains subject to exact-head remote CI and independent Web
+runtime re-audit. Root cause remains unknown.
+
 ## Active construction plan
 
 ### Gate 1 — Log efficiency
