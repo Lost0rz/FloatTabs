@@ -151,6 +151,8 @@ Run:
 - Release arm64 build;
 - required exact-head repository CI once pushed.
 
+Local Gate 5/6 evidence is complete on implementation commit `48a9b1b`: the focused matching tests, full XCTest, and Debug/Release arm64 builds exited successfully. Exact-head repository CI is still pending the authorized push.
+
 ### Gate 7 — Human UI acceptance
 
 ```text
@@ -180,6 +182,21 @@ STOP and report evidence if:
 - Keep PR #146 Draft until implementation verification and human UI acceptance are complete.
 - **Merge is not authorized by this task alone.**
 - **Release is not authorized.**
+
+Current local implementation receipt:
+
+```text
+IMPLEMENTATION_COMMIT=48a9b1b
+CHANGED_PATHS=FloatTabs/UI/ExternalTabRail.swift,FloatTabs/UI/GlobalSettingsController.swift,FloatTabsTests/AppPreferencesStoreTests.swift,FloatTabsTests/ExternalShellTests.swift,FloatTabsTests/SettingsInformationArchitectureTests.swift,FloatTabsTests/WebAttentionIndicatorTests.swift
+FOCUSED_TESTS=PASS
+FULL_XCTEST=PASS
+BUILD_DEBUG_ARM64=PASS
+BUILD_RELEASE_ARM64=PASS
+AUTOMATED_BROWSER_VERIFICATION=NOT_RUN
+AI_RENDERED_INSPECTION=NOT_RUN
+HUMAN_UI_ACCEPTANCE=PENDING
+CI_STATE=PENDING_PUSH
+```
 
 ## Required execution receipt
 

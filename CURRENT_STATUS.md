@@ -79,16 +79,28 @@ HUMAN_UI_ACCEPTANCE=PENDING
 
 AI/browser/render inspection may support implementation debugging but must not be reported as human acceptance.
 
+## Current execution evidence
+
+The bounded implementation is complete locally on commit `48a9b1b`:
+
+- active Tabs remain at 76 pt with a persistent label; inactive Tabs retain 40 -> 76 pt hover behavior;
+- canonical styles are Dot / Beacon / Orbit / Pulse, with `halo -> pulse` and `sweep -> orbit` compatibility;
+- Orbit uses the internal 2.5 pt inset / 3 pt perimeter and Pulse uses the frozen 0.38 -> 1.00 breath with a 0.72 Reduce Motion representative;
+- Settings uses the shared renderer in a 2x2 style grid;
+- focused matching tests, full XCTest, and Debug/Release arm64 builds all exited successfully.
+
+The implementation commit is not yet pushed. Exact-head repository CI remains pending, and human UI acceptance remains user-owned and pending.
+
 ## Repository lifecycle
 
 - `main` baseline at task start: `f08e0d718c7a7a9943e133d29f29e5c56c585585`.
 - No open PR existed at task start.
 - Task branch: `codex/ft-attention-active-tab-visual-refinement-001`.
 - Draft PR: `#146`, `OPEN / DRAFT / UNMERGED`.
-- PR #146 is the single task write surface; initial commits contain only the frozen control/design state.
+- PR #146 is the single task write surface; the frozen control/design state is now followed by the bounded implementation commit `48a9b1b`.
 - No merge is authorized yet.
 - No release is authorized.
 
 ## Next
 
-Local implementation should continue only on PR #146's task branch after reading `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and the frozen design contract. Preserve one writer, implement by the recorded Gates, push exact-head evidence, and stop for human UI acceptance before any merge decision.
+Push the same task branch, verify exact-head repository CI, and stop for human UI acceptance before any merge decision. Preserve one writer and do not merge or release.
