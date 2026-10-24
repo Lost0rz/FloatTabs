@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — FINAL WEB/RUNTIME CORRECTIVE AUTHORIZED**
+**MODE: ACTIVE CORRECTIVE — INDEPENDENT WEB/RUNTIME ACCEPTANCE PASS / FINAL MERGE AUDIT PENDING**
 
 Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
@@ -17,113 +17,95 @@ MAIN=17f1bf1760625833d0b82397009223b2165521c7
 LATEST_RELEASE=v0.5.6
 BUILD=24
 ARCH=arm64
-RELEASE_COMMIT=17f1bf1760625833d0b82397009223b2165521c7
 TASK_BRANCH=codex/ft-web-runtime-recovery-attention-001
 TASK_PR=144_OPEN_DRAFT_UNMERGED
-PREDECESSOR_PR_143=CLOSED_SUPERSEDED_UNMERGED
-PRE_FINAL_CORRECTIVE_SEMANTIC_HEAD=95865a33715bde8dde9d4385a829a17ad79f2edd
-PRE_FINAL_CORRECTIVE_CONTROL_HEAD=6684538d97a46e474a1a19c3e7f13044549263ae
 FINAL_CORRECTIVE_SEMANTIC_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
+PRE_ACCEPTANCE_CONTROL_HEAD=50f688f069cd14758853493d80ed9e74aa2a330b
 ROOT_CAUSE=UNKNOWN
-INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / FINAL_CORRECTIVE_VERIFIED / INDEPENDENT_WEB_RUNTIME_REAUDIT_PENDING
 ```
 
-v0.5.6 remains an observation release. Repeated WebContent termination and non-termination runtime stall/near-stall remain real incident evidence; no common root cause is established.
+v0.5.6 remains an observation release. Repeated WebContent process termination and non-termination runtime stall/near-stall remain real incident evidence; no shared root cause is established.
 
-## Independent re-audit state
+## Independent Web/runtime acceptance
 
-The independent Web/runtime re-audit of PR #144 accepted the major implementation corrections at semantic head `95865a33715bde8dde9d4385a829a17ad79f2edd`:
+Fresh independent re-audit of PR #144 at semantic head `c63578e6e8163a28d210ef60987d7ccd39d51af1` is **PASS**.
+
+Accepted implementation state:
 
 ```text
+RECOVERY_NAVIGATION_IDENTITY=PASS
+RECOVERY_COMMIT_WITHOUT_PROVISIONAL=PASS
+RECOVERY_FINISH_STATE=PASS
+STALE_RECOVERY_CALLBACK_REJECTION=PASS
+DEFERRED_RECOVERY_EXACT_NAVIGATION=PASS
+POST_FINISH_STALL_ELIGIBILITY=PASS
 PHYSICAL_RUNTIME_EPOCH=PASS
-OLD_CALLBACK_INVALIDATION=PASS
-SAME_RUNTIME_BUDGET_BOUNDING=PASS
-RECOVERY_NAVIGATION_FINISH=PASS
-STALE_RECOVERY_CALLBACK=PASS
-HOT_PATH_OPTIMIZATION=PASS
-STANDARD_COUNTER_STORAGE=PASS
+SAME_RUNTIME_REQUEST_BUDGET_BOUNDING=PASS
+ORDINARY_DOCUMENT_REPLACEMENT_NO_NEW_CAPACITY=PASS
+PHYSICAL_REPLACEMENT_FRESH_CAPACITY=PASS
+OLD_EPOCH_CALLBACK_NOOP=PASS
+ATTENTION_HOT_PATH_OPTIMIZATION=PASS
+STANDARD_NATIVE_COUNTER_STORAGE=PASS
+STANDARD_FAILURE_STATE_PROJECTION=PASS
+STANDARD_EARLY_SUPPRESSION_PROJECTION=PASS
+PRIVACY_DATA_SAFETY=PASS
+INDEPENDENT_WEB_RUNTIME_ACCEPTANCE=PASS
 ROOT_CAUSE=UNKNOWN
 ```
 
-Previous verification for that semantic head:
+No new production blocker was found in the final corrective.
+
+## Final corrective evidence
+
+Semantic implementation commit:
+
+`c63578e6e8163a28d210ef60987d7ccd39d51af1`
+
+The final corrective:
+
+- projects the four bounded native Attention timeout/suppression counters into long-term diagnostic fields for normal, unavailable, timeout, stale, evaluation-failed, and early-suppressed outcomes without an extra JavaScript probe;
+- preserves bridge-lifetime health evidence independently from document admission;
+- proves ordinary document replacement cannot manufacture liveness physical-request capacity;
+- proves authoritative WebContent replacement restores a fresh finite request budget and old callbacks remain harmless;
+- proves inactive deferred recovery retains exact returned `WKNavigation` identity through commit/finish;
+- proves recovered `navigation_phase=finished` restores post-finish dual-timeout stall-candidate eligibility;
+- does not change recovery disposition, residency policy, Browser Profile/session data, or detector/liveness cadence.
+
+Verification receipts:
 
 ```text
-FULL_XCTEST=1365_PASS_0_FAIL
-DEBUG_ARM64=PASS
-RELEASE_ARM64=PASS
-LARGE_DOM_FIXTURE=PASS_LAYOUT_CHECKS_2_DETECTOR_MAX_0.1_MS
-MACOS_CI_1098=SUCCESS_40082588185
-QA_DMG_510=SUCCESS_40082588204
-```
-
-Those historical receipts did not authorize merge; the final corrective now has fresh local and exact-head host verification, but independent Web/runtime acceptance is still required.
-
-## Final corrective verification
-
-The final corrective semantic head is `c63578e6e8163a28d210ef60987d7ccd39d51af1`.
-
-The native health counters are now merged from a content-free native helper on every long-term workload outcome, including unavailable, timeout, stale, evaluation-failed, and suppressed paths. No additional JavaScript probe, document admission, recovery, or budget ownership change was introduced.
-
-The three composed regressions are now present and passing:
-
-1. same-physical-runtime liveness budget remains exhausted across ordinary document replacement and resets only on authoritative WebContent replacement;
-2. deferred inactive recovery registers and finishes the exact returned `WKNavigation` without stale callbacks;
-3. recovered finish restores deterministic post-finish-stall eligibility.
-
-Final local verification:
-
-```text
-FOCUSED_AND_RELATED_TESTS=PASS
 FULL_XCTEST=1367_PASS_0_FAIL_3_SKIPPED_OF_1370
 DEBUG_ARM64=PASS
 RELEASE_ARM64=PASS
 LARGE_DOM_FIXTURE=PASS
 GIT_DIFF_CHECK=PASS
-MACOS_CI_1102=SUCCESS_40086444312
-QA_DMG_514=SUCCESS_40086444322
-PR_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
+SEMANTIC_MACOS_CI_1102=SUCCESS_40086444312
+SEMANTIC_QA_DMG_514=SUCCESS_40086444322
+PRE_ACCEPTANCE_CONTROL_MACOS_CI_1103=SUCCESS_40086995308
+PRE_ACCEPTANCE_CONTROL_QA_DMG_515=SUCCESS_40086995311
 ```
-
-This verification does not establish the WebContent termination/stall root cause or independent runtime acceptance.
-
-## Frozen accepted areas
-
-Do not change without a failing regression that proves necessity:
-
-- exact `WKNavigation` recovery identity ownership;
-- physical WebContent runtime epoch design;
-- late old-epoch callback rejection;
-- finite liveness/resync budgets;
-- Attention semantic selector narrowing and predicate ordering;
-- generating-path response-identity skip;
-- 250-ms Attention coalescing;
-- 2-second liveness cadence;
-- 30-second cross-world cadence;
-- WebContent reload/deferred recovery policy;
-- Hot/Warm/Cold residency policy.
 
 ## Safety boundary
 
-No authorization to:
+No authorization or evidence to:
 
-- claim WebContent termination root cause is known;
+- claim the WebContent termination/stall root cause is known;
 - add reload/reset/rebuild/restart mitigation;
+- change Hot/Warm/Cold residency policy;
 - clear or migrate Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or diagnostics history;
 - use private WebKit APIs;
-- capture prompt/response text, page content, selector text, cookies, tokens, or session values;
-- broaden this task into general diagnostics compaction or general WebView lifecycle redesign.
+- capture prompt/response text, page content, selector text, cookies, tokens, or session values.
 
 ## Repository lifecycle
 
 - PR #143 remains `CLOSED / SUPERSEDED / UNMERGED`.
-- PR #144 remains the sole write-capable workspace for this corrective.
-- PR #144 must remain `OPEN / DRAFT / UNMERGED` until fresh exact-head verification and independent Web/runtime acceptance pass.
+- PR #144 remains `OPEN / DRAFT / UNMERGED` pending literal-final-head verification and final merge audit.
+- No further production mutation is authorized by this acceptance unless a new blocking finding appears.
 
 ## Next milestone
 
-Return PR #144 for independent Web/runtime re-audit at the final corrective head:
-
-1. review the content-free Standard failure-state projection;
-2. review the three composed regression contracts and exact-head receipts;
-3. keep PR #144 Draft and unmerged until independent acceptance passes;
-4. do not Ready/merge/release before that acceptance.
+1. verify the new control-only final PR head differs from the accepted semantic head only by `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
+2. wait for literal-final-head macOS CI and QA DMG to complete successfully;
+3. perform final merge audit;
+4. if no base/head drift or new blocker appears, PR #144 may be marked Ready and merged;
+5. any later release remains separately authorized; `ROOT_CAUSE=UNKNOWN` must remain explicit.
