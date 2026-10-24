@@ -6,31 +6,27 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — INDEPENDENT WEB/RUNTIME ACCEPTANCE PASS / FINAL MERGE AUDIT PENDING**
+**MODE: NO ACTIVE ENGINEERING TASK — v0.5.6 AIR OBSERVATION**
 
-Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
+Most recently completed task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
-## Verified baseline
+## Current verified baseline
 
 ```text
-MAIN=17f1bf1760625833d0b82397009223b2165521c7
-LATEST_RELEASE=v0.5.6
-BUILD=24
-ARCH=arm64
-TASK_BRANCH=codex/ft-web-runtime-recovery-attention-001
-TASK_PR=144_OPEN_DRAFT_UNMERGED
+PRODUCT_MAIN_AFTER_PR144=4477a0f8a8d7d37a5202e209920e04b0330a93f6
+MERGED_PR=144
 FINAL_CORRECTIVE_SEMANTIC_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
-PRE_ACCEPTANCE_CONTROL_HEAD=50f688f069cd14758853493d80ed9e74aa2a330b
+PUBLIC_RELEASE=v0.5.6
+PUBLIC_BUILD=24
+ARCH=arm64
 ROOT_CAUSE=UNKNOWN
 ```
 
-v0.5.6 remains an observation release. Repeated WebContent process termination and non-termination runtime stall/near-stall remain real incident evidence; no shared root cause is established.
+PR #144 is merged. The accepted corrective improves FloatTabs-owned recovery/navigation identity, bounds ChatGPT Attention runtime request capacity by the physical WebContent runtime epoch, and projects bounded native Attention timeout/suppression health counters into Standard long-term diagnostics.
 
-## Independent Web/runtime acceptance
+The corrective does **not** establish the root cause of the observed WebContent termination or non-termination stall/near-stall incidents. `ROOT_CAUSE=UNKNOWN` remains authoritative.
 
-Fresh independent re-audit of PR #144 at semantic head `c63578e6e8163a28d210ef60987d7ccd39d51af1` is **PASS**.
-
-Accepted implementation state:
+## Accepted behavior
 
 ```text
 RECOVERY_NAVIGATION_IDENTITY=PASS
@@ -50,62 +46,38 @@ STANDARD_FAILURE_STATE_PROJECTION=PASS
 STANDARD_EARLY_SUPPRESSION_PROJECTION=PASS
 PRIVACY_DATA_SAFETY=PASS
 INDEPENDENT_WEB_RUNTIME_ACCEPTANCE=PASS
-ROOT_CAUSE=UNKNOWN
 ```
 
-No new production blocker was found in the final corrective.
+No reload/reset/rebuild mitigation, residency-policy change, Browser Profile/session migration, private WebKit API, or content capture was added.
 
-## Final corrective evidence
-
-Semantic implementation commit:
-
-`c63578e6e8163a28d210ef60987d7ccd39d51af1`
-
-The final corrective:
-
-- projects the four bounded native Attention timeout/suppression counters into long-term diagnostic fields for normal, unavailable, timeout, stale, evaluation-failed, and early-suppressed outcomes without an extra JavaScript probe;
-- preserves bridge-lifetime health evidence independently from document admission;
-- proves ordinary document replacement cannot manufacture liveness physical-request capacity;
-- proves authoritative WebContent replacement restores a fresh finite request budget and old callbacks remain harmless;
-- proves inactive deferred recovery retains exact returned `WKNavigation` identity through commit/finish;
-- proves recovered `navigation_phase=finished` restores post-finish dual-timeout stall-candidate eligibility;
-- does not change recovery disposition, residency policy, Browser Profile/session data, or detector/liveness cadence.
-
-Verification receipts:
+## Verification and merge evidence
 
 ```text
 FULL_XCTEST=1367_PASS_0_FAIL_3_SKIPPED_OF_1370
 DEBUG_ARM64=PASS
 RELEASE_ARM64=PASS
 LARGE_DOM_FIXTURE=PASS
-GIT_DIFF_CHECK=PASS
 SEMANTIC_MACOS_CI_1102=SUCCESS_40086444312
 SEMANTIC_QA_DMG_514=SUCCESS_40086444322
 PRE_ACCEPTANCE_CONTROL_MACOS_CI_1103=SUCCESS_40086995308
 PRE_ACCEPTANCE_CONTROL_QA_DMG_515=SUCCESS_40086995311
+FINAL_HEAD=8b71f42a6a516a86bb41a0ac038446d9405bf4c4
+FINAL_HEAD_QA_DMG_517=SUCCESS_40087782157
+FINAL_HEAD_MACOS_CI_1105=SUCCESS_40087782148_RERUN
+FINAL_MERGE_AUDIT=PASS_WITH_FOLLOWUP
+MERGE_COMMIT=4477a0f8a8d7d37a5202e209920e04b0330a93f6
+POST_MERGE_MACOS_CI_1106=SUCCESS_40093073048
 ```
 
-## Safety boundary
-
-No authorization or evidence to:
-
-- claim the WebContent termination/stall root cause is known;
-- add reload/reset/rebuild/restart mitigation;
-- change Hot/Warm/Cold residency policy;
-- clear or migrate Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or diagnostics history;
-- use private WebKit APIs;
-- capture prompt/response text, page content, selector text, cookies, tokens, or session values.
+The first macOS CI attempt for the unchanged final head failed only in `WebViewPoolTests.testHiddenSelectedColdGetsRecentActiveGraceBeforeColdRelease`; the same exact head passed on rerun, and post-merge `main` CI also passed. This is recorded as a non-blocking timing-sensitive XCTest stability follow-up, not as evidence of a PR #144 product regression and not as a root-cause finding.
 
 ## Repository lifecycle
 
-- PR #143 remains `CLOSED / SUPERSEDED / UNMERGED`.
-- PR #144 remains `OPEN / DRAFT / UNMERGED` pending literal-final-head verification and final merge audit.
-- No further production mutation is authorized by this acceptance unless a new blocking finding appears.
+- PR #143: `CLOSED / SUPERSEDED / UNMERGED`.
+- PR #144: `MERGED` at `4477a0f8a8d7d37a5202e209920e04b0330a93f6`.
+- No release is authorized by this closeout.
+- No product/runtime mutation is currently authorized.
 
-## Next milestone
+## Observation next step
 
-1. verify the new control-only final PR head differs from the accepted semantic head only by `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
-2. wait for literal-final-head macOS CI and QA DMG to complete successfully;
-3. perform final merge audit;
-4. if no base/head drift or new blocker appears, PR #144 may be marked Ready and merged;
-5. any later release remains separately authorized; `ROOT_CAUSE=UNKNOWN` must remain explicit.
+Continue normal use of the current v0.5.6 / Build 24 observation release. If a fresh slowdown, stall, or WebContent termination occurs, preserve/export Runtime Diagnostics before reload/restart when practical and correlate the incident by Slot, runtime identity, navigation state, Attention health counters, page-app trend, observer workload, and process-termination boundaries.
