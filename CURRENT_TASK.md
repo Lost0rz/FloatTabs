@@ -23,17 +23,21 @@ Repository rules and navigation remain:
 
 Where the frozen task contract defines the target behavior for active Tab presentation or unread Attention visuals, implement that target for this task without broadening unrelated v1.3 behavior.
 
-## Baseline
+## Baseline / workspace
 
 ```text
 BASE_MAIN=f08e0d718c7a7a9943e133d29f29e5c56c585585
 TASK_BRANCH=codex/ft-attention-active-tab-visual-refinement-001
+DRAFT_PR=146
+PR_STATE=OPEN_DRAFT_UNMERGED
 PUBLIC_RELEASE=v0.5.6
 PUBLIC_BUILD=24
 ARCH=arm64
 PREVIOUS_TASK=FT-WEB-RUNTIME-RECOVERY-ATTENTION-001
 PREVIOUS_TASK_STATE=TERMINAL
 ```
+
+PR #146 is the single remote task write surface. Continue the same task/branch/PR for in-scope corrections; do not create a successor PR merely because implementation needs adjustment.
 
 The previous runtime/Attention corrective remains closed. Its unresolved WebContent stall/termination root cause remains `UNKNOWN` and is not part of this UI task.
 
@@ -113,7 +117,8 @@ Small numeric corrections may be made only when needed to satisfy the frozen beh
 
 - fetch fresh refs;
 - read `AGENTS.md`, `CURRENT_STATUS.md`, this file, and the frozen design contract;
-- verify the task branch is based on the recorded baseline or reconcile only non-semantic control drift safely;
+- verify local work is on `codex/ft-attention-active-tab-visual-refinement-001` and PR #146 remains the task PR;
+- verify fresh `origin/main` has not introduced a material overlapping semantic change; control-only drift alone does not invalidate the task;
 - establish one writer and preserve unknown unique work;
 - STOP on overlapping unknown write-capable work.
 
@@ -169,10 +174,10 @@ STOP and report evidence if:
 
 ## Delivery / lifecycle
 
-- Use the existing task branch and one Draft PR for this task.
+- Continue only on `codex/ft-attention-active-tab-visual-refinement-001` / Draft PR #146.
 - Do not create a successor task/PR merely for an in-scope corrective.
 - Push and verify the task ref after state-changing commits.
-- Keep the PR Draft until implementation verification and human UI acceptance are complete.
+- Keep PR #146 Draft until implementation verification and human UI acceptance are complete.
 - **Merge is not authorized by this task alone.**
 - **Release is not authorized.**
 
