@@ -1918,6 +1918,68 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
+    func testRecoveryLoadRegistersReturnedNavigationBeforeCommitCallback() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var returnedNavigation: WKNavigation?
+        var profile = makeProfile(name: "RecoveryNavigationIdentity")
+        profile.currentURL = URL(string: "https://example.com/recovered")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { webView, _ in
+                returnedNavigation = webView.loadHTMLString(
+                    "<html><body>recovered</body></html>",
+                    baseURL: URL(string: "https://example.com/")
+                )
+                return returnedNavigation
+            },
+            diagnostics: diagnostics
+        )
+
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        observer.webViewWebContentProcessDidTerminate(webView)
+        let recoveryNavigation = try XCTUnwrap(returnedNavigation)
+
+        // Simulate WebKit delivering commit without a provisional-start
+        // callback. The pool's retained WKNavigation identity must still make
+        // this the current fresh generation.
+        observer.webView(webView, didCommit: recoveryNavigation)
+
+        let commit = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        guard case let .integer(generation)? = commit.fields["navigation_generation"] else {
+            return XCTFail("Recovery commit did not carry a navigation generation")
+        }
+        XCTAssertGreaterThanOrEqual(generation, 1)
+        XCTAssertEqual(commit.fields["navigation_phase"], .string("post_commit"))
+        XCTAssertEqual(commit.fields["navigation_callback_stale"], .bool(false))
+
+        // Recovery remains one complete navigation identity through didFinish,
+        // and a later ordinary navigation cannot be completed by a stale
+        // recovery callback.
+        observer.webView(webView, didFinish: recoveryNavigation)
+        let finish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(finish.fields["navigation_generation"], commit.fields["navigation_generation"])
+        XCTAssertEqual(finish.fields["navigation_phase"], .string("finished"))
+        XCTAssertEqual(finish.fields["navigation_callback_stale"], .bool(false))
+
+        let ordinaryNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>ordinary</body></html>",
+                baseURL: URL(string: "https://example.com/")
+            )
+        )
+        observer.webView(webView, didStartProvisionalNavigation: ordinaryNavigation)
+        observer.webView(webView, didFinish: recoveryNavigation)
+        let staleFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(staleFinish.fields["navigation_callback_stale"], .bool(true))
+        observer.webView(webView, didFinish: ordinaryNavigation)
+        let ordinaryFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(ordinaryFinish.fields["navigation_callback_stale"], .bool(false))
+    }
+
     func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() throws {
         var loadedRequests: [URLRequest] = []
         var isActive = false
@@ -1940,6 +2002,51 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.count, 2)
         XCTAssertEqual(loadedRequests.last?.url, profile.currentURL)
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
+    }
+
+    func testDeferredRecoveryRegistersExactNavigationThroughCommitAndFinish() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var isActive = false
+        var returnedRecoveryNavigation: WKNavigation?
+        var profile = makeProfile(name: "DeferredRecoveryNavigationIdentity")
+        profile.currentURL = URL(string: "https://example.com/deferred-recovery")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { webView, _ in
+                returnedRecoveryNavigation = webView.loadHTMLString(
+                    "<html><body>deferred recovery</body></html>",
+                    baseURL: URL(string: "https://example.com/")
+                )
+                return returnedRecoveryNavigation
+            },
+            isSlotActive: { _ in isActive },
+            diagnostics: diagnostics
+        )
+
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        pool.handleContentProcessTermination(slotID: profile.id)
+        XCTAssertNil(returnedRecoveryNavigation)
+
+        isActive = true
+        let recovered = try pool.webView(for: profile)
+        XCTAssertTrue(webView === recovered)
+        let recoveryNavigation = try XCTUnwrap(returnedRecoveryNavigation)
+
+        observer.webView(recovered, didCommit: recoveryNavigation)
+        let commit = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        XCTAssertEqual(commit.fields["navigation_phase"], .string("post_commit"))
+        XCTAssertEqual(commit.fields["navigation_callback_stale"], .bool(false))
+        let generation = try XCTUnwrap(commit.fields["navigation_generation"])
+
+        observer.webView(recovered, didFinish: recoveryNavigation)
+        let finish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(finish.fields["navigation_generation"], generation)
+        XCTAssertEqual(finish.fields["navigation_phase"], .string("finished"))
+        XCTAssertEqual(finish.fields["navigation_callback_stale"], .bool(false))
     }
 
     func testSlotNavigationObserverSurfacesContentProcessTermination() throws {

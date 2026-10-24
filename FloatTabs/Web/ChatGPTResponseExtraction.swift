@@ -325,13 +325,12 @@ struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
               }
             }
             const semanticControls = document.querySelectorAll(
-              'button,[role="button"]'
+              'button[aria-label],button[title],[role="button"][aria-label],[role="button"][title]'
             );
             for (const element of semanticControls) {
-              if (isRendered(element)
-                  && isEnabled(element)
+              if (isEnabled(element)
                   && hasStopSemanticLabel(element)) {
-                return true;
+                if (isRendered(element)) return true;
               }
             }
             return false;

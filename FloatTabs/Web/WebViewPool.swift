@@ -69,6 +69,7 @@ private enum WebRuntimeDiagnosticIdentitySequence {
 @MainActor
 final class WebViewPool {
     typealias LoadHandler = @MainActor (WKWebView, URLRequest) -> Void
+    typealias RecoveryLoadHandler = @MainActor (WKWebView, URLRequest) -> WKNavigation?
     typealias ReloadHandler = @MainActor (WKWebView) -> Void
     typealias IsSlotActiveHandler = @MainActor (UUID) -> Bool
     typealias ResidencyPolicyProvider = @MainActor (UUID) -> SlotResidencyPolicy?
@@ -128,6 +129,7 @@ final class WebViewPool {
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
+    private let recoveryLoad: RecoveryLoadHandler?
     private let reloadWebView: ReloadHandler
     private let isSlotActive: IsSlotActiveHandler
     private let residencyPolicyProvider: ResidencyPolicyProvider
@@ -150,6 +152,7 @@ final class WebViewPool {
         initialLoad: @escaping LoadHandler = { webView, request in
             webView.load(request)
         },
+        recoveryLoad: RecoveryLoadHandler? = nil,
         reloadWebView: ReloadHandler? = nil,
         isSlotActive: @escaping IsSlotActiveHandler = { _ in true },
         residencyPolicyProvider: @escaping ResidencyPolicyProvider = { _ in nil },
@@ -166,6 +169,7 @@ final class WebViewPool {
     ) {
         self.onURLChange = onURLChange
         load = initialLoad
+        self.recoveryLoad = recoveryLoad
         self.reloadWebView = reloadWebView ?? { webView in
             webView.reload()
         }
@@ -652,7 +656,7 @@ final class WebViewPool {
         // The terminated runtime is authoritatively replaced: reset its
         // attention runtime before the existing recovery policy proceeds. The
         // bridge installation itself stays usable for the recovered document.
-        attentionBridges[slotID]?.handleRuntimeReplacement()
+        attentionBridges[slotID]?.handleWebContentProcessReplacement()
         responseBridges[slotID]?.handleRuntimeReplacement()
         calibreReaderBridges[slotID]?.handleRuntimeReplacement()
 
@@ -667,7 +671,11 @@ final class WebViewPool {
                 return
             }
             lastKnownURLs[slotID] = recoveryURL
-            load(webView, recoveryRequest(url: recoveryURL))
+            loadRecovery(
+                webView,
+                slotID: slotID,
+                request: recoveryRequest(url: recoveryURL)
+            )
             diagnostics.record(
                 event: "web_runtime.recovery.reload_now",
                 level: .notice,
@@ -1084,7 +1092,27 @@ final class WebViewPool {
         let navigationURL = profile.currentURL.flatMap { WebAppURL.isSafe($0) ? $0 : nil }
             ?? profile.homeURL
         lastKnownURLs[profile.id] = navigationURL
-        load(webView, recoveryRequest(url: navigationURL))
+        loadRecovery(
+            webView,
+            slotID: profile.id,
+            request: recoveryRequest(url: navigationURL)
+        )
+    }
+
+    private func loadRecovery(
+        _ webView: WKWebView,
+        slotID: UUID,
+        request: URLRequest
+    ) {
+        if let recoveryLoad {
+            let navigation = recoveryLoad(webView, request)
+            navigationObservers[slotID]?.registerRecoveryNavigation(navigation)
+        } else {
+            // Preserve the existing test/diagnostic injection contract for
+            // callers that supply only the void initial loader. The real app
+            // supplies recoveryLoad so production recovery retains identity.
+            load(webView, request)
+        }
     }
 
     private func recoveryURL(slotID: UUID, webView: WKWebView) -> URL? {
