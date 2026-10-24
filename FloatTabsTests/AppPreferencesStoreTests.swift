@@ -141,7 +141,7 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(first.attentionPalette, .red)
         XCTAssertEqual(
             TabAttentionStyle.allCases.map(\.rawValue),
-            ["dot", "beacon", "halo", "orbit", "pulse", "sweep"]
+            ["dot", "beacon", "orbit", "pulse"]
         )
         XCTAssertEqual(
             TabAttentionPalette.allCases.map(\.rawValue),
@@ -181,8 +181,10 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         let expectedStyles: [(String, TabAttentionStyle)] = [
             ("signal", .dot),
             ("ember", .pulse),
-            ("aurora", .halo),
+            ("aurora", .pulse),
             ("spectrum", .pulse),
+            ("halo", .pulse),
+            ("sweep", .orbit),
         ]
         let expectedPalettes: [(String, TabAttentionPalette)] = [
             ("signal", .red),
@@ -217,8 +219,8 @@ final class AppPreferencesStoreTests: XCTestCase, @unchecked Sendable {
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
-        store.attentionStyle = .halo
-        store.attentionStyle = .halo
+        store.attentionStyle = .pulse
+        store.attentionStyle = .pulse
 
         wait(for: [change], timeout: 0.2)
     }

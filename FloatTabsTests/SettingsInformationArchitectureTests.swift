@@ -79,7 +79,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(audio.embeddedControllers.contains { $0 is UnreadTabAttentionSettingsViewController })
     }
 
-    func testUnreadAttentionStyleGridIsResponsiveThreeColumnLayoutAndKeepsPaletteLayout() throws {
+    func testUnreadAttentionStyleGridIsResponsiveTwoColumnLayoutAndKeepsPaletteLayout() throws {
         let suiteName = "FloatTabsTests.AttentionStyleGridLayout.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -95,10 +95,10 @@ final class SettingsInformationArchitectureTests: XCTestCase {
 
         for layout in [wide, narrow] {
             XCTAssertEqual(layout.rows.map { $0.map(\.style.displayName) }, [
-                ["Dot", "Beacon", "Halo"],
-                ["Orbit", "Pulse", "Sweep"],
+                ["Dot", "Beacon"],
+                ["Orbit", "Pulse"],
             ])
-            XCTAssertEqual(layout.rows.flatMap { $0 }.count, 6)
+            XCTAssertEqual(layout.rows.flatMap { $0 }.count, 4)
             let choices = layout.rows.flatMap { $0 }
             XCTAssertTrue(choices.allSatisfy { (82...84).contains(Int($0.frame.height.rounded())) })
             for row in layout.rows {

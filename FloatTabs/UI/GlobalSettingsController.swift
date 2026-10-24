@@ -1218,9 +1218,9 @@ final class UnreadTabAttentionSettingsViewController: NSViewController {
             choice.heightAnchor.constraint(equalToConstant: 83).isActive = true
             return choice
         }
-        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 3).map { start in
+        let rows = stride(from: 0, to: attentionStyleChoices.count, by: 2).map { start in
             let row = NSStackView(
-                views: Array(attentionStyleChoices[start..<min(start + 3, attentionStyleChoices.count)])
+                views: Array(attentionStyleChoices[start..<min(start + 2, attentionStyleChoices.count)])
             )
             row.orientation = .horizontal
             row.alignment = .centerY
