@@ -15,6 +15,7 @@ Active task: `FT-ATTENTION-ACTIVE-TAB-VISUAL-REFINEMENT-001`
 ```text
 BASE_MAIN=f08e0d718c7a7a9943e133d29f29e5c56c585585
 TASK_BRANCH=codex/ft-attention-active-tab-visual-refinement-001
+DRAFT_PR=146
 PUBLIC_RELEASE=v0.5.6
 PUBLIC_BUILD=24
 ARCH=arm64
@@ -82,11 +83,12 @@ AI/browser/render inspection may support implementation debugging but must not b
 
 - `main` baseline at task start: `f08e0d718c7a7a9943e133d29f29e5c56c585585`.
 - No open PR existed at task start.
-- Task branch created: `codex/ft-attention-active-tab-visual-refinement-001`.
-- One Draft PR is to be used for this task after the frozen control/design state is pushed.
+- Task branch: `codex/ft-attention-active-tab-visual-refinement-001`.
+- Draft PR: `#146`, `OPEN / DRAFT / UNMERGED`.
+- PR #146 is the single task write surface; initial commits contain only the frozen control/design state.
 - No merge is authorized yet.
 - No release is authorized.
 
 ## Next
 
-Local implementation should continue only from the active task branch after reading `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and the frozen design contract. Preserve one writer, implement by the recorded Gates, push exact-head evidence, and stop for human UI acceptance before any merge decision.
+Local implementation should continue only on PR #146's task branch after reading `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and the frozen design contract. Preserve one writer, implement by the recorded Gates, push exact-head evidence, and stop for human UI acceptance before any merge decision.
