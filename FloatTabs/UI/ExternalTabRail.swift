@@ -40,7 +40,7 @@ struct ExternalTabMetrics {
     static let tabRadius: CGFloat = 8
     static let collapsedWidth: CGFloat = 40
     static let hoverWidth: CGFloat = 76
-    static let activeWidth: CGFloat = 40
+    static let activeWidth: CGFloat = 76
     static let activeHoverWidth: CGFloat = 76
     static let topOffset: CGFloat = 23
     static let tabGap: CGFloat = 4
@@ -157,10 +157,8 @@ enum ExternalTabSurfacePalette {
 enum AttentionStyleEffect: String, CaseIterable, Identifiable, Equatable {
     case dot
     case beacon
-    case halo
     case orbit
     case pulse
-    case sweep
 
     var id: String { rawValue }
 }
@@ -222,10 +220,8 @@ enum TabAttentionPalette: String, CaseIterable, Identifiable, Equatable {
 enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
     case dot
     case beacon
-    case halo
     case orbit
     case pulse
-    case sweep
 
     var id: String { rawValue }
 
@@ -233,10 +229,8 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .dot: "Dot"
         case .beacon: "Beacon"
-        case .halo: "Halo"
         case .orbit: "Orbit"
         case .pulse: "Pulse"
-        case .sweep: "Sweep"
         }
     }
 
@@ -244,10 +238,8 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .dot: .dot
         case .beacon: .beacon
-        case .halo: .halo
         case .orbit: .orbit
         case .pulse: .pulse
-        case .sweep: .sweep
         }
     }
 
@@ -261,10 +253,8 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .dot: cycle = nil
         case .beacon: cycle = 4.0
-        case .halo: cycle = 4.8
         case .orbit: cycle = 5.2
         case .pulse: cycle = 4.4
-        case .sweep: cycle = 5.2
         }
         return AttentionStyleConfiguration(
             effect: effect,
@@ -276,7 +266,7 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
                 for: NSColor.controlBackgroundColor
             ),
             animationCycleDuration: cycle,
-            gentlyBreathes: self == .halo || self == .pulse
+            gentlyBreathes: self == .pulse
         )
     }
 
@@ -286,8 +276,10 @@ enum TabAttentionStyle: String, CaseIterable, Identifiable, Equatable {
         return switch raw {
         case "signal": .dot
         case "ember": .pulse
-        case "aurora": .halo
+        case "aurora": .pulse
         case "spectrum": .pulse
+        case "halo": .pulse
+        case "sweep": .orbit
         default: .dot
         }
     }
@@ -311,24 +303,17 @@ enum AttentionSurfaceGeometry: Equatable {
 }
 
 /// Shared layer renderer for unread Tabs, overflow, and Settings previews.
-/// Effects stay inside a fixed surface; Sweep moves a broad band over a tinted base,
-/// while Orbit rotates color around a continuous static perimeter.
+/// Effects stay inside a fixed surface; Orbit rotates color around a continuous
+/// internal perimeter while Pulse breathes across the whole surface.
 @MainActor
 final class AttentionStyleSurfaceView: NSView {
-    private static let haloAnimationKey = "FloatTabs.attentionStyle.halo"
     private static let beaconAnimationKey = "FloatTabs.attentionStyle.beacon"
     private static let orbitAnimationKey = "FloatTabs.attentionStyle.orbit"
     private static let pulseAnimationKey = "FloatTabs.attentionStyle.pulse"
-    private static let sweepStartAnimationKey = "FloatTabs.attentionStyle.sweepStart"
-    private static let sweepEndAnimationKey = "FloatTabs.attentionStyle.sweepEnd"
     private static let animationEpoch = CACurrentMediaTime()
 
     private let pulseLayer = CAGradientLayer()
     private let pulseMaskLayer = CAShapeLayer()
-    private let sweepBaseLayer = CAGradientLayer()
-    private let sweepBaseMaskLayer = CAShapeLayer()
-    private let sweepLayer = CAGradientLayer()
-    private let sweepMaskLayer = CAShapeLayer()
     private let beaconLayer = CAGradientLayer()
     private let beaconMaskLayer = CAShapeLayer()
     private let orbitLayer = CAGradientLayer()
@@ -351,12 +336,9 @@ final class AttentionStyleSurfaceView: NSView {
     }
 
     var isContinuousMotionActive: Bool {
-        layer?.animation(forKey: Self.haloAnimationKey) != nil
-            || beaconLayer.animation(forKey: Self.beaconAnimationKey) != nil
+        beaconLayer.animation(forKey: Self.beaconAnimationKey) != nil
             || orbitLayer.animation(forKey: Self.orbitAnimationKey) != nil
             || pulseLayer.animation(forKey: Self.pulseAnimationKey) != nil
-            || sweepLayer.animation(forKey: Self.sweepStartAnimationKey) != nil
-            || sweepLayer.animation(forKey: Self.sweepEndAnimationKey) != nil
     }
 
     var hasStaticRepresentativeEffect: Bool {
@@ -367,7 +349,7 @@ final class AttentionStyleSurfaceView: NSView {
         geometry == .settingsPreview
     }
 
-    var renderedGradientStopCount: Int { pulseLayer.colors?.count ?? sweepLayer.colors?.count ?? 0 }
+    var renderedGradientStopCount: Int { pulseLayer.colors?.count ?? 0 }
 
     init(frame frameRect: NSRect, geometry: AttentionSurfaceGeometry = .railTab) {
         self.geometry = geometry
@@ -376,19 +358,13 @@ final class AttentionStyleSurfaceView: NSView {
         layer?.masksToBounds = false
         layer?.backgroundColor = NSColor.clear.cgColor
         pulseMaskLayer.fillColor = NSColor.white.cgColor
-        sweepBaseMaskLayer.fillColor = NSColor.white.cgColor
-        sweepMaskLayer.fillColor = NSColor.white.cgColor
         beaconMaskLayer.fillColor = NSColor.white.cgColor
         orbitMaskLayer.fillColor = NSColor.clear.cgColor
         orbitMaskLayer.strokeColor = NSColor.white.cgColor
         pulseLayer.mask = pulseMaskLayer
-        sweepBaseLayer.name = "FloatTabs.attention.sweep.base"
-        sweepBaseLayer.mask = sweepBaseMaskLayer
-        sweepLayer.name = "FloatTabs.attention.sweep.band"
-        sweepLayer.mask = sweepMaskLayer
         beaconLayer.mask = beaconMaskLayer
         orbitLayer.mask = orbitMaskLayer
-        for sublayer in [pulseLayer, sweepBaseLayer, sweepLayer, beaconLayer, orbitLayer] {
+        for sublayer in [pulseLayer, beaconLayer, orbitLayer] {
             sublayer.actions = [
                 "colors": NSNull(), "locations": NSNull(), "startPoint": NSNull(),
                 "endPoint": NSNull(), "opacity": NSNull(), "path": NSNull(),
@@ -504,15 +480,9 @@ final class AttentionStyleSurfaceView: NSView {
                 beaconLayer.shadowOpacity = 0.55
                 beaconLayer.shadowOffset = .zero
                 beaconLayer.isHidden = false
-            case .halo:
-                layer?.shadowPath = surfacePath(in: bounds)
-                layer?.shadowColor = configuration.representativeColor.cgColor
-                layer?.shadowRadius = 11
-                layer?.shadowOffset = .zero
-                layer?.shadowOpacity = 0.42
             case .orbit:
-                orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
-                orbitMaskLayer.lineWidth = 2.5
+                orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 2.5, dy: 2.5))
+                orbitMaskLayer.lineWidth = 3.0
                 orbitMaskLayer.lineCap = .round
                 orbitMaskLayer.lineDashPattern = nil
                 orbitMaskLayer.lineDashPhase = 0
@@ -528,31 +498,8 @@ final class AttentionStyleSurfaceView: NSView {
                 pulseLayer.locations = evenlySpacedLocations(count: pulseLayer.colors?.count ?? 1)
                 pulseLayer.startPoint = CGPoint(x: 0, y: 0.5)
                 pulseLayer.endPoint = CGPoint(x: 1, y: 0.5)
-                pulseLayer.opacity = 0.22
+                pulseLayer.opacity = 0.72
                 pulseLayer.isHidden = false
-            case .sweep:
-                sweepBaseLayer.colors = configuration.colors.map {
-                    $0.withAlphaComponent(0.2).cgColor
-                }
-                sweepBaseLayer.locations = evenlySpacedLocations(
-                    count: sweepBaseLayer.colors?.count ?? 0
-                )
-                sweepBaseLayer.startPoint = CGPoint(x: 0, y: 0.5)
-                sweepBaseLayer.endPoint = CGPoint(x: 1, y: 0.5)
-                sweepBaseLayer.opacity = 0.82
-                sweepBaseLayer.isHidden = false
-                sweepLayer.colors = [NSColor.clear.cgColor]
-                    + configuration.colors.map { $0.withAlphaComponent(0.3).cgColor }
-                    + [
-                        configuration.representativeColor.withAlphaComponent(0.56).cgColor,
-                        NSColor.white.withAlphaComponent(0.64).cgColor,
-                        configuration.representativeColor.withAlphaComponent(0.42).cgColor,
-                        NSColor.clear.cgColor,
-                    ]
-                sweepLayer.locations = evenlySpacedLocations(count: sweepLayer.colors?.count ?? 1)
-                sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
-                sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
-                sweepLayer.isHidden = false
             }
         }
 
@@ -573,12 +520,6 @@ final class AttentionStyleSurfaceView: NSView {
             breathe.toValue = 0.62
             addSharedTiming(breathe, cycle: cycle, autoreverses: true)
             beaconLayer.add(breathe, forKey: Self.beaconAnimationKey)
-        case .halo:
-            let breathe = CABasicAnimation(keyPath: "shadowOpacity")
-            breathe.fromValue = 0.32
-            breathe.toValue = 0.53
-            addSharedTiming(breathe, cycle: cycle, autoreverses: true)
-            layer?.add(breathe, forKey: Self.haloAnimationKey)
         case .orbit:
             let orbit = CAKeyframeAnimation(keyPath: "endPoint")
             orbit.values = [
@@ -598,33 +539,10 @@ final class AttentionStyleSurfaceView: NSView {
             orbitLayer.add(orbit, forKey: Self.orbitAnimationKey)
         case .pulse:
             let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = 0.16
-            breathe.toValue = 0.34
+            breathe.fromValue = 0.38
+            breathe.toValue = 1.00
             addSharedTiming(breathe, cycle: cycle, autoreverses: true)
             pulseLayer.add(breathe, forKey: Self.pulseAnimationKey)
-        case .sweep:
-            let start = CAKeyframeAnimation(keyPath: "startPoint")
-            start.values = [
-                CGPoint(x: -0.42, y: 0.5),
-                CGPoint(x: 1.0, y: 0.5),
-                CGPoint(x: 1.0, y: 0.5),
-            ]
-            let end = CAKeyframeAnimation(keyPath: "endPoint")
-            end.values = [
-                CGPoint(x: 0, y: 0.5),
-                CGPoint(x: 1.42, y: 0.5),
-                CGPoint(x: 1.42, y: 0.5),
-            ]
-            for animation in [start, end] {
-                animation.keyTimes = [0, 0.34, 1]
-                animation.duration = cycle
-                animation.repeatCount = .infinity
-                animation.beginTime = Self.animationEpoch
-                animation.calculationMode = .linear
-                animation.isRemovedOnCompletion = false
-            }
-            sweepLayer.add(start, forKey: Self.sweepStartAnimationKey)
-            sweepLayer.add(end, forKey: Self.sweepEndAnimationKey)
         }
     }
 
@@ -642,12 +560,9 @@ final class AttentionStyleSurfaceView: NSView {
     }
 
     private func removeAllEffectAnimations() {
-        layer?.removeAnimation(forKey: Self.haloAnimationKey)
         beaconLayer.removeAnimation(forKey: Self.beaconAnimationKey)
         orbitLayer.removeAnimation(forKey: Self.orbitAnimationKey)
         pulseLayer.removeAnimation(forKey: Self.pulseAnimationKey)
-        sweepLayer.removeAnimation(forKey: Self.sweepStartAnimationKey)
-        sweepLayer.removeAnimation(forKey: Self.sweepEndAnimationKey)
     }
 
     private func resetEffectLayers() {
@@ -665,11 +580,6 @@ final class AttentionStyleSurfaceView: NSView {
         orbitLayer.type = .axial
         pulseLayer.isHidden = true
         pulseLayer.opacity = 0
-        sweepBaseLayer.isHidden = true
-        sweepBaseLayer.opacity = 1
-        sweepLayer.isHidden = true
-        sweepLayer.startPoint = CGPoint(x: 0.29, y: 0.5)
-        sweepLayer.endPoint = CGPoint(x: 0.71, y: 0.5)
     }
 
     private func updateLayerGeometry() {
@@ -689,14 +599,8 @@ final class AttentionStyleSurfaceView: NSView {
             layer?.borderWidth = 0
         }
         pulseLayer.frame = bounds
-        sweepBaseLayer.frame = bounds
-        sweepLayer.frame = bounds
         pulseMaskLayer.frame = bounds
-        sweepBaseMaskLayer.frame = bounds
-        sweepMaskLayer.frame = bounds
         pulseMaskLayer.path = surfacePath(in: bounds)
-        sweepBaseMaskLayer.path = surfacePath(in: bounds)
-        sweepMaskLayer.path = surfacePath(in: bounds)
         beaconLayer.frame = bounds
         orbitLayer.frame = bounds
         beaconMaskLayer.frame = bounds
@@ -704,9 +608,7 @@ final class AttentionStyleSurfaceView: NSView {
         if style == .beacon {
             beaconMaskLayer.path = beaconPath()
         } else if style == .orbit {
-            orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 1.25, dy: 1.25))
-        } else if style == .halo {
-            layer?.shadowPath = surfacePath(in: bounds)
+            orbitMaskLayer.path = surfacePath(in: bounds.insetBy(dx: 2.5, dy: 2.5))
         }
         CATransaction.commit()
     }
@@ -2845,7 +2747,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         return ExternalTabMetrics.width(isActive: isActive, dockInfluence: hoverInfluence)
     }
 
-    var isShowingLabel: Bool { isHovered }
+    var isShowingLabel: Bool { isActive || isHovered }
     var displayedLabelText: String { label.stringValue }
     var isActiveTab: Bool { isActive }
     var isResidentRuntime: Bool { isResident }
@@ -2994,7 +2896,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
         guard !isHoverInteractionSuspended || !hovered else { return }
         guard isHovered != hovered else { return }
         isHovered = hovered
-        label.isHidden = !hovered
+        label.isHidden = !(isActive || hovered)
         updateAppearance()
     }
 
@@ -3449,7 +3351,7 @@ final class ExternalWebAppTabView: NSView, RailHoverInteractionOwner {
     }
 
     private func applyResolvedAppearance() {
-        label.isHidden = !isHovered
+        label.isHidden = !(isActive || isHovered)
         label.font = .systemFont(ofSize: 11.5, weight: isActive ? .semibold : .medium)
         let attentionConfiguration = attentionStyle.configuration(for: attentionPalette)
         let attentionForeground = attentionConfiguration.foregroundColor

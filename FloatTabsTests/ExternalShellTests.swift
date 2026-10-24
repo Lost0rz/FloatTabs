@@ -1015,7 +1015,7 @@ final class ExternalShellTests: XCTestCase {
 
         XCTAssertEqual(activeView.frame.width, ExternalTabMetrics.activeWidth, accuracy: 0.001)
         XCTAssertEqual(inactiveView.frame.width, ExternalTabMetrics.collapsedWidth, accuracy: 0.001)
-        XCTAssertFalse(activeView.isShowingLabel)
+        XCTAssertTrue(activeView.isShowingLabel)
         XCTAssertFalse(inactiveView.isShowingLabel)
         XCTAssertEqual(activeView.frame.height, ExternalTabMetrics.tabHeight, accuracy: 0.001)
         XCTAssertEqual(zone.addControlFrame.width, ExternalTabMetrics.addNormalWidth, accuracy: 0.001)
@@ -1077,20 +1077,20 @@ final class ExternalShellTests: XCTestCase {
         zone.setModalPresentationActive(true)
 
         XCTAssertTrue(zone.isModalPresentationActive)
-        XCTAssertFalse(tab.isShowingLabel)
+        XCTAssertTrue(tab.isShowingLabel)
         XCTAssertEqual(tab.preferredWidth, ExternalTabMetrics.activeWidth, accuracy: 0.001)
 
         // A child tracking callback arriving while the sheet owns the panel
         // must not recreate the old magnification.
         tab.setHovered(true)
-        XCTAssertFalse(tab.isShowingLabel)
+        XCTAssertTrue(tab.isShowingLabel)
 
         zone.setModalPresentationActive(false)
 
         XCTAssertFalse(zone.isModalPresentationActive)
-        XCTAssertFalse(tab.isShowingLabel)
-        // The first post-dismissal pointer event is the only thing allowed to
-        // establish a new hover identity.
+        XCTAssertTrue(tab.isShowingLabel)
+        // The first post-dismissal pointer event is still the only thing
+        // allowed to establish a new hover identity for inactive Tabs.
         tab.setHovered(true)
         XCTAssertTrue(tab.isShowingLabel)
     }
@@ -1121,7 +1121,7 @@ final class ExternalShellTests: XCTestCase {
         zone.mouseMoved(with: event)
 
         XCTAssertTrue(zone.isModalPresentationActive)
-        XCTAssertFalse(activeView.isShowingLabel)
+        XCTAssertTrue(activeView.isShowingLabel)
         XCTAssertFalse(inactiveView.isShowingLabel)
         XCTAssertTrue(activeView.isActiveTab)
         XCTAssertFalse(inactiveView.isActiveTab)
