@@ -6,78 +6,87 @@
 
 ## Mode
 
-**MODE: NO ACTIVE ENGINEERING TASK — v0.5.6 AIR OBSERVATION**
+**MODE: ACTIVE UI REFINEMENT — ACTIVE TAB / UNREAD ATTENTION**
 
-Most recently completed task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
+Active task: `FT-ATTENTION-ACTIVE-TAB-VISUAL-REFINEMENT-001`
 
 ## Current verified baseline
 
 ```text
-PRODUCT_MAIN_AFTER_PR144=4477a0f8a8d7d37a5202e209920e04b0330a93f6
-MERGED_PR=144
-FINAL_CORRECTIVE_SEMANTIC_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
+BASE_MAIN=f08e0d718c7a7a9943e133d29f29e5c56c585585
+TASK_BRANCH=codex/ft-attention-active-tab-visual-refinement-001
 PUBLIC_RELEASE=v0.5.6
 PUBLIC_BUILD=24
 ARCH=arm64
-ROOT_CAUSE=UNKNOWN
+PREVIOUS_RUNTIME_TASK=FT-WEB-RUNTIME-RECOVERY-ATTENTION-001
+PREVIOUS_RUNTIME_TASK_STATE=TERMINAL
+WEB_RUNTIME_ROOT_CAUSE=UNKNOWN
 ```
 
-PR #144 is merged. The accepted corrective improves FloatTabs-owned recovery/navigation identity, bounds ChatGPT Attention runtime request capacity by the physical WebContent runtime epoch, and projects bounded native Attention timeout/suppression health counters into Standard long-term diagnostics.
+The previous Web runtime / Attention corrective is closed and remains separate from this UI task. Its unresolved WebContent termination/stall root cause is still `UNKNOWN`; this visual task must not reinterpret or modify that conclusion.
 
-The corrective does **not** establish the root cause of the observed WebContent termination or non-termination stall/near-stall incidents. `ROOT_CAUSE=UNKNOWN` remains authoritative.
+## Frozen target
 
-## Accepted behavior
+The implementation design is frozen in:
+
+- `docs/design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`
+
+The target is:
 
 ```text
-RECOVERY_NAVIGATION_IDENTITY=PASS
-RECOVERY_COMMIT_WITHOUT_PROVISIONAL=PASS
-RECOVERY_FINISH_STATE=PASS
-STALE_RECOVERY_CALLBACK_REJECTION=PASS
-DEFERRED_RECOVERY_EXACT_NAVIGATION=PASS
-POST_FINISH_STALL_ELIGIBILITY=PASS
-PHYSICAL_RUNTIME_EPOCH=PASS
-SAME_RUNTIME_REQUEST_BUDGET_BOUNDING=PASS
-ORDINARY_DOCUMENT_REPLACEMENT_NO_NEW_CAPACITY=PASS
-PHYSICAL_REPLACEMENT_FRESH_CAPACITY=PASS
-OLD_EPOCH_CALLBACK_NOOP=PASS
-ATTENTION_HOT_PATH_OPTIMIZATION=PASS
-STANDARD_NATIVE_COUNTER_STORAGE=PASS
-STANDARD_FAILURE_STATE_PROJECTION=PASS
-STANDARD_EARLY_SUPPRESSION_PROJECTION=PASS
-PRIVACY_DATA_SAFETY=PASS
-INDEPENDENT_WEB_RUNTIME_ACCEPTANCE=PASS
+ACTIVE_TAB_RESTING_WIDTH=76pt
+INACTIVE_TAB_RESTING_WIDTH=40pt
+ACTIVE_LABEL_PERSISTENT=YES
+CANONICAL_ATTENTION_STYLES=DOT,BEACON,ORBIT,PULSE
+HALO_STORED_VALUE=PULSE
+SWEEP_STORED_VALUE=ORBIT
+ORBIT=INTERNAL_VISIBLE_PERIMETER
+PULSE_MIN_OPACITY=0.38
+PULSE_MAX_OPACITY=1.00
+PULSE_REDUCE_MOTION_TARGET=0.72
+SETTINGS_STYLE_GRID=2x2_AT_CURRENT_WIDTH
+HUMAN_UI_ACCEPTANCE=PENDING
 ```
 
-No reload/reset/rebuild mitigation, residency-policy change, Browser Profile/session migration, private WebKit API, or content capture was added.
+## Scope boundary
 
-## Verification and merge evidence
+This is a bounded rail/presentation/preferences change. Expected implementation centers on `ExternalTabRail.swift`, Settings Attention previews, preference compatibility, and matching tests.
+
+Out of scope remain:
+
+- ChatGPT response/generation detection;
+- unread acknowledgement semantics;
+- Web Attention runtime ownership;
+- WebView lifecycle/navigation/residency/recovery;
+- Speech / Attention sound;
+- Panel/window/fullscreen ownership;
+- Browser Profile / Slot schema or user website/session data;
+- diagnostics expansion;
+- release/version changes.
+
+## Verification expectation
+
+Implementation must use focused tests first, then relevant full XCTest plus Debug/Release arm64 builds and required exact-head CI.
+
+Final product-interface acceptance is explicitly human-owned:
 
 ```text
-FULL_XCTEST=1367_PASS_0_FAIL_3_SKIPPED_OF_1370
-DEBUG_ARM64=PASS
-RELEASE_ARM64=PASS
-LARGE_DOM_FIXTURE=PASS
-SEMANTIC_MACOS_CI_1102=SUCCESS_40086444312
-SEMANTIC_QA_DMG_514=SUCCESS_40086444322
-PRE_ACCEPTANCE_CONTROL_MACOS_CI_1103=SUCCESS_40086995308
-PRE_ACCEPTANCE_CONTROL_QA_DMG_515=SUCCESS_40086995311
-FINAL_HEAD=8b71f42a6a516a86bb41a0ac038446d9405bf4c4
-FINAL_HEAD_QA_DMG_517=SUCCESS_40087782157
-FINAL_HEAD_MACOS_CI_1105=SUCCESS_40087782148_RERUN
-FINAL_MERGE_AUDIT=PASS_WITH_FOLLOWUP
-MERGE_COMMIT=4477a0f8a8d7d37a5202e209920e04b0330a93f6
-POST_MERGE_MACOS_CI_1106=SUCCESS_40093073048
+AUTOMATED_BROWSER_VERIFICATION=NOT_RUN
+AI_RENDERED_INSPECTION=NOT_RUN
+HUMAN_UI_ACCEPTANCE=PENDING
 ```
 
-The first macOS CI attempt for the unchanged final head failed only in `WebViewPoolTests.testHiddenSelectedColdGetsRecentActiveGraceBeforeColdRelease`; the same exact head passed on rerun, and post-merge `main` CI also passed. This is recorded as a non-blocking timing-sensitive XCTest stability follow-up, not as evidence of a PR #144 product regression and not as a root-cause finding.
+AI/browser/render inspection may support implementation debugging but must not be reported as human acceptance.
 
 ## Repository lifecycle
 
-- PR #143: `CLOSED / SUPERSEDED / UNMERGED`.
-- PR #144: `MERGED` at `4477a0f8a8d7d37a5202e209920e04b0330a93f6`.
-- No release is authorized by this closeout.
-- No product/runtime mutation is currently authorized.
+- `main` baseline at task start: `f08e0d718c7a7a9943e133d29f29e5c56c585585`.
+- No open PR existed at task start.
+- Task branch created: `codex/ft-attention-active-tab-visual-refinement-001`.
+- One Draft PR is to be used for this task after the frozen control/design state is pushed.
+- No merge is authorized yet.
+- No release is authorized.
 
-## Observation next step
+## Next
 
-Continue normal use of the current v0.5.6 / Build 24 observation release. If a fresh slowdown, stall, or WebContent termination occurs, preserve/export Runtime Diagnostics before reload/restart when practical and correlate the incident by Slot, runtime identity, navigation state, Attention health counters, page-app trend, observer workload, and process-termination boundaries.
+Local implementation should continue only from the active task branch after reading `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and the frozen design contract. Preserve one writer, implement by the recorded Gates, push exact-head evidence, and stop for human UI acceptance before any merge decision.
