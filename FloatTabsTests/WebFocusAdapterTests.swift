@@ -853,6 +853,44 @@ extension WebFocusAdapterTests {
         XCTAssertEqual(confirmed.fields["navigation_phase"], .string("finished"))
     }
 
+    func testRecoveredFinishRestoresPostFinishStallEligibility() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in .terminal(.timeout, latencyMilliseconds: 5_000) }
+        )
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+        webView.navigationDelegate = nil
+        let recoveryNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>recovered finish</body></html>",
+                baseURL: URL(string: "https://chatgpt.com/")
+            )
+        )
+        await settle(webView)
+        observer.registerRecoveryNavigation(recoveryNavigation)
+        observer.webView(webView, didCommit: recoveryNavigation)
+        observer.webView(webView, didFinish: recoveryNavigation)
+
+        XCTAssertEqual(
+            observer.currentNavigationDiagnosticFields["navigation_phase"],
+            .string("finished")
+        )
+        await observer.captureCrossWorldLivenessOnce()
+
+        let candidate = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.post_finish_stall_candidate" }
+        )
+        XCTAssertEqual(candidate.fields["navigation_finished"], .bool(true))
+        XCTAssertEqual(candidate.fields["navigation_phase"], .string("finished"))
+        XCTAssertEqual(candidate.fields["post_finish_dual_timeout_count"], .integer(1))
+    }
+
     func testRuntimeLivenessMarksInFlightResultsStaleAfterInvalidation() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

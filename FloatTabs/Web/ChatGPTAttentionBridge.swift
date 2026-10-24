@@ -2000,16 +2000,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         contextIsCurrent: @escaping @MainActor () -> Bool
     ) async -> [String: RuntimeDiagnosticValue] {
         guard pendingLongTermWorkloadCapture == nil else {
-            return Self.longTermWorkloadStatusFields(
+            var fields = Self.longTermWorkloadStatusFields(
                 status: "suppressed",
                 reason: "pending_request_budget"
             )
+            fields.merge(nativeAttentionHealthDiagnosticFields()) { _, new in new }
+            return fields
         }
         guard !benchmarkOperationInFlight else {
-            return Self.longTermWorkloadStatusFields(
+            var fields = Self.longTermWorkloadStatusFields(
                 status: "suppressed",
                 reason: "benchmark_operation_in_flight"
             )
+            fields.merge(nativeAttentionHealthDiagnosticFields()) { _, new in new }
+            return fields
         }
 
         let requestID = UUID()
@@ -2067,7 +2071,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 )
             }
         }
-        return Self.longTermWorkloadDiagnosticFields(from: raw)
+        var fields = Self.longTermWorkloadDiagnosticFields(from: raw)
+        fields.merge(nativeAttentionHealthDiagnosticFields()) { _, new in new }
+        return fields
     }
 
     /// Completes one bounded workload request. A timeout resumes the caller
@@ -2108,6 +2114,19 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         [
             "attention_workload_probe_status": .string(status),
             "attention_workload_probe_reason": .string(reason)
+        ]
+    }
+
+    /// Projects the bounded native health counters independently of the page
+    /// snapshot. Standard diagnostics must retain these fields when a sample
+    /// is unavailable, stale, timed out, suppressed, or otherwise unable to
+    /// produce document content.
+    private func nativeAttentionHealthDiagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        [
+            "attention_liveness_timeout_count": .integer(benchmarkCounters.livenessTimeoutCount),
+            "attention_liveness_suppression_count": .integer(benchmarkCounters.livenessSuppressionCount),
+            "attention_resync_timeout_count": .integer(benchmarkCounters.currentDocumentResyncTimeoutCount),
+            "attention_resync_suppression_count": .integer(benchmarkCounters.currentDocumentResyncSuppressionCount)
         ]
     }
 

@@ -2004,6 +2004,51 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
+    func testDeferredRecoveryRegistersExactNavigationThroughCommitAndFinish() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var isActive = false
+        var returnedRecoveryNavigation: WKNavigation?
+        var profile = makeProfile(name: "DeferredRecoveryNavigationIdentity")
+        profile.currentURL = URL(string: "https://example.com/deferred-recovery")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { webView, _ in
+                returnedRecoveryNavigation = webView.loadHTMLString(
+                    "<html><body>deferred recovery</body></html>",
+                    baseURL: URL(string: "https://example.com/")
+                )
+                return returnedRecoveryNavigation
+            },
+            isSlotActive: { _ in isActive },
+            diagnostics: diagnostics
+        )
+
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        pool.handleContentProcessTermination(slotID: profile.id)
+        XCTAssertNil(returnedRecoveryNavigation)
+
+        isActive = true
+        let recovered = try pool.webView(for: profile)
+        XCTAssertTrue(webView === recovered)
+        let recoveryNavigation = try XCTUnwrap(returnedRecoveryNavigation)
+
+        observer.webView(recovered, didCommit: recoveryNavigation)
+        let commit = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        XCTAssertEqual(commit.fields["navigation_phase"], .string("post_commit"))
+        XCTAssertEqual(commit.fields["navigation_callback_stale"], .bool(false))
+        let generation = try XCTUnwrap(commit.fields["navigation_generation"])
+
+        observer.webView(recovered, didFinish: recoveryNavigation)
+        let finish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(finish.fields["navigation_generation"], generation)
+        XCTAssertEqual(finish.fields["navigation_phase"], .string("finished"))
+        XCTAssertEqual(finish.fields["navigation_callback_stale"], .bool(false))
+    }
+
     func testSlotNavigationObserverSurfacesContentProcessTermination() throws {
         let webView = WebViewFactory.makeWebView()
         let slotID = UUID()
