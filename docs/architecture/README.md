@@ -15,9 +15,12 @@ For source/Authority routing, use:
 
 For shell interaction, rail geometry, movement, resize and fullscreen coordination, use:
 
-- [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md)
-- production code and regression tests on `main`
-- the current release record under `../release/`
+- [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md) for unaffected shell/rail behavior;
+- [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention refinement merged in PR #146;
+- production code and regression tests on `main`;
+- the current release record under `../release/`.
+
+Where the Attention/active-Tab refinement contract disagrees with the older Attention subsection in UI Design System v1.3, the refinement contract is the current accepted behavior for that bounded surface.
 
 The supported runtime and release architecture is Apple Silicon arm64 only.
 
@@ -25,7 +28,7 @@ The supported runtime and release architecture is Apple Silicon arm64 only.
 
 ### `FloatTabs_Technical_Architecture_v1.2.md`
 
-Still useful for the broader native/WebKit architecture and module boundaries, but older shell-interaction details yield to the current v1.3 interaction contract and production code.
+Still useful for the broader native/WebKit architecture and module boundaries, but older shell-interaction details yield to the current accepted design contracts and production code.
 
 ### `Stage_1_Interaction_Baseline.md`
 
@@ -33,7 +36,7 @@ Historical pointer only. The complete original pre-Slot baseline is retained at 
 
 ## Archived design history
 
-The superseded UI Design System v1.2 is retained at [`../design/archive/FloatTabs_UI_Design_System_v1.2.md`](../design/archive/FloatTabs_UI_Design_System_v1.2.md).
+The superseded UI Design System v1.2 is retained under [`../design/archive/`](../design/archive/).
 
 ## Rule
 
