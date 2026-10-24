@@ -2,131 +2,120 @@
 
 **Task ID:** `FT-RELEASE-V0.5.7-001`
 **Title:** Publish FloatTabs v0.5.7 Build 25
-**Status:** `ACTIVE / RELEASE PREPARATION AUTHORIZED`
-**Mode:** `EXECUTE`
+**Status:** `TERMINAL — PUBLISHED / PROVENANCE VERIFIED / CONTROL CLOSED`
+**Mode:** `TERMINAL`
 **Task class:** `RELEASE`
 
-## Authority
+> This task is complete and grants no further product, release, branch, data, or recovery authority.
 
-The user explicitly authorized publishing a downloadable release from the current accepted `main` baseline.
+## Terminal result
 
-This task is the only active release authorization. It does not reopen prior product tasks or authorize unrelated product/runtime changes.
-
-## Baseline
+FloatTabs **v0.5.7 / Build 25** was published through the repository's canonical release workflow and is available from GitHub Releases.
 
 ```text
 BASE_MAIN=098182e64890dabb68832c3bd4d868ff499ac95d
-CURRENT_PUBLIC_RELEASE=v0.5.6
-CURRENT_PUBLIC_BUILD=24
-TARGET_RELEASE=v0.5.7
-TARGET_BUILD=25
+RELEASE_PR=148
+RELEASE_PR_HEAD=1aef2c57bd4d4878704d8c0a06bd7f95c4368e66
+RELEASE_MAIN=9d92beb2433a84ca62dd6effacce22bc512dd6d4
+TAG=v0.5.7
+PUBLIC_RELEASE=v0.5.7
+PUBLIC_BUILD=25
 ARCH=arm64
-RELEASE_BRANCH=release/ft-v0.5.7
-RELEASE_AUTHORIZED=YES
+RELEASE_ID=422780134
+PUBLISH_RELEASE_RUN=37
+PUBLISH_RELEASE_RUN_ID=40102547155
+RELEASE_AUTHORIZED=NO
 ```
 
-The latest public GitHub Release is v0.5.6 / Build 24. No v0.5.7 release exists at task start. The current `main` contains the accepted runtime/Attention corrective work and the merged Active Tab / unread Attention visual refinement.
+## Release gate evidence
+
+### Metadata / scope
+
+- app Debug and Release build settings resolve to version 0.5.7 / Build 25;
+- release notes are `docs/release/FloatTabs_v0.5.7.md`;
+- release PR #148 changed only the Xcode version/build metadata, release notes, and release control state;
+- the final Xcode project diff contained only the four intended version/build lines;
+- no product/runtime/UI/persistence/session code or release-workflow logic changed for publication.
+
+### Pre-merge host gates
+
+```text
+RELEASE_PR_EXACT_HEAD=1aef2c57bd4d4878704d8c0a06bd7f95c4368e66
+MACOS_CI_RUN_1119=PASS
+QA_DMG_RUN_522=PASS
+PR_MERGEABLE=YES
+REVIEW_THREADS=0
+SUBMITTED_REVIEWS=0
+PR_MERGE_AUDIT=PASS
+```
+
+PR #148 was then merged to protected `main` at `9d92beb2433a84ca62dd6effacce22bc512dd6d4`.
+
+### Publisher / provenance
+
+Canonical `Publish Release` run #37 (`40102547155`) ran on exact release-main identity `9d92beb2433a84ca62dd6effacce22bc512dd6d4` and completed successfully.
+
+The workflow successfully completed:
+
+- release metadata resolution;
+- new-release state verification;
+- Apple Silicon release package build/verification;
+- release filename/checksum verification;
+- creation of the new GitHub Release.
+
+The lightweight tag `v0.5.7` resolves directly to `9d92beb2433a84ca62dd6effacce22bc512dd6d4`.
+
+GitHub Release state:
+
+```text
+DRAFT=NO
+PRERELEASE=NO
+RELEASE_NAME=FloatTabs v0.5.7
+RELEASE_TARGET=9d92beb2433a84ca62dd6effacce22bc512dd6d4
+```
+
+### Public assets
+
+```text
+FloatTabs-0.5.7.dmg
+FloatTabs-0.5.7.dmg.sha256
+FloatTabs-0.5.7.dSYM.zip
+FloatTabs-0.5.7.dSYM.zip.sha256
+```
+
+GitHub-recorded artifact digest for the downloadable DMG:
+
+```text
+SHA256=12562e874ca0ea4b975d9c0eba234bee44eb21abf3a8e217a10366376dc95d70
+```
+
+The dSYM ZIP digest is:
+
+```text
+SHA256=b6354c8de9ad8dde7468572c986eed3d053eb8f77c9944be5179b2939435943c
+```
+
+### Post-merge verification
+
+```text
+POST_MERGE_MACOS_CI_RUN=1120
+POST_MERGE_MACOS_CI=PASS
+RELEASE_PROVENANCE=VERIFIED
+RELEASE_ASSETS=VERIFIED
+```
+
+## Release contents / safety
+
+v0.5.7 publishes the already accepted product changes since v0.5.6, including the bounded Web runtime / Attention corrective and Active Tab / unread Attention visual refinement.
 
 The prior WebContent stall/termination root cause remains `UNKNOWN`; this release does not claim otherwise.
 
-## Objective
+No Browser Profile, website login/session/cookie data, Web App Slot configuration, user preference, backup, or persisted website-data reset/clearing is part of the release lifecycle.
 
-Publish FloatTabs **v0.5.7 / Build 25** through the repository's canonical `Publish Release` workflow so the user can download the DMG from GitHub Releases.
+## Lifecycle
 
-## Authorized changes
-
-Only the release lifecycle is authorized:
-
-- update `FloatTabs.xcodeproj/project.pbxproj` from v0.5.6 / Build 24 to v0.5.7 / Build 25 for both app build configurations;
-- add `docs/release/FloatTabs_v0.5.7.md`;
-- update `CURRENT_STATUS.md` / `CURRENT_TASK.md` for release lifecycle state;
-- create and merge the bounded release PR after required host gates pass;
-- allow the existing `.github/workflows/publish-release.yml` to create tag/release/assets;
-- verify tag/source provenance, DMG, checksum sidecars, dSYM assets and published release metadata;
-- perform a control-only closeout after publication evidence is complete.
-
-## Non-goals / protected boundaries
-
-Do not change product runtime/source behavior, WebKit ownership, Attention semantics, UI behavior, persistence, Browser Profiles, website/session data, diagnostics behavior, release workflow logic, signing policy, or architecture support merely to publish this version.
-
-Do not overwrite or force-refresh v0.5.6. v0.5.7 must be a new release.
-
-## Release contents
-
-Release notes must accurately summarize material user-visible and runtime changes since v0.5.6 without overstating unresolved root cause:
-
-- stronger Web runtime/recovery and Attention-runtime correctness/diagnostic boundaries merged after v0.5.6;
-- Active Tab remains expanded with its label visible;
-- unread Attention styles are Dot / Beacon / Orbit / Pulse with safe legacy compatibility;
-- Orbit/Pulse visual clarity improvements and 2x2 Settings presentation;
-- no Browser Profile/session reset or destructive migration;
-- WebContent stall/termination root cause remains `UNKNOWN`.
-
-## Gates
-
-### Gate 0 — Baseline
-
-- fresh `main` identity equals task baseline or only reconciled control-only drift is present;
-- no overlapping open PR/writer exists;
-- latest public release is v0.5.6 / Build 24;
-- v0.5.7 does not already exist.
-
-### Gate 1 — Release metadata
-
-- version/build are exactly 0.5.7 / 25 in both app Debug and Release build settings;
-- `docs/release/FloatTabs_v0.5.7.md` exists and matches repository release contract;
-- no unrelated production files change.
-
-### Gate 2 — Pre-merge verification
-
-- release PR exact head is mergeable;
-- required macOS CI passes on the literal release PR head;
-- any QA/package validation triggered for the release PR must pass;
-- release diff remains bounded to version/release/control files.
-
-### Gate 3 — Merge / publisher
-
-- merge the release PR to protected `main` only after Gate 2 passes;
-- observe `Publish Release` for the resulting `main` identity;
-- publisher must build and verify Apple Silicon release package and checksums successfully.
-
-### Gate 4 — Release provenance
-
-Verify:
-
-```text
-TAG=v0.5.7
-VERSION=0.5.7
-BUILD=25
-DRAFT=NO
-PRERELEASE=NO
-ASSETS=FloatTabs-0.5.7.dmg,FloatTabs-0.5.7.dmg.sha256,FloatTabs-0.5.7.dSYM.zip,FloatTabs-0.5.7.dSYM.zip.sha256
-```
-
-The release/tag must resolve to the release-main identity produced by this task.
-
-### Gate 5 — Closeout
-
-After publication is verified, update controls to terminal/public-release state through a control-only protected-branch-safe closeout. No further release/product authority remains.
-
-## STOP conditions
-
-Stop rather than publish if:
-
-- current `main` has materially changed outside reconciled authority;
-- v0.5.7 already exists with conflicting provenance;
-- version/build or notes do not match target;
-- required CI/package/publisher validation fails;
-- release assets or tag provenance cannot be verified;
-- publication would require destructive data handling or unrelated product changes.
-
-## Required final state
-
-```text
-TASK_STATE=TERMINAL
-PUBLIC_RELEASE=v0.5.7
-PUBLIC_BUILD=25
-RELEASE_PROVENANCE=VERIFIED
-RELEASE_ASSETS=VERIFIED
-OPEN_TASK_RELEASE_PRS=0
-```
+- Release PR #148: `MERGED`.
+- Public release v0.5.7: `PUBLISHED / VERIFIED`.
+- This release task is closed.
+- No further release is authorized.
+- Any future product work or release requires a new task authorization.
