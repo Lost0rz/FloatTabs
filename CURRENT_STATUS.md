@@ -6,43 +6,68 @@
 
 ## Mode
 
-**MODE: ACTIVE LIFECYCLE MAINTENANCE**
+**MODE: NO ACTIVE ENGINEERING TASK — POST-CLEANUP OBSERVATION**
 
-Active task: `FT-HISTORICAL-BRANCH-CLEANUP-001`
+Most recently completed task: `FT-HISTORICAL-BRANCH-CLEANUP-001`
 
 ## Current verified baseline
 
 ```text
-CONTROL_BASE_MAIN=43c21a37e4f51a139d1a9a9be74b4f3862b5bd76
+CLEANUP_BASE_MAIN=133d271e1407f2cc8903a6613aa2a3a8358477d7
 PUBLIC_RELEASE=v0.5.7
 PUBLIC_BUILD=25
 RELEASE_STATE=PUBLISHED / VERIFIED / CLOSED
-OPEN_PRS_BEFORE_TASK=0
+OPEN_PRS=0
+REMOTE_ORIGIN_BRANCH_COUNT=3
 ```
 
-FloatTabs v0.5.7 / Build 25 remains the current public release. Product/runtime state is unchanged by this task.
+FloatTabs v0.5.7 / Build 25 remains the current public release. No product/runtime/test/version/release behavior changed during the lifecycle cleanup.
 
-## Active lifecycle objective
+## Historical lifecycle cleanup result
 
-Perform a guarded local/remote lifecycle cleanup of historical FloatTabs worktrees and branches after fresh synchronization with `origin/main`.
+The authorized historical branch/worktree cleanup completed with physical repository state reduced to the current retained set.
 
-The task may remove only terminal historical identities that are freshly proven to contain no work requiring preservation. Unknown, dirty, unpushed, unique, archive-only, or otherwise unclassified work must be preserved.
-
-Two remote branches are explicitly retained:
+Remote `origin` branches retained:
 
 ```text
+main
 phase2/pr-e-floattabs-durable-outbox-sender
 chore/ft-v0.5.6-release-closeout
 ```
 
-The first remains PR #102 `ARCHIVE_ONLY` evidence with unique MemoX implementation work. The second remains closed/unmerged PR #143 history with unique control commits.
+The two non-main branches are intentionally preserved:
 
-## Safety boundary
+- `phase2/pr-e-floattabs-durable-outbox-sender`: PR #102 is CLOSED / UNMERGED / ARCHIVE_ONLY and retains unique MemoX implementation evidence.
+- `chore/ft-v0.5.6-release-closeout`: PR #143 is CLOSED / UNMERGED and retains unique control-plane history.
 
-This task does not authorize product/runtime/test/version/release changes and does not authorize deletion or reset of tags, releases, stashes, Browser Profiles, WebKit website data, website sessions/cookies, Slot configuration, preferences, backups, or unknown local work.
+The execution receipt reports:
 
-No `reset --hard`, repository-wide `git clean`, force push, or destructive unknown-work cleanup is authorized.
+```text
+LOCAL_MAIN_EQUALS_ORIGIN_MAIN=YES
+OPEN_PRS_AFTER=0
+STALE_WORKTREE_REGISTRATIONS=0
+UNCLASSIFIED_WORKSPACES=0
+FINAL_REMOTE_BRANCH_COUNT=3
+FINAL_WORKTREE_COUNT=2
+PRODUCT_CODE_CHANGED=NO
+CONTROL_FILES_CHANGED_DURING_PHYSICAL_CLEANUP=NO
+USER_DATA_TOUCHED=NO
+FINAL_VERDICT=CLEAN
+```
+
+One non-canonical performance worktree and locally unique historical work were preserved rather than deleted because they remain evidence-bearing or contain unique work.
+
+## Data safety
+
+No tags, releases, stashes, Browser Profiles, WebKit website data, website sessions/cookies, Slot configuration, preferences, backups, or unknown local work were deleted by this cleanup.
+
+## Repository lifecycle
+
+- Authorization PR #150: MERGED.
+- Physical historical branch/worktree cleanup: COMPLETE / VERIFIED BY RECEIPT AND REMOTE CROSS-CHECK.
+- Task `FT-HISTORICAL-BRANCH-CLEANUP-001`: TERMINAL after this control-only closeout.
+- No further branch deletion authority remains after closeout.
 
 ## Next
 
-Merge the control-only authorization PR after the required protected-branch check passes. Then the local executor must fresh-fetch, align the clean canonical `main` by fast-forward only, audit all candidate worktrees/branches, perform only evidence-backed deletions, and return a structured cleanup receipt. Final task closeout follows only after that receipt is verified.
+Continue normal use/observation of FloatTabs v0.5.7. Any future product change, release, or additional lifecycle deletion requires a new `CURRENT_TASK.md` authorization.
