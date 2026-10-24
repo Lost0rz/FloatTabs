@@ -19,6 +19,8 @@ BUILD=24
 ARCH=arm64
 RELEASE_COMMIT=17f1bf1760625833d0b82397009223b2165521c7
 TASK_BRANCH=codex/ft-web-runtime-recovery-attention-001
+TASK_PR=144_OPEN_DRAFT_UNMERGED
+PREDECESSOR_PR_143=CLOSED_SUPERSEDED_UNMERGED
 ROOT_CAUSE=UNKNOWN
 INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / CORRECTIVE_AUTHORIZED
 ```
@@ -86,7 +88,9 @@ The 2-second liveness watchdog still awaits a JavaScript completion without an e
 
 ## Active corrective scope
 
-The authorized task now focuses on three bounded fixes:
+Draft PR #144 carries the authorized task and currently contains control-plane changes only. Product construction has not started.
+
+The corrective is limited to:
 
 1. identity-correct recovery navigation diagnostics;
 2. bounded Attention liveness/resync WebKit operations;
@@ -105,8 +109,10 @@ Not part of the active task unless separately authorized:
 
 ## Repository lifecycle
 
-The previous control-only PR #143 attempted to close the already-published v0.5.6 release lifecycle but never merged and its last CI was cancelled. It contains no production/test implementation. It is superseded by the combined control reconciliation on the new corrective branch and should be closed rather than merged over the new task authority.
+PR #143 is now `CLOSED / SUPERSEDED / UNMERGED`. It was control-only release-closeout work with no production/test implementation and a cancelled final CI. Its stale release-control reconciliation is absorbed by the new task branch, so no overlapping control writer remains.
+
+Draft PR #144 is the sole write-capable corrective workspace for the affected Web runtime / Attention scope.
 
 ## Next milestone
 
-Mac mini local executor performs Gate 0 from the task branch, verifies the baseline and no overlapping unique work, then executes CURRENT_TASK Gates 1–4. Keep the new PR Draft and unmerged until exact-head verification and independent Web/runtime acceptance pass.
+Mac mini local executor performs Gate 0 from `codex/ft-web-runtime-recovery-attention-001`, verifies the baseline and no unexpected overlapping unique work, then executes CURRENT_TASK Gates 1–4. Keep PR #144 Draft and unmerged until exact-head verification and independent Web/runtime acceptance pass.
