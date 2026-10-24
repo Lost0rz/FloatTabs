@@ -221,6 +221,13 @@ struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
     private(set) var livenessProbeMaximumMilliseconds = 0.0
     private(set) var livenessFailureCount: Int64 = 0
     private(set) var recoveredCompletionCount: Int64 = 0
+    /// These health counters are bridge-lifetime evidence. They are separate
+    /// from the opt-in Debug benchmark measurement and must survive ordinary
+    /// document and physical WebContent runtime replacement boundaries.
+    private(set) var livenessTimeoutCount: Int64 = 0
+    private(set) var livenessSuppressionCount: Int64 = 0
+    private(set) var currentDocumentResyncTimeoutCount: Int64 = 0
+    private(set) var currentDocumentResyncSuppressionCount: Int64 = 0
 
     mutating func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
@@ -264,6 +271,26 @@ struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
         recoveredCompletionCount = Self.saturatedIncrement(recoveredCompletionCount)
     }
 
+    mutating func recordLivenessTimeout() {
+        livenessTimeoutCount = Self.saturatedIncrement(livenessTimeoutCount)
+    }
+
+    mutating func recordLivenessSuppression() {
+        livenessSuppressionCount = Self.saturatedIncrement(livenessSuppressionCount)
+    }
+
+    mutating func recordCurrentDocumentResyncTimeout() {
+        currentDocumentResyncTimeoutCount = Self.saturatedIncrement(
+            currentDocumentResyncTimeoutCount
+        )
+    }
+
+    mutating func recordCurrentDocumentResyncSuppression() {
+        currentDocumentResyncSuppressionCount = Self.saturatedIncrement(
+            currentDocumentResyncSuppressionCount
+        )
+    }
+
     var fields: [String: Any] {
         [
             "liveness_probe_count": livenessProbeCount,
@@ -271,7 +298,11 @@ struct ChatGPTAttentionBenchmarkCounters: Equatable, Sendable {
             "liveness_probe_total_ms": livenessProbeTotalMilliseconds,
             "liveness_probe_max_ms": livenessProbeMaximumMilliseconds,
             "liveness_failure_count": livenessFailureCount,
-            "recovered_completion_count": recoveredCompletionCount
+            "recovered_completion_count": recoveredCompletionCount,
+            "liveness_timeout_count": livenessTimeoutCount,
+            "liveness_suppression_count": livenessSuppressionCount,
+            "current_document_resync_timeout_count": currentDocumentResyncTimeoutCount,
+            "current_document_resync_suppression_count": currentDocumentResyncSuppressionCount
         ]
     }
 
@@ -1279,11 +1310,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let generation: UInt64
         let attempt: Int
         let webViewIdentity: ObjectIdentifier
+        let physicalRuntimeEpoch: UInt64
     }
 
     private enum PendingLivenessProbe {
-        case active(continuation: CheckedContinuation<Any?, Never>)
-        case timedOut
+        case active(
+            physicalRuntimeEpoch: UInt64,
+            continuation: CheckedContinuation<Any?, Never>
+        )
+        case timedOut(physicalRuntimeEpoch: UInt64)
     }
 
     private enum PendingLongTermWorkloadCapture {
@@ -1336,6 +1371,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var outstandingCurrentDocumentResyncRequestIDs = Set<UUID>()
     private var nextResyncGeneration: UInt64 = 0
     private var nextDocumentEpoch: UInt64 = 0
+    /// Physical callback ownership is distinct from the semantic document
+    /// epoch. It advances only at the authoritative WebContent termination
+    /// seam, so ordinary didCommit/reset boundaries cannot manufacture
+    /// capacity for callbacks that still belong to the same process.
+    private var physicalRuntimeEpoch: UInt64 = 1
     private var livenessWatchdogTask: Task<Void, Never>?
     private var livenessWatchdogGeneration: UInt64 = 0
     private var livenessGeneration: UInt64 = 0
@@ -2096,6 +2136,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             "confirmation_probe_count": "attention_confirmation_probe_count",
             "liveness_failure_count": "attention_liveness_failure_count",
             "recovered_completion_count": "attention_recovered_completion_count",
+            "liveness_timeout_count": "attention_liveness_timeout_count",
+            "liveness_suppression_count": "attention_liveness_suppression_count",
+            "current_document_resync_timeout_count": "attention_resync_timeout_count",
+            "current_document_resync_suppression_count": "attention_resync_suppression_count",
             "captured_uptime_ms": "attention_workload_captured_uptime_ms"
         ]
         let doubleKeys = [
@@ -2328,6 +2372,17 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         resetRuntime(admission: .awaitingSupportedBaseline)
     }
 
+    /// The WebContent process termination callback is the sole authoritative
+    /// physical-runtime replacement boundary. Advance the physical epoch and
+    /// discard old callback markers only here; ordinary document resets keep
+    /// them so late callbacks remain the only way to release same-process
+    /// request capacity.
+    func handleWebContentProcessReplacement() {
+        physicalRuntimeEpoch &+= 1
+        resetRuntime(admission: .awaitingSupportedBaseline)
+        discardPendingPhysicalRequestMarkers()
+    }
+
     /// The ordinary didCommit boundary supplies the actual committed/current
     /// WebKit URL before any presentation callback or persisted URL can be
     /// consulted. A supported commit closes natural baseline admission first,
@@ -2375,6 +2430,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         invalidatePendingLivenessProbes()
         stopLivenessWatchdog()
         invalidatePendingCurrentDocumentResync()
+        discardPendingPhysicalRequestMarkers()
         pendingInstantBackHandoff = nil
         let hadActiveDocument = document != nil
         document = nil
@@ -2495,6 +2551,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// result can only release physical capacity and never reopen state.
     private func boundedLivenessProbe(_ webView: WKWebView) async -> Any? {
         guard pendingLivenessProbes.count < Self.maximumOutstandingLivenessProbes else {
+            benchmarkCounters.recordLivenessSuppression()
             diagnostics.record(
                 event: "attention.liveness_probe.suppressed",
                 level: .debug,
@@ -2509,8 +2566,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
 
         let requestID = UUID()
+        let requestPhysicalRuntimeEpoch = physicalRuntimeEpoch
         return await withCheckedContinuation { continuation in
-            pendingLivenessProbes[requestID] = .active(continuation: continuation)
+            pendingLivenessProbes[requestID] = .active(
+                physicalRuntimeEpoch: requestPhysicalRuntimeEpoch,
+                continuation: continuation
+            )
             let timeoutNanoseconds = UInt64(livenessProbeTimeout * 1_000_000_000)
             livenessProbeTimeoutTasks[requestID] = Task { @MainActor [weak self] in
                 do {
@@ -2521,7 +2582,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 self?.finishLivenessProbe(
                     id: requestID,
                     value: nil,
-                    timedOut: true
+                    timedOut: true,
+                    physicalRuntimeEpoch: requestPhysicalRuntimeEpoch
                 )
             }
             Task { @MainActor [weak self, weak webView] in
@@ -2530,7 +2592,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                     self.finishLivenessProbe(
                         id: requestID,
                         value: nil,
-                        timedOut: false
+                        timedOut: false,
+                        physicalRuntimeEpoch: requestPhysicalRuntimeEpoch
                     )
                     return
                 }
@@ -2538,7 +2601,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 self.finishLivenessProbe(
                     id: requestID,
                     value: value,
-                    timedOut: false
+                    timedOut: false,
+                    physicalRuntimeEpoch: requestPhysicalRuntimeEpoch
                 )
             }
         }
@@ -2547,17 +2611,25 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private func finishLivenessProbe(
         id: UUID,
         value: Any?,
-        timedOut: Bool
+        timedOut: Bool,
+        physicalRuntimeEpoch: UInt64
     ) {
         guard let pending = pendingLivenessProbes[id] else { return }
         switch pending {
-        case let .active(continuation):
+        case let .active(requestEpoch, continuation):
+            guard requestEpoch == physicalRuntimeEpoch else { return }
             livenessProbeTimeoutTasks.removeValue(forKey: id)?.cancel()
-            pendingLivenessProbes[id] = timedOut ? .timedOut : nil
+            if timedOut {
+                benchmarkCounters.recordLivenessTimeout()
+            }
+            pendingLivenessProbes[id] = timedOut
+                ? .timedOut(physicalRuntimeEpoch: requestEpoch)
+                : nil
             continuation.resume(returning: value)
-        case .timedOut:
+        case let .timedOut(requestEpoch):
             // The timeout already completed the semantic request. A late
             // callback only releases the physical request budget.
+            guard requestEpoch == physicalRuntimeEpoch else { return }
             guard !timedOut else { return }
             pendingLivenessProbes.removeValue(forKey: id)
         }
@@ -2565,11 +2637,21 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func invalidatePendingLivenessProbes() {
         for (requestID, pending) in pendingLivenessProbes {
-            guard case let .active(continuation) = pending else { continue }
+            guard case let .active(requestEpoch, continuation) = pending else { continue }
             livenessProbeTimeoutTasks.removeValue(forKey: requestID)?.cancel()
-            pendingLivenessProbes[requestID] = .timedOut
+            pendingLivenessProbes[requestID] = .timedOut(
+                physicalRuntimeEpoch: requestEpoch
+            )
             continuation.resume(returning: nil)
         }
+    }
+
+    private func discardPendingPhysicalLivenessProbes() {
+        for task in livenessProbeTimeoutTasks.values {
+            task.cancel()
+        }
+        livenessProbeTimeoutTasks.removeAll()
+        pendingLivenessProbes.removeAll()
     }
 
     private func recordLivenessProbeFailure() {
@@ -2587,11 +2669,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
         }
         let generation = livenessGeneration
+        let cyclePhysicalRuntimeEpoch = physicalRuntimeEpoch
         let firstProbeStartedAt = ProcessInfo.processInfo.systemUptime
         let firstValue = await boundedLivenessProbe(webView)
         recordBenchmarkLivenessProbe(
             startedAt: firstProbeStartedAt,
-            isConfirmation: false
+            isConfirmation: false,
+            physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
         guard let firstValue,
               let firstProbe = parseLivenessProbe(firstValue),
@@ -2613,7 +2697,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let secondValue = await boundedLivenessProbe(webView)
         recordBenchmarkLivenessProbe(
             startedAt: secondProbeStartedAt,
-            isConfirmation: true
+            isConfirmation: true,
+            physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
         guard let secondValue,
               let secondProbe = parseLivenessProbe(secondValue),
@@ -2643,8 +2728,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
     private func recordBenchmarkLivenessProbe(
         startedAt: TimeInterval,
-        isConfirmation: Bool
+        isConfirmation: Bool,
+        physicalRuntimeEpoch: UInt64
     ) {
+        guard self.physicalRuntimeEpoch == physicalRuntimeEpoch else { return }
         let durationMilliseconds = (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
         benchmarkCounters.recordLivenessProbe(
             durationMilliseconds: durationMilliseconds,
@@ -2670,6 +2757,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
         guard outstandingCurrentDocumentResyncRequestIDs.count
             < Self.maximumOutstandingCurrentDocumentResyncRequests else {
+            benchmarkCounters.recordCurrentDocumentResyncSuppression()
             diagnostics.record(
                 event: "attention.current_document_resync.suppressed",
                 level: .debug,
@@ -2689,7 +2777,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             requestID: requestID,
             generation: generation,
             attempt: 1,
-            webViewIdentity: ObjectIdentifier(webView)
+            webViewIdentity: ObjectIdentifier(webView),
+            physicalRuntimeEpoch: physicalRuntimeEpoch
         )
         pendingCurrentDocumentResync = pending
         outstandingCurrentDocumentResyncRequestIDs.insert(requestID)
@@ -2697,13 +2786,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             requestID: requestID,
             generation: generation,
             attempt: pending.attempt,
-            webViewIdentity: ObjectIdentifier(webView)
+            webViewIdentity: ObjectIdentifier(webView),
+            physicalRuntimeEpoch: pending.physicalRuntimeEpoch
         )
         evaluateCurrentDocumentResync(
             in: webView,
             requestID: requestID,
             generation: generation,
-            attempt: pending.attempt
+            attempt: pending.attempt,
+            physicalRuntimeEpoch: pending.physicalRuntimeEpoch
         )
     }
 
@@ -2711,7 +2802,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         in webView: WKWebView,
         requestID: UUID,
         generation: UInt64,
-        attempt: Int
+        attempt: Int,
+        physicalRuntimeEpoch: UInt64
     ) {
         if let currentDocumentResyncEvaluator {
             Task { @MainActor [weak self, weak webView] in
@@ -2721,6 +2813,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                         requestID: requestID,
                         generation: generation,
                         attempt: attempt,
+                        physicalRuntimeEpoch: physicalRuntimeEpoch,
                         webView: nil,
                         result: .failure(CancellationError())
                     )
@@ -2735,6 +2828,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                         requestID: requestID,
                         generation: generation,
                         attempt: attempt,
+                        physicalRuntimeEpoch: physicalRuntimeEpoch,
                         webView: webView,
                         result: .success(value)
                     )
@@ -2743,6 +2837,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                         requestID: requestID,
                         generation: generation,
                         attempt: attempt,
+                        physicalRuntimeEpoch: physicalRuntimeEpoch,
                         webView: webView,
                         result: .failure(error)
                     )
@@ -2760,6 +2855,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 requestID: requestID,
                 generation: generation,
                 attempt: attempt,
+                physicalRuntimeEpoch: physicalRuntimeEpoch,
                 webView: webView,
                 result: result
             )
@@ -2770,7 +2866,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         requestID: UUID,
         generation: UInt64,
         attempt: Int,
-        webViewIdentity: ObjectIdentifier
+        webViewIdentity: ObjectIdentifier,
+        physicalRuntimeEpoch: UInt64
     ) {
         currentDocumentResyncTimeoutTasks[requestID]?.cancel()
         let timeoutNanoseconds = UInt64(currentDocumentResyncTimeout * 1_000_000_000)
@@ -2784,7 +2881,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 requestID: requestID,
                 generation: generation,
                 attempt: attempt,
-                webViewIdentity: webViewIdentity
+                webViewIdentity: webViewIdentity,
+                physicalRuntimeEpoch: physicalRuntimeEpoch
             )
         }
     }
@@ -2793,7 +2891,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         requestID: UUID,
         generation: UInt64,
         attempt: Int,
-        webViewIdentity: ObjectIdentifier
+        webViewIdentity: ObjectIdentifier,
+        physicalRuntimeEpoch: UInt64
     ) {
         guard outstandingCurrentDocumentResyncRequestIDs.contains(requestID) else {
             return
@@ -2806,10 +2905,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               pending.requestID == requestID,
               pending.generation == generation,
               pending.attempt == attempt,
-              pending.webViewIdentity == webViewIdentity else {
+              pending.webViewIdentity == webViewIdentity,
+              pending.physicalRuntimeEpoch == physicalRuntimeEpoch,
+              self.physicalRuntimeEpoch == physicalRuntimeEpoch else {
             return
         }
         pendingCurrentDocumentResync = nil
+        benchmarkCounters.recordCurrentDocumentResyncTimeout()
         diagnostics.record(
             event: "attention.current_document_resync.timeout",
             level: .debug,
@@ -2826,6 +2928,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         requestID: UUID,
         generation: UInt64,
         attempt: Int,
+        physicalRuntimeEpoch: UInt64,
         webView: WKWebView?,
         result: Result<Any, Error>
     ) {
@@ -2841,7 +2944,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               pending.requestID == requestID,
               pending.generation == generation,
               pending.attempt == attempt,
-              pending.webViewIdentity == ObjectIdentifier(webView) else {
+              pending.webViewIdentity == ObjectIdentifier(webView),
+              pending.physicalRuntimeEpoch == physicalRuntimeEpoch,
+              self.physicalRuntimeEpoch == physicalRuntimeEpoch else {
             return
         }
 
@@ -2867,7 +2972,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             requestID: retryRequestID,
             generation: generation,
             attempt: attempt + 1,
-            webViewIdentity: ObjectIdentifier(webView)
+            webViewIdentity: ObjectIdentifier(webView),
+            physicalRuntimeEpoch: physicalRuntimeEpoch
         )
         pendingCurrentDocumentResync = retry
         outstandingCurrentDocumentResyncRequestIDs.insert(retryRequestID)
@@ -2875,13 +2981,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             requestID: retryRequestID,
             generation: generation,
             attempt: retry.attempt,
-            webViewIdentity: ObjectIdentifier(webView)
+            webViewIdentity: ObjectIdentifier(webView),
+            physicalRuntimeEpoch: retry.physicalRuntimeEpoch
         )
         evaluateCurrentDocumentResync(
             in: webView,
             requestID: retryRequestID,
             generation: generation,
-            attempt: retry.attempt
+            attempt: retry.attempt,
+            physicalRuntimeEpoch: retry.physicalRuntimeEpoch
         )
     }
 
@@ -2904,5 +3012,15 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             task.cancel()
         }
         currentDocumentResyncTimeoutTasks.removeAll()
+    }
+
+    private func discardPendingPhysicalRequestMarkers() {
+        discardPendingPhysicalLivenessProbes()
+        for task in currentDocumentResyncTimeoutTasks.values {
+            task.cancel()
+        }
+        currentDocumentResyncTimeoutTasks.removeAll()
+        outstandingCurrentDocumentResyncRequestIDs.removeAll()
+        pendingCurrentDocumentResync = nil
     }
 }

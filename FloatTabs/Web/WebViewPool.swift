@@ -656,7 +656,7 @@ final class WebViewPool {
         // The terminated runtime is authoritatively replaced: reset its
         // attention runtime before the existing recovery policy proceeds. The
         // bridge installation itself stays usable for the recovered document.
-        attentionBridges[slotID]?.handleRuntimeReplacement()
+        attentionBridges[slotID]?.handleWebContentProcessReplacement()
         responseBridges[slotID]?.handleRuntimeReplacement()
         calibreReaderBridges[slotID]?.handleRuntimeReplacement()
 

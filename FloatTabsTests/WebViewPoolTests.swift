@@ -1939,6 +1939,7 @@ final class WebViewPoolTests: XCTestCase {
 
         let webView = try pool.webView(for: profile)
         let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
         observer.webViewWebContentProcessDidTerminate(webView)
         let recoveryNavigation = try XCTUnwrap(returnedNavigation)
 
@@ -1954,6 +1955,29 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(generation, 1)
         XCTAssertEqual(commit.fields["navigation_phase"], .string("post_commit"))
         XCTAssertEqual(commit.fields["navigation_callback_stale"], .bool(false))
+
+        // Recovery remains one complete navigation identity through didFinish,
+        // and a later ordinary navigation cannot be completed by a stale
+        // recovery callback.
+        observer.webView(webView, didFinish: recoveryNavigation)
+        let finish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(finish.fields["navigation_generation"], commit.fields["navigation_generation"])
+        XCTAssertEqual(finish.fields["navigation_phase"], .string("finished"))
+        XCTAssertEqual(finish.fields["navigation_callback_stale"], .bool(false))
+
+        let ordinaryNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>ordinary</body></html>",
+                baseURL: URL(string: "https://example.com/")
+            )
+        )
+        observer.webView(webView, didStartProvisionalNavigation: ordinaryNavigation)
+        observer.webView(webView, didFinish: recoveryNavigation)
+        let staleFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(staleFinish.fields["navigation_callback_stale"], .bool(true))
+        observer.webView(webView, didFinish: ordinaryNavigation)
+        let ordinaryFinish = try XCTUnwrap(writer.events.last { $0.event == "navigation.finished" })
+        XCTAssertEqual(ordinaryFinish.fields["navigation_callback_stale"], .bool(false))
     }
 
     func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() throws {

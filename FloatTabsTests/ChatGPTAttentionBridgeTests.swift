@@ -143,6 +143,31 @@ private final class CurrentDocumentResyncGate {
 }
 
 @MainActor
+private final class CurrentDocumentResyncBudgetGate {
+    private var continuations: [CheckedContinuation<Any, Error>] = []
+    private(set) var callCount = 0
+
+    func evaluate() async throws -> Any {
+        callCount += 1
+        return try await withCheckedThrowingContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func waitUntilStarted(_ expectedCallCount: Int) async {
+        while callCount < expectedCallCount {
+            await Task.yield()
+        }
+    }
+
+    func resolveAll(_ value: Any) {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume(returning: value) }
+    }
+}
+
+@MainActor
 private final class ChatGPTLongTermObservationSleeper {
     private struct Waiter {
         let id: UUID
@@ -933,12 +958,26 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         counters.recordLivenessProbe(durationMilliseconds: .infinity, isConfirmation: false)
         counters.recordLivenessFailure()
         counters.recordRecoveredCompletion()
+        counters.recordLivenessTimeout()
+        counters.recordLivenessSuppression()
+        counters.recordCurrentDocumentResyncTimeout()
+        counters.recordCurrentDocumentResyncSuppression()
         XCTAssertEqual(counters.fields["liveness_probe_count"] as? Int64, 2)
         XCTAssertEqual(counters.fields["confirmation_probe_count"] as? Int64, 1)
         XCTAssertEqual(counters.fields["liveness_probe_total_ms"] as? Double, 12)
         XCTAssertEqual(counters.fields["liveness_probe_max_ms"] as? Double, 12)
         XCTAssertEqual(counters.fields["liveness_failure_count"] as? Int64, 1)
         XCTAssertEqual(counters.fields["recovered_completion_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["liveness_timeout_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["liveness_suppression_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["current_document_resync_timeout_count"] as? Int64, 1)
+        XCTAssertEqual(counters.fields["current_document_resync_suppression_count"] as? Int64, 1)
+        counters.resetValues()
+        XCTAssertEqual(
+            counters.fields["liveness_timeout_count"] as? Int64,
+            1,
+            "bridge-lifetime health evidence must survive a document measurement reset"
+        )
         XCTAssertEqual(
             ChatGPTAttentionBenchmarkCounters.saturatedIncrement(.max),
             ChatGPTAttentionBenchmarkCounters.maximumCounter
@@ -957,9 +996,302 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
             [
                 "liveness_probe_count", "confirmation_probe_count",
                 "liveness_probe_total_ms", "liveness_probe_max_ms",
-                "liveness_failure_count", "recovered_completion_count"
+                "liveness_failure_count", "recovered_completion_count",
+                "liveness_timeout_count", "liveness_suppression_count",
+                "current_document_resync_timeout_count",
+                "current_document_resync_suppression_count"
             ]
         )
+    }
+
+    func testPhysicalRuntimeReplacementDiscardsTimedOutLivenessMarkersAndLateCallbacksAreHarmless() async throws {
+        let probes = LivenessProbeGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in observations.append(observation) },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            livenessProbeTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let firstTimedOutCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+        await firstTimedOutCycle.value
+
+        let secondTimedOutCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(2)
+        await secondTimedOutCycle.value
+
+        // Ordinary document replacement is intentionally not enough to free
+        // these physical callback markers. The process replacement seam must
+        // establish the new physical epoch and discard them.
+        bridge.handleWebContentProcessReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        await bridge.debugRunLivenessCycle()
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+
+        // The two callbacks belong to the old physical epoch. They must be
+        // harmless after the new epoch has already completed a recovery.
+        probes.resumeSuspended(nil)
+        probes.resumeSuspended(nil)
+        await Task.yield()
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+    }
+
+    func testPhysicalRuntimeReplacementResetsCurrentDocumentResyncBudgetWithoutAcceptingLateCallbacks() async throws {
+        let gate = CurrentDocumentResyncBudgetGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in observations.append(observation) },
+            currentDocumentResyncEvaluator: { _, _ in try await gate.evaluate() },
+            currentDocumentResyncTimeout: 1
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        let supportedURL = URL(string: "https://chatgpt.com/c/current")!
+
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        await gate.waitUntilStarted(1)
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        await gate.waitUntilStarted(2)
+
+        // The same physical WebContent runtime remains bounded: the third
+        // semantic replacement cannot manufacture a third WebKit request.
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        XCTAssertEqual(gate.callCount, 2)
+
+        bridge.handleWebContentProcessReplacement()
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        await gate.waitUntilStarted(3)
+        XCTAssertEqual(gate.callCount, 3)
+
+        gate.resolveAll([
+            "version": 1,
+            "kind": ChatGPTBridgePayload.baselineKind,
+            "token": tokenA!,
+            "generating": true
+        ] as [String: Any])
+        let admitted = await waitUntil {
+            observations == [.generationStarted]
+        }
+        XCTAssertTrue(admitted)
+    }
+
+    func testStandardDiagnosticsExposeBoundedLivenessBudgetCountersWithoutPageContent() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let probes = LivenessProbeGate()
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            benchmarkProbeEvaluator: { _, _ in
+                Self.longTermWorkloadPayload(
+                    token: self.tokenA,
+                    enabled: Self.benchmarkMeasurementEnabledForTest
+                )
+            },
+            livenessProbeTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        for expectedCallCount in 1...2 {
+            let timedOutCycle = Task { @MainActor in
+                await bridge.debugRunLivenessCycle()
+            }
+            await probes.waitForCall(expectedCallCount)
+            await timedOutCycle.value
+        }
+        // Two timed-out markers consume the physical budget; the next cycle
+        // is suppressed and increments the bounded counter without a debug-only
+        // event being required for Standard visibility.
+        await bridge.debugRunLivenessCycle()
+
+        let fields = await bridge.captureLongTermWorkloadDiagnosticFields(
+            for: webView,
+            runtimeIdentity: WebRuntimeDiagnosticIdentity(
+                runtimeGeneration: 1,
+                webViewInstanceID: UUID()
+            ),
+            navigationGeneration: 1,
+            contextIsCurrent: { true }
+        )
+        XCTAssertEqual(
+            fields["attention_liveness_timeout_count"],
+            RuntimeDiagnosticValue.integer(2)
+        )
+        XCTAssertEqual(
+            fields["attention_liveness_suppression_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+
+        diagnostics.record(
+            event: "diagnostics.performance_checkpoint",
+            level: .notice,
+            subsystem: "diagnostics",
+            fields: fields
+        )
+        let checkpoint = try XCTUnwrap(writer.events.last)
+        XCTAssertEqual(checkpoint.event, "diagnostics.performance_checkpoint")
+        XCTAssertEqual(
+            checkpoint.fields["attention_liveness_timeout_count"],
+            RuntimeDiagnosticValue.integer(2)
+        )
+        XCTAssertEqual(
+            checkpoint.fields["attention_liveness_suppression_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+        XCTAssertTrue(writer.events.allSatisfy { $0.level != .debug })
+        XCTAssertFalse(String(describing: checkpoint.fields).contains(tokenA))
+    }
+
+    func testStandardDiagnosticsExposeBoundedResyncBudgetCountersAcrossPhysicalReplacement() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let gate = CurrentDocumentResyncBudgetGate()
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            diagnostics: diagnostics,
+            benchmarkProbeEvaluator: { _, _ in
+                Self.longTermWorkloadPayload(
+                    token: self.tokenA,
+                    enabled: Self.benchmarkMeasurementEnabledForTest
+                )
+            },
+            livenessProbeTimeout: 0.01,
+            currentDocumentResyncEvaluator: { _, _ in try await gate.evaluate() },
+            currentDocumentResyncTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        let supportedURL = URL(string: "https://chatgpt.com/c/current")!
+
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        await gate.waitUntilStarted(1)
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        await gate.waitUntilStarted(2)
+        bridge.handleRuntimeReplacement(committedURL: supportedURL)
+        XCTAssertEqual(gate.callCount, 2)
+
+        bridge.handleWebContentProcessReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: false
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        let fields = await bridge.captureLongTermWorkloadDiagnosticFields(
+            for: webView,
+            runtimeIdentity: WebRuntimeDiagnosticIdentity(
+                runtimeGeneration: 1,
+                webViewInstanceID: UUID()
+            ),
+            navigationGeneration: 1,
+            contextIsCurrent: { true }
+        )
+
+        XCTAssertEqual(
+            fields["attention_resync_timeout_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+        XCTAssertEqual(
+            fields["attention_resync_suppression_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+        diagnostics.record(
+            event: "diagnostics.performance_checkpoint",
+            level: .notice,
+            subsystem: "diagnostics",
+            fields: fields
+        )
+        let checkpoint = try XCTUnwrap(writer.events.last)
+        XCTAssertEqual(
+            checkpoint.fields["attention_resync_timeout_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+        XCTAssertEqual(
+            checkpoint.fields["attention_resync_suppression_count"],
+            RuntimeDiagnosticValue.integer(1)
+        )
+        XCTAssertTrue(writer.events.allSatisfy { $0.level != .debug })
+
+        gate.resolveAll([
+            "version": 1,
+            "kind": ChatGPTBridgePayload.baselineKind,
+            "token": tokenA!,
+            "generating": false
+        ] as [String: Any])
+        await Task.yield()
     }
 
     func testBenchmarkMeasurementEnableResetSnapshotAndLivenessCounters() async {
