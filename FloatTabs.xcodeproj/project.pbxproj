@@ -27,7 +27,7 @@
 		A00000000000000000000010 /* WebRenderingProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* WebRenderingProfile.swift */; };
 		A00000000000000000000011 /* WebAppProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* WebAppProfile.swift */; };
 		A00000000000000000000012 /* TabStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* TabStore.swift */; };
-		A00000000000000000000013 /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
+		A00000000000000000000013 /* ProfileRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
 		A00000000000000000000014 /* WebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* WebViewPool.swift */; };
 		A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SlotLifecycleCoordinator.swift */; };
 		A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* SlotNavigationObserver.swift */; };
@@ -644,42 +644,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\
-source_revision=unknown\
-source_tree_state=unknown\
-source_revision_exact=false\
-if source_revision_candidate=$(git -C \"$SRCROOT\" rev-parse --verify HEAD 2>/dev/null); then\
-  if printf '%s' \"$source_revision_candidate\" | /usr/bin/grep -Eq '^[0-9a-f]{40}$'; then\
-    source_revision=$source_revision_candidate\
-    set -- .\
-    for build_path in \"$DERIVED_FILE_DIR\" \"$CONFIGURATION_BUILD_DIR\" \"$PROJECT_TEMP_DIR\" \"$SYMROOT\" \"$OBJROOT\"; do\
-      case \"$build_path\" in\
-        \"$SRCROOT\"/*)\
-          relative_path=${build_path#\"$SRCROOT\"/}\
-          set -- \"$@\" \":(exclude)$relative_path\" \":(exclude,glob)$relative_path/**\"\
-          ;;\
-      esac\
-    done\
-    if source_status=$(git -C \"$SRCROOT\" status --porcelain --untracked-files=all -- \"$@\" 2>/dev/null); then\
-      if [ -z \"$source_status\" ]; then\
-        source_tree_state=clean\
-        source_revision_exact=true\
-      else\
-        source_tree_state=dirty\
-      fi\
-    fi\
-  fi\
-fi\
-plist=\"$DERIVED_FILE_DIR/FloatTabsGeneratedInfo.plist\"\
-/usr/bin/install -m 644 \"$SRCROOT/FloatTabs/Info.plist\" \"$plist\"\
-set_plist_value() { /usr/libexec/PlistBuddy -c \"Set :$1 $2\" \"$plist\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :$1 string $2\" \"$plist\"; }\
-set_plist_value FloatTabsSourceRevision \"$source_revision\"\
-set_plist_value FloatTabsSourceTreeState \"$source_tree_state\"\
-set_plist_value FloatTabsSourceRevisionExact \"$source_revision_exact\"\
-set_plist_value FloatTabsBuildChannel \"$CONFIGURATION\"\
-case \"$CONFIGURATION\" in Debug) qa_label=ft-diag-002-qa ;; *) qa_label=release ;; esac\
-set_plist_value FloatTabsQALabel \"$qa_label\"\
-";
+			shellScript = "set -e\nsource_revision=unknown\nsource_tree_state=unknown\nsource_revision_exact=false\nif source_revision_candidate=$(git -C \"$SRCROOT\" rev-parse --verify HEAD 2>/dev/null); then\n  if printf '%s' \"$source_revision_candidate\" | /usr/bin/grep -Eq '^[0-9a-f]{40}$'; then\n    source_revision=$source_revision_candidate\n    set -- .\n    for build_path in \"$DERIVED_FILE_DIR\" \"$CONFIGURATION_BUILD_DIR\" \"$PROJECT_TEMP_DIR\" \"$SYMROOT\" \"$OBJROOT\"; do\n      case \"$build_path\" in\n        \"$SRCROOT\"/*)\n          relative_path=${build_path#\"$SRCROOT\"/}\n          set -- \"$@\" \":(exclude)$relative_path\" \":(exclude,glob)$relative_path/**\"\n          ;;\n      esac\n    done\n    if source_status=$(git -C \"$SRCROOT\" status --porcelain --untracked-files=all -- \"$@\" 2>/dev/null); then\n      if [ -z \"$source_status\" ]; then\n        source_tree_state=clean\n        source_revision_exact=true\n      else\n        source_tree_state=dirty\n      fi\n    fi\n  fi\nfi\nplist=\"$DERIVED_FILE_DIR/FloatTabsGeneratedInfo.plist\"\n/usr/bin/install -m 644 \"$SRCROOT/FloatTabs/Info.plist\" \"$plist\"\nset_plist_value() { /usr/libexec/PlistBuddy -c \"Set :$1 $2\" \"$plist\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :$1 string $2\" \"$plist\"; }\nset_plist_value FloatTabsSourceRevision \"$source_revision\"\nset_plist_value FloatTabsSourceTreeState \"$source_tree_state\"\nset_plist_value FloatTabsSourceRevisionExact \"$source_revision_exact\"\nset_plist_value FloatTabsBuildChannel \"$CONFIGURATION\"\ncase \"$CONFIGURATION\" in Debug) qa_label=ft-diag-002-qa ;; *) qa_label=release ;; esac\nset_plist_value FloatTabsQALabel \"$qa_label\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -985,7 +950,6 @@ set_plist_value FloatTabsQALabel \"$qa_label\"\
 				kind = upToNextMajorVersion;
 				minimumVersion = 3.0.1;
 			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
