@@ -6,80 +6,57 @@
 
 ## Mode
 
-**MODE: NO ACTIVE ENGINEERING TASK — POST-MERGE OBSERVATION**
+**MODE: ACTIVE RELEASE — v0.5.7 / Build 25**
 
-Most recently completed task: `FT-ATTENTION-ACTIVE-TAB-VISUAL-REFINEMENT-001`
+Active task: `FT-RELEASE-V0.5.7-001`
 
 ## Current verified baseline
 
 ```text
-MAIN_AFTER_PR146=00618024e6d5ef9802e10f882008079e5e27a90e
-MERGED_PR=146
-FINAL_PR_HEAD=9876c89c0dccd604c7eef6ed58f09d19570768af
-IMPLEMENTATION_COMMIT=48a9b1b
-PUBLIC_RELEASE=v0.5.6
-PUBLIC_BUILD=24
+BASE_MAIN=098182e64890dabb68832c3bd4d868ff499ac95d
+CURRENT_PUBLIC_RELEASE=v0.5.6
+CURRENT_PUBLIC_BUILD=24
+TARGET_RELEASE=v0.5.7
+TARGET_BUILD=25
 ARCH=arm64
-PREVIOUS_RUNTIME_TASK=FT-WEB-RUNTIME-RECOVERY-ATTENTION-001
-WEB_RUNTIME_ROOT_CAUSE=UNKNOWN
+RELEASE_BRANCH=release/ft-v0.5.7
+OPEN_PRS_AT_START=0
+V0_5_7_EXISTS_AT_START=NO
 ```
 
-PR #146 is merged. No further product mutation, release, or successor task is authorized by this closeout.
+The latest accepted product baseline includes the merged Active Tab / unread Attention refinement and prior bounded Web runtime / Attention corrective work.
 
-The previous Web runtime / Attention incident conclusion remains unchanged: the root cause of the observed WebContent stall/termination is still `UNKNOWN` and was not part of this UI task.
+The previous WebContent stall/termination root cause remains `UNKNOWN`. Publishing v0.5.7 does not change or close that incident conclusion.
 
-## Accepted behavior
+## Release target
 
-The merged behavior is governed by:
-
-- `docs/design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md` for active Tab / unread Attention presentation;
-- `docs/design/FloatTabs_UI_Design_System_v1.3.md` for unaffected shell/rail behavior;
-- production source and regression tests on current `main`.
-
-Accepted target:
+Publish a new GitHub Release rather than refreshing v0.5.6:
 
 ```text
-ACTIVE_TAB_RESTING_WIDTH=76pt
-INACTIVE_TAB_RESTING_WIDTH=40pt
-ACTIVE_LABEL_PERSISTENT=YES
-CANONICAL_ATTENTION_STYLES=DOT,BEACON,ORBIT,PULSE
-HALO_STORED_VALUE=PULSE
-SWEEP_STORED_VALUE=ORBIT
-ORBIT=INTERNAL_VISIBLE_PERIMETER
-PULSE_MIN_OPACITY=0.38
-PULSE_MAX_OPACITY=1.00
-PULSE_REDUCE_MOTION_TARGET=0.72
-SETTINGS_STYLE_GRID=2x2_AT_CURRENT_WIDTH
-HUMAN_UI_ACCEPTANCE=PASS
+VERSION=0.5.7
+BUILD=25
+TAG=v0.5.7
+DRAFT=NO
+PRERELEASE=NO
+EXPECTED_DMG=FloatTabs-0.5.7.dmg
+EXPECTED_DMG_SHA256=FloatTabs-0.5.7.dmg.sha256
+EXPECTED_DSYM=FloatTabs-0.5.7.dSYM.zip
+EXPECTED_DSYM_SHA256=FloatTabs-0.5.7.dSYM.zip.sha256
 ```
 
-The user accepted the current UI with only minor visual concerns and explicitly authorized merge subject to a detailed code audit.
+The repository's existing `Publish Release` workflow is the canonical publisher. It derives version/build from the Xcode project, requires matching release notes, builds the arm64 DMG/dSYM package, verifies checksum sidecars, and creates the GitHub Release.
 
-## Final verification / audit
+## Scope boundary
 
-```text
-FOCUSED_XCTEST=PASS
-FULL_XCTEST=PASS
-DEBUG_ARM64=PASS
-RELEASE_ARM64=PASS
-EXACT_HEAD_MACOS_CI_1113=PASS
-EXACT_HEAD_QA_DMG_519=PASS
-PR_MERGE_AUDIT=PASS_WITH_FOLLOWUPS
-PR_MERGEABLE_AT_GATE=YES
-INLINE_REVIEW_THREADS=0
-SUBMITTED_REVIEWS=0
-MERGE_COMMIT=00618024e6d5ef9802e10f882008079e5e27a90e
-```
+This release task may change only release metadata, release notes, and control state. No product/runtime/UI/persistence/session behavior change is authorized.
 
-The merge audit found no blocking or important code issue. The only closeout follow-ups were control/document alignment; this closeout resolves them by making the task terminal and adding the accepted refinement contract to current architecture navigation.
+## Evidence already carried into release preparation
 
-## Repository lifecycle
-
-- PR #146: `MERGED` at `00618024e6d5ef9802e10f882008079e5e27a90e`.
-- Task branch implementation identity: `9876c89c0dccd604c7eef6ed58f09d19570768af`.
-- Closeout is control/design-navigation only; it does not change product runtime behavior.
-- No release is authorized.
+- PR #146 product merge and its exact-head macOS CI / QA DMG passed before merge.
+- The subsequent control closeout PR #147 passed its required macOS CI and merged.
+- Current `main` is protected and has no open PR at release-task start.
+- Latest public release is v0.5.6 / Build 24.
 
 ## Next
 
-Continue normal use/observation on `main`. Any new product issue requires a new task authorization in `CURRENT_TASK.md`; do not reopen this completed task merely for unrelated follow-up work.
+Prepare v0.5.7 / Build 25 metadata and release notes on `release/ft-v0.5.7`, open one bounded release PR, pass current host gates, merge to `main`, verify the canonical publisher and public assets, then close the release task through a control-only closeout.
