@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — REMOTE GATES VERIFIED / INDEPENDENT WEB ACCEPTANCE PENDING**
+**MODE: ACTIVE CORRECTIVE — INDEPENDENT WEB ACCEPTANCE STOP / LOCAL CORRECTIVE AUTHORIZED**
 
 Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
@@ -21,35 +21,35 @@ RELEASE_COMMIT=17f1bf1760625833d0b82397009223b2165521c7
 TASK_BRANCH=codex/ft-web-runtime-recovery-attention-001
 TASK_PR=144_OPEN_DRAFT_UNMERGED
 PREDECESSOR_PR_143=CLOSED_SUPERSEDED_UNMERGED
+PRE_CORRECTIVE_SEMANTIC_HEAD=cd493fe4ca7b7ba216ff4654d2765b1531745eee
+PRE_CORRECTIVE_CONTROL_HEAD=8c5d3383c60e9689d672cc6c9d1d88fa2bbb62b0
 ROOT_CAUSE=UNKNOWN
-INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / CORRECTIVE_AUTHORIZED
+INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / CORRECTIVE_IN_PROGRESS
 ```
 
 v0.5.6 remains an observation release; it did not claim the ChatGPT/WebKit slowdown or WebContent termination incident was fixed.
 
 ## Fresh Air evidence reviewed
 
-Authoritative fresh evidence for this corrective:
+Authoritative evidence for this corrective:
 
 - `runtime-20261023-003.jsonl`
 - `runtime-20261024-001.jsonl`
 
-The 2026-10-24 segment contains seven explicit `web_content_process_terminated` events across multiple Slots. Six are followed by the existing `web_runtime.recovery.reload_now` path. Repeated termination is therefore still a live product/runtime incident on v0.5.6.
+The 2026-10-24 segment contains repeated real `web_content_process_terminated` events across multiple Slots, one `POST_FINISH_RUNTIME_STALL` candidate with both main-page and FloatTabs-isolated worlds timing out at 5 seconds after navigation finished, and a separate near-stall with roughly 4.18-second main/isolated probes.
 
-The same segment contains one `POST_FINISH_RUNTIME_STALL` candidate with both main-page and FloatTabs-isolated JavaScript worlds timing out at the 5-second bound after navigation had finished, plus a separate near-stall with roughly 4.18-second main/isolated probes, about 252-ms event-loop scheduling latency and about 521-ms responsiveness-probe latency.
-
-These establish two observable failure modes:
+These establish at least two observable runtime failure modes:
 
 1. WebContent process termination;
 2. non-termination runtime unresponsiveness / near-unresponsiveness.
 
 They do not establish a shared causal root. `ROOT_CAUSE=UNKNOWN` remains authoritative.
 
-## Confirmed FloatTabs-owned code findings
+## Confirmed FloatTabs-owned findings
 
-### 1. Recovery navigation diagnostic state defect
+### 1. Recovery navigation diagnostic identity defect
 
-One termination sequence is now correlated end-to-end:
+One termination sequence correlated:
 
 ```text
 web_content_process_terminated
@@ -61,77 +61,188 @@ web_content_process_terminated
    while navigation_phase remains terminated
 ```
 
-Source audit confirms why: `SlotNavigationObserver` changes the current diagnostic ticket to `.terminated`; a fresh ticket is normally created only by `didStartProvisionalNavigation`; `WebViewPool` discards the `WKNavigation?` returned by the recovery `load(...)`. If the recovery sequence reaches commit without a usable provisional callback, the commit cannot match an active ticket and the old terminal state remains canonical.
-
-Other terminations in the same log recover correctly when a fresh navigation generation is established, proving this is conditional rather than a universal recovery failure.
-
-Impact: diagnostics can under-report later post-finish stalls for an otherwise live recovered Slot because stall classification requires `navigation_phase == finished`.
+The first PR #144 implementation now retains/registers the exact `WKNavigation?` returned by the production recovery load, and independent review accepts that implementation direction. Remaining work is composed regression proof through finish, deferred recovery, stale-callback rejection, and restored post-finish-stall eligibility.
 
 ### 2. Attention detector long-tail hot path
 
-Fresh Release workload evidence records detector evaluate maxima around 410–412 ms.
+Fresh Release evidence recorded detector evaluate maxima around 410–412 ms. The first PR #144 implementation narrows semantic stop-control candidates, moves cheap semantic/enabled predicates before layout/style checks, and skips assistant-response identity resolution while generating.
 
-Source audit shows `isGenerating()` first checks explicit stop selectors, then scans all `button,[role="button"]`. The current predicate performs rendered/layout-style checks before cheaper enabled/semantic-label checks. The observer covers the entire document subtree and can schedule detector work during sustained ChatGPT DOM mutation, including while the panel is hidden so background generation completion can still be detected.
+Deterministic fixture evidence from that implementation reported layout checks reduced from `12003` to `2`, with detector max from about `800.2 ms` to `0.1 ms` in the synthetic fixture. This is accepted as a FloatTabs-owned performance improvement, not as proof of WebContent-termination causality.
 
-This is a real FloatTabs-owned optimization target. It is **not** evidence that Attention caused WebContent termination.
+### 3. Attention timeout/request-budget ownership remains incorrect across physical runtime replacement
 
-### 3. Attention WebKit callback boundedness gap
+The first PR #144 implementation adds timeout and finite outstanding budgets for liveness and current-document resync, but independent Web/runtime review found a remaining ownership defect:
 
-The 2-second liveness watchdog still awaits a JavaScript completion without an explicit timeout/request budget. Authorized current-document resync also depends on `evaluateJavaScript` completion; its retry count is bounded only after callbacks return. FloatTabs already has runtime evidence that a WebKit JavaScript completion may fail to return, so these paths need the same bounded-operation discipline already applied to long-term workload capture.
+- timed-out requests remain counted until their WebKit callback returns;
+- generic document/runtime reset invalidates semantic state but does not establish a separate physical WebContent request epoch;
+- if old callbacks never return, the finite budget can remain full after WebContent process replacement and suppress all probes/resyncs for the recovered process.
 
-## Other observations
+A naive fix that clears budget on every document/navigation replacement would be unsafe in the opposite direction: callbacks can still be physically pending in the same WebContent process, allowing repeated navigations to manufacture new capacity and accumulate unbounded WebKit work.
 
-- Page-app JavaScript error/dropped-event rates can spike sharply (one interval exceeded 200/min for both), but current content-free evidence cannot attribute those events to ChatGPT, WebKit or FloatTabs injection.
-- FloatTabs host RSS does not show a monotonic native-process leak in these segments.
-- WebContent process RSS/resource attribution remains unavailable through the current public API boundary.
-- One isolated `NSURLErrorDomain -1005` navigation failure is low priority relative to the runtime incident.
+Required model:
 
-## Active corrective scope
+```text
+same WebContent process + new document/navigation:
+    semantic authority resets
+    physical pending callbacks still consume the same finite budget
 
-Draft PR #144 now carries the authorized implementation and directly relevant regression/benchmark tests. Local construction and verification are complete. Exact-head macOS CI and QA DMG have passed; independent Web/runtime acceptance remains pending.
+webViewWebContentProcessDidTerminate / authoritative physical replacement:
+    old physical epoch loses authority
+    old-epoch request markers are discarded/bounded
+    new process receives a fresh finite budget
+    late old callbacks are harmless no-ops
+```
 
-The corrective is limited to:
+This is the primary merge-blocking corrective.
 
-1. identity-correct recovery navigation diagnostics;
-2. bounded Attention liveness/resync WebKit operations;
-3. generation-detector hot-path optimization with unchanged semantics and benchmark evidence.
+### 4. Standard diagnostics visibility gap
 
-No recovery-policy change or speculative termination fix is authorized.
+The new timeout/suppression events are primarily `.debug`, while `RuntimeDiagnosticMode.standard` drops debug events. The Air observation cycle can therefore miss the timeout/budget-exhaustion state.
 
-## Follow-ups
+The corrective must expose low-volume Standard evidence without logging every 2-second watchdog event. Preferred direction is bounded Release-enabled counters carried through the existing periodic Attention workload/performance-checkpoint path:
 
-Not part of the active task unless separately authorized:
+- liveness timeout count;
+- liveness budget-suppression count;
+- resync timeout count;
+- resync budget-suppression count.
 
-- compact normal cross-world heartbeat payloads without reducing the 30-second evidence cadence;
-- aggregate repeated pinned auto-hide no-op decisions;
-- richer termination-burst/last-known-sample correlation if needed after the corrective;
+A low-frequency notice for resync timeout/budget exhaustion is acceptable; repeated liveness suppression must be aggregated/deduped rather than emitted every cycle.
+
+## Independent Web/runtime review result
+
+Review target before this corrective:
+
+```text
+SEMANTIC_HEAD=cd493fe4ca7b7ba216ff4654d2765b1531745eee
+CONTROL_HEAD=8c5d3383c60e9689d672cc6c9d1d88fa2bbb62b0
+MACOS_CI_1095=SUCCESS
+QA_DMG_507=SUCCESS
+PR_144=OPEN_DRAFT_UNMERGED_MERGEABLE
+```
+
+Accepted directions:
+
+- recovery `WKNavigation` registration: accepted;
+- Attention DOM hot-path optimization: accepted;
+- basic timeout/late-callback gating: accepted.
+
+Merge blockers:
+
+1. physical WebContent runtime request-budget ownership;
+2. Standard diagnostics visibility for timeout/suppression;
+3. missing composed regressions for recovery finish/post-finish eligibility and repeated hung callback → physical runtime replacement → fresh capacity.
+
+Result:
+
+```text
+INDEPENDENT_WEB_RUNTIME_ACCEPTANCE=STOP
+MERGE=NOT_AUTHORIZED
+RELEASE=NOT_AUTHORIZED
+ROOT_CAUSE=UNKNOWN
+```
+
+## Authorized local corrective plan
+
+### Gate 0 — Authority/baseline
+
+- fetch origin;
+- confirm protected `main` still equals `17f1bf1760625833d0b82397009223b2165521c7` or reconcile any fresh drift before mutation;
+- confirm PR #144 is the sole write-capable workspace for this scope;
+- read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, `docs/architecture/DOMAIN_MAP.md`;
+- preserve unknown local work and STOP on material overlap.
+
+### Gate 1 — Complete recovery navigation regressions
+
+Keep exact `WKNavigation` ownership. Add end-to-end tests for:
+
+- termination → registered recovery → commit without provisional → finish;
+- restored `navigation_phase=finished` and post-finish-stall eligibility;
+- deferred inactive recovery → activation → identity-safe commit/finish;
+- stale old callbacks unable to hijack the current recovery ticket;
+- normal navigation unchanged.
+
+No recovery-policy behavior change is authorized.
+
+### Gate 2 — Separate physical-runtime budget from document semantics
+
+Implement an explicit physical WebContent runtime epoch/generation for Attention request budgets.
+
+Required semantics:
+
+- ordinary commit/document replacement invalidates semantic document authority but does not free unresolved physical request capacity;
+- authoritative WebContent process termination/replacement invalidates and discards old physical-epoch request markers, resumes/cancels semantic continuations safely, and starts a fresh finite budget for the new process;
+- late old-epoch callbacks do nothing;
+- old epoch tombstones do not accumulate without bound;
+- no reload/rebuild/reset/user-data mutation is introduced.
+
+### Gate 3 — Standard diagnostics evidence
+
+Extend the existing Release-enabled Attention workload/benchmark counters or equivalent bounded periodic fields so Standard diagnostics can observe timeout/suppression totals without high-frequency logging.
+
+Tests must prove Standard mode records the allowed evidence and repeated liveness suppression does not create unbounded event volume.
+
+### Gate 4 — Preserve accepted detector optimization
+
+Do not broaden or revert the accepted selector/predicate/identity-resolution optimization unless required by a failing semantic regression. Keep the 250-ms cadence unchanged.
+
+### Gate 5 — Composed boundedness regressions
+
+Liveness:
+
+- fill current physical-runtime budget with never-returning callbacks;
+- timeout semantically;
+- prove suppression while same physical runtime is current;
+- prove ordinary document replacement does not create capacity;
+- prove WebContent process replacement creates a fresh finite budget;
+- prove late old callbacks cannot affect the new epoch.
+
+Current-document resync:
+
+- accumulate timed-out physical requests across document replacements until budget exhausted;
+- prove suppression in same physical runtime;
+- prove physical process replacement permits fresh resync;
+- prove old late baseline cannot reopen or alter new admission/budget.
+
+### Gate 6 — Full verification
+
+After corrective implementation:
+
+- focused Web/Attention/Diagnostics tests;
+- full XCTest;
+- Debug arm64;
+- Release arm64;
+- deterministic large-DOM benchmark retained;
+- push same PR #144 branch;
+- exact-head macOS CI;
+- exact-head QA DMG;
+- independent Web/runtime re-audit before Ready/merge.
+
+## Safety / non-goals
+
+No authorization to:
+
+- claim WebContent termination root cause is known;
+- add reload/reset/rebuild/restart mitigation;
+- change Hot/Warm/Cold residency policy;
+- clear/migrate Browser Profiles, cookies, sessions, WebsiteData, Slots, preferences, backups, or diagnostics history;
+- use private WebKit APIs;
+- capture prompt/response text, selector text, cookie/session/token values;
+- reduce the 30-second cross-world cadence merely to reduce volume;
+- broaden into general logging compaction or general WebView lifecycle redesign.
+
+## Follow-ups not authorized
+
+- compact stable cross-world heartbeat payloads;
+- aggregate repeated pinned auto-hide no-op events;
+- richer termination-burst last-known-sample correlation if still needed after this task;
 - safe external/public WebContent resource attribution research.
-
-## Local construction and verification
-
-Verified on the task worktree on 2026-10-24:
-
-- full Debug XCTest: `1361` executed, `3` skipped, `0` failures;
-- Debug arm64 build: `BUILD SUCCEEDED`;
-- Release arm64 build: `BUILD SUCCEEDED`;
-- deterministic large-DOM detector benchmark: pre-change `detector_evaluate_max_ms≈800.2`, `layout_checks=12003`; post-change `detector_evaluate_max_ms=0.1`, `layout_checks=2`;
-- recovery identity, liveness timeout/late completion, and current-document resync timeout/late completion regression coverage passed;
-- root-cause and product recovery-policy claims remain unchanged: `ROOT_CAUSE=UNKNOWN`.
-
-## Remote gate receipts
-
-Verified against implementation semantic head `cd493fe4ca7b7ba216ff4654d2765b1531745eee` on 2026-10-24:
-
-- macOS CI run `1094` (`40079633427`): success, including Apple Silicon Debug/Release builds, native Release architecture verification, Unit tests, and XCTest diagnostics upload;
-- QA DMG run `506` (`40079633428`): success, Apple Silicon QA DMG build and verification;
-- PR #144 remains `OPEN_DRAFT_UNMERGED` and no independent Web/runtime acceptance receipt has been substituted by these executor gates.
 
 ## Repository lifecycle
 
-PR #143 is now `CLOSED / SUPERSEDED / UNMERGED`. It was control-only release-closeout work with no production/test implementation and a cancelled final CI. Its stale release-control reconciliation is absorbed by the new task branch, so no overlapping control writer remains.
+PR #143 remains `CLOSED / SUPERSEDED / UNMERGED`.
 
-Draft PR #144 is the sole write-capable corrective workspace for the affected Web runtime / Attention scope.
+Draft PR #144 remains the sole write-capable corrective workspace for the affected Web runtime / Attention scope and must remain Draft until independent acceptance passes.
 
 ## Next milestone
 
-Obtain independent Web/runtime acceptance for the implementation semantic head. Keep PR #144 Draft and unmerged until that independent receipt is present.
+Run the same-PR local corrective for physical-runtime budget ownership, Standard diagnostics visibility, and composed regressions. Then obtain exact-head CI/QA and a fresh independent Web/runtime re-audit.
