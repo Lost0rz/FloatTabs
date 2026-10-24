@@ -1,121 +1,143 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-RELEASE-V0.5.7-001`
-**Title:** Publish FloatTabs v0.5.7 Build 25
-**Status:** `TERMINAL — PUBLISHED / PROVENANCE VERIFIED / CONTROL CLOSED`
-**Mode:** `TERMINAL`
-**Task class:** `RELEASE`
+**Task ID:** `FT-HISTORICAL-BRANCH-CLEANUP-001`
+**Title:** Clean historical FloatTabs branches and worktrees
+**Status:** `ACTIVE / AUTHORIZED`
+**Mode:** `EXECUTE`
+**Task class:** `LIFECYCLE_MAINTENANCE`
 
-> This task is complete and grants no further product, release, branch, data, or recovery authority.
+## Objective
 
-## Terminal result
+Safely reconcile and remove terminal historical local worktrees/branches and their remote branch refs after fresh synchronization with current `origin/main`, while preserving all unknown, dirty, unpushed, unique, archive-only, or otherwise non-disposable work.
 
-FloatTabs **v0.5.7 / Build 25** was published through the repository's canonical release workflow and is available from GitHub Releases.
+No product/runtime/test/version/release behavior change is authorized.
 
-```text
-BASE_MAIN=098182e64890dabb68832c3bd4d868ff499ac95d
-RELEASE_PR=148
-RELEASE_PR_HEAD=1aef2c57bd4d4878704d8c0a06bd7f95c4368e66
-RELEASE_MAIN=9d92beb2433a84ca62dd6effacce22bc512dd6d4
-TAG=v0.5.7
-PUBLIC_RELEASE=v0.5.7
-PUBLIC_BUILD=25
-ARCH=arm64
-RELEASE_ID=422780134
-PUBLISH_RELEASE_RUN=37
-PUBLISH_RELEASE_RUN_ID=40102547155
-RELEASE_AUTHORIZED=NO
-```
+## Required route
 
-## Release gate evidence
+Use:
 
-### Metadata / scope
+`engineering-governance → project-governance → workspace-lifecycle`
 
-- app Debug and Release build settings resolve to version 0.5.7 / Build 25;
-- release notes are `docs/release/FloatTabs_v0.5.7.md`;
-- release PR #148 changed only the Xcode version/build metadata, release notes, and release control state;
-- the final Xcode project diff contained only the four intended version/build lines;
-- no product/runtime/UI/persistence/session code or release-workflow logic changed for publication.
+Default execution topology is INLINE. Do not use high-capability subagents; if delegation is materially required, use the project's allowed low-cost runtime only.
 
-### Pre-merge host gates
+## Gate 0 — Fresh truth and canonical alignment
+
+Before classifying or deleting anything:
+
+1. `git fetch origin --prune`.
+2. Verify the canonical `main` worktree is clean.
+3. If local `main` is strictly behind fresh `origin/main`, align only by `git merge --ff-only origin/main`.
+4. Verify GitHub Open PR count is zero after this authorization PR has merged.
+5. Re-read `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, and `docs/architecture/DOMAIN_MAP.md` from the aligned current `main`.
+
+STOP on dirty canonical `main`, non-fast-forward divergence, unexpected open PRs, missing authority files, or inability to obtain fresh remote truth.
+
+## Explicitly preserved remote branches
+
+Do not delete:
 
 ```text
-RELEASE_PR_EXACT_HEAD=1aef2c57bd4d4878704d8c0a06bd7f95c4368e66
-MACOS_CI_RUN_1119=PASS
-QA_DMG_RUN_522=PASS
-PR_MERGEABLE=YES
-REVIEW_THREADS=0
-SUBMITTED_REVIEWS=0
-PR_MERGE_AUDIT=PASS
+phase2/pr-e-floattabs-durable-outbox-sender
+chore/ft-v0.5.6-release-closeout
 ```
 
-PR #148 was then merged to protected `main` at `9d92beb2433a84ca62dd6effacce22bc512dd6d4`.
+Reasons:
 
-### Publisher / provenance
+- `phase2/pr-e-floattabs-durable-outbox-sender`: PR #102 is CLOSED / UNMERGED / ARCHIVE_ONLY and retains unique MemoX implementation evidence.
+- `chore/ft-v0.5.6-release-closeout`: PR #143 is CLOSED / UNMERGED and retains unique control-plane commits.
 
-Canonical `Publish Release` run #37 (`40102547155`) ran on exact release-main identity `9d92beb2433a84ca62dd6effacce22bc512dd6d4` and completed successfully.
+## Initial deletion candidates
 
-The workflow successfully completed:
-
-- release metadata resolution;
-- new-release state verification;
-- Apple Silicon release package build/verification;
-- release filename/checksum verification;
-- creation of the new GitHub Release.
-
-The lightweight tag `v0.5.7` resolves directly to `9d92beb2433a84ca62dd6effacce22bc512dd6d4`.
-
-GitHub Release state:
+The following historical remote branches are authorized for evidence-gated classification and deletion only if all disposal conditions pass:
 
 ```text
-DRAFT=NO
-PRERELEASE=NO
-RELEASE_NAME=FloatTabs v0.5.7
-RELEASE_TARGET=9d92beb2433a84ca62dd6effacce22bc512dd6d4
+codex/ft-post-finish-stall-diag-001
+release/ft-v0.5.5
+chore/ft-v0.5.5-release-closeout
+codex/ft-diag-efficiency-evidence-001
+release/ft-v0.5.6
+codex/ft-web-runtime-recovery-attention-001
+control/ft-web-runtime-recovery-attention-closeout
+codex/ft-attention-active-tab-visual-refinement-001
+control/ft-attention-active-tab-visual-refinement-closeout
+release/ft-v0.5.7
+control/ft-release-v0.5.7-closeout
 ```
 
-### Public assets
+After this authorization PR is merged, `control/ft-historical-branch-cleanup-001` is also a disposal candidate once fresh evidence proves its authorization content is present in `main` and no worktree/local dependency requires it.
+
+Do not expand deletion scope to any other branch without separate classification and explicit preservation-by-default.
+
+## Disposal proof required per candidate
+
+Before deleting any candidate, prove:
 
 ```text
-FloatTabs-0.5.7.dmg
-FloatTabs-0.5.7.dmg.sha256
-FloatTabs-0.5.7.dSYM.zip
-FloatTabs-0.5.7.dSYM.zip.sha256
+PR_TERMINAL=YES
+RELEVANT_RESULT_PRESENT_IN_MAIN_OR_EXPLICITLY_SUPERSEDED=YES
+UNCOMMITTED_WORK=NO
+UNPUSHED_LOCAL_WORK=NO
+UNIQUE_WORK_REQUIRING_PRESERVATION=NO
+WORKTREE_DEPENDENCY=NONE_OR_SAFE_TO_REMOVE
 ```
 
-GitHub-recorded artifact digest for the downloadable DMG:
+Because many PRs were squash-merged, non-ancestry alone is not proof of unique work. Use PR disposition plus fresh `origin/main...origin/<branch>` log/diff evidence.
+
+If any condition cannot be proven, preserve that branch/worktree and report it.
+
+## Authorized cleanup actions
+
+After proof:
+
+- remove only clean, disposable associated worktrees with `git worktree remove <path>`;
+- prune only genuinely stale registrations after proving the path is absent and no work is lost;
+- delete local branches with `git branch -d` where possible;
+- `git branch -D` is allowed only when squash-merge/non-ancestry prevents `-d` and the prior disposal proof is explicit in the receipt;
+- delete proven-safe remote branches with `git push origin --delete <branch>`;
+- `git fetch origin --prune` after remote deletions.
+
+## Prohibited actions
+
+Do not:
 
 ```text
-SHA256=12562e874ca0ea4b975d9c0eba234bee44eb21abf3a8e217a10366376dc95d70
+git reset --hard
+git clean -fd
+git clean -fdx
+force push
+delete tags
+delete releases
+delete or clear stashes
+delete Browser Profiles or WebKit website data
+delete website sessions/cookies
+delete Slot configuration/preferences/backups
+delete dirty/unknown/unclassified worktrees or branches
 ```
 
-The dSYM ZIP digest is:
+## Final verification
+
+Return fresh evidence for:
 
 ```text
-SHA256=b6354c8de9ad8dde7468572c986eed3d053eb8f77c9944be5179b2939435943c
+OPEN_PRS=0
+CANONICAL_MAIN_CLEAN=YES
+LOCAL_MAIN_EQUALS_ORIGIN_MAIN=YES
+STALE_WORKTREE_REGISTRATIONS=0
+UNCLASSIFIED_WORKSPACES=0_OR_EXPLICITLY_PRESERVED
 ```
 
-### Post-merge verification
+List every removed and preserved worktree/local branch/remote branch. Report every `-D` use with its proof.
+
+Expected minimal remote retained set after all safe cleanup is:
 
 ```text
-POST_MERGE_MACOS_CI_RUN=1120
-POST_MERGE_MACOS_CI=PASS
-RELEASE_PROVENANCE=VERIFIED
-RELEASE_ASSETS=VERIFIED
+main
+phase2/pr-e-floattabs-durable-outbox-sender
+chore/ft-v0.5.6-release-closeout
 ```
 
-## Release contents / safety
+This is an expected target, not permission to delete uncertain data merely to reach a count.
 
-v0.5.7 publishes the already accepted product changes since v0.5.6, including the bounded Web runtime / Attention corrective and Active Tab / unread Attention visual refinement.
+## Closeout
 
-The prior WebContent stall/termination root cause remains `UNKNOWN`; this release does not claim otherwise.
-
-No Browser Profile, website login/session/cookie data, Web App Slot configuration, user preference, backup, or persisted website-data reset/clearing is part of the release lifecycle.
-
-## Lifecycle
-
-- Release PR #148: `MERGED`.
-- Public release v0.5.7: `PUBLISHED / VERIFIED`.
-- This release task is closed.
-- No further release is authorized.
-- Any future product work or release requires a new task authorization.
+After the execution receipt is independently checked, update `CURRENT_STATUS.md` and `CURRENT_TASK.md` through a protected-branch-safe control-only closeout so this task becomes terminal. No further branch authority remains after closeout.
