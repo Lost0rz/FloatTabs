@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 **Title:** Correct recovery navigation state and reduce bounded ChatGPT attention runtime overhead
-**Status:** `ACTIVE — FINAL CORRECTIVE AUTHORIZED / INDEPENDENT WEB ACCEPTANCE STOP`
+**Status:** `ACTIVE — FINAL CORRECTIVE VERIFIED / INDEPENDENT WEB ACCEPTANCE STOP`
 **Mode:** `EXECUTION`
 **Task class:** `CORRECTIVE`
 
@@ -17,6 +17,7 @@ PR=144
 BRANCH=codex/ft-web-runtime-recovery-attention-001
 PRE_FINAL_CORRECTIVE_SEMANTIC_HEAD=95865a33715bde8dde9d4385a829a17ad79f2edd
 PRE_FINAL_CORRECTIVE_CONTROL_HEAD=6684538d97a46e474a1a19c3e7f13044549263ae
+FINAL_CORRECTIVE_SEMANTIC_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
 ROOT_CAUSE=UNKNOWN
 BUG_FIXED_CLAIM=NO
 MERGE=NOT_AUTHORIZED
@@ -37,11 +38,11 @@ Independent Web/runtime re-audit accepts the following PR #144 implementation di
 - Attention detector large-DOM hot-path optimization is accepted;
 - timeout/suppression counters are stored as bounded Release-enabled native counters.
 
-The prior corrective passed full XCTest (`1365 / 0`), Debug/Release arm64, macOS CI #1098 (`40082588185`), and QA DMG #510 (`40082588204`). Those receipts remain historical evidence for that semantic head only.
+The prior corrective passed full XCTest (`1365 / 0`), Debug/Release arm64, macOS CI #1098 (`40082588185`), and QA DMG #510 (`40082588204`). Those receipts remain historical evidence for that semantic head only. The final corrective semantic head `c63578e6e8163a28d210ef60987d7ccd39d51af1` now has fresh local and exact-head host verification.
 
-## Remaining independent re-audit blocker
+## Final corrective result pending independent re-audit
 
-### A. Standard failure-state counter projection
+### A. Standard failure-state counter projection — implemented and locally verified
 
 The native bridge correctly accumulates:
 
@@ -50,15 +51,15 @@ The native bridge correctly accumulates:
 - `attention_resync_timeout_count`;
 - `attention_resync_suppression_count`.
 
-However `captureLongTermWorkloadDiagnosticFields(...)` currently obtains those counters through the successful document-bound benchmark snapshot path. When current-document resync is itself timed out/suppressed, the bridge may remain `awaiting_authorized_resync` with no active document. `captureBenchmarkSnapshot(...)` then returns `document_unavailable`, so the native health counters can be absent from the Standard-mode periodic checkpoint exactly while the failure is active.
+`captureLongTermWorkloadDiagnosticFields(...)` now merges these fields from a content-free native helper on every workload outcome. When current-document resync is timed out/suppressed and no document is admitted, the Standard-mode periodic checkpoint still carries the native health counters.
 
-Required correction: project native bridge health counters into the long-term diagnostic result **regardless of JS/document snapshot status** (`ok`, `document_unavailable`, `timeout`, `stale`, `evaluation_failed`, or `suppressed`). Native counters must not require an admitted document or an extra JavaScript call.
+The correction covers `ok`, `document_unavailable`, `timeout`, `stale`, `evaluation_failed`, and `suppressed` outcomes without an extra JavaScript call. Native counter ownership and existing workload status/reason semantics remain unchanged.
 
 This is diagnostics projection only. Do not change resync admission/recovery behavior to make the counters visible.
 
-### B. Three composed regression gaps
+### B. Three composed regressions — implemented and passing
 
-Add direct tests for:
+Direct tests now cover:
 
 1. **Liveness same-physical-runtime budget across ordinary document replacement**
    - fill the finite liveness physical budget with never-returning callbacks;
@@ -79,7 +80,21 @@ Add direct tests for:
 3. **Recovered finish restores post-finish-stall eligibility**
    - termination → recovery registration → commit without provisional → finish;
    - then drive the existing deterministic dual-world timeout seam;
-   - prove the recovered navigation satisfies the post-finish boundary and can emit `web_runtime.post_finish_stall_candidate` (or the exact existing deterministic classification seam).
+   - prove the recovered navigation satisfies the post-finish boundary and emits `web_runtime.post_finish_stall_candidate` through the existing deterministic classification seam.
+
+Final verification receipts:
+
+```text
+FOCUSED_AND_RELATED_TESTS=PASS
+FULL_XCTEST=1367_PASS_0_FAIL_3_SKIPPED_OF_1370
+DEBUG_ARM64=PASS
+RELEASE_ARM64=PASS
+LARGE_DOM_FIXTURE=PASS
+GIT_DIFF_CHECK=PASS
+MACOS_CI_1102=SUCCESS_40086444312
+QA_DMG_514=SUCCESS_40086444322
+PR_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
+```
 
 ## Authorized scope
 
@@ -181,9 +196,11 @@ PHYSICAL_RUNTIME_BUDGET_OWNERSHIP=PASS
 RECOVERY_NAVIGATION_IDENTITY=PASS
 HOT_PATH_OPTIMIZATION=PASS
 STANDARD_COUNTER_STORAGE=PASS
-STANDARD_FAILURE_STATE_PROJECTION=CORRECTIVE_REQUIRED
-LIVENESS_DOCUMENT_REPLACEMENT_COMPOSED_TEST=REQUIRED
-DEFERRED_RECOVERY_IDENTITY_COMPOSED_TEST=REQUIRED
-POST_FINISH_ELIGIBILITY_COMPOSED_TEST=REQUIRED
-NEXT=LOCAL_FINAL_CORRECTIVE_THEN_WEB_RUNTIME_REAUDIT
+STANDARD_FAILURE_STATE_PROJECTION=PASS_LOCAL_VERIFIED
+LIVENESS_DOCUMENT_REPLACEMENT_COMPOSED_TEST=PASS_LOCAL_VERIFIED
+DEFERRED_RECOVERY_IDENTITY_COMPOSED_TEST=PASS_LOCAL_VERIFIED
+POST_FINISH_ELIGIBILITY_COMPOSED_TEST=PASS_LOCAL_VERIFIED
+MACOS_CI_EXACT_HEAD=PASS_1102_40086444312
+QA_DMG_EXACT_HEAD=PASS_514_40086444322
+NEXT=INDEPENDENT_WEB_RUNTIME_REAUDIT
 ```

@@ -23,8 +23,9 @@ TASK_PR=144_OPEN_DRAFT_UNMERGED
 PREDECESSOR_PR_143=CLOSED_SUPERSEDED_UNMERGED
 PRE_FINAL_CORRECTIVE_SEMANTIC_HEAD=95865a33715bde8dde9d4385a829a17ad79f2edd
 PRE_FINAL_CORRECTIVE_CONTROL_HEAD=6684538d97a46e474a1a19c3e7f13044549263ae
+FINAL_CORRECTIVE_SEMANTIC_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
 ROOT_CAUSE=UNKNOWN
-INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / STRUCTURAL_CORRECTIVES_ACCEPTED / FINAL_DIAGNOSTIC_PROJECTION_CORRECTIVE_AUTHORIZED
+INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / FINAL_CORRECTIVE_VERIFIED / INDEPENDENT_WEB_RUNTIME_REAUDIT_PENDING
 ```
 
 v0.5.6 remains an observation release. Repeated WebContent termination and non-termination runtime stall/near-stall remain real incident evidence; no common root cause is established.
@@ -55,56 +56,35 @@ MACOS_CI_1098=SUCCESS_40082588185
 QA_DMG_510=SUCCESS_40082588204
 ```
 
-These receipts do not authorize merge because one diagnostics projection defect and three composed regression gaps remain.
+Those historical receipts did not authorize merge; the final corrective now has fresh local and exact-head host verification, but independent Web/runtime acceptance is still required.
 
-## Remaining code defect
+## Final corrective verification
 
-### Standard failure-state counter projection
+The final corrective semantic head is `c63578e6e8163a28d210ef60987d7ccd39d51af1`.
 
-The bridge already owns bounded Release-enabled native counters for:
+The native health counters are now merged from a content-free native helper on every long-term workload outcome, including unavailable, timeout, stale, evaluation-failed, and suppressed paths. No additional JavaScript probe, document admission, recovery, or budget ownership change was introduced.
 
-- liveness timeout;
-- liveness budget suppression;
-- current-document-resync timeout;
-- current-document-resync budget suppression.
+The three composed regressions are now present and passing:
 
-The counters are correctly stored independent of normal measurement resets. The remaining defect is projection: `captureLongTermWorkloadDiagnosticFields(...)` currently receives those counters through the document-bound benchmark snapshot. If current-document resync has timed out/suppressed and the bridge remains `awaiting_authorized_resync`, there may be no active document; `captureBenchmarkSnapshot(...)` returns `document_unavailable`, and the native failure counters can be absent from the Standard periodic checkpoint exactly while the failure is active.
+1. same-physical-runtime liveness budget remains exhausted across ordinary document replacement and resets only on authoritative WebContent replacement;
+2. deferred inactive recovery registers and finishes the exact returned `WKNavigation` without stale callbacks;
+3. recovered finish restores deterministic post-finish-stall eligibility.
 
-Required correction is narrow:
+Final local verification:
 
 ```text
-ANY workload snapshot outcome
-(ok / document_unavailable / timeout / stale / evaluation_failed / suppressed)
-+
-native bridge health counters
-→
-long-term diagnostic fields / Standard performance checkpoint
+FOCUSED_AND_RELATED_TESTS=PASS
+FULL_XCTEST=1367_PASS_0_FAIL_3_SKIPPED_OF_1370
+DEBUG_ARM64=PASS
+RELEASE_ARM64=PASS
+LARGE_DOM_FIXTURE=PASS
+GIT_DIFF_CHECK=PASS
+MACOS_CI_1102=SUCCESS_40086444312
+QA_DMG_514=SUCCESS_40086444322
+PR_HEAD=c63578e6e8163a28d210ef60987d7ccd39d51af1
 ```
 
-This must not require another JavaScript call and must not alter document admission, recovery, liveness cadence, or request-budget ownership.
-
-## Remaining evidence gaps
-
-Three composed regressions remain mandatory before independent acceptance:
-
-1. **Liveness ordinary document replacement does not manufacture physical capacity**
-   - exhaust same-process physical liveness budget with never-returning requests;
-   - timeout semantically;
-   - prove suppression;
-   - perform ordinary document/navigation replacement;
-   - prove capacity remains exhausted;
-   - then perform authoritative WebContent replacement and prove fresh capacity.
-
-2. **Deferred recovery identity chain**
-   - inactive termination → deferred recovery → activation → exact recovery `WKNavigation` registration → commit → finish;
-   - prove fresh generation, non-stale callbacks, and `navigation_phase=finished`.
-
-3. **Recovered finish restores post-finish-stall eligibility**
-   - termination → recovery registration → commit without provisional → finish;
-   - then drive deterministic dual-world timeout evidence;
-   - prove the recovered finished navigation can enter the existing post-finish-stall classification path.
-
-These are verification/evidence gaps unless their tests expose a new production ownership defect.
+This verification does not establish the WebContent termination/stall root cause or independent runtime acceptance.
 
 ## Frozen accepted areas
 
@@ -141,12 +121,9 @@ No authorization to:
 
 ## Next milestone
 
-Execute the final narrow corrective in PR #144:
+Return PR #144 for independent Web/runtime re-audit at the final corrective head:
 
-1. always merge native health counters into long-term diagnostic fields independent of document snapshot status;
-2. add the three composed regressions above;
-3. run focused/full XCTest, Debug/Release arm64, deterministic large-DOM fixture, `git diff --check`;
-4. push same branch;
-5. obtain exact-head macOS CI and QA DMG;
-6. return for independent Web/runtime re-audit;
-7. do not Ready/merge/release before that acceptance.
+1. review the content-free Standard failure-state projection;
+2. review the three composed regression contracts and exact-head receipts;
+3. keep PR #144 Draft and unmerged until independent acceptance passes;
+4. do not Ready/merge/release before that acceptance.
