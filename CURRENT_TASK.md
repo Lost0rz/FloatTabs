@@ -1,85 +1,132 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-ATTENTION-ACTIVE-TAB-VISUAL-REFINEMENT-001`
-**Title:** Refine active Tab persistence and unread Attention visuals
-**Status:** `TERMINAL — MERGED / ACCEPTED / CONTROL CLOSED`
-**Mode:** `TERMINAL`
-**Task class:** `UI CORRECTIVE / VISUAL REFINEMENT`
+**Task ID:** `FT-RELEASE-V0.5.7-001`
+**Title:** Publish FloatTabs v0.5.7 Build 25
+**Status:** `ACTIVE / RELEASE PREPARATION AUTHORIZED`
+**Mode:** `EXECUTE`
+**Task class:** `RELEASE`
 
-> This task is complete and grants no further product, release, branch, data, or recovery authority.
+## Authority
 
-## Terminal result
+The user explicitly authorized publishing a downloadable release from the current accepted `main` baseline.
 
-PR #146 passed the final code/PR merge audit and was merged to protected `main`.
+This task is the only active release authorization. It does not reopen prior product tasks or authorize unrelated product/runtime changes.
+
+## Baseline
 
 ```text
-BASE_MAIN=f08e0d718c7a7a9943e133d29f29e5c56c585585
-FINAL_PR_HEAD=9876c89c0dccd604c7eef6ed58f09d19570768af
-MERGE_COMMIT=00618024e6d5ef9802e10f882008079e5e27a90e
-PR=146
-PR_STATE=MERGED
-PUBLIC_RELEASE=v0.5.6
-PUBLIC_BUILD=24
+BASE_MAIN=098182e64890dabb68832c3bd4d868ff499ac95d
+CURRENT_PUBLIC_RELEASE=v0.5.6
+CURRENT_PUBLIC_BUILD=24
+TARGET_RELEASE=v0.5.7
+TARGET_BUILD=25
 ARCH=arm64
-HUMAN_UI_ACCEPTANCE=PASS
-RELEASE_AUTHORIZED=NO
+RELEASE_BRANCH=release/ft-v0.5.7
+RELEASE_AUTHORIZED=YES
 ```
 
-The user accepted the current UI with minor visual concerns and explicitly authorized merge after a detailed code audit.
+The latest public GitHub Release is v0.5.6 / Build 24. No v0.5.7 release exists at task start. The current `main` contains the accepted runtime/Attention corrective work and the merged Active Tab / unread Attention visual refinement.
 
-## Accepted behavior
+The prior WebContent stall/termination root cause remains `UNKNOWN`; this release does not claim otherwise.
 
-The merged task delivered:
+## Objective
 
-- active Tab resting width of 76 pt with persistent label visibility;
-- inactive Tab resting width of 40 pt with existing 40 -> 76 pt Dock/hover behavior preserved;
-- canonical unread Attention styles of Dot / Beacon / Orbit / Pulse;
-- compatibility mapping `halo -> pulse` and `sweep -> orbit` without deleting/resetting the preference key;
-- Orbit as an internal visible Tab perimeter;
-- Pulse as a whole-surface breath from opacity 0.38 to 1.00, with Reduce Motion representative 0.72;
-- Settings four-style 2x2 layout at current width;
-- compact overflow remaining on the shared Attention renderer.
+Publish FloatTabs **v0.5.7 / Build 25** through the repository's canonical `Publish Release` workflow so the user can download the DMG from GitHub Releases.
 
-Binding accepted design contract:
+## Authorized changes
 
-- `docs/design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`
+Only the release lifecycle is authorized:
 
-For unaffected shell/rail behavior, continue to use:
+- update `FloatTabs.xcodeproj/project.pbxproj` from v0.5.6 / Build 24 to v0.5.7 / Build 25 for both app build configurations;
+- add `docs/release/FloatTabs_v0.5.7.md`;
+- update `CURRENT_STATUS.md` / `CURRENT_TASK.md` for release lifecycle state;
+- create and merge the bounded release PR after required host gates pass;
+- allow the existing `.github/workflows/publish-release.yml` to create tag/release/assets;
+- verify tag/source provenance, DMG, checksum sidecars, dSYM assets and published release metadata;
+- perform a control-only closeout after publication evidence is complete.
 
-- `docs/design/FloatTabs_UI_Design_System_v1.3.md`
+## Non-goals / protected boundaries
 
-## Verification evidence
+Do not change product runtime/source behavior, WebKit ownership, Attention semantics, UI behavior, persistence, Browser Profiles, website/session data, diagnostics behavior, release workflow logic, signing policy, or architecture support merely to publish this version.
+
+Do not overwrite or force-refresh v0.5.6. v0.5.7 must be a new release.
+
+## Release contents
+
+Release notes must accurately summarize material user-visible and runtime changes since v0.5.6 without overstating unresolved root cause:
+
+- stronger Web runtime/recovery and Attention-runtime correctness/diagnostic boundaries merged after v0.5.6;
+- Active Tab remains expanded with its label visible;
+- unread Attention styles are Dot / Beacon / Orbit / Pulse with safe legacy compatibility;
+- Orbit/Pulse visual clarity improvements and 2x2 Settings presentation;
+- no Browser Profile/session reset or destructive migration;
+- WebContent stall/termination root cause remains `UNKNOWN`.
+
+## Gates
+
+### Gate 0 — Baseline
+
+- fresh `main` identity equals task baseline or only reconciled control-only drift is present;
+- no overlapping open PR/writer exists;
+- latest public release is v0.5.6 / Build 24;
+- v0.5.7 does not already exist.
+
+### Gate 1 — Release metadata
+
+- version/build are exactly 0.5.7 / 25 in both app Debug and Release build settings;
+- `docs/release/FloatTabs_v0.5.7.md` exists and matches repository release contract;
+- no unrelated production files change.
+
+### Gate 2 — Pre-merge verification
+
+- release PR exact head is mergeable;
+- required macOS CI passes on the literal release PR head;
+- any QA/package validation triggered for the release PR must pass;
+- release diff remains bounded to version/release/control files.
+
+### Gate 3 — Merge / publisher
+
+- merge the release PR to protected `main` only after Gate 2 passes;
+- observe `Publish Release` for the resulting `main` identity;
+- publisher must build and verify Apple Silicon release package and checksums successfully.
+
+### Gate 4 — Release provenance
+
+Verify:
 
 ```text
-FOCUSED_XCTEST=PASS
-FULL_XCTEST=PASS
-BUILD_DEBUG_ARM64=PASS
-BUILD_RELEASE_ARM64=PASS
-EXACT_HEAD_MACOS_CI_RUN=1113
-EXACT_HEAD_MACOS_CI=PASS
-EXACT_HEAD_QA_DMG_RUN=519
-EXACT_HEAD_QA_DMG=PASS
-PR_MERGEABLE_AT_GATE=YES
-INLINE_REVIEW_THREADS=0
-SUBMITTED_REVIEWS=0
-FINAL_MERGE_AUDIT=PASS_WITH_FOLLOWUPS
+TAG=v0.5.7
+VERSION=0.5.7
+BUILD=25
+DRAFT=NO
+PRERELEASE=NO
+ASSETS=FloatTabs-0.5.7.dmg,FloatTabs-0.5.7.dmg.sha256,FloatTabs-0.5.7.dSYM.zip,FloatTabs-0.5.7.dSYM.zip.sha256
 ```
 
-The audit found no blocking or important code defect. The follow-ups were control/document alignment only and are resolved by the closeout update.
+The release/tag must resolve to the release-main identity produced by this task.
 
-## Scope integrity
+### Gate 5 — Closeout
 
-The task did not change ChatGPT response/generation detection, unread acknowledgement semantics, WebView lifecycle/navigation/residency/recovery, Speech, Attention sounds, Panel/window/fullscreen ownership, Browser Profile / Slot schemas, website/session data, diagnostics, or release/version numbers.
+After publication is verified, update controls to terminal/public-release state through a control-only protected-branch-safe closeout. No further release/product authority remains.
 
-No reload/reset/restart/data clearing was introduced as a workaround.
+## STOP conditions
 
-## Previous runtime incident separation
+Stop rather than publish if:
 
-The prior task `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001` remains terminal. Its WebContent stall/termination root cause remains `UNKNOWN`; this UI task neither proves nor changes that conclusion.
+- current `main` has materially changed outside reconciled authority;
+- v0.5.7 already exists with conflicting provenance;
+- version/build or notes do not match target;
+- required CI/package/publisher validation fails;
+- release assets or tag provenance cannot be verified;
+- publication would require destructive data handling or unrelated product changes.
 
-## Lifecycle
+## Required final state
 
-- PR #146: `MERGED`.
-- This task is closed.
-- No release is authorized by this closeout.
-- Any future product change requires a new `CURRENT_TASK.md` authorization.
+```text
+TASK_STATE=TERMINAL
+PUBLIC_RELEASE=v0.5.7
+PUBLIC_BUILD=25
+RELEASE_PROVENANCE=VERIFIED
+RELEASE_ASSETS=VERIFIED
+OPEN_TASK_RELEASE_PRS=0
+```
