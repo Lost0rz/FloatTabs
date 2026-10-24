@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — LOCAL IMPLEMENTATION VERIFIED / REMOTE ACCEPTANCE PENDING**
+**MODE: ACTIVE CORRECTIVE — REMOTE GATES VERIFIED / INDEPENDENT WEB ACCEPTANCE PENDING**
 
 Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
@@ -88,7 +88,7 @@ The 2-second liveness watchdog still awaits a JavaScript completion without an e
 
 ## Active corrective scope
 
-Draft PR #144 now carries the authorized implementation and directly relevant regression/benchmark tests. Local construction and verification are complete; exact-head remote CI, QA DMG, and independent Web/runtime acceptance remain pending.
+Draft PR #144 now carries the authorized implementation and directly relevant regression/benchmark tests. Local construction and verification are complete. Exact-head macOS CI and QA DMG have passed; independent Web/runtime acceptance remains pending.
 
 The corrective is limited to:
 
@@ -118,6 +118,14 @@ Verified on the task worktree on 2026-10-24:
 - recovery identity, liveness timeout/late completion, and current-document resync timeout/late completion regression coverage passed;
 - root-cause and product recovery-policy claims remain unchanged: `ROOT_CAUSE=UNKNOWN`.
 
+## Remote gate receipts
+
+Verified against implementation semantic head `cd493fe4ca7b7ba216ff4654d2765b1531745eee` on 2026-10-24:
+
+- macOS CI run `1094` (`40079633427`): success, including Apple Silicon Debug/Release builds, native Release architecture verification, Unit tests, and XCTest diagnostics upload;
+- QA DMG run `506` (`40079633428`): success, Apple Silicon QA DMG build and verification;
+- PR #144 remains `OPEN_DRAFT_UNMERGED` and no independent Web/runtime acceptance receipt has been substituted by these executor gates.
+
 ## Repository lifecycle
 
 PR #143 is now `CLOSED / SUPERSEDED / UNMERGED`. It was control-only release-closeout work with no production/test implementation and a cancelled final CI. Its stale release-control reconciliation is absorbed by the new task branch, so no overlapping control writer remains.
@@ -126,4 +134,4 @@ Draft PR #144 is the sole write-capable corrective workspace for the affected We
 
 ## Next milestone
 
-Commit and push the verified implementation on `codex/ft-web-runtime-recovery-attention-001`, then obtain exact-head macOS CI and QA DMG results plus independent Web/runtime acceptance. Keep PR #144 Draft and unmerged until those gates pass.
+Obtain independent Web/runtime acceptance for the implementation semantic head. Keep PR #144 Draft and unmerged until that independent receipt is present.
