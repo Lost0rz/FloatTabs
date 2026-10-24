@@ -89,7 +89,7 @@ The bounded implementation is complete locally on commit `48a9b1b`:
 - Settings uses the shared renderer in a 2x2 style grid;
 - focused matching tests, full XCTest, and Debug/Release arm64 builds all exited successfully.
 
-The implementation commit is not yet pushed. Exact-head repository CI remains pending, and human UI acceptance remains user-owned and pending.
+The implementation and control commits are pushed at exact remote head `ff2112aae063aed4309f707a22912215d88de902`. Exact-head macOS CI and QA DMG both passed; human UI acceptance remains user-owned and pending.
 
 ## Repository lifecycle
 
@@ -103,4 +103,4 @@ The implementation commit is not yet pushed. Exact-head repository CI remains pe
 
 ## Next
 
-Push the same task branch, verify exact-head repository CI, and stop for human UI acceptance before any merge decision. Preserve one writer and do not merge or release.
+The pushed task branch and exact-head repository CI are verified. Stop for human UI acceptance before any merge decision. Preserve one writer and do not merge or release.

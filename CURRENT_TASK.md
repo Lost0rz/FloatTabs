@@ -151,7 +151,7 @@ Run:
 - Release arm64 build;
 - required exact-head repository CI once pushed.
 
-Local Gate 5/6 evidence is complete on implementation commit `48a9b1b`: the focused matching tests, full XCTest, and Debug/Release arm64 builds exited successfully. Exact-head repository CI is still pending the authorized push.
+Local Gate 5/6 evidence is complete on implementation commit `48a9b1b`: the focused matching tests, full XCTest, and Debug/Release arm64 builds exited successfully. Exact-head macOS CI run `1112` and QA DMG run `518` both passed for remote head `ff2112aae063aed4309f707a22912215d88de902`.
 
 ### Gate 7 — Human UI acceptance
 
@@ -195,7 +195,8 @@ BUILD_RELEASE_ARM64=PASS
 AUTOMATED_BROWSER_VERIFICATION=NOT_RUN
 AI_RENDERED_INSPECTION=NOT_RUN
 HUMAN_UI_ACCEPTANCE=PENDING
-CI_STATE=PENDING_PUSH
+CI_STATE=PASS
+REMOTE_HEAD=ff2112aae063aed4309f707a22912215d88de902
 ```
 
 ## Required execution receipt
