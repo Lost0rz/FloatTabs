@@ -443,6 +443,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     private struct DiagnosticNavigationTicket {
+        let navigation: WKNavigation
         let navigationID: ObjectIdentifier
         let generation: UInt64
         var phase: DiagnosticNavigationPhase
@@ -690,6 +691,20 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         // authoritative again. A new provisional navigation also invalidates
         // any older correlation marker.
         cancelPendingInstantBack()
+    }
+
+    /// Registers the exact navigation returned by a recovery `load` before
+    /// WebKit delivers delegate callbacks. This keeps recovery commits on the
+    /// same identity/generation path as ordinary provisional starts while
+    /// allowing a commit callback to arrive without a provisional callback.
+    func registerRecoveryNavigation(_ navigation: WKNavigation?) {
+        guard let navigation else { return }
+        if let currentNavigationTicket,
+           currentNavigationTicket.navigationID == ObjectIdentifier(navigation),
+           currentNavigationTicket.phase == .terminated {
+            invalidateDiagnosticNavigation(phase: nil)
+        }
+        _ = beginDiagnosticNavigation(navigation)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -1073,6 +1088,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         precondition(nextNavigationGeneration < UInt64.max, "Navigation diagnostic generation exhausted")
         nextNavigationGeneration += 1
         let ticket = DiagnosticNavigationTicket(
+            navigation: navigation,
             navigationID: navigationID,
             generation: nextNavigationGeneration,
             phase: .provisional,

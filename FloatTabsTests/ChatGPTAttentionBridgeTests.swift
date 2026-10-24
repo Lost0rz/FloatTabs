@@ -120,6 +120,29 @@ private final class IncidentHealthProbeGate {
 }
 
 @MainActor
+private final class CurrentDocumentResyncGate {
+    private var continuation: CheckedContinuation<Any, Error>?
+
+    func evaluate() async throws -> Any {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while continuation == nil {
+            await Task.yield()
+        }
+    }
+
+    func resolve(_ value: Any) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: value)
+    }
+}
+
+@MainActor
 private final class ChatGPTLongTermObservationSleeper {
     private struct Waiter {
         let id: UUID
@@ -713,6 +736,91 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
     }
 
 #if DEBUG
+    func testLargeDOMDetectorBenchmarkUsesDeterministicContentFreeFixture() throws {
+        let context = try XCTUnwrap(JSContext())
+        context.evaluateScript("""
+        globalThis.window = globalThis;
+        window.top = window;
+        globalThis.location = { hostname: "chatgpt.com" };
+        window.webkit = { messageHandlers: { floatTabsChatGPTAttention: { postMessage: function() {} } } };
+        window.crypto = { randomUUID: function() { return "large-dom-benchmark-token-0001"; } };
+        globalThis.crypto = window.crypto;
+        window.__fixtureEnabled = false;
+        window.__layoutChecks = 0;
+        window.__clock = 0;
+        const makeControl = (label) => ({
+          isConnected: true,
+          disabled: false,
+          getClientRects: function() { window.__layoutChecks += 1; window.__clock += 0.1; return [1]; },
+          getAttribute: function(name) {
+            if (name === "aria-label") { return label; }
+            return null;
+          },
+          matches: function(selector) { return selector === 'button,[role="button"]'; },
+          querySelectorAll: function() { return []; },
+          querySelector: function() { return null; },
+          closest: function() { return null; }
+        });
+        window.__irrelevantControls = [];
+        for (let index = 0; index < 4000; index += 1) {
+          window.__irrelevantControls.push(makeControl(null));
+        }
+        window.__semanticStopControl = makeControl("Stop generating");
+        globalThis.document = {
+          documentElement: {},
+          visibilityState: "visible",
+          addEventListener: function() {},
+          querySelector: function() { return null; },
+          querySelectorAll: function(selector) {
+            if (selector.includes("stop-button")) { return []; }
+            if (!window.__fixtureEnabled) { return []; }
+            if (selector === 'button,[role="button"]') {
+              return window.__irrelevantControls.concat([window.__semanticStopControl]);
+            }
+            if (selector.includes("aria-label") && selector.includes("title")) {
+              return [window.__semanticStopControl];
+            }
+            return [];
+          }
+        };
+        window.addEventListener = function() {};
+        window.getComputedStyle = function() { return { display: "block", visibility: "visible" }; };
+        globalThis.MutationObserver = class {
+          constructor(callback) { window.__mutationCallback = callback; }
+          observe() {}
+          disconnect() {}
+        };
+        globalThis.PerformanceObserver = undefined;
+        globalThis.performance = { now: function() { return window.__clock; } };
+        window.__timeouts = [];
+        globalThis.setTimeout = function(callback) {
+          window.__timeouts.push(callback);
+          return window.__timeouts.length;
+        };
+        window.__flushTimeouts = function() {
+          while (window.__timeouts.length) { window.__timeouts.shift()(); }
+        };
+        globalThis.Date = { now: function() { return 1000; } };
+        """)
+        context.evaluateScript(ChatGPTAttentionBridge.scriptSource)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Benchmark script did not parse")
+
+        context.evaluateScript("window.__mutationCallback(); window.__flushTimeouts();")
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Baseline detector run failed")
+        context.evaluateScript("globalThis.__floatTabsAttentionBenchmarkConfigureV1(true, true);")
+        context.evaluateScript("window.__fixtureEnabled = true; window.__mutationCallback(); window.__flushTimeouts();")
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "Large-DOM detector run failed")
+
+        let snapshot = try XCTUnwrap(
+            context.evaluateScript(ChatGPTAttentionBridge.benchmarkSnapshotScript)?.toDictionary()
+        )
+        let layoutChecks = context.evaluateScript("window.__layoutChecks")?.toInt32() ?? -1
+        print("LARGE_DOM_BENCHMARK \(snapshot) layout_checks=\(layoutChecks)")
+        XCTAssertEqual(snapshot["detector_evaluate_count"] as? Int, 1)
+        XCTAssertGreaterThan(snapshot["detector_evaluate_max_ms"] as? Double ?? 0, 0)
+        XCTAssertLessThan(layoutChecks, 100)
+    }
+
     func testBenchmarkScriptCountsOnlyWhenEnabledAndReturnsContentFreeBoundedFields() throws {
         let context = try XCTUnwrap(JSContext())
         context.evaluateScript("""
@@ -1512,10 +1620,16 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("data-message-id"))
         XCTAssertTrue(source.contains("data-message-uuid"))
         XCTAssertTrue(source.contains("canonicalResponseIdentityFor"))
-        XCTAssertTrue(source.contains("responseIdentity: generating"))
+        XCTAssertTrue(source.contains("const responseIdentity = generating"))
         XCTAssertTrue(source.contains("latestAssistantResponseRoot"))
         XCTAssertTrue(source.contains("STOP_SELECTORS"))
         XCTAssertTrue(source.contains("fruitjuice-stop-button"))
+        XCTAssertTrue(
+            source.contains(
+                "'button[aria-label],button[title],[role=\"button\"][aria-label],[role=\"button\"][title]'"
+            )
+        )
+        XCTAssertTrue(source.contains("const responseIdentity = generating"))
     }
 
     func testBridgeConfiguredBeforeInitialLoad() throws {
@@ -1723,6 +1837,75 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.observations, [.generationStarted, .generationFinished])
         XCTAssertFalse(harness.bridge.debugLivenessWatchdogActive)
         XCTAssertEqual(harness.probeCount(), 2)
+    }
+
+    func testTimedOutLivenessProbeCannotReopenReplacedEpoch() async throws {
+        let probes = LivenessProbeGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            livenessProbeTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let oldCycle = Task { @MainActor in
+            await bridge.debugRunLivenessCycle()
+        }
+        await probes.waitForCall(1)
+        _ = try await oldCycle.value
+
+        bridge.handleRuntimeReplacement()
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenB,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        probes.enqueue([
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false],
+            ["version": 1, "kind": "baseline", "token": tokenB!, "generating": false]
+        ])
+
+        await bridge.debugRunLivenessCycle()
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
+
+        // This is the late callback from the timed-out old epoch. It only
+        // releases the physical request marker and cannot alter observations.
+        probes.resumeSuspended(nil)
+        await Task.yield()
+        XCTAssertEqual(
+            observations,
+            [.generationStarted, .runtimeReset, .generationStarted, .generationFinished]
+        )
     }
 
     func testWATCHDOG_COMPLETION_IDENTITY() async throws {
@@ -2717,6 +2900,50 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         // guesswork.
         harness.accept(true, token: "instant-back-a2")
         XCTAssertEqual(harness.observations, [.runtimeReset])
+    }
+
+    func testTimedOutCurrentDocumentResyncDoesNotOpenAdmissionOnLateBaseline() async throws {
+        let gate = CurrentDocumentResyncGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            currentDocumentResyncEvaluator: { _, _ in
+                try await gate.evaluate()
+            },
+            currentDocumentResyncTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.handleRuntimeReplacement(
+            committedURL: URL(string: "https://chatgpt.com/c/current")!
+        )
+        await gate.waitUntilStarted()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        gate.resolve([
+            "version": 1,
+            "kind": ChatGPTBridgePayload.baselineKind,
+            "token": tokenA!,
+            "generating": true
+        ])
+        await Task.yield()
+
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        XCTAssertTrue(observations.isEmpty)
     }
 
     func testCancelledInstantBackCannotRebaselineOldRuntime() throws {

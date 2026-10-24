@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — FRESH v0.5.6 AIR RUNTIME EVIDENCE**
+**MODE: ACTIVE CORRECTIVE — LOCAL IMPLEMENTATION VERIFIED / REMOTE ACCEPTANCE PENDING**
 
 Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
@@ -88,7 +88,7 @@ The 2-second liveness watchdog still awaits a JavaScript completion without an e
 
 ## Active corrective scope
 
-Draft PR #144 carries the authorized task and currently contains control-plane changes only. Product construction has not started.
+Draft PR #144 now carries the authorized implementation and directly relevant regression/benchmark tests. Local construction and verification are complete; exact-head remote CI, QA DMG, and independent Web/runtime acceptance remain pending.
 
 The corrective is limited to:
 
@@ -107,6 +107,17 @@ Not part of the active task unless separately authorized:
 - richer termination-burst/last-known-sample correlation if needed after the corrective;
 - safe external/public WebContent resource attribution research.
 
+## Local construction and verification
+
+Verified on the task worktree on 2026-10-24:
+
+- full Debug XCTest: `1361` executed, `3` skipped, `0` failures;
+- Debug arm64 build: `BUILD SUCCEEDED`;
+- Release arm64 build: `BUILD SUCCEEDED`;
+- deterministic large-DOM detector benchmark: pre-change `detector_evaluate_max_ms≈800.2`, `layout_checks=12003`; post-change `detector_evaluate_max_ms=0.1`, `layout_checks=2`;
+- recovery identity, liveness timeout/late completion, and current-document resync timeout/late completion regression coverage passed;
+- root-cause and product recovery-policy claims remain unchanged: `ROOT_CAUSE=UNKNOWN`.
+
 ## Repository lifecycle
 
 PR #143 is now `CLOSED / SUPERSEDED / UNMERGED`. It was control-only release-closeout work with no production/test implementation and a cancelled final CI. Its stale release-control reconciliation is absorbed by the new task branch, so no overlapping control writer remains.
@@ -115,4 +126,4 @@ Draft PR #144 is the sole write-capable corrective workspace for the affected We
 
 ## Next milestone
 
-Mac mini local executor performs Gate 0 from `codex/ft-web-runtime-recovery-attention-001`, verifies the baseline and no unexpected overlapping unique work, then executes CURRENT_TASK Gates 1–4. Keep PR #144 Draft and unmerged until exact-head verification and independent Web/runtime acceptance pass.
+Commit and push the verified implementation on `codex/ft-web-runtime-recovery-attention-001`, then obtain exact-head macOS CI and QA DMG results plus independent Web/runtime acceptance. Keep PR #144 Draft and unmerged until those gates pass.

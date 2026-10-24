@@ -1918,6 +1918,44 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(loadedRequests.last?.cachePolicy, .useProtocolCachePolicy)
     }
 
+    func testRecoveryLoadRegistersReturnedNavigationBeforeCommitCallback() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var returnedNavigation: WKNavigation?
+        var profile = makeProfile(name: "RecoveryNavigationIdentity")
+        profile.currentURL = URL(string: "https://example.com/recovered")!
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { webView, _ in
+                returnedNavigation = webView.loadHTMLString(
+                    "<html><body>recovered</body></html>",
+                    baseURL: URL(string: "https://example.com/")
+                )
+                return returnedNavigation
+            },
+            diagnostics: diagnostics
+        )
+
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        observer.webViewWebContentProcessDidTerminate(webView)
+        let recoveryNavigation = try XCTUnwrap(returnedNavigation)
+
+        // Simulate WebKit delivering commit without a provisional-start
+        // callback. The pool's retained WKNavigation identity must still make
+        // this the current fresh generation.
+        observer.webView(webView, didCommit: recoveryNavigation)
+
+        let commit = try XCTUnwrap(writer.events.last { $0.event == "navigation.commit" })
+        guard case let .integer(generation)? = commit.fields["navigation_generation"] else {
+            return XCTFail("Recovery commit did not carry a navigation generation")
+        }
+        XCTAssertGreaterThanOrEqual(generation, 1)
+        XCTAssertEqual(commit.fields["navigation_phase"], .string("post_commit"))
+        XCTAssertEqual(commit.fields["navigation_callback_stale"], .bool(false))
+    }
+
     func testInactiveWebContentTerminationDefersReloadUntilSlotActivation() throws {
         var loadedRequests: [URLRequest] = []
         var isActive = false

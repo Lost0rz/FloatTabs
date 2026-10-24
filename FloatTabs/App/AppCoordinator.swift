@@ -118,6 +118,9 @@ final class AppCoordinator {
                 onURLChange: { slotID, url in
                     tabStore.updateCurrentURL(id: slotID, url: url)
                 },
+                recoveryLoad: { webView, request in
+                    webView.load(request)
+                },
                 isSlotActive: { slotID in
                     tabStore.activeTabID == slotID
                 },
