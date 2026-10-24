@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: ACTIVE CORRECTIVE — INDEPENDENT WEB ACCEPTANCE STOP / LOCAL CORRECTIVE AUTHORIZED**
+**MODE: ACTIVE CORRECTIVE — INDEPENDENT WEB ACCEPTANCE STOP / LOCAL CORRECTIVE VERIFIED**
 
 Current task: `FT-WEB-RUNTIME-RECOVERY-ATTENTION-001`
 
@@ -23,8 +23,9 @@ TASK_PR=144_OPEN_DRAFT_UNMERGED
 PREDECESSOR_PR_143=CLOSED_SUPERSEDED_UNMERGED
 PRE_CORRECTIVE_SEMANTIC_HEAD=cd493fe4ca7b7ba216ff4654d2765b1531745eee
 PRE_CORRECTIVE_CONTROL_HEAD=8c5d3383c60e9689d672cc6c9d1d88fa2bbb62b0
+CORRECTIVE_SEMANTIC_HEAD=95865a33715bde8dde9d4385a829a17ad79f2edd
 ROOT_CAUSE=UNKNOWN
-INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / CORRECTIVE_IN_PROGRESS
+INCIDENT_STATE=FRESH_EVIDENCE_REVIEWED / LOCAL_CORRECTIVE_VERIFIED / INDEPENDENT_ACCEPTANCE_STOP
 ```
 
 v0.5.6 remains an observation release; it did not claim the ChatGPT/WebKit slowdown or WebContent termination incident was fixed.
@@ -69,7 +70,7 @@ Fresh Release evidence recorded detector evaluate maxima around 410–412 ms. Th
 
 Deterministic fixture evidence from that implementation reported layout checks reduced from `12003` to `2`, with detector max from about `800.2 ms` to `0.1 ms` in the synthetic fixture. This is accepted as a FloatTabs-owned performance improvement, not as proof of WebContent-termination causality.
 
-### 3. Attention timeout/request-budget ownership remains incorrect across physical runtime replacement
+### 3. Attention timeout/request-budget ownership corrective
 
 The first PR #144 implementation adds timeout and finite outstanding budgets for liveness and current-document resync, but independent Web/runtime review found a remaining ownership defect:
 
@@ -93,9 +94,9 @@ webViewWebContentProcessDidTerminate / authoritative physical replacement:
     late old callbacks are harmless no-ops
 ```
 
-This is the primary merge-blocking corrective.
+The corrective is implemented on the current semantic head. The new physical runtime epoch advances only at the WebContent process termination seam; ordinary document replacement keeps same-process physical markers bounded, while replacement discards old markers and makes late callbacks no-ops. The composed tests cover liveness and current-document resync fresh-capacity behavior.
 
-### 4. Standard diagnostics visibility gap
+### 4. Standard diagnostics visibility corrective
 
 The new timeout/suppression events are primarily `.debug`, while `RuntimeDiagnosticMode.standard` drops debug events. The Air observation cycle can therefore miss the timeout/budget-exhaustion state.
 
@@ -106,7 +107,21 @@ The corrective must expose low-volume Standard evidence without logging every 2-
 - resync timeout count;
 - resync budget-suppression count.
 
-A low-frequency notice for resync timeout/budget exhaustion is acceptable; repeated liveness suppression must be aggregated/deduped rather than emitted every cycle.
+The corrective carries bounded timeout/suppression counters through the existing Attention workload/performance-checkpoint fields. Standard-mode tests prove the counters are visible without per-watchdog debug events or page content.
+
+## Corrective verification receipt
+
+```text
+CORRECTIVE_SEMANTIC_HEAD=95865a33715bde8dde9d4385a829a17ad79f2edd
+LOCAL_XCTEST=1365_EXECUTED_0_FAILED
+DEBUG_ARM64=SUCCESS
+RELEASE_ARM64=SUCCESS
+LARGE_DOM_FIXTURE=PASS_LAYOUT_CHECKS_2_DETECTOR_MAX_0.1_MS
+MACOS_CI_1098=SUCCESS_40082588185
+QA_DMG_510=SUCCESS_40082588204
+```
+
+These receipts establish implementation/build/hosted-gate readiness only. `INDEPENDENT_WEB_RUNTIME_ACCEPTANCE=STOP` remains in force.
 
 ## Independent Web/runtime review result
 
@@ -245,4 +260,4 @@ Draft PR #144 remains the sole write-capable corrective workspace for the affect
 
 ## Next milestone
 
-Run the same-PR local corrective for physical-runtime budget ownership, Standard diagnostics visibility, and composed regressions. Then obtain exact-head CI/QA and a fresh independent Web/runtime re-audit.
+Obtain a fresh independent Web/runtime re-audit at `95865a33715bde8dde9d4385a829a17ad79f2edd`; keep PR #144 Draft and do not merge/release unless that acceptance separately passes.
