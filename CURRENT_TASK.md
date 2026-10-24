@@ -21,7 +21,7 @@ ROOT_CAUSE=UNKNOWN
 BUG_FIXED_CLAIM=NO
 ```
 
-The old release-closeout PR #143 is control-only predecessor work and is superseded by this combined control reconciliation + corrective authorization. It contains no production/test implementation to carry forward.
+The old release-closeout PR #143 is control-only predecessor work and is superseded by this combined control reconciliation + corrective authorization. It contains no production/test implementation to carry forward and is now closed unmerged.
 
 ## Verified evidence and code findings
 
@@ -158,7 +158,9 @@ STOP before unsafe mutation if:
 
 ```text
 BRANCH=codex/ft-web-runtime-recovery-attention-001
-PR=DRAFT_TO_BE_CREATED
+PR=144
+PR_STATE=OPEN_DRAFT_UNMERGED
+PREDECESSOR_PR_143=CLOSED_SUPERSEDED
 ROOT_CAUSE=UNKNOWN
 MERGE=NOT_AUTHORIZED
 RELEASE=NOT_AUTHORIZED
