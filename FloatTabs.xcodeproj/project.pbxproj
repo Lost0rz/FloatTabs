@@ -27,7 +27,7 @@
 		A00000000000000000000010 /* WebRenderingProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* WebRenderingProfile.swift */; };
 		A00000000000000000000011 /* WebAppProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* WebAppProfile.swift */; };
 		A00000000000000000000012 /* TabStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* TabStore.swift */; };
-		A00000000000000000000013 /* ProfileRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
+		A00000000000000000000013 /* ProfileRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000014 /* ProfileRepository.swift */; };
 		A00000000000000000000014 /* WebViewPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* WebViewPool.swift */; };
 		A00000000000000000000021 /* SlotLifecycleCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000021 /* SlotLifecycleCoordinator.swift */; };
 		A00000000000000000000015 /* SlotNavigationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* SlotNavigationObserver.swift */; };
@@ -950,6 +950,7 @@
 				kind = upToNextMajorVersion;
 				minimumVersion = 3.0.1;
 			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
