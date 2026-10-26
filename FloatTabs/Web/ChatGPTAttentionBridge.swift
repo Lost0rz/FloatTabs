@@ -1425,6 +1425,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private enum BoundedLivenessProbeResult {
         case value(Any?)
         case timedOut
+        case suppressed
 
         var value: Any? {
             guard case let .value(value) = self else { return nil }
@@ -1433,6 +1434,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
         var didTimeOut: Bool {
             if case .timedOut = self { return true }
+            return false
+        }
+
+        var wasSuppressed: Bool {
+            if case .suppressed = self { return true }
             return false
         }
     }
@@ -2718,7 +2724,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 reason: "pending_request_budget",
                 captureSnapshot: false
             )
-            return .value(nil)
+            return .suppressed
         }
 
         let requestID = UUID()
@@ -2993,11 +2999,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
         guard !firstResult.didTimeOut,
+              !firstResult.wasSuppressed,
               let firstValue,
               let firstProbe = parseLivenessProbe(firstValue),
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token),
               firstProbe.token == token else {
             if firstResult.didTimeOut { return }
+            if firstResult.wasSuppressed { return }
             if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) {
                 recordLivenessProbeFailure(
                     role: "first",
@@ -3033,11 +3041,16 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
         guard !secondResult.didTimeOut,
+              !secondResult.wasSuppressed,
               let secondValue,
               let secondProbe = parseLivenessProbe(secondValue),
               secondProbe.token == token,
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
             if secondResult.didTimeOut {
+                clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+            }
+            if secondResult.wasSuppressed {
                 clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
                 return
             }

@@ -3189,6 +3189,70 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         })
     }
 
+    func testLivenessSuppressionIsNotClassifiedAsFailureOrIncident() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let probes = LivenessProbeGate()
+        var observations: [ChatGPTAttentionObservation] = []
+        var incidentRequestCount = 0
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, observation in
+                observations.append(observation)
+            },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            livenessProbeTimeout: 0.01,
+            onIncidentRequest: { _, _ in
+                incidentRequestCount += 1
+            }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+        let observationsBeforeSuppression = observations
+
+        for expectedCallCount in 1...2 {
+            let timedOutCycle = Task { @MainActor in
+                await bridge.debugRunLivenessCycle()
+            }
+            await probes.waitForCall(expectedCallCount)
+            await timedOutCycle.value
+        }
+
+        let incidentRequestCountBeforeSuppression = incidentRequestCount
+        await bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "attention.liveness_probe.abnormal"
+                    && $0.fields["attention_probe_result"] == .string("suppressed")
+            }.count,
+            1
+        )
+        XCTAssertFalse(writer.events.contains {
+            $0.event == "attention.liveness_probe.failed"
+                && $0.fields["probe_result"] == .string("evaluation_or_callback_failure")
+        })
+        XCTAssertEqual(incidentRequestCountBeforeSuppression, 1)
+        XCTAssertEqual(incidentRequestCount, incidentRequestCountBeforeSuppression)
+        XCTAssertEqual(observations, observationsBeforeSuppression)
+    }
+
     func testPendingInstantBackKeepsCurrentDocumentWatchdogAuthoritative() async throws {
         let falseProbe: [String: Any] = [
             "version": 1,
