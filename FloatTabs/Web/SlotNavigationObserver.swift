@@ -459,6 +459,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
+    private let onContentProcessTerminationWithContext: @MainActor (
+        UUID,
+        RuntimeDiagnosticIncidentContext
+    ) -> Void
     private let onIncidentRequest: @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
     private let onNavigationFinish: @MainActor (UUID, URL?) -> Void
@@ -492,6 +496,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var livenessContextGeneration: UInt64 = 1
     private var consecutivePostFinishDualTimeouts = 0
     private var activeIncidentContext: RuntimeDiagnosticIncidentContext?
+    private var incidentAwaitingRuntimeRecovery = false
     private var lastHealthyCrossWorldUptime: TimeInterval?
     private var lastHealthyCrossWorldNavigationGeneration: UInt64?
 
@@ -533,6 +538,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
+        onContentProcessTerminationWithContext: @escaping @MainActor (
+            UUID,
+            RuntimeDiagnosticIncidentContext
+        ) -> Void = { _, _ in },
         onIncidentRequest: @escaping @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void = { _, _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onNavigationFinish: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
@@ -560,6 +569,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
+        self.onContentProcessTerminationWithContext = onContentProcessTerminationWithContext
         self.onIncidentRequest = onIncidentRequest
         self.onNavigationCommit = onNavigationCommit
         self.onNavigationFinish = onNavigationFinish
@@ -799,6 +809,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
                 .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
+        if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "navigation_failed")
+        }
     }
 
     func webView(
@@ -820,6 +833,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
                 .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
+        if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "navigation_failed")
+        }
         cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
@@ -846,6 +862,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         advanceObservedContentProcessEpoch()
         consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: .terminated)
+        incidentAwaitingRuntimeRecovery = true
         let incidentContext = activeIncidentContext ?? beginIncident(
             kind: .webContentTermination,
             trigger: "web_content_process_terminated"
@@ -859,6 +876,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             fields: terminationFields
         )
         onContentProcessTermination(slotID)
+        onContentProcessTerminationWithContext(slotID, incidentContext)
     }
 
     /// Called by WebKit before a back/forward transition. The request itself
@@ -935,6 +953,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: nil)
+        if let incidentContext = activeIncidentContext {
+            closeIncident(
+                incidentContext,
+                outcome: incidentAwaitingRuntimeRecovery ? "runtime_replaced" : "stale_context"
+            )
+        }
     }
 
     var currentNavigationDiagnosticFields: [String: RuntimeDiagnosticValue] {
@@ -1010,6 +1034,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         )
         if activeIncidentContext?.id == context.id {
             activeIncidentContext = nil
+            incidentAwaitingRuntimeRecovery = false
         }
     }
 
@@ -1038,6 +1063,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             && currentNavigationTicket?.phase == expectedNavigationPhase
         let responsivenessCaptured: WebRuntimeResponsivenessProbeResult
         if !contextAfterLiveness {
+            if let incidentContext = activeIncidentContext,
+               !incidentAwaitingRuntimeRecovery {
+                closeIncident(incidentContext, outcome: "stale_context")
+            }
             responsivenessCaptured = .terminal(.stale, probeLatencyMilliseconds: 0)
         } else if mainCaptured.outcome != .success {
             responsivenessCaptured = .notRun()
@@ -1185,6 +1214,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let currentNavigationTicket,
            currentNavigationTicket.navigationID == navigationID {
             return currentNavigationTicket
+        }
+
+        if let incidentContext = activeIncidentContext,
+           !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "superseded_navigation")
         }
 
         invalidateDiagnosticNavigation(phase: nil)

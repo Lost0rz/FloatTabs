@@ -726,6 +726,20 @@ final class PanelController: NSObject, NSWindowDelegate {
             ? "diagnostics.stuck_tab_snapshot"
             : "diagnostics.incident_snapshot"
 
+        if let requestedSlotID,
+           tabStore.profiles.first(where: { $0.id == requestedSlotID }) == nil {
+            fields["requested_slot_id"] = .string(requestedSlotID.uuidString)
+            fields["capture_availability"] = .string("requested_slot_unavailable")
+            fields["capture_stale"] = .bool(true)
+            diagnostics.record(
+                event: snapshotEvent,
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: fields
+            )
+            return "Snapshot recorded (requested Slot unavailable/stale)."
+        }
+
         guard let profile = requestedSlotID
             .flatMap({ requestedID in tabStore.profiles.first { $0.id == requestedID } })
             ?? tabStore.activeProfile else {

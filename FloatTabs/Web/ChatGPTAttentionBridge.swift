@@ -1422,12 +1422,27 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let physicalRuntimeEpoch: UInt64
     }
 
+    private enum BoundedLivenessProbeResult {
+        case value(Any?)
+        case timedOut
+
+        var value: Any? {
+            guard case let .value(value) = self else { return nil }
+            return value
+        }
+
+        var didTimeOut: Bool {
+            if case .timedOut = self { return true }
+            return false
+        }
+    }
+
     private enum PendingLivenessProbe {
         case active(
             physicalRuntimeEpoch: UInt64,
             role: String,
             startedAt: TimeInterval,
-            continuation: CheckedContinuation<Any?, Never>
+            continuation: CheckedContinuation<BoundedLivenessProbeResult, Never>
         )
         case timedOut(
             physicalRuntimeEpoch: UInt64,
@@ -2693,7 +2708,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private func boundedLivenessProbe(
         _ webView: WKWebView,
         role: String
-    ) async -> Any? {
+    ) async -> BoundedLivenessProbeResult {
         guard pendingLivenessProbes.count < Self.maximumOutstandingLivenessProbes else {
             benchmarkCounters.recordLivenessSuppression()
             recordLivenessAnomaly(
@@ -2703,7 +2718,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 reason: "pending_request_budget",
                 captureSnapshot: false
             )
-            return nil
+            return .value(nil)
         }
 
         let requestID = UUID()
@@ -2773,7 +2788,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                     startedAt: startedAt
                 )
                 : nil
-            continuation.resume(returning: value)
+            continuation.resume(returning: timedOut ? .timedOut : .value(value))
             if timedOut {
                 recordLivenessAnomaly(
                     result: "timeout",
@@ -2808,7 +2823,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
                 role: role,
                 startedAt: startedAt
             )
-            continuation.resume(returning: nil)
+            continuation.resume(returning: .value(nil))
         }
     }
 
@@ -2970,16 +2985,19 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let generation = livenessGeneration
         let cyclePhysicalRuntimeEpoch = physicalRuntimeEpoch
         let firstProbeStartedAt = ProcessInfo.processInfo.systemUptime
-        let firstValue = await boundedLivenessProbe(webView, role: "first")
+        let firstResult = await boundedLivenessProbe(webView, role: "first")
+        let firstValue = firstResult.value
         recordBenchmarkLivenessProbe(
             startedAt: firstProbeStartedAt,
             isConfirmation: false,
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
-        guard let firstValue,
+        guard !firstResult.didTimeOut,
+              let firstValue,
               let firstProbe = parseLivenessProbe(firstValue),
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token),
               firstProbe.token == token else {
+            if firstResult.didTimeOut { return }
             if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) {
                 recordLivenessProbeFailure(
                     role: "first",
@@ -3007,16 +3025,22 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
         let secondProbeStartedAt = ProcessInfo.processInfo.systemUptime
-        let secondValue = await boundedLivenessProbe(webView, role: "confirmation")
+        let secondResult = await boundedLivenessProbe(webView, role: "confirmation")
+        let secondValue = secondResult.value
         recordBenchmarkLivenessProbe(
             startedAt: secondProbeStartedAt,
             isConfirmation: true,
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
-        guard let secondValue,
+        guard !secondResult.didTimeOut,
+              let secondValue,
               let secondProbe = parseLivenessProbe(secondValue),
               secondProbe.token == token,
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
+            if secondResult.didTimeOut {
+                clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+            }
             if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) {
                 recordLivenessProbeFailure(
                     role: "confirmation",

@@ -760,6 +760,47 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertFalse(values.diagnosticFields.values.contains(.string("DO_NOT_READ_THIS")))
     }
 
+    func testInstalledPageAppRecorderReportsAgeAtCaptureNotEventTimestamp() throws {
+        let context = try XCTUnwrap(JSContext())
+        context.evaluateScript("""
+        globalThis.window = globalThis;
+        window.top = window;
+        globalThis.location = { hostname: "chatgpt.com" };
+        window.webkit = { messageHandlers: { floatTabsChatGPTAttention: { postMessage: function() {} } } };
+        window.crypto = { randomUUID: function() { return "page-app-age-token-0001"; } };
+        globalThis.crypto = window.crypto;
+        globalThis.document = {
+          documentElement: {},
+          visibilityState: "visible",
+          addEventListener: function() {},
+          querySelector: function() { return null; }
+        };
+        window.__listeners = {};
+        window.addEventListener = function(name, listener) { window.__listeners[name] = listener; };
+        globalThis.MutationObserver = class { constructor() {} observe() {} disconnect() {} };
+        globalThis.PerformanceObserver = undefined;
+        globalThis.PerformanceResourceTiming = undefined;
+        globalThis.__clock = 1000;
+        globalThis.performance = { now: function() { return window.__clock; } };
+        """)
+        context.evaluateScript(ChatGPTAttentionBridge.scriptSource)
+        XCTAssertNil(context.exception, context.exception?.toString() ?? "JavaScript source did not parse")
+
+        context.evaluateScript("window.__listeners.error({ target: window }); window.__clock = 1250;")
+        let payload = try XCTUnwrap(
+            context.evaluateScript(ChatGPTAttentionBridge.incidentPageAppProbeScript)?.toDictionary()
+        )
+        let values = try XCTUnwrap(
+            ChatGPTIncidentPageAppProbeValues.parse(
+                payload,
+                expectedDocumentToken: "page-app-age-token-0001"
+            )
+        )
+
+        XCTAssertEqual(values.events.first?.ageMilliseconds, 250)
+        XCTAssertEqual(values.events.count, 1)
+    }
+
 #if DEBUG
     func testLargeDOMDetectorBenchmarkUsesDeterministicContentFreeFixture() throws {
         let context = try XCTUnwrap(JSContext())
@@ -3089,6 +3130,63 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         )
         XCTAssertEqual(failure.level, .debug)
         XCTAssertTrue(bridge.debugLivenessWatchdogActive)
+    }
+
+    func testLivenessTimeoutIsNotDoubleClassifiedAndLateCallbackIsEvidenceOnly() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let probes = LivenessProbeGate()
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            diagnostics: diagnostics,
+            livenessProbe: { _ in await probes.next() },
+            livenessSleeper: { nanoseconds in
+                nanoseconds == ChatGPTAttentionBridge.livenessConfirmationDelayNanoseconds
+            },
+            livenessProbeTimeout: 0.01
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: 1,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        await bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(
+            writer.events.filter {
+                $0.event == "attention.liveness_probe.abnormal"
+                    && $0.fields["attention_probe_result"] == .string("timeout")
+            }.count,
+            1
+        )
+        XCTAssertFalse(writer.events.contains {
+            $0.event == "attention.liveness_probe.failed"
+                && $0.fields["probe_result"] == .string("evaluation_or_callback_failure")
+        })
+
+        probes.resumeSuspended(nil)
+        let lateObserved = await waitUntil {
+            writer.events.contains {
+                $0.event == "attention.liveness_probe.abnormal"
+                    && $0.fields["attention_probe_result"] == .string("late_callback")
+            }
+        }
+        XCTAssertTrue(lateObserved)
+        XCTAssertFalse(writer.events.contains {
+            $0.event == "attention.liveness_probe.failed"
+                && $0.fields["probe_result"] == .string("evaluation_or_callback_failure")
+        })
     }
 
     func testPendingInstantBackKeepsCurrentDocumentWatchdogAuthoritative() async throws {

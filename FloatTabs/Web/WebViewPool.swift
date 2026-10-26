@@ -653,9 +653,10 @@ final class WebViewPool {
         slotID: UUID,
         context: RuntimeDiagnosticIncidentContext
     ) {
-        if context.kind == .webContentTermination {
-            pendingTerminationIncidentContexts[slotID] = context
-        }
+        // Retain the active evidence context until the termination seam. A
+        // stall can be the precursor to WebContent termination, so the
+        // recovery path must not manufacture a second incident identity.
+        pendingTerminationIncidentContexts[slotID] = context
         onIncidentRequest?(slotID, context)
     }
 
@@ -692,7 +693,7 @@ final class WebViewPool {
         // The navigation observer already forwarded its bounded request before
         // invoking this legacy recovery callback. Direct callers still get the
         // same production snapshot request exactly once.
-        if suppliedIncidentContext != nil || pendingIncidentContext == nil {
+        if pendingIncidentContext?.id != incidentContext.id {
             onIncidentRequest?(slotID, incidentContext)
         }
 
@@ -711,6 +712,20 @@ final class WebViewPool {
             deferredReloadSlotIDs.remove(slotID)
             guard let recoveryURL = recoveryURL(slotID: slotID, webView: webView) else {
                 deferredReloadSlotIDs.insert(slotID)
+                diagnostics.record(
+                    event: "web_runtime.recovery.deferred",
+                    level: .notice,
+                    subsystem: "web",
+                    fields: [
+                        "slot_id": .string(slotID.uuidString),
+                        "recovery_disposition": .string("reload_now"),
+                        "recovery_outcome": .string("deferred"),
+                        "recovery_reason": .string("recovery_url_unavailable"),
+                        "recovery_target": .string("unavailable"),
+                        "recovery_url": .null
+                    ]
+                    .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
+                )
                 return
             }
             lastKnownURLs[slotID] = recoveryURL
@@ -724,6 +739,12 @@ final class WebViewPool {
                 level: .notice,
                 subsystem: "web",
                 fields: diagnosticURLFields(recoveryURL, slotID: slotID)
+                    .merging([
+                        "recovery_disposition": .string("reload_now"),
+                        "recovery_outcome": .string("reload_now"),
+                        "recovery_reason": .string("web_content_process_terminated"),
+                        "recovery_target": .string("available")
+                    ]) { _, new in new }
                     .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
             )
 
@@ -733,7 +754,13 @@ final class WebViewPool {
                 event: "web_runtime.recovery.deferred",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "recovery_disposition": .string("defer_until_activation"),
+                    "recovery_outcome": .string("deferred"),
+                    "recovery_reason": .string("inactive_slot"),
+                    "recovery_target": .string("deferred")
+                ]
                     .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
             )
         }
@@ -963,8 +990,12 @@ final class WebViewPool {
                 self.lastKnownURLs[slotID] = url
                 self.onURLChange(slotID, url)
             },
-            onContentProcessTermination: { [weak self] slotID in
-                self?.handleContentProcessTermination(slotID: slotID)
+            onContentProcessTermination: { _ in },
+            onContentProcessTerminationWithContext: { [weak self] slotID, context in
+                self?.handleContentProcessTermination(
+                    slotID: slotID,
+                    incidentContext: context
+                )
             },
             onIncidentRequest: { [weak self] slotID, context in
                 self?.handleIncidentRequest(slotID: slotID, context: context)
