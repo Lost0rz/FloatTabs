@@ -1,5 +1,6 @@
 import AppKit
 import Dispatch
+import Darwin
 import Foundation
 
 enum SlotMemoryPressureLevel {
@@ -355,20 +356,48 @@ final class SlotLifecycleCoordinator {
     }
 
     func handleMemoryPressure(_ level: SlotMemoryPressureLevel) {
+        let incidentContext = RuntimeDiagnosticIncidentContext(
+            id: UUID(),
+            kind: .memoryPressure,
+            trigger: level == .critical ? "critical" : "warning",
+            startedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+        var pressureFields = incidentContext.fields(phase: .trigger)
+        pressureFields.merge([
+            "level": .string(level == .critical ? "critical" : "warning"),
+            "host_resident_size_bytes": Self.currentProcessResidentSizeBytes().map(Self.diagnosticInteger) ?? .null,
+            "system_physical_memory_bytes": Self.diagnosticInteger(ProcessInfo.processInfo.physicalMemory),
+            "resident_slot_count": .integer(Int64(webViewPool.count)),
+            "active_slot_id": activeSlotID.map { .string($0.uuidString) } ?? .null,
+            "web_process_resource_attribution": .string("unavailable_public_api")
+        ]) { _, new in new }
         diagnostics.record(
             event: "slot_lifecycle.memory_pressure",
             level: .warning,
             subsystem: "lifecycle",
-            fields: ["level": .string(level == .critical ? "critical" : "warning")]
+            fields: pressureFields
+        )
+        recordMemoryPressureEvaluations(
+            level: level,
+            incidentContext: incidentContext
         )
         switch level {
         case .warning:
             break
         case .critical:
             evictInactiveWarmForMemoryPressure(
-                protectionBoundary: "memory_pressure"
+                protectionBoundary: "memory_pressure",
+                incidentContext: incidentContext
             )
         }
+        var completionFields = incidentContext.fields(phase: .closure)
+        completionFields["incident_outcome"] = .string("evaluation_complete")
+        diagnostics.record(
+            event: "slot_lifecycle.memory_pressure.completed",
+            level: .notice,
+            subsystem: "lifecycle",
+            fields: completionFields
+        )
     }
 
     var pendingColdReleaseCount: Int {
@@ -676,7 +705,10 @@ final class SlotLifecycleCoordinator {
         }
     }
 
-    private func evictInactiveWarmForMemoryPressure(protectionBoundary: String? = nil) {
+    private func evictInactiveWarmForMemoryPressure(
+        protectionBoundary: String? = nil,
+        incidentContext: RuntimeDiagnosticIncidentContext? = nil
+    ) {
         let candidates = inactivePlans.compactMap { slotID, plan -> (UUID, InactivePlan)? in
             guard plan.residencyPolicy == .warm else {
                 return nil
@@ -706,14 +738,77 @@ final class SlotLifecycleCoordinator {
         for (slotID, plan) in candidates {
             releaseInactiveSlot(
                 slotID: slotID,
-                expectedPlan: plan
+                expectedPlan: plan,
+                memoryPressureIncident: incidentContext
+            )
+        }
+    }
+
+    private func recordMemoryPressureEvaluations(
+        level: SlotMemoryPressureLevel,
+        incidentContext: RuntimeDiagnosticIncidentContext
+    ) {
+        for slotID in webViewPool.residentSlotIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            let plan = inactivePlans[slotID]
+            let protection = protectionState(slotID: slotID)
+            let visible = isVisibleSlot(slotID)
+            let policy = webViewPool.residencyPolicy(for: slotID)
+            let eligible = level == .critical
+                && policy == .warm
+                && plan != nil
+                && !visible
+                && !protection.media
+                && !protection.attention
+                && !protection.speech
+            let reason: String
+            if level == .warning {
+                reason = "warning_no_eviction"
+            } else if policy != .warm {
+                reason = "not_warm"
+            } else if visible {
+                reason = "visible"
+            } else if protection.media {
+                reason = "media_protected"
+            } else if protection.attention {
+                reason = "attention_protected"
+            } else if protection.speech {
+                reason = "speech_protected"
+            } else if plan == nil {
+                reason = "no_pending_release_plan"
+            } else {
+                reason = "eligible"
+            }
+
+            var fields = incidentContext.fields(phase: .trigger)
+            fields.merge([
+                "slot_id": .string(slotID.uuidString),
+                "level": .string(level == .critical ? "critical" : "warning"),
+                "residency_policy": .string(policy?.rawValue ?? "unknown"),
+                "is_active": .bool(activeSlotID == slotID),
+                "is_visible": .bool(visible),
+                "pending_release": .bool(plan != nil),
+                "pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
+                "media_protected": .bool(protection.media),
+                "attention_protected": .bool(protection.attention),
+                "speech_protected": .bool(protection.speech),
+                "release_eligible": .bool(eligible),
+                "decision": .string(eligible ? "release" : "skip"),
+                "release_reason": .string(reason),
+                "web_process_resource_attribution": .string("unavailable_public_api")
+            ]) { _, new in new }
+            diagnostics.record(
+                event: "slot_lifecycle.memory_pressure_slot",
+                level: eligible ? .notice : .info,
+                subsystem: "lifecycle",
+                fields: fields
             )
         }
     }
 
     private func releaseInactiveSlot(
         slotID: UUID,
-        expectedPlan: InactivePlan? = nil
+        expectedPlan: InactivePlan? = nil,
+        memoryPressureIncident: RuntimeDiagnosticIncidentContext? = nil
     ) {
         guard let currentPlan = inactivePlans[slotID],
               expectedPlan.map({ $0.token == currentPlan.token }) ?? true,
@@ -747,6 +842,21 @@ final class SlotLifecycleCoordinator {
         webViewPool.release(slotID: slotID)
         cancelInactivePlan(slotID: slotID)
         onRuntimeReleased(currentPlan.profile)
+        if let memoryPressureIncident {
+            var fields = memoryPressureIncident.fields(phase: .recovery)
+            fields.merge([
+                "slot_id": .string(slotID.uuidString),
+                "decision": .string("release"),
+                "action": .string("release_completed"),
+                "release_reason": .string("critical_pressure_eligible")
+            ]) { _, new in new }
+            diagnostics.record(
+                event: "slot_lifecycle.memory_pressure_slot",
+                level: .notice,
+                subsystem: "lifecycle",
+                fields: fields
+            )
+        }
     }
 
     private func cancelInactivePlan(
@@ -826,5 +936,28 @@ final class SlotLifecycleCoordinator {
                 fields: fields
             )
         }
+    }
+
+    private static func diagnosticInteger(_ value: UInt64) -> RuntimeDiagnosticValue {
+        .integer(value > UInt64(Int64.max) ? Int64.max : Int64(value))
+    }
+
+    private static func currentProcessResidentSizeBytes() -> UInt64? {
+        var info = mach_task_basic_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    $0,
+                    &count
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return UInt64(info.resident_size)
     }
 }

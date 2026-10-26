@@ -4,6 +4,58 @@ import XCTest
 
 @MainActor
 final class RuntimeDiagnosticsTests: XCTestCase {
+    func testIncidentContextCarriesBoundedCorrelationAndElapsedFields() {
+        let incidentID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let context = RuntimeDiagnosticIncidentContext(
+            id: incidentID,
+            kind: .attentionLiveness,
+            trigger: "timeout",
+            startedAtUptime: 10
+        )
+
+        XCTAssertEqual(
+            context.fields(phase: .trigger, now: 12),
+            [
+                "incident_id": .string(incidentID.uuidString),
+                "incident_kind": .string("attention_liveness"),
+                "incident_trigger": .string("timeout"),
+                "incident_phase": .string("trigger"),
+                "incident_elapsed_ms": .integer(2_000)
+            ]
+        )
+    }
+
+    func testPageAppParserRetainsStructuralErrorTypeAndPerKindDropCounters() {
+        let values = ChatGPTIncidentPageAppProbeValues.parse([
+            "version": 1,
+            "document_identity": "document-token",
+            "events": [[
+                "kind": "javascript_error",
+                "category": "global_error",
+                "error_category": "type_error",
+                "resource_type": "none",
+                "http_status": NSNull(),
+                "duration_bucket": NSNull(),
+                "age_ms": 42
+            ]],
+            "dropped_events": 4,
+            "dropped_javascript_error_events": 3,
+            "dropped_lifecycle_events": 1,
+            "javascript_error_count": 8,
+            "unhandled_rejection_count": 0,
+            "resource_load_failure_count": 0,
+            "resource_http_error_count": 0,
+            "slow_resource_count": 0,
+            "lifecycle_event_count": 1,
+            "resource_timing_available": true,
+            "response_status_available": true
+        ], expectedDocumentToken: "document-token")
+
+        XCTAssertEqual(values?.events.first?.errorCategory, "type_error")
+        XCTAssertEqual(values?.droppedEventsByKind["javascript_error"], 3)
+        XCTAssertEqual(values?.droppedEventsByKind["lifecycle"], 1)
+        XCTAssertEqual(values?.diagnosticFields["page_app_dropped_javascript_error_event_count"], .integer(3))
+    }
     func testEnvironmentFieldsCarryBuiltSourceAndBoundedChannelLabels() throws {
         let diagnostics = RuntimeDiagnostics(
             mode: .verbose,
