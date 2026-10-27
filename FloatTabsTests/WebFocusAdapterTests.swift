@@ -7,6 +7,29 @@ import XCTest
 final class WebFocusAdapterTests: XCTestCase {
     private var retainedWindows: [NSWindow] = []
 
+    /// Test-only WebKit fixture: the production liveness entry point reads
+    /// WKWebView.url as its supported-site admission guard. Keep that guard
+    /// real while removing runner timing from this recovery test.
+    private final class DeterministicChatGPTURLWebView: WKWebView {
+        private let deterministicURL: URL
+
+        init(deterministicURL: URL) {
+            self.deterministicURL = deterministicURL
+            super.init(
+                frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+                configuration: WKWebViewConfiguration()
+            )
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("DeterministicChatGPTURLWebView is test-only")
+        }
+
+        override var url: URL? {
+            deterministicURL
+        }
+    }
+
     private final class FutureAdapter: WebSiteAdapter {
         let identifier = "future"
 
@@ -523,8 +546,13 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(future.identifier, "future")
     }
 
-    private func makeWebView() -> WKWebView {
-        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    private func makeWebView(deterministicURL: URL? = nil) -> WKWebView {
+        let webView: WKWebView
+        if let deterministicURL {
+            webView = DeterministicChatGPTURLWebView(deterministicURL: deterministicURL)
+        } else {
+            webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        }
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.borderless],
@@ -894,7 +922,9 @@ extension WebFocusAdapterTests {
     func testStallTerminationRecoveryClosesSameIncidentWhenRuntimeIsHealthy() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
-        let webView = makeWebView()
+        let webView = makeWebView(
+            deterministicURL: URL(string: "https://chatgpt.com/recovered")
+        )
         let observer = SlotNavigationObserver(
             slotID: UUID(), webView: webView, websiteMode: .desktop,
             onURLChange: { _, _ in }, diagnostics: diagnostics,

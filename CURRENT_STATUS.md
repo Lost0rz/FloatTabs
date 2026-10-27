@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: GOVERNANCE CLOSEOUT / MERGE AUTHORIZED**
+**MODE: GOVERNANCE CLOSEOUT / BOUNDED CI-TEST CORRECTIVE**
 
-Current task: `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` — `TERMINAL / ACCEPTED`
+Current task: `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` — `ACTIVE / BOUNDED CI-TEST CORRECTIVE`
 
 ## Current verified baseline
 
@@ -18,6 +18,7 @@ PUBLIC_BUILD=25
 RELEASE_STATE=PUBLISHED / VERIFIED
 ACCEPTED_SEMANTIC_IMPLEMENTATION=b6d9e6841da92033dbc2f5fbd5c325915e1e3864
 DELIVERY_PR=#153
+LITERAL_PR_HEAD=914a6e80c0a6aa847b24ccd88cdb2c0daa8955b4
 ROOT_CAUSE=UNKNOWN
 ```
 
@@ -74,6 +75,12 @@ WEB_CONTENT_PROCESS_MEMORY_ATTRIBUTION=unavailable_public_api
 
 The diagnostics work does not claim to have found or fixed the historical runtime root cause. `ROOT_CAUSE=UNKNOWN` is intentionally preserved until a future real incident provides causal evidence.
 
+## Bounded CI/test corrective
+
+The terminal closeout is temporarily reopened within the same Task solely for `TEST_ONLY_CI_STABILIZATION`. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`. This corrective may change only `CURRENT_TASK.md`, `CURRENT_STATUS.md` and the named regression test; production source, recovery policy, runtime ownership, Attention semantics, persistence, profiles, sessions, CI workflow and product behavior remain out of scope.
+
+The current blocker is a flaky WebKit test fixture URL-timing dependency in `WebFocusAdapterTests.testStallTerminationRecoveryClosesSameIncidentWhenRuntimeIsHealthy()`. Merge remains blocked until the new literal PR head passes the required macOS arm64 CI.
+
 ## Repository lifecycle
 
 - Historical cleanup PR #151: `MERGED`.
@@ -84,8 +91,8 @@ The diagnostics work does not claim to have found or fixed the historical runtim
 
 ## Closeout disposition
 
-The user explicitly authorized governance closeout, Ready-for-review transition and merge on 2026-10-26.
+The prior closeout authorization is retained as historical evidence, but is suspended for this bounded corrective. The PR must not merge until the corrective has passed its focused repetition, full-suite and exact-literal-head CI gates.
 
-PR #153 may be marked Ready and merged after the control-only closeout head passes the required `Build & Test (Apple Silicon arm64)` gate and GitHub still reports the PR mergeable with no new blocking review finding.
+PR #153 remains the existing delivery vehicle. No new PR is authorized. Its merge disposition is `BLOCKED_PENDING_LITERAL_FINAL_HEAD_CI`.
 
-After merge, `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` remains terminal. Any subsequent engineering work requires a new `CURRENT_TASK.md` authorization.
+After the corrective gates pass, the controls may be returned to `TERMINAL / ACCEPTED / MERGE AUTHORIZED`, recording that the only intervening difference was `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`. Any subsequent product/runtime engineering work requires a new `CURRENT_TASK.md` authorization.
