@@ -24,6 +24,24 @@ Where the Attention/active-Tab refinement contract disagrees with the older Atte
 
 The supported runtime and release architecture is Apple Silicon arm64 only.
 
+## Runtime diagnostics architecture
+
+Runtime Diagnostics is an evidence plane, not a product-state owner. The canonical runtime, navigation, lifecycle, focus, Attention and persistence authorities remain in their owning domains.
+
+The current incident-oriented diagnostics path can correlate a bounded incident identity across emitters in Web, Panel and Attention while `FloatTabs/Diagnostics/` owns the shared diagnostic event vocabulary, privacy filtering, persistence/export and bounded snapshot representation.
+
+Important boundaries:
+
+- `SlotNavigationObserver` owns navigation/runtime observations and emits liveness, stall, termination, recovery-progress and healthy-closure evidence;
+- `WebViewPool` / `SlotLifecycleCoordinator` own runtime/recovery/residency decisions and expose their dispositions as evidence;
+- `ChatGPTAttentionBridge` owns Attention runtime behavior and emits typed abnormal-path evidence without transferring Attention business-state ownership to Diagnostics;
+- `PanelController` can contribute bounded presentation/focus snapshot facts without making Diagnostics a window authority;
+- `RuntimeDiagnostics` and related Diagnostics types correlate and persist privacy-filtered evidence but never define root cause from event presence alone.
+
+Public WebKit APIs do not provide reliable per-WebContent-process memory attribution. Current diagnostics therefore record that limitation explicitly rather than assigning host RSS or memory-pressure evidence to a WebContent child process without proof.
+
+The historical WebContent stall/termination root cause remains `UNKNOWN`. Recovery by reload/reset/restart is evidence about the recovery boundary, not causal proof.
+
 ## Existing architecture references
 
 ### `FloatTabs_Technical_Architecture_v1.2.md`
