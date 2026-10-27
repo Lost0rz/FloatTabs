@@ -5,7 +5,7 @@
 **Status:** `WAITING / RUNTIME OBSERVATION`
 **Mode:** `OBSERVE`
 **Task class:** `RELEASE / DOCUMENTATION / OBSERVATION`
-**Authorized baseline:** `main@73eee804cbe32a32bd2cc15f957ee8b52e66e1253`
+**Authorized baseline:** `main@73eee804cbe32a32bdce9b389be98939570c097e`
 **Published release:** `v0.5.8`
 **Published build:** `26`
 **Release merge commit:** `36c8c1733f25095e5b1b2e0ba6d090a50aa22918`
