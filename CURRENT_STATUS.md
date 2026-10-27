@@ -6,29 +6,33 @@
 
 ## Mode
 
-**MODE: GOVERNANCE CLOSEOUT / MERGE AUTHORIZED**
+**MODE: RELEASE PREPARATION / RUNTIME OBSERVATION NEXT**
 
-Current task: `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` — `TERMINAL / ACCEPTED`
+Current task: `FT-RELEASE-V0.5.8-001` — `ACTIVE / RELEASE PREPARATION`
 
 ## Current verified baseline
 
 ```text
+MAIN_HEAD=73eee804cbe32a32bdce9b389be98939570c097e
 PUBLIC_RELEASE=v0.5.7
 PUBLIC_BUILD=25
-RELEASE_STATE=PUBLISHED / VERIFIED
-ACCEPTED_SEMANTIC_IMPLEMENTATION=b6d9e6841da92033dbc2f5fbd5c325915e1e3864
-DELIVERY_PR=#153
-LAST_CORRECTIVE_CI_HEAD=7f1f9e76d66776e8772376375034ff96f85c7080
+PUBLIC_RELEASE_STATE=PUBLISHED / VERIFIED
+NEXT_RELEASE=v0.5.8
+NEXT_BUILD=26
+DIAGNOSTICS_DELIVERY_PR=#153 / MERGED
+DIAGNOSTICS_MERGE_COMMIT=73eee804cbe32a32bdce9b389be98939570c097e
+ACCEPTED_DIAGNOSTICS_SEMANTIC_HEAD=b6d9e6841da92033dbc2f5fbd5c325915e1e3864
+FINAL_DIAGNOSTICS_PR_HEAD=dcff3e7d56e6fc0c8f2489b1fa08af20536bffac
 ROOT_CAUSE=UNKNOWN
 ```
 
-FloatTabs v0.5.7 / Build 25 remains the current public release. No version bump or release is authorized by the completed diagnostics task.
+FloatTabs v0.5.7 / Build 25 remains the public release until the v0.5.8 release workflow completes. PR #153 is merged into protected `main`; there is no longer an outstanding diagnostics merge gate.
 
-## Accepted diagnostics outcome
+## Merged diagnostics outcome
 
-The runtime incident diagnostics work is complete and accepted. The implementation now provides bounded incident-oriented evidence for the known runtime failure classes while preserving existing product behavior and data safety.
+The runtime incident diagnostics work is merged and accepted. Current `main` now provides bounded incident-oriented evidence for the known runtime failure classes while preserving existing product behavior and data safety.
 
-Accepted coverage includes:
+Coverage includes:
 
 - shared incident IDs and bounded automatic cross-domain snapshots;
 - WebContent termination → recovery disposition → navigation progress → first healthy closure under one incident identity;
@@ -37,28 +41,23 @@ Accepted coverage includes:
 - Attention timeout/failure/invalid/stale/suppressed/late-callback evidence with typed semantic separation;
 - previous-application restore terminal outcomes;
 - page-app age-at-capture correctness, bounded category-diverse retention, per-kind drop counters and privacy-safe structural error categories;
-- rate limiting of redundant low-value diagnostic records without reducing health-probe cadence.
+- reduced redundant low-value diagnostic records without reducing health-probe cadence.
 
-## Verification state
-
-Final accepted semantic head: `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`
-
-Verified evidence:
+## Final diagnostics verification
 
 ```text
-CORRECTIVE_HEAD=7f1f9e76d66776e8772376375034ff96f85c7080
 FOCUSED_SINGLE_TEST=1 PASS / 0 FAIL
 FOCUSED_REPETITION=20/20 PASS
 WEBFOCUSADAPTERTESTS=26 PASS / 0 FAIL
 FULL_LOCAL_SUITE=1382 EXECUTED / 0 FAIL
-MACOS_CI_RUN=40426931567 / SUCCESS
+FINAL_MACOS_CI_RUN=40427655506 / #1150 / SUCCESS
 REQUIRED_ARM64_JOB=SUCCESS
-QA_DMG_RUN=40426931534 / SUCCESS
+FINAL_QA_DMG_RUN=40427655469 / #544 / SUCCESS
 FRESH_CONTEXT_AUDIT=PASS
-UNRESOLVED_BLOCKERS=NONE
+UNRESOLVED_IMPLEMENTATION_BLOCKERS=NONE
 ```
 
-The final governance closeout modifies only `CURRENT_STATUS.md` / `CURRENT_TASK.md`. Under `AGENTS.md`, this is `CONTROL_ONLY_DRIFT`; semantic implementation evidence remains valid. The repository-required CI must still succeed on the literal final PR head before merge.
+The final CI-stability corrective changed only the test target plus control files; production runtime source and CI workflow were unchanged.
 
 ## Safety / unchanged product semantics
 
@@ -76,26 +75,35 @@ USER_DATA=UNTOUCHED
 WEB_CONTENT_PROCESS_MEMORY_ATTRIBUTION=unavailable_public_api
 ```
 
-The diagnostics work does not claim to have found or fixed the historical runtime root cause. `ROOT_CAUSE=UNKNOWN` is intentionally preserved until a future real incident provides causal evidence.
-
-## CI stability corrective closeout
-
-The same-Task `TEST_ONLY_CI_STABILIZATION` is complete. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`; the only intervening difference is `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`.
-
-The flaky test was caused by WebKit runner timing leaving `WKWebView.url` unavailable when the production supported-ChatGPT admission guard ran. A test-target-only `WKWebView` fixture now returns a deterministic supported ChatGPT URL while the real production liveness method and incident assertions remain in use. No production source or CI workflow changed.
+The diagnostics work does not claim to have found or fixed the historical runtime root cause. `ROOT_CAUSE=UNKNOWN` remains authoritative until a future real incident provides causal evidence.
 
 ## Repository lifecycle
 
-- Historical cleanup PR #151: `MERGED`.
+- Cleanup PR #151: `MERGED`.
 - Diagnostics authorization PR #152: `MERGED`.
-- Diagnostics implementation PR #153: accepted for merge closeout after final literal-head required CI.
-- Accepted implementation branch/worktree ownership remains `codex/ft-runtime-incident-diagnostics-001` / dedicated worktree until PR #153 merges and lifecycle cleanup is separately verified.
-- No release/distribution action is authorized by this closeout.
+- Diagnostics implementation PR #153: `MERGED`.
+- PR #153 merge commit: `73eee804cbe32a32bdce9b389be98939570c097e`.
+- Release preparation branch: `release/v0.5.8`.
+- No runtime/product semantic source change is authorized in the release task.
 
-## Closeout disposition
+## v0.5.8 release preparation
 
-The prior closeout authorization is restored after the corrective passed its focused repetition, full-suite and exact-literal-head CI gates.
+Target release is `v0.5.8 / Build 26`.
 
-PR #153 remains the existing delivery vehicle. No new PR is authorized. Its merge disposition is `MERGE AUTHORIZED`; this execution did not merge it.
+Release preparation must update:
 
-Any subsequent product/runtime engineering work requires a new `CURRENT_TASK.md` authorization.
+- current control-plane state;
+- stale README release/download information;
+- current architecture/navigation wording where diagnostics ownership changed materially;
+- `docs/release/FloatTabs_v0.5.8.md`;
+- Xcode release metadata.
+
+The existing release workflow remains the publishing authority. After the release PR merges, it must build the Apple Silicon package, verify checksum sidecars, create tag `v0.5.8`, and publish the GitHub Release assets.
+
+## Next state: runtime observation
+
+After v0.5.8 is published and verified, the project enters `WAITING / RUNTIME OBSERVATION`.
+
+During that period, use FloatTabs normally. If a fresh slowdown, stall, WebContent termination, Attention abnormality, or focus-restore anomaly occurs, preserve/export Runtime Diagnostics before reload/restart when practical and note the approximate time and affected Slot/site.
+
+Reload/reset/restart remains recovery evidence only. It does not establish root cause.
