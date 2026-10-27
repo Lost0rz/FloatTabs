@@ -7,6 +7,29 @@ import XCTest
 final class WebFocusAdapterTests: XCTestCase {
     private var retainedWindows: [NSWindow] = []
 
+    /// Test-only WebKit fixture: the production liveness entry point reads
+    /// WKWebView.url as its supported-site admission guard. Keep that guard
+    /// real while removing runner timing from this recovery test.
+    private final class DeterministicChatGPTURLWebView: WKWebView {
+        private let deterministicURL: URL
+
+        init(deterministicURL: URL) {
+            self.deterministicURL = deterministicURL
+            super.init(
+                frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+                configuration: WKWebViewConfiguration()
+            )
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("DeterministicChatGPTURLWebView is test-only")
+        }
+
+        override var url: URL? {
+            deterministicURL
+        }
+    }
+
     private final class FutureAdapter: WebSiteAdapter {
         let identifier = "future"
 
@@ -523,8 +546,13 @@ final class WebFocusAdapterTests: XCTestCase {
         XCTAssertEqual(future.identifier, "future")
     }
 
-    private func makeWebView() -> WKWebView {
-        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    private func makeWebView(deterministicURL: URL? = nil) -> WKWebView {
+        let webView: WKWebView
+        if let deterministicURL {
+            webView = DeterministicChatGPTURLWebView(deterministicURL: deterministicURL)
+        } else {
+            webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        }
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.borderless],
@@ -889,6 +917,91 @@ extension WebFocusAdapterTests {
         XCTAssertEqual(candidate.fields["navigation_finished"], .bool(true))
         XCTAssertEqual(candidate.fields["navigation_phase"], .string("finished"))
         XCTAssertEqual(candidate.fields["post_finish_dual_timeout_count"], .integer(1))
+    }
+
+    func testStallTerminationRecoveryClosesSameIncidentWhenRuntimeIsHealthy() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let webView = makeWebView(
+            deterministicURL: URL(string: "https://chatgpt.com/recovered")
+        )
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in
+                .success(readyState: "complete", visibilityState: "visible", latencyMilliseconds: 1)
+            }
+        )
+
+        let stalledNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>stalled</body></html>",
+                baseURL: URL(string: "https://chatgpt.com/stalled")
+            )
+        )
+        webView.navigationDelegate = nil
+        observer.webView(webView, didStartProvisionalNavigation: stalledNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(stalledNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        let incidentID = try XCTUnwrap(
+            writer.events.last { $0.event == "navigation.stall_detected" }?.fields["incident_id"]
+        )
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+        let termination = try XCTUnwrap(
+            writer.events.last { $0.event == "web_content_process_terminated" }
+        )
+        XCTAssertEqual(termination.fields["incident_id"], incidentID)
+
+        let recoveryNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>recovered</body></html>",
+                baseURL: URL(string: "https://chatgpt.com/recovered")
+            )
+        )
+        await settle(webView)
+        observer.registerRecoveryNavigation(recoveryNavigation)
+        observer.webView(webView, didCommit: recoveryNavigation)
+        observer.webView(webView, didFinish: recoveryNavigation)
+        let progress = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.recovery_progress" }
+        )
+        XCTAssertEqual(progress.fields["incident_id"], incidentID)
+
+        await observer.captureCrossWorldLivenessOnce()
+
+        let closure = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.closed" }
+        )
+        XCTAssertEqual(closure.fields["incident_id"], incidentID)
+        XCTAssertEqual(closure.fields["incident_outcome"], .string("healthy_current_runtime"))
+    }
+
+    func testTerminatedIncidentClosesAsRuntimeReplacedWhenInvalidated() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics
+        )
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+        let incidentID = try XCTUnwrap(
+            writer.events.last { $0.event == "web_content_process_terminated" }?.fields["incident_id"]
+        )
+
+        observer.invalidateDiagnosticNavigation()
+
+        let closure = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.closed" }
+        )
+        XCTAssertEqual(closure.fields["incident_id"], incidentID)
+        XCTAssertEqual(closure.fields["incident_outcome"], .string("runtime_replaced"))
     }
 
     func testRuntimeLivenessMarksInFlightResultsStaleAfterInvalidation() async throws {

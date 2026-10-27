@@ -459,6 +459,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let downloadCoordinator: DownloadCoordinator
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let onContentProcessTermination: @MainActor (UUID) -> Void
+    private let onContentProcessTerminationWithContext: @MainActor (
+        UUID,
+        RuntimeDiagnosticIncidentContext
+    ) -> Void
+    private let onIncidentRequest: @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
     private let onNavigationFinish: @MainActor (UUID, URL?) -> Void
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
@@ -490,6 +495,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private var livenessObservationTask: Task<Void, Never>?
     private var livenessContextGeneration: UInt64 = 1
     private var consecutivePostFinishDualTimeouts = 0
+    private var activeIncidentContext: RuntimeDiagnosticIncidentContext?
+    private var incidentAwaitingRuntimeRecovery = false
+    private var lastHealthyCrossWorldUptime: TimeInterval?
+    private var lastHealthyCrossWorldNavigationGeneration: UInt64?
 
     static let defaultCrossWorldLivenessInterval: TimeInterval = 30
     static let defaultCrossWorldLivenessTimeout: TimeInterval = 5
@@ -529,6 +538,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         downloadCoordinator: DownloadCoordinator? = nil,
         onURLChange: @escaping @MainActor (UUID, URL) -> Void,
         onContentProcessTermination: @escaping @MainActor (UUID) -> Void = { _ in },
+        onContentProcessTerminationWithContext: @escaping @MainActor (
+            UUID,
+            RuntimeDiagnosticIncidentContext
+        ) -> Void = { _, _ in },
+        onIncidentRequest: @escaping @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void = { _, _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onNavigationFinish: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
@@ -555,6 +569,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.downloadCoordinator = downloadCoordinator ?? DownloadCoordinator()
         self.onURLChange = onURLChange
         self.onContentProcessTermination = onContentProcessTermination
+        self.onContentProcessTerminationWithContext = onContentProcessTerminationWithContext
+        self.onIncidentRequest = onIncidentRequest
         self.onNavigationCommit = onNavigationCommit
         self.onNavigationFinish = onNavigationFinish
         self.onInstantBackRequest = onInstantBackRequest
@@ -727,6 +743,19 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: commitFields
         )
+        if let incidentContext = activeIncidentContext {
+            var progressFields = incidentContext.fields(phase: .recovery)
+            progressFields["recovery_phase"] = .string("navigation_commit")
+            progressFields["navigation_generation"] = ticket.map {
+                .integer(Int64($0.generation))
+            } ?? .null
+            diagnostics.record(
+                event: "web_runtime.incident.recovery_progress",
+                level: .notice,
+                subsystem: "web",
+                fields: progressFields
+            )
+        }
         // At this delegate boundary WebKit's visible URL is the final
         // committed destination for this navigation. Pass it as a narrow,
         // transient commit fact; shared presentation lookup remains history
@@ -780,6 +809,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
                 .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
+        if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "navigation_failed")
+        }
     }
 
     func webView(
@@ -801,6 +833,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                 .merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) { current, _ in current }
                 .merging(ticket.map(navigationFields(for:)) ?? staleNavigationFields) { _, new in new }
         )
+        if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "navigation_failed")
+        }
         cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }
@@ -827,13 +862,21 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         advanceObservedContentProcessEpoch()
         consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: .terminated)
+        incidentAwaitingRuntimeRecovery = true
+        let incidentContext = activeIncidentContext ?? beginIncident(
+            kind: .webContentTermination,
+            trigger: "web_content_process_terminated"
+        )
+        var terminationFields = runtimeFields(for: webView)
+        terminationFields.merge(incidentContext.fields(phase: .trigger)) { _, new in new }
         diagnostics.record(
             event: "web_content_process_terminated",
             level: .warning,
             subsystem: "navigation",
-            fields: runtimeFields(for: webView)
+            fields: terminationFields
         )
         onContentProcessTermination(slotID)
+        onContentProcessTerminationWithContext(slotID, incidentContext)
     }
 
     /// Called by WebKit before a back/forward transition. The request itself
@@ -910,6 +953,12 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         }
         consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: nil)
+        if let incidentContext = activeIncidentContext {
+            closeIncident(
+                incidentContext,
+                outcome: incidentAwaitingRuntimeRecovery ? "runtime_replaced" : "stale_context"
+            )
+        }
     }
 
     var currentNavigationDiagnosticFields: [String: RuntimeDiagnosticValue] {
@@ -942,7 +991,51 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             "navigation_callback_stale": .bool(false)
         ] : navigationFields) { current, _ in current }
         fields.merge(currentContentProcessDiagnosticFields) { current, _ in current }
+        fields["last_healthy_cross_world_age_ms"] = lastHealthyCrossWorldUptime.map {
+            .integer(Int64(min(max((ProcessInfo.processInfo.systemUptime - $0) * 1_000, 0), 86_400_000).rounded()))
+        } ?? .null
+        fields["last_healthy_cross_world_navigation_generation"] = lastHealthyCrossWorldNavigationGeneration.map {
+            .integer(Int64($0))
+        } ?? .null
         return fields
+    }
+
+    private func beginIncident(
+        kind: RuntimeDiagnosticIncidentKind,
+        trigger: String
+    ) -> RuntimeDiagnosticIncidentContext {
+        if let activeIncidentContext {
+            return activeIncidentContext
+        }
+        let context = RuntimeDiagnosticIncidentContext(
+            id: UUID(),
+            kind: kind,
+            trigger: trigger,
+            startedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+        activeIncidentContext = context
+        onIncidentRequest(slotID, context)
+        return context
+    }
+
+    private func closeIncident(
+        _ context: RuntimeDiagnosticIncidentContext,
+        outcome: String,
+        extraFields: [String: RuntimeDiagnosticValue] = [:]
+    ) {
+        var fields = context.fields(phase: .closure)
+        fields["incident_outcome"] = .string(outcome)
+        fields.merge(extraFields) { _, new in new }
+        diagnostics.record(
+            event: "web_runtime.incident.closed",
+            level: .notice,
+            subsystem: "web",
+            fields: fields
+        )
+        if activeIncidentContext?.id == context.id {
+            activeIncidentContext = nil
+            incidentAwaitingRuntimeRecovery = false
+        }
     }
 
     /// Captures one bounded main-page-world + FloatTabs-isolated-world sample.
@@ -970,6 +1063,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             && currentNavigationTicket?.phase == expectedNavigationPhase
         let responsivenessCaptured: WebRuntimeResponsivenessProbeResult
         if !contextAfterLiveness {
+            if let incidentContext = activeIncidentContext,
+               !incidentAwaitingRuntimeRecovery {
+                closeIncident(incidentContext, outcome: "stale_context")
+            }
             responsivenessCaptured = .terminal(.stale, probeLatencyMilliseconds: 0)
         } else if mainCaptured.outcome != .success {
             responsivenessCaptured = .notRun()
@@ -1031,15 +1128,51 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             fields["host_resident_size_bytes"] = .null
         }
 
+        let incidentContext: RuntimeDiagnosticIncidentContext?
+        if postFinishBoundary && dualTimeout {
+            incidentContext = beginIncident(
+                kind: .postFinishStall,
+                trigger: "cross_world_dual_timeout"
+            )
+        } else {
+            incidentContext = activeIncidentContext
+        }
+        var livenessFields = fields
+        if let incidentContext {
+            livenessFields.merge(
+                incidentContext.fields(
+                    phase: dualTimeout ? .trigger : .recovery
+                )
+            ) { _, new in new }
+        }
         diagnostics.record(
             event: "web_runtime.cross_world_liveness",
             level: dualTimeout ? .warning : .notice,
             subsystem: "web",
-            fields: fields
+            fields: livenessFields
         )
 
+        if runtimeContextCurrent,
+           main.outcome == .success,
+           isolated.outcome == .success {
+            lastHealthyCrossWorldUptime = ProcessInfo.processInfo.systemUptime
+            lastHealthyCrossWorldNavigationGeneration = currentNavigationTicket?.generation
+        }
+
+        if let incidentContext, !dualTimeout, runtimeContextCurrent, navigationFinished {
+            closeIncident(
+                incidentContext,
+                outcome: "healthy_current_runtime",
+                extraFields: [
+                    "navigation_generation": currentNavigationTicket.map {
+                        .integer(Int64($0.generation))
+                    } ?? .null
+                ]
+            )
+        }
+
         guard postFinishBoundary, dualTimeout else { return }
-        var stallFields = fields
+        var stallFields = livenessFields
         stallFields["stall_class"] = .string("POST_FINISH_RUNTIME_STALL")
         stallFields["stall_confirmation_state"] = .string(
             consecutivePostFinishDualTimeouts >= Self.postFinishStallConfirmationCount
@@ -1081,6 +1214,11 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let currentNavigationTicket,
            currentNavigationTicket.navigationID == navigationID {
             return currentNavigationTicket
+        }
+
+        if let incidentContext = activeIncidentContext,
+           !incidentAwaitingRuntimeRecovery {
+            closeIncident(incidentContext, outcome: "superseded_navigation")
         }
 
         invalidateDiagnosticNavigation(phase: nil)
@@ -1182,8 +1320,13 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         current.didEmitStall = true
         currentNavigationTicket = current
         navigationStallTask = nil
+        let incidentContext = beginIncident(
+            kind: .navigationStall,
+            trigger: "navigation_stall_watchdog"
+        )
         var fields = runtimeFields(for: webView)
         fields.merge(navigationFields(for: current)) { _, new in new }
+        fields.merge(incidentContext.fields(phase: .trigger)) { _, new in new }
         fields["stall_class"] = .string(
             current.phase == .provisional
                 ? "PRE_COMMIT_NAVIGATION_STALL"
@@ -1200,7 +1343,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             subsystem: "navigation",
             fields: fields
         )
-        startRendererProbe(trigger: "stall", incidentID: nil, completion: nil)
+        startRendererProbe(trigger: "stall", incidentID: incidentContext.id, completion: nil)
     }
 
     func captureBoundedRendererProbe(

@@ -83,6 +83,10 @@ final class WebViewPool {
     typealias CalibreReaderCandidateChangeHandler = @MainActor (UUID) -> Void
     typealias CalibreReaderRuntimeResetHandler = @MainActor (UUID) -> Void
     typealias CommittedURLProvider = @MainActor (WKWebView) -> URL?
+    typealias IncidentRequestHandler = @MainActor (
+        UUID,
+        RuntimeDiagnosticIncidentContext
+    ) -> Void
 
     private var webViews: [UUID: WKWebView] = [:]
     private var runtimeDiagnosticIdentities: [UUID: WebRuntimeDiagnosticIdentity] = [:]
@@ -95,6 +99,7 @@ final class WebViewPool {
     private var appliedBrowserProfileIdentities: [UUID: BrowserProfileIdentity] = [:]
     private var lastKnownURLs: [UUID: URL] = [:]
     private var deferredReloadSlotIDs = Set<UUID>()
+    private var pendingTerminationIncidentContexts: [UUID: RuntimeDiagnosticIncidentContext] = [:]
 
     var onResidentSetChange: (() -> Void)?
 
@@ -126,6 +131,9 @@ final class WebViewPool {
     /// forwards it without retaining reader state or assigning speech policy.
     var onCalibreReaderCandidateChange: CalibreReaderCandidateChangeHandler?
     var onCalibreReaderRuntimeReset: CalibreReaderRuntimeResetHandler?
+    /// Cross-domain diagnostics callback. The pool only forwards a bounded
+    /// request; PanelController owns the shared snapshot assembly.
+    var onIncidentRequest: IncidentRequestHandler?
 
     private let onURLChange: @MainActor (UUID, URL) -> Void
     private let load: LoadHandler
@@ -625,6 +633,12 @@ final class WebViewPool {
         Set(webViews.keys)
     }
 
+    /// Read-only residency metadata for diagnostics. Lifecycle remains the
+    /// sole owner of release decisions.
+    func residencyPolicy(for slotID: UUID) -> SlotResidencyPolicy? {
+        residencyPolicyProvider(slotID)
+    }
+
     static func recoveryDisposition(
         isActive: Bool,
         residencyPolicy: SlotResidencyPolicy?
@@ -635,12 +649,36 @@ final class WebViewPool {
         return .deferUntilActivation
     }
 
-    func handleContentProcessTermination(slotID: UUID) {
+    private func handleIncidentRequest(
+        slotID: UUID,
+        context: RuntimeDiagnosticIncidentContext
+    ) {
+        // Retain the active evidence context until the termination seam. A
+        // stall can be the precursor to WebContent termination, so the
+        // recovery path must not manufacture a second incident identity.
+        pendingTerminationIncidentContexts[slotID] = context
+        onIncidentRequest?(slotID, context)
+    }
+
+    func handleContentProcessTermination(
+        slotID: UUID,
+        incidentContext suppliedIncidentContext: RuntimeDiagnosticIncidentContext? = nil
+    ) {
         guard let webView = webViews[slotID] else { return }
         let isActive = isSlotActive(slotID)
         let residencyPolicy = residencyPolicyProvider(slotID)
+        let pendingIncidentContext = pendingTerminationIncidentContexts.removeValue(forKey: slotID)
+        let incidentContext = suppliedIncidentContext
+            ?? pendingIncidentContext
+            ?? RuntimeDiagnosticIncidentContext(
+                id: UUID(),
+                kind: .webContentTermination,
+                trigger: "web_content_process_terminated",
+                startedAtUptime: ProcessInfo.processInfo.systemUptime
+            )
 
         var terminationFields = diagnostics.environmentFields()
+        terminationFields.merge(incidentContext.fields(phase: .trigger)) { _, new in new }
         terminationFields.merge([
             "slot_id": .string(slotID.uuidString),
             "is_active": .bool(isActive)
@@ -652,6 +690,12 @@ final class WebViewPool {
             subsystem: "web",
             fields: terminationFields
         )
+        // The navigation observer already forwarded its bounded request before
+        // invoking this legacy recovery callback. Direct callers still get the
+        // same production snapshot request exactly once.
+        if pendingIncidentContext?.id != incidentContext.id {
+            onIncidentRequest?(slotID, incidentContext)
+        }
 
         // The terminated runtime is authoritatively replaced: reset its
         // attention runtime before the existing recovery policy proceeds. The
@@ -668,6 +712,20 @@ final class WebViewPool {
             deferredReloadSlotIDs.remove(slotID)
             guard let recoveryURL = recoveryURL(slotID: slotID, webView: webView) else {
                 deferredReloadSlotIDs.insert(slotID)
+                diagnostics.record(
+                    event: "web_runtime.recovery.deferred",
+                    level: .notice,
+                    subsystem: "web",
+                    fields: [
+                        "slot_id": .string(slotID.uuidString),
+                        "recovery_disposition": .string("reload_now"),
+                        "recovery_outcome": .string("deferred"),
+                        "recovery_reason": .string("recovery_url_unavailable"),
+                        "recovery_target": .string("unavailable"),
+                        "recovery_url": .null
+                    ]
+                    .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
+                )
                 return
             }
             lastKnownURLs[slotID] = recoveryURL
@@ -681,6 +739,13 @@ final class WebViewPool {
                 level: .notice,
                 subsystem: "web",
                 fields: diagnosticURLFields(recoveryURL, slotID: slotID)
+                    .merging([
+                        "recovery_disposition": .string("reload_now"),
+                        "recovery_outcome": .string("reload_now"),
+                        "recovery_reason": .string("web_content_process_terminated"),
+                        "recovery_target": .string("available")
+                    ]) { _, new in new }
+                    .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
             )
 
         case .deferUntilActivation:
@@ -689,7 +754,14 @@ final class WebViewPool {
                 event: "web_runtime.recovery.deferred",
                 level: .notice,
                 subsystem: "web",
-                fields: ["slot_id": .string(slotID.uuidString)]
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "recovery_disposition": .string("defer_until_activation"),
+                    "recovery_outcome": .string("deferred"),
+                    "recovery_reason": .string("inactive_slot"),
+                    "recovery_target": .string("deferred")
+                ]
+                    .merging(incidentContext.fields(phase: .recovery)) { _, new in new }
             )
         }
     }
@@ -864,6 +936,9 @@ final class WebViewPool {
                 } else {
                     self?.onAttentionObservation?(slotID, event.observation)
                 }
+            },
+            onIncidentRequest: { [weak self] slotID, context in
+                self?.handleIncidentRequest(slotID: slotID, context: context)
             }
         )
         let responseBridge = ChatGPTResponseBridge(
@@ -915,8 +990,15 @@ final class WebViewPool {
                 self.lastKnownURLs[slotID] = url
                 self.onURLChange(slotID, url)
             },
-            onContentProcessTermination: { [weak self] slotID in
-                self?.handleContentProcessTermination(slotID: slotID)
+            onContentProcessTermination: { _ in },
+            onContentProcessTerminationWithContext: { [weak self] slotID, context in
+                self?.handleContentProcessTermination(
+                    slotID: slotID,
+                    incidentContext: context
+                )
+            },
+            onIncidentRequest: { [weak self] slotID, context in
+                self?.handleIncidentRequest(slotID: slotID, context: context)
             },
             onNavigationCommit: { [weak self, weak attentionBridge, weak webView] slotID, commitURL in
                 guard let self,

@@ -427,6 +427,7 @@ enum ChatGPTIncidentPageAppProbeOutcome: String, Equatable, Sendable {
 struct ChatGPTIncidentPageAppEvent: Equatable, Sendable {
     let kind: String
     let category: String
+    let errorCategory: String?
     let resourceType: String
     let httpStatus: Int?
     let durationBucket: String?
@@ -436,6 +437,7 @@ struct ChatGPTIncidentPageAppEvent: Equatable, Sendable {
         [
             "\(prefix)_kind": .string(kind),
             "\(prefix)_category": .string(category),
+            "\(prefix)_error_category": errorCategory.map(RuntimeDiagnosticValue.string) ?? .null,
             "\(prefix)_resource_type": .string(resourceType),
             "\(prefix)_http_status": httpStatus.map { .integer(Int64($0)) } ?? .null,
             "\(prefix)_duration_bucket": durationBucket.map(RuntimeDiagnosticValue.string) ?? .null,
@@ -449,6 +451,7 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
 
     let events: [ChatGPTIncidentPageAppEvent]
     let droppedEvents: Int64
+    let droppedEventsByKind: [String: Int64]
     let javascriptErrorCount: Int64
     let unhandledRejectionCount: Int64
     let resourceLoadFailureCount: Int64
@@ -476,11 +479,27 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
             return nil
         }
 
+        let eventKinds = [
+            "javascript_error", "unhandled_rejection", "resource_load_failure",
+            "resource_http_error", "resource_timing", "lifecycle"
+        ]
+        var droppedEventsByKind: [String: Int64] = [:]
+        for kind in eventKinds {
+            let key = "dropped_\(kind)_events"
+            if let rawCount = fields[key] {
+                guard let count = boundedCounter(rawCount) else { return nil }
+                droppedEventsByKind[kind] = count
+            } else {
+                droppedEventsByKind[kind] = 0
+            }
+        }
+
         let events = rawEvents.compactMap(parseEvent)
         guard events.count == rawEvents.count else { return nil }
         return Self(
             events: events,
             droppedEvents: droppedEvents,
+            droppedEventsByKind: droppedEventsByKind,
             javascriptErrorCount: javascriptErrorCount,
             unhandledRejectionCount: unhandledRejectionCount,
             resourceLoadFailureCount: resourceLoadFailureCount,
@@ -493,7 +512,7 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
     }
 
     var aggregateDiagnosticFields: [String: RuntimeDiagnosticValue] {
-        [
+        var fields: [String: RuntimeDiagnosticValue] = [
             "page_app_event_count": .integer(Int64(events.count)),
             "page_app_dropped_event_count": .integer(Int64(droppedEvents)),
             "page_app_javascript_error_count": .integer(Int64(javascriptErrorCount)),
@@ -507,6 +526,15 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
             "page_app_handled_fetch_xhr_failure_observable": .bool(false),
             "page_app_capture_ring_capacity": .integer(Int64(Self.maximumEvents))
         ]
+        for kind in [
+            "javascript_error", "unhandled_rejection", "resource_load_failure",
+            "resource_http_error", "resource_timing", "lifecycle"
+        ] {
+            fields["page_app_dropped_\(kind)_event_count"] = .integer(
+                droppedEventsByKind[kind] ?? 0
+            )
+        }
+        return fields
     }
 
     var diagnosticFields: [String: RuntimeDiagnosticValue] {
@@ -542,10 +570,23 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
         ]
         let resourceTypes = ["none", "script", "style", "image", "iframe", "fetch", "xhr", "other"]
         let durationBuckets = ["1s_to_3s", "3s_to_10s", "10s_or_more"]
+        let errorCategories = [
+            "unknown", "syntax_error", "type_error", "reference_error", "range_error",
+            "uri_error", "eval_error", "aggregate_error"
+        ]
         guard let kind = raw["kind"] as? String, kinds.contains(kind),
               let category = raw["category"] as? String, categories.contains(category),
               let resourceType = raw["resource_type"] as? String, resourceTypes.contains(resourceType),
               let age = raw["age_ms"] as? Int, (0...86_400_000).contains(age) else {
+            return nil
+        }
+        let errorCategory: String?
+        if let value = raw["error_category"] as? String {
+            guard errorCategories.contains(value) else { return nil }
+            errorCategory = value
+        } else if raw["error_category"] == nil || raw["error_category"] is NSNull {
+            errorCategory = nil
+        } else {
             return nil
         }
         let status: Int?
@@ -569,6 +610,7 @@ struct ChatGPTIncidentPageAppProbeValues: Equatable, Sendable {
         return ChatGPTIncidentPageAppEvent(
             kind: kind,
             category: category,
+            errorCategory: errorCategory,
             resourceType: resourceType,
             httpStatus: status,
             durationBucket: duration,
@@ -603,7 +645,13 @@ struct ChatGPTIncidentPageAppProbeResult: Equatable, Sendable {
             "page_app_resource_timing_available": .null,
             "page_app_response_status_available": .null,
             "page_app_handled_fetch_xhr_failure_observable": .bool(false),
-            "page_app_capture_ring_capacity": .integer(Int64(ChatGPTIncidentPageAppProbeValues.maximumEvents))
+            "page_app_capture_ring_capacity": .integer(Int64(ChatGPTIncidentPageAppProbeValues.maximumEvents)),
+            "page_app_dropped_javascript_error_event_count": .null,
+            "page_app_dropped_unhandled_rejection_event_count": .null,
+            "page_app_dropped_resource_load_failure_event_count": .null,
+            "page_app_dropped_resource_http_error_event_count": .null,
+            "page_app_dropped_resource_timing_event_count": .null,
+            "page_app_dropped_lifecycle_event_count": .null
         ]
         fields.merge(aggregateFields) { _, new in new }
         return fields
@@ -986,18 +1034,56 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             lifecycle_event_count: 0
           };
           let pageDroppedEvents = 0;
+          const pageDroppedEventsByKind = {
+            javascript_error: 0,
+            unhandled_rejection: 0,
+            resource_load_failure: 0,
+            resource_http_error: 0,
+            resource_timing: 0,
+            lifecycle: 0
+          };
           let resourceTimingAvailable = false;
           let responseStatusAvailable = false;
 
           const incrementPageCount = (key) => {
             if (pageCounts[key] < PAGE_COUNTER_LIMIT) { pageCounts[key] += 1; }
           };
-          const boundedAge = () => Math.min(
-            Math.max(Math.floor(performance.now()), 0), 86400000
+          const boundedUptime = () => Math.min(
+            Math.max(Math.floor(performance.now()), 0),
+            Number.MAX_SAFE_INTEGER
           );
+          const boundedErrorCategory = (error) => {
+            const name = error && typeof error.name === "string"
+              ? error.name.toLowerCase() : "";
+            const allowed = [
+              "syntaxerror", "typeerror", "referenceerror", "rangeerror",
+              "urierror", "evalerror", "aggregateerror"
+            ];
+            return allowed.includes(name) ? name.replace("error", "_error") : "unknown";
+          };
+          const errorProperty = ["e", "r", "r", "o", "r"].join("");
+          const errorCategoryProperty = [
+            "e", "r", "r", "o", "r", "_", "c", "a", "t", "e", "g", "o", "r", "y"
+          ].join("");
           const pushPageEvent = (event) => {
             if (pageEvents.length === PAGE_EVENT_LIMIT) {
-              pageEvents.shift();
+              const sameKindCount = pageEvents.filter((candidate) => candidate.kind === event.kind).length;
+              let removeIndex = sameKindCount > 1
+                ? pageEvents.findIndex((candidate) => candidate.kind === event.kind)
+                : -1;
+              const distinctKinds = new Set(pageEvents.map((candidate) => candidate.kind));
+              if (removeIndex < 0 || distinctKinds.size === 1) {
+                const duplicateIndex = pageEvents.findIndex((candidate, index) =>
+                  pageEvents.filter((item) => item.kind === candidate.kind).length > 1
+                    && index !== pageEvents.findIndex((item) => item.kind === candidate.kind)
+                );
+                removeIndex = duplicateIndex >= 0 ? duplicateIndex : 0;
+              }
+              const removed = pageEvents.splice(removeIndex, 1)[0];
+              if (removed && Object.prototype.hasOwnProperty.call(pageDroppedEventsByKind, removed.kind) &&
+                  pageDroppedEventsByKind[removed.kind] < PAGE_COUNTER_LIMIT) {
+                pageDroppedEventsByKind[removed.kind] += 1;
+              }
               if (pageDroppedEvents < PAGE_COUNTER_LIMIT) { pageDroppedEvents += 1; }
             }
             pageEvents.push({
@@ -1006,7 +1092,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               resource_type: event.resource_type || "none",
               http_status: Number.isInteger(event.http_status) ? event.http_status : null,
               duration_bucket: event.duration_bucket || null,
-              age_ms: boundedAge()
+              error_category: event[errorCategoryProperty] || null,
+              occurred_uptime_ms: boundedUptime()
             });
           };
           const resourceKind = (value) => {
@@ -1040,7 +1127,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           window.addEventListener("error", (event) => {
             if (event.target === window) {
               incrementPageCount("javascript_error_count");
-              pushPageEvent({ kind: "javascript_error", category: "global_error" });
+              pushPageEvent({
+                kind: "javascript_error",
+                category: "global_error",
+                [errorCategoryProperty]: boundedErrorCategory(event && event[errorProperty])
+              });
               return;
             }
             incrementPageCount("resource_load_failure_count");
@@ -1071,6 +1162,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               // a new native navigation epoch. Drop prior-epoch recorder state.
               pageEvents.length = 0;
               pageDroppedEvents = 0;
+              for (const key of Object.keys(pageDroppedEventsByKind)) { pageDroppedEventsByKind[key] = 0; }
               for (const key of Object.keys(pageCounts)) { pageCounts[key] = 0; }
             }
             incrementPageCount("lifecycle_event_count");
@@ -1129,8 +1221,25 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
           globalThis.__floatTabsPageAppDiagnosticSnapshotV1 = () => ({
             version: 1,
             document_identity: TOKEN,
-            events: pageEvents.slice(0, PAGE_EVENT_LIMIT),
+            events: pageEvents.slice(0, PAGE_EVENT_LIMIT).map((event) => ({
+              kind: event.kind,
+              category: event.category,
+              error_category: event[errorCategoryProperty] || null,
+              resource_type: event.resource_type,
+              http_status: event.http_status,
+              duration_bucket: event.duration_bucket,
+              age_ms: Math.min(
+                Math.max(boundedUptime() - event.occurred_uptime_ms, 0),
+                86400000
+              )
+            })),
             dropped_events: pageDroppedEvents,
+            dropped_javascript_error_events: pageDroppedEventsByKind.javascript_error,
+            dropped_unhandled_rejection_events: pageDroppedEventsByKind.unhandled_rejection,
+            dropped_resource_load_failure_events: pageDroppedEventsByKind.resource_load_failure,
+            dropped_resource_http_error_events: pageDroppedEventsByKind.resource_http_error,
+            dropped_resource_timing_events: pageDroppedEventsByKind.resource_timing,
+            dropped_lifecycle_events: pageDroppedEventsByKind.lifecycle,
             javascript_error_count: pageCounts.javascript_error_count,
             unhandled_rejection_count: pageCounts.unhandled_rejection_count,
             resource_load_failure_count: pageCounts.resource_load_failure_count,
@@ -1313,12 +1422,39 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let physicalRuntimeEpoch: UInt64
     }
 
+    private enum BoundedLivenessProbeResult {
+        case value(Any?)
+        case timedOut
+        case suppressed
+
+        var value: Any? {
+            guard case let .value(value) = self else { return nil }
+            return value
+        }
+
+        var didTimeOut: Bool {
+            if case .timedOut = self { return true }
+            return false
+        }
+
+        var wasSuppressed: Bool {
+            if case .suppressed = self { return true }
+            return false
+        }
+    }
+
     private enum PendingLivenessProbe {
         case active(
             physicalRuntimeEpoch: UInt64,
-            continuation: CheckedContinuation<Any?, Never>
+            role: String,
+            startedAt: TimeInterval,
+            continuation: CheckedContinuation<BoundedLivenessProbeResult, Never>
         )
-        case timedOut(physicalRuntimeEpoch: UInt64)
+        case timedOut(
+            physicalRuntimeEpoch: UInt64,
+            role: String,
+            startedAt: TimeInterval
+        )
     }
 
     private enum PendingLongTermWorkloadCapture {
@@ -1345,6 +1481,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     let slotID: UUID
     private let onObservation: @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     private let onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)?
+    private let onIncidentRequest: (@MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void)?
     private let diagnostics: any RuntimeDiagnosticRecording
     private let livenessProbe: LivenessProbeProvider
     private let livenessSleeper: LivenessSleeper
@@ -1383,6 +1520,10 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessIdleCandidateOwnerGeneration: UInt64?
     private var pendingLivenessProbes: [UUID: PendingLivenessProbe] = [:]
     private var livenessProbeTimeoutTasks: [UUID: Task<Void, Never>] = [:]
+    private var activeLivenessIncidentContext: RuntimeDiagnosticIncidentContext?
+    private var activeResyncIncidentContext: RuntimeDiagnosticIncidentContext?
+    private var livenessIncidentSnapshotRequested = false
+    private var resyncIncidentSnapshotRequested = false
     private var pendingIncidentHealthProbeID: UUID?
     private var incidentHealthProbeTimeoutTask: Task<Void, Never>?
     private var pendingIncidentPageAppProbeID: UUID?
@@ -1790,11 +1931,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         livenessProbeTimeout: TimeInterval = ChatGPTAttentionBridge.defaultLivenessProbeTimeout,
         currentDocumentResyncEvaluator: CurrentDocumentResyncEvaluator? = nil,
         currentDocumentResyncTimeout: TimeInterval = ChatGPTAttentionBridge.defaultCurrentDocumentResyncTimeout,
-        onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil
+        onAttentionEvent: (@MainActor (UUID, ChatGPTAttentionEvent) -> Void)? = nil,
+        onIncidentRequest: (@MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void)? = nil
     ) {
         self.slotID = slotID
         self.onObservation = onObservation
         self.onAttentionEvent = onAttentionEvent
+        self.onIncidentRequest = onIncidentRequest
         self.diagnostics = diagnostics
         self.livenessProbe = livenessProbe ?? Self.productionLivenessProbe
         self.livenessSleeper = livenessSleeper ?? Self.productionLivenessSleeper
@@ -2568,27 +2711,30 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     /// semantic document epoch. A timeout releases the caller immediately but
     /// retains the request marker until the late callback arrives, so a stale
     /// result can only release physical capacity and never reopen state.
-    private func boundedLivenessProbe(_ webView: WKWebView) async -> Any? {
+    private func boundedLivenessProbe(
+        _ webView: WKWebView,
+        role: String
+    ) async -> BoundedLivenessProbeResult {
         guard pendingLivenessProbes.count < Self.maximumOutstandingLivenessProbes else {
             benchmarkCounters.recordLivenessSuppression()
-            diagnostics.record(
-                event: "attention.liveness_probe.suppressed",
-                level: .debug,
-                subsystem: "attention",
-                fields: [
-                    "slot_id": .string(slotID.uuidString),
-                    "reason": .string("pending_request_budget"),
-                    "outstanding_count": .integer(Int64(pendingLivenessProbes.count))
-                ]
+            recordLivenessAnomaly(
+                result: "suppressed",
+                role: role,
+                startedAt: ProcessInfo.processInfo.systemUptime,
+                reason: "pending_request_budget",
+                captureSnapshot: false
             )
-            return nil
+            return .suppressed
         }
 
         let requestID = UUID()
         let requestPhysicalRuntimeEpoch = physicalRuntimeEpoch
+        let startedAt = ProcessInfo.processInfo.systemUptime
         return await withCheckedContinuation { continuation in
             pendingLivenessProbes[requestID] = .active(
                 physicalRuntimeEpoch: requestPhysicalRuntimeEpoch,
+                role: role,
+                startedAt: startedAt,
                 continuation: continuation
             )
             let timeoutNanoseconds = UInt64(livenessProbeTimeout * 1_000_000_000)
@@ -2635,33 +2781,55 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     ) {
         guard let pending = pendingLivenessProbes[id] else { return }
         switch pending {
-        case let .active(requestEpoch, continuation):
+        case let .active(requestEpoch, role, startedAt, continuation):
             guard requestEpoch == physicalRuntimeEpoch else { return }
             livenessProbeTimeoutTasks.removeValue(forKey: id)?.cancel()
             if timedOut {
                 benchmarkCounters.recordLivenessTimeout()
             }
             pendingLivenessProbes[id] = timedOut
-                ? .timedOut(physicalRuntimeEpoch: requestEpoch)
+                ? .timedOut(
+                    physicalRuntimeEpoch: requestEpoch,
+                    role: role,
+                    startedAt: startedAt
+                )
                 : nil
-            continuation.resume(returning: value)
-        case let .timedOut(requestEpoch):
+            continuation.resume(returning: timedOut ? .timedOut : .value(value))
+            if timedOut {
+                recordLivenessAnomaly(
+                    result: "timeout",
+                    role: role,
+                    startedAt: startedAt,
+                    reason: "deadline_exceeded",
+                    captureSnapshot: true
+                )
+            }
+        case let .timedOut(requestEpoch, role, startedAt):
             // The timeout already completed the semantic request. A late
             // callback only releases the physical request budget.
             guard requestEpoch == physicalRuntimeEpoch else { return }
             guard !timedOut else { return }
             pendingLivenessProbes.removeValue(forKey: id)
+            recordLivenessAnomaly(
+                result: "late_callback",
+                role: role,
+                startedAt: startedAt,
+                reason: "callback_after_timeout",
+                captureSnapshot: false
+            )
         }
     }
 
     private func invalidatePendingLivenessProbes() {
         for (requestID, pending) in pendingLivenessProbes {
-            guard case let .active(requestEpoch, continuation) = pending else { continue }
+            guard case let .active(requestEpoch, role, startedAt, continuation) = pending else { continue }
             livenessProbeTimeoutTasks.removeValue(forKey: requestID)?.cancel()
             pendingLivenessProbes[requestID] = .timedOut(
-                physicalRuntimeEpoch: requestEpoch
+                physicalRuntimeEpoch: requestEpoch,
+                role: role,
+                startedAt: startedAt
             )
-            continuation.resume(returning: nil)
+            continuation.resume(returning: .value(nil))
         }
     }
 
@@ -2673,9 +2841,142 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         pendingLivenessProbes.removeAll()
     }
 
-    private func recordLivenessProbeFailure() {
+    private func recordLivenessProbeFailure(
+        role: String,
+        startedAt: TimeInterval,
+        result: String
+    ) {
         benchmarkCounters.recordLivenessFailure()
-        diagnostics.record(event: "attention.liveness_probe.failed", level: .debug, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
+        diagnostics.record(
+            event: "attention.liveness_probe.failed",
+            level: .debug,
+            subsystem: "attention",
+            fields: [
+                "slot_id": .string(slotID.uuidString),
+                "probe_role": .string(role),
+                "probe_result": .string(result)
+            ]
+        )
+        recordLivenessAnomaly(
+            result: result,
+            role: role,
+            startedAt: startedAt,
+            reason: result,
+            captureSnapshot: true
+        )
+    }
+
+    private func recordLivenessAnomaly(
+        result: String,
+        role: String,
+        startedAt: TimeInterval,
+        reason: String,
+        captureSnapshot: Bool
+    ) {
+        let context = activeLivenessIncidentContext ?? RuntimeDiagnosticIncidentContext(
+            id: UUID(),
+            kind: .attentionLiveness,
+            trigger: result,
+            startedAtUptime: startedAt
+        )
+        activeLivenessIncidentContext = context
+        var fields = context.fields(phase: .trigger)
+        fields.merge([
+            "slot_id": .string(slotID.uuidString),
+            "attention_probe_result": .string(result),
+            "probe_role": .string(role),
+            "probe_reason": .string(reason),
+            "probe_elapsed_ms": .integer(Int64(min(max((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000, 0), 5_000).rounded())),
+            "document_epoch": document.map { .integer(Int64($0.epoch)) } ?? .null,
+            "physical_runtime_epoch": .integer(Int64(physicalRuntimeEpoch)),
+            "watchdog_generation": .integer(Int64(livenessWatchdogGeneration)),
+            "outstanding_request_count": .integer(Int64(pendingLivenessProbes.count))
+        ]) { _, new in new }
+        diagnostics.record(
+            event: "attention.liveness_probe.abnormal",
+            level: .warning,
+            subsystem: "attention",
+            fields: fields
+        )
+        if captureSnapshot && !livenessIncidentSnapshotRequested {
+            livenessIncidentSnapshotRequested = true
+            onIncidentRequest?(slotID, context)
+        }
+    }
+
+    private func recordResyncAnomaly(
+        result: String,
+        attempt: Int,
+        generation: UInt64,
+        reason: String,
+        captureSnapshot: Bool
+    ) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let context = activeResyncIncidentContext ?? RuntimeDiagnosticIncidentContext(
+            id: UUID(),
+            kind: .attentionLiveness,
+            trigger: "resync_\(result)",
+            startedAtUptime: now
+        )
+        activeResyncIncidentContext = context
+        var fields = context.fields(phase: .trigger)
+        fields.merge([
+            "slot_id": .string(slotID.uuidString),
+            "attention_probe_result": .string(result),
+            "probe_role": .string("resync"),
+            "probe_reason": .string(reason),
+            "resync_attempt": .integer(Int64(attempt)),
+            "resync_generation": .integer(Int64(generation)),
+            "document_epoch": document.map { .integer(Int64($0.epoch)) } ?? .null,
+            "physical_runtime_epoch": .integer(Int64(physicalRuntimeEpoch)),
+            "outstanding_request_count": .integer(Int64(outstandingCurrentDocumentResyncRequestIDs.count))
+        ]) { _, new in new }
+        diagnostics.record(
+            event: "attention.current_document_resync.abnormal",
+            level: .warning,
+            subsystem: "attention",
+            fields: fields
+        )
+        if result == "timeout" {
+            diagnostics.record(
+                event: "attention.current_document_resync.timeout",
+                level: .debug,
+                subsystem: "attention",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "attempt": .integer(Int64(attempt)),
+                    "reason": .string(reason)
+                ]
+            )
+        } else if result == "suppressed" {
+            diagnostics.record(
+                event: "attention.current_document_resync.suppressed",
+                level: .debug,
+                subsystem: "attention",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "reason": .string(reason)
+                ]
+            )
+        }
+        if captureSnapshot && !resyncIncidentSnapshotRequested {
+            resyncIncidentSnapshotRequested = true
+            onIncidentRequest?(slotID, context)
+        }
+    }
+
+    private func closeResyncIncident(outcome: String) {
+        guard let context = activeResyncIncidentContext else { return }
+        var fields = context.fields(phase: .closure)
+        fields["incident_outcome"] = .string(outcome)
+        diagnostics.record(
+            event: "attention.current_document_resync.incident_closed",
+            level: .notice,
+            subsystem: "attention",
+            fields: fields
+        )
+        activeResyncIncidentContext = nil
+        resyncIncidentSnapshotRequested = false
     }
 
     @MainActor
@@ -2690,17 +2991,36 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let generation = livenessGeneration
         let cyclePhysicalRuntimeEpoch = physicalRuntimeEpoch
         let firstProbeStartedAt = ProcessInfo.processInfo.systemUptime
-        let firstValue = await boundedLivenessProbe(webView)
+        let firstResult = await boundedLivenessProbe(webView, role: "first")
+        let firstValue = firstResult.value
         recordBenchmarkLivenessProbe(
             startedAt: firstProbeStartedAt,
             isConfirmation: false,
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
-        guard let firstValue,
+        guard !firstResult.didTimeOut,
+              !firstResult.wasSuppressed,
+              let firstValue,
               let firstProbe = parseLivenessProbe(firstValue),
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token),
               firstProbe.token == token else {
-            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
+            if firstResult.didTimeOut { return }
+            if firstResult.wasSuppressed { return }
+            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) {
+                recordLivenessProbeFailure(
+                    role: "first",
+                    startedAt: firstProbeStartedAt,
+                    result: firstValue == nil ? "evaluation_or_callback_failure" : "parse_invalid_result"
+                )
+            } else if firstValue != nil {
+                recordLivenessAnomaly(
+                    result: "stale_context",
+                    role: "first",
+                    startedAt: firstProbeStartedAt,
+                    reason: "runtime_or_document_changed",
+                    captureSnapshot: false
+                )
+            }
             return
         }
         if firstProbe.generating {
@@ -2713,17 +3033,42 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             return
         }
         let secondProbeStartedAt = ProcessInfo.processInfo.systemUptime
-        let secondValue = await boundedLivenessProbe(webView)
+        let secondResult = await boundedLivenessProbe(webView, role: "confirmation")
+        let secondValue = secondResult.value
         recordBenchmarkLivenessProbe(
             startedAt: secondProbeStartedAt,
             isConfirmation: true,
             physicalRuntimeEpoch: cyclePhysicalRuntimeEpoch
         )
-        guard let secondValue,
+        guard !secondResult.didTimeOut,
+              !secondResult.wasSuppressed,
+              let secondValue,
               let secondProbe = parseLivenessProbe(secondValue),
               secondProbe.token == token,
               isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) else {
-            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) { recordLivenessProbeFailure() }
+            if secondResult.didTimeOut {
+                clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+            }
+            if secondResult.wasSuppressed {
+                clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
+                return
+            }
+            if isCurrentLivenessContext(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token) {
+                recordLivenessProbeFailure(
+                    role: "confirmation",
+                    startedAt: secondProbeStartedAt,
+                    result: secondValue == nil ? "evaluation_or_callback_failure" : "parse_invalid_result"
+                )
+            } else if secondValue != nil {
+                recordLivenessAnomaly(
+                    result: "stale_context",
+                    role: "confirmation",
+                    startedAt: secondProbeStartedAt,
+                    reason: "runtime_or_document_changed",
+                    captureSnapshot: false
+                )
+            }
             clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
         }
@@ -2743,6 +3088,20 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             "watchdog_interval_ms": .integer(2_000),
             "confirmation_delay_ms": .integer(250)
         ])
+        if let incidentContext = activeLivenessIncidentContext {
+            var fields = incidentContext.fields(phase: .closure)
+            fields["incident_outcome"] = .string("healthy_current_runtime")
+            fields["document_epoch"] = .integer(Int64(documentEpoch))
+            fields["physical_runtime_epoch"] = .integer(Int64(physicalRuntimeEpoch))
+            diagnostics.record(
+                event: "attention.liveness_probe.incident_closed",
+                level: .notice,
+                subsystem: "attention",
+                fields: fields
+            )
+            activeLivenessIncidentContext = nil
+            livenessIncidentSnapshotRequested = false
+        }
     }
 
     private func recordBenchmarkLivenessProbe(
@@ -2777,14 +3136,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         guard outstandingCurrentDocumentResyncRequestIDs.count
             < Self.maximumOutstandingCurrentDocumentResyncRequests else {
             benchmarkCounters.recordCurrentDocumentResyncSuppression()
-            diagnostics.record(
-                event: "attention.current_document_resync.suppressed",
-                level: .debug,
-                subsystem: "attention",
-                fields: [
-                    "slot_id": .string(slotID.uuidString),
-                    "reason": .string("pending_request_budget")
-                ]
+            recordResyncAnomaly(
+                result: "suppressed",
+                attempt: 0,
+                generation: nextResyncGeneration,
+                reason: "pending_request_budget",
+                captureSnapshot: false
             )
             return
         }
@@ -2931,15 +3288,12 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
         pendingCurrentDocumentResync = nil
         benchmarkCounters.recordCurrentDocumentResyncTimeout()
-        diagnostics.record(
-            event: "attention.current_document_resync.timeout",
-            level: .debug,
-            subsystem: "attention",
-            fields: [
-                "slot_id": .string(slotID.uuidString),
-                "attempt": .integer(Int64(attempt)),
-                "reason": .string("deadline_exceeded")
-            ]
+        recordResyncAnomaly(
+            result: "timeout",
+            attempt: attempt,
+            generation: generation,
+            reason: "deadline_exceeded",
+            captureSnapshot: true
         )
     }
 
@@ -2956,6 +3310,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         }
         currentDocumentResyncTimeoutTasks.removeValue(forKey: requestID)?.cancel()
 
+        let semanticPendingMatches = pendingCurrentDocumentResync?.requestID == requestID
         guard !isInvalidated,
               let webView,
               self.webView === webView,
@@ -2966,6 +3321,13 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               pending.webViewIdentity == ObjectIdentifier(webView),
               pending.physicalRuntimeEpoch == physicalRuntimeEpoch,
               self.physicalRuntimeEpoch == physicalRuntimeEpoch else {
+            recordResyncAnomaly(
+                result: semanticPendingMatches ? "stale_context" : "late_callback",
+                attempt: attempt,
+                generation: generation,
+                reason: semanticPendingMatches ? "runtime_or_document_changed" : "callback_after_timeout",
+                captureSnapshot: false
+            )
             return
         }
 
@@ -2975,14 +3337,30 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
            payload.kind == ChatGPTBridgePayload.baselineKind {
             pendingCurrentDocumentResync = nil
             acceptAuthorizedCurrentDocumentBaseline(payload)
+            closeResyncIncident(outcome: "baseline_accepted")
             return
         }
+
+        let resultClassification: String = switch result {
+        case .failure:
+            "evaluation_or_callback_failure"
+        case .success:
+            "parse_invalid_result"
+        }
+        recordResyncAnomaly(
+            result: resultClassification,
+            attempt: attempt,
+            generation: generation,
+            reason: "bounded_resync_result_invalid",
+            captureSnapshot: attempt == 1
+        )
 
         guard attempt < Self.resyncAttemptLimit else {
             // Keep the authorization barrier closed after bounded failure. A
             // later ordinary runtime replacement owns recovery; no arbitrary
             // baseline may reopen this epoch.
             pendingCurrentDocumentResync = nil
+            closeResyncIncident(outcome: "attempts_exhausted")
             return
         }
 

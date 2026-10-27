@@ -370,6 +370,40 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(writer.events.contains { $0.event == "navigation.renderer_probe" })
     }
 
+    func testIncidentCaptureForMissingRequestedSlotNeverFallsBackToActiveSlot() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let (controller, _, store, _) = makeController(
+            profiles: [
+                spec(name: "ActiveCaptureSlot", url: "https://example.com/active"),
+                spec(name: "OtherCaptureSlot", url: "https://example.com/other")
+            ],
+            diagnostics: diagnostics
+        )
+        let activeSlot = try XCTUnwrap(store.activeProfile)
+        let missingSlotID = UUID()
+        let context = RuntimeDiagnosticIncidentContext(
+            id: UUID(),
+            kind: .postFinishStall,
+            trigger: "missing_requested_slot",
+            startedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+
+        let message = controller.captureIncidentSnapshot(
+            context: context,
+            slotID: missingSlotID
+        )
+
+        XCTAssertTrue(message.contains("requested Slot"))
+        let event = try XCTUnwrap(writer.events.last { $0.event == "diagnostics.incident_snapshot" })
+        XCTAssertEqual(event.fields["incident_id"], .string(context.id.uuidString))
+        XCTAssertEqual(event.fields["requested_slot_id"], .string(missingSlotID.uuidString))
+        XCTAssertEqual(event.fields["capture_availability"], .string("requested_slot_unavailable"))
+        XCTAssertEqual(event.fields["capture_stale"], .bool(true))
+        XCTAssertNil(event.fields["slot_id"])
+        XCTAssertNotEqual(event.fields["slot_id"], .string(activeSlot.id.uuidString))
+    }
+
     func testLongTermCheckpointDoesNotMaterializeMissingRuntime() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

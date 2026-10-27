@@ -34,6 +34,51 @@ enum RuntimeDiagnosticLevel: String, CaseIterable, Codable, Equatable, Sendable 
     case fault
 }
 
+enum RuntimeDiagnosticIncidentKind: String, CaseIterable, Codable, Equatable, Sendable {
+    case manualSnapshot = "manual_snapshot"
+    case webContentTermination = "web_content_termination"
+    case postFinishStall = "post_finish_stall"
+    case navigationStall = "navigation_stall"
+    case attentionLiveness = "attention_liveness"
+    case memoryPressure = "memory_pressure"
+    case previousApplicationRestore = "previous_application_restore"
+}
+
+enum RuntimeDiagnosticIncidentPhase: String, CaseIterable, Codable, Equatable, Sendable {
+    case trigger
+    case snapshot
+    case recovery
+    case closure
+    case superseded
+}
+
+/// A short-lived correlation value. It is carried through diagnostic fields
+/// only; it is not persisted as product state and never participates in a
+/// recovery, residency, focus, or Attention decision.
+struct RuntimeDiagnosticIncidentContext: Equatable, Sendable {
+    let id: UUID
+    let kind: RuntimeDiagnosticIncidentKind
+    let trigger: String
+    let startedAtUptime: TimeInterval
+
+    func fields(
+        phase: RuntimeDiagnosticIncidentPhase,
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> [String: RuntimeDiagnosticValue] {
+        let elapsedMilliseconds = min(
+            max((now - startedAtUptime) * 1_000, 0),
+            86_400_000
+        )
+        return [
+            "incident_id": .string(id.uuidString),
+            "incident_kind": .string(kind.rawValue),
+            "incident_trigger": .string(trigger),
+            "incident_phase": .string(phase.rawValue),
+            "incident_elapsed_ms": .integer(Int64(elapsedMilliseconds.rounded()))
+        ]
+    }
+}
+
 enum RuntimeDiagnosticValue: Codable, Equatable, Sendable {
     case string(String)
     case bool(Bool)

@@ -159,6 +159,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let capturedWindowObservation: RuntimeDiagnosticExternalWindowObservation?
         let requestedAtUptime: TimeInterval
         var requestAccepted: Bool?
+        var observationAttemptCount = 0
     }
 
     private enum UnreadDiagnosticSource: String {
@@ -333,6 +334,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var unreadPruneDiagnosticSuppressionIDs: Set<UUID> = []
     private var lastPresentationUptime: TimeInterval = -.infinity
     private var workspaceAutoHideSuppression = WorkspaceAutoHideSuppression()
+    private var autoHideIgnoreLastRecordedAt: [String: TimeInterval] = [:]
     private var fullscreenProfile: WebAppProfile?
     private var companionActiveProfile: WebAppProfile?
     private var fullscreenVisibilityIntent = FullscreenVisibilityIntent()
@@ -699,14 +701,51 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// never materializes a missing runtime or changes presentation state.
     @discardableResult
     func captureStuckTabSnapshot() -> String {
-        let incidentID = UUID()
-        var fields = diagnostics.environmentFields()
-        fields["incident_id"] = .string(incidentID.uuidString)
+        captureIncidentSnapshot(
+            context: RuntimeDiagnosticIncidentContext(
+                id: UUID(),
+                kind: .manualSnapshot,
+                trigger: "manual_stuck_tab_snapshot",
+                startedAtUptime: ProcessInfo.processInfo.systemUptime
+            )
+        )
+    }
 
-        guard let profile = tabStore.activeProfile else {
+    /// Shared bounded assembler for automatic incident capture. It reads the
+    /// requested resident Slot only and composes existing runtime, lifecycle,
+    /// renderer, health, and page-app probes. No runtime, presentation, or
+    /// product state is created or changed here.
+    @discardableResult
+    func captureIncidentSnapshot(
+        context: RuntimeDiagnosticIncidentContext,
+        slotID requestedSlotID: UUID? = nil
+    ) -> String {
+        var fields = diagnostics.environmentFields()
+        fields.merge(context.fields(phase: .snapshot)) { _, new in new }
+        let snapshotEvent = context.kind == .manualSnapshot
+            ? "diagnostics.stuck_tab_snapshot"
+            : "diagnostics.incident_snapshot"
+
+        if let requestedSlotID,
+           tabStore.profiles.first(where: { $0.id == requestedSlotID }) == nil {
+            fields["requested_slot_id"] = .string(requestedSlotID.uuidString)
+            fields["capture_availability"] = .string("requested_slot_unavailable")
+            fields["capture_stale"] = .bool(true)
+            diagnostics.record(
+                event: snapshotEvent,
+                level: .notice,
+                subsystem: "diagnostics",
+                fields: fields
+            )
+            return "Snapshot recorded (requested Slot unavailable/stale)."
+        }
+
+        guard let profile = requestedSlotID
+            .flatMap({ requestedID in tabStore.profiles.first { $0.id == requestedID } })
+            ?? tabStore.activeProfile else {
             fields["capture_availability"] = .string("no_active_slot")
             diagnostics.record(
-                event: "diagnostics.stuck_tab_snapshot",
+                event: snapshotEvent,
                 level: .notice,
                 subsystem: "diagnostics",
                 fields: fields
@@ -731,7 +770,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 current, _ in current
             }
             diagnostics.record(
-                event: "diagnostics.stuck_tab_snapshot",
+                event: snapshotEvent,
                 level: .notice,
                 subsystem: "diagnostics",
                 fields: fields
@@ -824,7 +863,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
 
         diagnostics.record(
-            event: "diagnostics.stuck_tab_snapshot",
+            event: snapshotEvent,
             level: .notice,
             subsystem: "diagnostics",
             fields: fields
@@ -857,7 +896,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         webViewPool.captureBoundedRendererProbe(
             slotID: slotID,
-            incidentID: incidentID,
+            incidentID: context.id,
             completion: { _ in }
         )
         return "Snapshot recorded for active Slot."
@@ -1287,6 +1326,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onResidentSetChange = { [weak self] in
             self?.synchronizeResidentIndicators()
         }
+        webViewPool.onIncidentRequest = { [weak self] slotID, context in
+            self?.captureIncidentSnapshot(context: context, slotID: slotID)
+        }
         webViewPool.onAttentionEvent = { [weak self] slotID, event in
             self?.handleAttentionEvent(slotID: slotID, event: event)
         }
@@ -1472,8 +1514,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         // A later dismiss supersedes any delayed observation from an older
         // restore transaction. The ticket is diagnostics-only and must never
         // be allowed to attach an observation to this dismiss.
-        pendingRestoreObservation = nil
-        restoreObservationTracker.invalidate()
+        finishPendingRestoreObservationAsSuperseded()
         recordDismissBegin(
             trace: trace,
             source: dismissSource,
@@ -1648,9 +1689,41 @@ final class PanelController: NSObject, NSWindowDelegate {
     /// boundary. It deliberately does not touch the previous-application
     /// context or any presentation business state.
     private func invalidatePendingRestoreObservationForNewPresentation() {
-        guard pendingRestoreObservation != nil else { return }
+        finishPendingRestoreObservationAsSuperseded()
+    }
+
+    private func finishPendingRestoreObservationAsSuperseded() {
+        guard let pending = pendingRestoreObservation else {
+            restoreObservationTracker.invalidate()
+            return
+        }
         pendingRestoreObservation = nil
         restoreObservationTracker.invalidate()
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "observation_state": .string("terminal"),
+            "terminal_outcome": .string("superseded"),
+            "observation_attempt": .integer(Int64(pending.observationAttemptCount)),
+            "restore_request_accepted": pending.requestAccepted.map(RuntimeDiagnosticValue.bool)
+                ?? .null,
+            "elapsed_uptime": .double(
+                max(0, ProcessInfo.processInfo.systemUptime - pending.requestedAtUptime)
+            )
+        ]
+        fields["requested_application_process_identifier"] = .integer(
+            Int64(pending.application.processIdentifier)
+        )
+        if let bundleIdentifier = RuntimeDiagnosticPrivacy.safeBundleIdentifier(
+            pending.application.bundleIdentifier
+        ) {
+            fields["requested_application_bundle_id"] = bundleIdentifier
+        }
+        diagnostics.record(
+            event: "previous_app.restore.terminal",
+            level: .notice,
+            subsystem: "panel",
+            trace: pending.ticket.trace,
+            fields: fields
+        )
     }
 
     private func recordDismissBegin(
@@ -2408,6 +2481,28 @@ final class PanelController: NSObject, NSWindowDelegate {
         staleEvent: Bool = false,
         insidePresentation: Bool = false
     ) {
+        if case let .ignore(reason) = decision {
+            let signature = [
+                trigger.rawValue,
+                reason.rawValue,
+                requestedVisibility ? "visible" : "hidden",
+                isPinned ? "pinned" : "unpinned",
+                suppressionActive ? "suppressed" : "unsuppressed",
+                presentationFocusPending ? "focus_pending" : "focus_ready",
+                staleEvent ? "stale" : "fresh",
+                insidePresentation ? "inside" : "outside",
+                frontmostMatches.map(String.init) ?? "unknown"
+            ].joined(separator: "|")
+            let now = ProcessInfo.processInfo.systemUptime
+            if let previous = autoHideIgnoreLastRecordedAt[signature], now - previous < 1 {
+                return
+            }
+            autoHideIgnoreLastRecordedAt[signature] = now
+            if autoHideIgnoreLastRecordedAt.count > 32 {
+                let oldest = autoHideIgnoreLastRecordedAt.min { $0.value < $1.value }?.key
+                if let oldest { autoHideIgnoreLastRecordedAt.removeValue(forKey: oldest) }
+            }
+        }
         var fields: [String: RuntimeDiagnosticValue] = [
             "trigger": .string(trigger.rawValue),
             "decision": .string(decision.result),
@@ -5232,10 +5327,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         attempt: Int
     ) {
         guard restoreObservationTracker.accepts(ticket),
-              let pending = pendingRestoreObservation,
-              pending.ticket == ticket else {
+              let pendingObservation = pendingRestoreObservation,
+              pendingObservation.ticket == ticket else {
             return
         }
+
+        var pending = pendingObservation
+        pending.observationAttemptCount = max(pending.observationAttemptCount, attempt)
+        pendingRestoreObservation = pending
 
         let observedApplication = NSWorkspace.shared.frontmostApplication
         let observedWindow = observedApplication.flatMap {
@@ -5251,8 +5350,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard restoreObservationTracker.consume(ticket) != nil else { return }
         pendingRestoreObservation = nil
 
+        let windowMatch = RuntimeDiagnosticExternalWindowObservation.windowMatch(
+            applicationMatches: applicationMatch,
+            capturedWindowNumber: pending.capturedWindowObservation?.windowNumber,
+            observedWindowNumber: observedWindow?.windowNumber
+        )
+        let terminalOutcome: String
+        if !applicationMatch {
+            terminalOutcome = "application_not_frontmost"
+        } else if observedWindow == nil {
+            terminalOutcome = "window_unavailable"
+        } else if windowMatch == .mismatched {
+            terminalOutcome = "window_mismatch"
+        } else {
+            terminalOutcome = "restored"
+        }
         var fields: [String: RuntimeDiagnosticValue] = [
             "observation_state": .string("observed"),
+            "terminal_outcome": .string(terminalOutcome),
             "observation_attempt": .integer(Int64(attempt)),
             "requested_application_process_identifier": .integer(
                 Int64(pending.application.processIdentifier)
@@ -5260,13 +5375,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             "restore_request_accepted": pending.requestAccepted.map(RuntimeDiagnosticValue.bool)
                 ?? .null,
             "application_match": .bool(applicationMatch),
-            "window_match": .string(
-                RuntimeDiagnosticExternalWindowObservation.windowMatch(
-                    applicationMatches: applicationMatch,
-                    capturedWindowNumber: pending.capturedWindowObservation?.windowNumber,
-                    observedWindowNumber: observedWindow?.windowNumber
-                ).rawValue
-            ),
+            "window_match": .string(windowMatch.rawValue),
             "elapsed_uptime": .double(
                 max(0, ProcessInfo.processInfo.systemUptime - pending.requestedAtUptime)
             )
@@ -5303,6 +5412,15 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "panel",
             trace: ticket.trace,
             fields: fields
+        )
+        var terminalFields = fields
+        terminalFields["observation_state"] = .string("terminal")
+        diagnostics.record(
+            event: "previous_app.restore.terminal",
+            level: terminalOutcome == "restored" ? .notice : .warning,
+            subsystem: "panel",
+            trace: ticket.trace,
+            fields: terminalFields
         )
     }
 

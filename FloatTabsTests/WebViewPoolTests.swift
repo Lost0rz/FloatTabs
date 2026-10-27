@@ -2049,6 +2049,164 @@ final class WebViewPoolTests: XCTestCase {
         XCTAssertEqual(finish.fields["navigation_callback_stale"], .bool(false))
     }
 
+    func testNavigationStallTerminationRecoveryRetainsOneIncidentIdentity() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var recoveryNavigation: WKNavigation?
+        var profile = makeProfile(name: "StallTerminationIdentity")
+        profile.currentURL = URL(string: "https://example.com/stall")
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            recoveryLoad: { webView, _ in
+                recoveryNavigation = webView.loadHTMLString(
+                    "<html><body>recovered</body></html>",
+                    baseURL: URL(string: "https://example.com/recovered")
+                )
+                return recoveryNavigation
+            },
+            isSlotActive: { _ in true },
+            diagnostics: diagnostics,
+            navigationStallTimeout: 120
+        )
+
+        let webView = try pool.webView(for: profile)
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        let stalledNavigation = try XCTUnwrap(
+            webView.loadHTMLString(
+                "<html><body>stalled</body></html>",
+                baseURL: URL(string: "https://example.com/stalled")
+            )
+        )
+        observer.webView(webView, didStartProvisionalNavigation: stalledNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(stalledNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        let stall = try XCTUnwrap(writer.events.last { $0.event == "navigation.stall_detected" })
+        let incidentID = try XCTUnwrap(stall.fields["incident_id"])
+
+        observer.webViewWebContentProcessDidTerminate(webView)
+
+        let termination = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.content_process_terminated" }
+        )
+        let recovery = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.recovery.reload_now" }
+        )
+        XCTAssertEqual(termination.fields["incident_id"], incidentID)
+        XCTAssertEqual(recovery.fields["incident_id"], incidentID)
+
+        let returnedRecoveryNavigation = try XCTUnwrap(recoveryNavigation)
+        observer.webView(webView, didCommit: returnedRecoveryNavigation)
+        observer.webView(webView, didFinish: returnedRecoveryNavigation)
+        let progress = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.recovery_progress" }
+        )
+        XCTAssertEqual(progress.fields["incident_id"], incidentID)
+    }
+
+    func testStallIncidentClosesOnSupersedingNavigation() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics
+        )
+        webView.navigationDelegate = nil
+        let firstNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>first</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: firstNavigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(firstNavigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        let incidentID = try XCTUnwrap(
+            writer.events.last { $0.event == "navigation.stall_detected" }?.fields["incident_id"]
+        )
+
+        let supersedingNavigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>second</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: supersedingNavigation)
+
+        let closure = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.closed" }
+        )
+        XCTAssertEqual(closure.fields["incident_id"], incidentID)
+        XCTAssertEqual(closure.fields["incident_outcome"], .string("superseded_navigation"))
+    }
+
+    func testStallIncidentClosesOnExplicitStaleInvalidation() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        let webView = WebViewFactory.makeWebView()
+        let observer = SlotNavigationObserver(
+            slotID: UUID(),
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics
+        )
+        webView.navigationDelegate = nil
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>stale</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didStartProvisionalNavigation: navigation)
+        observer.fireDiagnosticStallWatchdog(
+            navigationID: ObjectIdentifier(navigation),
+            generation: 1,
+            phase: "provisional"
+        )
+        let incidentID = try XCTUnwrap(
+            writer.events.last { $0.event == "navigation.stall_detected" }?.fields["incident_id"]
+        )
+
+        observer.invalidateDiagnosticNavigation()
+
+        let closure = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.incident.closed" }
+        )
+        XCTAssertEqual(closure.fields["incident_id"], incidentID)
+        XCTAssertEqual(closure.fields["incident_outcome"], .string("stale_context"))
+    }
+
+    func testReloadNowWithoutSafeRecoveryURLRecordsDeferredOutcomeAndFiniteReason() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .verbose, writer: writer)
+        var profile = makeProfile(
+            name: "UnavailableRecoveryURL",
+            homeURL: URL(string: "about:blank")!
+        )
+        profile.currentURL = nil
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in },
+            isSlotActive: { _ in true },
+            diagnostics: diagnostics
+        )
+        _ = try pool.webView(for: profile)
+
+        pool.handleContentProcessTermination(slotID: profile.id)
+
+        let deferred = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.recovery.deferred" }
+        )
+        XCTAssertEqual(deferred.fields["recovery_disposition"], .string("reload_now"))
+        XCTAssertEqual(deferred.fields["recovery_outcome"], .string("deferred"))
+        XCTAssertEqual(deferred.fields["recovery_reason"], .string("recovery_url_unavailable"))
+        XCTAssertEqual(deferred.fields["recovery_target"], .string("unavailable"))
+        XCTAssertEqual(deferred.fields["recovery_url"], .null)
+    }
+
     func testSlotNavigationObserverSurfacesContentProcessTermination() throws {
         let webView = WebViewFactory.makeWebView()
         let slotID = UUID()
