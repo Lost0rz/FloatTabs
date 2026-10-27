@@ -6,73 +6,67 @@
 
 <p align="center">
   <strong>A native floating Web App switcher for macOS.</strong><br>
-  原生 macOS 悬浮 Web App 切换器。
+  原生 macOS 悬浮 Web App 容器 / switcher。
 </p>
 
 <p align="center">
-  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.2.3"><strong>Download FloatTabs v0.2.3</strong></a>
-  · macOS 13 or later · Apple Silicon required · arm64
+  <a href="https://github.com/Lost0rz/FloatTabs/releases/tag/v0.5.8"><strong>Download FloatTabs v0.5.8</strong></a>
+  · macOS 13+ · Apple Silicon arm64
 </p>
 
-**Current release package:** **v0.2.3 Build 11**.
+**Current release package:** **v0.5.8 Build 26**.
 
-FloatTabs keeps a small set of long-lived Web Apps one shortcut away: AI tools, social feeds, dashboards, documentation, media players, self-hosted services, or anything else you want available without opening a full browser window.
+FloatTabs keeps a small set of long-lived Web Apps one shortcut away without requiring a full browser window. It is intentionally **not** a general-purpose browser.
 
-Each Web App lives in its own persistent **Slot** with independent rendering, viewport, browser identity, zoom, resource policy, and background-media behavior.
-
-**FloatTabs is intentionally not a full browser.** It is a compact native shell for persistent Web Apps.
+Each persistent **Slot** owns its Web App configuration while the actual `WKWebView` runtime remains a separate lifecycle concern. Browser Profiles provide isolated, persistent WebKit login/session containers.
 
 ## 中文简介
 
-FloatTabs 的目标不是再做一个完整浏览器，而是把经常需要快速查看的网页变成一组长期存在的悬浮 Web App。
+FloatTabs 的目标是把长期使用的网页变成一组稳定、快速切换的悬浮 Web App：
 
-- 一个悬浮窗口管理多个长期 Web App Slot。
-- 通过全局快捷键或菜单栏图标随时呼出 / 隐藏。
-- 左侧 Tab rail 支持单击切换、拖动排序、右键快速设置。
-- Rail 可折叠：折叠后网页回收原先预留的大部分宽度，只保留 12 pt 左侧移动带。
-- 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold 内存策略。
-- ChatGPT 回答在后台完成时可进入 Ready 状态：Tab 显示红点、菜单栏聚合未读 Ready 数量，并可按设置播放提示音。
-- Browser Profiles：多个相互独立的登录 / 会话容器；默认 Profile 完整保留现有网站登录，自定义 Profile 可创建、重命名、配色，并绑定到任意 Web App。
-- 每个 Slot 独立保存 Website Mode、Browser Identity、窗口尺寸、缩放、Residency 与 Background Media。
+- 一个原生 macOS 悬浮窗口管理多个长期 Web App Slot；
+- 全局快捷键或菜单栏图标快速显示 / 隐藏；
+- 左侧 Tab rail 支持快速切换、排序、折叠和右键设置；
+- Browser Profiles 提供相互隔离并持续保存的登录 / Session 容器；
+- 支持 Pin、自动隐藏、多显示器 WebKit 全屏、后台音频和 Hot / Warm / Cold Residency；
+- ChatGPT 回答完成后可产生 Ready / unread Attention 提示；
+- Runtime Diagnostics 为 Web runtime、navigation、Attention、focus、memory pressure 和 recovery 留下可关联证据。
+
+FloatTabs 不会把 reload / reset / restart 当作运行时根因。历史 WebContent stall / termination 的根因目前仍保持 **UNKNOWN**；v0.5.8 的重点是让下一次真实异常能够留下更完整的诊断证据。
 
 ## Core Features
 
 | Feature | What it does |
 | --- | --- |
-| Persistent Web App Slots | Keep selected Web Apps alive across switching and relaunch. |
-| Browser Profiles | Multiple independent login/session containers. Default preserves your existing WebKit sessions; custom Profiles are isolated from each other. |
-| External Tab rail | Favicon-first vertical rail with hover labels and Dock-style magnification. |
+| Persistent Web App Slots | Keep configured Web Apps readily available across switching and relaunch. |
+| Browser Profiles | Independent persistent WebKit login/session containers. Default preserves existing website data; custom Profiles isolate sessions from each other. |
+| External Tab rail | Favicon-first vertical rail with active-state expansion, hover magnification and unread Attention presentation. |
 | Single-click activation | Tab / Add / Pin / Settings respond on the first click even when FloatTabs is not the active app. |
-| ChatGPT Ready attention | Tracks ChatGPT generation at runtime and marks unseen completed work with a red Tab indicator. |
-| Menu-bar attention | Shows the unseen ChatGPT Ready count while FloatTabs is hidden and follows the selected Slot’s committed-site favicon. |
-| Configurable Ready alerts | Settings → Audio → Ready Alerts can enable/disable Ready sounds, choose an available macOS system sound, set per-alert volume, and preview changes immediately. |
-| Collapsible rail | Reclaims the 76 pt nominal rail reservation down to a 12 pt physical movement gutter without changing persisted viewport size. |
-| Drag-to-reorder | Reorder persistent Web Apps directly on the rail. |
-| Tab context menu | Home, Reload, Website Mode, Window Size, Zoom, Residency, Background Media, Edit, Remove. |
-| Per-App rendering | Desktop/Mobile behavior, browser identity, custom User Agent, device/viewport preset and zoom. |
-| Per-App or Fixed sizing | Restore each Slot's own viewport or use one shared viewport. |
-| Floating resize | Bottom-right resize keeps normal floating-window semantics; it does not auto-maximize or auto-slide the window to fill the screen. |
-| Pin / auto-hide | Stay visible above other apps when pinned; otherwise hide when focus moves elsewhere. |
-| WebKit element fullscreen | Fullscreen page presentation is separated from the FloatTabs shell and restored through a guarded source-window lifecycle. |
-| Hot / Warm / Cold lifecycle | Balance fast switching against memory use on a Slot-by-Slot basis. |
-| Background audio policy | Pause inactive media by default or explicitly allow background playback. |
-| Backup & restore | Export and restore FloatTabs configuration through the same live geometry/state paths used by the app. |
-| Persistent website sessions | Uses WebKit's persistent website data store for cookies, sessions and logins. |
+| ChatGPT Ready attention | Tracks generation runtime state and marks unseen completed work. |
+| Configurable Ready alerts | Optional system-sound notification and per-alert volume controls. |
+| Collapsible rail | Reclaims most of the nominal rail reservation while preserving persisted viewport semantics. |
+| Per-App rendering | Desktop/Mobile behavior, browser identity, viewport preset and zoom per Slot. |
+| Floating resize | Ordinary floating-window resize constrained to the current display. |
+| Pin / auto-hide | Keep FloatTabs visible when pinned; otherwise hide when focus moves elsewhere. |
+| WebKit element fullscreen | Separates fullscreen source hosting from the FloatTabs shell and restores through guarded lifecycle coordination. |
+| Hot / Warm / Cold lifecycle | Balances fast switching against resource use on a Slot-by-Slot basis. |
+| Background audio policy | Pauses inactive media by default or allows background playback per Slot. |
+| Backup & restore | Exports and restores FloatTabs configuration without storing website credentials or cookies. |
+| Runtime Diagnostics | Persists privacy-filtered runtime evidence for incident analysis and export. |
 | Safer downloads | Stages downloads before replacing an existing destination file. |
-| Self-hosted compatibility | Inferred custom-port HTTPS entries may retry once over HTTP after eligible connection failures; explicit HTTPS is never downgraded. |
 
-## Getting Started
+## Install
 
-### Install
-
-1. Download [`FloatTabs-0.2.3.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.2.3/FloatTabs-0.2.3.dmg).
+1. Download [`FloatTabs-0.5.8.dmg`](https://github.com/Lost0rz/FloatTabs/releases/download/v0.5.8/FloatTabs-0.5.8.dmg).
 2. Open the DMG.
 3. Drag **FloatTabs** to **Applications**.
 4. Launch FloatTabs from Applications.
 
-Replacing an older copy does not normally remove saved FloatTabs configuration or WebKit website data.
+Replacing an older copy does not normally remove saved FloatTabs configuration, Browser Profiles, or WebKit website data.
 
-FloatTabs v0.2.0 is currently unsigned and unnotarized. If macOS blocks the first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm. You can also allow it from **System Settings → Privacy & Security**.
+The release build pipeline always verifies the Apple Silicon arm64 package and applies at least a sealed ad-hoc code signature. Unless Developer ID and notarization credentials are supplied to the release environment, the DMG is not a public notarized build. If Gatekeeper blocks first launch, Control-click / right-click **FloatTabs.app**, choose **Open**, and confirm, or use **System Settings → Privacy & Security**.
+
+## Everyday Use
 
 ### Show / hide
 
@@ -85,102 +79,91 @@ FloatTabs runs as a menu-bar application without a Dock icon.
 
 1. Click **+** on the rail.
 2. Enter the Home URL.
-3. Name is optional; when blank, FloatTabs derives a label from the host.
-4. Configure rendering, viewport, browser identity, zoom, Residency or background media if needed.
+3. Name is optional; FloatTabs can derive a label from the host.
+4. Select a Browser Profile if needed.
+5. Configure rendering, viewport, browser identity, zoom, Residency and background-media behavior.
 
-A bare address such as `nas.local:3000` is initially inferred as HTTPS. On eligible custom-port connection failures, FloatTabs may retry that inferred address once over HTTP. Explicit `https://...` is never downgraded.
-
-## Everyday Use
+A bare custom-port address such as `nas.local:3000` is initially inferred as HTTPS. On eligible connection failures, FloatTabs may retry an inferred custom-port entry once over HTTP. Explicit `https://...` is never silently downgraded.
 
 ### Switch and reorder
 
 - Click a Tab to switch immediately.
-- Hover to reveal its name.
+- The active Tab remains expanded; inactive Tabs retain hover magnification.
 - Drag Tabs vertically to reorder.
 - Use `⌘1` … `⌘9` for Slots 1–9.
 - Use `⌃Tab` / `⌃⇧Tab` for next / previous Slot.
 
 ### Tab quick menu
 
-Right-click a Tab for:
-
-- Return to Home
-- Reload
-- Website Mode
-- Window Size
-- Zoom
-- Profile
-- Open in New Tab with Profile
-- Residency
-- Background Media
-- Edit Web App
-- Remove Web App
-
-### Move and resize
-
-- Drag the thin movement regions around the page / shell to move FloatTabs.
-- Use the **bottom-right grip** to resize.
-- Resize remains anchored as a normal floating window and is clamped to the current display's available area.
-- **There is no automatic full-width / maximize behavior when the right edge reaches the display edge.**
+Right-click a Tab for actions including Home, Reload, Website Mode, Window Size, Zoom, Profile, Residency, Background Media, Edit and Remove.
 
 ### Fold the Tab rail
 
-Use the colored **bottom-left fold grip**.
-
-Expanded state reserves a nominal **76 pt** control zone. When folded:
-
-- Tabs, `+`, Pin and Settings controls are hidden.
-- The physical leading inset becomes **12 pt**.
-- Web content reclaims the remaining **64 pt**.
-- The shell window itself does not resize.
-- Persisted / nominal viewport calculations remain 76-pt based, so re-expanding restores the exact nominal viewport.
-- Fold animation components share one **0.22 s** clock.
+Use the bottom-left fold grip. Expanded state reserves the nominal control zone; folded state hides the rail controls and lets Web content reclaim most of that width without changing the shell window itself or persisted nominal viewport semantics.
 
 Rail folding is intentionally disabled while WebKit owns an element-fullscreen session so source and shell geometry cannot diverge.
 
-### Pin
-
-Use the Pin control or `⌘⇧P`.
-
-- **Pin off:** clicking outside FloatTabs hides it.
-- **Pin on:** FloatTabs stays presented above other applications.
-
 ## Browser Profiles
 
-Browser Profiles give each Web App an independent, persistent login container — keep a personal and a work account on the same site without signing out and back in.
+Browser Profiles let multiple accounts of the same website remain signed in independently.
 
-- The built-in **Default** Profile preserves all of your existing WebKit website sessions. Nothing is migrated, copied, or reset when you upgrade.
-- Create, rename, and color custom Profiles in **Settings → Browser & Performance → Profiles**. Profile names are entirely your own; none are predefined.
-- **Add Web App** lets you pick the Profile before the first page load, so a site intended for a custom Profile never touches Default cookies.
-- Right-click a Tab → **Profile** to switch that Slot to another Profile in place. The page reloads with the chosen Profile's saved sessions; the previous Profile's logins stay intact on disk.
-- Right-click a Tab → **Open in New Tab with Profile** to run two accounts of the same site side by side in two Slots.
-- The active Tab is tinted with its Profile color so you can tell identities apart at a glance. Inactive Tabs stay neutral, and favicons are never recolored.
-- Deleting a custom Profile is blocked while any Tab still uses it; the Delete button explains which Tabs reference it. Deletion removes that Profile's website data permanently.
-- Custom Profiles require **macOS 14 or later**. On macOS 13 FloatTabs remains Default-only, and a Slot bound to a custom Profile shows an explanatory state instead of silently falling back to Default.
-- Backups include Profile definitions, colors, and Slot bindings — never cookies, passwords, OAuth tokens, or other website login/session data.
+- **Default Profile** preserves the existing persistent WebKit website-data store.
+- Custom Profiles use separate persistent WebKit data stores.
+- A new Web App can select its Profile before the first page load.
+- A Slot can switch Profiles or open the same site in another Profile.
+- Deleting a custom Profile is blocked while Tabs still reference it.
+- Custom Profiles require a system version with the required WebKit data-store API; the current product baseline is macOS 13+, with custom-profile support requiring macOS 14+.
+- Backups contain Profile definitions and Slot bindings, but never cookies, passwords, OAuth tokens or other website login/session data.
 
-## Fullscreen
-
-FloatTabs uses a separate source-window architecture for WebKit element fullscreen rather than making the whole application window fullscreen.
-
-The restore path waits for both:
-
-1. the active `WKWebView` to return to the ordinary source hierarchy; and
-2. WebKit's fullscreen presentation window to finish tearing down.
-
-The shell also reapplies a short auto-hide suppression window when it is re-presented after fullscreen restore. Together with the physical-visibility lifecycle guard introduced in v0.1.2, this prevents stale logical state from retiring or hiding content that is still physically visible.
-
-The previously reproduced post-fullscreen black-screen case has passed current Real-Mac acceptance.
+Browser Profile/session data is user data. Runtime recovery, diagnostics and release installation do not implicitly clear it.
 
 ## Residency
 
 | Policy | Behavior |
 | --- | --- |
-| **Hot** | Keep the live WebView attached; if WebKit terminates its renderer, recover it in the background without selecting or presenting the Slot. |
-| **Warm** | Keep inactive WebViews for the configured retention (2 minutes by default) during normal operation; critical memory pressure may shorten retention. |
-| **Cold** | Release after about 30 seconds away from the Slot; a selected-but-hidden Slot gets a recent-active grace period first. |
+| **Hot** | Keep the live WebView available; renderer termination can be recovered without requiring Slot selection. |
+| **Warm** | Keep inactive runtimes for the configured retention during normal operation; memory pressure can shorten retention according to policy. |
+| **Cold** | Release inactive runtimes after the cold retention boundary, with recent-active protection where applicable. |
 
-Background media is separate from Residency. Inactive media pauses by default; a Slot can opt into **Allow Background Audio**.
+Background media is separate from Residency. Inactive media pauses by default unless the Slot explicitly allows background audio.
+
+## Runtime Diagnostics and Observation
+
+v0.5.8 expands the incident-oriented diagnostics added around Web runtime failures. The diagnostic system is evidence-only: it records what FloatTabs observed but does not convert a log event into a root-cause claim.
+
+The current diagnostics can correlate, where available:
+
+- Slot and runtime identity;
+- navigation generation and phase;
+- WebContent termination and recovery disposition;
+- recovery navigation progress and first healthy closure;
+- bounded main/isolated-world liveness results;
+- Attention timeout / failure / stale / suppressed / late-callback outcomes;
+- memory-pressure decisions and FloatTabs host RSS;
+- previous-application restore terminal outcomes;
+- bounded privacy-safe page-app structural evidence.
+
+Public WebKit APIs do not expose trustworthy per-WebContent-process memory attribution, so diagnostics explicitly record that limitation rather than inventing ownership.
+
+### When a fresh incident happens
+
+If practical, before reload/reset/restart:
+
+1. note the approximate time;
+2. note the affected Slot / website;
+3. export or preserve Runtime Diagnostics;
+4. then use the normal recovery action if needed.
+
+A reload, reset or restart that restores the page proves a **recovery boundary**, not the root cause.
+
+## Data Safety
+
+- Website content is rendered by the system **WebKit** framework.
+- Browser Profiles use persistent WebKit website-data stores.
+- FloatTabs does not implement its own password store.
+- `.floattabsbackup` stores FloatTabs configuration, not cookies, passwords, OAuth tokens, caches or live page content.
+- Runtime diagnostics apply privacy filtering and are not intended to persist prompt/response bodies or authentication data.
+- Release / recovery code must not silently replace unreadable user configuration with an empty state.
 
 ## Default Shortcuts
 
@@ -199,67 +182,31 @@ All shortcuts are configurable in **FloatTabs Settings → Shortcuts**.
 | Pin / auto-hide | `⌘⇧P` |
 | Settings | `⌘,` |
 
-## Data, Backup and Downloads
+## What's New in v0.5.8
 
-- Web content is rendered by the system **WebKit** framework.
-- Website sessions use WebKit's persistent website data store; each Browser Profile has its own isolated container.
-- FloatTabs does not implement its own password store.
-- `.floattabsbackup` contains FloatTabs configuration — including Profile names, colors, and Slot bindings — but not cookies, passwords, OAuth tokens, caches or live page state.
-- Attachment downloads use a staged transfer so an existing destination is not replaced until the new download succeeds.
+v0.5.8 publishes the incident-oriented diagnostics work merged after v0.5.7.
 
-## What's New in v0.2.3
+- Shared incident identity now correlates runtime/navigation evidence across bounded diagnostics.
+- WebContent termination can be followed through recovery disposition, navigation progress and the first healthy runtime closure.
+- Post-finish/navigation stalls gain bounded snapshots and explicit terminal outcomes without changing recovery policy.
+- Memory-pressure diagnostics record host-side resource evidence and per-Slot decision reasoning while explicitly acknowledging unavailable public WebContent attribution.
+- Attention liveness/resync diagnostics distinguish timeout, evaluation/callback failure, invalid results, stale callbacks, suppression and late callbacks.
+- Previous-application restore attempts gain explicit terminal evidence.
+- Page-app diagnostic evidence uses corrected age-at-capture semantics and bounded category-diverse retention.
+- Redundant healthy diagnostic records are reduced without reducing actual health-probe cadence.
+- A WebKit URL timing flake in the new incident regression test was stabilized with a test-only deterministic fixture; production runtime behavior was not changed by that corrective.
 
-v0.2.3 establishes the current FloatTabs interaction baseline for global presentation and website focus.
+The historical WebContent stall/termination root cause remains **UNKNOWN**. v0.5.8 is intended to improve the evidence available from the next real incident, not to claim that the underlying failure has been eliminated.
 
-- Global summon now presents and activates FloatTabs when another app currently owns focus, while preserving the normal hide behavior when FloatTabs already owns focus.
-- Presentation retries the native key-window handoff briefly so an accessory app cannot remain visible while keyboard input is still owned by the previous app.
-- Presentation initializes the active website adapter's primary input focus after WebView content becomes available, so keyboard scrolling and voice input work immediately after summoning.
-- The manual primary-focus shortcut remains available and takes precedence over the automatic presentation focus.
-- Added regression coverage for global summon visibility, website input focus initialization, and the presentation auto-hide grace period.
-
-## What's New in v0.2.0
-
-v0.2.0 is the Browser Profiles release. It adds persistent multi-account login containers on top of the v0.1.4 baseline without changing the Slot-based runtime model, Hot / Warm / Cold semantics, or existing website sessions.
-
-- Added **Browser Profiles**: independent persistent WebKit login/session containers, with the existing Default store fully preserved.
-- Added custom Profile creation, rename, and label colors in **Settings → Account & Language → Profiles**; the Default Profile can be renamed too.
-- Added Profile selection in **Add Web App** so a new site loads in the right container from its very first request.
-- Added in-place Profile switching and **Open in New Tab with Profile** from the Tab context menu for two accounts of the same site at once.
-- Added Profile-color identification on the active Tab; favicons, the Ready red dot, and the global border theme are unaffected.
-- Hardened Profile deletion: it is disabled while Tabs still reference the Profile (with a tooltip naming them), and removal now releases runtimes before deleting the WebKit data store.
-- Hardened startup configuration recovery so an unreadable configuration can never be replaced by an empty fallback and overwrite your data.
-- Backups gained Profile metadata and bindings (schema/state v2) while continuing to exclude all website login/session data.
-- macOS 14+ supports custom Profiles; macOS 13 stays Default-only and fails closed for custom-bound Slots.
-
-See [`docs/release/FloatTabs_v0.2.0.md`](docs/release/FloatTabs_v0.2.0.md) for the detailed release record.
-
-## What's New in v0.1.4
-
-v0.1.4 is the ChatGPT Attention and notification release. It builds on the v0.1.3 floating-shell baseline without changing normal Tab, fullscreen, resizing, or Hot / Warm / Cold semantics.
-
-- Added a Slot-scoped ChatGPT runtime attention state (`Idle → Generating → Ready`) with a red favicon indicator for unseen completed responses.
-- Added real-presentation acknowledgement so Ready clears only when the actual ChatGPT WebView becomes user-visible, including fullscreen source and visible companion presentations.
-- Protected Generating and unseen Ready runtimes from FloatTabs-initiated Warm/Cold eviction without changing the existing residency policy itself.
-- Added hidden-app menu-bar Ready aggregation and current-site favicon projection for the selected committed WebKit page.
-- Added a Ready completion sound and a dedicated **Settings → Notifications** pane.
-- Added automatic sound preview when choosing a sound or completing a volume adjustment, plus a manual **Play Preview** button.
-- Added per-alert volume control and an enable/disable switch. Defaults preserve the prior behavior: On, Ping, 100%.
-- Kept Settings previews available when automatic alerts are disabled; 0% volume is true silence and never falls back to a system beep.
-- Hardened committed ChatGPT navigation so stale old-document/natural baselines cannot reopen the attention barrier; only an authorized current-document resync can establish the new baseline after a supported commit.
-- Kept attention runtime-only: prompt/response text is not persisted into FloatTabs preferences or backups.
-- Backup/restore now carries the Ready sound preferences while remaining backward compatible with older schema-1 backups.
-
-Manual QA confirmed the new Ready sound selection/volume behavior and existing first-click interaction on the release candidate. Automated coverage includes the attention state machine, navigation/document lifetime, visibility, lifecycle protection, menu-bar projection, sound policy/settings, and backup compatibility.
-
-See [`docs/release/FloatTabs_v0.1.4.md`](docs/release/FloatTabs_v0.1.4.md) for the detailed release record.
+See [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md) for the detailed release record.
 
 ## Verify the Download
 
-```bash
-shasum -a 256 -c FloatTabs-0.2.0.dmg.sha256
-```
+Download the matching checksum sidecar and run:
 
-Only install an unsigned build when you trust this repository and the checksum matches.
+```bash
+shasum -a 256 -c FloatTabs-0.5.8.dmg.sha256
+```
 
 ## Build from Source
 
@@ -281,13 +228,13 @@ xcodebuild \
   test
 ```
 
-Build the unsigned Apple Silicon arm64-only package used by the release workflow:
+Build the Apple Silicon package used by the release workflow:
 
 ```bash
 tools/release/build_dmg.sh
 ```
 
-Artifacts are written using the current app version:
+Artifacts use the current app version:
 
 ```text
 FloatTabs-<version>.dmg
@@ -300,10 +247,13 @@ FloatTabs-<version>.dSYM.zip.sha256
 
 Current sources of truth:
 
+- Project rules: [`AGENTS.md`](AGENTS.md)
+- Current verified state: [`CURRENT_STATUS.md`](CURRENT_STATUS.md)
+- Active task / observation authority: [`CURRENT_TASK.md`](CURRENT_TASK.md)
 - Product / usage: this README
-- Current interaction and geometry contract: [`docs/design/FloatTabs_UI_Design_System_v1.3.md`](docs/design/FloatTabs_UI_Design_System_v1.3.md)
+- Architecture navigation: [`docs/architecture/README.md`](docs/architecture/README.md) and [`docs/architecture/DOMAIN_MAP.md`](docs/architecture/DOMAIN_MAP.md)
+- Current shell / interaction contracts: [`docs/design/`](docs/design/)
 - Browser Profiles product contract: [`docs/product/FloatTabs_Browser_Profiles_Contract_V1.md`](docs/product/FloatTabs_Browser_Profiles_Contract_V1.md)
-- Current release record: [`docs/release/FloatTabs_v0.2.0.md`](docs/release/FloatTabs_v0.2.0.md)
-- UI/UX reference-map status: [`docs/uiux/README.md`](docs/uiux/README.md)
+- Current release record: [`docs/release/FloatTabs_v0.5.8.md`](docs/release/FloatTabs_v0.5.8.md)
 
-Older stage, design and release files are retained as historical records. Files explicitly marked **Historical** or **Superseded** must not override current production behavior.
+Older stage, design and release files are retained as historical records. Historical documents do not override current production behavior or current accepted contracts.
