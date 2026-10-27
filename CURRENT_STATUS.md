@@ -1,81 +1,90 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-27
+**Status date:** 2026-10-28
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: RUNTIME OBSERVATION**
+**MODE: DIAGNOSTIC EXPERIMENT AUTHORIZATION**
 
-Current task: `FT-RELEASE-V0.5.8-001` — `WAITING / RUNTIME OBSERVATION`
+Current task: `FT-WEBCONTENT-JSC-AB-001` — `ACTIVE / AUTHORIZED`
 
 ## Current verified baseline
 
 ```text
-RELEASE_MERGE_HEAD=36c8c1733f25095e5b1b2e0ba6d090a50aa22918
+REMOTE_MAIN=ecd615602075cea6cbdb4bda4a9e2132cd682d55
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-PUBLIC_RELEASE_STATE=PUBLISHED / VERIFIED
-RELEASE_PR=#154 / MERGED
-RELEASE_PR_HEAD=0f739221c9ea6938e43e9081d6d91483c4c8dee3
-RELEASE_PR_MACOS_CI=40433884424 / #1152 / SUCCESS
-RELEASE_PR_QA_DMG=40433884389 / #545 / SUCCESS
-PUBLISH_RELEASE_RUN=40434662992 / #38 / SUCCESS
-GITHUB_RELEASE_ID=424952924
-RELEASE_TAG=v0.5.8
-RELEASE_TAG_TARGET=36c8c1733f25095e5b1b2e0ba6d090a50aa22918
-DIAGNOSTICS_DELIVERY_PR=#153 / MERGED
+RELEASE_MERGE_HEAD=36c8c1733f25095e5b1b2e0ba6d090a50aa22918
 ACCEPTED_DIAGNOSTICS_SEMANTIC_HEAD=b6d9e6841da92033dbc2f5fbd5c325915e1e3864
+OPEN_PRS_AT_RECONCILIATION=0
+ROOT_CAUSE=UNKNOWN
+FAULTING_SUBSYSTEM=JavaScriptCore
+```
+
+FloatTabs v0.5.8 / Build 26 remains the current public release. No production runtime fix has been accepted or released for the WebContent crash family.
+
+## Fresh incident evidence
+
+The v0.5.8 observation period produced materially stronger evidence than the previous generic WebContent termination classification.
+
+For the 2026-10-27 21:44:55 +0800 incident:
+
+- `com.apple.WebKit.WebContent` PID `53961` terminated as `reason=Crash`;
+- `launchd` recorded `SIGSEGV`, not a normal WebKit reclamation or direct Jetsam termination;
+- the WebContent process successfully completed a JavaScript-in-script-world probe roughly 0.8 seconds before the crash;
+- the process had recently reached roughly 1.1 GB memory footprint and WebKit changed its memory policy from `Unrestricted` to `Conservative`, but the crash stack is not an allocator/OOM/Jetsam stack;
+- ReportCrash captured corpse data for PID `53961`, but OSAnalytics did not persist that incident's `.ips` because type-309 crash-report creation returned `Log limit exceeded`.
+
+Historical crash reports already present on the same Mac supplied the missing stack evidence. The preserved corpus contains 38 `com.apple.WebKit.WebContent` `.ips` reports attributable to FloatTabs, all on macOS `27.0.1 (26A434)` / WebKit `22625.1.29.11.28`.
+
+Crash clustering shows:
+
+```text
+38/38  faulting queue = com.apple.main-thread
+33/38  EXC_BAD_ACCESS / SIGSEGV
+18/38  llint_entry_osr_function_for_call family, commonly invalid address 0x48
+14/38  JSC::ScriptExecutable::newReplacementCodeBlockFor -> operationOptimize family, commonly invalid address 0x78
+4/38   JSC CodeBlock / JIT-to-DFG deferred compilation WTFCrash family
+2/38   other JSC faults
+37/38  faulting stacks include async generator / async iterator execution
+38/38  faulting stacks include the JavaScriptCore/microtask execution path
+```
+
+At least one v0.5.8 runtime incident was timestamp-correlated to a preserved `.ips` report showing the `newReplacementCodeBlockFor -> operationOptimize` family while an inactive warm ChatGPT Slot was resident, generating and Attention-protected.
+
+## Evidence-supported fault boundary
+
+The failure class is now narrower than the former generic WebContent termination label:
+
+```text
+FAILURE_CLASS=WebContent native crash
+DIRECT_TERMINATION=SIGSEGV / JSC fatal crash family
+FAULTING_SUBSYSTEM=JavaScriptCore
+DOMINANT_AREA=JIT / OSR / DFG / optimized CodeBlock lifecycle during async/microtask execution
+JETSAM_DIRECT_CAUSE=NOT_SUPPORTED
+FLOATTABS_RECOVERY_CAUSE=NOT_SUPPORTED
+EXACT_TRIGGER=UNKNOWN
 ROOT_CAUSE=UNKNOWN
 ```
 
-FloatTabs v0.5.8 / Build 26 is the current public release. The release is public, non-draft and non-prerelease, and the `v0.5.8` tag points directly to the merged release commit.
+The historical `post_finish_runtime_stall` remains a separate observed failure class and must not be merged into this crash family without evidence.
 
-## Release verification
+## Active diagnostic question
 
-The v0.5.8 release lifecycle completed successfully:
+The next blocked decision is whether FloatTabs' periodic **background cross-world JavaScript liveness probe** is required to trigger or materially amplify this repeated JavaScriptCore crash family.
 
-- release preparation PR #154 merged to protected `main`;
-- exact release-PR macOS CI #1152 succeeded;
-- exact release-PR QA DMG #545 succeeded;
-- Publish Release run #38 (`40434662992`) succeeded;
-- Apple Silicon release package build/verification succeeded;
-- release filenames and checksum sidecars were verified before publication;
-- GitHub Release `v0.5.8` was published successfully.
+The authorized diagnostic experiment therefore uses:
 
-Published assets:
+- **A:** existing v0.5.8 / Build 26 evidence, unchanged;
+- **B:** a QA-only variant that suppresses only the periodic cross-world JavaScript liveness evaluation while a Slot is inactive, while preserving active-Slot probes and all product/runtime semantics outside that diagnostic probe.
 
-```text
-FloatTabs-0.5.8.dmg
-FloatTabs-0.5.8.dmg.sha256
-FloatTabs-0.5.8.dSYM.zip
-FloatTabs-0.5.8.dSYM.zip.sha256
-```
-
-Observed release digests include:
-
-```text
-FloatTabs-0.5.8.dmg sha256=02f262e971e0eb2f0de2db94e433fe7f503416c2a07b2b5115e22250ad0a1ed5
-FloatTabs-0.5.8.dSYM.zip sha256=2de205ed6274106f4925d54c90c41401c867d36b4b88dc45d7f173389306a835
-```
-
-## Merged diagnostics outcome
-
-The runtime incident diagnostics delivered by PR #153 remain the accepted production semantics in v0.5.8. Coverage includes:
-
-- shared incident IDs and bounded automatic cross-domain snapshots;
-- WebContent termination → recovery disposition → navigation progress → first healthy closure under one incident identity;
-- post-finish/navigation stall terminal outcomes including healthy recovery, superseding navigation, stale context and runtime replacement;
-- memory-pressure host/process-boundary evidence and per-Slot lifecycle decision reasoning without unsupported WebContent attribution;
-- Attention timeout/failure/invalid/stale/suppressed/late-callback evidence with typed semantic separation;
-- previous-application restore terminal outcomes;
-- page-app age-at-capture correctness, bounded category-diverse retention, per-kind drop counters and privacy-safe structural error categories;
-- reduced redundant low-value diagnostic records without reducing health-probe cadence.
-
-The historical WebContent stall/termination root cause remains `UNKNOWN`. v0.5.8 improves the evidence available from the next real incident and does not claim that the underlying failure has been causally fixed or eliminated.
+A B-side reproduction with the same JSC signature would strongly show that the background probe is not required for the crash. A bounded B observation with no crash is only non-reproduction evidence and must not be promoted to a causal fix.
 
 ## Safety / unchanged product semantics
+
+The experiment must preserve:
 
 ```text
 RECOVERY_POLICY=UNCHANGED
@@ -88,10 +97,11 @@ BROWSER_PROFILES=UNCHANGED
 WEBSITE_SESSIONS_DATA=UNCHANGED
 PERSISTENCE=UNCHANGED
 USER_DATA=UNTOUCHED
-WEB_CONTENT_PROCESS_MEMORY_ATTRIBUTION=unavailable_public_api
+ACTIVE_SLOT_LIVENESS_PROBING=UNCHANGED
+PRODUCTION_RELEASE=NOT_AUTHORIZED
 ```
 
-Installing or observing v0.5.8 must not implicitly reset Browser Profiles, website sessions, cookies, preferences, backups or persisted website data.
+No Browser Profile, website session, cookie, preference, backup or persisted website data may be cleared or rebuilt for this experiment.
 
 ## Repository lifecycle
 
@@ -99,20 +109,13 @@ Installing or observing v0.5.8 must not implicitly reset Browser Profiles, websi
 - Diagnostics authorization PR #152: `MERGED`.
 - Diagnostics implementation PR #153: `MERGED`.
 - v0.5.8 release PR #154: `MERGED`.
+- Observation closeout/corrective PRs #155 / #156: `MERGED`.
 - Public release `v0.5.8`: `PUBLISHED / VERIFIED`.
-- Current task is no longer a construction/release task; it is observation-only.
+- At reconciliation time, open PR count was `0`.
+- The new task is diagnostic-experiment authorization only; no product implementation or release disposition has yet been established.
 
-## Runtime observation
+## Next gate
 
-Use v0.5.8 normally for an observation period.
+Implement the smallest B variant under `CURRENT_TASK.md`, verify the conditional suppression without changing product semantics, then run bounded real-runtime observation on the affected Mac and preserve any fresh `.ips` / runtime diagnostics.
 
-If a fresh slowdown, stall, WebContent termination, Attention abnormality, or focus-restore anomaly occurs, preserve/export Runtime Diagnostics before reload/reset/restart when practical and record:
-
-1. approximate incident time;
-2. affected Slot / website;
-3. what was happening immediately before the symptom;
-4. whether reload/reset/restart recovered it.
-
-Do not infer root cause merely because a recovery action works. Reload/reset/restart remains evidence about a recovery boundary only.
-
-No product/runtime mutation is authorized by observation alone. A follow-on fix requires a new or reconciled engineering task supported by the fresh incident evidence.
+Do not merge a production behavior change or publish a release from this task. The experiment ends at evidence collection and interpretation unless a separately reconciled task authorizes a production fix.
