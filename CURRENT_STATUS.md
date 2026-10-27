@@ -1,14 +1,14 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-26
+**Status date:** 2026-10-27
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: GOVERNANCE CLOSEOUT / BOUNDED CI-TEST CORRECTIVE**
+**MODE: GOVERNANCE CLOSEOUT / MERGE AUTHORIZED**
 
-Current task: `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` — `ACTIVE / BOUNDED CI-TEST CORRECTIVE`
+Current task: `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001` — `TERMINAL / ACCEPTED`
 
 ## Current verified baseline
 
@@ -18,7 +18,7 @@ PUBLIC_BUILD=25
 RELEASE_STATE=PUBLISHED / VERIFIED
 ACCEPTED_SEMANTIC_IMPLEMENTATION=b6d9e6841da92033dbc2f5fbd5c325915e1e3864
 DELIVERY_PR=#153
-LITERAL_PR_HEAD=914a6e80c0a6aa847b24ccd88cdb2c0daa8955b4
+LAST_CORRECTIVE_CI_HEAD=7f1f9e76d66776e8772376375034ff96f85c7080
 ROOT_CAUSE=UNKNOWN
 ```
 
@@ -46,11 +46,14 @@ Final accepted semantic head: `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`
 Verified evidence:
 
 ```text
-FOCUSED_ATTENTION=95 PASS / 0 FAIL
-FULL_LOCAL_SUITE=1382 PASS / 0 FAIL
-MACOS_CI_RUN=40335936727 / #1131 / SUCCESS
+CORRECTIVE_HEAD=7f1f9e76d66776e8772376375034ff96f85c7080
+FOCUSED_SINGLE_TEST=1 PASS / 0 FAIL
+FOCUSED_REPETITION=20/20 PASS
+WEBFOCUSADAPTERTESTS=26 PASS / 0 FAIL
+FULL_LOCAL_SUITE=1382 EXECUTED / 0 FAIL
+MACOS_CI_RUN=40426931567 / SUCCESS
 REQUIRED_ARM64_JOB=SUCCESS
-QA_DMG_RUN=40335936732 / #525 / SUCCESS
+QA_DMG_RUN=40426931534 / SUCCESS
 FRESH_CONTEXT_AUDIT=PASS
 UNRESOLVED_BLOCKERS=NONE
 ```
@@ -75,11 +78,11 @@ WEB_CONTENT_PROCESS_MEMORY_ATTRIBUTION=unavailable_public_api
 
 The diagnostics work does not claim to have found or fixed the historical runtime root cause. `ROOT_CAUSE=UNKNOWN` is intentionally preserved until a future real incident provides causal evidence.
 
-## Bounded CI/test corrective
+## CI stability corrective closeout
 
-The terminal closeout is temporarily reopened within the same Task solely for `TEST_ONLY_CI_STABILIZATION`. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`. This corrective may change only `CURRENT_TASK.md`, `CURRENT_STATUS.md` and the named regression test; production source, recovery policy, runtime ownership, Attention semantics, persistence, profiles, sessions, CI workflow and product behavior remain out of scope.
+The same-Task `TEST_ONLY_CI_STABILIZATION` is complete. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`; the only intervening difference is `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`.
 
-The current blocker is a flaky WebKit test fixture URL-timing dependency in `WebFocusAdapterTests.testStallTerminationRecoveryClosesSameIncidentWhenRuntimeIsHealthy()`. Merge remains blocked until the new literal PR head passes the required macOS arm64 CI.
+The flaky test was caused by WebKit runner timing leaving `WKWebView.url` unavailable when the production supported-ChatGPT admission guard ran. A test-target-only `WKWebView` fixture now returns a deterministic supported ChatGPT URL while the real production liveness method and incident assertions remain in use. No production source or CI workflow changed.
 
 ## Repository lifecycle
 
@@ -91,8 +94,8 @@ The current blocker is a flaky WebKit test fixture URL-timing dependency in `Web
 
 ## Closeout disposition
 
-The prior closeout authorization is retained as historical evidence, but is suspended for this bounded corrective. The PR must not merge until the corrective has passed its focused repetition, full-suite and exact-literal-head CI gates.
+The prior closeout authorization is restored after the corrective passed its focused repetition, full-suite and exact-literal-head CI gates.
 
-PR #153 remains the existing delivery vehicle. No new PR is authorized. Its merge disposition is `BLOCKED_PENDING_LITERAL_FINAL_HEAD_CI`.
+PR #153 remains the existing delivery vehicle. No new PR is authorized. Its merge disposition is `MERGE AUTHORIZED`; this execution did not merge it.
 
-After the corrective gates pass, the controls may be returned to `TERMINAL / ACCEPTED / MERGE AUTHORIZED`, recording that the only intervening difference was `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`. Any subsequent product/runtime engineering work requires a new `CURRENT_TASK.md` authorization.
+Any subsequent product/runtime engineering work requires a new `CURRENT_TASK.md` authorization.

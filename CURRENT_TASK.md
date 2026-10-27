@@ -2,32 +2,32 @@
 
 **Task ID:** `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001`
 **Title:** Complete incident-oriented diagnostics for known runtime failures
-**Status:** `ACTIVE / BOUNDED CI-TEST CORRECTIVE`
-**Mode:** `EXECUTE`
+**Status:** `TERMINAL / ACCEPTED / MERGE AUTHORIZED`
+**Mode:** `CLOSEOUT`
 **Task class:** `DIAGNOSTICS / RUNTIME OBSERVABILITY`
 **Original authorized baseline:** `main@547fa103536a0e33bdea7aa21c5d5e5faaaf3bb7`
 **Accepted semantic implementation:** `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`
 **Delivery PR:** `#153`
-**Current literal PR head:** `914a6e80c0a6aa847b24ccd88cdb2c0daa8955b4`
+**Last corrective CI-verified head:** `7f1f9e76d66776e8772376375034ff96f85c7080`
 **Root cause:** `UNKNOWN`
 
-## Bounded CI/test corrective authorization
+## CI stability corrective closeout
 
-This is a same-Task, test-only stabilization corrective for the terminal closeout blocker. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`; this corrective must not reopen product implementation scope.
+The same-Task test-only stabilization corrective is complete. The accepted production semantic implementation remains `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`; the only intervening difference is `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`.
 
 Allowed changes are limited to `CURRENT_TASK.md`, `CURRENT_STATUS.md` and `FloatTabsTests/WebFocusAdapterTests.swift`. Production source under `FloatTabs/**`, recovery policy, Slot/runtime ownership, Attention semantics, timeout thresholds, Browser Profiles, persistence, sessions, user data, CI workflows, versioning and release behavior are prohibited.
 
-Merge remains `BLOCKED` until the new literal final head passes the required macOS arm64 CI. The accepted semantic identity and historical runtime `ROOT_CAUSE=UNKNOWN` must be preserved.
+The corrective head passed the required literal-head macOS arm64 CI and QA DMG. The accepted semantic identity and historical runtime `ROOT_CAUSE=UNKNOWN` are preserved.
 
 ## Final disposition
 
 The bounded diagnostics implementation is complete and accepted. The final fresh-context audit returned `PASS` after two corrective rounds, and no blocking implementation finding remains.
 
-The closeout is temporarily suspended by `FT-RUNTIME-INCIDENT-DIAGNOSTICS-001-CI-STABILITY-CORRECTIVE-03` for one bounded XCTest fixture-stability correction. This does not alter the accepted production semantics.
+`FT-RUNTIME-INCIDENT-DIAGNOSTICS-001-CI-STABILITY-CORRECTIVE-03` completed one bounded XCTest fixture-stability correction. This did not alter the accepted production semantics.
 
 The user explicitly authorized governance closeout, Ready-for-review transition, and merge on 2026-10-26. This closeout authorization supersedes the construction-phase prohibition on merging under the active implementation task. It does **not** authorize a version bump, release, distribution, Browser Profile/session reset, or any product-data mutation.
 
-Control-only changes to `CURRENT_STATUS.md` / `CURRENT_TASK.md` after the accepted semantic implementation are `CONTROL_ONLY_DRIFT` under `AGENTS.md`; they do not invalidate the accepted implementation evidence. The literal final PR head must still pass the repository-required `Build & Test (Apple Silicon arm64)` check before merge.
+Control-only changes to `CURRENT_STATUS.md` / `CURRENT_TASK.md` after the accepted semantic implementation are `CONTROL_ONLY_DRIFT` under `AGENTS.md`; they do not invalidate the accepted implementation evidence. The corrective literal head `7f1f9e76d66776e8772376375034ff96f85c7080` passed the repository-required `Build & Test (Apple Silicon arm64)` check before this control-only closeout.
 
 ## Accepted outcome
 
@@ -48,17 +48,17 @@ Accepted semantic head: `b6d9e6841da92033dbc2f5fbd5c325915e1e3864`
 
 Observed verification:
 
-- focused Attention suite: `95 passed / 0 failed` on the final corrective;
-- full local suite: `1,382 passed / 0 failed`;
-- exact-semantic-head macOS CI run `40335936727` / run `#1131`: `SUCCESS`;
-- required `Build & Test (Apple Silicon arm64)`: `SUCCESS`;
-- exact-semantic-head QA DMG run `40335936732` / run `#525`: `SUCCESS`;
+- named flaky test: `1 passed / 0 failed`;
+- named flaky test repetition: `20/20 passed`;
+- full `WebFocusAdapterTests`: `26 passed / 0 failed`;
+- full local suite: `1,382 executed / 0 failed`;
+- corrective-head macOS CI run `40426931567`: `SUCCESS`;
+- corrective-head required `Build & Test (Apple Silicon arm64)`: `SUCCESS`;
+- corrective-head QA DMG run `40426931534`: `SUCCESS`;
 - third fresh-context evidence audit: `PASS`;
 - unresolved blocking findings: `NONE`.
 
-The final literal PR head may advance only through this governance closeout control update. Required CI must be reread on that literal head before merge.
-
-The corrective must establish a deterministic test-only supported ChatGPT URL fixture for `testStallTerminationRecoveryClosesSameIncidentWhenRuntimeIsHealthy()` while continuing to call the real `SlotNavigationObserver.captureCrossWorldLivenessOnce()` and asserting the same incident ID and `healthy_current_runtime` closure. No sleep, retry, skip, weakened assertion, production URL eligibility change or timeout change is authorized.
+No sleep, retry, skip, weakened assertion, production URL eligibility change or timeout change was introduced.
 
 ## Preserved safety boundaries
 
@@ -82,7 +82,7 @@ The historical runtime root cause remains unknown. Diagnostics improve future in
 
 ## Merge closeout gate
 
-PR #153 remains merge-blocked during this corrective. It may be marked Ready and merged only after all of the following are true for its new literal final head:
+PR #153 may be merged only when all of the following remain true for its observed literal head:
 
 1. only the accepted diagnostics implementation plus this control-only closeout drift is present;
 2. base remains `main` with no material authority drift;
@@ -90,7 +90,7 @@ PR #153 remains merge-blocked during this corrective. It may be marked Ready and
 4. required `Build & Test (Apple Silicon arm64)` succeeds on the literal final PR head;
 5. no new blocking review finding exists.
 
-The corrective-specific gates are:
+The corrective-specific gates were observed as:
 
 1. the named single test passes once;
 2. the named single test passes `20/20` consecutive repetitions without skip;
@@ -99,8 +99,8 @@ The corrective-specific gates are:
 5. production source and CI workflow are unchanged;
 6. exact-head macOS arm64 CI succeeds, with QA DMG recorded if automatically triggered.
 
-After those gates are observed, mark PR #153 Ready and merge it using its observed exact head identity. Do not release under this task.
+PR #153 is already Ready; no merge was performed in this execution. Do not release under this task.
 
 ## Terminal state
 
-After the corrective gates pass, this task may return to `TERMINAL / ACCEPTED / MERGE AUTHORIZED`, with the difference recorded as `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`. No follow-on product/runtime engineering work is authorized by this file; any new product/runtime task requires a new `CURRENT_TASK.md` authorization.
+This task is `TERMINAL / ACCEPTED / MERGE AUTHORIZED`, with the difference recorded as `TEST_ONLY_CI_STABILIZATION + CONTROL_ONLY_DRIFT`. No follow-on product/runtime engineering work is authorized by this file; any new product/runtime task requires a new `CURRENT_TASK.md` authorization.
