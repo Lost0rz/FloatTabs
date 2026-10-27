@@ -230,7 +230,7 @@
 		B0000000000000000000005A /* SpeechContentCleanerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechContentCleanerTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005B /* SpeechSegmenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSegmenterTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005C /* SpeechQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechQueueTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinator.swift; sourceTree = "<group>"; };
+		B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinatorTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000005E /* MathSpeechNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizer.swift; sourceTree = "<group>"; };
 		B0000000000000000000005F /* MathSpeechNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizerTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000060 /* AttentionSoundAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundAssetStore.swift; sourceTree = "<group>"; };
@@ -240,12 +240,12 @@
 		B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTUnreadResponseCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000065 /* UnreadResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000066 /* SpeechPlaybackSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionController.swift; sourceTree = "<group>"; };
-		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
-		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
-		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006A /* CalibreSpeechCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreSpeechCoordinator.swift; sourceTree = "<group>"; };
 		B0000000000000000000006B /* CalibreReaderBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderBridge.swift; sourceTree = "<group>"; };
 		B0000000000000000000006C /* CalibreReaderSpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderSpeechTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
+		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsPrivacyTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTraceTests.swift; sourceTree = "<group>"; };
