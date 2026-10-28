@@ -16,6 +16,7 @@ Current task: `FT-SPEECH-RETIRE-001` — `ACTIVE / AUTHORIZED`
 REMOTE_MAIN=fbdcdaa4e1d1dfa953cea6a9ee2078d4fce827e5
 IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
 WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
+WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -108,107 +109,17 @@ VOICE_INPUT_FOCUS_UNCHANGED=YES
 WEB_RUNTIME_SEMANTICS_UNCHANGED=YES
 ```
 
-WP1 removed active Speech ownership from App composition, Panel and Slot lifecycle while preserving Attention, media protection, RemoteOrbit voice focus and Web runtime behavior.
-
-## Work Package 2 — PRE_AUDIT
-
-**PRE_AUDIT: PASS**
-
-Audit target: `5c82aee8e4bbdf75ca64754b9fffe0875ee3212c`.
-
-### Runtime inventory
-
-`FloatTabs/Speech/` contains the current Speech implementation domain:
-
-```text
-AssistantSpeechCoordinator.swift
-CalibreSpeechCoordinator.swift
-MathSpeechNormalizer.swift
-SpeechContentCleaner.swift
-SpeechPlaybackSessionController.swift
-SpeechQueue.swift
-SpeechSegmenter.swift
-SpeechService.swift
-SpeechSettings.swift
-SpeechSourceRouting.swift
-```
-
-`SpeechService` is the `AVSpeechSynthesizer` transport owner, but WP1 removed its App/Panel production construction path.
-
-`SpeechSettings.swift` still contains `SpeechPreferencesStore` and the live `SpeechVoiceCatalog`. `SpeechVoiceCatalog` currently performs eager voice enumeration and, on supported macOS versions, registers `AVSpeechSynthesizer.availableVoicesDidChangeNotification`.
-
-`GlobalSettingsController` still constructs its default Speech preferences/catalog so the retained WP4 Settings surface continues to create the voice catalog even after App-level Speech ownership was removed.
-
-### Calibre read-aloud boundary
-
-`CalibreReaderBridge` is a read-aloud-specific WebKit bridge. It owns reader-route/runtime detection, reading-unit text extraction, CFI/relocation state and page advance behavior.
-
-`WebViewPool` currently creates and installs a `CalibreReaderBridge` for every WebView, stores it per Slot, forwards navigation commit/finish/recovery boundaries to it, and invalidates it with the WebView runtime. This is active Calibre read-aloud runtime and is in WP2 REMOVE scope.
-
-Normal Calibre browsing does not require this bridge.
-
-Generic background-media behavior is independent and remains owned by WebView/Slot lifecycle through:
-
-```text
-pauseAllMediaPlayback
-requestMediaPlaybackState
-media protection / BackgroundMediaPolicy
-```
-
-These paths must remain unchanged.
-
-### Package-boundary resolution
-
-The Xcode project uses explicit source/test build references. Physical deletion of all Speech source files, dedicated tests and `project.pbxproj` references in WP2 would necessarily overlap the separately authorized WP5 project/test cleanup package.
-
-Therefore WP2 means **remove active production runtime ownership/wiring**, while WP5 remains responsible for final physical source/test/project-reference deletion and repository-wide residual-reference cleanup.
-
-Compiled-but-unowned Speech types may temporarily remain only where required for later WP3/WP4 compatibility surfaces or WP5 cleanup. They must not retain active production runtime behavior prohibited by WP2 acceptance.
-
-### WP2 expected edits
-
-```text
-FloatTabs/Speech/SpeechSettings.swift
-  - remove live voice-change observer ownership
-  - remove eager production-start voice enumeration
-  - preserve persisted keys without migration/deletion
-  - explicit temporary refresh support may remain only for the WP4 Settings compatibility surface
-
-FloatTabs/Web/WebViewPool.swift
-  - remove CalibreReaderBridge production ownership/wiring
-  - remove its callbacks/storage/accessor/construction/install/attach
-  - remove navigation/recovery/reset/invalidation hooks used only by Calibre read-aloud
-
-Directly impacted tests only as required for WP2 semantics, including likely:
-FloatTabsTests/SpeechVoiceDefaultsTests.swift
-FloatTabsTests/WebViewPoolTests.swift
-focused lifecycle/background-media tests
-```
-
-### Explicit WP2 non-edits
-
-```text
-Do not delete FloatTabs/Speech/* physical files yet — WP5.
-Do not delete Speech-only test files or Xcode project references yet — WP5.
-Do not remove Speech Settings UI, Rail controls, commands or shortcuts — WP4.
-Do not slim ChatGPTResponseBridge / response extraction / speech-follow machinery — WP3.
-Do not change Attention / Unread.
-Do not change RemoteOrbit voice-input focus.
-Do not change generic background-media policy or media protection.
-Do not change normal Calibre browsing/navigation.
-Do not change WebView ownership/residency/recovery except removing Calibre read-aloud hooks.
-Do not mutate Profiles, website sessions/cookies, Slot data, backups, recovery data or unrelated preferences.
-```
-
-### WP2 implementation gate
+## Work Package 2 — COMPLETE
 
 ```text
 PRE_AUDIT=PASS
-IMPLEMENT=AUTHORIZED
-POST_AUDIT=REQUIRED_BEFORE_WP3
+IMPLEMENT=COMPLETE
+POST_AUDIT=PASS
+EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
+AUDIT_INDEPENDENCE=FRESH_CONTEXT
 ```
 
-WP2 POST_AUDIT must prove:
+Verified WP2 acceptance:
 
 ```text
 AVSPEECHSYNTHESIZER_ACTIVE_REFERENCES=0
@@ -217,24 +128,32 @@ VOICE_ENUMERATION_OBSERVERS_ACTIVE_REFERENCES=0
 CALIBRE_READ_ALOUD_ACTIVE_REFERENCES=0
 BACKGROUND_MEDIA_POLICY_PRESERVED=YES
 NORMAL_CALIBRE_BROWSING_PRESERVED=YES
+UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
 
-“ACTIVE_REFERENCES” means live production ownership/call paths. Final physical source/test/project-reference removal remains a WP5 gate.
+WP2 removed eager voice enumeration and the voice-change observer from `SpeechVoiceCatalog`. Explicit `refresh()` remains only for the temporary WP4 Settings compatibility surface.
+
+`WebViewPool` no longer owns, creates, installs, attaches, stores, forwards lifecycle events to, recovers, or invalidates `CalibreReaderBridge`. The physical bridge/source/test/project files remain intentionally for WP5 cleanup only.
+
+Generic background-media handling remains independent through `pauseAllMediaPlayback`, `requestMediaPlaybackState`, Slot lifecycle media protection and `BackgroundMediaPolicy`. Normal Calibre browsing continues through the ordinary WebView/navigation path without the read-aloud bridge.
+
+Physical Speech source/test/Xcode-reference cleanup remains WP5. Speech Settings/Rail/commands remain WP4. ChatGPT response extraction/follow/locator slimming remains WP3.
 
 ## Verification state
 
-At WP1 exact head `5c82aee8e4bbdf75ca64754b9fffe0875ee3212c`:
+At WP2 exact head `43b507774a6208189ad6af2baa9740bf4e280d28`:
 
 ```text
-LOCAL_FULL_XCTEST=1369 tests / 3 skipped / 0 failures (reported executor evidence)
-QA_DMG_548=SUCCESS
-MACOS_CI_1165=IN_PROGRESS at latest observation
+LOCAL_FOCUSED_XCTEST=143 tests / 0 failures (reported executor evidence)
+LOCAL_FULL_XCTEST=1370 tests / 3 skipped / 0 failures (reported executor evidence)
+MACOS_CI_1167=IN_PROGRESS at latest observation
+QA_DMG_550=IN_PROGRESS at latest observation
 ```
 
-The CI state above is not promoted beyond the latest observed status.
+Remote CI is not promoted beyond the latest observed state and remains a later PR/merge gate.
 
 ## Next gate
 
-Implement **Work Package 2 only** on `codex/ft-speech-retire-001`, run focused macOS verification and full tests as appropriate, push the exact implementation head, then perform an independent exact-head WP2 POST_AUDIT before beginning Work Package 3.
+Start **Work Package 3 PRE_AUDIT only**. Separate Speech-only ChatGPT response extraction/follow/locator behavior from preserved stable response identity, status/generation, trusted interaction, Unread and Attention semantics before any WP3 implementation.
 
-No release is authorized by this task merely because the retirement implementation completes.
+Do not enter WP3 IMPLEMENT until that PRE_AUDIT passes. No release is authorized merely because the retirement implementation completes.
