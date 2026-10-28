@@ -17,7 +17,7 @@ REMOTE_MAIN=fbdcdaa4e1d1dfa953cea6a9ee2078d4fce827e5
 IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
 WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
-WP3_PRE_AUDIT_TARGET=f94f5181cfda963168884a1f5e93689c03bd566c
+WP3_EXACT_HEAD=29810e65d700901baa0737e94bcfbf6ba63390d0
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -141,141 +141,17 @@ MACOS_CI_1168=SUCCESS
 QA_DMG_551=SUCCESS
 ```
 
-## Work Package 3 — PRE_AUDIT
-
-**PRE_AUDIT: PASS**
-
-Audit target: `f94f5181cfda963168884a1f5e93689c03bd566c`.
-
-### Shared response bridge boundary
-
-The current `ChatGPTResponseBridge` still mixes two distinct responsibilities:
-
-1. retired Speech-only response-body extraction/follow behavior;
-2. preserved document identity, latest-response identity/status and trusted page interaction behavior used by Unread.
-
-Speech-only native/runtime machinery still present in the bridge includes:
-
-```text
-ChatGPTResponseExtracting
-ChatGPTResponseFollowing
-PendingRequest / pendingRequests
-extractLatest / beginExtraction
-response payload delivery/parsing
-scrollToSpeechBlock / scrollScript
-SpeechSourceLocator-based follow requests
-Speech-only onManualScroll callback path
-Speech-only external runtime-reset callback path
-```
-
-The injected response script still contains Speech-only body/locator machinery including:
-
-```text
-responseKeys
-locatorRegistry
-responseLocatorKeys
-responseIDFor
-structuredBlocks and body-text/math/code/table extraction
-MAX_BLOCKS / MAX_RESPONSE_GROUPS / MAX_BLOCK_TEXT limits
-postEmpty
-__floatTabsChatGPTResponseRequestLatestV3
-__floatTabsScrollToSpeechBlockV3
-programmaticScrollGuardUntil
-Speech extraction diagnostics
-```
-
-These are WP3 REMOVE scope.
-
-### Mandatory preserved bridge behavior
-
-The following bridge behavior is not Speech and must remain:
-
-```text
-ChatGPTResponseIdentity
-ChatGPTResponseIdentity.sharedDOMHelperSource
-documentReady / current document token handshake
-snapshotLatestResponseStatus
-ChatGPTResponseStatusSnapshot
-__floatTabsChatGPTResponseIdentitySnapshotV1
-trusted manual scroll interaction evidence
-trusted assistant pointer interaction evidence
-ChatGPTTrustedInteractionEvent
-response identity + responseComplete carried with trusted interaction
-host / protocol / main-frame / attached-WebView trust admission
-runtime replacement / invalidation resetting current document identity
-```
-
-`PanelController.requestLatestResponseHandledSnapshot` uses `snapshotLatestResponseStatus` to reconcile late completed response identity with Unread. `PanelController.handleTrustedInteraction` uses the identity-bearing trusted interaction event to record/acknowledge handled responses. These are hard PRESERVE paths.
-
-`ChatGPTAttentionBridge` also injects `ChatGPTResponseIdentity.sharedDOMHelperSource` and uses `latestAssistantResponseRoot`, `canonicalResponseIdentityFor` and `isGenerating` for Attention response identity. Therefore WP3 must not delete or semantically weaken the shared identity/root-detection helper merely because body extraction is retired.
-
-The JavaScript `manualScroll` event itself must remain: it is trusted Unread interaction evidence. Only its separate Speech-follow callback and programmatic Speech-scroll machinery are removed.
-
-### Compile-only compatibility boundary until WP5
-
-The physical Speech source/tests remain compiled until WP5. `AssistantSpeechCoordinator` still references `ChatGPTResponseExtracting`, `ChatGPTResponseFollowing`, `ChatGPTSpeechOwnershipCategory` and related Speech extraction models even though WP1/WP2 removed all production ownership.
-
-Therefore WP3 may temporarily retain **compile-only type/protocol/model declarations** required by those unowned Speech files. They must not remain implemented by `ChatGPTResponseBridge`, reachable from `WebViewPool`, or backed by response-body/locator JavaScript runtime behavior. Their physical removal and Speech-only test/project-reference cleanup remain WP5.
-
-If preserving compilation would require reactivating extraction/follow runtime or editing the Speech domain into a new ownership model, STOP instead of widening WP3.
-
-### Expected WP3 edits
-
-```text
-FloatTabs/Web/ChatGPTResponseBridge.swift
-  - remove active extraction/follow conformance and implementation
-  - remove pending extraction request machinery and payload delivery path
-  - remove Speech-only manual-scroll/runtime-reset callback ownership
-  - preserve status snapshot, document identity and trusted interaction admission
-
-FloatTabs/Web/ChatGPTResponseExtraction.swift
-  - remove response-body/structured-block extraction runtime
-  - remove locator registries and Speech scroll-to-block runtime
-  - remove Speech extraction diagnostics from injected JavaScript
-  - preserve ChatGPTResponseIdentity/shared DOM helper and the minimal response script required for documentReady, status identity and trusted interactions
-  - replace any preserved event-version dependency on ChatGPTResponsePayload with a neutral bridge/protocol version owner rather than keeping the payload as runtime authority
-
-FloatTabs/Web/WebViewPool.swift
-  - remove SpeechManualScrollHandler / onSpeechManualScroll and its bridge injection
-  - remove obsolete external response-runtime-reset forwarding if no preserved production consumer exists
-  - preserve response bridge ownership/lifecycle for Unread identity/status/trusted interaction
-
-Directly impacted shared tests may be edited to remove retired runtime assertions and strengthen preserved identity/status/trusted-interaction coverage.
-```
-
-Likely shared test surfaces include:
-
-```text
-FloatTabsTests/ChatGPTResponseBridgeTests.swift
-FloatTabsTests/ChatGPTResponseExtractionTests.swift
-FloatTabsTests/WebViewPoolTests.swift
-FloatTabsTests/UnreadResponseTests.swift
-FloatTabsTests/WebAttentionCrossFeatureTests.swift
-```
-
-Do not physically delete shared test files in WP3. Dedicated Speech-only files/project references remain WP5.
-
-### Explicit WP3 non-edits
-
-```text
-Do not change ChatGPT Attention business state or generation semantics.
-Prefer no production edit to ChatGPTAttentionBridge.swift; its shared identity helper contract must remain equivalent.
-Do not change PanelController Unread acknowledgement/reconciliation business rules except unavoidable compile adaptation; none is currently identified.
-Do not remove trusted manual-scroll or assistant-pointer evidence.
-Do not enter Rail/Settings/commands/shortcuts work — WP4.
-Do not physically delete Speech source/test/Xcode project references — WP5.
-Do not change RemoteOrbit voice-input focus, Ready Alert, background media, Calibre browsing, WebView residency/navigation/recovery, Profiles, sessions or user data.
-```
-
-### WP3 implementation gate
+## Work Package 3 — COMPLETE
 
 ```text
 PRE_AUDIT=PASS
-IMPLEMENT=AUTHORIZED
-POST_AUDIT=REQUIRED_BEFORE_WP4
+IMPLEMENT=COMPLETE
+POST_AUDIT=PASS
+EXACT_HEAD=29810e65d700901baa0737e94bcfbf6ba63390d0
+AUDIT_INDEPENDENCE=FRESH_CONTEXT
 ```
 
-WP3 POST_AUDIT must prove:
+Verified WP3 acceptance:
 
 ```text
 SPEECH_BODY_EXTRACTION=REMOVED
@@ -285,22 +161,33 @@ STABLE_RESPONSE_IDENTITY=PRESERVED
 UNREAD_RECONCILIATION=PRESERVED
 TRUSTED_INTERACTION=PRESERVED
 ATTENTION_STATUS=PRESERVED
+UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
+
+WP3 removed the production `ChatGPTResponseExtracting` / `ChatGPTResponseFollowing` conformance, pending extraction request machinery, response-body delivery path, Speech locator/scroll runtime, Speech-only manual-scroll callback and external response-runtime-reset forwarding. `ChatGPTResponseBridge` now owns only current-document identity, latest response identity/status and trusted page interaction transport required by preserved product behavior.
+
+The injected response script no longer contains the retired response-body/structured-block extraction, locator registry, `__floatTabsChatGPTResponseRequestLatestV3`, `__floatTabsScrollToSpeechBlockV3`, programmatic Speech-scroll guard, or Speech extraction diagnostics. Trusted manual-scroll and assistant-pointer events remain identity-bearing, content-free interaction evidence.
+
+`ChatGPTResponseIdentity.sharedDOMHelperSource` remains semantically unchanged from the WP3 pre-implementation baseline and continues to be shared with `ChatGPTAttentionBridge`. `PanelController` Unread acknowledgement/reconciliation business rules were not modified; `snapshotLatestResponseStatus` and identity-bearing trusted-interaction handling remain the active bridge into Unread.
+
+Compile-only extraction/follow protocols and payload/model declarations remain temporarily only because the already-unowned Speech source/tests are still compiled until WP5. The production bridge does not conform to those protocols and the injected JavaScript no longer implements their runtime behavior.
 
 ## Verification state
 
-Latest fully verified semantic/control baseline before WP3 implementation:
+At WP3 exact implementation head `29810e65d700901baa0737e94bcfbf6ba63390d0`:
 
 ```text
-HEAD=f94f5181cfda963168884a1f5e93689c03bd566c
-MACOS_CI_1168=SUCCESS
-QA_DMG_551=SUCCESS
+TDD_RED=31 tests / 26 failures on pre-change implementation (executor evidence)
+LOCAL_FOCUSED_XCTEST=406 tests / 0 failures (executor evidence)
+LOCAL_FULL_XCTEST=1321 tests / 0 failures / TEST SUCCEEDED (executor evidence)
+MACOS_CI_1183=QUEUED at latest observation
+QA_DMG_566=QUEUED at latest observation
 ```
 
-The subsequent `CURRENT_STATUS.md` commits only record the WP3 audit/handoff state and do not change production semantics.
+Remote CI is not promoted beyond the latest observed state. The queued exact-head workflows are not a CODE_DIFF WP3 post-audit blocker; they remain later PR/merge/final-acceptance host gates.
 
 ## Next gate
 
-Implement **Work Package 3 only** on `codex/ft-speech-retire-001`, run focused bridge/Unread/Attention tests plus the full required XCTest suite, push the exact implementation head, then perform an independent exact-head WP3 POST_AUDIT before beginning Work Package 4.
+Start **Work Package 4 PRE_AUDIT only**. Inventory and separate Speech Rail controls, tab badges/state, Settings IA/UI, previews, commands and shortcut bindings from preserved Ready Alert and Attention/Unread presentation before any WP4 implementation.
 
-No release is authorized merely because the retirement implementation completes.
+Do not enter WP4 IMPLEMENT until that PRE_AUDIT passes. Do not enter WP5 early. No release is authorized merely because the retirement implementation advances.
