@@ -15,24 +15,19 @@ Current task: `FT-SPEECH-RETIRE-001` — `ACTIVE / AUTHORIZED`
 ```text
 REMOTE_MAIN=fbdcdaa4e1d1dfa953cea6a9ee2078d4fce827e5
 IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
-AUTHORIZED_SEMANTIC_BASELINE=7245efa34152036bd9a6406f4cdb20abd432688e
+WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
 FAULTING_SUBSYSTEM=JavaScriptCore
 PREDECESSOR_PR_158=ARCHIVE_ONLY / CLOSED / UNMERGED
 CONTROL_PR_159=MERGED
+IMPLEMENTATION_PR_160=OPEN / DRAFT / UNMERGED
 ```
 
 FloatTabs v0.5.8 / Build 26 remains the current public release. No production fix has been accepted for the repeated WebContent JavaScriptCore crash family.
 
-## Predecessor diagnostic disposition
-
-`FT-WEBCONTENT-JSC-AB-001` is complete as a diagnostic experiment.
-
-The B variant suppressed only the periodic cross-world JavaScript liveness evaluation for inactive Slots while preserving active-Slot probing and normal product/runtime semantics. Supplied runtime evidence reproduced the same JSC/SIGSEGV crash family multiple times with that inactive probe suppressed.
-
-Therefore:
+The predecessor JSC diagnostic established only:
 
 ```text
 INACTIVE_PERIODIC_LIVENESS_PROBE_REQUIRED_FOR_CRASH=NO
@@ -41,11 +36,9 @@ EXACT_TRIGGER=UNKNOWN
 ROOT_CAUSE=UNKNOWN
 ```
 
-PR #158 is retained only as diagnostic evidence and is closed without merge.
-
 ## Frozen product decision
 
-FloatTabs will retire its built-in **Speech / TTS read-aloud feature end-to-end**. This is a product/runtime simplification decision, not a claim that Speech caused or fixes the JavaScriptCore crash family.
+FloatTabs is retiring built-in **Speech / TTS read-aloud end-to-end** as a product/runtime simplification. This is not a claim that Speech caused or fixes the JavaScriptCore crash family.
 
 ### REMOVE
 
@@ -59,7 +52,7 @@ Speech Rail controls and per-tab speech badges
 Speech Settings / preview / voice catalog
 Speech shortcuts / commands
 Speech-only tests and project references
-Speech-specific shared-bridge code that is not required by preserved features
+Speech-specific shared-bridge code not required by preserved features
 ```
 
 ### PRESERVE
@@ -80,9 +73,9 @@ Persistence / backups / recovery data
 All user data
 ```
 
-Existing Speech preference or shortcut values already stored on user machines are not deleted or migrated. They become inert legacy data once no code reads or writes them.
+Existing persisted Speech preference/shortcut values are not deleted or migrated. They become inert legacy data after no production code reads or writes them.
 
-## Frozen execution model
+## Execution model
 
 Every package follows:
 
@@ -95,77 +88,153 @@ PRE_AUDIT
 
 A failed or ambiguous post-audit is a STOP condition.
 
-Planned packages:
+## Work Package 1 — COMPLETE
 
-1. remove Speech ownership/glue from App composition and Panel lifecycle;
-2. remove Speech domain runtime and Calibre read-aloud bridge while preserving background media;
-3. slim the shared ChatGPT response bridge to stable identity / trusted interaction / Unread needs only;
-4. remove Speech product surfaces: Rail, badges, Settings, commands and shortcuts;
-5. remove Speech-only project/test references and reconcile shared regression tests;
-6. run full cross-feature and real-runtime acceptance, then record the resulting runtime baseline.
+```text
+PRE_AUDIT=PASS
+IMPLEMENT=COMPLETE
+POST_AUDIT=PASS
+EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
+```
 
-## Work Package 1 — PRE_AUDIT
+Verified WP1 acceptance:
+
+```text
+NO_ACTIVE_SPEECH_OWNER_IN_APP_COMPOSITION=YES
+NO_ACTIVE_SPEECH_OWNER_IN_PANEL=YES
+NO_SPEECH_SLOT_PROTECTION_HOOK=YES
+ATTENTION_UNCHANGED=YES
+VOICE_INPUT_FOCUS_UNCHANGED=YES
+WEB_RUNTIME_SEMANTICS_UNCHANGED=YES
+```
+
+WP1 removed active Speech ownership from App composition, Panel and Slot lifecycle while preserving Attention, media protection, RemoteOrbit voice focus and Web runtime behavior.
+
+## Work Package 2 — PRE_AUDIT
 
 **PRE_AUDIT: PASS**
 
-Audit basis: fresh read-only review of the authorized semantic baseline plus the control-only merge of PR #159. The merge changed only `CURRENT_STATUS.md` / `CURRENT_TASK.md`; production source identity for WP1 remains equivalent to the authorized semantic baseline.
+Audit target: `5c82aee8e4bbdf75ca64754b9fffe0875ee3212c`.
 
-### Established active Speech ownership
+### Runtime inventory
 
-- `AppCoordinator` owns Speech preferences / voice catalog, constructs `SpeechService`, injects Speech dependencies into `PanelController`, and wires Settings speech preview.
-- `PanelController` also has fallback Speech construction, owns `SpeechPlaybackSessionController`, Assistant/Calibre speech coordinators, source adapters and `SpeechCommandRouter`, and synchronizes Speech presentation.
-- `PanelController` wires Calibre Speech into Slot lifecycle through release preparation, inactive callbacks, speech protection and protection-ended restart.
-- `SlotLifecycleCoordinator` includes Speech as a separate proactive-protection dimension alongside media and Attention; Speech protection participates in Warm/Cold release, memory-pressure eligibility and restart-after-protection logic.
-
-### Shared PRESERVE boundaries established
-
-- RemoteOrbit voice-input focus uses the independent Focus/Input path `prepareInputFocusForExternalVoice`; it does not require the TTS owner chain.
-- Attention protection remains an independent Slot lifecycle protection source and has its own restart entry point.
-- Background media / media protection remains independent and must not be removed with Speech protection.
-- Shared Attention/Unread/runtime test files contain both Speech-specific and preserved cases; only directly obsolete Speech composition/lifecycle cases may change in WP1.
-
-### WP1 expected edits
+`FloatTabs/Speech/` contains the current Speech implementation domain:
 
 ```text
-FloatTabs/App/AppCoordinator.swift
-FloatTabs/Panel/PanelController.swift
-FloatTabs/Web/SlotLifecycleCoordinator.swift
-FloatTabsTests/WebAttentionLifecycleTests.swift   # only directly obsolete speech-protection cases / constructor adaptation
-FloatTabsTests/WebAttentionCrossFeatureTests.swift # only directly obsolete Panel speech-owner composition cases / constructor adaptation
+AssistantSpeechCoordinator.swift
+CalibreSpeechCoordinator.swift
+MathSpeechNormalizer.swift
+SpeechContentCleaner.swift
+SpeechPlaybackSessionController.swift
+SpeechQueue.swift
+SpeechSegmenter.swift
+SpeechService.swift
+SpeechSettings.swift
+SpeechSourceRouting.swift
 ```
 
-Additional directly impacted compile-test files may be edited only when required by these signature removals and must remain inside WP1 semantics.
+`SpeechService` is the `AVSpeechSynthesizer` transport owner, but WP1 removed its App/Panel production construction path.
 
-### Explicit WP1 non-edits
+`SpeechSettings.swift` still contains `SpeechPreferencesStore` and the live `SpeechVoiceCatalog`. `SpeechVoiceCatalog` currently performs eager voice enumeration and, on supported macOS versions, registers `AVSpeechSynthesizer.availableVoicesDidChangeNotification`.
+
+`GlobalSettingsController` still constructs its default Speech preferences/catalog so the retained WP4 Settings surface continues to create the voice catalog even after App-level Speech ownership was removed.
+
+### Calibre read-aloud boundary
+
+`CalibreReaderBridge` is a read-aloud-specific WebKit bridge. It owns reader-route/runtime detection, reading-unit text extraction, CFI/relocation state and page advance behavior.
+
+`WebViewPool` currently creates and installs a `CalibreReaderBridge` for every WebView, stores it per Slot, forwards navigation commit/finish/recovery boundaries to it, and invalidates it with the WebView runtime. This is active Calibre read-aloud runtime and is in WP2 REMOVE scope.
+
+Normal Calibre browsing does not require this bridge.
+
+Generic background-media behavior is independent and remains owned by WebView/Slot lifecycle through:
 
 ```text
-Do not delete FloatTabs/Speech/* yet.
-Do not delete CalibreReaderBridge yet.
-Do not slim ChatGPTResponseBridge / response extraction yet.
-Do not remove Rail controls, Settings Speech UI, AppCommand enum cases or shortcut catalog yet except the minimum compile adaptation required after owner removal.
-Do not change Attention business state.
-Do not change RemoteOrbit voice-focus behavior.
-Do not change media protection / background-media policy.
-Do not change WebView ownership, residency thresholds, navigation or recovery.
-Do not mutate Profiles, sessions, cookies, Slot data, backups, recovery data or unrelated preferences.
+pauseAllMediaPlayback
+requestMediaPlaybackState
+media protection / BackgroundMediaPolicy
 ```
 
-### WP1 implementation gate
+These paths must remain unchanged.
+
+### Package-boundary resolution
+
+The Xcode project uses explicit source/test build references. Physical deletion of all Speech source files, dedicated tests and `project.pbxproj` references in WP2 would necessarily overlap the separately authorized WP5 project/test cleanup package.
+
+Therefore WP2 means **remove active production runtime ownership/wiring**, while WP5 remains responsible for final physical source/test/project-reference deletion and repository-wide residual-reference cleanup.
+
+Compiled-but-unowned Speech types may temporarily remain only where required for later WP3/WP4 compatibility surfaces or WP5 cleanup. They must not retain active production runtime behavior prohibited by WP2 acceptance.
+
+### WP2 expected edits
+
+```text
+FloatTabs/Speech/SpeechSettings.swift
+  - remove live voice-change observer ownership
+  - remove eager production-start voice enumeration
+  - preserve persisted keys without migration/deletion
+  - explicit temporary refresh support may remain only for the WP4 Settings compatibility surface
+
+FloatTabs/Web/WebViewPool.swift
+  - remove CalibreReaderBridge production ownership/wiring
+  - remove its callbacks/storage/accessor/construction/install/attach
+  - remove navigation/recovery/reset/invalidation hooks used only by Calibre read-aloud
+
+Directly impacted tests only as required for WP2 semantics, including likely:
+FloatTabsTests/SpeechVoiceDefaultsTests.swift
+FloatTabsTests/WebViewPoolTests.swift
+focused lifecycle/background-media tests
+```
+
+### Explicit WP2 non-edits
+
+```text
+Do not delete FloatTabs/Speech/* physical files yet — WP5.
+Do not delete Speech-only test files or Xcode project references yet — WP5.
+Do not remove Speech Settings UI, Rail controls, commands or shortcuts — WP4.
+Do not slim ChatGPTResponseBridge / response extraction / speech-follow machinery — WP3.
+Do not change Attention / Unread.
+Do not change RemoteOrbit voice-input focus.
+Do not change generic background-media policy or media protection.
+Do not change normal Calibre browsing/navigation.
+Do not change WebView ownership/residency/recovery except removing Calibre read-aloud hooks.
+Do not mutate Profiles, website sessions/cookies, Slot data, backups, recovery data or unrelated preferences.
+```
+
+### WP2 implementation gate
 
 ```text
 PRE_AUDIT=PASS
 IMPLEMENT=AUTHORIZED
-POST_AUDIT=REQUIRED_BEFORE_WP2
+POST_AUDIT=REQUIRED_BEFORE_WP3
 ```
 
-## Performance / crash interpretation
+WP2 POST_AUDIT must prove:
 
-Expected consequences of the complete retirement include fewer startup objects/observers, removal of `AVSpeechSynthesizer` and voice enumeration, fewer Speech-specific JavaScript evaluations and DOM traversals, removal of speech locator strong references, less Panel cross-domain glue, and smaller UI/test maintenance surface.
+```text
+AVSPEECHSYNTHESIZER_ACTIVE_REFERENCES=0
+SPEECH_QUEUE_STATE_MACHINE_ACTIVE_REFERENCES=0
+VOICE_ENUMERATION_OBSERVERS_ACTIVE_REFERENCES=0
+CALIBRE_READ_ALOUD_ACTIVE_REFERENCES=0
+BACKGROUND_MEDIA_POLICY_PRESERVED=YES
+NORMAL_CALIBRE_BROWSING_PRESERVED=YES
+```
 
-These are architectural/runtime-surface reductions only. Do not report the JSC/SIGSEGV root cause as solved unless separate evidence proves it.
+“ACTIVE_REFERENCES” means live production ownership/call paths. Final physical source/test/project-reference removal remains a WP5 gate.
+
+## Verification state
+
+At WP1 exact head `5c82aee8e4bbdf75ca64754b9fffe0875ee3212c`:
+
+```text
+LOCAL_FULL_XCTEST=1369 tests / 3 skipped / 0 failures (reported executor evidence)
+QA_DMG_548=SUCCESS
+MACOS_CI_1165=IN_PROGRESS at latest observation
+```
+
+The CI state above is not promoted beyond the latest observed status.
 
 ## Next gate
 
-Implement **Work Package 1 only** on `codex/ft-speech-retire-001`, run focused macOS verification, push the exact implementation head, then perform WP1 POST_AUDIT before beginning Work Package 2.
+Implement **Work Package 2 only** on `codex/ft-speech-retire-001`, run focused macOS verification and full tests as appropriate, push the exact implementation head, then perform an independent exact-head WP2 POST_AUDIT before beginning Work Package 3.
 
 No release is authorized by this task merely because the retirement implementation completes.
