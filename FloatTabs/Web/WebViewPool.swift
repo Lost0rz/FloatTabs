@@ -75,8 +75,6 @@ final class WebViewPool {
     typealias ResidencyPolicyProvider = @MainActor (UUID) -> SlotResidencyPolicy?
     typealias AttentionObservationHandler = @MainActor (UUID, ChatGPTAttentionObservation) -> Void
     typealias AttentionEventHandler = @MainActor (UUID, ChatGPTAttentionEvent) -> Void
-    typealias ResponseRuntimeResetHandler = @MainActor (UUID) -> Void
-    typealias SpeechManualScrollHandler = @MainActor (UUID, String) -> Void
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias CommittedURLChangeHandler = @MainActor (UUID, URL) -> Void
@@ -104,15 +102,6 @@ final class WebViewPool {
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
     var onAttentionEvent: AttentionEventHandler?
-
-    /// Response extraction has its own lifecycle channel. It is intentionally
-    /// separate from the metadata-only attention observation route.
-    var onResponseRuntimeReset: ResponseRuntimeResetHandler?
-
-    /// Trusted page input can temporarily suspend Speech Follow for the
-    /// currently spoken response. This is a transient presentation signal;
-    /// the pool does not retain scroll or response state.
-    var onSpeechManualScroll: SpeechManualScrollHandler?
 
     /// Trusted page interactions are forwarded without retaining input or
     /// assigning unread policy in the pool.
@@ -929,12 +918,6 @@ final class WebViewPool {
         )
         let responseBridge = ChatGPTResponseBridge(
             slotID: profile.id,
-            onRuntimeReset: { [weak self] slotID in
-                self?.onResponseRuntimeReset?(slotID)
-            },
-            onManualScroll: { [weak self] slotID, documentToken in
-                self?.onSpeechManualScroll?(slotID, documentToken)
-            },
             onTrustedInteraction: { [weak self] slotID, kind, documentToken in
                 self?.onTrustedInteraction?(slotID, kind, documentToken)
             },

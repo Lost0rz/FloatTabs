@@ -6,7 +6,6 @@ import XCTest
 private final class TrustedInteractionAdmissionProbe {
     var count = 0
 }
-
 @MainActor
 private final class ResponseStatusSnapshotProviderProbe {
     private enum Resolution {
@@ -49,257 +48,17 @@ private final class ResponseStatusSnapshotProviderProbe {
 
 @MainActor
 final class ChatGPTResponseBridgeTests: XCTestCase {
-    func testPayloadParsingAcceptsStructuredResponseOnly() {
-        let payload = ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [
-                [
-                    "kind": "paragraph",
-                    "text": "Hello",
-                    "level": NSNull(),
-                    "sourceLocator": [
-                        "documentToken": "document-12345678",
-                        "responseID": "document-12345678:response-1",
-                        "blockID": "document-12345678:response-1:block-0",
-                    ],
-                ],
-                [
-                    "kind": "heading",
-                    "text": "Title",
-                    "level": 2,
-                    "sourceLocator": [
-                        "documentToken": "document-12345678",
-                        "responseID": "document-12345678:response-1",
-                        "blockID": "document-12345678:response-1:block-1",
-                    ],
-                ],
-            ],
-        ])
 
-        XCTAssertEqual(payload?.blocks.count, 2)
-        XCTAssertEqual(payload?.blocks.first?.kind, .paragraph)
-        XCTAssertEqual(payload?.responseID, "document-12345678:response-1")
-        XCTAssertEqual(
-            payload?.blocks.first?.sourceLocator?.blockID,
-            "document-12345678:response-1:block-0"
-        )
-    }
 
-    func testSpeechQADiagnosticsAreFixedBoundedAndDoNotChangePayloadOrUtterances() throws {
-        let sentinel = "PRIVATE_RESPONSE_SENTINEL"
-        let baseBody: [String: Any] = [
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [[
-                "kind": "paragraph",
-                "text": "\(sentinel).",
-                "level": NSNull(),
-                "sourceLocator": [
-                    "documentToken": "document-12345678",
-                    "responseID": "document-12345678:response-1",
-                    "blockID": "document-12345678:response-1:block-0"
-                ]
-            ]]
-        ]
-        var qaBody = baseBody
-        qaBody["speechDiagnostics"] = [
-            "selectedPath": "fallback",
-            "rootElement": "div",
-            "composerMarkerPresent": true,
-            "userMarkerPresent": false,
-            "assistantMarkerPresent": false,
-            "statusMarkerPresent": false,
-            "alertMarkerPresent": false,
-            "liveRegionMarkerPresent": false,
-            "blockOwnership": ["unknown"]
-        ]
 
-        let baseline = try XCTUnwrap(ChatGPTResponsePayload.parse(baseBody))
-        let instrumented = try XCTUnwrap(ChatGPTResponsePayload.parse(qaBody))
-        XCTAssertEqual(instrumented.blocks, baseline.blocks)
-        XCTAssertEqual(
-            SpeechLanguageRouter.utteranceRequests(for: instrumented.blocks),
-            SpeechLanguageRouter.utteranceRequests(for: baseline.blocks)
-        )
-        XCTAssertEqual(instrumented.speechDiagnostics?.selectedPath, .fallback)
-        XCTAssertEqual(instrumented.speechDiagnostics?.blockOwnership, [.unknown])
 
-        let fields = try XCTUnwrap(instrumented.speechDiagnostics?.diagnosticFields)
-        let data = try JSONEncoder().encode(fields)
-        let serializedFields = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertFalse(serializedFields.contains(sentinel))
-        for forbidden in [
-            "textContent", "innerText", "innerHTML", "messageID", "URL",
-            "cookie", "token", "className", "classList"
-        ] {
-            XCTAssertFalse(serializedFields.localizedCaseInsensitiveContains(forbidden))
-        }
-        XCTAssertFalse(fields.keys.contains { $0.localizedCaseInsensitiveContains("text") })
-    }
 
-    func testSpeechQADiagnosticsAcceptOnlyFixedPathAndOwnershipEnums() {
-        for path in ChatGPTResponseExtractionPath.allCases {
-            for ownership in ChatGPTSpeechOwnershipCategory.allCases {
-                let parsed = ChatGPTSpeechExtractionDiagnostics.parse([
-                    "selectedPath": path.rawValue,
-                    "rootElement": "other",
-                    "composerMarkerPresent": false,
-                    "userMarkerPresent": false,
-                    "assistantMarkerPresent": false,
-                    "statusMarkerPresent": false,
-                    "alertMarkerPresent": false,
-                    "liveRegionMarkerPresent": false,
-                    "blockOwnership": [ownership.rawValue]
-                ])
-                XCTAssertEqual(parsed?.selectedPath, path)
-                XCTAssertEqual(parsed?.blockOwnership, [ownership])
-            }
-        }
 
-        let oversized = [String](repeating: "unknown", count: 1025)
-        XCTAssertNil(ChatGPTSpeechExtractionDiagnostics.parse([
-            "selectedPath": "explicit",
-            "rootElement": "div",
-            "composerMarkerPresent": false,
-            "userMarkerPresent": false,
-            "assistantMarkerPresent": true,
-            "statusMarkerPresent": false,
-            "alertMarkerPresent": false,
-            "liveRegionMarkerPresent": false,
-            "blockOwnership": oversized
-        ]))
-        XCTAssertNil(ChatGPTSpeechExtractionDiagnostics.parse([
-            "selectedPath": "explicit",
-            "rootElement": "div",
-            "composerMarkerPresent": false,
-            "userMarkerPresent": false,
-            "assistantMarkerPresent": true,
-            "statusMarkerPresent": false,
-            "alertMarkerPresent": false,
-            "liveRegionMarkerPresent": false,
-            "blockOwnership": ["raw-content"]
-        ]))
-    }
 
-    func testSpeechQADiagnosticScriptUsesOnlyStructuralMetadata() throws {
-        let source = ChatGPTResponseExtraction.scriptSource
-        let start = try XCTUnwrap(source.range(of: "const speechAssistantSelector"))
-        let end = try XCTUnwrap(source.range(
-            of: "const safeStableID",
-            range: start.upperBound..<source.endIndex
-        ))
-        let helpers = String(source[start.lowerBound..<end.lowerBound])
-        for forbidden in [
-            "textContent", "innerText", "innerHTML", "className", "classList", "href"
-        ] {
-            XCTAssertFalse(helpers.localizedCaseInsensitiveContains(forbidden))
-        }
-        XCTAssertTrue(helpers.contains("speechOwnershipFor"))
-        XCTAssertTrue(helpers.contains("blockOwnership"))
-        XCTAssertTrue(helpers.contains("speechSelectedPath"))
 
-        let correlationID = "speech-request-12345678"
-        let requestScript = ChatGPTResponseBridge.debugRequestScript(
-            correlationID: correlationID
-        )
-        XCTAssertTrue(requestScript.contains(correlationID))
-    }
 
-    func testPayloadParsingRejectsMalformedOrContentlessResponses() {
-        XCTAssertNil(ChatGPTResponsePayload.parse([:]))
-        XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion + 1,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [[
-                "kind": "paragraph",
-                "text": "Hello",
-                "sourceLocator": [
-                    "documentToken": "document-12345678",
-                    "responseID": "document-12345678:response-1",
-                    "blockID": "document-12345678:response-1:block-0",
-                ],
-            ]],
-        ]))
-        XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [],
-        ]))
-        XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [
-                [
-                    "kind": "paragraph",
-                    "text": "Hello",
-                    "sourceLocator": [
-                        "documentToken": "document-12345678",
-                        "responseID": "document-12345678:response-1",
-                        "blockID": "document-12345678:response-1:block-0",
-                    ],
-                ],
-                ["kind": "unknown", "text": "x"],
-            ],
-        ]))
-        XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [[
-                "kind": "paragraph",
-                "text": "Hello",
-            ]],
-        ]))
-        XCTAssertNil(ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "response",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": "document-12345678:response-1",
-            "blocks": [[
-                "kind": "paragraph",
-                "text": "Hello",
-                "sourceLocator": [
-                    "documentToken": "document-12345678",
-                    "responseID": "document-12345678:other-response",
-                    "blockID": "document-12345678:response-1:block-0",
-                ],
-            ]],
-        ]))
-    }
 
-    func testEmptyPayloadIsValidWithoutResponseBody() {
-        let payload = ChatGPTResponsePayload.parse([
-            "version": ChatGPTResponsePayload.currentVersion,
-            "kind": "empty",
-            "requestID": "request-12345678",
-            "documentToken": "document-12345678",
-            "responseID": NSNull(),
-            "blocks": [],
-        ])
 
-        XCTAssertEqual(payload?.kind, .empty)
-        XCTAssertNil(payload?.responseID)
-        XCTAssertTrue(payload?.blocks.isEmpty == true)
-    }
 
     func testResponseStatusSnapshotValidatesDocumentIdentityAndCompletionState() throws {
         let identity = try XCTUnwrap(
@@ -410,19 +169,21 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             ChatGPTResponseExtraction.contentWorld.name,
             ChatGPTResponseExtraction.contentWorldName
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             ChatGPTResponseExtraction.scriptSource.contains(
                 "__floatTabsChatGPTResponseRequestLatestV3"
             )
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             ChatGPTResponseExtraction.scriptSource.contains(
                 "__floatTabsScrollToSpeechBlockV3"
             )
         )
-        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("responseLocatorKeys"))
-        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("MAX_RESPONSE_GROUPS"))
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("locatorRegistry.clear()"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("responseLocatorKeys"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("locatorRegistry"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("structuredBlocks"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("mathSource"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MAX_BLOCKS"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("isEditableTarget"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("plaintext-only"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'Home'"))
@@ -443,13 +204,19 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MutationObserver"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("characterData"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("document.body.innerText"))
-        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("scrollIntoView"))
+        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("scrollIntoView"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains(".focus()"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setInterval"))
         XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("setTimeout"))
+        XCTAssertTrue(
+            ChatGPTResponseExtraction.scriptSource.contains(
+                "__floatTabsChatGPTResponseIdentitySnapshotV1"
+            )
+        )
+        XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event: \"trustedInteraction\""))
     }
 
-    func testResponseIdentityPolicyIsSharedWithSpeechExtractionWithoutChangingSpeechIDs() throws {
+    func testResponseIdentityPolicyRemainsSharedWithoutSpeechExtractionRuntime() throws {
         let source = ChatGPTResponseExtraction.scriptSource
         XCTAssertTrue(source.contains("RESPONSE_STABLE_ATTRIBUTE_NAMES"))
         XCTAssertTrue(source.contains("data-message-id"))
@@ -457,46 +224,25 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("canonicalResponseIdentityFor"))
         XCTAssertTrue(source.contains("latestResponseIdentity"))
         XCTAssertTrue(source.contains("latestResponseComplete"))
-        XCTAssertTrue(source.contains("responseIDFor"))
+        XCTAssertFalse(source.contains("responseIDFor"))
         let identity = try XCTUnwrap(
             ChatGPTResponseIdentity(stableValue: "speech-independent-id")
         )
         XCTAssertEqual(identity.rawValue, "message:speech-independent-id")
     }
 
-    func testBridgeLifecycleResetRejectsOldPendingCallback() {
-        let slotID = UUID()
-        var resetSlotID: UUID?
-        let bridge = ChatGPTResponseBridge(slotID: slotID) { resetSlotID = $0 }
-        let controller = WKUserContentController()
-        bridge.install(into: controller)
-        let webView = WKWebView(
-            frame: .zero,
-            configuration: WKWebViewConfiguration()
-        )
-        bridge.attach(to: webView)
-
-        var callbackResult: ChatGPTResponsePayload? = ChatGPTResponsePayload(
-            version: ChatGPTResponsePayload.currentVersion,
-            kind: .empty,
-            requestID: "request-12345678",
-            documentToken: "document-12345678",
-            responseID: nil,
-            blocks: []
-        )
-        bridge.extractLatest { callbackResult = $0 }
-        bridge.handleRuntimeReplacement()
-
-        XCTAssertEqual(resetSlotID, slotID)
-        XCTAssertNil(callbackResult)
+    func testBridgeDoesNotImplementSpeechExtractionOrFollowProtocols() {
+        let bridge = ChatGPTResponseBridge(slotID: UUID())
+        XCTAssertFalse((bridge as Any) is ChatGPTResponseExtracting)
+        XCTAssertFalse((bridge as Any) is ChatGPTResponseFollowing)
     }
 
-    func testDocumentReadyEstablishesLiveIdentityWithoutExtraction() {
+    func testDocumentReadyEstablishesLiveIdentityAndTrustedManualScroll() {
         let slotID = UUID()
-        var manualScrollCount = 0
+        var manualScrollEvents: [ChatGPTTrustedInteractionEvent] = []
         let bridge = ChatGPTResponseBridge(
             slotID: slotID,
-            onManualScroll: { _, _ in manualScrollCount += 1 }
+            onTrustedInteractionEvent: { _, event in manualScrollEvents.append(event) }
         )
 
         XCTAssertTrue(
@@ -509,7 +255,8 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
                 documentToken: "document-ready-12345678"
             )
         )
-        XCTAssertEqual(manualScrollCount, 1)
+        XCTAssertEqual(manualScrollEvents.map(\.kind), [.manualScroll])
+        XCTAssertEqual(manualScrollEvents.first?.documentToken, "document-ready-12345678")
     }
 
     func testDocumentReadyRejectsInvalidTokenAndWrongVersion() {
@@ -535,7 +282,11 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         var manualScrollTokens: [String] = []
         let bridge = ChatGPTResponseBridge(
             slotID: UUID(),
-            onManualScroll: { _, token in manualScrollTokens.append(token) }
+            onTrustedInteractionEvent: { _, event in
+                if event.kind == .manualScroll {
+                    manualScrollTokens.append(event.documentToken)
+                }
+            }
         )
 
         XCTAssertTrue(

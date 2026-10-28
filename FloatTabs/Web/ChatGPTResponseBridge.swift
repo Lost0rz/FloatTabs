@@ -1,6 +1,8 @@
 import Foundation
 import WebKit
 
+/// Compile-only compatibility protocol retained until the Speech source and
+/// project-reference cleanup package. No production response bridge conforms.
 @MainActor
 protocol ChatGPTResponseExtracting: AnyObject {
     func extractLatest(completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void)
@@ -31,6 +33,8 @@ protocol ChatGPTResponseStatusSnapshotting: AnyObject {
     )
 }
 
+/// Compile-only compatibility protocol retained until WP5. Speech follow is
+/// no longer implemented by the production response bridge.
 @MainActor
 protocol ChatGPTResponseFollowing: AnyObject {
     func scrollToSpeechBlock(
@@ -39,30 +43,19 @@ protocol ChatGPTResponseFollowing: AnyObject {
     )
 }
 
-/// A per-WebView, one-shot ChatGPT response extractor. Unlike the attention
-/// bridge, this bridge never observes DOM mutations; it only evaluates the
-/// extraction function when explicitly requested.
+/// Per-WebView bridge for response identity, status and trusted page input.
+/// Response body extraction and Speech-follow are deliberately not owned here.
 @MainActor
-final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseExtracting, ChatGPTResponseFollowing, ChatGPTResponseStatusSnapshotting {
-    typealias ResultHandler = @MainActor (ChatGPTResponsePayload?) -> Void
-    typealias ManualScrollHandler = @MainActor (UUID, String) -> Void
+final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseStatusSnapshotting {
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
     typealias TrustedInteractionEventHandler = @MainActor (UUID, ChatGPTTrustedInteractionEvent) -> Void
     typealias ResponseStatusSnapshotProvider = @MainActor (WKWebView, String) async -> ChatGPTResponseStatusSnapshot?
 
-    private struct PendingRequest {
-        let webViewIdentity: ObjectIdentifier
-        let completion: ResultHandler
-    }
-
     let slotID: UUID
-    private let onRuntimeReset: @MainActor (UUID) -> Void
-    private let onManualScroll: ManualScrollHandler
     private let onTrustedInteraction: TrustedInteractionHandler
     private let onTrustedInteractionEvent: TrustedInteractionEventHandler?
     private weak var webView: WKWebView?
     private weak var userContentController: WKUserContentController?
-    private var pendingRequests: [String: PendingRequest] = [:]
     private var currentDocumentToken: String?
     private var responseStatusSnapshotProvider: ResponseStatusSnapshotProvider
 #if DEBUG
@@ -78,22 +71,15 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
 
     init(
         slotID: UUID,
-        onRuntimeReset: @escaping @MainActor (UUID) -> Void = { _ in },
-        onManualScroll: @escaping ManualScrollHandler = { _, _ in },
         onTrustedInteraction: @escaping TrustedInteractionHandler = { _, _, _ in },
         onTrustedInteractionEvent: TrustedInteractionEventHandler? = nil,
         responseStatusSnapshotProvider: ResponseStatusSnapshotProvider? = nil
     ) {
         self.slotID = slotID
-        self.onRuntimeReset = onRuntimeReset
-        self.onManualScroll = onManualScroll
         self.onTrustedInteraction = onTrustedInteraction
         self.onTrustedInteractionEvent = onTrustedInteractionEvent
         self.responseStatusSnapshotProvider = responseStatusSnapshotProvider ?? { webView, script in
-            await Self.evaluateResponseStatusSnapshot(
-                in: webView,
-                script: script
-            )
+            await Self.evaluateResponseStatusSnapshot(in: webView, script: script)
         }
         super.init()
     }
@@ -121,86 +107,8 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         self.webView = webView
     }
 
-    func scrollToSpeechBlock(
-        _ locator: SpeechSourceLocator,
-        completion: @escaping @MainActor (Bool) -> Void = { _ in }
-    ) {
-        guard !isInvalidated,
-              locator.slotID == slotID,
-              locator.documentToken == currentDocumentToken,
-              let webView else {
-            completion(false)
-            return
-        }
-
-        webView.evaluateJavaScript(
-            Self.scrollScript(locator: locator),
-            in: nil,
-            in: ChatGPTResponseExtraction.contentWorld
-        ) { result in
-            Task { @MainActor in
-                completion((try? result.get() as? Bool) ?? false)
-            }
-        }
-    }
-
-    /// Requests one extraction from the currently attached document. The
-    /// result is delivered through the independent script-message channel.
-    func extractLatest(completion: @escaping ResultHandler) {
-        beginExtraction(requestID: UUID().uuidString, completion: completion)
-    }
-
-    /// The Speech QA path supplies its read-request UUID so the JavaScript
-    /// payload and native utterance submissions share one opaque correlation.
-#if DEBUG
-    func extractLatest(
-        correlationID: String,
-        completion: @escaping ResultHandler
-    ) {
-        guard ChatGPTResponsePayload.isOpaqueIdentifier(correlationID) else {
-            completion(nil)
-            return
-        }
-        beginExtraction(requestID: correlationID, completion: completion)
-    }
-#endif
-
-    private func beginExtraction(
-        requestID: String,
-        completion: @escaping ResultHandler
-    ) {
-        guard !isInvalidated, let webView else {
-            completion(nil)
-            return
-        }
-        pendingRequests[requestID] = PendingRequest(
-            webViewIdentity: ObjectIdentifier(webView),
-            completion: completion
-        )
-        webView.evaluateJavaScript(
-            Self.requestScript(requestID: requestID),
-            in: nil,
-            in: ChatGPTResponseExtraction.contentWorld
-        ) { [weak self, weak webView] (result: Result<Any, Error>) in
-            guard let self,
-                  let webView,
-                  let pending = self.pendingRequests[requestID],
-                  pending.webViewIdentity == ObjectIdentifier(webView) else {
-                return
-            }
-            guard case let .success(value) = result, (value as? Bool) == true else {
-                self.pendingRequests.removeValue(forKey: requestID)
-                pending.completion(nil)
-                return
-            }
-            // A successful JavaScript invocation is not the response itself;
-            // the independent message handler will resolve the pending item.
-        }
-    }
-
-    /// Reads only the latest response status from the current document. The
-    /// result is identity/status metadata, never response content, and is
-    /// rejected if the WebView or document changed while WebKit evaluated it.
+    /// Reads only latest response identity/status metadata from the current
+    /// document. No response body or Speech payload is requested.
     func snapshotLatestResponseStatus(
         completion: @escaping @MainActor (ChatGPTResponseStatusSnapshot?) -> Void
     ) {
@@ -227,10 +135,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 completion(nil)
                 return
             }
-            let snapshot = await provider(
-                webView,
-                Self.snapshotLatestResponseStatusScript
-            )
+            let snapshot = await provider(webView, Self.snapshotLatestResponseStatusScript)
             guard let self,
                   !self.isInvalidated,
                   self.webView === webView,
@@ -245,9 +150,8 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         }
     }
 
-    /// Validates and admits one normalized trusted page interaction. This is
-    /// the shared native boundary used by the real script-message route and
-    /// by deterministic tests; admission never changes unread state itself.
+    /// Validates and admits one normalized trusted page interaction. Admission
+    /// never changes unread state itself; PanelController remains the owner.
     @discardableResult
     func acceptTrustedInteraction(
         body: [String: Any],
@@ -265,13 +169,14 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
               let originProtocol,
               ["http", "https"].contains(originProtocol.lowercased()),
               body["event"] as? String == "trustedInteraction",
-              body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+              body["version"] as? Int == ChatGPTResponseProtocol.currentVersion,
               let documentToken = body["documentToken"] as? String,
               documentToken == currentDocumentToken,
               let rawKind = body["interactionKind"] as? String,
               let kind = ChatGPTTrustedPageInteractionKind(rawValue: rawKind) else {
             return false
         }
+
         let responseIdentity: ChatGPTResponseIdentity?
         if let rawIdentity = body["responseIdentity"] as? String {
             guard let parsedIdentity = ChatGPTResponseIdentity(rawValue: rawIdentity) else {
@@ -283,6 +188,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         } else {
             return false
         }
+
         let responseComplete: Bool
         if let rawResponseComplete = body["responseComplete"] {
             guard let parsedResponseComplete = rawResponseComplete as? Bool else {
@@ -292,6 +198,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         } else {
             responseComplete = false
         }
+
         let event = ChatGPTTrustedInteractionEvent(
             kind: kind,
             documentToken: documentToken,
@@ -304,42 +211,22 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 
 #if DEBUG
-    /// Test-only delivery of the post-commit document identity. The helper
-    /// shares the native validation used by the real script-message route and
-    /// deliberately does not invoke extraction.
+    /// Test-only delivery of the post-commit document identity. This models
+    /// the native validation used by the real script-message route.
     @discardableResult
     func debugReceiveDocumentReady(
         documentToken: String,
-        version: Int = ChatGPTResponsePayload.currentVersion
+        version: Int = ChatGPTResponseProtocol.currentVersion
     ) -> Bool {
         guard !isInvalidated,
-              version == ChatGPTResponsePayload.currentVersion else {
+              version == ChatGPTResponseProtocol.currentVersion else {
             return false
         }
         return acceptDocumentReady(documentToken)
     }
 
-    /// Test-only response delivery for a pending extraction. This preserves
-    /// the bridge's normal completion path while avoiding a real WebKit page
-    /// and network response in deterministic speech state tests.
-    @discardableResult
-    func debugResolveFirstPendingRequest(
-        with payload: ChatGPTResponsePayload
-    ) -> Bool {
-        guard let requestID = pendingRequests.keys.first,
-              let pending = pendingRequests.removeValue(forKey: requestID) else {
-            return false
-        }
-        guard payload.documentToken == currentDocumentToken else {
-            pending.completion(nil)
-            return true
-        }
-        pending.completion(payloadForDelivery(payload))
-        return true
-    }
-
-    /// Test-only forwarding for a manual-scroll event after the production
-    /// content-world trust/document checks have been modeled deterministically.
+    /// Test-only forwarding for trusted manual-scroll evidence. Manual scroll
+    /// remains an Unread interaction event; there is no Speech callback.
     @discardableResult
     func debugInvokeTrustedManualScroll(documentToken: String) -> Bool {
         debugInvokeTrustedManualScroll(
@@ -358,7 +245,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         guard !isInvalidated, documentToken == currentDocumentToken else {
             return false
         }
-        onManualScroll(slotID, documentToken)
         onTrustedInteractionEvent?(
             slotID,
             ChatGPTTrustedInteractionEvent(
@@ -371,9 +257,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         return true
     }
 
-    /// Test-only forwarding for a trust-admitted normalized interaction. The
-    /// helper models only the post-content-world event and still validates the
-    /// live document identity used by the production route.
+    /// Test-only forwarding for a trust-admitted normalized interaction.
     @discardableResult
     func debugInvokeTrustedInteraction(
         kind: ChatGPTTrustedPageInteractionKind,
@@ -410,16 +294,15 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 #endif
 
+    /// A navigation/runtime replacement invalidates the document identity but
+    /// keeps the bridge installed for the replacement document.
     func handleRuntimeReplacement() {
         currentDocumentToken = nil
-        finishPendingRequests()
-        onRuntimeReset(slotID)
     }
 
     func invalidate() {
         guard !isInvalidated else { return }
         isInvalidated = true
-        finishPendingRequests()
         currentDocumentToken = nil
         userContentController?.removeScriptMessageHandler(
             forName: ChatGPTResponseExtraction.messageHandlerName,
@@ -427,7 +310,6 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         )
         userContentController = nil
         webView = nil
-        onRuntimeReset(slotID)
     }
 
     // MARK: WKScriptMessageHandler
@@ -439,25 +321,25 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         guard let attachedWebView = webView,
               message.webView === attachedWebView,
               message.frameInfo.isMainFrame,
-              ChatGPTSitePolicy.isSupportedHost(
-                message.frameInfo.securityOrigin.host
-              ),
+              ChatGPTSitePolicy.isSupportedHost(message.frameInfo.securityOrigin.host),
               ["http", "https"].contains(
-                message.frameInfo.securityOrigin.`protocol`.lowercased()
+                  message.frameInfo.securityOrigin.`protocol`.lowercased()
               ),
               let body = message.body as? [String: Any] else {
             return
         }
+
         if body["event"] as? String == "documentReady" {
-            guard body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+            guard body["version"] as? Int == ChatGPTResponseProtocol.currentVersion,
                   let documentToken = body["documentToken"] as? String,
                   acceptDocumentReady(documentToken) else {
                 return
             }
             return
         }
+
         if body["event"] as? String == "manualScroll",
-           body["version"] as? Int == ChatGPTResponsePayload.currentVersion,
+           body["version"] as? Int == ChatGPTResponseProtocol.currentVersion,
            let documentToken = body["documentToken"] as? String,
            documentToken == currentDocumentToken {
             let responseIdentity: ChatGPTResponseIdentity?
@@ -472,6 +354,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             } else {
                 return
             }
+
             let responseComplete: Bool
             if let rawResponseComplete = body["latestResponseComplete"] {
                 guard let parsedResponseComplete = rawResponseComplete as? Bool else {
@@ -481,16 +364,18 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
             } else {
                 responseComplete = false
             }
-            let event = ChatGPTTrustedInteractionEvent(
-                kind: .manualScroll,
-                documentToken: documentToken,
-                responseIdentity: responseIdentity,
-                responseComplete: responseComplete
+            onTrustedInteractionEvent?(
+                slotID,
+                ChatGPTTrustedInteractionEvent(
+                    kind: .manualScroll,
+                    documentToken: documentToken,
+                    responseIdentity: responseIdentity,
+                    responseComplete: responseComplete
+                )
             )
-            onManualScroll(slotID, documentToken)
-            onTrustedInteractionEvent?(slotID, event)
             return
         }
+
         if body["event"] as? String == "trustedInteraction" {
             _ = acceptTrustedInteraction(
                 body: body,
@@ -499,65 +384,17 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                 originHost: message.frameInfo.securityOrigin.host,
                 originProtocol: message.frameInfo.securityOrigin.`protocol`
             )
-            return
         }
-
-        guard let payload = ChatGPTResponsePayload.parse(body),
-              let pending = pendingRequests.removeValue(forKey: payload.requestID),
-              pending.webViewIdentity == ObjectIdentifier(attachedWebView) else {
-            return
-        }
-        guard payload.documentToken == currentDocumentToken else {
-            pending.completion(nil)
-            return
-        }
-        pending.completion(payloadForDelivery(payload))
     }
 
     @discardableResult
     private func acceptDocumentReady(_ documentToken: String) -> Bool {
-        guard ChatGPTResponsePayload.isOpaqueIdentifier(documentToken) else {
+        guard ChatGPTResponseProtocol.isOpaqueIdentifier(documentToken) else {
             return false
         }
         currentDocumentToken = documentToken
         return true
     }
-
-    private func payloadForDelivery(
-        _ payload: ChatGPTResponsePayload
-    ) -> ChatGPTResponsePayload? {
-        guard payload.kind == .response else {
-#if DEBUG
-            return payload.speechDiagnostics == nil ? nil : payload
-#else
-            return nil
-#endif
-        }
-        return payload.assigning(slotID: slotID)
-    }
-
-    private func finishPendingRequests() {
-        let pending = pendingRequests.values
-        pendingRequests.removeAll()
-        pending.forEach { $0.completion(nil) }
-    }
-
-    private static func requestScript(requestID: String) -> String {
-        let encoded: String
-        if let data = try? JSONSerialization.data(withJSONObject: [requestID]),
-           let json = String(data: data, encoding: .utf8) {
-            encoded = String(json.dropFirst().dropLast())
-        } else {
-            encoded = "\"\""
-        }
-        return "globalThis.__floatTabsChatGPTResponseRequestLatestV3?.(\(encoded)) === true"
-    }
-
-#if DEBUG
-    static func debugRequestScript(correlationID: String) -> String {
-        requestScript(requestID: correlationID)
-    }
-#endif
 
     private static let snapshotLatestResponseStatusScript =
         "globalThis.__floatTabsChatGPTResponseIdentitySnapshotV1?.()"
@@ -566,7 +403,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
         guard let body = value as? [String: Any],
               body["version"] as? Int == 1,
               let documentToken = body["documentToken"] as? String,
-              ChatGPTResponsePayload.isOpaqueIdentifier(documentToken),
+              ChatGPTResponseProtocol.isOpaqueIdentifier(documentToken),
               let generating = body["generating"] as? Bool else {
             return nil
         }
@@ -602,19 +439,8 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(
-                    returning: parseResponseStatusSnapshot(value)
-                )
+                continuation.resume(returning: parseResponseStatusSnapshot(value))
             }
         }
-    }
-
-    private static func scrollScript(locator: SpeechSourceLocator) -> String {
-        let values = [locator.documentToken, locator.responseID, locator.blockID]
-        guard let data = try? JSONSerialization.data(withJSONObject: values),
-              let json = String(data: data, encoding: .utf8) else {
-            return "false"
-        }
-        return "globalThis.__floatTabsScrollToSpeechBlockV3?.(\(json.dropFirst().dropLast())) === true"
     }
 }

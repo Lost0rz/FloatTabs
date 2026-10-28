@@ -5620,18 +5620,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(
             responseBridge.debugReceiveDocumentReady(documentToken: documentToken)
         )
-        responseBridge.extractLatest { _ in }
-        let emptyPayload = ChatGPTResponsePayload(
-            version: ChatGPTResponsePayload.currentVersion,
-            kind: .empty,
-            requestID: "prime-request",
-            documentToken: documentToken,
-            responseID: nil,
-            blocks: []
-        )
-        XCTAssertTrue(
-            responseBridge.debugResolveFirstPendingRequest(with: emptyPayload)
-        )
     }
 
     private func wait(milliseconds: UInt64) async throws {
