@@ -4,6 +4,20 @@ import XCTest
 
 @MainActor
 final class SpeechVoiceDefaultsTests: XCTestCase {
+    func testVoiceCatalogDoesNotEnumerateVoicesUntilExplicitRefresh() {
+        var providerCallCount = 0
+        let catalog = SpeechVoiceCatalog(
+            voicesProvider: {
+                providerCallCount += 1
+                return []
+            }
+        )
+
+        XCTAssertEqual(providerCallCount, 0)
+        catalog.refresh()
+        XCTAssertEqual(providerCallCount, 1)
+    }
+
     func testVoiceNameNormalizationTreatsTingTingSpellingVariantsAsOneName() {
         XCTAssertEqual(SpeechVoiceCatalog.normalizedVoiceName("Ting-Ting"), "tingting")
         XCTAssertEqual(SpeechVoiceCatalog.normalizedVoiceName("Ting Ting"), "tingting")
@@ -242,7 +256,6 @@ final class SpeechVoiceDefaultsTests: XCTestCase {
         preferences.chineseVoiceIdentifier = "explicit.temporarily.unavailable"
         var attempts: [SpeechVoiceResolutionAttempt] = []
         let catalog = SpeechVoiceCatalog(
-            notificationCenter: NotificationCenter(),
             voicesProvider: { [] },
             voiceResolver: { identifier in
                 attempts.append(.identifier(identifier))

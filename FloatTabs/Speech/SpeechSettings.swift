@@ -430,8 +430,8 @@ protocol SpeechVoiceCatalogProviding: AnyObject {
     ) -> AVSpeechSynthesisVoice?
 }
 
-/// Live Apple voice catalog. System Settings downloads are reflected through
-/// AVSpeechSynthesizer's public available-voices notification.
+/// Apple voice catalog. Voice enumeration is explicit so the retained Settings
+/// surface can refresh only while it is visible or when the user requests it.
 @MainActor
 final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
     typealias VoiceResolver = @MainActor (String) -> AVSpeechSynthesisVoice?
@@ -440,45 +440,21 @@ final class SpeechVoiceCatalog: SpeechVoiceCatalogProviding {
     static let chineseDefaultVoiceName = "Ting-Ting"
     static let englishDefaultVoiceName = "Samantha"
 
-    private let notificationCenter: NotificationCenter
     private let voicesProvider: () -> [AVSpeechSynthesisVoice]
     private let voiceResolver: VoiceResolver
     private let languageVoiceResolver: LanguageVoiceResolver
-    private var voicesDidChangeObserver: NSObjectProtocol?
 
     private(set) var voices: [SpeechVoiceDescriptor] = []
     var onVoicesChanged: (() -> Void)?
 
     init(
-        notificationCenter: NotificationCenter = .default,
         voicesProvider: @escaping () -> [AVSpeechSynthesisVoice] = AVSpeechSynthesisVoice.speechVoices,
         voiceResolver: @escaping VoiceResolver = { AVSpeechSynthesisVoice(identifier: $0) },
         languageVoiceResolver: @escaping LanguageVoiceResolver = { AVSpeechSynthesisVoice(language: $0) }
     ) {
-        self.notificationCenter = notificationCenter
         self.voicesProvider = voicesProvider
         self.voiceResolver = voiceResolver
         self.languageVoiceResolver = languageVoiceResolver
-        refresh()
-        if #available(macOS 14.0, *) {
-            voicesDidChangeObserver = notificationCenter.addObserver(
-                forName: AVSpeechSynthesizer.availableVoicesDidChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.refresh()
-                }
-            }
-        } else {
-            voicesDidChangeObserver = nil
-        }
-    }
-
-    deinit {
-        if let voicesDidChangeObserver {
-            notificationCenter.removeObserver(voicesDidChangeObserver)
-        }
     }
 
     func refresh() {
