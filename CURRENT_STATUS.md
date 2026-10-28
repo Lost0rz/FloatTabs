@@ -6,20 +6,22 @@
 
 ## Mode
 
-**MODE: PRODUCT FEATURE RETIREMENT AUTHORIZATION**
+**MODE: PRODUCT FEATURE RETIREMENT EXECUTION**
 
 Current task: `FT-SPEECH-RETIRE-001` — `ACTIVE / AUTHORIZED`
 
 ## Current verified baseline
 
 ```text
-REMOTE_MAIN=7245efa34152036bd9a6406f4cdb20abd432688e
+REMOTE_MAIN=fbdcdaa4e1d1dfa953cea6a9ee2078d4fce827e5
+IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
+AUTHORIZED_SEMANTIC_BASELINE=7245efa34152036bd9a6406f4cdb20abd432688e
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
 FAULTING_SUBSYSTEM=JavaScriptCore
 PREDECESSOR_PR_158=ARCHIVE_ONLY / CLOSED / UNMERGED
-PREDECESSOR_PR_HEAD=c418f86b84e7e89384ec1bea964efe4de5b381e8
+CONTROL_PR_159=MERGED
 ```
 
 FloatTabs v0.5.8 / Build 26 remains the current public release. No production fix has been accepted for the repeated WebContent JavaScriptCore crash family.
@@ -44,8 +46,6 @@ PR #158 is retained only as diagnostic evidence and is closed without merge.
 ## Frozen product decision
 
 FloatTabs will retire its built-in **Speech / TTS read-aloud feature end-to-end**. This is a product/runtime simplification decision, not a claim that Speech caused or fixes the JavaScriptCore crash family.
-
-The reason for retirement is that Speech is outside FloatTabs' core product value and adds non-trivial runtime, DOM-bridge, observer/state-machine, UI, shortcut, test, and maintenance surface. The retirement is intended to reduce ongoing complexity and performance/runtime surface even if the JSC root cause remains external or unrelated.
 
 ### REMOVE
 
@@ -84,16 +84,16 @@ Existing Speech preference or shortcut values already stored on user machines ar
 
 ## Frozen execution model
 
-The retirement is executed as sequential bounded work packages. Every package must follow:
+Every package follows:
 
 ```text
-PRE_AUDIT (read-only evidence / boundary verification)
-→ IMPLEMENT (one canonical writer, smallest authorized mutation)
-→ POST_AUDIT (read-only exact-head verification)
+PRE_AUDIT
+→ IMPLEMENT
+→ POST_AUDIT
 → PASS before next package
 ```
 
-A package must not be combined with the next package before its post-audit passes. A failed or ambiguous post-audit is a STOP condition, not permission to continue and clean up later.
+A failed or ambiguous post-audit is a STOP condition.
 
 Planned packages:
 
@@ -104,14 +104,68 @@ Planned packages:
 5. remove Speech-only project/test references and reconcile shared regression tests;
 6. run full cross-feature and real-runtime acceptance, then record the resulting runtime baseline.
 
+## Work Package 1 — PRE_AUDIT
+
+**PRE_AUDIT: PASS**
+
+Audit basis: fresh read-only review of the authorized semantic baseline plus the control-only merge of PR #159. The merge changed only `CURRENT_STATUS.md` / `CURRENT_TASK.md`; production source identity for WP1 remains equivalent to the authorized semantic baseline.
+
+### Established active Speech ownership
+
+- `AppCoordinator` owns Speech preferences / voice catalog, constructs `SpeechService`, injects Speech dependencies into `PanelController`, and wires Settings speech preview.
+- `PanelController` also has fallback Speech construction, owns `SpeechPlaybackSessionController`, Assistant/Calibre speech coordinators, source adapters and `SpeechCommandRouter`, and synchronizes Speech presentation.
+- `PanelController` wires Calibre Speech into Slot lifecycle through release preparation, inactive callbacks, speech protection and protection-ended restart.
+- `SlotLifecycleCoordinator` includes Speech as a separate proactive-protection dimension alongside media and Attention; Speech protection participates in Warm/Cold release, memory-pressure eligibility and restart-after-protection logic.
+
+### Shared PRESERVE boundaries established
+
+- RemoteOrbit voice-input focus uses the independent Focus/Input path `prepareInputFocusForExternalVoice`; it does not require the TTS owner chain.
+- Attention protection remains an independent Slot lifecycle protection source and has its own restart entry point.
+- Background media / media protection remains independent and must not be removed with Speech protection.
+- Shared Attention/Unread/runtime test files contain both Speech-specific and preserved cases; only directly obsolete Speech composition/lifecycle cases may change in WP1.
+
+### WP1 expected edits
+
+```text
+FloatTabs/App/AppCoordinator.swift
+FloatTabs/Panel/PanelController.swift
+FloatTabs/Web/SlotLifecycleCoordinator.swift
+FloatTabsTests/WebAttentionLifecycleTests.swift   # only directly obsolete speech-protection cases / constructor adaptation
+FloatTabsTests/WebAttentionCrossFeatureTests.swift # only directly obsolete Panel speech-owner composition cases / constructor adaptation
+```
+
+Additional directly impacted compile-test files may be edited only when required by these signature removals and must remain inside WP1 semantics.
+
+### Explicit WP1 non-edits
+
+```text
+Do not delete FloatTabs/Speech/* yet.
+Do not delete CalibreReaderBridge yet.
+Do not slim ChatGPTResponseBridge / response extraction yet.
+Do not remove Rail controls, Settings Speech UI, AppCommand enum cases or shortcut catalog yet except the minimum compile adaptation required after owner removal.
+Do not change Attention business state.
+Do not change RemoteOrbit voice-focus behavior.
+Do not change media protection / background-media policy.
+Do not change WebView ownership, residency thresholds, navigation or recovery.
+Do not mutate Profiles, sessions, cookies, Slot data, backups, recovery data or unrelated preferences.
+```
+
+### WP1 implementation gate
+
+```text
+PRE_AUDIT=PASS
+IMPLEMENT=AUTHORIZED
+POST_AUDIT=REQUIRED_BEFORE_WP2
+```
+
 ## Performance / crash interpretation
 
-Expected consequences include fewer startup objects/observers, removal of `AVSpeechSynthesizer` and voice enumeration, fewer Speech-specific JavaScript evaluations and DOM traversals, removal of speech locator strong references, less Panel cross-domain glue, and smaller UI/test maintenance surface.
+Expected consequences of the complete retirement include fewer startup objects/observers, removal of `AVSpeechSynthesizer` and voice enumeration, fewer Speech-specific JavaScript evaluations and DOM traversals, removal of speech locator strong references, less Panel cross-domain glue, and smaller UI/test maintenance surface.
 
 These are architectural/runtime-surface reductions only. Do not report the JSC/SIGSEGV root cause as solved unless separate evidence proves it.
 
 ## Next gate
 
-Start **Work Package 1 PRE_AUDIT only** under `CURRENT_TASK.md`. Establish exact current owners, callbacks, lifecycle hooks and preservation boundaries before making production source changes.
+Implement **Work Package 1 only** on `codex/ft-speech-retire-001`, run focused macOS verification, push the exact implementation head, then perform WP1 POST_AUDIT before beginning Work Package 2.
 
 No release is authorized by this task merely because the retirement implementation completes.
