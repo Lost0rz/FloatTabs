@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-28
+**Status date:** 2026-10-29
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
@@ -17,6 +17,7 @@ REMOTE_MAIN=fbdcdaa4e1d1dfa953cea6a9ee2078d4fce827e5
 IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
 WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
+WP3_PRE_AUDIT_TARGET=f94f5181cfda963168884a1f5e93689c03bd566c
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -131,29 +132,175 @@ NORMAL_CALIBRE_BROWSING_PRESERVED=YES
 UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
 
-WP2 removed eager voice enumeration and the voice-change observer from `SpeechVoiceCatalog`. Explicit `refresh()` remains only for the temporary WP4 Settings compatibility surface.
+WP2 removed eager voice enumeration and the voice-change observer from `SpeechVoiceCatalog`, and removed all active `CalibreReaderBridge` ownership/wiring from `WebViewPool`. Physical Speech/Calibre source/test/project cleanup remains WP5.
 
-`WebViewPool` no longer owns, creates, installs, attaches, stores, forwards lifecycle events to, recovers, or invalidates `CalibreReaderBridge`. The physical bridge/source/test/project files remain intentionally for WP5 cleanup only.
+At control head `f94f5181cfda963168884a1f5e93689c03bd566c`:
 
-Generic background-media handling remains independent through `pauseAllMediaPlayback`, `requestMediaPlaybackState`, Slot lifecycle media protection and `BackgroundMediaPolicy`. Normal Calibre browsing continues through the ordinary WebView/navigation path without the read-aloud bridge.
+```text
+MACOS_CI_1168=SUCCESS
+QA_DMG_551=SUCCESS
+```
 
-Physical Speech source/test/Xcode-reference cleanup remains WP5. Speech Settings/Rail/commands remain WP4. ChatGPT response extraction/follow/locator slimming remains WP3.
+## Work Package 3 — PRE_AUDIT
+
+**PRE_AUDIT: PASS**
+
+Audit target: `f94f5181cfda963168884a1f5e93689c03bd566c`.
+
+### Shared response bridge boundary
+
+The current `ChatGPTResponseBridge` still mixes two distinct responsibilities:
+
+1. retired Speech-only response-body extraction/follow behavior;
+2. preserved document identity, latest-response identity/status and trusted page interaction behavior used by Unread.
+
+Speech-only native/runtime machinery still present in the bridge includes:
+
+```text
+ChatGPTResponseExtracting
+ChatGPTResponseFollowing
+PendingRequest / pendingRequests
+extractLatest / beginExtraction
+response payload delivery/parsing
+scrollToSpeechBlock / scrollScript
+SpeechSourceLocator-based follow requests
+Speech-only onManualScroll callback path
+Speech-only external runtime-reset callback path
+```
+
+The injected response script still contains Speech-only body/locator machinery including:
+
+```text
+responseKeys
+locatorRegistry
+responseLocatorKeys
+responseIDFor
+structuredBlocks and body-text/math/code/table extraction
+MAX_BLOCKS / MAX_RESPONSE_GROUPS / MAX_BLOCK_TEXT limits
+postEmpty
+__floatTabsChatGPTResponseRequestLatestV3
+__floatTabsScrollToSpeechBlockV3
+programmaticScrollGuardUntil
+Speech extraction diagnostics
+```
+
+These are WP3 REMOVE scope.
+
+### Mandatory preserved bridge behavior
+
+The following bridge behavior is not Speech and must remain:
+
+```text
+ChatGPTResponseIdentity
+ChatGPTResponseIdentity.sharedDOMHelperSource
+documentReady / current document token handshake
+snapshotLatestResponseStatus
+ChatGPTResponseStatusSnapshot
+__floatTabsChatGPTResponseIdentitySnapshotV1
+trusted manual scroll interaction evidence
+trusted assistant pointer interaction evidence
+ChatGPTTrustedInteractionEvent
+response identity + responseComplete carried with trusted interaction
+host / protocol / main-frame / attached-WebView trust admission
+runtime replacement / invalidation resetting current document identity
+```
+
+`PanelController.requestLatestResponseHandledSnapshot` uses `snapshotLatestResponseStatus` to reconcile late completed response identity with Unread. `PanelController.handleTrustedInteraction` uses the identity-bearing trusted interaction event to record/acknowledge handled responses. These are hard PRESERVE paths.
+
+`ChatGPTAttentionBridge` also injects `ChatGPTResponseIdentity.sharedDOMHelperSource` and uses `latestAssistantResponseRoot`, `canonicalResponseIdentityFor` and `isGenerating` for Attention response identity. Therefore WP3 must not delete or semantically weaken the shared identity/root-detection helper merely because body extraction is retired.
+
+The JavaScript `manualScroll` event itself must remain: it is trusted Unread interaction evidence. Only its separate Speech-follow callback and programmatic Speech-scroll machinery are removed.
+
+### Compile-only compatibility boundary until WP5
+
+The physical Speech source/tests remain compiled until WP5. `AssistantSpeechCoordinator` still references `ChatGPTResponseExtracting`, `ChatGPTResponseFollowing`, `ChatGPTSpeechOwnershipCategory` and related Speech extraction models even though WP1/WP2 removed all production ownership.
+
+Therefore WP3 may temporarily retain **compile-only type/protocol/model declarations** required by those unowned Speech files. They must not remain implemented by `ChatGPTResponseBridge`, reachable from `WebViewPool`, or backed by response-body/locator JavaScript runtime behavior. Their physical removal and Speech-only test/project-reference cleanup remain WP5.
+
+If preserving compilation would require reactivating extraction/follow runtime or editing the Speech domain into a new ownership model, STOP instead of widening WP3.
+
+### Expected WP3 edits
+
+```text
+FloatTabs/Web/ChatGPTResponseBridge.swift
+  - remove active extraction/follow conformance and implementation
+  - remove pending extraction request machinery and payload delivery path
+  - remove Speech-only manual-scroll/runtime-reset callback ownership
+  - preserve status snapshot, document identity and trusted interaction admission
+
+FloatTabs/Web/ChatGPTResponseExtraction.swift
+  - remove response-body/structured-block extraction runtime
+  - remove locator registries and Speech scroll-to-block runtime
+  - remove Speech extraction diagnostics from injected JavaScript
+  - preserve ChatGPTResponseIdentity/shared DOM helper and the minimal response script required for documentReady, status identity and trusted interactions
+  - replace any preserved event-version dependency on ChatGPTResponsePayload with a neutral bridge/protocol version owner rather than keeping the payload as runtime authority
+
+FloatTabs/Web/WebViewPool.swift
+  - remove SpeechManualScrollHandler / onSpeechManualScroll and its bridge injection
+  - remove obsolete external response-runtime-reset forwarding if no preserved production consumer exists
+  - preserve response bridge ownership/lifecycle for Unread identity/status/trusted interaction
+
+Directly impacted shared tests may be edited to remove retired runtime assertions and strengthen preserved identity/status/trusted-interaction coverage.
+```
+
+Likely shared test surfaces include:
+
+```text
+FloatTabsTests/ChatGPTResponseBridgeTests.swift
+FloatTabsTests/ChatGPTResponseExtractionTests.swift
+FloatTabsTests/WebViewPoolTests.swift
+FloatTabsTests/UnreadResponseTests.swift
+FloatTabsTests/WebAttentionCrossFeatureTests.swift
+```
+
+Do not physically delete shared test files in WP3. Dedicated Speech-only files/project references remain WP5.
+
+### Explicit WP3 non-edits
+
+```text
+Do not change ChatGPT Attention business state or generation semantics.
+Prefer no production edit to ChatGPTAttentionBridge.swift; its shared identity helper contract must remain equivalent.
+Do not change PanelController Unread acknowledgement/reconciliation business rules except unavoidable compile adaptation; none is currently identified.
+Do not remove trusted manual-scroll or assistant-pointer evidence.
+Do not enter Rail/Settings/commands/shortcuts work — WP4.
+Do not physically delete Speech source/test/Xcode project references — WP5.
+Do not change RemoteOrbit voice-input focus, Ready Alert, background media, Calibre browsing, WebView residency/navigation/recovery, Profiles, sessions or user data.
+```
+
+### WP3 implementation gate
+
+```text
+PRE_AUDIT=PASS
+IMPLEMENT=AUTHORIZED
+POST_AUDIT=REQUIRED_BEFORE_WP4
+```
+
+WP3 POST_AUDIT must prove:
+
+```text
+SPEECH_BODY_EXTRACTION=REMOVED
+SPEECH_LOCATOR_REGISTRIES=REMOVED
+SPEECH_SCROLL_FOLLOW=REMOVED
+STABLE_RESPONSE_IDENTITY=PRESERVED
+UNREAD_RECONCILIATION=PRESERVED
+TRUSTED_INTERACTION=PRESERVED
+ATTENTION_STATUS=PRESERVED
+```
 
 ## Verification state
 
-At WP2 exact head `43b507774a6208189ad6af2baa9740bf4e280d28`:
+Latest fully verified semantic/control baseline before WP3 implementation:
 
 ```text
-LOCAL_FOCUSED_XCTEST=143 tests / 0 failures (reported executor evidence)
-LOCAL_FULL_XCTEST=1370 tests / 3 skipped / 0 failures (reported executor evidence)
-MACOS_CI_1167=IN_PROGRESS at latest observation
-QA_DMG_550=IN_PROGRESS at latest observation
+HEAD=f94f5181cfda963168884a1f5e93689c03bd566c
+MACOS_CI_1168=SUCCESS
+QA_DMG_551=SUCCESS
 ```
 
-Remote CI is not promoted beyond the latest observed state and remains a later PR/merge gate.
+The subsequent `CURRENT_STATUS.md` commits only record the WP3 audit/handoff state and do not change production semantics.
 
 ## Next gate
 
-Start **Work Package 3 PRE_AUDIT only**. Separate Speech-only ChatGPT response extraction/follow/locator behavior from preserved stable response identity, status/generation, trusted interaction, Unread and Attention semantics before any WP3 implementation.
+Implement **Work Package 3 only** on `codex/ft-speech-retire-001`, run focused bridge/Unread/Attention tests plus the full required XCTest suite, push the exact implementation head, then perform an independent exact-head WP3 POST_AUDIT before beginning Work Package 4.
 
-Do not enter WP3 IMPLEMENT until that PRE_AUDIT passes. No release is authorized merely because the retirement implementation completes.
+No release is authorized merely because the retirement implementation completes.
