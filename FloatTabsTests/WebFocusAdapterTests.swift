@@ -648,6 +648,82 @@ extension WebFocusAdapterTests {
         XCTAssertNil(writer.events.last { $0.event == "web_runtime.post_finish_stall_detected" })
     }
 
+    func testActiveSlotPeriodicCrossWorldLivenessStillExecutes() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        var probeCalls = 0
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 1,
+            livenessProbeEvaluator: { _, _ in
+                probeCalls += 1
+                return .success(
+                    readyState: "complete",
+                    visibilityState: "visible",
+                    latencyMilliseconds: 1
+                )
+            },
+            isSlotActive: { _ in true }
+        )
+        load("<main>Active periodic probe</main>", in: webView)
+        await settle(webView)
+
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        XCTAssertGreaterThanOrEqual(probeCalls, 2)
+        XCTAssertTrue(writer.events.contains { $0.event == "web_runtime.cross_world_liveness" })
+        withExtendedLifetime(observer) {}
+    }
+
+    func testInactiveSlotSuppressesPeriodicCrossWorldLivenessWithoutRuntimeMutation() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let webViewIdentity = ObjectIdentifier(webView)
+        var probeCalls = 0
+        let observer = SlotNavigationObserver(
+            slotID: UUID(), webView: webView, websiteMode: .desktop,
+            onURLChange: { _, _ in }, diagnostics: diagnostics,
+            crossWorldLivenessInterval: 1,
+            livenessProbeEvaluator: { _, _ in
+                probeCalls += 1
+                return .success(
+                    readyState: "complete",
+                    visibilityState: "hidden",
+                    latencyMilliseconds: 1
+                )
+            },
+            isSlotActive: { _ in false }
+        )
+        load("<main>Inactive periodic probe</main>", in: webView)
+        await settle(webView)
+        XCTAssertEqual(
+            observer.currentNavigationDiagnosticFields["navigation_phase"],
+            RuntimeDiagnosticValue.string("finished")
+        )
+
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let suppression = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.cross_world_liveness.suppressed" }
+        )
+        XCTAssertEqual(suppression.fields["is_active"], .bool(false))
+        XCTAssertEqual(suppression.fields["suppression_reason"], .string("inactive_slot"))
+        XCTAssertEqual(probeCalls, 0)
+        XCTAssertEqual(ObjectIdentifier(webView), webViewIdentity)
+        XCTAssertEqual(
+            observer.currentNavigationDiagnosticFields["navigation_phase"],
+            RuntimeDiagnosticValue.string("finished")
+        )
+        XCTAssertNil(writer.events.first { $0.event == "web_runtime.cross_world_liveness" })
+        XCTAssertNil(writer.events.first { $0.event == "web_runtime.content_process_terminated" })
+        XCTAssertNil(writer.events.first { $0.event == "web_runtime.recovery.started" })
+        XCTAssertNil(writer.events.first { $0.event == "web_runtime.post_finish_stall_detected" })
+        withExtendedLifetime(observer) {}
+    }
+
     func testRuntimeResponsivenessDistinguishesSlowSuccessFromTimeoutWithoutPageContent() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

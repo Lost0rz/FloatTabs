@@ -477,6 +477,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
     private let livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator
     private let responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator
+    private let isSlotActive: @MainActor (UUID) -> Bool
     private let livenessProbeIntervalNanoseconds: UInt64
     private var nextNavigationGeneration: UInt64 = 0
     private var currentNavigationTicket: DiagnosticNavigationTicket?
@@ -556,6 +557,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         crossWorldLivenessTimeout: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessTimeout,
         livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator? = nil,
         responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator? = nil,
+        isSlotActive: @escaping @MainActor (UUID) -> Bool = { _ in true },
         instantBackURLSafetyCheck: @escaping (URL) -> Bool = WebAppURL.isSafe,
         loadHandler: @escaping @MainActor (WKWebView, URL) -> Void = { webView, url in
             webView.load(URLRequest(url: url))
@@ -580,6 +582,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.navigationStallTimeout = max(0, navigationStallTimeout)
         self.rendererProbeTimeout = max(0, rendererProbeTimeout)
         self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
+        self.isSlotActive = isSlotActive
         let normalizedLivenessInterval = min(max(crossWorldLivenessInterval, 1), 300)
         let normalizedLivenessTimeout = min(max(crossWorldLivenessTimeout, 0.1), 5)
         livenessProbeIntervalNanoseconds = UInt64(normalizedLivenessInterval * 1_000_000_000)
@@ -1546,9 +1549,27 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                     return
                 }
                 guard let self, let webView, self.webView === webView else { return }
+                guard self.isSlotActive(self.slotID) else {
+                    self.recordInactiveCrossWorldLivenessSuppression(for: webView)
+                    continue
+                }
                 await self.captureCrossWorldLivenessOnce()
             }
         }
+    }
+
+    private func recordInactiveCrossWorldLivenessSuppression(for webView: WKWebView) {
+        var fields = runtimeFields(for: webView, includeEnvironment: false)
+        fields.merge([
+            "is_active": .bool(false),
+            "suppression_reason": .string("inactive_slot")
+        ]) { _, new in new }
+        diagnostics.record(
+            event: "web_runtime.cross_world_liveness.suppressed",
+            level: .notice,
+            subsystem: "web",
+            fields: fields
+        )
     }
 
     private static let runtimeLivenessProbeScript = """

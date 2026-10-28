@@ -1062,7 +1062,8 @@ final class WebViewPool {
             diagnostics: diagnostics,
             navigationStallTimeout: navigationStallTimeout,
             rendererProbeTimeout: rendererProbeTimeout,
-            rendererJavaScriptEvaluator: rendererJavaScriptEvaluator
+            rendererJavaScriptEvaluator: rendererJavaScriptEvaluator,
+            isSlotActive: isSlotActive
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
