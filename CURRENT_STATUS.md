@@ -18,6 +18,7 @@ IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
 WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
 WP3_EXACT_HEAD=29810e65d700901baa0737e94bcfbf6ba63390d0
+WP4_PRE_AUDIT_TARGET=515455ecc0607b5da55c012b0412599a4b1a26c0
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -41,21 +42,6 @@ ROOT_CAUSE=UNKNOWN
 ## Frozen product decision
 
 FloatTabs is retiring built-in **Speech / TTS read-aloud end-to-end** as a product/runtime simplification. This is not a claim that Speech caused or fixes the JavaScriptCore crash family.
-
-### REMOVE
-
-```text
-TTS / Speech product feature end-to-end
-ChatGPT speech content extraction / follow / locator behavior
-Calibre read-aloud path
-Speech voice / rate / language routing
-Speech playback queue / state machine / AVSpeechSynthesizer ownership
-Speech Rail controls and per-tab speech badges
-Speech Settings / preview / voice catalog
-Speech shortcuts / commands
-Speech-only tests and project references
-Speech-specific shared-bridge code not required by preserved features
-```
 
 ### PRESERVE
 
@@ -132,15 +118,6 @@ NORMAL_CALIBRE_BROWSING_PRESERVED=YES
 UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
 
-WP2 removed eager voice enumeration and the voice-change observer from `SpeechVoiceCatalog`, and removed all active `CalibreReaderBridge` ownership/wiring from `WebViewPool`. Physical Speech/Calibre source/test/project cleanup remains WP5.
-
-At control head `f94f5181cfda963168884a1f5e93689c03bd566c`:
-
-```text
-MACOS_CI_1168=SUCCESS
-QA_DMG_551=SUCCESS
-```
-
 ## Work Package 3 — COMPLETE
 
 ```text
@@ -164,30 +141,172 @@ ATTENTION_STATUS=PRESERVED
 UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
 
-WP3 removed the production `ChatGPTResponseExtracting` / `ChatGPTResponseFollowing` conformance, pending extraction request machinery, response-body delivery path, Speech locator/scroll runtime, Speech-only manual-scroll callback and external response-runtime-reset forwarding. `ChatGPTResponseBridge` now owns only current-document identity, latest response identity/status and trusted page interaction transport required by preserved product behavior.
-
-The injected response script no longer contains the retired response-body/structured-block extraction, locator registry, `__floatTabsChatGPTResponseRequestLatestV3`, `__floatTabsScrollToSpeechBlockV3`, programmatic Speech-scroll guard, or Speech extraction diagnostics. Trusted manual-scroll and assistant-pointer events remain identity-bearing, content-free interaction evidence.
-
-`ChatGPTResponseIdentity.sharedDOMHelperSource` remains semantically unchanged from the WP3 pre-implementation baseline and continues to be shared with `ChatGPTAttentionBridge`. `PanelController` Unread acknowledgement/reconciliation business rules were not modified; `snapshotLatestResponseStatus` and identity-bearing trusted-interaction handling remain the active bridge into Unread.
-
-Compile-only extraction/follow protocols and payload/model declarations remain temporarily only because the already-unowned Speech source/tests are still compiled until WP5. The production bridge does not conform to those protocols and the injected JavaScript no longer implements their runtime behavior.
-
-## Verification state
-
 At WP3 exact implementation head `29810e65d700901baa0737e94bcfbf6ba63390d0`:
 
 ```text
-TDD_RED=31 tests / 26 failures on pre-change implementation (executor evidence)
 LOCAL_FOCUSED_XCTEST=406 tests / 0 failures (executor evidence)
 LOCAL_FULL_XCTEST=1321 tests / 0 failures / TEST SUCCEEDED (executor evidence)
-MACOS_CI_1183=QUEUED at latest observation
-QA_DMG_566=QUEUED at latest observation
+MACOS_CI_1183=SUCCESS
+QA_DMG_566=SUCCESS
 ```
 
-Remote CI is not promoted beyond the latest observed state. The queued exact-head workflows are not a CODE_DIFF WP3 post-audit blocker; they remain later PR/merge/final-acceptance host gates.
+## Work Package 4 — PRE_AUDIT
+
+**PRE_AUDIT: PASS**
+
+Audit target: `515455ecc0607b5da55c012b0412599a4b1a26c0`.
+
+### Rail / tab product surface
+
+`FloatTabs/UI/ExternalTabRail.swift` still contains the complete visible Speech surface even though WP1-WP3 removed its active runtime ownership:
+
+```text
+SpeechRailControl
+Auto Speak control
+Read Latest control
+Replay control
+Stop control
+onToggleAutoSpeak / onReadLatestResponse / onReplayLatestResponse / onStopSpeech
+setSpeechPresentation(SpeechRailPresentation)
+per-tab speechBadgeView
+isAutoSpeakSource / speechPlaybackState
+Speech badge accessibility projections
+```
+
+These are WP4 REMOVE scope.
+
+The same file independently owns the preserved Attention / Unread presentation:
+
+```text
+ClassicUnreadDotView
+AttentionStyleSurfaceView
+TabAttentionStyle
+TabAttentionPalette
+Unread response state/accessibility
+Beacon / Orbit / Pulse / Dot presentation
+```
+
+Those structures are not Speech and must remain. Removing Speech controls must allow the rail layout/overflow calculations to reflow around the remaining Add, Settings, Pin and Overflow controls without changing Attention/Unread tab presentation.
+
+### Settings boundary
+
+`FloatTabs/UI/GlobalSettingsController.swift` still owns Settings-only Speech dependencies and embeds `SpeechSettingsViewController` under Audio. The Speech controller exposes voice selection, rate, Follow Speech, previews, Refresh Voices and high-quality voice management. These are WP4 REMOVE scope.
+
+The Audio page also independently embeds `NotificationsSettingsViewController`, whose `Ready Alerts` controls, preview, sound library and volume behavior are preserved. `AppCoordinator` continues to own the Ready Alert player/asset store and generation-completion playback route; no Speech retirement change is required there beyond compile adaptation if a Settings initializer signature shrinks.
+
+`FloatTabs/UI/SettingsInformationArchitecture.swift` currently declares `.speech` and projects Audio as `[.readyAlerts, .speech]`. WP4 removes only `.speech`; Audio remains with `[.readyAlerts]`.
+
+### Commands / shortcuts boundary
+
+`FloatTabs/Hotkeys/AppCommandController.swift` contains exactly four Speech command/binding surfaces:
+
+```text
+readPauseResumeSpeechForActiveTab
+replayLatestSpeechForActiveTab
+stopSpeechForActiveTab
+toggleAutoSpeakForActiveTab
+
+readLatestOrStopSpeech        Ctrl+Shift+R
+replayLatestSpeech            Ctrl+Shift+E
+stopSpeechForActiveTab        Ctrl+Shift+S
+toggleAutoSpeak               Ctrl+Shift+A
+```
+
+`AppShortcutCatalog` currently has 28 bindings:
+
+```text
+slot=9
+navigation=7
+view=4
+speech=4
+residency=3
+application=1
+TOTAL=28
+```
+
+Removing only the four Speech bindings yields the required `EXPECTED_NON_SPEECH_BINDINGS=24`.
+
+`ShortcutsSettingsViewController` currently renders a dedicated Speech section from `AppShortcutCatalog.speechBindings`; that section is WP4 REMOVE scope. Shortcut conflict detection already derives from `allBindings`, so retired Speech shortcuts cease being active once removed from the catalog.
+
+The external RemoteOrbit protocol is a separate enum/transport and must remain unchanged, especially `FloatTabsExternalCommand.focusInputForVoice`. Removing local Speech shortcut declarations must not delete or migrate already persisted shortcut values; they simply become inert legacy values.
+
+### Test boundary
+
+Directly impacted shared tests include at least:
+
+```text
+FloatTabsTests/AppCommandControllerTests.swift
+FloatTabsTests/SettingsInformationArchitectureTests.swift
+FloatTabsTests/ExternalShellTests.swift
+FloatTabsTests/WebAttentionIndicatorTests.swift
+```
+
+WP4 may update these shared tests to remove retired Speech product assertions and assert the preserved 24-binding catalog, Ready Alerts and Attention/Unread rail behavior.
+
+Dedicated Speech-only tests and Xcode project references remain physically present until WP5 and are not deleted in WP4.
+
+### Expected WP4 edits
+
+```text
+FloatTabs/UI/ExternalTabRail.swift
+  - remove SpeechRailControl and four Speech rail controls/callbacks
+  - remove setSpeechPresentation and per-tab Speech badge/state/accessibility
+  - reflow rail/overflow around remaining controls
+  - preserve all Attention/Unread styles, dot/surface state and accessibility
+
+FloatTabs/UI/GlobalSettingsController.swift
+  - remove Settings-only Speech preferences/catalog/preview ownership
+  - remove SpeechSettingsViewController product surface
+  - keep NotificationsSettingsViewController / Ready Alerts unchanged
+
+FloatTabs/UI/SettingsInformationArchitecture.swift
+  - remove GlobalSettingsSection.speech
+  - Audio remains and contains Ready Alerts only
+
+FloatTabs/Hotkeys/AppCommandController.swift
+  - remove four Speech AppCommand cases
+  - remove four Speech KeyboardShortcuts.Name declarations
+  - remove speechBindings and Speech diagnostic command names
+  - preserve all 24 non-Speech bindings
+  - preserve FloatTabsExternalCommand, including focusInputForVoice
+
+Directly affected shared tests only as needed for WP4 product-surface semantics.
+```
+
+### Explicit WP4 non-edits
+
+```text
+Do not modify Attention / Unread business semantics or visual style behavior.
+Do not remove Ready Alerts, their preferences, custom sound library, preview or playback routing.
+Do not change RemoteOrbit voice-input focus or FloatTabsExternalCommand.focusInputForVoice.
+Do not delete/migrate stored Speech preference or shortcut values.
+Do not physically delete Speech source files, dedicated Speech tests or Xcode project references — WP5.
+Do not change ChatGPT response bridge/Attention runtime, Calibre browsing, media policy, WebView lifecycle/navigation/recovery, Profiles, sessions or user data.
+```
+
+### WP4 implementation gate
+
+```text
+PRE_AUDIT=PASS
+IMPLEMENT=AUTHORIZED
+POST_AUDIT=REQUIRED_BEFORE_WP5
+```
+
+WP4 POST_AUDIT must prove:
+
+```text
+SPEECH_RAIL_CONTROLS=0
+SPEECH_TAB_BADGES=0
+SPEECH_SETTINGS_SURFACE=0
+SPEECH_COMMANDS=0
+SPEECH_SHORTCUT_BINDINGS=0
+EXPECTED_NON_SPEECH_BINDINGS=24
+READY_ALERTS=PRESERVED
+UNREAD_ATTENTION_RAIL=PRESERVED
+```
 
 ## Next gate
 
-Start **Work Package 4 PRE_AUDIT only**. Inventory and separate Speech Rail controls, tab badges/state, Settings IA/UI, previews, commands and shortcut bindings from preserved Ready Alert and Attention/Unread presentation before any WP4 implementation.
+Implement **Work Package 4 only** on `codex/ft-speech-retire-001`, run focused Rail/Settings/command/Ready Alert/Attention-Unread verification plus the full required XCTest suite, push the exact implementation head, then perform an independent exact-head WP4 POST_AUDIT before beginning Work Package 5.
 
-Do not enter WP4 IMPLEMENT until that PRE_AUDIT passes. Do not enter WP5 early. No release is authorized merely because the retirement implementation advances.
+Do not enter WP5 early. No release is authorized merely because the retirement implementation advances.
