@@ -23,7 +23,6 @@ final class SlotLifecycleCoordinator {
     typealias AttentionProtectionQuery = @MainActor (UUID) -> Bool
     /// This query covers source work that must finish before a WebView can be
     /// released. A source lease or a paused source is not sufficient here.
-    typealias SpeechProtectionQuery = @MainActor (UUID) -> Bool
 
     private struct InactivePlan {
         let token: UUID
@@ -35,7 +34,6 @@ final class SlotLifecycleCoordinator {
     private struct ProtectionState {
         let media: Bool
         let attention: Bool
-        let speech: Bool
     }
 
     private let webViewPool: WebViewPool
@@ -50,7 +48,6 @@ final class SlotLifecycleCoordinator {
     private let prepareRuntimeForRelease: RuntimeReleasePreparation
     private let onSlotBecameInactive: SlotBecameInactiveHandler
     private let attentionProtectionQuery: AttentionProtectionQuery
-    private let speechProtectionQuery: SpeechProtectionQuery
     private let diagnostics: any RuntimeDiagnosticRecording
 
     private var inactivePlans: [UUID: InactivePlan] = [:]
@@ -75,7 +72,6 @@ final class SlotLifecycleCoordinator {
         prepareRuntimeForRelease: @escaping RuntimeReleasePreparation = { _ in },
         onSlotBecameInactive: @escaping SlotBecameInactiveHandler = { _ in },
         attentionProtectionQuery: @escaping AttentionProtectionQuery = { _ in false },
-        speechProtectionQuery: @escaping SpeechProtectionQuery = { _ in false },
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         installsMemoryPressureSource: Bool = true
     ) {
@@ -99,7 +95,6 @@ final class SlotLifecycleCoordinator {
         self.prepareRuntimeForRelease = prepareRuntimeForRelease
         self.onSlotBecameInactive = onSlotBecameInactive
         self.attentionProtectionQuery = attentionProtectionQuery
-        self.speechProtectionQuery = speechProtectionQuery
         self.diagnostics = diagnostics
 
         if installsMemoryPressureSource {
@@ -240,7 +235,7 @@ final class SlotLifecycleCoordinator {
         prepareInactive(profile: profile)
     }
 
-    /// Restarts normal Warm/Cold handling after an attention or speech runtime
+    /// Restarts normal Warm/Cold handling after an attention runtime
     /// reset removed protection from an already lifecycle-inactive Slot. A
     /// reset can arrive after the old release timer has fired and been
     /// skipped, so this deliberately creates a new plan rather than reusing
@@ -253,8 +248,7 @@ final class SlotLifecycleCoordinator {
               profile.residencyPolicy == .warm || profile.residencyPolicy == .cold,
               webViewPool.contains(slotID: slotID),
               !isVisibleSlot(slotID),
-              !attentionProtectionQuery(slotID),
-              !speechProtectionQuery(slotID) else {
+              !attentionProtectionQuery(slotID) else {
             return
         }
 
@@ -270,7 +264,7 @@ final class SlotLifecycleCoordinator {
     }
 
     /// Keep the existing attention-specific entry point while sharing the
-    /// same lifecycle restart engine with speech protection.
+    /// same lifecycle restart engine with the lifecycle coordinator.
     func restartAfterAttentionProtectionEnded(profile: WebAppProfile) {
         restartAfterProtectionEnded(profile: profile)
     }
@@ -425,7 +419,6 @@ final class SlotLifecycleCoordinator {
             "lifecycle_pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
             "lifecycle_media_protected": .bool(protection.media),
             "lifecycle_attention_protected": .bool(protection.attention),
-            "lifecycle_speech_protected": .bool(protection.speech)
         ]
     }
 
@@ -759,7 +752,6 @@ final class SlotLifecycleCoordinator {
                 && !visible
                 && !protection.media
                 && !protection.attention
-                && !protection.speech
             let reason: String
             if level == .warning {
                 reason = "warning_no_eviction"
@@ -771,8 +763,6 @@ final class SlotLifecycleCoordinator {
                 reason = "media_protected"
             } else if protection.attention {
                 reason = "attention_protected"
-            } else if protection.speech {
-                reason = "speech_protected"
             } else if plan == nil {
                 reason = "no_pending_release_plan"
             } else {
@@ -790,7 +780,6 @@ final class SlotLifecycleCoordinator {
                 "pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
                 "media_protected": .bool(protection.media),
                 "attention_protected": .bool(protection.attention),
-                "speech_protected": .bool(protection.speech),
                 "release_eligible": .bool(eligible),
                 "decision": .string(eligible ? "release" : "skip"),
                 "release_reason": .string(reason),
@@ -895,14 +884,12 @@ final class SlotLifecycleCoordinator {
     private func isProactivelyProtected(slotID: UUID) -> Bool {
         mediaProtectedSlotIDs.contains(slotID)
             || attentionProtectionQuery(slotID)
-            || speechProtectionQuery(slotID)
     }
 
     private func protectionState(slotID: UUID) -> ProtectionState {
         ProtectionState(
             media: mediaProtectedSlotIDs.contains(slotID),
-            attention: attentionProtectionQuery(slotID),
-            speech: speechProtectionQuery(slotID)
+            attention: attentionProtectionQuery(slotID)
         )
     }
 
@@ -923,14 +910,6 @@ final class SlotLifecycleCoordinator {
         if protection.attention {
             diagnostics.record(
                 event: "slot_lifecycle.attention_protected",
-                level: .info,
-                subsystem: "lifecycle",
-                fields: fields
-            )
-        }
-        if protection.speech {
-            diagnostics.record(
-                event: "slot_lifecycle.speech_protected",
                 level: .info,
                 subsystem: "lifecycle",
                 fields: fields

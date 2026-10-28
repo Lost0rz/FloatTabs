@@ -133,18 +133,11 @@ final class AppCoordinator {
             // injected into the presentation owner. AppCoordinator itself
             // never routes provider observations.
             let attentionCoordinator = WebAttentionCoordinator(diagnostics: diagnostics)
-            let speechService = SpeechService(
-                preferences: resolvedSpeechPreferencesStore,
-                voiceCatalog: resolvedSpeechVoiceCatalog
-            )
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool,
                 attentionCoordinator: attentionCoordinator,
                 preferencesStore: resolvedPreferencesStore,
-                speechService: speechService,
-                speechPreferencesStore: resolvedSpeechPreferencesStore,
-                speechVoiceCatalog: resolvedSpeechVoiceCatalog,
                 diagnostics: diagnostics
             )
         }
