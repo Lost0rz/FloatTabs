@@ -1,34 +1,37 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-29
+**Status date:** 2026-10-30
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: JSC / WEBCONTENT RUNTIME STABILITY OPTIMIZATION**
+**MODE: JSC / WEBCONTENT RUNTIME STABILITY — AIR SOAK REPRODUCED**
 
 Current task: `FT-JSC-RUNTIME-STABILITY-001` — `ACTIVE / AUTHORIZED`.
 
-PR #160 (`FT-SPEECH-RETIRE-001`) has been merged. Speech/TTS retirement is complete and is no longer the active task. The repeated WebContent failure is now an independent runtime-stability incident.
+PR #160 (`FT-SPEECH-RETIRE-001`) is merged. PR #161 remains the active runtime-stability experiment and is still Draft/Open/Unmerged.
 
 ## Verified baseline
 
 ```text
 MAIN_AFTER_PR160=26c81d83d3bdd771e98e355337b78622e2b25b17
-PR160=MERGED
-PR160_HEAD=d46a23c553c965d415dbda155ce200e6f91dcfb0
-PR160_LITERAL_HEAD_MACOS_CI=#1200 SUCCESS
-PR160_LITERAL_HEAD_QA_DMG=#583 SUCCESS
 ACTIVE_BRANCH=codex/ft-jsc-runtime-stability-001
-ACTIVE_PR=#161 OPEN / DRAFT
+ACTIVE_PR=#161 OPEN / DRAFT / UNMERGED
+PRODUCT_COMMIT=8ceb99aa9fe30b0159d9cb5ad5d14d6e3e53f39f
+SOAK_SOURCE_REVISION=5de2d0f2b8ec8934b60103e700d625f646dc8be6
+SOAK_SOURCE_REVISION_EXACT=true
+OPTIMIZATION=CHATGPT_GENERATION_LIVENESS_WATCHDOG_2S_TO_5S
+MACOS_CI=#1205 SUCCESS
+QA_DMG=#585 SUCCESS
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
+JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-## Confirmed crash family
+## Confirmed historical crash family
 
-Post-retirement native evidence proves the same JavaScriptCore crash family remains present:
+Native evidence from the pre-optimization soak established:
 
 ```text
 EXCEPTION=EXC_BAD_ACCESS
@@ -45,75 +48,103 @@ JSC_EXACT_TRIGGER=UNKNOWN
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-The confirmed post-retirement `.ips` is `com.apple.WebKit.WebContent-2026-10-29-192012.ips`; it repeats the historical async-generator/microtask execution family.
-
-## Runtime correlation
-
-The accepted soak produced seven system-confirmed WebContent crashes:
+## PR #161 optimization verification
 
 ```text
-SYSTEM_CONFIRMED_WEBCONTENT_CRASHES=7
-CHATGPT_GENERATING_AT_CRASH=7/7
-ATTENTION_PROTECTED_AT_CRASH=7/7
-ACTIVE_SLOT_CRASHES=1
-INACTIVE_SLOT_CRASHES=6
-HOT_AND_WARM_BOTH_REPRODUCE=YES
-ALL_RUNTIME_RECORDED_CRASHES_RECOVERED=YES
-```
-
-A separate post-finish stall also reached the diagnostic confirmation threshold.
-
-## Memory-pressure evidence
-
-The final crash pair occurred with substantial WebContent memory pressure. Observed WebContent footprints included approximately `1.6 GB` and `2.2 GB`, with `system vm pressure critical: 1` recorded before the crashes.
-
-Interpretation:
-
-```text
-MEMORY_PRESSURE_CORRELATION=SUPPORTED
-MEMORY_PRESSURE_ROOT_CAUSE=UNKNOWN
-JETSAM_KILL_CLASSIFICATION=NO
-```
-
-Memory pressure is therefore a valid optimization/investigation axis, but the native termination remains a JSC `EXC_BAD_ACCESS / SIGSEGV` rather than a proven memory kill.
-
-## Prior exclusions / reduced hypotheses
-
-```text
-SPEECH_CAUSALITY_SUPPORTED=NO
-INACTIVE_PERIODIC_LIVENESS_PROBE_REQUIRED_FOR_CRASH=NO
-INACTIVE_SLOT_RELEASE_ALONE_EXPLAINS_FAILURE=NO
-RELOAD_RESET_RESTART_PROVES_ROOT_CAUSE=NO
-```
-
-## Active optimization direction
-
-The authorized task now audits and optimizes the FloatTabs-owned runtime path around:
-
-```text
-ChatGPT generation/status observation
-× Attention/Unread protection
-× repeated JS / DOM / cross-world work
-× long-lived Slot residency
-× memory-pressure response
-```
-
-The first implementation must be one bounded, evidence-supported intervention. It must reduce FloatTabs-owned runtime pressure/workload without interrupting ChatGPT generation, weakening required Attention/Unread behavior, or mutating Browser Profiles/sessions/user data.
-
-## Current decision
-
-```text
-ACTIVE_TASK=FT-JSC-RUNTIME-STABILITY-001
-ACTIVE_PR=#161 OPEN / DRAFT
-PRODUCT_CODE_CHANGE=IMPLEMENTED
-PRODUCT_COMMIT=8ceb99aa9fe30b0159d9cb5ad5d14d6e3e53f39f
-OPTIMIZATION=CHATGPT_GENERATION_LIVENESS_WATCHDOG_2S_TO_5S
 PRE_AUDIT=PASS
 FOCUSED_TESTS=217_PASS
 FULL_XCTEST=1059_PASS
 LOCAL_DEBUG_BUILD=PASS
 LOCAL_RELEASE_BUILD=PASS_ARM64
-NEXT_GATE=AIR SOAK
-TARGET_VALIDATION=AIR SOAK
+MACOS_CI=#1205 SUCCESS
+QA_DMG=#585 SUCCESS
+```
+
+The bounded intervention reduced the ChatGPT generation liveness watchdog cadence from 2 seconds to 5 seconds while preserving generation observation, Attention/Unread ownership and watchdog recovery semantics.
+
+## Air soak result for optimized build
+
+Uploaded runtime logs contain a fresh session for the optimized exact revision:
+
+```text
+SESSION_ID=6DAB3F8F-4FA2-42CA-A1F9-A14093E73C94
+SOURCE_REVISION=5de2d0f2b8ec8934b60103e700d625f646dc8be6
+OBSERVED_RANGE=2026-10-29T12:49:56Z..2026-10-29T16:41:19Z
+WEBCONTENT_TERMINATION_EVENTS=6
+```
+
+All six new termination incident snapshots were again recorded while the affected ChatGPT Slot was generating and Attention-protected:
+
+```text
+CHATGPT_GENERATING_AT_TERMINATION=6/6
+ATTENTION_PROTECTED_AT_TERMINATION=6/6
+ACTIVE_SLOT_TERMINATIONS=1
+INACTIVE_SLOT_TERMINATIONS=5
+HOT_TERMINATIONS=2
+WARM_TERMINATIONS=4
+ALL_SIX_INCIDENTS_RECOVERED_TO_HEALTHY_CURRENT_RUNTIME=YES
+```
+
+The new JSONL package does not contain matching Unified Log or new `.ips` evidence. Therefore these six events prove that WebContent process termination still reproduces after the 2s→5s optimization, but they do not by themselves prove that every event is the exact historical JSC `SIGSEGV / 0x48 / llint_entry_osr_function_for_call+120` family.
+
+The available slice-level event rate is not sufficient for a causal efficacy claim. The previous session slice in the same archive recorded 7 terminations over about 3h21m, while the optimized session recorded 6 over about 3h51m. This is directionally lower but uncontrolled and too small to establish improvement.
+
+Interpretation:
+
+```text
+WATCHDOG_2S_TO_5S_ELIMINATED_TERMINATION=NO
+CORE_WEBCONTENT_TERMINATION_REPRODUCED=YES
+SAME_NEW_JSC_NATIVE_SIGNATURE=UNVERIFIED_PENDING_NATIVE_EVIDENCE
+JSC_ROOT_CAUSE=UNKNOWN
+PR161_MERGE_READINESS=HOLD
+```
+
+## Stall / other runtime observations
+
+The optimized session recorded one `post_finish_stall_candidate` caused by a dual-world timeout. It did not reach the confirmed-stall threshold and later closed as `superseded_navigation`.
+
+No `attention.liveness_probe.abnormal` event was observed in the optimized session.
+
+Other warnings were lower priority and currently do not establish a product defect:
+
+- two early `web_focus.failed` / `presentation_focus.failed` events with `dom_input_unavailable` immediately after launch/presentation;
+- two provisional `NSURLErrorDomain -999` navigation cancellations and one `-1001` timeout;
+- several previous-app restore observations where the external window could not be re-identified.
+
+These are not currently promoted into the JSC incident root-cause chain.
+
+## Separate unread / red-dot product finding
+
+The same optimized runtime logs independently confirm the reported behavior for a visible active ChatGPT page.
+
+During the fresh session:
+
+```text
+VALID_COMPLETIONS_NOT_PRESENTED=49 -> unread.marked reason=completion_unseen
+VALID_COMPLETIONS_PRESENTED=18 -> unread.mark_skipped reason=visible_completion
+```
+
+Current code intentionally treats a valid completion as already handled when the Slot is actually user-visible. `ChatGPTUnreadResponseCoordinator.handle(...)` does not persist unread in that case, and the accepted V1 Attention contract explicitly defines visible completion as `Generating -> Idle` with no Ready red dot.
+
+Therefore:
+
+```text
+ACTIVE_VISIBLE_COMPLETION_NO_RED_DOT=CONFIRMED_CURRENT_SEMANTICS
+UI_RENDER_BUG=NO_EVIDENCE
+PRODUCT_SEMANTIC_CHANGE_REQUIRED_IF_RED_DOT_SHOULD_ALWAYS_APPEAR=YES
+SEPARATE_FOLLOWUP_FROM_PR161=YES
+```
+
+Do not mix this product semantic change into PR #161 unless task authority is explicitly changed.
+
+## Current decision
+
+```text
+ACTIVE_TASK=FT-JSC-RUNTIME-STABILITY-001
+ACTIVE_PR=#161 OPEN / DRAFT / UNMERGED
+AIR_SOAK_RESULT=WEBCONTENT_TERMINATION_REPRODUCED
+PR161_MERGE_READINESS=HOLD
+NEXT_RUNTIME_GATE=COLLECT_NATIVE/SYSTEM EVIDENCE FOR NEW TERMINATIONS THEN SELECT NEXT BOUNDED HYPOTHESIS
+UNREAD_VISIBLE_COMPLETION_FINDING=SEPARATE PRODUCT FOLLOWUP
 PRODUCTION_RELEASE=NOT_AUTHORIZED
 ```
