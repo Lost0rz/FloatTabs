@@ -2376,6 +2376,37 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertEqual(harness.bridge.debugLivenessWatchdogStartCount, 1)
     }
 
+    func testGeneratingLivenessWatchdogUsesReducedFiveSecondCadence() throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let bridge = ChatGPTAttentionBridge(
+            slotID: UUID(),
+            onObservation: { _, _ in },
+            diagnostics: diagnostics,
+            livenessSleeper: { _ in false }
+        )
+        let webView = WKWebView()
+        bridge.attach(to: webView)
+
+        bridge.accept(
+            payload: ChatGPTBridgePayload(
+                version: ChatGPTBridgePayload.currentVersion,
+                kind: ChatGPTBridgePayload.baselineKind,
+                token: tokenA,
+                generating: true
+            ),
+            messageWebView: webView,
+            isMainFrame: true,
+            originHost: "chatgpt.com",
+            originProtocol: "https"
+        )
+
+        let started = try XCTUnwrap(
+            writer.events.last { $0.event == "attention.liveness_watchdog.started" }
+        )
+        XCTAssertEqual(started.fields["watchdog_interval_ms"], .integer(5_000))
+    }
+
     func testTrueLivenessProbeKeepsGenerationActiveWithoutDuplicateStart() async throws {
         let trueProbe: [String: Any] = [
             "version": 1,

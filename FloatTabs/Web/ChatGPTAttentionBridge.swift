@@ -726,7 +726,11 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let defaultLongTermWorkloadTimeout: TimeInterval = 5
     static let defaultLivenessProbeTimeout: TimeInterval = 2
     static let defaultCurrentDocumentResyncTimeout: TimeInterval = 2
-    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+    /// Generation state normally arrives through the page-owned mutation
+    /// observer. Keep the watchdog as a bounded recovery path, but reduce its
+    /// repeated cross-world evaluation cadence during the generation window
+    /// where the confirmed WebContent incidents occurred.
+    static let livenessWatchdogIntervalNanoseconds: UInt64 = 5_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
     static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
@@ -2665,7 +2669,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 #endif
         diagnostics.record(event: "attention.liveness_watchdog.started", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
-            "watchdog_interval_ms": .integer(2_000)
+            "watchdog_interval_ms": .integer(
+                Int64(Self.livenessWatchdogIntervalNanoseconds / 1_000_000)
+            )
         ])
         livenessWatchdogTask = Task { [weak self, weak webView] in
             guard let self, let webView else { return }
@@ -3085,7 +3091,9 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         diagnostics.record(event: "attention.liveness_probe.recovered_completion", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
             "confirmation_count": .integer(2),
-            "watchdog_interval_ms": .integer(2_000),
+            "watchdog_interval_ms": .integer(
+                Int64(Self.livenessWatchdogIntervalNanoseconds / 1_000_000)
+            ),
             "confirmation_delay_ms": .integer(250)
         ])
         if let incidentContext = activeLivenessIncidentContext {
