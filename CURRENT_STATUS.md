@@ -54,7 +54,7 @@ APP_LAUNCH=2026-10-29T06:16:11Z
 
 ## Repeated WebContent crash evidence
 
-The first uploaded runtime slice recorded five distinct ChatGPT WebContent terminations:
+The runtime logs record seven distinct ChatGPT WebContent terminations in the same post-retirement soak session:
 
 ```text
 2026-10-29T06:22:17Z  slot B3328965  inactive  incident F7870DA5  recovery deferred
@@ -62,9 +62,11 @@ The first uploaded runtime slice recorded five distinct ChatGPT WebContent termi
 2026-10-29T08:15:43Z  slot 1FA8BE8B  active    incident A3D1F0E5  reload_now
 2026-10-29T08:35:23Z  slot B3328965  inactive  incident EA263B85  recovery deferred
 2026-10-29T09:25:13Z  slot 1FA8BE8B  inactive  incident 0E094547  reload_now
+2026-10-29T11:20:11Z  slot B3328965  inactive  warm  generating  attention-protected  recovered healthy
+2026-10-29T11:20:59Z  slot 1FA8BE8B  inactive  hot   generating  attention-protected  recovered healthy
 ```
 
-The Air evidence bundle then supplied matching macOS Unified Log evidence for all five timestamps. For each event WebKit reported:
+Air macOS Unified Log evidence now correlates all seven runtime events. WebKit reports the system-level termination reason as `Crash` for each correlated WebContent process:
 
 ```text
 WebProcessProxy::didClose: (web process 0 crash)
@@ -72,7 +74,7 @@ WebProcessProxy::processDidTerminateOrFailedToLaunch: reason=Crash
 WebPageProxy::processDidTerminate: reason=Crash
 ```
 
-The matching WebContent PIDs were:
+The first five matching WebContent PIDs were:
 
 ```text
 14:22:17 local  PID 3307
@@ -82,22 +84,28 @@ The matching WebContent PIDs were:
 17:25:13 local  PID 11674
 ```
 
-ReportCrash started for each crash and attempted a type-309 WebContent report. However, each report creation failed with:
+The two later events are also system-confirmed crashes:
+
+```text
+19:20:11 local  PID 12848  reason=Crash
+19:20:59 local  PID 17992  reason=Crash
+```
+
+ReportCrash started for both later crashes. The first produced a new type-309 WebContent native report successfully:
+
+```text
+/Users/jack7788/Library/Logs/DiagnosticReports/com.apple.WebKit.WebContent-2026-10-29-192012.ips
+```
+
+The second attempted another type-309 report but failed with:
 
 ```text
 client log create type 309 result FAILED: Log limit exceeded
 ```
 
-Therefore no new native `.ips` was persisted for these five post-retirement crashes. The evidence bundle contains two older WebContent `.ips` files only, with embedded timestamps `2026-10-25 20:55:34 +0800` and `2026-10-28 12:03:16 +0800`; both are historical `EXC_BAD_ACCESS / SIGSEGV / KERN_INVALID_ADDRESS 0x48` crashes with JavaScriptCore frames including `llint_entry_osr_function_for_call`, async generator/iterator handling and microtask execution. Those old reports establish the historical crash family but cannot be transferred to the new crash identities.
+This changes the native-evidence gate materially: one exact post-retirement crash `.ips` now exists and can be used to classify whether the new crash belongs to the historical JavaScriptCore SIGSEGV family.
 
-The continuation runtime log adds two more WebContent terminations in the same soak session:
-
-```text
-2026-10-29T11:20:11Z  slot B3328965  inactive  warm  generating  attention-protected  recovered healthy
-2026-10-29T11:20:59Z  slot 1FA8BE8B  inactive  hot   generating  attention-protected  recovered healthy
-```
-
-The captured Unified Log window ended before these two later crashes, so native/system correlation for them is still pending.
+The earlier evidence bundle contains two older WebContent `.ips` files with embedded timestamps `2026-10-25 20:55:34 +0800` and `2026-10-28 12:03:16 +0800`; both are historical `EXC_BAD_ACCESS / SIGSEGV / KERN_INVALID_ADDRESS 0x48` crashes with JavaScriptCore frames including `llint_entry_osr_function_for_call`, async generator/iterator handling and microtask execution. Those old reports establish the historical crash family but cannot substitute for the newly generated `2026-10-29 19:20:12` report.
 
 Across all seven runtime-recorded terminations:
 
@@ -108,11 +116,20 @@ ACTIVE_SLOT_TERMINATION_COUNT=1
 INACTIVE_SLOT_TERMINATION_COUNT=6
 HOT_AND_WARM_RESIDENCY_BOTH_REPRODUCE=YES
 ALL_RUNTIME_RECORDED_TERMINATIONS_RECOVERED=YES
+SYSTEM_CONFIRMED_REASON_CRASH_COUNT=7
 ```
 
-This correlation does not prove that ChatGPT generation or Attention causes the native crash. It does establish that inactive-slot release/residency alone does not explain the failures and that the repeated crash family remains present after Speech retirement.
+This correlation does not prove that ChatGPT generation or Attention causes the native crash. It does establish that inactive-slot release/residency alone does not explain the failures and that repeated WebContent crashes remain present after Speech retirement.
 
-One system memory-pressure warning was recorded at `2026-10-29T09:17:10Z`; it occurs only after the first four crashes and therefore cannot explain the series as a whole.
+## Memory-pressure correlation
+
+The narrow `19:18 .. 19:23` Unified Log window adds a stronger memory-pressure correlation for the final two crashes than was visible in the FloatTabs JSONL alone.
+
+For PID `12848` (crashed at `19:20:11`), WebKit reported a footprint of about `1639 MB` at `19:19:35`, then `system vm pressure critical: 1` at `19:19:44`; shortly before the crash its footprint was about `1105 MB` after pressure relief.
+
+For PID `17992` (crashed at `19:20:59`), WebKit reported `system vm pressure critical: 1` at `19:18:44` and again at `19:19:05`; after the first process crash it reached about `2209 MB` footprint at `19:20:14` before later falling to about `1568 MB` and then crashing at `19:20:59`.
+
+Therefore memory pressure is now a supported co-occurring condition for the final two crashes and must not be dismissed. It is still not established as root cause: WebKit/macOS classified both terminations as `reason=Crash`, not as a memory-pressure/Jetsam termination, and native stack evidence is required to distinguish a JSC fault under pressure from another crash mechanism.
 
 ## Post-finish stall evidence
 
@@ -142,13 +159,14 @@ No Speech/TTS/synth runtime residue was found in the soak session.
 SPEECH_RETIREMENT_ACCEPTANCE=PASS
 POST_RETIREMENT_WEBCONTENT_CRASH_REPRODUCED=YES
 POST_RETIREMENT_RUNTIME_TERMINATION_COUNT=7
-SYSTEM_CONFIRMED_REASON_CRASH_COUNT=5
-LATER_RUNTIME_ONLY_TERMINATION_COUNT=2
-REPORTCRASH_TYPE_309_ATTEMPTED=5/5
-NEW_IPS_PERSISTED=NO_LOG_LIMIT_EXCEEDED
+SYSTEM_CONFIRMED_REASON_CRASH_COUNT=7
+REPORTCRASH_NEW_POST_RETIREMENT_IPS=YES
+NEW_IPS_PATH=com.apple.WebKit.WebContent-2026-10-29-192012.ips
+SECOND_19H20_REPORT=LOG_LIMIT_EXCEEDED
 HISTORICAL_JSC_SIGSEGV_REPORTS_PRESENT=YES
-NEW_CRASH_NATIVE_STACK=UNAVAILABLE
-SAME_JSC_CRASH_FAMILY=UNKNOWN
+NEW_CRASH_NATIVE_STACK=AVAILABLE_NOT_YET_AUDITED
+SAME_JSC_CRASH_FAMILY=UNKNOWN_PENDING_NEW_IPS_AUDIT
+MEMORY_PRESSURE_CORRELATION=SUPPORTED_FOR_19H20_PAIR_NOT_ROOT_CAUSE
 CONFIRMED_POST_FINISH_STALL=YES
 JSC_ROOT_CAUSE=UNKNOWN
 MERGE_READINESS=HOLD
@@ -157,6 +175,6 @@ RELEASE=NOT_AUTHORIZED
 
 ## Current decision
 
-Keep PR #160 Draft/Open/Unmerged. Continue using the soak build only as an evidence source. The next bounded evidence step is to capture a narrow Air Unified Log window around the two later terminations at `2026-10-29T11:20:11Z` and `11:20:59Z` (19:20 local) and preserve future crash evidence before the OSAnalytics type-309 log quota prevents native report persistence again.
+Keep PR #160 Draft/Open/Unmerged. Continue using the soak build only as an evidence source. The next bounded evidence step is now specific: preserve and audit `/Users/jack7788/Library/Logs/DiagnosticReports/com.apple.WebKit.WebContent-2026-10-29-192012.ips` from the Air, then compare its exception type, termination signal and JavaScriptCore frames against the historical JSC crash family.
 
-No production fix is authorized from this status alone. Do not infer a JavaScriptCore root-cause fix or exact crash-family identity without native stack evidence.
+No production fix is authorized from this status alone. Do not infer a JavaScriptCore root cause or memory-pressure root cause until the exact post-retirement `.ips` is audited.
