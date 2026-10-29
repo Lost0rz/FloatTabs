@@ -118,27 +118,6 @@ final class AppCommandControllerTests: XCTestCase {
         XCTAssertEqual(Set(AppShortcutCatalog.allNames.map(\.rawValue)).count, 24)
     }
 
-    func testRetiredSpeechShortcutsAreNotInCatalog() {
-        XCTAssertTrue(
-            AppShortcutCatalog.allBindings.allSatisfy {
-                !$0.title.localizedCaseInsensitiveContains("speech")
-            }
-        )
-        for key in [
-            KeyboardShortcuts.Key.r,
-            KeyboardShortcuts.Key.e,
-            KeyboardShortcuts.Key.s,
-            KeyboardShortcuts.Key.a,
-        ] {
-            XCTAssertNil(
-                defaultCommand(
-                    keyCode: UInt16(key.rawValue),
-                    modifiers: [.control, .shift]
-                )
-            )
-        }
-    }
-
     func testResidencyShortcutsSelectHotWarmAndCold() {
         XCTAssertEqual(
             defaultCommand(

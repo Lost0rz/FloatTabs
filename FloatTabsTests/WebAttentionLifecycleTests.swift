@@ -61,7 +61,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
     func testHidingPanelNotifiesBackgroundPolicyBeforeHiddenGraceRelease() async throws {
         let pool = makePool()
-        let profile = makeProfile(name: "HiddenSpeech", policy: .warm)
+        let profile = makeProfile(name: "HiddenPanel", policy: .warm)
         _ = try pool.webView(for: profile)
         var becameInactiveCount = 0
         let lifecycle = makeLifecycle(

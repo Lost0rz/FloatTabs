@@ -1072,27 +1072,6 @@ final class WebAttentionIndicatorTests: XCTestCase {
         )
     }
 
-    func testSpeechRailAndTabBadgeSurfaceIsAbsent() {
-        let profile = makeProfile(name: "ChatGPT")
-        let (_, zone) = makeZoneHarness()
-        zone.apply(profiles: [profile], activeTabID: profile.id)
-        zone.layoutSubtreeIfNeeded()
-
-        XCTAssertFalse(
-            zone.subviews.contains {
-                String(describing: type(of: $0)).localizedCaseInsensitiveContains("speech")
-            }
-        )
-        let tab = try! XCTUnwrap(zone.tabView(for: profile.id))
-        XCTAssertFalse(
-            tab.subviews.contains {
-                String(describing: type(of: $0)).localizedCaseInsensitiveContains("speech")
-            }
-        )
-    }
-
-    // Speech rail and tab badge behavior is retired in WP4; preserved rail and attention coverage follows.
-
     func testRailCapacityMatrixUsesCollisionFreeCompactOverflowLayout() {
         let counts = [0, 1, 3, 4, 5, 9]
         for count in counts {

@@ -4161,7 +4161,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
-    func testTrustedManualScrollAcknowledgesUnreadWithoutSpeechExtraction() throws {
+    func testTrustedManualScrollAcknowledgesUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4405,7 +4405,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
-    func testBackgroundManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+    func testBackgroundManualScrollDoesNotAcknowledgeUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4433,7 +4433,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testStaleDocumentManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+    func testStaleDocumentManualScrollDoesNotAcknowledgeUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )

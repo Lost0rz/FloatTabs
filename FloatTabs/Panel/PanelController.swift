@@ -1655,41 +1655,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         persistPanelFrame()
     }
 
-    @discardableResult
-    func readLatestResponseForActiveTab() -> Bool {
-        false
-    }
-
-    @discardableResult
-    func replayLatestResponseForActiveTab() -> Bool {
-        false
-    }
-
-    func readPauseResumeSpeechForActiveTab() {
-    }
-
-    func stopSpeechForActiveTab() {
-    }
-
-    func readLatestOrStopSpeechForActiveTab() {
-        // Keep this source-compatible alias for callers from the S1 baseline;
-        // the semantic command now routes through Pause / Resume.
-        readPauseResumeSpeechForActiveTab()
-    }
-
-    func toggleAutoSpeakForActiveTab() {
-    }
-
-    func stopSpeech() {
-    }
-
-    func playSpeechPreview(_ requests: [SpeechUtteranceRequest]) {
-    }
-
-    func stopSpeaking() {
-        stopSpeech()
-    }
-
     func storedWebAppStateSnapshot() -> StoredWebAppState {
         tabStore.storedStateSnapshot()
     }

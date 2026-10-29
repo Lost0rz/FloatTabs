@@ -2,8 +2,7 @@ import Foundation
 import WebKit
 
 /// Stable identity for unread ownership. This is deliberately independent
-/// from SpeechResponseIdentity, whose document-scoped locator semantics are
-/// part of the speech protocol.
+/// from any document-scoped content locator semantics.
 struct ChatGPTResponseIdentity: Equatable, Hashable, Sendable {
     static let prefix = "message:"
     static let stableAttributeNames = ["data-message-id", "data-message-uuid"]
@@ -350,115 +349,10 @@ struct ChatGPTTrustedInteractionEvent: Equatable, Sendable {
     let responseComplete: Bool
 }
 
-/// Swift-owned protocol model for the independent one-shot ChatGPT response
-/// bridge. It contains only structured response blocks in transient memory.
-enum ChatGPTResponseMessageKind: String, Equatable, Sendable {
-    case response
-    case empty
-}
-
 enum ChatGPTTrustedPageInteractionKind: String, Equatable, Sendable {
     case manualScroll
     case assistantPointer
 }
-
-enum ChatGPTResponseExtractionPath: String, CaseIterable, Equatable, Sendable {
-    case explicit
-    case semanticTurn = "semantic_turn"
-    case contentUnit = "content_unit"
-    case fallback
-    case none
-}
-
-enum ChatGPTSpeechOwnershipCategory: String, CaseIterable, Equatable, Sendable {
-    case assistantOwned = "assistant_owned"
-    case userOwned = "user_owned"
-    case composer
-    case statusLive = "status_live"
-    case unknown
-}
-
-enum ChatGPTResponseRootElementCategory: String, Equatable, Sendable {
-    case article
-    case div
-    case section
-    case other
-    case none
-}
-
-/// Fixed, structural metadata produced beside the real response payload. This
-/// model deliberately has no field capable of holding DOM or response text.
-struct ChatGPTSpeechExtractionDiagnostics: Equatable, Sendable {
-    static let maximumBlockCount = 1024
-
-    let selectedPath: ChatGPTResponseExtractionPath
-    let rootElement: ChatGPTResponseRootElementCategory
-    let composerMarkerPresent: Bool
-    let userMarkerPresent: Bool
-    let assistantMarkerPresent: Bool
-    let statusMarkerPresent: Bool
-    let alertMarkerPresent: Bool
-    let liveRegionMarkerPresent: Bool
-    let blockOwnership: [ChatGPTSpeechOwnershipCategory]
-
-    var diagnosticFields: [String: RuntimeDiagnosticValue] {
-        var fields: [String: RuntimeDiagnosticValue] = [
-            "selected_path": .string(selectedPath.rawValue),
-            "root_element": .string(rootElement.rawValue),
-            "composer_marker_present": .bool(composerMarkerPresent),
-            "user_marker_present": .bool(userMarkerPresent),
-            "assistant_marker_present": .bool(assistantMarkerPresent),
-            "status_marker_present": .bool(statusMarkerPresent),
-            "alert_marker_present": .bool(alertMarkerPresent),
-            "live_region_marker_present": .bool(liveRegionMarkerPresent),
-            "block_count": .integer(Int64(blockOwnership.count)),
-            "block_ownership_sequence": .string(
-                blockOwnership.map(\.rawValue).joined(separator: ",")
-            )
-        ]
-        for category in ChatGPTSpeechOwnershipCategory.allCases {
-            fields["block_\(category.rawValue)_count"] = .integer(
-                Int64(blockOwnership.filter { $0 == category }.count)
-            )
-        }
-        return fields
-    }
-
-    static func parse(_ value: Any?) -> ChatGPTSpeechExtractionDiagnostics? {
-        guard let body = value as? [String: Any],
-              let rawPath = body["selectedPath"] as? String,
-              let selectedPath = ChatGPTResponseExtractionPath(rawValue: rawPath),
-              let rawRoot = body["rootElement"] as? String,
-              let rootElement = ChatGPTResponseRootElementCategory(rawValue: rawRoot),
-              let composerMarkerPresent = body["composerMarkerPresent"] as? Bool,
-              let userMarkerPresent = body["userMarkerPresent"] as? Bool,
-              let assistantMarkerPresent = body["assistantMarkerPresent"] as? Bool,
-              let statusMarkerPresent = body["statusMarkerPresent"] as? Bool,
-              let alertMarkerPresent = body["alertMarkerPresent"] as? Bool,
-              let liveRegionMarkerPresent = body["liveRegionMarkerPresent"] as? Bool,
-              let rawOwnership = body["blockOwnership"] as? [String],
-              rawOwnership.count <= maximumBlockCount else {
-            return nil
-        }
-        let blockOwnership = rawOwnership.compactMap(
-            ChatGPTSpeechOwnershipCategory.init(rawValue:)
-        )
-        guard blockOwnership.count == rawOwnership.count else { return nil }
-        return ChatGPTSpeechExtractionDiagnostics(
-            selectedPath: selectedPath,
-            rootElement: rootElement,
-            composerMarkerPresent: composerMarkerPresent,
-            userMarkerPresent: userMarkerPresent,
-            assistantMarkerPresent: assistantMarkerPresent,
-            statusMarkerPresent: statusMarkerPresent,
-            alertMarkerPresent: alertMarkerPresent,
-            liveRegionMarkerPresent: liveRegionMarkerPresent,
-            blockOwnership: blockOwnership
-        )
-    }
-}
-
-
 enum ChatGPTResponseProtocol {
     static let currentVersion = 3
 
@@ -469,40 +363,6 @@ enum ChatGPTResponseProtocol {
                 of: #"^[A-Za-z0-9._:-]+$"#,
                 options: .regularExpression
             ) != nil
-    }
-}
-
-/// Compile-only compatibility payload retained until WP5. Production WebKit
-/// response handling uses ChatGPTResponseProtocol and never requests a body.
-struct ChatGPTResponsePayload: Equatable, Sendable {
-    static let currentVersion = ChatGPTResponseProtocol.currentVersion
-    static let responseKind = ChatGPTResponseMessageKind.response.rawValue
-    static let emptyKind = ChatGPTResponseMessageKind.empty.rawValue
-
-    let version: Int
-    let kind: ChatGPTResponseMessageKind
-    let requestID: String
-    let documentToken: String
-    let responseID: String?
-    let blocks: [SpeechContentBlock]
-    let speechDiagnostics: ChatGPTSpeechExtractionDiagnostics?
-
-    init(
-        version: Int,
-        kind: ChatGPTResponseMessageKind,
-        requestID: String,
-        documentToken: String,
-        responseID: String?,
-        blocks: [SpeechContentBlock],
-        speechDiagnostics: ChatGPTSpeechExtractionDiagnostics? = nil
-    ) {
-        self.version = version
-        self.kind = kind
-        self.requestID = requestID
-        self.documentToken = documentToken
-        self.responseID = responseID
-        self.blocks = blocks
-        self.speechDiagnostics = speechDiagnostics
     }
 }
 

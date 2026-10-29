@@ -1,31 +1,6 @@
 import Foundation
 import WebKit
 
-/// Compile-only compatibility protocol retained until the Speech source and
-/// project-reference cleanup package. No production response bridge conforms.
-@MainActor
-protocol ChatGPTResponseExtracting: AnyObject {
-    func extractLatest(completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void)
-#if DEBUG
-    func extractLatest(
-        correlationID: String,
-        completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void
-    )
-#endif
-}
-
-extension ChatGPTResponseExtracting {
-#if DEBUG
-    func extractLatest(
-        correlationID: String,
-        completion: @escaping @MainActor (ChatGPTResponsePayload?) -> Void
-    ) {
-        _ = correlationID
-        extractLatest(completion: completion)
-    }
-#endif
-}
-
 @MainActor
 protocol ChatGPTResponseStatusSnapshotting: AnyObject {
     func snapshotLatestResponseStatus(
@@ -33,18 +8,8 @@ protocol ChatGPTResponseStatusSnapshotting: AnyObject {
     )
 }
 
-/// Compile-only compatibility protocol retained until WP5. Speech follow is
-/// no longer implemented by the production response bridge.
-@MainActor
-protocol ChatGPTResponseFollowing: AnyObject {
-    func scrollToSpeechBlock(
-        _ locator: SpeechSourceLocator,
-        completion: @escaping @MainActor (Bool) -> Void
-    )
-}
-
 /// Per-WebView bridge for response identity, status and trusted page input.
-/// Response body extraction and Speech-follow are deliberately not owned here.
+/// Response body extraction and follow behavior are deliberately not owned here.
 @MainActor
 final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResponseStatusSnapshotting {
     typealias TrustedInteractionHandler = @MainActor (UUID, ChatGPTTrustedPageInteractionKind, String) -> Void
@@ -108,7 +73,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 
     /// Reads only latest response identity/status metadata from the current
-    /// document. No response body or Speech payload is requested.
+    /// document. No response body is requested.
     func snapshotLatestResponseStatus(
         completion: @escaping @MainActor (ChatGPTResponseStatusSnapshot?) -> Void
     ) {
@@ -226,7 +191,7 @@ final class ChatGPTResponseBridge: NSObject, WKScriptMessageHandler, ChatGPTResp
     }
 
     /// Test-only forwarding for trusted manual-scroll evidence. Manual scroll
-    /// remains an Unread interaction event; there is no Speech callback.
+    /// remains an Unread interaction event; there is no callback.
     @discardableResult
     func debugInvokeTrustedManualScroll(documentToken: String) -> Bool {
         debugInvokeTrustedManualScroll(

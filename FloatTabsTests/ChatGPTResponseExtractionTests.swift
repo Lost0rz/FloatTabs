@@ -130,24 +130,8 @@ private final class ChatGPTResponsePageHarness {
 
 @MainActor
 final class ChatGPTResponseExtractionTests: XCTestCase {
-    func testInjectedScriptRetainsIdentityStatusAndTrustedInteractionOnly() {
+    func testInjectedScriptRetainsIdentityStatusAndTrustedInteractionContract() {
         let source = ChatGPTResponseExtraction.scriptSource
-
-        for forbidden in [
-            "__floatTabsChatGPTResponseRequestLatestV3",
-            "__floatTabsScrollToSpeechBlockV3",
-            "responseKeys",
-            "locatorRegistry",
-            "responseLocatorKeys",
-            "structuredBlocks",
-            "MAX_BLOCKS",
-            "MAX_RESPONSE_GROUPS",
-            "mathSource",
-            "programmaticScrollGuardUntil",
-            "speechDiagnostics"
-        ] {
-            XCTAssertFalse(source.contains(forbidden), "retired runtime remains: \(forbidden)")
-        }
 
         for preserved in [
             "__floatTabsChatGPTResponseIdentitySnapshotV1",

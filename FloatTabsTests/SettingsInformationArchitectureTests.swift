@@ -11,7 +11,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         )
         XCTAssertFalse(
             GlobalSettingsPage.allCases.map(\.title).contains {
-                ["Appearance", "Performance", "Notifications", "Speech", "Diagnostics", "Account & Language"].contains($0)
+                ["Appearance", "Performance", "Notifications", "Diagnostics", "Account & Language"].contains($0)
             }
         )
     }

@@ -169,21 +169,6 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
             ChatGPTResponseExtraction.contentWorld.name,
             ChatGPTResponseExtraction.contentWorldName
         )
-        XCTAssertFalse(
-            ChatGPTResponseExtraction.scriptSource.contains(
-                "__floatTabsChatGPTResponseRequestLatestV3"
-            )
-        )
-        XCTAssertFalse(
-            ChatGPTResponseExtraction.scriptSource.contains(
-                "__floatTabsScrollToSpeechBlockV3"
-            )
-        )
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("responseLocatorKeys"))
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("locatorRegistry"))
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("structuredBlocks"))
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("mathSource"))
-        XCTAssertFalse(ChatGPTResponseExtraction.scriptSource.contains("MAX_BLOCKS"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("isEditableTarget"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("plaintext-only"))
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event.key === 'Home'"))
@@ -216,7 +201,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(ChatGPTResponseExtraction.scriptSource.contains("event: \"trustedInteraction\""))
     }
 
-    func testResponseIdentityPolicyRemainsSharedWithoutSpeechExtractionRuntime() throws {
+    func testResponseIdentityPolicyRemainsShared() throws {
         let source = ChatGPTResponseExtraction.scriptSource
         XCTAssertTrue(source.contains("RESPONSE_STABLE_ATTRIBUTE_NAMES"))
         XCTAssertTrue(source.contains("data-message-id"))
@@ -226,15 +211,9 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(source.contains("latestResponseComplete"))
         XCTAssertFalse(source.contains("responseIDFor"))
         let identity = try XCTUnwrap(
-            ChatGPTResponseIdentity(stableValue: "speech-independent-id")
+            ChatGPTResponseIdentity(stableValue: "stable-identity-id")
         )
-        XCTAssertEqual(identity.rawValue, "message:speech-independent-id")
-    }
-
-    func testBridgeDoesNotImplementSpeechExtractionOrFollowProtocols() {
-        let bridge = ChatGPTResponseBridge(slotID: UUID())
-        XCTAssertFalse((bridge as Any) is ChatGPTResponseExtracting)
-        XCTAssertFalse((bridge as Any) is ChatGPTResponseFollowing)
+        XCTAssertEqual(identity.rawValue, "message:stable-identity-id")
     }
 
     func testDocumentReadyEstablishesLiveIdentityAndTrustedManualScroll() {
@@ -268,7 +247,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertFalse(
             bridge.debugReceiveDocumentReady(
                 documentToken: "document-ready-12345678",
-                version: ChatGPTResponsePayload.currentVersion + 1
+                version: ChatGPTResponseProtocol.currentVersion + 1
             )
         )
         XCTAssertFalse(
@@ -373,7 +352,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(
             bridge.acceptTrustedInteraction(
                 body: [
-                    "version": ChatGPTResponsePayload.currentVersion,
+                    "version": ChatGPTResponseProtocol.currentVersion,
                     "event": "trustedInteraction",
                     "documentToken": token,
                     "interactionKind": "assistantPointer",
@@ -410,7 +389,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertTrue(bridge.debugReceiveDocumentReady(documentToken: token))
 
         let base: [String: Any] = [
-            "version": ChatGPTResponsePayload.currentVersion,
+            "version": ChatGPTResponseProtocol.currentVersion,
             "event": "trustedInteraction",
             "documentToken": token,
             "interactionKind": "assistantPointer"
@@ -577,7 +556,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
         XCTAssertFalse(
             fixture.bridge.acceptTrustedInteraction(
                 body: trustedInteractionBody(
-                    version: ChatGPTResponsePayload.currentVersion + 1
+                    version: ChatGPTResponseProtocol.currentVersion + 1
                 ),
                 messageWebView: fixture.attachedWebView,
                 isMainFrame: true,
@@ -649,7 +628,7 @@ final class ChatGPTResponseBridgeTests: XCTestCase {
     }
 
     private func trustedInteractionBody(
-        version: Int = ChatGPTResponsePayload.currentVersion,
+        version: Int = ChatGPTResponseProtocol.currentVersion,
         token: String = "trusted-admission-document-12345678",
         kind: String = "assistantPointer"
     ) -> [String: Any] {

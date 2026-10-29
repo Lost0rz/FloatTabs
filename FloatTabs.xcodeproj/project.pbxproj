@@ -85,33 +85,13 @@
 		A0000000000000000000004D /* WebFocusAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000004D /* WebFocusAdapterTests.swift */; };
 		A00000000000000000000050 /* ChatGPTResponseBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000050 /* ChatGPTResponseBridge.swift */; };
 		A00000000000000000000051 /* ChatGPTResponseExtraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000051 /* ChatGPTResponseExtraction.swift */; };
-		A00000000000000000000052 /* SpeechSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000052 /* SpeechSettings.swift */; };
-		A00000000000000000000053 /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000053 /* SpeechService.swift */; };
-		A00000000000000000000054 /* SpeechQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000054 /* SpeechQueue.swift */; };
-		A00000000000000000000055 /* SpeechContentCleaner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000055 /* SpeechContentCleaner.swift */; };
-		A00000000000000000000056 /* SpeechSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000056 /* SpeechSegmenter.swift */; };
-		A00000000000000000000057 /* AssistantSpeechCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000057 /* AssistantSpeechCoordinator.swift */; };
 		A00000000000000000000058 /* ChatGPTResponseBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000058 /* ChatGPTResponseBridgeTests.swift */; };
 		A00000000000000000000059 /* ChatGPTResponseExtractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000059 /* ChatGPTResponseExtractionTests.swift */; };
-		A0000000000000000000005A /* SpeechContentCleanerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005A /* SpeechContentCleanerTests.swift */; };
-		A0000000000000000000005B /* SpeechSegmenterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005B /* SpeechSegmenterTests.swift */; };
-		A0000000000000000000005C /* SpeechQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005C /* SpeechQueueTests.swift */; };
-		A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */; };
-		A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005E /* MathSpeechNormalizer.swift */; };
-		A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000005F /* MathSpeechNormalizerTests.swift */; };
 		A00000000000000000000060 /* AttentionSoundAssetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000060 /* AttentionSoundAssetStore.swift */; };
 		A00000000000000000000061 /* AttentionSoundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000061 /* AttentionSoundTests.swift */; };
-		A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */; };
 		A00000000000000000000063 /* UnreadResponseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000063 /* UnreadResponseStore.swift */; };
 		A00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */; };
 		A00000000000000000000065 /* UnreadResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000065 /* UnreadResponseTests.swift */; };
-		A00000000000000000000066 /* SpeechPlaybackSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000066 /* SpeechPlaybackSessionController.swift */; };
-		A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000067 /* SpeechSourceRouting.swift */; };
-		A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */; };
-		A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000069 /* SpeechCommandRouterTests.swift */; };
-		A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006A /* CalibreSpeechCoordinator.swift */; };
-		A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006B /* CalibreReaderBridge.swift */; };
-		A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006C /* CalibreReaderSpeechTests.swift */; };
 		A0000000000000000000006D /* RuntimeDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */; };
 		A0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */; };
 		A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */; };
@@ -219,33 +199,13 @@
 		B0000000000000000000004D /* WebFocusAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebFocusAdapterTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000050 /* ChatGPTResponseBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTResponseBridge.swift; sourceTree = "<group>"; };
 		B00000000000000000000051 /* ChatGPTResponseExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTResponseExtraction.swift; sourceTree = "<group>"; };
-		B00000000000000000000052 /* SpeechSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSettings.swift; sourceTree = "<group>"; };
-		B00000000000000000000053 /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
-		B00000000000000000000054 /* SpeechQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechQueue.swift; sourceTree = "<group>"; };
-		B00000000000000000000055 /* SpeechContentCleaner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechContentCleaner.swift; sourceTree = "<group>"; };
-		B00000000000000000000056 /* SpeechSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSegmenter.swift; sourceTree = "<group>"; };
-		B00000000000000000000057 /* AssistantSpeechCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000058 /* ChatGPTResponseBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTResponseBridgeTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000059 /* ChatGPTResponseExtractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTResponseExtractionTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005A /* SpeechContentCleanerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechContentCleanerTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005B /* SpeechSegmenterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSegmenterTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005C /* SpeechQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechQueueTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechCoordinatorTests.swift; sourceTree = "<group>"; };
-		B0000000000000000000005E /* MathSpeechNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizer.swift; sourceTree = "<group>"; };
-		B0000000000000000000005F /* MathSpeechNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSpeechNormalizerTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000060 /* AttentionSoundAssetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundAssetStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000061 /* AttentionSoundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionSoundTests.swift; sourceTree = "<group>"; };
-		B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechVoiceDefaultsTests.swift; sourceTree = "<group>"; };
 		B00000000000000000000063 /* UnreadResponseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000064 /* ChatGPTUnreadResponseCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTUnreadResponseCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000065 /* UnreadResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadResponseTests.swift; sourceTree = "<group>"; };
-		B00000000000000000000066 /* SpeechPlaybackSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionController.swift; sourceTree = "<group>"; };
-		B0000000000000000000006A /* CalibreSpeechCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreSpeechCoordinator.swift; sourceTree = "<group>"; };
-		B0000000000000000000006B /* CalibreReaderBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderBridge.swift; sourceTree = "<group>"; };
-		B0000000000000000000006C /* CalibreReaderSpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibreReaderSpeechTests.swift; sourceTree = "<group>"; };
-		B00000000000000000000067 /* SpeechSourceRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSourceRouting.swift; sourceTree = "<group>"; };
-		B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlaybackSessionControllerTests.swift; sourceTree = "<group>"; };
-		B00000000000000000000069 /* SpeechCommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechCommandRouterTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsPrivacyTests.swift; sourceTree = "<group>"; };
 		B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsTraceTests.swift; sourceTree = "<group>"; };
@@ -303,7 +263,6 @@
 				H0000000000000000000000E /* Storage */,
 				H00000000000000000000007 /* Web */,
 				H0000000000000000000000D /* UI */,
-				H0000000000000000000000F /* Speech */,
 				H00000000000000000000008 /* Resources */,
 			);
 			path = FloatTabs;
@@ -423,7 +382,6 @@
 				B0000000000000000000004C /* WebFocusRouter.swift */,
 				B00000000000000000000050 /* ChatGPTResponseBridge.swift */,
 				B00000000000000000000051 /* ChatGPTResponseExtraction.swift */,
-				B0000000000000000000006B /* CalibreReaderBridge.swift */,
 			);
 			path = Web;
 			sourceTree = "<group>";
@@ -440,23 +398,6 @@
 				B00000000000000000000077 /* RuntimeDiagnosticsSettingsViewController.swift */,
 			);
 			path = UI;
-			sourceTree = "<group>";
-		};
-		H0000000000000000000000F /* Speech */ = {
-			isa = PBXGroup;
-			children = (
-				B00000000000000000000052 /* SpeechSettings.swift */,
-				B00000000000000000000053 /* SpeechService.swift */,
-				B00000000000000000000066 /* SpeechPlaybackSessionController.swift */,
-				B00000000000000000000067 /* SpeechSourceRouting.swift */,
-				B00000000000000000000054 /* SpeechQueue.swift */,
-				B00000000000000000000055 /* SpeechContentCleaner.swift */,
-				B0000000000000000000005E /* MathSpeechNormalizer.swift */,
-				B00000000000000000000056 /* SpeechSegmenter.swift */,
-				B00000000000000000000057 /* AssistantSpeechCoordinator.swift */,
-				B0000000000000000000006A /* CalibreSpeechCoordinator.swift */,
-			);
-			path = Speech;
 			sourceTree = "<group>";
 		};
 		H00000000000000000000008 /* Resources */ = {
@@ -499,17 +440,8 @@
 				B0000000000000000000004D /* WebFocusAdapterTests.swift */,
 				B00000000000000000000058 /* ChatGPTResponseBridgeTests.swift */,
 				B00000000000000000000059 /* ChatGPTResponseExtractionTests.swift */,
-				B0000000000000000000005A /* SpeechContentCleanerTests.swift */,
-				B0000000000000000000005B /* SpeechSegmenterTests.swift */,
-				B0000000000000000000005C /* SpeechQueueTests.swift */,
-				B0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift */,
-				B0000000000000000000005F /* MathSpeechNormalizerTests.swift */,
 				B00000000000000000000061 /* AttentionSoundTests.swift */,
-				B00000000000000000000062 /* SpeechVoiceDefaultsTests.swift */,
 				B00000000000000000000065 /* UnreadResponseTests.swift */,
-				B00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift */,
-				B00000000000000000000069 /* SpeechCommandRouterTests.swift */,
-				B0000000000000000000006C /* CalibreReaderSpeechTests.swift */,
 				B0000000000000000000006D /* RuntimeDiagnosticsTests.swift */,
 				B0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift */,
 				B0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift */,
@@ -714,17 +646,6 @@
 				A0000000000000000000004C /* WebFocusRouter.swift in Sources */,
 				A00000000000000000000050 /* ChatGPTResponseBridge.swift in Sources */,
 				A00000000000000000000051 /* ChatGPTResponseExtraction.swift in Sources */,
-				A00000000000000000000052 /* SpeechSettings.swift in Sources */,
-				A00000000000000000000053 /* SpeechService.swift in Sources */,
-				A00000000000000000000054 /* SpeechQueue.swift in Sources */,
-				A00000000000000000000055 /* SpeechContentCleaner.swift in Sources */,
-				A0000000000000000000005E /* MathSpeechNormalizer.swift in Sources */,
-				A00000000000000000000056 /* SpeechSegmenter.swift in Sources */,
-				A00000000000000000000057 /* AssistantSpeechCoordinator.swift in Sources */,
-				A00000000000000000000066 /* SpeechPlaybackSessionController.swift in Sources */,
-				A00000000000000000000067 /* SpeechSourceRouting.swift in Sources */,
-				A0000000000000000000006B /* CalibreReaderBridge.swift in Sources */,
-				A0000000000000000000006A /* CalibreSpeechCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -761,17 +682,8 @@
 				A0000000000000000000004D /* WebFocusAdapterTests.swift in Sources */,
 				A00000000000000000000058 /* ChatGPTResponseBridgeTests.swift in Sources */,
 				A00000000000000000000059 /* ChatGPTResponseExtractionTests.swift in Sources */,
-				A0000000000000000000005A /* SpeechContentCleanerTests.swift in Sources */,
-				A0000000000000000000005B /* SpeechSegmenterTests.swift in Sources */,
-				A0000000000000000000005C /* SpeechQueueTests.swift in Sources */,
-				A0000000000000000000005D /* AssistantSpeechCoordinatorTests.swift in Sources */,
-				A0000000000000000000005F /* MathSpeechNormalizerTests.swift in Sources */,
 				A00000000000000000000061 /* AttentionSoundTests.swift in Sources */,
-				A00000000000000000000062 /* SpeechVoiceDefaultsTests.swift in Sources */,
 				A00000000000000000000065 /* UnreadResponseTests.swift in Sources */,
-				A00000000000000000000068 /* SpeechPlaybackSessionControllerTests.swift in Sources */,
-				A00000000000000000000069 /* SpeechCommandRouterTests.swift in Sources */,
-				A0000000000000000000006C /* CalibreReaderSpeechTests.swift in Sources */,
 				A0000000000000000000006D /* RuntimeDiagnosticsTests.swift in Sources */,
 				A0000000000000000000006E /* RuntimeDiagnosticsPrivacyTests.swift in Sources */,
 				A0000000000000000000006F /* RuntimeDiagnosticsTraceTests.swift in Sources */,
