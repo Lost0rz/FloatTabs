@@ -19,6 +19,7 @@ WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
 WP3_EXACT_HEAD=29810e65d700901baa0737e94bcfbf6ba63390d0
 WP4_EXACT_HEAD=c1d94a86231b47bcbc8ffb7827c5a11c200b9058
+WP5_PRE_AUDIT_TARGET=56f31697f4074d2c617651dfc4bce26dd550400c
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -160,8 +161,6 @@ EXACT_HEAD=c1d94a86231b47bcbc8ffb7827c5a11c200b9058
 AUDIT_INDEPENDENCE=FRESH_CONTEXT
 ```
 
-Exact-head POST_AUDIT verified the semantic implementation delta from `53ec58d4d0e6895d3d6869e1a8d10bfcdf6cd1c9` to `c1d94a86231b47bcbc8ffb7827c5a11c200b9058` is one commit touching only the five WP4 production surfaces and four shared tests. No Speech source file, dedicated Speech test, or Xcode project reference was deleted, so WP5 was not entered early.
-
 Verified WP4 acceptance:
 
 ```text
@@ -176,29 +175,156 @@ UNREAD_ATTENTION_RAIL=PRESERVED
 UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
 
-Evidence boundary:
-
-- `ExternalTabRail.swift` contains no remaining Speech rail control/badge/state identifiers while retaining Attention/Unread structures and presentation.
-- `AppCommandController.swift` contains no Speech `AppCommand`, Speech `KeyboardShortcuts.Name`, Speech catalog binding, or Speech diagnostic command; RemoteOrbit `focusInputForVoice` remains present.
-- `AppShortcutCatalog` contains 24 non-Speech bindings and focused tests assert the four retired Ctrl+Shift shortcuts no longer resolve.
-- Audio Settings now embeds only `NotificationsSettingsViewController`, and `SettingsInformationArchitecture` projects Audio as `[.readyAlerts]`.
-- The compile-only `SpeechSettingsViewController` class and no-op Speech compatibility methods in `PanelController` remain physically present but are not reachable from active WP4 product surfaces. They are residual source cleanup for WP5 and do not retain Speech runtime ownership or commands.
-- Existing persisted Speech preference/shortcut values were not deleted or migrated.
-
 At WP4 exact implementation head `c1d94a86231b47bcbc8ffb7827c5a11c200b9058`:
 
 ```text
 LOCAL_FOCUSED_XCTEST=164 tests / 0 failures (executor evidence)
 LOCAL_FULL_XCTEST=1306 tests / 0 failures / TEST SUCCEEDED (executor evidence)
-MACOS_CI_1186=IN_PROGRESS at latest observation
+MACOS_CI_1186=SUCCESS
 QA_DMG_569=SUCCESS
 HUMAN_UI_ACCEPTANCE=PENDING
 ```
 
-Remote macOS CI is not promoted beyond the latest observed state. QA DMG for the exact semantic head has passed. The still-running macOS CI is not a CODE_DIFF WP4 post-audit blocker; it remains a later PR/merge/final-acceptance host gate. Human UI acceptance remains human-owned and pending; it is not promoted by automated or code-level audit evidence.
+## Work Package 5 — PRE_AUDIT
+
+**PRE_AUDIT: PASS**
+
+Audit target: `56f31697f4074d2c617651dfc4bce26dd550400c`.
+
+WP1-WP4 have removed every active Speech owner/runtime/product surface. WP5 is now a bounded physical cleanup and residual-reference package; it does not require a new ownership model.
+
+### Whole-file production deletions
+
+The `FloatTabs/Speech` group still contains exactly ten retired Speech-domain source files:
+
+```text
+AssistantSpeechCoordinator.swift
+CalibreSpeechCoordinator.swift
+MathSpeechNormalizer.swift
+SpeechContentCleaner.swift
+SpeechPlaybackSessionController.swift
+SpeechQueue.swift
+SpeechSegmenter.swift
+SpeechService.swift
+SpeechSettings.swift
+SpeechSourceRouting.swift
+```
+
+All ten are now unowned by active production composition and are WP5 whole-file DELETE scope.
+
+`FloatTabs/Web/CalibreReaderBridge.swift` is also WP5 whole-file DELETE scope. It implements the retired read-aloud-specific Calibre reader detection/extraction/CFI/page-advance/relocation bridge. Current `WebViewPool.swift` has no `CalibreReader` ownership or reference after WP2, so deleting this bridge does not remove normal Calibre browsing or generic background-media behavior.
+
+### Dedicated test deletions
+
+Nine dedicated Speech/read-aloud test files remain and are WP5 whole-file DELETE scope:
+
+```text
+AssistantSpeechCoordinatorTests.swift
+CalibreReaderSpeechTests.swift
+MathSpeechNormalizerTests.swift
+SpeechCommandRouterTests.swift
+SpeechContentCleanerTests.swift
+SpeechPlaybackSessionControllerTests.swift
+SpeechQueueTests.swift
+SpeechSegmenterTests.swift
+SpeechVoiceDefaultsTests.swift
+```
+
+Shared tests are not deleted merely because they contain historical Speech wording.
+
+### Xcode project cleanup
+
+`FloatTabs.xcodeproj/project.pbxproj` still explicitly contains PBX build/file/group references for:
+
+- all ten retired Speech-domain source files;
+- `CalibreReaderBridge.swift`;
+- all nine dedicated Speech/read-aloud test files;
+- the `Speech` PBXGroup itself.
+
+WP5 removes those references consistently from file references, groups and build phases. Shared bridge/Attention/Unread/Ready Alert/RemoteOrbit/Web lifecycle test references remain.
+
+### Compile-only production residue to edit in place
+
+`FloatTabs/Web/ChatGPTResponseBridge.swift` still contains compile-only `ChatGPTResponseExtracting` and `ChatGPTResponseFollowing` protocols. Production `ChatGPTResponseBridge` does not conform to them. WP5 removes these compatibility protocols while preserving `ChatGPTResponseStatusSnapshotting` and the active identity/status/trusted-interaction bridge.
+
+`FloatTabs/Web/ChatGPTResponseExtraction.swift` still contains WP3 compatibility models used only by the retired source/tests, including `ChatGPTResponsePayload` (explicitly marked retained until WP5), Speech extraction diagnostics/ownership/path models and related retired payload structures. WP5 removes only compatibility entities proven unused after the retired Speech sources/tests are deleted. It must preserve:
+
+```text
+ChatGPTResponseIdentity
+ChatGPTResponseStatusSnapshot
+ChatGPTTrustedInteractionEvent
+ChatGPTTrustedPageInteractionKind
+ChatGPTResponseProtocol
+ChatGPTResponseExtraction content-world script
+stable response identity/status
+trusted manual-scroll / assistant-pointer semantics
+```
+
+Any shared test that currently uses `ChatGPTResponsePayload.currentVersion` for the preserved trusted-interaction protocol must migrate to `ChatGPTResponseProtocol.currentVersion`; the compatibility payload must not be kept solely to support tests.
+
+`FloatTabs/UI/GlobalSettingsController.swift` still physically contains the unmounted `SpeechPreviewHandler` and `SpeechSettingsViewController` implementation. WP5 removes that Speech-only block while preserving all active Settings surfaces, especially `NotificationsSettingsViewController` / Ready Alerts.
+
+`FloatTabs/Panel/PanelController.swift` still contains no-op Speech compatibility methods (`read/pause/resume`, replay, stop, auto-speak, preview aliases). WP5 removes those methods after repository-wide caller verification. `prepareInputFocusForExternalVoice` and all RemoteOrbit focus behavior are unrelated and must remain.
+
+### Shared-test selective cleanup
+
+Shared test files remain and lose only retired Speech compatibility assertions/names where applicable:
+
+- `ChatGPTResponseBridgeTests.swift`: remove assertions against retired extraction/follow protocols and Speech-specific historical names; migrate version fixtures from `ChatGPTResponsePayload.currentVersion` to `ChatGPTResponseProtocol.currentVersion`; preserve identity/status/document/trusted-interaction/pool-forwarding coverage.
+- `ChatGPTResponseExtractionTests.swift`: preserve positive identity/status/trusted-interaction coverage; remove retired Speech-only negative strings/wording where they no longer validate an active contract.
+- `WebAttentionIndicatorTests.swift`: remove the WP4 transitional `testSpeechRailAndTabBadgeSurfaceIsAbsent` residue; preserve all Attention/Unread/Ready Alert coverage.
+- `WebAttentionCrossFeatureTests.swift`: keep the actual Unread interaction tests but rename Speech-specific historical test wording (`WithoutSpeechExtraction`) to neutral preserved-contract names.
+- `WebAttentionLifecycleTests.swift`: retain lifecycle/background-policy coverage; rename the historical `HiddenSpeech` fixture only.
+- `SettingsInformationArchitectureTests.swift`: retain Audio/Ready Alert and Settings IA coverage; remove obsolete Speech title wording where it exists only as historical absence evidence.
+- `AppCommandControllerTests.swift`: retain the 24-binding and RemoteOrbit coverage; remove the transitional dedicated retired-Speech-shortcut absence test once the declarations are physically gone.
+
+A final implementation-time repository-wide residual search is mandatory because WP5 owns cleanup of any additional Speech-only compatibility reference discovered at the exact implementation head. Such cleanup remains in scope only when it does not alter preserved feature semantics.
+
+### Hard non-edits / preserve boundary
+
+```text
+Do not alter ChatGPT Attention business semantics.
+Do not alter Unread acknowledgement/reconciliation semantics.
+Do not remove or weaken stable response identity/status/trusted interactions.
+Do not alter Ready Alert preferences, custom sound library, preview or playback.
+Do not alter FloatTabsExternalCommand.focusInputForVoice or WebFocus voice routing.
+Do not remove generic background-media behavior or normal Calibre browsing.
+Do not alter WebView lifecycle/navigation/residency/recovery semantics except project-reference cleanup required by deleted Speech files.
+Do not modify Browser Profiles, sessions/cookies, Slot configuration, backups/recovery or user data.
+Do not delete/migrate persisted historical Speech preference/shortcut values.
+Do not enter WP6 implementation/acceptance early.
+```
+
+### WP5 implementation gate
+
+```text
+PRE_AUDIT=PASS
+IMPLEMENT=AUTHORIZED
+POST_AUDIT=REQUIRED_BEFORE_WP6
+```
+
+WP5 POST_AUDIT must establish at least:
+
+```text
+SPEECH_DOMAIN_SOURCE_FILES=0
+CALIBRE_READ_ALOUD_SOURCE=0
+DEDICATED_SPEECH_TEST_FILES=0
+SPEECH_XCODE_SOURCE_REFS=0
+SPEECH_XCODE_TEST_REFS=0
+ACTIVE_SPEECH_PRODUCTION_REFS=0
+ACTIVE_SPEECH_TEST_REFS=0
+INERT_LEGACY_DATA_MUTATION=NONE
+ATTENTION_UNREAD_REGRESSION=PASS
+STABLE_RESPONSE_IDENTITY_TRUSTED_INTERACTION=PASS
+REMOTEORBIT_VOICE_FOCUS=PASS
+READY_ALERTS=PASS
+BACKGROUND_MEDIA_NORMAL_CALIBRE=PASS
+WEB_RUNTIME_LIFECYCLE_REGRESSION=PASS
+UNVERIFIED_REQUIRED_CLAIMS=NONE
+```
 
 ## Next gate
 
-Start **Work Package 5 PRE_AUDIT only**. Inventory Xcode project references, dedicated Speech tests, compile-only Speech source declarations, no-op compatibility seams and shared tests that mix Speech with preserved behavior. Establish the exact deletion/edit boundary before any WP5 implementation.
+Implement **Work Package 5 only** on `codex/ft-speech-retire-001`. Delete the retired source/test files and exact Xcode references, remove compile-only/shared-test residue, run the required focused regression matrix plus the full XCTest suite, and perform a repository-wide residual-reference audit before push.
 
-Do not enter WP5 IMPLEMENT until that PRE_AUDIT passes. Do not enter WP6 early. No release is authorized merely because the retirement implementation advances.
+After implementation is pushed, perform an independent exact-head WP5 POST_AUDIT before entering WP6. Human UI acceptance remains pending and human-owned. No release is authorized merely because the retirement implementation advances.
