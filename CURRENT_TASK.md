@@ -1,297 +1,167 @@
 # FloatTabs Current Task
 
-**Task ID:** `FT-SPEECH-RETIRE-001`
-**Title:** Retire built-in Speech / TTS end-to-end with gated pre/post audits
+**Task ID:** `FT-JSC-MULTI-RUNTIME-002`
+**Title:** Audit multi-generating long-lived ChatGPT WebContent clustering and shared resource pressure
 **Status:** `ACTIVE / AUTHORIZED`
 **Mode:** `EXECUTE`
-**Task class:** `PRODUCT RETIREMENT / RUNTIME SIMPLIFICATION`
-**Authorized semantic baseline:** `main@7245efa34152036bd9a6406f4cdb20abd432688e`
+**Task class:** `RUNTIME STABILITY / EVIDENCE-DRIVEN CORRECTIVE`
+**Authorized baseline:** `main@26c81d83d3bdd771e98e355337b78622e2b25b17`
 **Public baseline:** `v0.5.8` / Build `26`
-**WebContent crash root cause:** `UNKNOWN`
+**Predecessor:** PR #161 `CLOSED / ARCHIVE-ONLY / UNMERGED`
+**JSC root cause:** `UNKNOWN`
 
 ## Purpose
 
-Remove FloatTabs' built-in text-to-speech/read-aloud feature completely from the active product/runtime surface while preserving unrelated product capabilities and user data.
+Investigate the strongest remaining correlation after the negative watchdog-cadence experiment: multiple long-lived ChatGPT WebContent runtimes generating concurrently while Attention-protected, with crash events clustering across different Slots.
 
-This is a deliberate product simplification. It is not a workaround claim for the JavaScriptCore crash family and must not be represented as proving or fixing the crash root cause.
+The task must determine whether FloatTabs-owned multi-runtime behavior or shared resource pressure exposes a bounded mitigation opportunity, then implement at most one smallest evidence-supported intervention and produce a new QA artifact for Air soak.
 
-## Frozen product decision
+This task does not claim that concurrent generation, Attention protection, memory pressure, or FloatTabs itself is the proven JSC root cause.
 
-The following decision is no longer open for implementation debate inside this task:
+## Verified evidence carried forward
+
+Historical native crash family:
 
 ```text
-BUILT_IN_SPEECH_TTS=RETIRE COMPLETELY
-TEMPORARY_DISABLE=NO
-HIDDEN_UI_WITH_RUNTIME_LEFT_BEHIND=NO
-PARTIAL_CHATGPT_ONLY_RETIREMENT=NO
-CALIBRE_READ_ALOUD=RETIRE
+EXCEPTION=EXC_BAD_ACCESS
+SIGNAL=SIGSEGV
+COMMON_FAULT_ADDRESS=0x48
+COMMON_FAULT_SYMBOL=llint_entry_osr_function_for_call+120
+ASYNC_PATH=async-generator / async-iterator / microtask
+JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-If implementation evidence shows that a listed PRESERVE capability actually depends on a Speech-specific component in a way that cannot be separated safely, STOP and surface the dependency. Do not silently redefine the retirement boundary.
-
-## Authorized REMOVE scope
-
-Retire active production ownership and behavior for:
-
-- `AssistantSpeechCoordinator`;
-- `CalibreSpeechCoordinator`;
-- `SpeechPlaybackSessionController`;
-- `SpeechSourceRouting` / speech command routing;
-- `SpeechService` / `AVSpeechSynthesizer`;
-- `SpeechSettings`, voice catalog/defaults, speech rate and language routing;
-- `SpeechQueue`;
-- `SpeechContentCleaner`;
-- `SpeechSegmenter`;
-- `MathSpeechNormalizer`;
-- ChatGPT response body extraction, speech block parsing, speech-follow/scroll behavior, speech locator registries and speech-only bridge requests;
-- Calibre read-aloud/reader bridge behavior used only for TTS;
-- Speech ownership/callbacks/protection hooks in App composition, Panel lifecycle and Slot lifecycle;
-- Rail Speech controls and per-tab Speech status/badges;
-- Speech Settings UI, previews and voice management surface;
-- Speech AppCommands, keyboard shortcuts and shortcut catalog entries;
-- Speech-only tests and Xcode project/source references;
-- Speech-specific portions of shared tests/bridges that are no longer required after retirement.
-
-## Mandatory PRESERVE scope
-
-The following are hard boundaries and must remain functionally intact:
+Optimized soak from closed PR #161:
 
 ```text
-ChatGPT Attention
-Unread / 有回复
-Stable response identity
-Trusted manual scroll / trusted assistant pointer needed by Unread
+SYSTEM_CONFIRMED_WEBCONTENT_CRASHES=6/6
+CHATGPT_GENERATING_AT_TERMINATION=6/6
+ATTENTION_PROTECTED_AT_TERMINATION=6/6
+ACTIVE_SLOT_TERMINATIONS=1
+INACTIVE_SLOT_TERMINATIONS=5
+HOT_TERMINATIONS=2
+WARM_TERMINATIONS=4
+SYSTEM_VM_PRESSURE_CRITICAL_REQUIRED_FOR_CRASH=NO
+ELEVATED_WEBCONTENT_FOOTPRINT_COMMON=YES
+MULTI_SLOT_CRASH_CLUSTER_1=~18.4s
+MULTI_SLOT_CRASH_CLUSTER_2=~1.6s
+WATCHDOG_2S_TO_5S_ELIMINATED_CRASH=NO
+```
+
+PR #161 is negative evidence only. Do not cherry-pick or inherit its `2s -> 5s` watchdog change unless new evidence independently authorizes that behavior; canonical `main` remains the baseline.
+
+## Gate 1 — bounded PRE_AUDIT
+
+Before any product mutation, map the exact current production path for:
+
+1. how many ChatGPT Slots can be simultaneously `Generating` and `Attention-protected`;
+2. WebView/WebContent/process-pool/data-store topology across those Slots and Browser Profiles;
+3. Slot residency decisions while multiple protected runtimes coexist;
+4. FloatTabs-owned repeated JavaScript, DOM, bridge, health, diagnostics and benchmark work performed per generating Slot;
+5. memory-pressure handling and what non-protected runtimes remain resident while multiple protected ChatGPT runtimes are active;
+6. termination/recovery ownership and whether clustered crashes share any FloatTabs-owned global coordinator, timer, queue or resource boundary;
+7. existing tests and diagnostics that can distinguish single-generating versus multi-generating runtime states.
+
+Quantify, where the code permits, which workload scales linearly with the number of generating protected Slots and which workload is globally shared.
+
+Return:
+
+```text
+PRE_AUDIT=PASS | STOP
+MULTI_GENERATING_RUNTIME_TOPOLOGY=<facts>
+SCALING_FLOATTABS_WORK=<facts>
+SAFE_BOUNDED_INTERVENTION=<one candidate or NONE>
+```
+
+## Gate 2 — one smallest evidence-supported intervention
+
+Only after PRE_AUDIT passes, implement at most one coherent intervention that reduces FloatTabs-owned shared/multi-runtime pressure without interrupting ChatGPT generation.
+
+Authorized classes, only if supported by the audit:
+
+1. reduce or coalesce non-essential FloatTabs-owned work that scales with concurrent generating Slots;
+2. stagger globally coordinated non-essential work to avoid synchronized per-Slot bursts;
+3. under elevated shared runtime pressure, release or defer only **non-active, non-generating, non-Attention-protected** runtimes while preserving Browser Profile/session data;
+4. add the minimal diagnostics required to measure concurrent-generating count, protected-runtime count, affected WebContent footprint/pressure context, and clustered termination relationships when no safe mitigation can yet be proven.
+
+Do not batch multiple speculative mitigations. If no safe bounded intervention is established, STOP after diagnostics/evidence rather than inventing one.
+
+## Mandatory preserve boundary
+
+```text
+ChatGPT generation must continue normally
+Attention / Unread / 有回复 existing semantics
+Stable response identity / trusted interaction
 Ready Alert sound
 RemoteOrbit voice-input focus
-FloatTabsExternalCommand.focusInputForVoice
-prepareInputFocusForExternalVoice
-WebFocusVoiceTarget / WebSiteAdapter voice-focus path
-Background media policy
+Background media behavior
 Normal Calibre browsing
-WebView ownership / lifecycle / navigation / residency / recovery
 Browser Profiles
-Website sessions / cookies
+Website cookies / sessions
 Slot configuration
-Preferences not owned by retired Speech code
-Backups / recovery data
+Persistence / backups / recovery data
 All user data
 ```
 
-Do not delete or migrate existing persisted Speech preference/shortcut values. After retirement they remain inert legacy data and are no longer read or written.
+Do not delete/reset/rebuild Browser Profiles, cookies, sessions, Slot data, backups or preferences.
 
-## Execution contract — mandatory audit sandwich
+Do not use routine reload/restart/reset as the optimization or as root-cause evidence.
 
-Every implementation work package must use the same three-stage gate:
+Do not change canonical WebView ownership, process-pool ownership, Browser Profile data-store ownership or other architecture boundaries without a separate architecture decision.
 
-### A. PRE_AUDIT — read-only
+## Gate 3 — verification and QA
 
-Before modifying that package:
+Before Air soak handoff:
 
-1. establish the exact current production owners, call sites, lifecycle hooks, tests and project references in that package;
-2. identify shared dependencies crossing into PRESERVE capabilities;
-3. prove the planned mutation is bounded to the package and does not require a hidden ownership change;
-4. record expected deletions/edits and explicit non-edits;
-5. return `PRE_AUDIT=PASS` or `STOP` with evidence.
+- focused tests for every touched runtime/residency/Attention path;
+- full required XCTest suite;
+- Debug and Release arm64 build gates;
+- exact-head CI and QA DMG checks;
+- diagnostics must preserve enough evidence to compare single- vs multi-generating conditions;
+- no regression in Attention/Unread, generation tracking, RemoteOrbit focus, background media, Browser Profiles or recovery;
+- QA DMG must be tied to exact source revision and SHA256.
 
-No production source mutation for the package is allowed before `PRE_AUDIT=PASS`.
-
-### B. IMPLEMENT — one canonical writer
-
-After the pre-audit passes:
-
-1. implement the smallest complete retirement delta for that package;
-2. do not perform adjacent cleanup outside the frozen package;
-3. preserve user/product data;
-4. run focused verification sufficient to detect direct breakage before handoff to post-audit.
-
-### C. POST_AUDIT — read-only exact-head verification
-
-After implementation:
-
-1. audit the exact implementation head, not an older diff or plan;
-2. confirm intended Speech behavior/ownership is gone for that package;
-3. confirm every package-specific PRESERVE contract remains intact;
-4. confirm required focused tests/build checks and source/project references are consistent;
-5. search for residual active Speech paths that would leave a hidden or partially disabled runtime;
-6. return `POST_AUDIT=PASS` or `STOP` with concrete findings.
-
-`POST_AUDIT=PASS` is required before beginning the next package. Do not batch future packages merely to make the current package pass later.
-
-## Work Package 1 — Composition and lifecycle ownership
-
-### PRE_AUDIT target
-
-Audit App composition, `PanelController`, Slot lifecycle integration and Speech protection/callback ownership. Establish all active Speech owners before deletion.
-
-### IMPLEMENT target
-
-Remove Speech construction/injection and Speech lifecycle glue, including active coordinator/service/preferences ownership and Panel/Slot callbacks, without changing Web runtime, Attention, focus, residency or recovery semantics.
-
-### POST_AUDIT acceptance
+## Interpretation rules
 
 ```text
-NO_ACTIVE_SPEECH_OWNER_IN_APP_COMPOSITION=YES
-NO_ACTIVE_SPEECH_OWNER_IN_PANEL=YES
-NO_SPEECH_SLOT_PROTECTION_HOOK=YES
-ATTENTION_UNCHANGED=YES
-VOICE_INPUT_FOCUS_UNCHANGED=YES
-WEB_RUNTIME_SEMANTICS_UNCHANGED=YES
-```
-
-## Work Package 2 — Speech runtime domain and Calibre read-aloud
-
-### PRE_AUDIT target
-
-Inventory all files in the Speech domain, `AVSpeechSynthesizer`/voice observers, Calibre read-aloud bridge behavior, background-media coupling, production references and dedicated tests.
-
-### IMPLEMENT target
-
-Delete the Speech runtime domain and Calibre read-aloud path once no production owner remains. Remove only Speech coupling from background-media handling.
-
-### POST_AUDIT acceptance
-
-```text
-AVSPEECHSYNTHESIZER_ACTIVE_REFERENCES=0
-SPEECH_QUEUE_STATE_MACHINE_ACTIVE_REFERENCES=0
-VOICE_ENUMERATION_OBSERVERS_ACTIVE_REFERENCES=0
-CALIBRE_READ_ALOUD_ACTIVE_REFERENCES=0
-BACKGROUND_MEDIA_POLICY_PRESERVED=YES
-NORMAL_CALIBRE_BROWSING_PRESERVED=YES
-```
-
-## Work Package 3 — Shared ChatGPT response bridge slimming
-
-### PRE_AUDIT target
-
-Separate Speech-only extraction/follow/locator behavior from shared stable-response identity, generation/status and trusted-interaction behavior used by Unread/Attention.
-
-### IMPLEMENT target
-
-Remove response-body payload extraction, structured speech blocks, locator registries, speech-follow/scroll requests and speech-specific pending request machinery. Retain only behavior required by stable response identity, status/trusted interaction and Unread/Attention contracts.
-
-### POST_AUDIT acceptance
-
-```text
-SPEECH_BODY_EXTRACTION=REMOVED
-SPEECH_LOCATOR_REGISTRIES=REMOVED
-SPEECH_SCROLL_FOLLOW=REMOVED
-STABLE_RESPONSE_IDENTITY=PRESERVED
-UNREAD_RECONCILIATION=PRESERVED
-TRUSTED_INTERACTION=PRESERVED
-ATTENTION_STATUS=PRESERVED
-```
-
-## Work Package 4 — Product surfaces and shortcuts
-
-### PRE_AUDIT target
-
-Inventory Rail controls, tab badges/state, Settings IA/UI, previews, commands, keyboard shortcut declarations/catalog and accessibility projections tied to Speech.
-
-### IMPLEMENT target
-
-Remove all Speech product surface and commands. Keep the Audio Settings surface only for Ready Alerts. Preserve unrelated Rail Attention/Unread visuals.
-
-### POST_AUDIT acceptance
-
-```text
-SPEECH_RAIL_CONTROLS=0
-SPEECH_TAB_BADGES=0
-SPEECH_SETTINGS_SURFACE=0
-SPEECH_COMMANDS=0
-SPEECH_SHORTCUT_BINDINGS=0
-EXPECTED_NON_SPEECH_BINDINGS=24
-READY_ALERTS=PRESERVED
-UNREAD_ATTENTION_RAIL=PRESERVED
-```
-
-## Work Package 5 — Project/test cleanup and residual-reference audit
-
-### PRE_AUDIT target
-
-Inventory Xcode project references, dedicated Speech tests and shared tests that contain both Speech and preserved cross-feature coverage.
-
-### IMPLEMENT target
-
-Remove Speech-only source/test/project references; edit shared tests only to remove retired Speech assertions/cases while retaining coverage for preserved behavior.
-
-### POST_AUDIT acceptance
-
-Run a repository-wide residual-reference audit. Active production/test references to retired Speech runtime are not allowed except explicit inert legacy key names or historical documentation/evidence where retention is intentional.
-
-Focused regression sets must cover at least:
-
-- Attention / Unread;
-- stable response identity / trusted interaction;
-- RemoteOrbit voice-input focus;
-- Ready Alerts;
-- background media / normal Calibre browsing;
-- WebView lifecycle / navigation / residency / recovery areas touched indirectly by deletion.
-
-## Work Package 6 — Full acceptance and runtime baseline
-
-No new feature implementation is authorized in this package.
-
-Run:
-
-1. full required XCTest suite;
-2. Debug and Release build gates required by the repository;
-3. exact-head PR/CI verification;
-4. real macOS acceptance covering:
-   - active/background ChatGPT generation;
-   - tab switching and long-lived Slots;
-   - Unread / 有回复 presentation and clearing;
-   - Ready Alert sound;
-   - RemoteOrbit voice-input focus;
-   - normal Calibre browsing and background-media behavior;
-5. runtime-log observation sufficient to establish a post-retirement baseline for performance/runtime behavior.
-
-Interpret runtime evidence conservatively:
-
-```text
-SPEECH_RETIREMENT_REDUCES_RUNTIME_SURFACE=SUPPORTED_BY_ARCHITECTURE
-JSC_CRASH_ROOT_CAUSE=UNKNOWN
-NO_CRASH_AFTER_RETIREMENT != ROOT_CAUSE_PROVEN
-CRASH_AFTER_RETIREMENT != RETIREMENT_FAILURE_IF_PRODUCT_ACCEPTANCE_PASSES
+MULTI_SLOT_CLUSTER != CONCURRENT_GENERATION_ROOT_CAUSE
+ELEVATED_FOOTPRINT != MEMORY_ROOT_CAUSE
+LOWER_CRASH_RATE != ROOT_CAUSE_PROVEN
+NO_CRASH_DURING_BOUNDED_SOAK != FIX_PROVEN
+JSC_NATIVE_CRASH_SITE != FLOATTABS_SOURCE_LINE_PROVEN
 ```
 
 ## STOP conditions
 
-STOP immediately if:
+STOP and report evidence if:
 
-- repository/task authority changes materially;
-- a package pre-audit cannot establish safe ownership boundaries;
-- a change would delete/reset/migrate Browser Profiles, sessions, cookies, Slot data, backups, recovery data or unrelated preferences;
-- stable response identity / Unread / Attention cannot be preserved while removing Speech extraction;
-- RemoteOrbit voice-input focus is coupled to Speech/TTS in a way that is not safely separable;
-- background media or normal Calibre browsing would be removed as collateral damage;
-- a package post-audit fails or finds residual hidden Speech runtime;
-- implementation requires a new canonical writer/shared ownership model not already authorized;
-- required tests/build gates fail because of the retirement change;
-- an unrelated runtime defect appears and would broaden this task into incident repair.
-
-Do not convert an unrelated defect into a retirement-scope fix. Preserve it as separate evidence/follow-up.
+- PRE_AUDIT cannot establish a bounded FloatTabs-owned multi-runtime workload or measurement gap;
+- the proposed change would interrupt or serialize user ChatGPT generation as a product behavior;
+- the change would weaken required Attention/Unread protection for work still generating or unseen;
+- the only proposed mitigation is destructive data/session/profile mutation or routine reload/reset/restart;
+- implementation requires canonical WebView/process-pool/data-store ownership redesign;
+- tests/builds fail because of the intervention;
+- new native evidence contradicts the current incident classification.
 
 ## Completion boundary
 
-This task is complete only when all six work packages have individually passed their pre-audit/implementation/post-audit gate and the final full acceptance passes.
+This task reaches `AIR_SOAK_READY` only after one bounded intervention or evidence-critical diagnostic improvement is implemented, verified and delivered with a fresh QA DMG.
 
-Final completion must report:
+Final receipt must distinguish:
 
 ```text
-ACTIVE_SPEECH_RUNTIME=ABSENT
-SPEECH_PRODUCT_SURFACE=ABSENT
-SPEECH_SHORTCUTS=ABSENT
-CHATGPT_SPEECH_EXTRACTION_FOLLOW=ABSENT
-CALIBRE_READ_ALOUD=ABSENT
-READY_ALERT=PRESERVED
-ATTENTION_UNREAD=PRESERVED
-STABLE_RESPONSE_IDENTITY=PRESERVED
-REMOTEORBIT_VOICE_FOCUS=PRESERVED
-BACKGROUND_MEDIA=PRESERVED
-USER_DATA_MUTATION=NONE
-FULL_TEST_BUILD_GATE=PASS
-REAL_RUNTIME_ACCEPTANCE=PASS
+PRE_AUDIT=<result>
+INTERVENTION=<exactly one or DIAGNOSTICS_ONLY>
+MULTI_RUNTIME_PRESSURE_REDUCED_OR_MEASURED=<evidence>
+FULL_TEST_BUILD_GATE=<result>
+CI_GATE=<result>
+QA_DMG=<identity/path/hash>
 JSC_ROOT_CAUSE=UNKNOWN unless separately proven
+AIR_SOAK=READY | BLOCKED
 ```
 
-A production release is not automatically authorized by task completion. Release requires its own final repository/host readiness decision.
+Production release is not authorized by this task.
+
+## Separate follow-up not authorized here
+
+The active-visible ChatGPT completion red-dot behavior is a confirmed product-semantic issue: current V1 intentionally suppresses persistent unread for visible completion. Any change to that behavior requires a separate product task and must not be mixed into this runtime experiment.
