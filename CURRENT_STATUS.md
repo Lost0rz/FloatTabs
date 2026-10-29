@@ -64,6 +64,19 @@ Within that soak session, five distinct ChatGPT WebContent terminations were rec
 
 All five report `origin=https://chatgpt.com`; four occurred while the Slot was inactive and one while active. All five later reached `web_runtime.incident.closed` with `incident_outcome=healthy_current_runtime` after recovery.
 
+A stronger common correlation is now established from the incident snapshots:
+
+```text
+CHATGPT_GENERATING_AT_TERMINATION=5/5
+ATTENTION_PROTECTED_AT_TERMINATION=5/5
+ACTIVE_SLOT=1/5
+INACTIVE_SLOT=4/5
+HOT_RESIDENCY=3/5
+WARM_RESIDENCY=2/5
+```
+
+Therefore the observed termination family is not explained by inactive-Slot release/residency alone: it reproduces in both active and inactive Slots and across both hot and warm residency states. The common product-level condition visible in all five snapshots is active ChatGPT generation with Attention protection. This is correlation only; it does not establish the native crash trigger or root cause.
+
 One system memory-pressure warning was recorded at `2026-10-29T09:17:10Z`; it occurs only before the fifth termination and therefore does not explain the first four. WebContent resource attribution remains unavailable through the public API.
 
 At the end of the uploaded log, the same soak session records an unresolved candidate only:
@@ -89,8 +102,12 @@ No Speech/TTS/synth runtime match was found in the soak session.
 SPEECH_RETIREMENT_ACCEPTANCE=PASS
 POST_RETIREMENT_WEBCONTENT_TERMINATION_REPRODUCED=YES
 POST_RETIREMENT_TERMINATION_COUNT=5
+CHATGPT_GENERATING_AT_TERMINATION=5/5
+ATTENTION_PROTECTED_AT_TERMINATION=5/5
 ACTIVE_SLOT_TERMINATION_COUNT=1
 INACTIVE_SLOT_TERMINATION_COUNT=4
+HOT_RESIDENCY_TERMINATION_COUNT=3
+WARM_RESIDENCY_TERMINATION_COUNT=2
 ALL_RECORDED_TERMINATIONS_RECOVERED=YES
 LATEST_STALL_CANDIDATE=UNRESOLVED_IN_UPLOADED_SLICE
 JSC_ROOT_CAUSE=UNKNOWN
