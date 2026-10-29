@@ -115,9 +115,6 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
     typealias RestoreBackupHandler = (URL) throws -> URL
 
     private let preferencesStore: AppPreferencesStore
-    private let speechPreferencesStore: SpeechPreferencesStore
-    private let speechVoiceCatalog: SpeechVoiceCatalogProviding
-    private let speechPreviewHandler: SpeechPreviewHandler?
     private let attentionSoundAssetStore: AttentionSoundAssetStore
     private let attentionSoundPlayer: AttentionSoundPlaying
     private let onExportBackup: ExportBackupHandler
@@ -131,9 +128,6 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
 
     init(
         preferencesStore: AppPreferencesStore,
-        speechPreferencesStore: SpeechPreferencesStore = SpeechPreferencesStore(),
-        speechVoiceCatalog: SpeechVoiceCatalogProviding = SpeechVoiceCatalog(),
-        speechPreviewHandler: SpeechPreviewHandler? = nil,
         attentionSoundAssetStore: AttentionSoundAssetStore = AttentionSoundAssetStore(),
         attentionSoundPlayer: AttentionSoundPlaying = AttentionSoundPlayer(),
         onExportBackup: @escaping ExportBackupHandler = { _ in },
@@ -147,9 +141,6 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
         onCaptureDiagnosticsIncident: RuntimeDiagnosticsIncidentCaptureHandler? = nil
     ) {
         self.preferencesStore = preferencesStore
-        self.speechPreferencesStore = speechPreferencesStore
-        self.speechVoiceCatalog = speechVoiceCatalog
-        self.speechPreviewHandler = speechPreviewHandler
         self.attentionSoundAssetStore = attentionSoundAssetStore
         self.attentionSoundPlayer = attentionSoundPlayer
         self.onExportBackup = onExportBackup
@@ -225,11 +216,6 @@ final class GlobalSettingsController: NSObject, NSWindowDelegate {
                     preferencesStore: preferencesStore,
                     attentionSoundPlayer: attentionSoundPlayer,
                     assetStore: attentionSoundAssetStore
-                ),
-                SpeechSettingsViewController(
-                    preferencesStore: speechPreferencesStore,
-                    voiceCatalog: speechVoiceCatalog,
-                    previewHandler: speechPreviewHandler
                 ),
             ]
         case .shortcuts:
@@ -1698,8 +1684,6 @@ final class ShortcutsSettingsViewController: NSViewController {
         views.append(contentsOf: AppShortcutCatalog.navigationBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("View")])
         views.append(contentsOf: AppShortcutCatalog.viewBindings.map(shortcutRecorderRow(for:)))
-        views.append(contentsOf: [spacer(10), sectionTitle("Speech")])
-        views.append(contentsOf: AppShortcutCatalog.speechBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("Mode")])
         views.append(contentsOf: AppShortcutCatalog.residencyBindings.map(shortcutRecorderRow(for:)))
         views.append(contentsOf: [spacer(10), sectionTitle("Application")])

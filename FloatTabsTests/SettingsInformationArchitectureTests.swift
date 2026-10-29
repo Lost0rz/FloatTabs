@@ -27,7 +27,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         )
         XCTAssertEqual(
             GlobalSettingsPage.audio.sections,
-            [.readyAlerts, .speech]
+            [.readyAlerts]
         )
         XCTAssertEqual(GlobalSettingsPage.shortcuts.sections, [.shortcuts])
         XCTAssertEqual(
@@ -70,7 +70,7 @@ final class SettingsInformationArchitectureTests: XCTestCase {
         )
         XCTAssertEqual(
             audio.embeddedControllers.map { String(describing: type(of: $0)) },
-            ["NotificationsSettingsViewController", "SpeechSettingsViewController"]
+            ["NotificationsSettingsViewController"]
         )
         XCTAssertEqual(
             general.embeddedControllers.filter { $0 is UnreadTabAttentionSettingsViewController }.count,

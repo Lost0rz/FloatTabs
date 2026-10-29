@@ -7,7 +7,6 @@ enum GlobalSettingsSection: String, Equatable {
     case performance
     case readyAlerts
     case unreadTabAttention
-    case speech
     case shortcuts
     case runtimeDiagnostics
     case backupRestore
@@ -58,7 +57,7 @@ enum GlobalSettingsPage: CaseIterable, Equatable {
         case .browserPerformance:
             return [.browserProfiles, .performance]
         case .audio:
-            return [.readyAlerts, .speech]
+            return [.readyAlerts]
         case .shortcuts:
             return [.shortcuts]
         case .advanced:

@@ -2855,17 +2855,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         case let .setResidency(policy):
             _ = setActiveResidency(policy)
 
-        case .readPauseResumeSpeechForActiveTab:
-            readPauseResumeSpeechForActiveTab()
-
-        case .replayLatestSpeechForActiveTab:
-            replayLatestResponseForActiveTab()
-
-        case .stopSpeechForActiveTab:
-            stopSpeechForActiveTab()
-
-        case .toggleAutoSpeakForActiveTab:
-            toggleAutoSpeakForActiveTab()
         }
     }
 
@@ -3126,18 +3115,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         rail.onSettings = { [weak self] in
             self?.onOpenGlobalSettings?()
-        }
-        rail.onReadLatestResponse = { [weak self] in
-            self?.readPauseResumeSpeechForActiveTab()
-        }
-        rail.onReplayLatestResponse = { [weak self] in
-            self?.replayLatestResponseForActiveTab()
-        }
-        rail.onToggleAutoSpeak = { [weak self] in
-            self?.toggleAutoSpeakForActiveTab()
-        }
-        rail.onStopSpeech = { [weak self] in
-            self?.stopSpeechForActiveTab()
         }
         rail.onTogglePin = { [weak self] in
             self?.togglePinnedState()
