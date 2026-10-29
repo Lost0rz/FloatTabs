@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: POST-RETIREMENT SOAK INCIDENT / MERGE HOLD**
+**MODE: SPEECH RETIREMENT ACCEPTED / JSC INCIDENT SEPARATED / PRE-MERGE RECHECK**
 
-Current task: `FT-SPEECH-RETIRE-001` — WP1-WP6 acceptance is complete, but PR lifecycle closeout is intentionally held because post-acceptance soak produced repeated WebContent crashes and a confirmed post-finish stall.
+Current task: `FT-SPEECH-RETIRE-001` — WP1-WP6 acceptance is complete. Post-acceptance soak reproduced the pre-existing JavaScriptCore WebContent crash family, so incident repair is explicitly separated from the Speech-retirement task rather than broadening PR #160 into an unrelated runtime fix.
 
 ## Verified baseline
 
@@ -23,7 +23,7 @@ IMPLEMENTATION_PR_160=OPEN / DRAFT / UNMERGED
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-Speech/TTS retirement remains accepted as a product/runtime simplification. Post-retirement crashes do not make the retirement task fail, but they prove that removing Speech/TTS did not eliminate the broader WebContent runtime failure family.
+Speech/TTS retirement remains accepted as a product/runtime simplification. The post-retirement crash does not make the retirement task fail. Native evidence now proves the crash belongs to the same historical JavaScriptCore crash family that existed before Speech retirement.
 
 ## Work-package acceptance
 
@@ -66,48 +66,9 @@ The runtime logs record seven distinct ChatGPT WebContent terminations in the sa
 2026-10-29T11:20:59Z  slot 1FA8BE8B  inactive  hot   generating  attention-protected  recovered healthy
 ```
 
-Air macOS Unified Log evidence now correlates all seven runtime events. WebKit reports the system-level termination reason as `Crash` for each correlated WebContent process:
+Air macOS Unified Log evidence correlates all seven runtime events. WebKit reports the system-level termination reason as `Crash` for each correlated WebContent process.
 
-```text
-WebProcessProxy::didClose: (web process 0 crash)
-WebProcessProxy::processDidTerminateOrFailedToLaunch: reason=Crash
-WebPageProxy::processDidTerminate: reason=Crash
-```
-
-The first five matching WebContent PIDs were:
-
-```text
-14:22:17 local  PID 3307
-14:45:52 local  PID 3314
-16:15:43 local  PID 3312
-16:35:23 local  PID 10744
-17:25:13 local  PID 11674
-```
-
-The two later events are also system-confirmed crashes:
-
-```text
-19:20:11 local  PID 12848  reason=Crash
-19:20:59 local  PID 17992  reason=Crash
-```
-
-ReportCrash started for both later crashes. The first produced a new type-309 WebContent native report successfully:
-
-```text
-/Users/jack7788/Library/Logs/DiagnosticReports/com.apple.WebKit.WebContent-2026-10-29-192012.ips
-```
-
-The second attempted another type-309 report but failed with:
-
-```text
-client log create type 309 result FAILED: Log limit exceeded
-```
-
-This changes the native-evidence gate materially: one exact post-retirement crash `.ips` now exists and can be used to classify whether the new crash belongs to the historical JavaScriptCore SIGSEGV family.
-
-The earlier evidence bundle contains two older WebContent `.ips` files with embedded timestamps `2026-10-25 20:55:34 +0800` and `2026-10-28 12:03:16 +0800`; both are historical `EXC_BAD_ACCESS / SIGSEGV / KERN_INVALID_ADDRESS 0x48` crashes with JavaScriptCore frames including `llint_entry_osr_function_for_call`, async generator/iterator handling and microtask execution. Those old reports establish the historical crash family but cannot substitute for the newly generated `2026-10-29 19:20:12` report.
-
-Across all seven runtime-recorded terminations:
+Across all seven runtime-recorded crashes:
 
 ```text
 CHATGPT_GENERATING_AT_TERMINATION=7/7
@@ -119,29 +80,86 @@ ALL_RUNTIME_RECORDED_TERMINATIONS_RECOVERED=YES
 SYSTEM_CONFIRMED_REASON_CRASH_COUNT=7
 ```
 
-This correlation does not prove that ChatGPT generation or Attention causes the native crash. It does establish that inactive-slot release/residency alone does not explain the failures and that repeated WebContent crashes remain present after Speech retirement.
+This correlation does not prove that ChatGPT generation or Attention causes the native crash. It does establish that inactive-slot release/residency alone does not explain the failures.
+
+## Exact post-retirement native crash classification
+
+A new native report was successfully persisted for the `19:20:11` local crash:
+
+```text
+FILE=com.apple.WebKit.WebContent-2026-10-29-192012.ips
+SHA256=d37e0ddba2233ccb60c61fa21070420435b3736a81e9db5d03f19866e199ee6d
+INCIDENT_ID=788084DA-0DAB-4EF4-80BE-5A22E47EF6DF
+PID=12848
+TIMESTAMP=2026-10-29 19:20:12 +0800
+```
+
+The report classifies the failure as:
+
+```text
+EXCEPTION=EXC_BAD_ACCESS
+SIGNAL=SIGSEGV
+SUBTYPE=KERN_INVALID_ADDRESS at 0x0000000000000048
+TERMINATION=SIGNAL / Segmentation fault: 11
+FAULT_ADDRESS=0x48
+FAULTING_THREAD=main thread
+```
+
+The JavaScriptCore image is exactly the same binary as the historical 2026-10-25 and 2026-10-28 reports:
+
+```text
+JSC_VERSION=22625.1.29.11.28
+JSC_UUID=798e8d5d-b1a1-3ab1-89c7-8329cb6c0d15
+JSC_BASE=7210815488
+OS=macOS 27.0.1 (26A434)
+```
+
+Most importantly, all three reports fault at the exact same native program counter in that same JSC binary:
+
+```text
+FAULT_PC=7221987548
+IMAGE_OFFSET=11172060
+SYMBOL=llint_entry_osr_function_for_call
+SYMBOL_LOCATION=120
+FAR=72 / 0x48
+```
+
+The new report also repeats the same higher-level async/microtask path:
+
+```text
+llint_entry_osr_function_for_call
+llint_function_for_call_prologue
+JSC::asyncGeneratorUnwrapYieldResumption(...)
+JSC::asyncGeneratorNext(...)
+JSC::runInternalMicrotask(...)
+JSC::MicrotaskQueue::drainWithoutUseCallOnEachMicrotask(...)
+WebCore::MicrotaskQueue::performMicrotaskCheckpoint(...)
+WebCore::EventLoop::run(...)
+```
+
+The 2026-10-25 and 2026-10-28 reports share the same exact fault PC and `asyncGeneratorUnwrapYieldResumption` frame, but their lower async continuation uses `asyncIteratorNextWithDriver` / `llint_slow_path_async_iterator_next_with_driver` before reaching the microtask queue. The 2026-10-29 report instead uses `asyncGeneratorNext` on that lower portion of the path.
+
+Therefore the evidence supports:
+
+```text
+SAME_HISTORICAL_JSC_CRASH_FAMILY=YES
+SAME_EXACT_JSC_FAULT_SITE=YES
+LOWER_ASYNC_CONTINUATION_VARIANT=YES
+EXACT_TRIGGER=UNKNOWN
+ROOT_CAUSE=UNKNOWN
+```
+
+This is stronger than a generic similarity claim: the post-retirement crash reaches the same crashing instruction in the same JavaScriptCore binary with the same near-null fault address as the pre-retirement historical crashes.
 
 ## Memory-pressure correlation
 
-The narrow `19:18 .. 19:23` Unified Log window adds a stronger memory-pressure correlation for the final two crashes than was visible in the FloatTabs JSONL alone.
+The narrow `19:18 .. 19:23` Unified Log window shows substantial WebContent memory pressure around the final two crashes. PID `12848` reached about `1639 MB` and received `system vm pressure critical: 1` before its crash. PID `17992` also received repeated critical pressure and later reached about `2209 MB` footprint before the second crash.
 
-For PID `12848` (crashed at `19:20:11`), WebKit reported a footprint of about `1639 MB` at `19:19:35`, then `system vm pressure critical: 1` at `19:19:44`; shortly before the crash its footprint was about `1105 MB` after pressure relief.
-
-For PID `17992` (crashed at `19:20:59`), WebKit reported `system vm pressure critical: 1` at `19:18:44` and again at `19:19:05`; after the first process crash it reached about `2209 MB` footprint at `19:20:14` before later falling to about `1568 MB` and then crashing at `19:20:59`.
-
-Therefore memory pressure is now a supported co-occurring condition for the final two crashes and must not be dismissed. It is still not established as root cause: WebKit/macOS classified both terminations as `reason=Crash`, not as a memory-pressure/Jetsam termination, and native stack evidence is required to distinguish a JSC fault under pressure from another crash mechanism.
+Memory pressure is therefore a supported co-occurring condition and may be an amplifier or trigger condition worth testing. It is not established as root cause. The persisted native report proves the first final-pair failure is a JavaScriptCore `EXC_BAD_ACCESS / SIGSEGV` at `0x48`, not a Jetsam/memory-kill classification.
 
 ## Post-finish stall evidence
 
-The previously unresolved candidate at `2026-10-29T09:28:25Z` is resolved by the continuation log:
-
-```text
-09:28:25Z  candidate / dual timeout #1
-09:28:56Z  both worlds responsive again
-09:28:56Z  incident closed: healthy_current_runtime
-```
-
-A separate later incident then reproduced on the same Slot/runtime:
+The earlier candidate at `2026-10-29T09:28:25Z` recovered to `healthy_current_runtime`. A separate later incident reached the diagnostic confirmation threshold:
 
 ```text
 09:32:34Z  post_finish_stall_candidate / dual timeout #1
@@ -149,7 +167,7 @@ A separate later incident then reproduced on the same Slot/runtime:
 09:33:22Z  incident closed: superseded_navigation
 ```
 
-Thus at least one post-retirement `POST_FINISH_RUNTIME_STALL` reached the diagnostic confirmation threshold. Its closure by superseding navigation is a recovery/ownership boundary, not a root-cause explanation.
+Thus at least one post-retirement `POST_FINISH_RUNTIME_STALL` was confirmed. Its closure by superseding navigation is a recovery boundary, not a root-cause explanation.
 
 No Speech/TTS/synth runtime residue was found in the soak session.
 
@@ -160,21 +178,23 @@ SPEECH_RETIREMENT_ACCEPTANCE=PASS
 POST_RETIREMENT_WEBCONTENT_CRASH_REPRODUCED=YES
 POST_RETIREMENT_RUNTIME_TERMINATION_COUNT=7
 SYSTEM_CONFIRMED_REASON_CRASH_COUNT=7
-REPORTCRASH_NEW_POST_RETIREMENT_IPS=YES
-NEW_IPS_PATH=com.apple.WebKit.WebContent-2026-10-29-192012.ips
-SECOND_19H20_REPORT=LOG_LIMIT_EXCEEDED
-HISTORICAL_JSC_SIGSEGV_REPORTS_PRESENT=YES
-NEW_CRASH_NATIVE_STACK=AVAILABLE_NOT_YET_AUDITED
-SAME_JSC_CRASH_FAMILY=UNKNOWN_PENDING_NEW_IPS_AUDIT
-MEMORY_PRESSURE_CORRELATION=SUPPORTED_FOR_19H20_PAIR_NOT_ROOT_CAUSE
+POST_RETIREMENT_NATIVE_IPS_AUDITED=YES
+SAME_HISTORICAL_JSC_CRASH_FAMILY=YES
+SAME_EXACT_JSC_FAULT_SITE=YES
+FAULT=EXC_BAD_ACCESS / SIGSEGV / KERN_INVALID_ADDRESS 0x48
+FAULT_SYMBOL=llint_entry_osr_function_for_call+120
+MEMORY_PRESSURE_CORRELATION=SUPPORTED_NOT_ROOT_CAUSE
 CONFIRMED_POST_FINISH_STALL=YES
+SPEECH_CAUSALITY_SUPPORTED=NO
+JSC_EXACT_TRIGGER=UNKNOWN
 JSC_ROOT_CAUSE=UNKNOWN
-MERGE_READINESS=HOLD
+PR160_INCIDENT_REPAIR_SCOPE=SEPARATED
+MERGE_READINESS=REQUIRES_FINAL_LITERAL_HEAD_GATE_RECHECK
 RELEASE=NOT_AUTHORIZED
 ```
 
 ## Current decision
 
-Keep PR #160 Draft/Open/Unmerged. Continue using the soak build only as an evidence source. The next bounded evidence step is now specific: preserve and audit `/Users/jack7788/Library/Logs/DiagnosticReports/com.apple.WebKit.WebContent-2026-10-29-192012.ips` from the Air, then compare its exception type, termination signal and JavaScriptCore frames against the historical JSC crash family.
+Do not broaden PR #160 into JSC/WebContent incident repair. The Speech-retirement implementation and acceptance remain valid, and the reproduced crash is now proven to be the same historical JSC family that predates retirement. The prior incident-based merge hold is therefore replaced by a normal final literal-head merge-readiness recheck for PR #160.
 
-No production fix is authorized from this status alone. Do not infer a JavaScriptCore root cause or memory-pressure root cause until the exact post-retirement `.ips` is audited.
+Any new investigation or production change aimed at the JSC crash must be authorized as a separate incident task. The next incident hypothesis should remain evidence-driven and should distinguish at least: JavaScriptCore async-generator/microtask execution, ChatGPT active generation, long-lived WebContent state, and memory-pressure amplification. No root-cause fix is authorized from the current evidence alone.
