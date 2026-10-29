@@ -86,6 +86,32 @@ Authorized classes, only if supported by the audit:
 
 Do not batch multiple speculative mitigations. If no safe bounded intervention is established, STOP after diagnostics/evidence rather than inventing one.
 
+## Local execution result (2026-10-30)
+
+```text
+PRE_AUDIT=PASS
+INTERVENTION=DIAGNOSTICS_ONLY
+SAFE_BOUNDED_INTERVENTION=NONE
+```
+
+The audit established a bounded measurement gap: existing diagnostics exposed
+resident/protected totals but did not separate resident generating from resident
+ready runtimes across Slots. A single read-only diagnostic improvement now
+records `resident_attention_generating_count`,
+`resident_attention_ready_count`, and `resident_attention_protected_count`
+in incident snapshots, long-term checkpoints and one-shot runtime snapshots.
+No generation, Attention/Unread, residency, recovery, process-pool, data-store,
+profile, session or user-data behavior was changed.
+
+Local verification completed before delivery:
+
+```text
+FOCUSED_CROSS_FEATURE_TESTS=122/122 PASSED
+FULL_XCTEST=1059/1059 PASSED
+DEBUG_ARM64_BUILD=SUCCEEDED
+RELEASE_ARM64_BUILD=SUCCEEDED
+```
+
 ## Mandatory preserve boundary
 
 ```text

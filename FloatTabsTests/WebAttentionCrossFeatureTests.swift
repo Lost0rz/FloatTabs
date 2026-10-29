@@ -1504,6 +1504,35 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(writer.events.filter { $0.event == "unread.marked" }.count, 1)
     }
 
+    func testRuntimeDiagnosticsDistinguishResidentSingleAndMultiGeneratingSlots() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let first = try materializeRuntime(pool: pool, store: store, slotName: "ChatA")
+        let second = try materializeRuntime(pool: pool, store: store, slotName: "ChatB")
+        let firstBridge = try attentionBridge(pool: pool, slot: first.profile)
+        let secondBridge = try attentionBridge(pool: pool, slot: second.profile)
+
+        acceptBaseline(generating: true, bridge: firstBridge, webView: first.webView)
+        acceptBaseline(generating: true, bridge: secondBridge, webView: second.webView)
+        XCTAssertEqual(coordinator.state(for: first.profile.id), .generating)
+        XCTAssertEqual(coordinator.state(for: second.profile.id), .generating)
+
+        var fields = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(fields["resident_attention_generating_count"], .integer(2))
+        XCTAssertEqual(fields["resident_attention_ready_count"], .integer(0))
+        XCTAssertEqual(fields["resident_attention_protected_count"], .integer(2))
+
+        acceptState(generating: false, bridge: secondBridge, webView: second.webView)
+        fields = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(fields["resident_attention_generating_count"], .integer(1))
+        XCTAssertEqual(fields["resident_attention_ready_count"], .integer(1))
+        XCTAssertEqual(fields["resident_attention_protected_count"], .integer(2))
+    }
+
     func testNativeRecoveredCompletionUsesExistingHiddenUnreadRoute() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

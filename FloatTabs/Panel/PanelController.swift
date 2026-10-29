@@ -646,6 +646,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     ) -> String {
         var fields = diagnostics.environmentFields()
         fields.merge(context.fields(phase: .snapshot)) { _, new in new }
+        fields.merge(residentAttentionDiagnosticFields()) { _, new in new }
         let snapshotEvent = context.kind == .manualSnapshot
             ? "diagnostics.stuck_tab_snapshot"
             : "diagnostics.incident_snapshot"
@@ -853,6 +854,7 @@ final class PanelController: NSObject, NSWindowDelegate {
                 .string($0.uuidString)
             } ?? .null
         ]) { _, new in new }
+        fields.merge(residentAttentionDiagnosticFields()) { _, new in new }
 
         guard let profile = tabStore.activeProfile else {
             fields["capture_availability"] = .string("no_active_slot")
@@ -1073,8 +1075,30 @@ final class PanelController: NSObject, NSWindowDelegate {
             "presentation_native_focus_pending": .bool(presentationNativeFocusPending),
             "presentation_web_focus_pending": .bool(presentationWebFocusPending)
         ]
+        fields.merge(residentAttentionDiagnosticFields()) { _, new in new }
         fields["pinned"] = .bool(isPinned)
         return RuntimeDiagnosticSnapshot(fields: fields)
+    }
+
+    /// Returns read-only aggregate evidence for resident Attention-protected
+    /// runtimes. The resident filter keeps this distinct from the global
+    /// Attention state, so multi-generating conditions can be identified
+    /// without querying WebContent or changing lifecycle decisions.
+    private func residentAttentionDiagnosticFields() -> [String: RuntimeDiagnosticValue] {
+        let residentSlotIDs = webViewPool.residentSlotIDs
+        let generatingCount = residentSlotIDs.filter {
+            attentionCoordinator.state(for: $0) == .generating
+        }.count
+        let readyCount = residentSlotIDs.filter {
+            attentionCoordinator.state(for: $0) == .ready
+        }.count
+        return [
+            "resident_attention_generating_count": .integer(Int64(generatingCount)),
+            "resident_attention_ready_count": .integer(Int64(readyCount)),
+            "resident_attention_protected_count": .integer(
+                Int64(generatingCount + readyCount)
+            )
+        ]
     }
 
     var unreadResponseSlotIDs: Set<UUID> {

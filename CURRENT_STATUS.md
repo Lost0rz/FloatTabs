@@ -99,13 +99,51 @@ SEPARATE_FROM_RUNTIME_TASK=YES
 
 No red-dot semantic change is authorized in `FT-JSC-MULTI-RUNTIME-002`.
 
+## Local PRE_AUDIT result (2026-10-30)
+
+```text
+PRE_AUDIT=PASS
+SAFE_BOUNDED_INTERVENTION=NONE
+INTERVENTION=DIAGNOSTICS_ONLY
+```
+
+The production topology is one app-owned `WebViewPool`, one native
+`WebAttentionCoordinator`, one `SlotLifecycleCoordinator`, one diagnostics
+writer queue and one shared `DownloadCoordinator`, with one pooled `WKWebView`
+and one per-Slot bridge/navigation observer for each resident Slot. FloatTabs
+does not assign an explicit `WKProcessPool`; each WebView receives the
+Browser-Profile-mapped `WKWebsiteDataStore`. WebKit therefore owns the actual
+WebContent process placement, and public APIs do not provide stable child-PID
+attribution.
+
+Each generating protected Slot adds its own document observer/bridge state,
+coalesced DOM state reads, bounded liveness watchdog/probes, navigation
+observer work and per-Slot lifecycle timers. The app-wide memory-pressure
+source and long-term coordinator are shared, while critical pressure only
+evicts eligible inactive, non-generating, non-Attention-protected runtimes.
+Clustered terminations therefore share FloatTabs global coordinators and
+queues, but current evidence does not establish a shared FloatTabs causal
+resource or a JSC root cause.
+
+The diagnostics-only change adds resident generating/ready/protected counts to
+incident snapshots, long-term checkpoints and `runtimeDiagnosticSnapshot()`.
+These counts distinguish single- versus multi-generating conditions without
+querying WebContent, altering Attention/Unread semantics, or changing
+residency/recovery decisions.
+
 ## Current decision
 
 ```text
 ACTIVE_TASK=FT-JSC-MULTI-RUNTIME-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
-NEXT_GATE=LOCAL PRE_AUDIT
-PRODUCT_CODE_CHANGE=NONE_YET
+NEXT_GATE=REMOTE DELIVERY / EXACT-HEAD CI / QA ARTIFACT
+PRODUCT_CODE_CHANGE=DIAGNOSTICS_ONLY
+PRE_AUDIT=PASS
+SAFE_BOUNDED_INTERVENTION=NONE
+FOCUSED_TESTS=122/122 PASSED
+FULL_XCTEST=1059/1059 PASSED
+DEBUG_ARM64_BUILD=SUCCEEDED
+RELEASE_ARM64_BUILD=SUCCEEDED
 PR161=ARCHIVED_NEGATIVE_EXPERIMENT
 PRODUCTION_RELEASE=NOT_AUTHORIZED
 JSC_ROOT_CAUSE=UNKNOWN
