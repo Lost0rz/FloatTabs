@@ -191,11 +191,11 @@ At WP4 exact implementation head `c1d94a86231b47bcbc8ffb7827c5a11c200b9058`:
 LOCAL_FOCUSED_XCTEST=164 tests / 0 failures (executor evidence)
 LOCAL_FULL_XCTEST=1306 tests / 0 failures / TEST SUCCEEDED (executor evidence)
 MACOS_CI_1186=IN_PROGRESS at latest observation
-QA_DMG_569=IN_PROGRESS at latest observation
+QA_DMG_569=SUCCESS
 HUMAN_UI_ACCEPTANCE=PENDING
 ```
 
-Remote CI is not promoted beyond the latest observed state. The in-progress exact-head workflows are not a CODE_DIFF WP4 post-audit blocker; they remain later PR/merge/final-acceptance host gates. Human UI acceptance remains human-owned and pending; it is not promoted by automated or code-level audit evidence.
+Remote macOS CI is not promoted beyond the latest observed state. QA DMG for the exact semantic head has passed. The still-running macOS CI is not a CODE_DIFF WP4 post-audit blocker; it remains a later PR/merge/final-acceptance host gate. Human UI acceptance remains human-owned and pending; it is not promoted by automated or code-level audit evidence.
 
 ## Next gate
 
