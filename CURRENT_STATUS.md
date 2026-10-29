@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: POST-RETIREMENT SOAK / PRE-MERGE**
+**MODE: POST-RETIREMENT SOAK INCIDENT / MERGE HOLD**
 
-Current task: `FT-SPEECH-RETIRE-001` — acceptance complete; lifecycle closeout intentionally deferred for local soak before merge.
+Current task: `FT-SPEECH-RETIRE-001` — WP1-WP6 acceptance is complete, but PR lifecycle closeout is intentionally held because post-acceptance soak produced new WebContent termination evidence.
 
 ## Verified baseline
 
@@ -19,106 +19,88 @@ WP5_SEMANTIC_HEAD=79668cf69aba2a179cf09e3f648732a103fc7929
 PRE_SOAK_CONTROL_HEAD=36a64e951725bd30f79153f570cdc2560d6debba
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-ROOT_CAUSE=UNKNOWN
-FAULTING_SUBSYSTEM=JavaScriptCore
 IMPLEMENTATION_PR_160=OPEN / DRAFT / UNMERGED
-```
-
-Speech/TTS retirement is a deliberate product/runtime simplification. It does not prove that Speech caused or fixes the historical JavaScriptCore/WebContent crash family.
-
-## Work-package state
-
-```text
-WP1 Composition/lifecycle ownership       = COMPLETE / POST_AUDIT PASS
-WP2 Speech runtime + Calibre read-aloud   = COMPLETE / POST_AUDIT PASS
-WP3 Shared ChatGPT response bridge        = COMPLETE / POST_AUDIT PASS
-WP4 Product surfaces + shortcuts          = COMPLETE / POST_AUDIT PASS
-WP5 Source/test/project cleanup           = COMPLETE / POST_AUDIT PASS
-WP6 Full acceptance + runtime baseline    = COMPLETE / POST_AUDIT PASS
-```
-
-WP5 semantic head through the pre-soak control head differs only by `CURRENT_STATUS.md`; no production/test semantic drift exists.
-
-## WP6 final evidence
-
-Repository-host gates for `36a64e951725bd30f79153f570cdc2560d6debba`:
-
-```text
-MACOS_CI_1194=SUCCESS
-QA_DMG_577=SUCCESS
-PACKAGE_RESOLUTION=PASS
-PACKAGE_LOCK_UNCHANGED=PASS
-DEBUG_BUILD=PASS
-RELEASE_BUILD=PASS
-RELEASE_ARCHITECTURE=arm64 / PASS
-FULL_XCTEST=PASS
-```
-
-Validated QA candidate:
-
-```text
-QA_APP_PATH=/private/tmp/floattabs-wp6-l3FvEl/DerivedData/Build/Products/Release/FloatTabs.app
-QA_EXECUTABLE_SHA256=308552cac01c351270637989e908408c96ebc3f046f3a576f801f6368eb5a05b
-QA_DMG_PATH=/private/tmp/floattabs-wp6-l3FvEl/FloatTabs-0.5.8.dmg
-QA_DMG_SHA256=6a9e80d34f24d740490ccfda61539e99f9f6eaee3497f867cf4bdccdf7aad62f
-SOURCE_REVISION=2b1701a3f84e1e808939a03035dcebabfbbc4200
-SOURCE_TREE_STATE=clean
-SOURCE_REVISION_EXACT=true
-BUNDLE_VERSION_BUILD=0.5.8 / 26
-ARCHITECTURE=arm64
-CODE_SIGNATURE_VERIFY=PASS
-RUNNING_QA_EXECUTABLE_PATH=/private/tmp/floattabs-wp6-l3FvEl/DerivedData/Build/Products/Release/FloatTabs.app/Contents/MacOS/FloatTabs
-```
-
-The artifact source revision differs from the current control head only by control-plane `CURRENT_STATUS.md` changes; the product/test semantic tree is equivalent.
-
-Acceptance session:
-
-```text
-ACCEPTANCE_SESSION_START=2026-10-29T05:55:14Z
-ACCEPTANCE_SESSION_END=2026-10-29T06:06:58Z
-RUNTIME_LOG_SESSION=59D71A6E-E6CC-4238-B789-CA99242C3B9E
-RUNTIME_RECORDS=151
-CRASH_STALL_TERMINATION_RECOVERY_MATCHES=0
-OBSERVED_WEB_PROCESS_TERMINATION_COUNT_MAX=0
-SPEECH_TTS_SYNTH_RUNTIME_MATCHES=0
-RUNTIME_BASELINE_CAPTURED=YES
-```
-
-Human owner explicitly reported the WP6 scenarios passed on 2026-10-29.
-
-```text
-HUMAN_UI_ACCEPTANCE=PASS
-REAL_RUNTIME_ACCEPTANCE=PASS
-```
-
-Final WP6 acceptance:
-
-```text
-ACTIVE_SPEECH_RUNTIME=ABSENT
-SPEECH_PRODUCT_SURFACE=ABSENT
-SPEECH_SHORTCUTS=ABSENT
-CHATGPT_SPEECH_EXTRACTION_FOLLOW=ABSENT
-CALIBRE_READ_ALOUD=ABSENT
-READY_ALERT=PRESERVED
-ATTENTION_UNREAD=PRESERVED
-STABLE_RESPONSE_IDENTITY=PRESERVED
-REMOTEORBIT_VOICE_FOCUS=PRESERVED
-BACKGROUND_MEDIA=PRESERVED
-USER_DATA_MUTATION=NONE
-FULL_TEST_BUILD_GATE=PASS
-REAL_RUNTIME_ACCEPTANCE=PASS
-RUNTIME_BASELINE_CAPTURED=YES
-HUMAN_UI_ACCEPTANCE=PASS
 JSC_ROOT_CAUSE=UNKNOWN
-UNVERIFIED_REQUIRED_CLAIMS=NONE
-WP6_POST_AUDIT=PASS
 ```
+
+Speech/TTS retirement remains accepted as a product/runtime simplification. A post-retirement WebContent termination does not make the retirement task fail, and it does not prove or disprove the historical JavaScriptCore root cause.
+
+## Work-package acceptance
+
+```text
+WP1=COMPLETE / POST_AUDIT PASS
+WP2=COMPLETE / POST_AUDIT PASS
+WP3=COMPLETE / POST_AUDIT PASS
+WP4=COMPLETE / POST_AUDIT PASS
+WP5=COMPLETE / POST_AUDIT PASS
+WP6=COMPLETE / POST_AUDIT PASS
+HUMAN_UI_ACCEPTANCE=PASS
+REAL_RUNTIME_ACCEPTANCE=PASS
+```
+
+The bounded WP6 acceptance window (`2026-10-29T05:55:14Z .. 06:06:58Z`) had no crash/stall/termination/recovery event and no Speech/TTS runtime residue. Repository gates for the then-current control head passed (`macOS CI #1194`, `QA DMG #577`).
+
+## Post-acceptance soak evidence
+
+Uploaded runtime logs cover the older AB build and the retired-Speech soak build. The retired-Speech soak runtime is identified by:
+
+```text
+SOURCE_REVISION=2b1701a3f84e1e808939a03035dcebabfbbc4200
+SOURCE_REVISION_EXACT=true
+QA_LABEL=release
+SESSION_ID=45E2C8A2-8325-4A0B-A098-B0243E8690F5
+APP_LAUNCH=2026-10-29T06:16:11Z
+```
+
+Within that soak session, five distinct ChatGPT WebContent terminations were recorded:
+
+```text
+2026-10-29T06:22:17Z  slot B3328965  inactive  incident F7870DA5  recovery deferred
+2026-10-29T06:45:52Z  slot 8D649ABB  inactive  incident 4A6CD7F1  reload_now
+2026-10-29T08:15:43Z  slot 1FA8BE8B  active    incident A3D1F0E5  reload_now
+2026-10-29T08:35:23Z  slot B3328965  inactive  incident EA263B85  recovery deferred
+2026-10-29T09:25:13Z  slot 1FA8BE8B  inactive  incident 0E094547  reload_now
+```
+
+All five report `origin=https://chatgpt.com`; four occurred while the Slot was inactive and one while active. All five later reached `web_runtime.incident.closed` with `incident_outcome=healthy_current_runtime` after recovery.
+
+One system memory-pressure warning was recorded at `2026-10-29T09:17:10Z`; it occurs only before the fifth termination and therefore does not explain the first four. WebContent resource attribution remains unavailable through the public API.
+
+At the end of the uploaded log, the same soak session records an unresolved candidate only:
+
+```text
+2026-10-29T09:28:25Z
+web_runtime.post_finish_stall_candidate
+slot=1FA8BE8B
+incident=E00F4B13-1C16-412E-9597-2BECE8059247
+trigger=cross_world_dual_timeout
+main_world_probe=timeout
+isolated_world_probe=timeout
+post_finish_dual_timeout_count=1
+```
+
+The uploaded file ends at that trigger, so confirmation/closure is not available. Treat it as `STALL_CANDIDATE`, not a confirmed stall.
+
+No Speech/TTS/synth runtime match was found in the soak session.
+
+## Current interpretation
+
+```text
+SPEECH_RETIREMENT_ACCEPTANCE=PASS
+POST_RETIREMENT_WEBCONTENT_TERMINATION_REPRODUCED=YES
+POST_RETIREMENT_TERMINATION_COUNT=5
+ACTIVE_SLOT_TERMINATION_COUNT=1
+INACTIVE_SLOT_TERMINATION_COUNT=4
+ALL_RECORDED_TERMINATIONS_RECOVERED=YES
+LATEST_STALL_CANDIDATE=UNRESOLVED_IN_UPLOADED_SLICE
+JSC_ROOT_CAUSE=UNKNOWN
+SAME_JSC_CRASH_FAMILY=UNKNOWN_UNTIL_NATIVE_IPS_EVIDENCE
+MERGE_READINESS=HOLD
+RELEASE=NOT_AUTHORIZED
+```
+
+The JSONL proves WebContent termination/recovery events but does not provide the native crash stack needed to classify them as the historical JavaScriptCore SIGSEGV family. Preserve matching macOS WebContent `.ips` reports, if produced, before making a root-cause/family claim.
 
 ## Current decision
 
-Do not merge or publish a production release yet. The validated QA build is entering a user-directed local soak period. The existing QA DMG may be copied to the Desktop and used for this soak without rebuilding; it is not a notarized public release artifact.
-
-During soak, preserve diagnostics and treat any new runtime defect as evidence. Do not infer a JavaScriptCore root-cause fix from an absence of crashes.
-
-After the owner is satisfied with the soak period, refresh the literal PR head/host gates and make a separate merge-readiness decision for PR #160. Production release remains a separate later decision.
+Keep PR #160 Draft/Open/Unmerged. Continue using the soak build only as an evidence source; do not interpret successful auto-recovery as root-cause resolution. Next evidence gate is native crash-report correlation for the five termination timestamps plus a continuation log after the `09:28:25Z` stall candidate. No production fix is authorized from this status alone.
