@@ -6,7 +6,7 @@
 
 ## Mode
 
-**MODE: JSC / WEBCONTENT RUNTIME STABILITY — AIR SOAK REPRODUCED**
+**MODE: JSC / WEBCONTENT RUNTIME STABILITY — OPTIMIZED AIR SOAK REPRODUCED / SYSTEM CRASH CONFIRMED**
 
 Current task: `FT-JSC-RUNTIME-STABILITY-001` — `ACTIVE / AUTHORIZED`.
 
@@ -48,6 +48,16 @@ JSC_EXACT_TRIGGER=UNKNOWN
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
+The uploaded optimized-soak evidence bundle also contains three historical `.ips` reports. Their internal timestamps, not their filesystem mtimes, are authoritative:
+
+```text
+2026-10-24 14:50:27 +0800  EXC_BAD_ACCESS / SIGSEGV / 0x48 / llint_entry_osr_function_for_call+120
+2026-10-27 18:29:53 +0800  EXC_BAD_ACCESS / SIGSEGV / 0x78 / ScriptExecutable::newReplacementCodeBlockFor -> operationOptimize
+2026-10-28 12:03:16 +0800  EXC_BAD_ACCESS / SIGSEGV / 0x48 / llint_entry_osr_function_for_call+120
+```
+
+All use the same JavaScriptCore binary/version and repeat the broader async-generator / async-iterator / microtask crash family. None is a new native report for the optimized soak.
+
 ## PR #161 optimization verification
 
 ```text
@@ -62,9 +72,9 @@ QA_DMG=#585 SUCCESS
 
 The bounded intervention reduced the ChatGPT generation liveness watchdog cadence from 2 seconds to 5 seconds while preserving generation observation, Attention/Unread ownership and watchdog recovery semantics.
 
-## Air soak result for optimized build
+## Optimized Air soak — app/runtime evidence
 
-Uploaded runtime logs contain a fresh session for the optimized exact revision:
+Fresh optimized session:
 
 ```text
 SESSION_ID=6DAB3F8F-4FA2-42CA-A1F9-A14093E73C94
@@ -73,7 +83,7 @@ OBSERVED_RANGE=2026-10-29T12:49:56Z..2026-10-29T16:41:19Z
 WEBCONTENT_TERMINATION_EVENTS=6
 ```
 
-All six new termination incident snapshots were again recorded while the affected ChatGPT Slot was generating and Attention-protected:
+All six termination incident snapshots were again recorded while the affected ChatGPT Slot was generating and Attention-protected:
 
 ```text
 CHATGPT_GENERATING_AT_TERMINATION=6/6
@@ -85,16 +95,80 @@ WARM_TERMINATIONS=4
 ALL_SIX_INCIDENTS_RECOVERED_TO_HEALTHY_CURRENT_RUNTIME=YES
 ```
 
-The new JSONL package does not contain matching Unified Log or new `.ips` evidence. Therefore these six events prove that WebContent process termination still reproduces after the 2s→5s optimization, but they do not by themselves prove that every event is the exact historical JSC `SIGSEGV / 0x48 / llint_entry_osr_function_for_call+120` family.
+## Optimized Air soak — system/native correlation
 
-The available slice-level event rate is not sufficient for a causal efficacy claim. The previous session slice in the same archive recorded 7 terminations over about 3h21m, while the optimized session recorded 6 over about 3h51m. This is directionally lower but uncontrolled and too small to establish improvement.
+The separately captured macOS Unified Log now correlates all six optimized-session terminations one-for-one with WebKit system crash classification:
+
+```text
+2026-10-29 21:30:07.702 +0800  PID 39157  reason=Crash
+2026-10-29 23:41:43.382 +0800  PID 39120  reason=Crash
+2026-10-29 23:49:30.873 +0800  PID 39167  reason=Crash
+2026-10-29 23:49:49.299 +0800  PID 65046  reason=Crash
+2026-10-30 00:01:08.339 +0800  PID 43954  reason=Crash
+2026-10-30 00:01:09.934 +0800  PID 68439  reason=Crash
+```
+
+For each event WebKit reports `WebProcessProxy::didClose: (web process 0 crash)` and `processDidTerminateOrFailedToLaunch: reason=Crash`, followed by `WebPageProxy::processDidTerminate: reason=Crash`.
+
+ReportCrash attempted a type-309 native report for every one of the six crashes, but every attempt failed with:
+
+```text
+client log create type 309 result FAILED: Log limit exceeded
+```
+
+Therefore:
+
+```text
+OPTIMIZED_SOAK_SYSTEM_CONFIRMED_CRASHES=6/6
+NEW_OPTIMIZED_SOAK_IPS_PERSISTED=0
+SAME_NEW_EXACT_JSC_NATIVE_SIGNATURE=UNVERIFIED_BECAUSE_REPORTCRASH_LOG_LIMIT
+```
+
+The absence of a new `.ips` is a diagnostic retention limitation, not evidence of a different termination type.
+
+## Memory / clustering evidence
+
+Last observed affected-process footprints before the six crashes were approximately:
+
+```text
+PID 39157  1684 MB  memory-pressure event 16; system critical=0; policy -> Strict
+PID 39120  1725 MB  memory-pressure event 16; later system critical=1; policy -> Strict
+PID 39167  1102 MB  no nearby critical-pressure event found
+PID 65046  2122 MB  no nearby critical-pressure event found
+PID 43954  1129 MB  policy Unrestricted -> Conservative; no nearby critical-pressure event found
+PID 68439  1168 MB  no nearby critical-pressure event found
+```
+
+Interpretation:
+
+```text
+ELEVATED_WEBCONTENT_FOOTPRINT_COMMON=YES
+SYSTEM_VM_PRESSURE_CRITICAL_REQUIRED_FOR_CRASH=NO
+MEMORY_PRESSURE_ROOT_CAUSE=UNKNOWN
+```
+
+Critical system VM pressure is therefore not a necessary observed condition for this crash set. Memory/resource pressure can remain an amplifier hypothesis, but it should not be treated as the sole next hypothesis.
+
+Two multi-Slot crash clusters are especially notable:
+
+```text
+23:49:30.873 -> 23:49:49.299  different ChatGPT Slots, ~18.4 s apart
+00:01:08.339 -> 00:01:09.934  different ChatGPT Slots, ~1.6 s apart
+```
+
+The first pair includes an inactive Warm Slot followed by the active Warm Slot. The second pair contains two inactive Warm Slots. Combined with 6/6 generating + attention-protected correlation, this increases the priority of investigating shared/multi-runtime conditions around concurrent long-lived ChatGPT generation rather than further tuning only one Slot's watchdog cadence.
+
+The available slice-level event rate remains insufficient for a causal efficacy claim. The prior session slice recorded 7 terminations over about 3h21m, while the optimized session recorded 6 over about 3h51m. This is directionally lower but uncontrolled and too small to establish improvement.
 
 Interpretation:
 
 ```text
 WATCHDOG_2S_TO_5S_ELIMINATED_TERMINATION=NO
-CORE_WEBCONTENT_TERMINATION_REPRODUCED=YES
-SAME_NEW_JSC_NATIVE_SIGNATURE=UNVERIFIED_PENDING_NATIVE_EVIDENCE
+CORE_WEBCONTENT_CRASH_REPRODUCED=YES
+OPTIMIZED_SOAK_SYSTEM_CRASH_CLASSIFICATION=CONFIRMED_6_OF_6
+WATCHDOG_CADENCE_AS_PRIMARY_CAUSE=WEAKENED
+SYSTEM_CRITICAL_MEMORY_PRESSURE_AS_REQUIRED_TRIGGER=NOT_SUPPORTED
+NEXT_HYPOTHESIS_PRIORITY=MULTI_GENERATING_LONG_LIVED_WEBCONTENT / SHARED_RESOURCE_PRESSURE
 JSC_ROOT_CAUSE=UNKNOWN
 PR161_MERGE_READINESS=HOLD
 ```
@@ -105,7 +179,7 @@ The optimized session recorded one `post_finish_stall_candidate` caused by a dua
 
 No `attention.liveness_probe.abnormal` event was observed in the optimized session.
 
-Other warnings were lower priority and currently do not establish a product defect:
+Other warnings remain lower priority and currently do not establish a product defect:
 
 - two early `web_focus.failed` / `presentation_focus.failed` events with `dom_input_unavailable` immediately after launch/presentation;
 - two provisional `NSURLErrorDomain -999` navigation cancellations and one `-1001` timeout;
@@ -142,9 +216,10 @@ Do not mix this product semantic change into PR #161 unless task authority is ex
 ```text
 ACTIVE_TASK=FT-JSC-RUNTIME-STABILITY-001
 ACTIVE_PR=#161 OPEN / DRAFT / UNMERGED
-AIR_SOAK_RESULT=WEBCONTENT_TERMINATION_REPRODUCED
+AIR_SOAK_RESULT=SYSTEM_CONFIRMED_WEBCONTENT_CRASH_REPRODUCED_6_OF_6
 PR161_MERGE_READINESS=HOLD
-NEXT_RUNTIME_GATE=COLLECT_NATIVE/SYSTEM EVIDENCE FOR NEW TERMINATIONS THEN SELECT NEXT BOUNDED HYPOTHESIS
+CURRENT_INTERVENTION_RESULT=NEGATIVE_FOR_ELIMINATION / WORKLOAD_REDUCTION_ONLY
+NEXT_RUNTIME_GATE=AUTHORIZE ONE NEW BOUNDED MULTI-RUNTIME/RESOURCE HYPOTHESIS BEFORE PRODUCT MUTATION
 UNREAD_VISIBLE_COMPLETION_FINDING=SEPARATE PRODUCT FOLLOWUP
 PRODUCTION_RELEASE=NOT_AUTHORIZED
 ```
