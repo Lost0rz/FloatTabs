@@ -18,7 +18,7 @@ IMPLEMENTATION_BRANCH=codex/ft-speech-retire-001
 WP1_EXACT_HEAD=5c82aee8e4bbdf75ca64754b9fffe0875ee3212c
 WP2_EXACT_HEAD=43b507774a6208189ad6af2baa9740bf4e280d28
 WP3_EXACT_HEAD=29810e65d700901baa0737e94bcfbf6ba63390d0
-WP4_PRE_AUDIT_TARGET=515455ecc0607b5da55c012b0412599a4b1a26c0
+WP4_EXACT_HEAD=c1d94a86231b47bcbc8ffb7827c5a11c200b9058
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 ROOT_CAUSE=UNKNOWN
@@ -150,149 +150,19 @@ MACOS_CI_1183=SUCCESS
 QA_DMG_566=SUCCESS
 ```
 
-## Work Package 4 — PRE_AUDIT
-
-**PRE_AUDIT: PASS**
-
-Audit target: `515455ecc0607b5da55c012b0412599a4b1a26c0`.
-
-### Rail / tab product surface
-
-`FloatTabs/UI/ExternalTabRail.swift` still contains the complete visible Speech surface even though WP1-WP3 removed its active runtime ownership:
-
-```text
-SpeechRailControl
-Auto Speak control
-Read Latest control
-Replay control
-Stop control
-onToggleAutoSpeak / onReadLatestResponse / onReplayLatestResponse / onStopSpeech
-setSpeechPresentation(SpeechRailPresentation)
-per-tab speechBadgeView
-isAutoSpeakSource / speechPlaybackState
-Speech badge accessibility projections
-```
-
-These are WP4 REMOVE scope.
-
-The same file independently owns the preserved Attention / Unread presentation:
-
-```text
-ClassicUnreadDotView
-AttentionStyleSurfaceView
-TabAttentionStyle
-TabAttentionPalette
-Unread response state/accessibility
-Beacon / Orbit / Pulse / Dot presentation
-```
-
-Those structures are not Speech and must remain. Removing Speech controls must allow the rail layout/overflow calculations to reflow around the remaining Add, Settings, Pin and Overflow controls without changing Attention/Unread tab presentation.
-
-### Settings boundary
-
-`FloatTabs/UI/GlobalSettingsController.swift` still owns Settings-only Speech dependencies and embeds `SpeechSettingsViewController` under Audio. The Speech controller exposes voice selection, rate, Follow Speech, previews, Refresh Voices and high-quality voice management. These are WP4 REMOVE scope.
-
-The Audio page also independently embeds `NotificationsSettingsViewController`, whose `Ready Alerts` controls, preview, sound library and volume behavior are preserved. `AppCoordinator` continues to own the Ready Alert player/asset store and generation-completion playback route; no Speech retirement change is required there beyond compile adaptation if a Settings initializer signature shrinks.
-
-`FloatTabs/UI/SettingsInformationArchitecture.swift` currently declares `.speech` and projects Audio as `[.readyAlerts, .speech]`. WP4 removes only `.speech`; Audio remains with `[.readyAlerts]`.
-
-### Commands / shortcuts boundary
-
-`FloatTabs/Hotkeys/AppCommandController.swift` contains exactly four Speech command/binding surfaces:
-
-```text
-readPauseResumeSpeechForActiveTab
-replayLatestSpeechForActiveTab
-stopSpeechForActiveTab
-toggleAutoSpeakForActiveTab
-
-readLatestOrStopSpeech        Ctrl+Shift+R
-replayLatestSpeech            Ctrl+Shift+E
-stopSpeechForActiveTab        Ctrl+Shift+S
-toggleAutoSpeak               Ctrl+Shift+A
-```
-
-`AppShortcutCatalog` currently has 28 bindings:
-
-```text
-slot=9
-navigation=7
-view=4
-speech=4
-residency=3
-application=1
-TOTAL=28
-```
-
-Removing only the four Speech bindings yields the required `EXPECTED_NON_SPEECH_BINDINGS=24`.
-
-`ShortcutsSettingsViewController` currently renders a dedicated Speech section from `AppShortcutCatalog.speechBindings`; that section is WP4 REMOVE scope. Shortcut conflict detection already derives from `allBindings`, so retired Speech shortcuts cease being active once removed from the catalog.
-
-The external RemoteOrbit protocol is a separate enum/transport and must remain unchanged, especially `FloatTabsExternalCommand.focusInputForVoice`. Removing local Speech shortcut declarations must not delete or migrate already persisted shortcut values; they simply become inert legacy values.
-
-### Test boundary
-
-Directly impacted shared tests include at least:
-
-```text
-FloatTabsTests/AppCommandControllerTests.swift
-FloatTabsTests/SettingsInformationArchitectureTests.swift
-FloatTabsTests/ExternalShellTests.swift
-FloatTabsTests/WebAttentionIndicatorTests.swift
-```
-
-WP4 may update these shared tests to remove retired Speech product assertions and assert the preserved 24-binding catalog, Ready Alerts and Attention/Unread rail behavior.
-
-Dedicated Speech-only tests and Xcode project references remain physically present until WP5 and are not deleted in WP4.
-
-### Expected WP4 edits
-
-```text
-FloatTabs/UI/ExternalTabRail.swift
-  - remove SpeechRailControl and four Speech rail controls/callbacks
-  - remove setSpeechPresentation and per-tab Speech badge/state/accessibility
-  - reflow rail/overflow around remaining controls
-  - preserve all Attention/Unread styles, dot/surface state and accessibility
-
-FloatTabs/UI/GlobalSettingsController.swift
-  - remove Settings-only Speech preferences/catalog/preview ownership
-  - remove SpeechSettingsViewController product surface
-  - keep NotificationsSettingsViewController / Ready Alerts unchanged
-
-FloatTabs/UI/SettingsInformationArchitecture.swift
-  - remove GlobalSettingsSection.speech
-  - Audio remains and contains Ready Alerts only
-
-FloatTabs/Hotkeys/AppCommandController.swift
-  - remove four Speech AppCommand cases
-  - remove four Speech KeyboardShortcuts.Name declarations
-  - remove speechBindings and Speech diagnostic command names
-  - preserve all 24 non-Speech bindings
-  - preserve FloatTabsExternalCommand, including focusInputForVoice
-
-Directly affected shared tests only as needed for WP4 product-surface semantics.
-```
-
-### Explicit WP4 non-edits
-
-```text
-Do not modify Attention / Unread business semantics or visual style behavior.
-Do not remove Ready Alerts, their preferences, custom sound library, preview or playback routing.
-Do not change RemoteOrbit voice-input focus or FloatTabsExternalCommand.focusInputForVoice.
-Do not delete/migrate stored Speech preference or shortcut values.
-Do not physically delete Speech source files, dedicated Speech tests or Xcode project references — WP5.
-Do not change ChatGPT response bridge/Attention runtime, Calibre browsing, media policy, WebView lifecycle/navigation/recovery, Profiles, sessions or user data.
-```
-
-### WP4 implementation gate
+## Work Package 4 — COMPLETE
 
 ```text
 PRE_AUDIT=PASS
-IMPLEMENT=AUTHORIZED
-POST_AUDIT=REQUIRED_BEFORE_WP5
+IMPLEMENT=COMPLETE
+POST_AUDIT=PASS
+EXACT_HEAD=c1d94a86231b47bcbc8ffb7827c5a11c200b9058
+AUDIT_INDEPENDENCE=FRESH_CONTEXT
 ```
 
-WP4 POST_AUDIT must prove:
+Exact-head POST_AUDIT verified the semantic implementation delta from `53ec58d4d0e6895d3d6869e1a8d10bfcdf6cd1c9` to `c1d94a86231b47bcbc8ffb7827c5a11c200b9058` is one commit touching only the five WP4 production surfaces and four shared tests. No Speech source file, dedicated Speech test, or Xcode project reference was deleted, so WP5 was not entered early.
+
+Verified WP4 acceptance:
 
 ```text
 SPEECH_RAIL_CONTROLS=0
@@ -303,10 +173,32 @@ SPEECH_SHORTCUT_BINDINGS=0
 EXPECTED_NON_SPEECH_BINDINGS=24
 READY_ALERTS=PRESERVED
 UNREAD_ATTENTION_RAIL=PRESERVED
+UNVERIFIED_REQUIRED_CLAIMS=NONE
 ```
+
+Evidence boundary:
+
+- `ExternalTabRail.swift` contains no remaining Speech rail control/badge/state identifiers while retaining Attention/Unread structures and presentation.
+- `AppCommandController.swift` contains no Speech `AppCommand`, Speech `KeyboardShortcuts.Name`, Speech catalog binding, or Speech diagnostic command; RemoteOrbit `focusInputForVoice` remains present.
+- `AppShortcutCatalog` contains 24 non-Speech bindings and focused tests assert the four retired Ctrl+Shift shortcuts no longer resolve.
+- Audio Settings now embeds only `NotificationsSettingsViewController`, and `SettingsInformationArchitecture` projects Audio as `[.readyAlerts]`.
+- The compile-only `SpeechSettingsViewController` class and no-op Speech compatibility methods in `PanelController` remain physically present but are not reachable from active WP4 product surfaces. They are residual source cleanup for WP5 and do not retain Speech runtime ownership or commands.
+- Existing persisted Speech preference/shortcut values were not deleted or migrated.
+
+At WP4 exact implementation head `c1d94a86231b47bcbc8ffb7827c5a11c200b9058`:
+
+```text
+LOCAL_FOCUSED_XCTEST=164 tests / 0 failures (executor evidence)
+LOCAL_FULL_XCTEST=1306 tests / 0 failures / TEST SUCCEEDED (executor evidence)
+MACOS_CI_1186=IN_PROGRESS at latest observation
+QA_DMG_569=IN_PROGRESS at latest observation
+HUMAN_UI_ACCEPTANCE=PENDING
+```
+
+Remote CI is not promoted beyond the latest observed state. The in-progress exact-head workflows are not a CODE_DIFF WP4 post-audit blocker; they remain later PR/merge/final-acceptance host gates. Human UI acceptance remains human-owned and pending; it is not promoted by automated or code-level audit evidence.
 
 ## Next gate
 
-Implement **Work Package 4 only** on `codex/ft-speech-retire-001`, run focused Rail/Settings/command/Ready Alert/Attention-Unread verification plus the full required XCTest suite, push the exact implementation head, then perform an independent exact-head WP4 POST_AUDIT before beginning Work Package 5.
+Start **Work Package 5 PRE_AUDIT only**. Inventory Xcode project references, dedicated Speech tests, compile-only Speech source declarations, no-op compatibility seams and shared tests that mix Speech with preserved behavior. Establish the exact deletion/edit boundary before any WP5 implementation.
 
-Do not enter WP5 early. No release is authorized merely because the retirement implementation advances.
+Do not enter WP5 IMPLEMENT until that PRE_AUDIT passes. Do not enter WP6 early. No release is authorized merely because the retirement implementation advances.
