@@ -1168,7 +1168,6 @@ final class ExternalShellTests: XCTestCase {
         let visible = zone.subviews.filter { view in
             (view is ExternalWebAppTabView
                 || view is AddWebAppControl
-                || view is SpeechRailControl
                 || view is GlobalSettingsControl
                 || view is PinPanelControl
                 || view is RailOverflowControl)

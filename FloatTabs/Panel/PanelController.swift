@@ -165,7 +165,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private enum UnreadDiagnosticSource: String {
         case explicitSelection = "explicit_selection"
         case explicitSelectionDeferred = "explicit_selection_deferred"
-        case manualSpeech = "manual_speech"
         case trustedManualScroll = "trusted_manual_scroll"
         case trustedAssistantPointer = "trusted_assistant_pointer"
         case generationStarted = "generation_started"
@@ -213,8 +212,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator
     private let webFocusRouter: WebFocusRouter
     private let presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))?
-    private let speechPlaybackSessionController: SpeechPlaybackSessionController
-    private let speechPreferencesStore: SpeechPreferencesStore
     private let frameStore: PanelFrameStore
     private let confirmBrowserProfileSwitch: BrowserProfileSwitchConfirmation
     private weak var websiteCacheUsageStore: WebsiteCacheUsageStore?
@@ -230,18 +227,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         onRuntimeReleased: { [weak self] profile in
             self?.handleRuntimeReleased(profile)
         },
-        prepareRuntimeForRelease: { [weak self] slotID in
-            self?.calibreSpeechCoordinator.prepareForRuntimeRelease(slotID: slotID)
-        },
-        onSlotBecameInactive: { [weak self] profile in
-            self?.calibreSpeechCoordinator.handleBecameInactive(profile: profile)
-        },
         attentionProtectionQuery: { [weak self] slotID in
             self?.attentionCoordinator.isAttentionProtected(slotID) ?? false
-        },
-        speechProtectionQuery: { [weak self] slotID in
-            self?.calibreSpeechCoordinator.isSpeechRuntimeProtectionActive(slotID: slotID)
-                ?? false
         },
         diagnostics: diagnostics
     )
@@ -256,67 +243,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     )
 
-    private lazy var assistantSpeechCoordinator = AssistantSpeechCoordinator(
-        playbackSession: speechPlaybackSessionController,
-        webViewProvider: { [weak self] slotID in
-            self?.webViewPool.existingWebView(for: slotID)
-        },
-        responseBridgeProvider: { [weak self] slotID in
-            self?.webViewPool.responseBridge(for: slotID)
-        },
-        followBridgeProvider: { [weak self] slotID in
-            self?.webViewPool.responseBridge(for: slotID)
-        },
-        activeSlotIDProvider: { [weak self] in
-            self?.tabStore.activeTabID
-        },
-        followSpeechEnabled: { [weak self] in
-            self?.speechPreferencesStore.followSpeechOnPage
-                ?? SpeechPreferencesStore.defaultFollowSpeechOnPage
-        },
-        automaticSpeechSuppressed: { [weak self] _ in
-            guard let sourceKind = self?.speechPlaybackSessionController.activeSourceSessionKind else {
-                return false
-            }
-            return sourceKind != .chatGPT
-        },
-        diagnostics: diagnostics
-    )
-
-    private lazy var calibreSpeechCoordinator = CalibreSpeechCoordinator(
-        playbackSession: speechPlaybackSessionController,
-        bridgeProvider: { [weak self] slotID in
-            self?.webViewPool.calibreReaderBridge(for: slotID)
-        }
-    )
-
-    private lazy var chatGPTSpeechSourceAdapter = ChatGPTSpeechSourceAdapter(
-        coordinator: assistantSpeechCoordinator,
-        playbackSession: speechPlaybackSessionController,
-        activeSlotIDProvider: { [weak self] in
-            self?.tabStore.activeTabID
-        },
-        supportsSpeechQuery: { [weak self] slotID in
-            self?.activeSlotSupportsSpeech(slotID: slotID) ?? false
-        }
-    )
-
-    private lazy var calibreReaderSpeechSourceAdapter = CalibreSpeechSourceAdapter(
-        coordinator: calibreSpeechCoordinator,
-        playbackSession: speechPlaybackSessionController,
-        activeSlotIDProvider: { [weak self] in
-            self?.tabStore.activeTabID
-        }
-    )
-
-    private lazy var speechCommandRouter = SpeechCommandRouter(
-        sources: [chatGPTSpeechSourceAdapter, calibreReaderSpeechSourceAdapter],
-        playbackSession: speechPlaybackSessionController,
-        activeSlotIDProvider: { [weak self] in
-            self?.tabStore.activeTabID
-        }
-    )
-
     private var previousApplicationContext: PreviousApplicationContext?
     private var restoreObservationTracker = RuntimeDiagnosticRestoreObservationTracker()
     private var pendingRestoreObservation: PendingRestoreObservation?
@@ -325,7 +251,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var hasPositionedPanel = false
     private var lastSynchronizedActiveID: UUID?
     private var lastSynchronizedActiveProfile: WebAppProfile?
-    private var lastSynchronizedProfilesByID: [UUID: WebAppProfile] = [:]
     private let preferencesStore: AppPreferencesStore
     private(set) var isPinned = false
     private var externalMouseMonitor: Any?
@@ -354,7 +279,6 @@ final class PanelController: NSObject, NSWindowDelegate {
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
-    private(set) var debugSpeechPresentationSynchronizationCount = 0
 #endif
 
     var isVisible: Bool {
@@ -1171,10 +1095,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         frameStore: PanelFrameStore = PanelFrameStore(),
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
-        speechService: SpeechSynthesizing? = nil,
-        speechPlaybackSessionController: SpeechPlaybackSessionController? = nil,
-        speechPreferencesStore: SpeechPreferencesStore? = nil,
-        speechVoiceCatalog: SpeechVoiceCatalogProviding? = nil,
         confirmBrowserProfileSwitch: @escaping BrowserProfileSwitchConfirmation = PanelController.defaultBrowserProfileSwitchConfirmation,
         diagnostics: any RuntimeDiagnosticRecording = RuntimeDiagnosticNoopRecorder(),
         presentationFocusReadinessProvider: (@MainActor () -> (applicationActive: Bool, windowKey: Bool))? = nil
@@ -1189,15 +1109,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 store: unreadResponseStore ?? UnreadResponseStore()
             )
         self.webFocusRouter = webFocusRouter ?? WebFocusRouter(diagnostics: diagnostics)
-        let resolvedSpeechPreferences = speechPreferencesStore ?? SpeechPreferencesStore()
-        self.speechPreferencesStore = resolvedSpeechPreferences
-        let resolvedSpeechVoiceCatalog = speechVoiceCatalog ?? SpeechVoiceCatalog()
-        let resolvedSpeechService = speechService ?? SpeechService(
-            preferences: resolvedSpeechPreferences,
-            voiceCatalog: resolvedSpeechVoiceCatalog
-        )
-        self.speechPlaybackSessionController = speechPlaybackSessionController
-            ?? SpeechPlaybackSessionController(speechService: resolvedSpeechService)
         self.frameStore = frameStore
         self.confirmBrowserProfileSwitch = confirmBrowserProfileSwitch
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
@@ -1245,29 +1156,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         rootView.webPanelContainerView.layer?.shadowOffset = .zero
 
         configureTransientUI()
-
-        // The shared session owns global transport-state presentation. The
-        // ChatGPT coordinator below only reports source-local presentation
-        // facts such as Auto Speak membership and runtime resets.
-        self.speechPlaybackSessionController.onPlaybackStateChange = { [weak self] in
-            self?.synchronizeSpeechPresentation()
-        }
-        assistantSpeechCoordinator.onSpeechPresentationChange = { [weak self] in
-            self?.synchronizeSpeechPresentation()
-        }
-        calibreSpeechCoordinator.onPresentationChange = { [weak self] in
-            self?.synchronizeSpeechPresentation()
-        }
-        calibreSpeechCoordinator.onSpeechProtectionChange = { [weak self] slotID, isProtected in
-            guard let self, !isProtected,
-                  let profile = self.tabStore.profiles.first(where: { $0.id == slotID }) else {
-                return
-            }
-            self.slotLifecycleCoordinator.restartAfterProtectionEnded(profile: profile)
-        }
-        // Register both source adapters before any WebView lifecycle callback
-        // can deliver a completion into the shared playback session.
-        _ = speechCommandRouter
 
         rootView.onResizeEnded = { [weak self] in
             self?.handleManualResizeEnded()
@@ -1342,22 +1230,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                     observation: observation,
                     responseIdentity: nil
                 )
-            )
-        }
-        webViewPool.onResponseRuntimeReset = { [weak self] slotID in
-            self?.assistantSpeechCoordinator.resetRuntime(slotID: slotID)
-        }
-        webViewPool.onCalibreReaderRuntimeReset = { [weak self] slotID in
-            self?.calibreSpeechCoordinator.resetRuntime(slotID: slotID)
-        }
-        webViewPool.onCalibreReaderCandidateChange = { [weak self] _ in
-            self?.synchronizeSpeechPresentation()
-        }
-        webViewPool.onSpeechManualScroll = { [weak self] slotID, documentToken in
-            guard let self else { return }
-            self.assistantSpeechCoordinator.handleManualScroll(
-                for: slotID,
-                documentToken: documentToken
             )
         }
         webViewPool.onTrustedInteractionEvent = { [weak self] slotID, event in
@@ -1780,82 +1652,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "app",
             trace: trace
         )
-        _ = speechCommandRouter.stopCurrentPlayback()
         persistPanelFrame()
-    }
-
-    @discardableResult
-    func readLatestResponseForActiveTab() -> Bool {
-        let outcome = speechCommandRouter.readLatestForActiveSlot()
-        guard case let .manualReadAccepted(sourceKind, slotID) = outcome else {
-            if outcome == .rejected { NSSound.beep() }
-            synchronizeSpeechPresentation()
-            return false
-        }
-        if sourceKind == .chatGPT {
-            acknowledgeUnreadAfterManualSpeech(slotID: slotID)
-        }
-        return true
-    }
-
-    @discardableResult
-    func replayLatestResponseForActiveTab() -> Bool {
-        let outcome = speechCommandRouter.replayLatestForActiveSlot()
-        guard case let .replayAccepted(sourceKind, slotID) = outcome else {
-            if outcome == .rejected { NSSound.beep() }
-            synchronizeSpeechPresentation()
-            return false
-        }
-        if sourceKind == .chatGPT {
-            acknowledgeUnreadAfterManualSpeech(slotID: slotID)
-        }
-        return true
-    }
-
-    func readPauseResumeSpeechForActiveTab() {
-        let outcome = speechCommandRouter.readPauseResumeForActiveSlot()
-        switch outcome {
-        case let .manualReadAccepted(sourceKind, slotID)
-            where sourceKind == .chatGPT:
-            acknowledgeUnreadAfterManualSpeech(slotID: slotID)
-        case .rejected:
-            NSSound.beep()
-        default:
-            break
-        }
-        synchronizeSpeechPresentation()
-    }
-
-    func stopSpeechForActiveTab() {
-        _ = speechCommandRouter.stopForActiveSlot()
-        synchronizeSpeechPresentation()
-    }
-
-    func readLatestOrStopSpeechForActiveTab() {
-        // Keep this source-compatible alias for callers from the S1 baseline;
-        // the semantic command now routes through Pause / Resume.
-        readPauseResumeSpeechForActiveTab()
-    }
-
-    func toggleAutoSpeakForActiveTab() {
-        let outcome = speechCommandRouter.toggleAutoSpeakForActiveSlot()
-        if outcome == .rejected {
-            NSSound.beep()
-        }
-        synchronizeSpeechPresentation()
-    }
-
-    func stopSpeech() {
-        _ = speechCommandRouter.stopCurrentPlayback()
-        synchronizeSpeechPresentation()
-    }
-
-    func playSpeechPreview(_ requests: [SpeechUtteranceRequest]) {
-        speechCommandRouter.playPreview(requests)
-    }
-
-    func stopSpeaking() {
-        stopSpeech()
     }
 
     func storedWebAppStateSnapshot() -> StoredWebAppState {
@@ -2330,8 +2127,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.reset(slotIDs: existingIDs)
         let unreadBeforeReplacement = unreadResponseCoordinator.unreadSlotIDs
         for slotID in existingIDs {
-            assistantSpeechCoordinator.removeSlot(slotID: slotID)
-            calibreSpeechCoordinator.removeSlot(slotID: slotID)
             webViewPool.release(slotID: slotID)
             // Replacement Slots are new identities: their attention
             // bookkeeping starts fresh rather than being restored.
@@ -2347,7 +2142,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         lastSynchronizedActiveID = nil
         lastSynchronizedActiveProfile = nil
-        lastSynchronizedProfilesByID.removeAll()
         synchronizeSlotState()
         return true
     }
@@ -2888,18 +2682,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         return rootView.externalControlZoneView.overflowTabIDs
     }
 
-    var debugAutoSpeakSlotIDs: Set<UUID> {
-        speechCommandRouter.presentation.autoSpeakSlotIDs
-    }
-
-    var debugCurrentSpeakingSlotID: UUID? {
-        speechCommandRouter.presentation.currentSpeakingSlotID
-    }
-
-    var debugSpeechPlaybackState: SpeechPlaybackState {
-        speechCommandRouter.presentation.playbackState
-    }
-
     var debugPendingColdReleaseCount: Int {
         slotLifecycleCoordinator.pendingColdReleaseCount
     }
@@ -3038,17 +2820,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         case let .setResidency(policy):
             _ = setActiveResidency(policy)
 
-        case .readPauseResumeSpeechForActiveTab:
-            readPauseResumeSpeechForActiveTab()
-
-        case .replayLatestSpeechForActiveTab:
-            replayLatestResponseForActiveTab()
-
-        case .stopSpeechForActiveTab:
-            stopSpeechForActiveTab()
-
-        case .toggleAutoSpeakForActiveTab:
-            toggleAutoSpeakForActiveTab()
         }
     }
 
@@ -3310,18 +3081,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         rail.onSettings = { [weak self] in
             self?.onOpenGlobalSettings?()
         }
-        rail.onReadLatestResponse = { [weak self] in
-            self?.readPauseResumeSpeechForActiveTab()
-        }
-        rail.onReplayLatestResponse = { [weak self] in
-            self?.replayLatestResponseForActiveTab()
-        }
-        rail.onToggleAutoSpeak = { [weak self] in
-            self?.toggleAutoSpeakForActiveTab()
-        }
-        rail.onStopSpeech = { [weak self] in
-            self?.stopSpeechForActiveTab()
-        }
         rail.onTogglePin = { [weak self] in
             self?.togglePinnedState()
         }
@@ -3368,9 +3127,7 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func synchronizeSlotState() {
         synchronizeBrowserProfileMenuPresentation()
-        synchronizeSpeechPresentation()
         let orderedProfiles = tabStore.orderedProfiles
-        synchronizeCalibreBackgroundMediaPolicy(for: orderedProfiles)
         let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
         unreadResponseCoordinator.prune(
             validSlotIDs: Set(orderedProfiles.map(\.id))
@@ -3396,7 +3153,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             profiles: orderedProfiles,
             activeTabID: tabStore.activeTabID
         )
-        synchronizeSpeechPresentation()
         synchronizeAttentionPresentation()
         synchronizeUnreadIndicators()
         synchronizeResidentIndicators()
@@ -3411,7 +3167,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             webFocusRouter.setCurrentWebView(nil)
             rootView.webPanelContainerView.showEmptyState()
             synchronizeResidentIndicators()
-            synchronizeSpeechPresentation()
             onSelectedSlotPresentationChange?(nil, nil)
             return
         }
@@ -3445,7 +3200,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 rootView.webPanelContainerView.showEmptyState()
             }
             synchronizeResidentIndicators()
-            synchronizeSpeechPresentation()
             return
         }
         rootView.webPanelContainerView.show(
@@ -3459,11 +3213,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         sourceHostController.observeFullscreenState(of: webView)
         lastSynchronizedActiveID = activeProfile.id
         lastSynchronizedActiveProfile = activeProfile
-        if activeChanged {
-            assistantSpeechCoordinator.handleActiveTabChange(to: activeProfile.id)
-        }
         synchronizeResidentIndicators()
-        synchronizeSpeechPresentation()
         onSelectedSlotPresentationChange?(
             activeProfile.name,
             faviconURL(for: activeProfile)
@@ -3479,49 +3229,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Background Media Policy has one source-local bridge for Calibre. The
-    /// profile snapshot is only used to detect policy transitions; it is not a
-    /// second persisted preference or a speech-state authority.
-    private func synchronizeCalibreBackgroundMediaPolicy(
-        for profiles: [WebAppProfile]
-    ) {
-        let currentProfilesByID = Dictionary(
-            uniqueKeysWithValues: profiles.map { ($0.id, $0) }
-        )
-        for (slotID, previousProfile) in lastSynchronizedProfilesByID {
-            guard let currentProfile = currentProfilesByID[slotID],
-                  previousProfile.backgroundMediaPolicy
-                    != currentProfile.backgroundMediaPolicy else {
-                continue
-            }
-            calibreSpeechCoordinator.handleBackgroundMediaPolicyChange(
-                slotID: slotID,
-                policy: currentProfile.backgroundMediaPolicy,
-                isInactive: !isSlotActuallyPresented(slotID: slotID)
-            )
-        }
-        lastSynchronizedProfilesByID = currentProfilesByID
-    }
-
     private func faviconURL(for profile: WebAppProfile) -> URL? {
         webViewPool.committedURL(for: profile.id) ?? profile.homeURL
-    }
-
-    private func activeSlotSupportsSpeech(slotID: UUID) -> Bool {
-        guard let committedURL = webViewPool.committedURL(for: slotID) else {
-            return false
-        }
-        return ChatGPTSitePolicy.isSupportedChatGPTURL(committedURL)
-    }
-
-    private func synchronizeSpeechPresentation() {
-#if DEBUG
-        debugSpeechPresentationSynchronizationCount += 1
-#endif
-        rootView.externalControlZoneView.setSpeechPresentation(
-            speechCommandRouter.presentation.railPresentation,
-            activeTabName: tabStore.activeProfile?.name
-        )
     }
 
     private func handleCommittedURLChange(slotID: UUID, url: URL) {
@@ -3531,7 +3240,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         onSelectedSlotPresentationChange?(activeProfile.name, url)
-        synchronizeSpeechPresentation()
         if let webView = selectedPresentationWebView() {
             Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
@@ -3631,7 +3339,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         }
         let wasProtected = attentionCoordinator.isAttentionProtected(slotID)
 
-        assistantSpeechCoordinator.handle(observation, for: slotID)
         attentionRouter.handle(observation, for: slotID)
         let completionResult = unreadResponseCoordinator.handle(
             event,
@@ -3932,37 +3639,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             return
         }
         finishUnreadAcknowledgement(attempt, skippedReason: skippedReason)
-    }
-
-    /// Manual Read Latest and Replay Latest acknowledge only after the speech
-    /// coordinator accepted an extraction request for the active ChatGPT Slot.
-    private func acknowledgeUnreadAfterManualSpeech(slotID: UUID) {
-        let facts = unreadPresentationFacts(slotID: slotID)
-        guard facts.activeSlotMatches else {
-            finishUnreadSelectionAttemptIfNeeded(
-                slotID: slotID,
-                source: .manualSpeech,
-                trace: nil,
-                skippedReason: .notActiveSlot
-            )
-            return
-        }
-        if let attempt = beginUnreadAcknowledgement(
-            slotID: slotID,
-            source: .manualSpeech
-        ) {
-            guard attempt.facts.activeSlotMatches else {
-                finishUnreadAcknowledgement(
-                    attempt,
-                    skippedReason: .notActiveSlot
-                )
-                return
-            }
-            unreadResponseCoordinator.acknowledge(slotID: slotID)
-            synchronizeUnreadIndicators()
-            finishUnreadAcknowledgement(attempt, skippedReason: .stateUnchanged)
-        }
-        requestLatestResponseHandledSnapshot(slotID: slotID, source: .manualSpeech)
     }
 
     private func handleTrustedInteraction(
@@ -4386,8 +4062,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             unreadPruneDiagnosticSuppressionIDs.remove(id)
             return false
         }
-        assistantSpeechCoordinator.removeSlot(slotID: id)
-        calibreSpeechCoordinator.removeSlot(slotID: id)
         slotLifecycleCoordinator.remove(slotID: id)
         webViewPool.remove(slotID: id)
         // Pool removal already routed the bridge's final runtimeReset;
@@ -5829,10 +5503,6 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.beginSupplementalVisibility(profile: activeProfile)
         WebViewFactory.configureHiddenScrollers(in: webView)
         companionActiveProfile = activeProfile
-        if activeChanged {
-            assistantSpeechCoordinator.handleActiveTabChange(to: activeProfile.id)
-        }
-
         guard requestedVisibility,
               sourceHostController.sessionState == .fullscreen else { return }
         WebViewFocus.focus(webView, in: panel)

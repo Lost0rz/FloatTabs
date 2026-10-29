@@ -22,7 +22,6 @@ For current behavior, use this order:
 | Window / Panel / Fullscreen | shell visibility, panel/window synchronization, fullscreen source hosting, screen positioning | `FloatTabs/Panel/PanelController.swift`, `FloatingPanel.swift`, `FullscreenSourceHost.swift`, `ScreenPositioning.swift` | one writer per presentation state; fullscreen transitions must not create competing window authority; bounded diagnostic snapshots are observations only |
 | Focus / Input / Commands | native/Web focus routing, global/app shortcuts, command dispatch, click/drag interaction routing | `FloatTabs/Web/WebFocusRouter.swift`, `FloatTabs/Hotkeys/AppCommandController.swift`, `GlobalHotkeyController.swift`, focus policy in `PanelController.swift` | distinguish native focus from DOM focus; event monitors/commands must not silently become window or Tab state owners |
 | Persistence & Recovery | durable Tab/Profile state, app preferences, backups, unread durable state | `FloatTabs/Persistence/ProfileRepository.swift`, `AppPreferencesStore.swift`, `FloatTabsBackupService.swift`, `UnreadResponseStore.swift` | preserve user data; runtime/transient state must not be persisted as a workaround for runtime bugs |
-| Speech | assistant/reader speech ownership, playback session, routing, segmentation/normalization | `FloatTabs/Speech/AssistantSpeechCoordinator.swift`, `CalibreSpeechCoordinator.swift`, `SpeechPlaybackSessionController.swift`, `SpeechSourceRouting.swift`, `SpeechService.swift` | speech consumes verified content/runtime signals; it must not redefine response or Tab ownership |
 | Attention / Response Projection | ChatGPT attention/response extraction, unread projection, presentation routing | `FloatTabs/Web/ChatGPTAttentionBridge.swift`, `ChatGPTResponseBridge.swift`, `ChatGPTResponseExtraction.swift`, `ChatGPTUnreadResponseCoordinator.swift`, `WebAttentionCoordinator.swift` | provider observations, response identity, unread state, and presentation are separate responsibilities; diagnostic timeout/failure/stale/suppressed/late evidence does not redefine Attention business state |
 | Diagnostics | diagnostic event vocabulary, incident correlation context, privacy filtering, bounded snapshots, persistence/export | `FloatTabs/Diagnostics/RuntimeDiagnostics.swift`, `RuntimeDiagnosticWriter.swift`, `RuntimeDiagnosticEvent.swift`, `RuntimeDiagnosticPrivacy.swift`, `RuntimeDiagnosticSnapshot.swift`, `LongTermPerformanceObservationCoordinator.swift` | diagnostics records cross-domain evidence but never owns runtime/product state or root cause; correlate Slot/session/runtime/navigation identity; WebContent memory attribution remains unavailable through public WebKit APIs |
 | Website Cache / Storage | website-cache measurement, cleanup policy, scheduling, usage state | `FloatTabs/Storage/WebsiteCacheCleanupCoordinator.swift`, `WebsiteCacheCleanupService.swift`, `WebsiteCachePolicy.swift`, `WebsiteCacheSizeMeasurer.swift`, `WebsiteCacheUsageStore.swift` | cache cleanup must not delete durable profile/session product data outside its explicit policy |
@@ -40,7 +39,7 @@ AppCoordinator
 → SlotNavigationObserver owns navigation/runtime observations
 → SlotLifecycleCoordinator manages residency/release/recovery decisions
 → WebFocusRouter / command layer manages input focus
-→ Attention / Response / Speech consume bounded Web signals
+→ Attention / Response consume bounded Web signals
 → Persistence saves durable user state
 → Diagnostics correlates privacy-filtered evidence across those owners
 ```
@@ -56,7 +55,7 @@ Tests live under `FloatTabsTests/`. Prefer the narrowest matching tests first, t
 - `WebViewPoolTests.swift` — runtime/recovery disposition and lifecycle evidence;
 - `ChatGPTAttentionBridgeTests.swift` and `WebAttentionCrossFeatureTests.swift` — Attention liveness/resync abnormal-path evidence;
 - Browser Profile persistence/switch/settings tests — persistent user-data boundaries;
-- `AppCommandControllerTests.swift`, `AppPreferencesStoreTests.swift`, `AssistantSpeechCoordinatorTests.swift` — adjacent domain ownership.
+- `AppCommandControllerTests.swift`, `AppPreferencesStoreTests.swift` — adjacent domain ownership.
 
 Before editing a domain, locate the exact matching tests/symbols on the current task branch; this map is a routing aid, not a frozen file inventory.
 
@@ -71,7 +70,7 @@ vs WebView runtime/navigation
 vs Window/Fullscreen
 vs Focus/Input
 vs Persistence
-vs Speech/Attention projection
+vs Attention/Response projection
 ```
 
 Then correlate fresh evidence by Slot, session, runtime generation, navigation generation and time where available. Treat reload/reset/restart only as recovery evidence. Keep `ROOT_CAUSE=UNKNOWN` when the recorded evidence cannot prove causation.

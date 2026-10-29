@@ -58,49 +58,6 @@ private final class CrossFeatureResponseStatusSnapshotProbe {
 }
 
 @MainActor
-private final class CrossFeatureSpeechService: SpeechSynthesizing {
-    private(set) var lastTransportToken: UInt64?
-    private(set) var pauseCount = 0
-    private(set) var resumeCount = 0
-    private(set) var stopCount = 0
-
-    var onUtteranceStarted: ((UInt64) -> Void)?
-    var onUtteranceFinished: ((UInt64) -> Void)?
-    var onUtterancePaused: ((UInt64) -> Void)?
-    var onUtteranceContinued: ((UInt64) -> Void)?
-    var onUtteranceCancelled: ((UInt64) -> Void)?
-
-    func speak(_ request: SpeechPlaybackRequest) {
-        lastTransportToken = request.transportToken
-        onUtteranceStarted?(request.transportToken)
-    }
-
-    func pause() -> Bool {
-        pauseCount += 1
-        return true
-    }
-
-    func resume() -> Bool {
-        resumeCount += 1
-        return true
-    }
-
-    func stop() {
-        stopCount += 1
-    }
-
-    func confirmPause() {
-        guard let lastTransportToken else { return }
-        onUtterancePaused?(lastTransportToken)
-    }
-
-    func confirmResume() {
-        guard let lastTransportToken else { return }
-        onUtteranceContinued?(lastTransportToken)
-    }
-}
-
-@MainActor
 private final class CrossFeatureSoundPlayer: AttentionSoundPlaying {
     struct Call: Equatable {
         let source: AttentionSoundPlaybackSource
@@ -1707,36 +1664,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
                 && $0.fields["reason"] == .string("visible_completion")
         })
         XCTAssertFalse(writer.events.contains { $0.event == "unread.marked" })
-    }
-
-    func testPanelOwnsGlobalSpeechPresentationSynchronization() {
-        let service = CrossFeatureSpeechService()
-        let session = SpeechPlaybackSessionController(speechService: service)
-        let (controller, _, _, _) = makeController(
-            speechService: service,
-            speechPlaybackSessionController: session
-        )
-        let before = controller.debugSpeechPresentationSynchronizationCount
-        let context = SpeechPlaybackContext(
-            sourceKind: .chatGPT,
-            slotID: nil,
-            sourceSequence: 50,
-            origin: .manual
-        )
-
-        XCTAssertTrue(session.speak(
-            context: context,
-            text: "Panel observer.",
-            languageRole: .english
-        ))
-
-        // CrossFeatureSpeechService confirms didStart synchronously, so the
-        // Panel observes both idle → starting and starting → speaking.
-        XCTAssertEqual(
-            controller.debugSpeechPresentationSynchronizationCount,
-            before + 2
-        )
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
     }
 
     // MARK: 4.5 Selected-hidden completion
@@ -3652,69 +3579,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(controller.debugPendingColdReleaseCount, 0)
     }
 
-    func testPanelSpeechAutoSpeakActionTracksActiveSlotAndFailsClosed() throws {
-        var committedURL: URL?
-        let (controller, _, store, pool) = makeController(
-            profiles: [
-                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
-                spec(name: "ChatB", url: "https://chatgpt.com/chat-b"),
-            ],
-            committedURLProvider: { _ in committedURL }
-        )
-        let chatURL = URL(string: "https://chatgpt.com/chat-a")!
-        let unsupportedURL = URL(string: "https://example.com/plain")!
-        let first = try profile(named: "ChatA", in: store)
-        let second = try profile(named: "ChatB", in: store)
-
-        XCTAssertTrue(store.select(id: first.id))
-        committedURL = chatURL
-        pool.onCommittedURLChange?(first.id, chatURL)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
-
-        XCTAssertTrue(store.select(id: second.id))
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id, second.id]))
-
-        committedURL = unsupportedURL
-        pool.onCommittedURLChange?(second.id, unsupportedURL)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([first.id]))
-    }
-
-    func testPanelSpeechReadStopCommandUsesActiveTabAndFailsClosed() throws {
-        var committedURL: URL?
-        let (controller, _, store, pool) = makeController(
-            profiles: [
-                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
-                spec(name: "Plain", url: "https://example.com/plain"),
-            ],
-            committedURLProvider: { _ in committedURL }
-        )
-        let chat = try profile(named: "ChatA", in: store)
-        let plain = try profile(named: "Plain", in: store)
-
-        XCTAssertTrue(store.select(id: chat.id))
-        committedURL = URL(string: "https://chatgpt.com/chat-a")
-        pool.onCommittedURLChange?(chat.id, committedURL!)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
-
-        XCTAssertTrue(store.select(id: plain.id))
-        committedURL = URL(string: "https://example.com/plain")
-        pool.onCommittedURLChange?(plain.id, committedURL!)
-
-        // The read/stop command must consult the active Tab only. An
-        // unsupported active page cannot fall back to ChatA's response.
-        controller.handle(.readPauseResumeSpeechForActiveTab)
-        XCTAssertEqual(controller.debugCurrentSpeakingSlotID, nil)
-
-        // Unsupported Auto Speak remains fail-closed, while ChatA's armed
-        // membership is preserved across the active-Tab switch.
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertEqual(controller.debugAutoSpeakSlotIDs, Set([chat.id]))
-    }
-
     // MARK: 4.13 Production acknowledgement wiring
 
     func testVisibleValidCompletionPlaysSoundOnceWithoutMakingAttentionReady() throws {
@@ -4252,150 +4116,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(hiddenSlotID))
     }
 
-    func testManualReadAndReplayAcceptedRequestsClearUnreadButRejectedRequestsDoNot() throws {
-        let writer = RuntimeDiagnosticInMemoryWriter()
-        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
-        var committedURL: URL?
-        let (controller, _, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
-            committedURLProvider: { _ in committedURL },
-            diagnostics: diagnostics
-        )
-        let slot = try profile(named: "ChatA", in: store)
-        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        let bridge = try attentionBridge(pool: pool, slot: slot)
-        let chatURL = URL(string: "https://chatgpt.com/chat-a")!
-
-        committedURL = chatURL
-        pool.onCommittedURLChange?(slot.id, chatURL)
-        completeGeneration(
-            bridge: bridge,
-            webView: webView,
-            token: "manual-read-document"
-        )
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-        XCTAssertTrue(controller.readLatestResponseForActiveTab())
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        completeGeneration(
-            bridge: bridge,
-            webView: webView,
-            token: "manual-read-document"
-        )
-        XCTAssertTrue(controller.replayLatestResponseForActiveTab())
-        XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        completeGeneration(
-            bridge: bridge,
-            webView: webView,
-            token: "manual-read-document"
-        )
-        committedURL = nil
-        XCTAssertFalse(controller.readLatestResponseForActiveTab())
-        XCTAssertFalse(controller.replayLatestResponseForActiveTab())
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-        XCTAssertEqual(
-            writer.events.filter { $0.event == "unread.acknowledged" }
-                .last?.fields["source"],
-            .string("manual_speech")
-        )
-        XCTAssertEqual(writer.events.filter { $0.event == "unread.acknowledged" }.count, 2)
-    }
-
-    func testPauseResumeStopAndAutoSpeakDoNotAcknowledgeUnread() throws {
-        var committedURL: URL?
-        let (controller, _, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
-            committedURLProvider: { _ in committedURL }
-        )
-        let slot = try profile(named: "ChatA", in: store)
-        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        let bridge = try attentionBridge(pool: pool, slot: slot)
-        committedURL = URL(string: "https://chatgpt.com/chat-a")!
-        pool.onCommittedURLChange?(slot.id, committedURL!)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        completeGeneration(
-            bridge: bridge,
-            webView: webView,
-            token: "automatic-speech-does-not-ack"
-        )
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        // With no committed source, the combined read/pause/resume command
-        // fails closed and must not turn an unavailable operation into an
-        // unread acknowledgement. Stop is likewise a no-op here.
-        committedURL = nil
-        controller.handle(.readPauseResumeSpeechForActiveTab)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-        controller.handle(.readPauseResumeSpeechForActiveTab)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-        controller.handle(.stopSpeechForActiveTab)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-    }
-
-    func testActualPauseAndResumeCommandsPreserveUnreadWhileSpeaking() throws {
-        var committedURL: URL?
-        let speechService = CrossFeatureSpeechService()
-        let (controller, _, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
-            committedURLProvider: { _ in committedURL },
-            speechService: speechService
-        )
-        let slot = try profile(named: "ChatA", in: store)
-        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        let bridge = try attentionBridge(pool: pool, slot: slot)
-        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
-        committedURL = URL(string: "https://chatgpt.com/chat-a")!
-        pool.onCommittedURLChange?(slot.id, committedURL!)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-        XCTAssertTrue(
-            responseBridge.debugReceiveDocumentReady(
-                documentToken: "deterministic-document"
-            )
-        )
-
-        completeGeneration(
-            bridge: bridge,
-            webView: webView,
-            token: "pause-resume-unread"
-        )
-        let payload = ChatGPTResponsePayload(
-            version: ChatGPTResponsePayload.currentVersion,
-            kind: .response,
-            requestID: "deterministic-request",
-            documentToken: "deterministic-document",
-            responseID: "deterministic-response",
-            blocks: [
-                SpeechContentBlock(
-                    kind: .paragraph,
-                    text: "Deterministic response.",
-                    level: nil
-                )
-            ]
-        )
-        XCTAssertTrue(responseBridge.debugResolveFirstPendingRequest(with: payload))
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
-        XCTAssertEqual(controller.debugCurrentSpeakingSlotID, slot.id)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        controller.handle(.readPauseResumeSpeechForActiveTab)
-        XCTAssertEqual(speechService.pauseCount, 1)
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .pausing)
-        speechService.confirmPause()
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .paused)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        controller.handle(.readPauseResumeSpeechForActiveTab)
-        XCTAssertEqual(speechService.resumeCount, 1)
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .resuming)
-        speechService.confirmResume()
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-
-        controller.handle(.stopSpeechForActiveTab)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
-    }
-
     func testTrustedManualScrollAcknowledgesVisibleUnread() throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
@@ -4441,7 +4161,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
-    func testTrustedManualScrollAcknowledgesUnreadWithoutSpeechExtraction() throws {
+    func testTrustedManualScrollAcknowledgesUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4450,7 +4170,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let attentionBridge = try attentionBridge(pool: pool, slot: slot)
         let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
 
-        XCTAssertFalse(controller.debugAutoSpeakSlotIDs.contains(slot.id))
         completeGeneration(
             bridge: attentionBridge,
             webView: webView,
@@ -4686,7 +4405,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         )
     }
 
-    func testBackgroundManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+    func testBackgroundManualScrollDoesNotAcknowledgeUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4714,7 +4433,7 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
-    func testStaleDocumentManualScrollWithoutSpeechExtractionDoesNotAcknowledgeUnread() throws {
+    func testStaleDocumentManualScrollDoesNotAcknowledgeUnreadWithStableResponseBridge() throws {
         let (controller, _, store, pool) = makeController(
             profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")]
         )
@@ -4723,7 +4442,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         let attentionBridge = try attentionBridge(pool: pool, slot: slot)
         let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
 
-        XCTAssertFalse(controller.debugAutoSpeakSlotIDs.contains(slot.id))
         completeGeneration(
             bridge: attentionBridge,
             webView: webView,
@@ -4764,46 +4482,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             )
         }
         XCTAssertFalse(controller.unreadResponseSlotIDs.contains(slot.id))
-    }
-
-    func testProgrammaticSpeechFollowScrollDoesNotAcknowledgeUnread() throws {
-        var committedURL: URL?
-        let speechService = CrossFeatureSpeechService()
-        let (controller, _, store, pool) = makeController(
-            profiles: [spec(name: "ChatA", url: "https://chatgpt.com/chat-a")],
-            committedURLProvider: { _ in committedURL },
-            speechService: speechService
-        )
-        let slot = try profile(named: "ChatA", in: store)
-        let webView = try makeResidentWebView(pool: pool, store: store, slotName: "ChatA")
-        let attentionBridge = try attentionBridge(pool: pool, slot: slot)
-        let responseBridge = try XCTUnwrap(pool.responseBridge(for: slot.id))
-        XCTAssertTrue(
-            responseBridge.debugReceiveDocumentReady(
-                documentToken: "programmatic-follow-document"
-            )
-        )
-        committedURL = URL(string: "https://chatgpt.com/chat-a")!
-        pool.onCommittedURLChange?(slot.id, committedURL!)
-        controller.handle(.toggleAutoSpeakForActiveTab)
-
-        completeGeneration(
-            bridge: attentionBridge,
-            webView: webView,
-            token: "programmatic-follow"
-        )
-        XCTAssertTrue(
-            responseBridge.debugResolveFirstPendingRequest(
-                with: responsePayload(
-                    documentToken: "programmatic-follow-document",
-                    responseID: "programmatic-follow-response",
-                    withLocator: true
-                )
-            )
-        )
-
-        XCTAssertEqual(controller.debugSpeechPlaybackState, .speaking)
-        XCTAssertTrue(controller.unreadResponseSlotIDs.contains(slot.id))
     }
 
     func testVisibleGenerationStartedAcknowledgesExistingUnread() throws {
@@ -5643,8 +5321,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         store: TabStore? = nil,
         attentionCoordinator: WebAttentionCoordinator = WebAttentionCoordinator(),
         committedURLProvider: WebViewPool.CommittedURLProvider? = nil,
-        speechService: SpeechSynthesizing? = nil,
-        speechPlaybackSessionController: SpeechPlaybackSessionController? = nil,
         unreadResponseCoordinator: ChatGPTUnreadResponseCoordinator? = nil,
         preferencesStore: AppPreferencesStore? = nil,
         webFocusRouter: WebFocusRouter? = nil,
@@ -5669,8 +5345,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
             frameStore: PanelFrameStore(),
             preferencesStore: resolvedPreferencesStore,
             webFocusRouter: webFocusRouter,
-            speechService: speechService,
-            speechPlaybackSessionController: speechPlaybackSessionController,
             diagnostics: diagnostics,
             presentationFocusReadinessProvider: presentationFocusReadinessProvider
         )
@@ -5945,47 +5619,6 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
     ) {
         XCTAssertTrue(
             responseBridge.debugReceiveDocumentReady(documentToken: documentToken)
-        )
-        responseBridge.extractLatest { _ in }
-        let emptyPayload = ChatGPTResponsePayload(
-            version: ChatGPTResponsePayload.currentVersion,
-            kind: .empty,
-            requestID: "prime-request",
-            documentToken: documentToken,
-            responseID: nil,
-            blocks: []
-        )
-        XCTAssertTrue(
-            responseBridge.debugResolveFirstPendingRequest(with: emptyPayload)
-        )
-    }
-
-    private func responsePayload(
-        documentToken: String,
-        responseID: String,
-        withLocator: Bool = false
-    ) -> ChatGPTResponsePayload {
-        let locator = withLocator
-            ? SpeechSourceLocator(
-                documentToken: documentToken,
-                responseID: responseID,
-                blockID: "(responseID):block-0"
-            )
-            : nil
-        return ChatGPTResponsePayload(
-            version: ChatGPTResponsePayload.currentVersion,
-            kind: .response,
-            requestID: "request-(responseID)",
-            documentToken: documentToken,
-            responseID: responseID,
-            blocks: [
-                SpeechContentBlock(
-                    kind: .paragraph,
-                    text: "Deterministic response.",
-                    level: nil,
-                    sourceLocator: locator
-                )
-            ]
         )
     }
 

@@ -33,8 +33,6 @@ final class AppCoordinator {
     private let panelController: PanelController
     private let diagnostics: RuntimeDiagnostics
     private let diagnosticExporter: RuntimeDiagnosticExporter
-    private let speechPreferencesStore: SpeechPreferencesStore
-    private let speechVoiceCatalog: SpeechVoiceCatalog
     private var statusItemController: StatusItemController?
     private var globalHotkeyController: GlobalHotkeyController?
     private var appCommandController: AppCommandController?
@@ -80,8 +78,6 @@ final class AppCoordinator {
         }
     ) {
         let resolvedPreferencesStore = preferencesStore ?? AppPreferencesStore()
-        let resolvedSpeechPreferencesStore = SpeechPreferencesStore()
-        let resolvedSpeechVoiceCatalog = SpeechVoiceCatalog()
         let resolvedAttentionSoundAssetStore = attentionSoundAssetStore ?? AttentionSoundAssetStore()
         let diagnostics = RuntimeDiagnostics(
             writer: RuntimeDiagnosticWriter(directory: RuntimeDiagnosticWriter.defaultDirectory),
@@ -95,8 +91,6 @@ final class AppCoordinator {
         self.preferencesStore = resolvedPreferencesStore
         self.diagnostics = diagnostics
         self.diagnosticExporter = RuntimeDiagnosticExporter(diagnostics: diagnostics)
-        self.speechPreferencesStore = resolvedSpeechPreferencesStore
-        self.speechVoiceCatalog = resolvedSpeechVoiceCatalog
         self.backupService = backupService
         self.attentionSoundAssetStore = resolvedAttentionSoundAssetStore
         self.attentionSoundPlayer = attentionSoundPlayer
@@ -133,18 +127,11 @@ final class AppCoordinator {
             // injected into the presentation owner. AppCoordinator itself
             // never routes provider observations.
             let attentionCoordinator = WebAttentionCoordinator(diagnostics: diagnostics)
-            let speechService = SpeechService(
-                preferences: resolvedSpeechPreferencesStore,
-                voiceCatalog: resolvedSpeechVoiceCatalog
-            )
             self.panelController = PanelController(
                 tabStore: tabStore,
                 webViewPool: webViewPool,
                 attentionCoordinator: attentionCoordinator,
                 preferencesStore: resolvedPreferencesStore,
-                speechService: speechService,
-                speechPreferencesStore: resolvedSpeechPreferencesStore,
-                speechVoiceCatalog: resolvedSpeechVoiceCatalog,
                 diagnostics: diagnostics
             )
         }
@@ -177,11 +164,6 @@ final class AppCoordinator {
 
         globalSettingsController = GlobalSettingsController(
             preferencesStore: preferencesStore,
-            speechPreferencesStore: speechPreferencesStore,
-            speechVoiceCatalog: speechVoiceCatalog,
-            speechPreviewHandler: { [weak self] requests in
-                self?.panelController.playSpeechPreview(requests)
-            },
             attentionSoundAssetStore: attentionSoundAssetStore,
             attentionSoundPlayer: attentionSoundPlayer,
             onExportBackup: { [weak self] url in
