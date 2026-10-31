@@ -8,7 +8,7 @@
 
 **MODE: JSC / WEBCONTENT MULTI-RUNTIME PRESSURE INVESTIGATION**
 
-Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / CORRECTIVE AUTHORIZED`.
+Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AIR_SOAK_READY`.
 
 PR #161 is closed `ARCHIVE-ONLY / UNMERGED`. Its watchdog `2s -> 5s` experiment reduced periodic work but did not eliminate WebContent crashes and is not production state.
 
@@ -18,12 +18,13 @@ PR #161 is closed `ARCHIVE-ONLY / UNMERGED`. Its watchdog `2s -> 5s` experiment 
 MAIN=26c81d83d3bdd771e98e355337b78622e2b25b17
 ACTIVE_BRANCH=codex/ft-jsc-multi-runtime-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
+IMPLEMENTATION_COMMIT=3dff7e90d23918e69e12d2820ce6c1be31805e99
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-The exact-head Air-soak artifact used for the latest evidence was:
+The prior exact-head Air-soak artifact used for the diagnostic baseline was:
 
 ```text
 SOAK_SOURCE_REVISION=ca46c3fad6bb7c7c106fb8cbbdf7fbde89da3120
@@ -131,7 +132,7 @@ Observed warning-time safe-candidate counts:
 01:21:25Z -> 2
 ```
 
-Current code behavior is explicit:
+Baseline code behavior before the corrective was explicit:
 
 ```text
 memory pressure WARNING  -> diagnostics only; no eviction
@@ -150,6 +151,8 @@ ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
 AIR_SOAK_DIAGNOSTIC_GATE=COMPLETED
 SAFE_BOUNDED_INTERVENTION=WARNING_PRESSURE_EARLY_WARM_RELEASE
 INTERVENTION_AUTHORIZED=YES
+INTERVENTION_IMPLEMENTED=YES
+IMPLEMENTATION_COMMIT=3dff7e90d23918e69e12d2820ce6c1be31805e99
 TARGET=existing inactive Warm pending-release runtimes only
 ACTIVE_OR_VISIBLE_RELEASE=FORBIDDEN
 ATTENTION_OR_MEDIA_PROTECTED_RELEASE=FORBIDDEN
@@ -159,7 +162,9 @@ JSC_ROOT_CAUSE=UNKNOWN
 PRODUCTION_RELEASE=NOT_AUTHORIZED
 ```
 
-Next gate: implement exactly this one bounded warning-pressure release policy, preserve the current protection boundary, verify locally and remotely, produce a new exact-head QA DMG, then run another Air soak.
+The single corrective is implemented through the existing lifecycle release path. Warning pressure now releases only eligible inactive Warm pending-release runtimes; active/visible, Hot, media-protected and Attention-protected runtimes remain protected. Focused and full XCTest, Debug/Release arm64 builds, exact-head CI/QA, and a fresh exact-head local QA DMG have passed.
+
+Next gate: Air-side soak using the fresh exact-head QA DMG. Do not interpret the intervention as proof of JSC root cause.
 
 ## Separate product follow-up
 

@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-JSC-MULTI-RUNTIME-002`
 **Title:** Audit multi-generating long-lived ChatGPT WebContent clustering and shared resource pressure
-**Status:** `ACTIVE / CORRECTIVE AUTHORIZED`
-**Mode:** `EXECUTE`
+**Status:** `ACTIVE / AIR_SOAK_READY`
+**Mode:** `WAITING_FOR_AIR_SOAK`
 **Task class:** `RUNTIME STABILITY / EVIDENCE-DRIVEN CORRECTIVE`
 **Authorized baseline:** `main@26c81d83d3bdd771e98e355337b78622e2b25b17`
 **Active PR:** `#162` / `codex/ft-jsc-multi-runtime-002`
@@ -114,6 +114,20 @@ Use the existing lifecycle release path. The change should reuse the existing cr
 - Do not use reload/restart/reset as mitigation.
 - Do not alter generation, Attention/Unread, stable response identity, RemoteOrbit focus, background-media semantics or active-visible completion red-dot behavior.
 
+## Corrective implementation result
+
+The single authorized intervention is implemented in:
+
+```
+IMPLEMENTATION_COMMIT=3dff7e90d23918e69e12d2820ce6c1be31805e99
+CHANGED_PATHS=FloatTabs/Web/SlotLifecycleCoordinator.swift; FloatTabsTests/WebAttentionCrossFeatureTests.swift; FloatTabsTests/WebAttentionLifecycleTests.swift
+CODE_PATH=SlotLifecycleCoordinator.handleMemoryPressure(.warning) -> evictInactiveWarmForMemoryPressure(...)
+WARNING_RELEASE_BOUNDARY=existing inactive Warm pending-release resident WebView, not visible, media-protected=false, attention-protected=false
+WARNING_DIAGNOSTICS=pressure_level and warning_pressure_eligible are recorded; release_completed is not mislabeled critical_pressure_eligible
+```
+
+The implementation preserves the existing critical-pressure path and all active/visible, Hot, media and Attention protection boundaries. It does not alter generation, Attention/Unread, recovery, Browser Profile/session/user data or process-pool/data-store ownership.
+
 ## Diagnostics requirement
 
 Memory-pressure diagnostics must tell the truth after the behavior change.
@@ -196,6 +210,8 @@ STOP and report rather than broaden scope if:
 This iteration reaches `AIR_SOAK_READY` only after the single warning-pressure Warm release intervention is implemented, verified, pushed to PR #162, and tied to a fresh exact-head QA DMG.
 
 Production release is not authorized.
+
+The implementation/verification boundary is now complete and the task is waiting for the user-owned Air soak. The fresh artifact identity, provenance, SHA256 and host-gate results are returned in the execution receipt; no Air install or soak is performed in this stage.
 
 ## Separate follow-up not authorized here
 
