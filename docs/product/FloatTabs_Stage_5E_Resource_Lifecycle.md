@@ -1,91 +1,15 @@
 # FloatTabs Stage 5E — Resource Lifecycle Contract
 
-Status: accepted Stage 5 resource-lifecycle contract; final closeout validated on PR #10.
+> **DOCUMENT ROLE: HISTORICAL STAGE CONTRACT — SUPERSEDED AS TARGET LIFECYCLE AUTHORITY**
+>
+> The complete original Stage 5E contract is preserved unchanged at [`archive/FloatTabs_Stage_5E_Resource_Lifecycle.md`](archive/FloatTabs_Stage_5E_Resource_Lifecycle.md).
+>
+> Its Hot/Warm/Cold timing rules, hidden-active grace, and residency semantics describe an accepted historical implementation. They do not govern the active Runtime Lifecycle / Memory redesign.
 
-Stage 5D interaction/rendering geometry remains frozen. Stage 5E changes only resource lifecycle semantics and the UI signals that expose those runtime semantics.
+Use instead:
 
-## 1. Product policies versus runtime state
+- `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
+- [`../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](../architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md);
+- current source/tests for present production behavior.
 
-User policy remains:
-
-- **Hot** — strict resident runtime; highest responsiveness; no proactive eviction.
-- **Warm** — resident for the configured inactive retention period during normal operation; critical memory pressure may shorten retention.
-- **Cold** — non-resident after a short grace; behaves like a persistent Web App bookmark when unused.
-
-Active/selected is not itself a Residency policy. Any Slot being actively used gets a complete live WKWebView regardless of Hot/Warm/Cold.
-
-## 2. Release rules
-
-### Hot
-
-- Never proactively release an inactive Hot WKWebView.
-- If WebKit terminates its content process, immediately reload the existing recovery URL in the background without selecting or presenting the Slot or taking keyboard/window focus.
-- `Pause When Inactive` may pause media, but the runtime remains resident.
-- `Allow Background Audio` allows media/background work and also remains resident.
-
-### Warm
-
-- Inactive Warm remains resident as a short-lived cache.
-- Default inactive TTL: **120 seconds**.
-- The selected Warm retention setting is honored during normal operation; adding another inactive Warm runtime does not evict the oldest one before its TTL.
-- macOS memory-pressure warning is diagnostic only and does not release Warm runtimes before TTL; critical pressure may evict inactive non-protected Warm runtimes early.
-- Reactivating before eviction cancels the inactive plan and reuses the same WKWebView.
-
-### Cold
-
-- Switching away starts a **30 second** release grace.
-- Reactivating during grace cancels eviction and reuses the same WKWebView.
-- After eviction, only persisted Slot/profile/current URL and shared persistent website data remain. Returning recreates the WKWebView and reloads from the stored URL.
-
-## 3. Selected Slot while FloatTabs is hidden
-
-Hiding FloatTabs is not immediately equivalent to abandoning the selected page.
-
-- Selected Slot gets a **120 second recent-active grace** while the panel is hidden.
-- Showing FloatTabs during this grace cancels the hidden transition.
-- After the hidden grace, the selected Slot becomes lifecycle-inactive and follows its own policy:
-  - Hot stays resident;
-  - Warm enters its configured TTL;
-  - Cold enters its 30 second grace.
-
-## 4. Background playback is an eviction protection condition
-
-`Allow Background Audio` does not mean "never release forever". It means **do not release while WebKit reports media is actually playing**.
-
-- FloatTabs uses public `WKWebView.requestMediaPlaybackState` rather than site-specific JavaScript.
-- If an inactive Warm/Cold Slot is playing, it becomes media-protected and no eviction is allowed.
-- Playback state is checked periodically while protected.
-- When playback becomes paused/none, a fresh policy grace starts from that observation time.
-- Release deadlines re-check playback before destruction, preventing a page that started playing after deactivation from being killed at the old deadline.
-- Media-protected Warm is excluded from TTL release and critical-pressure eviction.
-
-## 5. Runtime state visualization
-
-Favicon color represents **actual live runtime**, not selected state:
-
-- full color = `WebViewPool` currently owns a live WKWebView for the Slot;
-- grayscale = the WKWebView has been released.
-
-Therefore Active, Hot inactive, Warm cached, Cold grace, and background-media-protected Slots are all full color while resident. Once released, the favicon becomes gray.
-
-Selected/active remains represented by the existing Stage 5D tab geometry and animated rainbow outline.
-
-The menu-bar status item displays the current selected Web App favicon plus name. This remains visible when the panel is hidden, so the user can see which Slot will be presented on the next summon.
-
-## 6. Source of truth
-
-Runtime color must derive from `WebViewPool.residentSlotIDs`; no second persisted `isLoaded` flag is allowed.
-
-Benchmark/debug state exposes:
-
-- resident Slot count / IDs;
-- pending Cold release count;
-- pending Warm release count;
-- media-protected Slot IDs;
-- hidden-active grace pending state.
-
-These fields are the basis for long-duration resource measurement. Real-Mac acceptance on 2026-08-10 confirmed Cold 30-second eviction, Warm timed eviction, hidden recent-active grace, zero-resident recovery, and low post-release idle CPU. The default Warm TTL is 120 seconds, and Settings can select a longer retention. Ordinary inactivity honors that configured TTL; critical memory pressure may shorten Warm retention.
-
-## 7. Regression boundary
-
-Stage 5E must not alter frozen Stage 5D resize/movement geometry, tab dimensions/hover behavior, rainbow/Web seam, Website Mode, Window Size, Zoom, Browser Identity, Pin, or summon semantics.
+Historical Stage 5E evidence remains valid only for the version/implementation it originally described.

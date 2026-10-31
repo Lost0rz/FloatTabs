@@ -13,11 +13,14 @@ Repository authority uses:
 - `AGENTS.md` — durable project rules and authority boundaries;
 - `CURRENT_STATUS.md` — verified current-state snapshot;
 - `CURRENT_TASK.md` — the only active task authorization;
+- `docs/README.md` — documentation authority/status routing index;
 - `docs/architecture/DOMAIN_MAP.md` — derived navigation map, not product truth or task authority.
 
 Chat history, Memory, handoff cards, audit replies, historical reports, old PRs, and archived documents are supporting evidence only.
 
 Before state-changing work, read the three control files, refresh the task-relevant repository evidence, and confirm the requested work is authorized by `CURRENT_TASK.md`.
+
+When consulting repository documentation beyond the three control files, read `docs/README.md` before relying on old architecture/product/design/validation/plan files. A historical document does not regain current Authority because its body says `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current`, or `CONSTRUCTION_GATE_READY`.
 
 If the user says “continue” and the active task is still accurate, continue it. Do not generate a second execution contract.
 
@@ -35,6 +38,25 @@ A commit changing only `CURRENT_STATUS.md` / `CURRENT_TASK.md` is `CONTROL_ONLY_
 Do not treat every historical recorded SHA as a permanent equality lock. Fresh Git/GitHub refs are authoritative for current branch/PR identity.
 
 Preserve unknown staged, unstaged, untracked, local-only, or archived work. Never reset/delete it merely to make a workspace match an expected state.
+
+## Documentation status / history boundary
+
+Historical documentation is preserved as evidence, rationale, and release/acceptance history. It is not a parallel control plane.
+
+Treat these as historical by default unless current Authority explicitly restores a claim:
+
+- Stage-numbered design/product/validation documents;
+- dated plans and `docs/superpowers/plans/*`;
+- construction plans after their task/feature closed;
+- point-in-time audits;
+- old product specs and old technical architecture versions;
+- old benchmark protocols tied to superseded lifecycle/product models;
+- release records;
+- anything under an `archive/` directory.
+
+Accepted feature contracts may remain useful for their bounded feature semantics, but when they overlap a newer cross-cutting contract or current production source/tests, the newer/current owner wins.
+
+Do not rewrite historical evidence into present-day facts merely to make documents look consistent. Prefer a status wrapper/banner plus an archive copy of the original body when an old document's current-sounding wording could mislead future work.
 
 ## Domain / Authority boundaries
 
