@@ -613,6 +613,129 @@ final class WebFocusAdapterTests: XCTestCase {
 
 @MainActor
 extension WebFocusAdapterTests {
+    func testGeneratingPeriodicCrossWorldLivenessIsSuppressedButExplicitCaptureRuns() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let slotID = UUID()
+        let attentionCoordinator = WebAttentionCoordinator()
+        attentionCoordinator.apply(.generationStarted, for: slotID)
+        var evaluatedWorlds: [WebRuntimeLivenessWorld] = []
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            attentionStateQuery: { queriedSlotID in
+                XCTAssertEqual(queriedSlotID, slotID)
+                return attentionCoordinator.state(for: queriedSlotID)
+            },
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, world in
+                evaluatedWorlds.append(world)
+                return .success(
+                    readyState: "complete",
+                    visibilityState: "visible",
+                    latencyMilliseconds: 1
+                )
+            },
+            responsivenessProbeEvaluator: { _, _ in .notRun() }
+        )
+        load("<main>Generating cross-world suppression</main>", in: webView)
+        await settle(webView)
+
+        await observer.captureCrossWorldLivenessOnce(source: .periodic)
+
+        XCTAssertTrue(evaluatedWorlds.isEmpty)
+        let suppressed = try XCTUnwrap(
+            writer.events.last { $0.event == "web_runtime.cross_world_liveness_suppressed" }
+        )
+        XCTAssertEqual(suppressed.fields["slot_id"], .string(slotID.uuidString))
+        XCTAssertEqual(suppressed.fields["reason"], .string("chatgpt_generating"))
+        XCTAssertEqual(suppressed.fields["sample_source"], .string("periodic"))
+        XCTAssertEqual(suppressed.fields["js_evaluation_started"], .bool(false))
+
+        await observer.captureCrossWorldLivenessOnce()
+
+        XCTAssertEqual(evaluatedWorlds, [.mainPage, .floatTabsIsolated])
+        attentionCoordinator.apply(.generationFinished(userVisible: true), for: slotID)
+        await observer.captureCrossWorldLivenessOnce(source: .periodic)
+        XCTAssertEqual(
+            evaluatedWorlds,
+            [.mainPage, .floatTabsIsolated, .mainPage, .floatTabsIsolated]
+        )
+    }
+
+    func testPeriodicCrossWorldLivenessRunsForIdleAndReadyAndSkipsNonChatGPT() async throws {
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let webView = makeWebView()
+        let slotID = UUID()
+        let attentionCoordinator = WebAttentionCoordinator()
+        var evaluationCount = 0
+        let observer = SlotNavigationObserver(
+            slotID: slotID,
+            webView: webView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            attentionStateQuery: { queriedSlotID in
+                attentionCoordinator.state(for: queriedSlotID)
+            },
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in
+                evaluationCount += 1
+                return .success(
+                    readyState: "complete",
+                    visibilityState: "visible",
+                    latencyMilliseconds: 1
+                )
+            },
+            responsivenessProbeEvaluator: { _, _ in .notRun() }
+        )
+        load("<main>Periodic cross-world sampling</main>", in: webView)
+        await settle(webView)
+
+        await observer.captureCrossWorldLivenessOnce(source: .periodic)
+        XCTAssertEqual(evaluationCount, 2)
+
+        attentionCoordinator.apply(.generationStarted, for: slotID)
+        attentionCoordinator.apply(.generationFinished(userVisible: false), for: slotID)
+        await observer.captureCrossWorldLivenessOnce(source: .periodic)
+        XCTAssertEqual(evaluationCount, 4)
+
+        let nonChatGPTWebView = makeWebView()
+        let nonChatGPTSlotID = UUID()
+        attentionCoordinator.apply(.generationStarted, for: nonChatGPTSlotID)
+        let nonChatGPTObserver = SlotNavigationObserver(
+            slotID: nonChatGPTSlotID,
+            webView: nonChatGPTWebView,
+            websiteMode: .desktop,
+            onURLChange: { _, _ in },
+            diagnostics: diagnostics,
+            attentionStateQuery: { queriedSlotID in
+                attentionCoordinator.state(for: queriedSlotID)
+            },
+            crossWorldLivenessInterval: 300,
+            livenessProbeEvaluator: { _, _ in
+                XCTFail("non-ChatGPT periodic sampling should not evaluate JavaScript")
+                return .terminal(.failed, latencyMilliseconds: 0)
+            }
+        )
+        load(
+            "<main>Non-ChatGPT periodic sampling</main>",
+            baseURL: URL(string: "https://example.com/"),
+            in: nonChatGPTWebView
+        )
+        await settle(nonChatGPTWebView)
+        await nonChatGPTObserver.captureCrossWorldLivenessOnce(source: .periodic)
+
+        XCTAssertNil(
+            writer.events.last { $0.event == "web_runtime.cross_world_liveness_suppressed" }
+        )
+    }
+
     func testRuntimeLivenessDistinguishesMainPageFromIsolatedWorld() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)

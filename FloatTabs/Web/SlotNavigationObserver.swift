@@ -167,6 +167,13 @@ typealias WebRuntimeLivenessProbeEvaluator = @MainActor (
     WebRuntimeLivenessWorld
 ) async -> WebRuntimeLivenessProbeResult
 
+typealias WebAttentionStateQuery = @MainActor (UUID) -> WebAttentionState
+
+enum CrossWorldLivenessSampleSource: String, Equatable, Sendable {
+    case periodic
+    case explicit
+}
+
 typealias WebRuntimeResponsivenessProbeEvaluator = @MainActor (
     WKWebView,
     Bool
@@ -475,6 +482,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let navigationStallTimeout: TimeInterval
     private let rendererProbeTimeout: TimeInterval
     private let rendererJavaScriptEvaluator: RendererJavaScriptEvaluator?
+    private let attentionStateQuery: WebAttentionStateQuery
     private let livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator
     private let responsivenessProbeEvaluator: WebRuntimeResponsivenessProbeEvaluator
     private let livenessProbeIntervalNanoseconds: UInt64
@@ -552,6 +560,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationStallTimeout: TimeInterval = 120,
         rendererProbeTimeout: TimeInterval = 5,
         rendererJavaScriptEvaluator: RendererJavaScriptEvaluator? = nil,
+        attentionStateQuery: @escaping WebAttentionStateQuery = { _ in .idle },
         crossWorldLivenessInterval: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessInterval,
         crossWorldLivenessTimeout: TimeInterval = SlotNavigationObserver.defaultCrossWorldLivenessTimeout,
         livenessProbeEvaluator: WebRuntimeLivenessProbeEvaluator? = nil,
@@ -580,6 +589,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.navigationStallTimeout = max(0, navigationStallTimeout)
         self.rendererProbeTimeout = max(0, rendererProbeTimeout)
         self.rendererJavaScriptEvaluator = rendererJavaScriptEvaluator
+        self.attentionStateQuery = attentionStateQuery
         let normalizedLivenessInterval = min(max(crossWorldLivenessInterval, 1), 300)
         let normalizedLivenessTimeout = min(max(crossWorldLivenessTimeout, 0.1), 5)
         livenessProbeIntervalNanoseconds = UInt64(normalizedLivenessInterval * 1_000_000_000)
@@ -1041,10 +1051,28 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     /// Captures one bounded main-page-world + FloatTabs-isolated-world sample.
     /// This is evidence only: it never reloads, rebuilds, releases, or mutates
     /// persistent site/profile data.
-    func captureCrossWorldLivenessOnce() async {
+    func captureCrossWorldLivenessOnce(
+        source: CrossWorldLivenessSampleSource = .explicit
+    ) async {
         guard let webView,
               let url = webView.url,
               ChatGPTSitePolicy.isSupportedChatGPTURL(url) else {
+            return
+        }
+
+        if source == .periodic,
+           attentionStateQuery(slotID) == .generating {
+            diagnostics.record(
+                event: "web_runtime.cross_world_liveness_suppressed",
+                level: .notice,
+                subsystem: "web",
+                fields: [
+                    "slot_id": .string(slotID.uuidString),
+                    "reason": .string("chatgpt_generating"),
+                    "sample_source": .string(source.rawValue),
+                    "js_evaluation_started": .bool(false)
+                ]
+            )
             return
         }
 
@@ -1546,7 +1574,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
                     return
                 }
                 guard let self, let webView, self.webView === webView else { return }
-                await self.captureCrossWorldLivenessOnce()
+                await self.captureCrossWorldLivenessOnce(source: .periodic)
             }
         }
     }

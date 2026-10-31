@@ -1154,6 +1154,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         super.init()
 
+        webViewPool.attentionStateQuery = { [weak attentionCoordinator] slotID in
+            attentionCoordinator?.state(for: slotID) ?? .idle
+        }
+
         for slotID in self.unreadResponseCoordinator.unreadSlotIDs {
             recordUnreadDiagnostic(event: "unread.state_restored", fields: [
                 "slot_id": .string(slotID.uuidString)
