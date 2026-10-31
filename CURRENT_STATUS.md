@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: JSC / WEBCONTENT GENERATION-TIME DIAGNOSTIC JS EXPERIMENT / WAITING FOR AIR SOAK**
+**MODE: WARM WARNING SEMANTICS CORRECTIVE / EXECUTE**
 
-Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AIR SOAK READY`.
+Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AUTHORIZED CORRECTIVE`.
 
 PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain unknown.
 
@@ -18,8 +18,10 @@ PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain
 MAIN=26c81d83d3bdd771e98e355337b78622e2b25b17
 ACTIVE_BRANCH=codex/ft-jsc-multi-runtime-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
-LAST_PRODUCT_HEAD=cddcbbff2b5471357688a92cb74e4bf4ac5f0021
-WARNING_PRESSURE_IMPLEMENTATION=3dff7e90d23918e69e12d2820ce6c1be31805e99
+AUTHORITY_OBSERVED_HEAD=94ae07a1ec31fa6fd4bdc31ad1bd1c700dc66288
+LAST_VERIFIED_GENERATION_PRODUCT_HEAD=be95a36467822a22a7d6ad78b9900f50c4ca69ca
+WARNING_PRESSURE_EARLY_WARM_RELEASE=CORRECTIVE_AUTHORIZED_WARNING_DISABLED
+AIR_SOAK=BLOCKED_PENDING_CORRECTIVE_VERIFICATION
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
@@ -39,7 +41,7 @@ ARCH=arm64
 SESSION_ID=74D9AE04-8C8D-4844-A7DC-7C33C6E37A91
 ```
 
-The warning-pressure intervention worked as designed:
+The earlier warning-pressure behavior was observed to reduce inactive Warm residency:
 
 ```text
 MEMORY_WARNING_COUNT=5
@@ -50,7 +52,28 @@ ACTIVE_VISIBLE_HOT_PROTECTED_RELEASE=0
 CONFIRMED_POST_FINISH_STALL=0
 ```
 
-The intervention is retained as a useful residency-pressure mitigation. It does not prove memory pressure is the JSC root cause.
+That behavior is now classified as a product-semantics regression: `.warning` must not
+evict inactive Warm runtimes before their configured retention deadline. The corrective
+is authorized inside this task and is limited to making warning pressure diagnostics-only;
+the existing bounded `.critical` eviction path remains authorized. This does not prove
+memory pressure is the JSC root cause.
+
+The observed early-release seam is:
+
+```text
+SlotLifecycleCoordinator.handleMemoryPressure(.warning)
+  -> evictInactiveWarmForMemoryPressure(...)
+  -> releaseInactiveSlot(...)
+```
+
+Until the corrective is verified, the prior AIR_SOAK_READY state is revoked:
+
+```text
+WARNING_SEMANTICS_REGRESSION=CONFIRMED
+WARNING_EARLY_WARM_RELEASE=NOT_ACCEPTABLE
+CRITICAL_EARLY_WARM_RELEASE=RETAINED
+AIR_SOAK=BLOCKED
+```
 
 One WebContent termination still occurred at `2026-10-31T02:45:15Z`:
 
@@ -106,7 +129,7 @@ Preserve without semantic change:
 - Attention / Unread / stable response identity;
 - Ready Alert and RemoteOrbit focus paths;
 - active / visible / Hot residency semantics;
-- warning-pressure early Warm release already implemented;
+- warning-pressure Warm release corrected to diagnostics-only by this iteration;
 - Browser Profiles, cookies, sessions, Slot configuration, preferences, backups and recovery data.
 
 The periodic navigation observer must not become a second owner of Attention state. Suppression must consume a read-only projection from the canonical `WebAttentionCoordinator` through an existing or minimally injected composition seam.

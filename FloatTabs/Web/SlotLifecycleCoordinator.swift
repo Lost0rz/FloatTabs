@@ -377,10 +377,10 @@ final class SlotLifecycleCoordinator {
         )
         switch level {
         case .warning:
-            evictInactiveWarmForMemoryPressure(
-                protectionBoundary: "memory_pressure_warning",
-                incidentContext: incidentContext
-            )
+            // Warning pressure is an observation boundary only. Warm retention
+            // owns the existing plan and deadline; only critical pressure may
+            // shorten it for an eligible inactive runtime.
+            break
         case .critical:
             evictInactiveWarmForMemoryPressure(
                 protectionBoundary: "memory_pressure",
@@ -757,22 +757,26 @@ final class SlotLifecycleCoordinator {
                 && !visible
                 && !protection.media
                 && !protection.attention
-            let reason: String
+            let candidateReason: String
             if policy != .warm {
-                reason = "not_warm"
+                candidateReason = "not_warm"
             } else if visible {
-                reason = "visible"
+                candidateReason = "visible"
             } else if protection.media {
-                reason = "media_protected"
+                candidateReason = "media_protected"
             } else if protection.attention {
-                reason = "attention_protected"
+                candidateReason = "attention_protected"
             } else if plan == nil {
-                reason = "no_pending_release_plan"
+                candidateReason = "no_pending_release_plan"
             } else if !resident {
-                reason = "not_resident"
+                candidateReason = "not_resident"
             } else {
-                reason = "\(pressureLevel)_pressure_eligible"
+                candidateReason = "\(pressureLevel)_pressure_eligible"
             }
+            let diagnosticsOnly = level == .warning
+            let releaseEligible = diagnosticsOnly ? false : eligible
+            let decision = diagnosticsOnly ? "observe" : (eligible ? "release" : "skip")
+            let reason = diagnosticsOnly ? "warning_diagnostics_only" : candidateReason
 
             var fields = incidentContext.fields(phase: .trigger)
             fields.merge([
@@ -786,14 +790,14 @@ final class SlotLifecycleCoordinator {
                 "pending_release_class": .string(plan?.residencyPolicy.rawValue ?? "none"),
                 "media_protected": .bool(protection.media),
                 "attention_protected": .bool(protection.attention),
-                "release_eligible": .bool(eligible),
-                "decision": .string(eligible ? "release" : "skip"),
+                "release_eligible": .bool(releaseEligible),
+                "decision": .string(decision),
                 "release_reason": .string(reason),
                 "web_process_resource_attribution": .string("unavailable_public_api")
             ]) { _, new in new }
             diagnostics.record(
                 event: "slot_lifecycle.memory_pressure_slot",
-                level: eligible ? .notice : .info,
+                level: releaseEligible ? .notice : .info,
                 subsystem: "lifecycle",
                 fields: fields
             )

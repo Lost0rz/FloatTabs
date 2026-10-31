@@ -1,11 +1,11 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-JSC-MULTI-RUNTIME-002`
-**Title:** Test generation-time periodic cross-world diagnostic JS suppression
-**Status:** `ACTIVE / AIR SOAK READY`
-**Mode:** `WAITING_FOR_AIR_SOAK`
-**Task class:** `RUNTIME STABILITY / EVIDENCE-DRIVEN CORRECTIVE`
-**Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@b878dd7bfb9b3e437bcb96106cd6682f171c61fd`
+**Title:** Correct Warm warning-pressure residency semantics after generation-time diagnostic experiment
+**Status:** `ACTIVE / AUTHORIZED CORRECTIVE`
+**Mode:** `EXECUTE`
+**Task class:** `RUNTIME STABILITY / BOUNDED CORRECTIVE`
+**Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@94ae07a1ec31fa6fd4bdc31ad1bd1c700dc66288`
 **Active PR:** `#162` / `codex/ft-jsc-multi-runtime-002`
 **JSC root cause:** `UNKNOWN`
 
@@ -17,9 +17,39 @@ Suppress only that periodic diagnostic sampling while the canonical Attention st
 
 This task does not claim that cross-world probing, concurrent generation, memory pressure, Attention protection, or FloatTabs is the proven JSC root cause.
 
+## Active corrective authorization — Warm warning semantics
+
+Air evidence showed that the earlier warning-pressure behavior reduced inactive Warm
+residency, but this is a product-semantics regression because `.warning` released
+eligible inactive Warm runtimes before their configured retention deadline. The
+current corrective is authorized within this task and must change only the existing
+`SlotLifecycleCoordinator` memory-pressure branch:
+
+- `.warning` performs diagnostics/evaluation only; it must not release, cancel,
+  recreate, reset, extend, or shrink an existing inactive Warm plan/deadline.
+- `.critical` retains the existing bounded eviction of eligible inactive, non-protected
+  Warm runtimes.
+- Normal Warm expiry and Hot/Cold behavior remain unchanged.
+- Warning diagnostics must describe observe/skip/diagnostics-only behavior and must not
+  report `decision=release`, `release_completed`, `warning_pressure_eligible`, or an
+  equivalent false release claim.
+
+The canonical residency/lifecycle owner remains `SlotLifecycleCoordinator`; no second
+Attention owner or parallel generating Slot set is authorized. All generation-time
+cross-world suppression behavior from the preceding experiment remains unchanged.
+
+The corrective must preserve Warm options and fallback, active/visible/fullscreen/
+supplemental/media/Attention/generating protection, Attention/Unread/Ready Alert/
+RemoteOrbit semantics, the 2-second watchdog, page-owned generation detection,
+profiles/cookies/sessions/website data/Slot configuration/preferences/backups and
+recovery data, and active-visible completion red-dot semantics.
+
 ## Reconciliation from the previous iteration
 
-The previous authorized intervention `WARNING_PRESSURE_EARLY_WARM_RELEASE` is complete and remains part of the branch. Its Air soak proved that warning-time early release safely reduces unnecessary inactive Warm residency:
+The previous authorized intervention `WARNING_PRESSURE_EARLY_WARM_RELEASE` remains in
+the branch as the observed predecessor behavior. Its Air soak proved that warning-time
+early release reduced unnecessary inactive Warm residency, but the new evidence
+classifies that early release as a Warm-retention semantics regression:
 
 ```text
 MEMORY_WARNING_COUNT=5
@@ -88,7 +118,8 @@ Do not alter:
 - explicit/on-demand `captureCrossWorldLivenessOnce()` calls used by incident/recovery evidence;
 - renderer probes and incident health/page-app probes;
 - navigation recovery semantics;
-- warning-pressure early Warm release from the prior iteration;
+- critical-pressure early Warm release from the prior iteration; warning pressure is
+  corrected to diagnostics-only by the active corrective above;
 - active / visible / Hot / media / Attention residency protection;
 - Ready Alert;
 - RemoteOrbit external voice focus;
@@ -153,7 +184,7 @@ At minimum cover:
 5. transition `generating -> idle` => later periodic tick resumes sampling without rebuild/reload;
 6. explicit/on-demand cross-world capture still runs while generating;
 7. non-ChatGPT runtime behavior is unchanged;
-8. warning-pressure early Warm release regression remains green;
+8. warning-pressure Warm-retention corrective regression remains green;
 9. Attention generation/Ready/Unread regression coverage remains green.
 
 ## Verification gate
@@ -225,7 +256,11 @@ STOP and report rather than broaden scope if:
 
 ## Completion boundary
 
-This iteration reaches `AIR_SOAK_READY` only after the single periodic-cross-world suppression experiment is implemented, verified, pushed, and tied to a fresh exact-head QA DMG.
+This corrective reaches `AIR_SOAK_READY` only after the warning behavior, critical
+behavior, diagnostics, retention-plan preservation, Attention/Unread protections,
+generation-time suppression regressions, focused/full XCTest, Debug/Release arm64
+builds, remote exact-head verification, exact-head CI, and exact-head QA DMG all pass.
+Until then `AIR_SOAK=BLOCKED`. Do not merge or release.
 
 ## Execution result
 
