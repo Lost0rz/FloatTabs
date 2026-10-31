@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: JSC / WEBCONTENT GENERATION-TIME DIAGNOSTIC JS EXPERIMENT**
+**MODE: JSC / WEBCONTENT GENERATION-TIME DIAGNOSTIC JS EXPERIMENT / WAITING FOR AIR SOAK**
 
-Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / NEXT CORRECTIVE AUTHORIZED`.
+Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AIR SOAK READY`.
 
 PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain unknown.
 
@@ -18,7 +18,7 @@ PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain
 MAIN=26c81d83d3bdd771e98e355337b78622e2b25b17
 ACTIVE_BRANCH=codex/ft-jsc-multi-runtime-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
-LAST_PRODUCT_HEAD=b878dd7bfb9b3e437bcb96106cd6682f171c61fd
+LAST_PRODUCT_HEAD=cddcbbff2b5471357688a92cb74e4bf4ac5f0021
 WARNING_PRESSURE_IMPLEMENTATION=3dff7e90d23918e69e12d2820ce6c1be31805e99
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
@@ -111,9 +111,33 @@ Preserve without semantic change:
 
 The periodic navigation observer must not become a second owner of Attention state. Suppression must consume a read-only projection from the canonical `WebAttentionCoordinator` through an existing or minimally injected composition seam.
 
+## Generation-time suppression result
+
+The authorized `GENERATING_PERIODIC_CROSS_WORLD_SUPPRESSION` experiment is implemented and verified on:
+
+```text
+IMPLEMENTATION_COMMIT=be95a36467822a22a7d6ad78b9900f50c4ca69ca
+VERIFICATION_COMMIT=cddcbbff2b5471357688a92cb74e4bf4ac5f0021
+CANONICAL_ATTENTION_OWNER=WebAttentionCoordinator
+READ_ONLY_QUERY_PATH=PanelController -> WebViewPool -> SlotNavigationObserver
+DUPLICATE_GENERATING_STATE=NO
+GENERATING_PERIODIC_MAIN_WORLD_EVALUATIONS=0
+GENERATING_PERIODIC_ISOLATED_WORLD_EVALUATIONS=0
+GENERATING_PERIODIC_SUPPRESSION_DIAGNOSTIC=YES
+GENERATING_EXPLICIT_CAPTURE=PRESERVED
+IDLE_PERIODIC_SAMPLE=PASS
+READY_PERIODIC_SAMPLE=PASS
+GENERATING_TO_IDLE_PERIODIC_RESUME=PASS
+NON_CHATGPT_PERIODIC_BEHAVIOR=UNCHANGED
+WATCHDOG=2_SECONDS_UNCHANGED
+JSC_ROOT_CAUSE=UNKNOWN
+```
+
+Focused tests, full XCTest, Debug arm64, Release arm64, exact-head macOS CI, and exact-head QA DMG all passed. The final control-aligned exact-head QA DMG provenance and checksum are returned in the execution receipt.
+
 ## Next gate
 
-Local implementation must make exactly this single diagnostic-load change, add focused regression coverage, run the full required test/build gates, push/verify exact remote HEAD, produce a fresh exact-head QA DMG, and return to Air soak.
+The single diagnostic-load change is complete. The next gate is user-owned Air soak on the exact-head QA DMG. Production release is not authorized.
 
 Interpretation remains bounded:
 

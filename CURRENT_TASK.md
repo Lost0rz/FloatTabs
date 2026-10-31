@@ -2,8 +2,8 @@
 
 **Task ID:** `FT-JSC-MULTI-RUNTIME-002`
 **Title:** Test generation-time periodic cross-world diagnostic JS suppression
-**Status:** `ACTIVE / AUTHORIZED`
-**Mode:** `EXECUTE`
+**Status:** `ACTIVE / AIR SOAK READY`
+**Mode:** `WAITING_FOR_AIR_SOAK`
 **Task class:** `RUNTIME STABILITY / EVIDENCE-DRIVEN CORRECTIVE`
 **Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@b878dd7bfb9b3e437bcb96106cd6682f171c61fd`
 **Active PR:** `#162` / `codex/ft-jsc-multi-runtime-002`
@@ -226,6 +226,42 @@ STOP and report rather than broaden scope if:
 ## Completion boundary
 
 This iteration reaches `AIR_SOAK_READY` only after the single periodic-cross-world suppression experiment is implemented, verified, pushed, and tied to a fresh exact-head QA DMG.
+
+## Execution result
+
+The authorized experiment is implemented without changing the canonical Attention owner or introducing a parallel generating Slot set:
+
+```text
+IMPLEMENTATION_COMMIT=be95a36467822a22a7d6ad78b9900f50c4ca69ca
+VERIFICATION_COMMIT=cddcbbff2b5471357688a92cb74e4bf4ac5f0021
+CANONICAL_ATTENTION_OWNER=WebAttentionCoordinator
+READ_ONLY_QUERY_PATH=PanelController -> WebViewPool -> SlotNavigationObserver
+DUPLICATE_GENERATING_STATE=NO
+```
+
+Focused regression coverage proves that generating periodic sampling starts no main-world or isolated-world evaluator, emits the bounded suppression diagnostic, idle and ready periodic sampling still run, generating-to-idle resumes sampling, explicit/on-demand capture still runs while generating, and non-ChatGPT behavior is unchanged. The warning-pressure and Attention/Unread regressions remain green.
+
+Verification evidence:
+
+```text
+FOCUSED_XCTEST=185 tests, 3 skipped, 0 failures
+FULL_XCTEST=1065 tests, 3 skipped, 0 failures
+DEBUG_ARM64_BUILD=PASS
+RELEASE_ARM64_BUILD=PASS
+MACOS_CI_RUN=41165487122 SUCCESS
+QA_DMG_RUN=41165487129 SUCCESS
+LOCAL_QA_DMG=PASS (final control-aligned exact-head provenance returned in execution receipt)
+DMG_VERSION=0.5.8
+DMG_BUILD=26
+DMG_ARCHITECTURE=arm64
+DMG_SOURCE_REVISION=FINAL_CONTROL_ALIGNED_HEAD
+DMG_SOURCE_REVISION_EXACT=true
+DMG_SHA256=RETURNED_IN_EXECUTION_RECEIPT
+HDIUTIL_VERIFY=PASS
+JSC_ROOT_CAUSE=UNKNOWN
+```
+
+The branch is now waiting for user-owned Air soak. Do not merge or release.
 
 Production release and merge are not authorized in this iteration.
 
