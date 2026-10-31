@@ -1,6 +1,8 @@
 # FloatTabs — Architecture Document Status
 
-Use this file to distinguish current navigation/contracts from historical stage documents.
+Read [`../README.md`](../README.md) first. It is the repository-wide documentation authority/status index.
+
+Use this file to distinguish current architecture navigation/contracts from historical architecture and Stage documents.
 
 ## Current navigation
 
@@ -31,7 +33,7 @@ For shell interaction, rail geometry, movement, resize and fullscreen coordinati
 - [`../design/FloatTabs_UI_Design_System_v1.3.md`](../design/FloatTabs_UI_Design_System_v1.3.md) for unaffected shell/rail behavior;
 - [`../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](../design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) for the accepted active-Tab and unread-Attention refinement merged in PR #146;
 - production code and regression tests on `main`;
-- the current release record under `../release/`.
+- the current release record under `../release/` only as version-specific historical evidence.
 
 Where the Attention/active-Tab refinement contract disagrees with the older Attention subsection in UI Design System v1.3, the refinement contract is the current accepted behavior for that bounded surface.
 
@@ -55,20 +57,26 @@ Public WebKit APIs do not provide reliable per-WebContent-process memory attribu
 
 The historical WebContent stall/termination root cause remains `UNKNOWN`. Recovery by reload/reset/restart is evidence about the recovery boundary, not causal proof.
 
-## Existing architecture references
+## Historical architecture references
 
 ### `FloatTabs_Technical_Architecture_v1.2.md`
 
-Still useful for the broader native/WebKit architecture and module boundaries, but older shell-interaction details yield to the current accepted design contracts and production code.
+**Historical architecture baseline only.** It contains several deliberately preserved old assumptions, including the earlier Hot/Warm/Cold residency model, pre-custom-Profile website-data model, and older UI routing. Those statements must not be used as current Runtime/Profile/UI authority.
+
+Use it only for historical rationale that remains consistent with current source/contracts. The original body is preserved through its historical wrapper/archive path.
 
 ### `Stage_1_Interaction_Baseline.md`
 
 Historical pointer only. The complete original pre-Slot baseline is retained at [`archive/Stage_1_Interaction_Baseline.md`](archive/Stage_1_Interaction_Baseline.md).
 
-## Archived design history
+## Historical design / Stage references
 
-The superseded UI Design System v1.2 is retained under [`../design/archive/`](../design/archive/).
+- `../design/FloatTabs_UI_Design_System_v1.2.md` is explicitly superseded by v1.3 for current shell interaction/geometry.
+- `../design/Stage_3_Rendering_Profile_V2.md` and `V3.md` are historical Stage records. Verify current rendering behavior in source/tests instead of trusting their old `current`/`accepted` wording.
+- old Stage 5 Residency/Resource Lifecycle documents under `../product/` are historical inputs only for the active Runtime Lifecycle / Memory program.
 
 ## Rule
 
-When a versioned architecture/design document disagrees with current production code or a newer accepted contract, treat the older statement as historical unless explicitly restored.
+When a versioned architecture/design/product document disagrees with current production code or a newer accepted contract, treat the older statement as historical unless explicitly restored by `CURRENT_TASK.md` or a current linked contract.
+
+Never use a historical `FROZEN`, `LOCKED`, `accepted`, `canonical`, or `CONSTRUCTION_GATE_READY` label as present-day execution authority.
