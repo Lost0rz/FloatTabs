@@ -1,29 +1,30 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`
-**Title:** Runtime Lifecycle / Memory redesign — governed phased implementation
-**Status:** `ACTIVE / PHASE 1 PLAN FREEZE`
-**Mode:** `AUDIT CLOSEOUT / DESIGN FREEZE`
+**Title:** Runtime Lifecycle / Memory redesign — Phase 1 Safe Hibernate + Restore
+**Status:** `ACTIVE / PHASE 1 IMPLEMENTATION`
+**Mode:** `EXECUTE`
 **Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY`
-**Audit baseline main:** `1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088`
+**Implementation baseline main:** `672f7122f352f6cfb1704109db6488519480c628`
 **Frozen program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`
-**Phase 1 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`
-**Active PR:** `#167` / `codex/ft-runtime-lifecycle-memory-001-phase1-audit-freeze`
+**Frozen Phase 1 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`
 **JSC root cause:** `UNKNOWN`
 
-## Current authorization
+## Authorization
 
-The Phase 1 focused read-only audit is complete. The only currently authorized mutation is this control/design freeze PR.
+Phase 1 implementation is authorized now, but only inside the frozen Phase 1 plan.
 
-**Runtime product mutation is not authorized until PR #167 merges and a post-merge Control Alignment explicitly changes this task to `ACTIVE / PHASE 1 IMPLEMENTATION`.**
+The executor must read the control files and Phase 1 plan before mutation. The concise construction card is a bounded handoff and must not replace/restate the full contract.
 
-After that alignment, one concise construction card may authorize local implementation exactly within the frozen Phase 1 plan.
+## Exact production scope
 
-## Accepted Phase 1 design
+Authorized:
 
-### Semantic split
+- `FloatTabs/Web/WebViewPool.swift`
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
+- `FloatTabs/Web/SlotNavigationObserver.swift`
 
-Phase 1 introduces explicit Runtime hibernation without changing destructive release semantics:
+Expected behavior:
 
 ```text
 hibernate(slotID:)
@@ -32,84 +33,103 @@ hibernate(slotID:)
   → retain one memory-local restore snapshot
 
 release(slotID:)
-  clear pending restore snapshot
+  clear pending restore state
   → deterministic destructive teardown
 ```
 
-Only normal eligible lifecycle reclamation, including eligible critical Warm pressure, changes to `hibernate`.
+Only normal eligible inactive lifecycle reclamation / eligible critical Warm memory-pressure reclamation changes to hibernate.
 
-Deletion, profile/stored-state replacement, website-cache preparation, rendering/Profile rebuild, fullscreen recovery/rebuild, and explicit reset/replacement remain destructive.
+Destructive release/rebuild/reset/delete/profile/cache/recovery paths remain destructive and must clear pending restore state.
 
-### Restore state
+## Restore contract
 
-Use public `WKWebView.interactionState` only.
-
-Snapshot semantics:
+Use public `WKWebView.interactionState`.
 
 - memory-local only;
-- opaque `Any`/WebKit state; do not assume stable serialized `Data`;
-- never log or persist contents;
-- store Browser Profile identity, effective runtime rendering identity and safe captured URL alongside the state for compatibility validation;
-- at most one pending snapshot per Slot.
+- opaque value, no assumed serialized schema;
+- never log/persist its contents;
+- validate Slot/Profile/effective-rendering/current-URL compatibility before replay;
+- compatible restore builds the full fresh WebView/bridge/observer/popup runtime first, then assigns interaction state;
+- compatible restore must not issue ordinary initial URL load;
+- missing/incompatible state uses the existing safe currentURL/home fallback;
+- if real supported macOS shows silent interaction-state failure requiring arbitrary timer/double-navigation hacks, STOP and reconcile instead.
 
-Restore only when Slot/Profile/rendering/URL compatibility matches. Otherwise discard and follow the existing currentURL/home URL load fallback.
+## Deterministic teardown contract
 
-For compatible state restore:
+Before old Runtime is considered released:
 
-```text
-same datastore/configuration
-→ install scripts/bridges before WebView creation
-→ create fresh WebView/runtime identity
-→ install observer/popup/delegates/maps
-→ assign interactionState
-→ consume snapshot
-```
+1. freeze required diagnostic navigation metadata;
+2. invalidate Attention bridge;
+3. invalidate Response bridge;
+4. close/discard PopupCoordinator;
+5. explicitly invalidate SlotNavigationObserver including KVO + liveness/navigation/probe tasks;
+6. clear `navigationDelegate`;
+7. clear `uiDelegate`;
+8. call `stopLoading()`;
+9. clear all transient per-Slot Pool maps, including pending termination incident context;
+10. detach old WebView from superview if still present;
+11. remove old WebView/runtime diagnostic identity;
+12. emit truthful hibernate/release/restore evidence and resident-set change.
 
-Do not issue a competing ordinary URL load on this path.
+Do not claim weak WebKit delegates caused the historical memory problem; clearing is deterministic lifecycle hygiene.
 
-### Deterministic teardown
-
-The shared teardown primitive must cover:
-
-1. Attention bridge invalidation;
-2. Response bridge invalidation;
-3. PopupCoordinator close/discard;
-4. explicit `SlotNavigationObserver` invalidation including KVO and pending liveness/navigation/probe work;
-5. `navigationDelegate = nil`;
-6. `uiDelegate = nil`;
-7. `stopLoading()`;
-8. clearing every per-Slot transient Pool map, including `pendingTerminationIncidentContexts`;
-9. AppKit superview removal if still attached;
-10. WebView/runtime identity removal and truthful resident-set diagnostics.
-
-WebKit delegates are publicly weak; explicit clearing is a deterministic callback boundary, not a claim that they caused the historical memory issue.
-
-## Authorized Phase 1 implementation files after Control Alignment
-
-### Production
-
-- `FloatTabs/Web/WebViewPool.swift`
-- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
-- `FloatTabs/Web/SlotNavigationObserver.swift`
-
-### Tests
+## Authorized tests
 
 - `FloatTabsTests/WebViewPoolTests.swift`
 - `FloatTabsTests/WebAttentionLifecycleTests.swift`
-- `FloatTabsTests/WebFocusAdapterTests.swift` only if it is the narrowest existing fixture for observer invalidation
+- `FloatTabsTests/WebFocusAdapterTests.swift` only if required for the narrow existing SlotNavigationObserver fixture
 
-### Benchmark tooling
+Must cover the exact test matrix frozen in the Phase 1 plan, including:
 
-- `tools/benchmark/floattabs_lifecycle_benchmark.py` only if necessary for Phase 1 matrix/reporting
-- `tools/benchmark/README.md` only for the Phase 1 runbook
+- state capture/restore without duplicate initial load;
+- URL fallback;
+- destructive release clears state;
+- Profile/rendering mismatch invalidation;
+- same-profile sibling isolation;
+- deterministic teardown/old callback rejection;
+- fresh runtime identity;
+- weak old-WebView deallocation where deterministic;
+- Warm/Cold + eligible critical pressure hibernate;
+- unchanged visible/fullscreen/supplemental/media/Attention protection;
+- unchanged Generating/Ready semantics.
 
-### Control/design
+## Authorized benchmark tooling
 
-- current STATUS/TASK and the accepted architecture plan for factual progress/evidence only.
+Only if needed:
 
-## Explicitly not authorized in Phase 1
+- `tools/benchmark/floattabs_lifecycle_benchmark.py`
+- `tools/benchmark/README.md`
 
-Do not change without STOP/reconciliation:
+Use existing Debug benchmark control channel. Do not create a new control plane.
+
+Primary memory measurement is Warm lifecycle hibernation, not Cold, to avoid cache-cleanup confounding.
+
+Matrix: `1 / 2 / 4 / 8` loaded Slots.
+
+For heavy 4/8 cases, use at least 3 repeated cycles/equivalent clean runs.
+
+Memory PASS:
+
+```text
+exact resident-count reduction
++ protected runtimes unchanged
++ positive/repeatable process-tree memory reduction
++ median reclaimed signal > 2× same-family no-op/control drift
++ directionally consistent as more heavy runtimes hibernate
++ no duplicate runtime after restore
+```
+
+Restore performance STOP guard:
+
+```text
+median interaction-state restore regression vs URL fallback
+> max(20%, 300 ms)
+=> STOP / reconcile
+```
+
+## Out of scope / STOP before touching
+
+Do not modify without task reconciliation:
 
 - `PanelController.swift` product semantics;
 - `FullscreenSourceHost.swift`;
@@ -118,129 +138,48 @@ Do not change without STOP/reconciliation:
 - Browser Profile datastore behavior/schema;
 - Attention generating/ready semantics;
 - durable Unread semantics;
-- ChatGPT completion notifications;
-- Hot/Warm/Cold UI or configured timer values;
+- completion notification;
+- Hot/Warm/Cold UI/timing values;
 - automatic Runtime Budget/ranking;
-- Website Cache data types/policy;
-- process-pool topology;
+- Website Cache policy/data types;
+- permanent process-pool topology;
 - server Push/service-worker behavior;
 - native conversation preview.
 
-## Exact test contract
+STOP if:
 
-Implementation must add/adjust tests for:
+- old WebView remains strongly reachable after the deterministic teardown contract;
+- Profile/session/user-data safety would change;
+- public interactionState is unreliable without unsupported hacks;
+- controlled 4/8 memory evidence stays inside no-op drift;
+- proven download/fullscreen/focus ownership requires new cross-domain semantics;
+- private WebKit behavior is required;
+- overlapping unique work appears;
+- required tests/CI fail.
 
-1. compatible hibernate captures interaction state and restores it to a fresh WebView without invoking ordinary initial load;
-2. nil state falls back to currentURL/home;
-3. destructive release clears any pending hibernate state;
-4. Browser Profile mismatch invalidates restore state;
-5. runtime rendering mismatch invalidates restore state;
-6. same-profile sibling Slot remains isolated;
-7. deterministic teardown invalidates bridges/popup/observer, clears delegates/maps/pending termination incident context;
-8. stale async health/page-app/liveness results from old runtime are rejected after restore;
-9. restored runtime gets a new physical runtime generation/WebView instance identity;
-10. old WebView weak-deallocation evidence where deterministic XCTest behavior permits;
-11. inactive Warm/Cold lifecycle and critical eligible Warm path invoke hibernate;
-12. active/fullscreen/supplemental-visible/media/Attention-protected behavior remains unchanged;
-13. current Generating/Ready protection remains unchanged in Phase 1.
+## Required executor outcome
 
-Existing Browser Profile, Attention, lifecycle, diagnostics and build tests must remain green.
+The executor must:
 
-## Runtime benchmark contract
+1. refresh `origin/main` and verify this task/plan still match;
+2. implement only the frozen Phase 1 scope;
+3. run focused tests then required broader tests/builds;
+4. run the accepted benchmark matrix and preserve raw/report evidence;
+5. update STATUS/TASK with factual evidence only as required by the task;
+6. commit and push one Phase 1 branch/PR;
+7. stop at:
 
-Use the existing Debug benchmark control plane and lifecycle benchmark; do not create a second control service.
+`WAITING_FOR_INDEPENDENT_WEB_AUDIT`
 
-Primary memory measurement uses **Warm** release so Cold website-cache cleanup does not confound runtime reclamation.
-
-Matrix:
-
-```text
-1 loaded Slot baseline
-2 loaded Slots
-4 loaded Slots
-8 loaded Slots
-```
-
-For heavy 4/8 scenarios use at least 3 repeated cycles/equivalent clean runs.
-
-Collect:
-
-- host RSS/CPU;
-- existing attributed WebContent/Networking/GPU RSS evidence;
-- total process-tree RSS/CPU;
-- helper process counts;
-- exact Pool resident Slot count/IDs;
-- hibernate/restore diagnostic boundaries;
-- restore timing.
-
-Do not claim exact public-WebKit-proven per-Slot WebContent memory.
-
-### Memory PASS
-
-All must hold:
-
-- resident runtime count drops exactly for hibernated Slots;
-- protected/visible runtimes are untouched;
-- process-tree reclaimed-memory signal is positive/repeatable in heavy 4/8 scenarios;
-- median signal exceeds `2×` absolute no-op/control drift measured in the same run family;
-- direction remains consistent as more heavy runtimes are hibernated;
-- restoration creates no duplicate resident runtime.
-
-If logical residency falls but memory stays inside control noise, verdict is `FAIL / UNKNOWN`; STOP before Phase 2+.
-
-### Restore performance guard
-
-Pair compatible interaction-state restore against ordinary URL fallback on the same machine/site.
-
-Record p50/p95. If median interaction-state restore is slower by more than `max(20%, 300 ms)`, STOP/reconcile rather than claiming a fast restore path.
-
-## Manual acceptance
-
-After machine gates:
-
-- Default/custom Profile login remains intact;
-- same ChatGPT conversation returns;
-- back/forward and scroll restoration are sane;
-- controlled form state restores where WebKit supports it;
-- no visible double load on interaction-state restore;
-- current Attention protection behavior remains unchanged;
-- current Hot/Warm/Cold behavior remains functionally intact;
-- focus/fullscreen show no regression.
-
-User owns final visual/manual acceptance.
-
-## STOP conditions
-
-STOP and reconcile if:
-
-- a FloatTabs-owned strong edge keeps the old WebView alive after the deterministic teardown contract;
-- Browser Profile/session/user-data safety would need to change;
-- public interactionState is unreliable on supported macOS without arbitrary timer/double-navigation hacks;
-- controlled 4/8 runtime memory evidence stays within no-op drift;
-- a proven download/fullscreen/focus owner requires new cross-domain semantics;
-- implementation needs Panel/Fullscreen/Focus/Profile/Attention/Unread/Notification/Runtime-Budget changes;
-- private/unsupported WebKit behavior is required;
-- required CI fails;
-- overlapping unique work appears in the authorized files.
+Do not merge and do not publish/release.
 
 ## Rollback
 
-Rollback never touches user data:
+Rollback must remain data-safe:
 
-- lifecycle can switch hibernate call sites back to destructive release;
+- hibernate callers can return to destructive release;
 - restore snapshot storage/application can be removed independently;
-- deterministic teardown improvements may remain if independently verified;
-- no schema migration/user-data rewrite exists in Phase 1.
+- deterministic teardown can remain if independently verified;
+- no migration or persisted user-data rewrite exists in Phase 1.
 
-## Gate to implementation
-
-PR #167 must first:
-
-1. contain only control/architecture documentation;
-2. pass required `Build & Test (Apple Silicon arm64)`;
-3. pass independent plan/Authority audit;
-4. merge into `main`.
-
-Then run Control Alignment to `ACTIVE / PHASE 1 IMPLEMENTATION` and issue one concise local execution card referencing the Phase 1 plan.
-
-Local executor must implement, test and gather benchmark evidence, push the result, and stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT`. Merge/release are not authorized by the construction card.
+Production release is not authorized.
