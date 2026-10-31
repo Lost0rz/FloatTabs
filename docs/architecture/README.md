@@ -17,12 +17,15 @@ For source/Authority routing, use:
 
 For the accepted Runtime Lifecycle / Memory redesign, use:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — **ACCEPTED / FROZEN** architecture contract for program `FT-RUNTIME-LIFECYCLE-MEMORY-001`;
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — **ACCEPTED / FROZEN** program-level architecture contract for `FT-RUNTIME-LIFECYCLE-MEMORY-001`;
+- [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — **ACCEPTED / FROZEN** concrete implementation plan for Phase 1 after its audit-freeze PR merges;
 - `CURRENT_STATUS.md` — current phase/progress and verified repository state;
 - `CURRENT_TASK.md` — the only active execution authorization;
-- production source and regression tests on the current Delivery / Semantic HEAD.
+- production code and regression tests on the current Delivery / Semantic HEAD.
 
-The contract freezes ownership, phase order, data-safety invariants, Attention/unread handoff direction, native completion-notification direction, automatic Runtime Budget direction, benchmark/STOP gates, and prohibited shortcuts. It does **not** claim that unimplemented phases are current production behavior.
+The program contract freezes ownership, phase order, data-safety invariants, Attention/unread handoff direction, native completion-notification direction, automatic Runtime Budget direction, benchmark/STOP gates, and prohibited shortcuts. It does **not** claim that unimplemented phases are current production behavior.
+
+The Phase 1 plan freezes the exact Safe Hibernate + Restore implementation boundary, semantic split between hibernate and destructive release, deterministic teardown order, opaque in-memory `WKWebView.interactionState` restore contract, tests, benchmark acceptance and STOP conditions. It does not authorize Phase 2+ behavior.
 
 Each implementation phase must first pass its focused pre-implementation audit and repository task reconciliation before product mutation. Execution cards are bounded handoffs only; they do not replace the repository contract.
 
