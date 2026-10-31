@@ -537,6 +537,8 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
 
     private var pendingInstantBack: PendingInstantBack?
 
+    private(set) var isInvalidated = false
+
     init(
         slotID: UUID,
         webView: WKWebView,
@@ -637,6 +639,25 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         livenessObservationTask?.cancel()
     }
 
+    /// Invalidates every observer-owned callback source at the runtime teardown
+    /// boundary. Pool-owned WebView delegates are cleared by WebViewPool after
+    /// this method returns.
+    func invalidate() {
+        guard !isInvalidated else { return }
+        observation?.invalidate()
+        observation = nil
+        livenessObservationTask?.cancel()
+        livenessObservationTask = nil
+        if livenessContextGeneration < UInt64.max {
+            livenessContextGeneration += 1
+        }
+        invalidateDiagnosticNavigation()
+        pendingInstantBack = nil
+        pendingHTTPEntryFallback = nil
+        isInvalidated = true
+        webView = nil
+    }
+
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -646,6 +667,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
             WKWebpagePreferences
         ) -> Void
     ) {
+        guard !isInvalidated else {
+            decisionHandler(.cancel, preferences)
+            return
+        }
         restoreWebsiteMode(in: webView)
 
         if navigationAction.shouldPerformDownload {
@@ -668,6 +693,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         decidePolicyFor navigationResponse: WKNavigationResponse,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
+        guard !isInvalidated else {
+            decisionHandler(.cancel)
+            return
+        }
         decisionHandler(
             DownloadCoordinator.responsePolicy(
                 response: navigationResponse.response,
@@ -681,6 +710,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationAction: WKNavigationAction,
         didBecome download: WKDownload
     ) {
+        guard !isInvalidated else { return }
         downloadCoordinator.attach(download, presentingWindow: webView.window)
     }
 
@@ -689,6 +719,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         navigationResponse: WKNavigationResponse,
         didBecome download: WKDownload
     ) {
+        guard !isInvalidated else { return }
         downloadCoordinator.attach(download, presentingWindow: webView.window)
     }
 
@@ -703,6 +734,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard !isInvalidated else { return }
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = navigation.map(beginDiagnosticNavigation)
@@ -724,6 +756,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     /// same identity/generation path as ordinary provisional starts while
     /// allowing a commit callback to arrive without a provisional callback.
     func registerRecoveryNavigation(_ navigation: WKNavigation?) {
+        guard !isInvalidated else { return }
         guard let navigation else { return }
         if let currentNavigationTicket,
            currentNavigationTicket.navigationID == ObjectIdentifier(navigation),
@@ -734,6 +767,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard !isInvalidated else { return }
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
         cancelPendingInstantBack()
@@ -774,6 +808,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !isInvalidated else { return }
         restoreWebsiteMode(in: webView)
         restoreHiddenScrollerPolicy(in: webView)
 
@@ -805,6 +840,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         didFail navigation: WKNavigation!,
         withError error: Error
     ) {
+        guard !isInvalidated else { return }
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
         diagnostics.record(
@@ -829,6 +865,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        guard !isInvalidated else { return }
         restoreHiddenScrollerPolicy(in: webView)
         let ticket = navigation.flatMap { completeDiagnosticNavigation($0, phase: .failed) }
         diagnostics.record(
@@ -869,6 +906,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard !isInvalidated else { return }
         advanceObservedContentProcessEpoch()
         consecutivePostFinishDualTimeouts = 0
         invalidateDiagnosticNavigation(phase: .terminated)
@@ -900,6 +938,10 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         willUseInstantBack: Bool,
         completionHandler: @escaping (Bool) -> Void
     ) {
+        guard !isInvalidated else {
+            completionHandler(false)
+            return
+        }
         // A new request supersedes any older pending target before its own
         // transient marker is installed.
         cancelPendingInstantBack()
@@ -956,6 +998,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func invalidateDiagnosticNavigation() {
+        guard !isInvalidated else { return }
         livenessObservationTask?.cancel()
         livenessObservationTask = nil
         if livenessContextGeneration < UInt64.max {
