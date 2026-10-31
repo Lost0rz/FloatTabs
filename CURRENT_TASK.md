@@ -37,12 +37,13 @@ Before Phase 1 source audit begins, perform a bounded repository documentation r
 
 Documentation/control files only:
 
-- `CURRENT_STATUS.md`
-- `CURRENT_TASK.md`
-- `docs/README.md`
-- relevant `docs/**/README.md` status/index files
-- `docs/architecture/README.md`
-- existing historical/current-contract Markdown files where only an authority/status banner or routing clarification is required
+- `AGENTS.md` only for the durable documentation-routing/history rule;
+- `CURRENT_STATUS.md`;
+- `CURRENT_TASK.md`;
+- `docs/README.md`;
+- relevant `docs/**/README.md` status/index files;
+- `docs/architecture/README.md`;
+- existing historical/current-contract Markdown files where only an authority/status banner, wrapper/archive move, or routing clarification is required.
 
 ### Not authorized
 
@@ -123,6 +124,8 @@ preserve historical body
 + state exact superseded overlap
 ```
 
+When a document contains many dangerous current-sounding statements, preserve its full original body under an `archive/` path and leave a short Historical Wrapper at the old path so existing links remain safe.
+
 Do **not** rewrite old evidence, benchmark results, old acceptance outcomes, historical dates/SHAs, or closed feature decisions as if they were produced today.
 
 Do not mass-delete historical documents simply to reduce ambiguity.
@@ -132,14 +135,15 @@ Do not mass-delete historical documents simply to reduce ambiguity.
 The documentation reconciliation is accepted only when:
 
 1. `docs/README.md` provides a clear Document Authority / Status Index;
-2. architecture navigation explicitly identifies current vs historical architecture sources;
-3. high-risk stale documents above carry explicit historical/superseded warnings;
-4. validation and dated-plan collections are explicitly classified as historical evidence;
-5. old Browser Profile/Attention contracts remain discoverable but cannot override current lifecycle ownership/phase contracts;
-6. no historical document is silently rewritten into a false current narrative;
-7. changed paths are Markdown/control only;
-8. required `Build & Test (Apple Silicon arm64)` passes;
-9. final read-only diff audit finds no authority contradiction.
+2. `AGENTS.md` durably routes documentation readers through `docs/README.md` and states that historical labels never create current Authority;
+3. architecture navigation explicitly identifies current vs historical architecture sources;
+4. high-risk stale documents above carry explicit historical/superseded warnings or wrappers;
+5. validation and dated-plan collections are explicitly classified as historical evidence;
+6. old Browser Profile/Attention contracts remain discoverable but cannot override current lifecycle ownership/phase contracts;
+7. no historical document is silently rewritten into a false current narrative;
+8. changed paths are Markdown/control only;
+9. required `Build & Test (Apple Silicon arm64)` passes;
+10. final read-only diff audit finds no authority contradiction.
 
 ## Frozen program direction — unchanged
 
