@@ -11,6 +11,19 @@ For source/Authority routing, use:
 
 `DOMAIN_MAP.md` is navigation only. It does not override product/design contracts or `CURRENT_TASK.md`.
 
+## Current runtime lifecycle / memory contract
+
+For the accepted Runtime Lifecycle / Memory redesign, use:
+
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — **ACCEPTED / FROZEN** architecture contract for program `FT-RUNTIME-LIFECYCLE-MEMORY-001`;
+- `CURRENT_STATUS.md` — current phase/progress and verified repository state;
+- `CURRENT_TASK.md` — the only active execution authorization;
+- production source and regression tests on the current Delivery / Semantic HEAD.
+
+The contract freezes ownership, phase order, data-safety invariants, Attention/unread handoff direction, native completion-notification direction, automatic Runtime Budget direction, benchmark/STOP gates, and prohibited shortcuts. It does **not** claim that unimplemented phases are current production behavior.
+
+Each implementation phase must first pass its focused pre-implementation audit and repository task reconciliation before product mutation. Execution cards are bounded handoffs only; they do not replace the repository contract.
+
 ## Current behavior
 
 For shell interaction, rail geometry, movement, resize and fullscreen coordination, use:
