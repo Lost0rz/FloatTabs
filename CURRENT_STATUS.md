@@ -6,18 +6,18 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 PRE-IMPLEMENTATION AUDIT**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 AUDIT COMPLETE / PLAN FREEZE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 1 FOCUSED READ-ONLY AUDIT`.
+Current execution state: `ACTIVE / PHASE 1 PLAN PR`.
 
-Runtime product mutation is **NOT AUTHORIZED** until the Phase 1 audit freezes exact implementation scope, tests, benchmark gates and STOP conditions in repository Authority.
+Runtime product mutation is **NOT YET AUTHORIZED**. The Phase 1 focused read-only audit is complete and its exact implementation contract is being frozen in PR #167. Product mutation starts only after that plan merges, Control Alignment moves `CURRENT_TASK.md` to `PHASE 1 IMPLEMENTATION`, and a concise construction card is issued.
 
 ## Canonical / current state
 
 ```text
-MAIN_AFTER_DOC_GATE=9ade3652aef9f4f37d8c729d42dce1680c0d13c6
+AUDIT_BASE_MAIN=1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088
 PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
 PR_162=MERGED
 JSC_ROOT_CAUSE=UNKNOWN
@@ -27,114 +27,113 @@ PUBLIC_BUILD=26
 
 ACTIVE_PROGRAM=FT-RUNTIME-LIFECYCLE-MEMORY-001
 PHASE_0_CONTRACT_FREEZE=COMPLETE
-PHASE_0_PR=#163 MERGED
-PHASE_0_CONTROL_ALIGNMENT_PR=#164 MERGED
 HISTORICAL_DOC_GATE=COMPLETE
-HISTORICAL_DOC_PR=#165 MERGED
-HISTORICAL_DOC_PR_HEAD=bd94906450f721c0fbd5bf3dd58fe98ece312885
-HISTORICAL_DOC_MERGE=9ade3652aef9f4f37d8c729d42dce1680c0d13c6
-HISTORICAL_DOC_REQUIRED_CI_RUN=41206877144 PASS
-CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_AUDIT
+PHASE_1_FOCUSED_AUDIT=COMPLETE
+PHASE_1_PLAN=docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md
+PHASE_1_PLAN_PR=#167 OPEN / DRAFT / UNMERGED
 CURRENT_PRODUCT_MUTATION=NOT_AUTHORIZED
+OPEN_PRS_BEFORE_PHASE1_PLAN=0
 ```
 
-## Documentation Authority is reconciled
+## Documentation / Authority
 
-The historical-document gate is complete. `docs/README.md` is now the repository documentation status index and `AGENTS.md` durably requires it before relying on old Stage/design/audit/plan documents.
-
-High-risk stale documents now use Historical/Superseded wrappers at their old paths while their complete original bodies are preserved under matching `archive/` paths. Directory-level READMEs classify validation, performance, product Stage/Construction, legacy plans and release documents.
-
-Therefore old words such as `FROZEN`, `LOCKED`, `canonical`, `accepted`, `implemented`, `current` or `CONSTRUCTION_GATE_READY` do not create present-day execution Authority.
-
-Current engineering routing is:
+Use:
 
 ```text
 AGENTS.md
 → CURRENT_STATUS.md
 → CURRENT_TASK.md
 → docs/README.md
-→ current linked architecture/design contract
-→ DOMAIN_MAP.md for navigation
-→ production source/tests/fresh evidence
+→ docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md
+→ docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md
+→ docs/architecture/DOMAIN_MAP.md for navigation
+→ current source/tests/fresh evidence
 ```
 
-## Accepted lifecycle/memory contract
+The repository-wide historical-document reconciliation is complete. Historical Stage/design/audit/plan wording cannot override current Authority.
 
-The frozen target architecture remains:
+## Phase 1 audit verdict
+
+**VERDICT: IMPLEMENTATION DESIGN IS SUFFICIENT TO FREEZE.**
+
+The audit found no need to rewrite the whole Web container architecture. Phase 1 can remain bounded to the Web Runtime mechanism/lifecycle boundary.
+
+### Key audited facts
+
+1. `WebViewPool` already separates live `WKWebView` runtime from persistent Slot/Profile data.
+2. `BrowserProfileDataStoreProvider` resolves persistent Default/custom `WKWebsiteDataStore` independently from Runtime lifetime.
+3. current `release(slotID:)` removes runtime maps/bridges/observers but is not a complete hibernation primitive: it does not capture `interactionState`, explicitly `stopLoading`, explicitly clear delegates, explicitly invalidate the navigation KVO token, or clear `pendingTerminationIncidentContexts`.
+4. current lifecycle release order is correct: final protection checks → preparation → container detach → Pool teardown → callback.
+5. current `release()` has destructive callers (Slot deletion, stored-state/profile replacement, cache preparation, rebuild/recovery). It must not be globally redefined as hibernate.
+6. Phase 1 therefore requires an explicit semantic split:
 
 ```text
-Persistent Slot / Browser Profile / durable unread
-                    │
-                    ▼
-         bounded restore snapshot
-                    │
-                    ▼
-             WKWebView cache
-              LIVE / NIL
-                    │
-                    ▼
-              WebViewPool
+hibernate(slotID:) = capture bounded restore state + deterministic teardown
+release(slotID:)   = clear restore state + deterministic destructive teardown
 ```
 
-Accepted direction remains:
+7. only normal inactive lifecycle reclamation / eligible critical Warm pressure switches to `hibernate`; destructive callers remain destructive.
+8. public `WKWebView.interactionState` is available on macOS 12+ and is explicitly intended to restore back-forward list/current page/scroll/form state to another WebView. FloatTabs macOS 13+ baseline is compatible.
+9. the interaction state must remain opaque and memory-local in Phase 1; it is never persisted/logged.
+10. `WebPanelContainerView`, `WebSlotHostView`, `WebFocusRouter.currentWebView`, and Fullscreen source observed WebView references are weak. There is currently no evidence requiring Phase 1 changes in Panel/Fullscreen/Focus.
+11. ChatGPT Attention/Response bridges already use weak WebView references and explicit invalidation; stale async probe paths already validate runtime/WebView/navigation identity.
+12. `SlotNavigationObserver` needs an explicit idempotent invalidation seam so KVO/tasks are stopped deterministically instead of depending on deinit timing.
+13. current Cold release may trigger Website Cache cleanup, but cleanup is limited to disk/memory/fetch caches and excludes login/session data. Primary Phase 1 memory benchmark will use Warm release to avoid cache-cleanup confounding.
+14. the existing Debug benchmark control channel and lifecycle benchmark already capture process-tree RSS/CPU, helper counts and exact resident Slot count; no second benchmark control plane is needed.
 
-- `WebViewPool` is the live Runtime mechanism owner;
-- Browser Profile / `WKWebsiteDataStore` lifetime remains independent from Runtime lifetime;
-- safe hibernate/restore must be proven before aggressive automatic reclamation;
-- `WKWebView.interactionState` is the primary Phase 1 restore mechanism to audit, with URL fallback;
-- active ChatGPT `generating` remains Runtime-protected in Phase 1;
-- Ready/Unread decoupling is Phase 2, not Phase 1;
-- native completion notification is Phase 3;
-- automatic Runtime Budget/Policy is Phase 4;
-- no fake JavaScript Freeze, private-WebKit truth, manual permanent process-pool topology or user-data deletion shortcut.
+## Frozen Phase 1 implementation scope
 
-## Frozen phase sequence
+Expected production changes are limited to:
 
-```text
-Phase 0  Authority / contract freeze                         COMPLETE
-Doc Gate Historical documentation reconciliation             COMPLETE
-Phase 1  Safe Hibernate + Restore                            AUDIT ACTIVE
-Phase 2  Ready / Unread decoupling                           NOT STARTED
-Phase 3  Native ChatGPT Completion Notification              NOT STARTED
-Phase 4  Automatic Runtime Budget / Policy                   NOT STARTED
-Phase 5  Long-running Background Generation Thrift           NOT STARTED
-Phase 6  Perceived-fast Restore                              NOT STARTED
-Phase 7  Optional server-push / service-worker research      NOT STARTED
-```
+- `FloatTabs/Web/WebViewPool.swift`
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
+- `FloatTabs/Web/SlotNavigationObserver.swift`
 
-## Current gate — Phase 1 focused audit
+Expected tests/tooling are limited to:
 
-The next work is detailed read-only source/evidence audit, not implementation.
+- `FloatTabsTests/WebViewPoolTests.swift`
+- `FloatTabsTests/WebAttentionLifecycleTests.swift`
+- `FloatTabsTests/WebFocusAdapterTests.swift` only if needed for the narrow observer invalidation fixture
+- `tools/benchmark/floattabs_lifecycle_benchmark.py` only if Phase 1 reporting needs adaptation
+- `tools/benchmark/README.md` only for the accepted Phase 1 benchmark runbook
 
-It must establish and freeze:
+Full exact behavior/tests/benchmark/STOP conditions are frozen in the Phase 1 plan.
 
-1. exact `WebViewPool.webView(for:)` create/reuse/rebuild path;
-2. exact `WebViewPool.release(slotID:)` teardown order and every retained per-Slot sidecar;
-3. every production caller that can release/rebuild a Runtime;
-4. `SlotLifecycleCoordinator` inactive/release/protection ordering;
-5. `WebPanelContainerView`, fullscreen source and supplemental-visible detach/reparent ownership;
-6. `SlotNavigationObserver` invalidation plus pending task/probe/callback cleanup;
-7. Attention/Response/Popup bridges and `WKUserContentController` handler teardown;
-8. stale runtime/navigation-generation callback rejection after replacement;
-9. `WKWebView.interactionState` API availability, capture timing, restore ordering and bounded URL fallback;
-10. Browser Profile/data-store/rendering rebuild invariants;
-11. exact regression-test additions/updates;
-12. a 1/2/4/8 Slot memory + restore-latency benchmark and decision threshold;
-13. rollback/STOP conditions before any Phase 1 implementation card.
+## Explicit Phase 1 non-scope
 
-## Phase 1 primary decision gate
+Do not change in Phase 1 unless a STOP condition forces task reconciliation:
 
-```text
-Does clean WKWebView reclamation produce a meaningful and repeatable memory reduction
-without breaking Browser Profile/session/product-state invariants?
-```
+- Ready/Unread semantics;
+- ChatGPT completion notification;
+- Hot/Warm/Cold UI/timings;
+- automatic Runtime Budget/ranking;
+- Browser Profile persistence/schema;
+- Website Cache data types/policy;
+- Panel/Fullscreen/Focus product semantics;
+- process-pool topology;
+- server Push;
+- recent-conversation native preview.
 
-If the audit cannot support a safe design for this question, keep the task in audit/STOP and investigate teardown retention or WebKit process residency. Do not advance Phase 2+.
+## Primary implementation/validation gate
 
-## Non-claims
+After implementation, Phase 1 only passes if controlled evidence shows:
 
-- Historical JSC root cause remains `UNKNOWN`.
-- No Runtime Budget number is accepted yet.
-- No claim is made that ChatGPT generation survives WebView destruction.
-- No newer public release is authorized.
-- Historical-document cleanup does not prove memory reclamation or restore correctness.
+- logical resident runtime count falls exactly for eligible hibernated Slots;
+- protected/visible Slots remain resident;
+- process-tree memory reduction for multiple heavy runtimes is positive/repeatable and larger than 2× the measured no-op/control drift;
+- restore creates one new runtime, preserves Profile/session/product invariants, and does not issue a competing URL load on compatible interaction-state restore;
+- paired restore timing does not regress versus URL fallback by more than `max(20%, 300 ms)` in median;
+- all required tests/CI/manual acceptance pass.
+
+If runtime count falls but memory remains within control noise, or interaction-state restore needs private API/double-navigation/timer hacks, STOP before Phase 2+.
+
+## Next gate
+
+1. complete independent read-only audit of PR #167;
+2. required GitHub CI must pass;
+3. merge #167 if scope/Authority remain clean;
+4. run Control Alignment on `main` to authorize `ACTIVE / PHASE 1 IMPLEMENTATION`;
+5. issue one concise local construction card referencing the frozen Phase 1 plan;
+6. local executor implements/tests/benchmarks and stops at `WAITING_FOR_INDEPENDENT_WEB_AUDIT`.
+
+No production release is authorized.
