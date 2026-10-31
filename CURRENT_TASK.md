@@ -1,218 +1,234 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-JSC-MULTI-RUNTIME-002`
-**Title:** Audit multi-generating long-lived ChatGPT WebContent clustering and shared resource pressure
-**Status:** `ACTIVE / AIR_SOAK_READY`
-**Mode:** `WAITING_FOR_AIR_SOAK`
+**Title:** Test generation-time periodic cross-world diagnostic JS suppression
+**Status:** `ACTIVE / AUTHORIZED`
+**Mode:** `EXECUTE`
 **Task class:** `RUNTIME STABILITY / EVIDENCE-DRIVEN CORRECTIVE`
-**Authorized baseline:** `main@26c81d83d3bdd771e98e355337b78622e2b25b17`
+**Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@b878dd7bfb9b3e437bcb96106cd6682f171c61fd`
 **Active PR:** `#162` / `codex/ft-jsc-multi-runtime-002`
 **JSC root cause:** `UNKNOWN`
 
 ## Purpose
 
-Reduce one now-measured FloatTabs-owned WebContent residency pressure path without interrupting ChatGPT generation or weakening Attention/Unread protection, then produce a fresh exact-head QA DMG and repeat Air soak.
+Test one new, bounded hypothesis: whether FloatTabs' timer-driven cross-world diagnostic JavaScript sampling during active ChatGPT generation is a crash amplifier.
 
-This task does not claim that memory pressure, concurrent generation, Attention protection, or FloatTabs is the proven JSC root cause.
+Suppress only that periodic diagnostic sampling while the canonical Attention state for the Slot is exactly `generating`, then produce a fresh exact-head QA DMG and repeat Air soak.
 
-## Evidence established by PR #162 Air soak
+This task does not claim that cross-world probing, concurrent generation, memory pressure, Attention protection, or FloatTabs is the proven JSC root cause.
 
-Exact soak artifact:
+## Reconciliation from the previous iteration
 
-```text
-SOURCE_REVISION=ca46c3fad6bb7c7c106fb8cbbdf7fbde89da3120
-SOURCE_REVISION_EXACT=true
-DMG_SHA256=e67d277c6d0287d58f04566b094da8cffde6626e45588f02b754cc29f256339e
-SESSION_ID=E5464F6C-550B-4792-A7A8-3035874D9266
-```
-
-Observed WebContent terminations:
+The previous authorized intervention `WARNING_PRESSURE_EARLY_WARM_RELEASE` is complete and remains part of the branch. Its Air soak proved that warning-time early release safely reduces unnecessary inactive Warm residency:
 
 ```text
-01:21:15Z resident_generating=1 resident_protected=1
-01:25:17Z resident_generating=2 resident_protected=2
-01:25:41Z resident_generating=2 resident_protected=2
+MEMORY_WARNING_COUNT=5
+WARNING_DRIVEN_WARM_RELEASE_COMPLETED=8
+FIRST_WARNING_RESIDENT_SLOT_COUNT=5
+NEXT_WARNING_RESIDENT_SLOT_COUNT=3
+ACTIVE_VISIBLE_HOT_PROTECTED_RELEASE=0
 ```
 
-All three affected Slots were generating and Attention-protected. One crash occurred with only one generating resident Slot, therefore multi-generation is not required. Two different-Slot incidents clustered about 24 seconds apart while dual generation was present, so multi-generation remains a correlation, not a cause.
+One active Hot ChatGPT WebContent still terminated while generating with two resident generating/protected Slots. Therefore the memory-pressure intervention is useful but not sufficient to eliminate the crash family.
 
-Across 107 minute-scale performance checkpoints:
+User authorization on 2026-10-31 explicitly requested the next detailed plan and construction card. This reconciles the previous STOP boundary that prohibited automatically adding a second speculative mitigation.
+
+## Evidence for the next experiment
+
+`SlotNavigationObserver` currently runs periodic cross-world liveness sampling every 30 seconds. One periodic cycle evaluates JavaScript in:
 
 ```text
-resident_generating=0 -> 44
-resident_generating=1 -> 45
-resident_generating=2 -> 18
+main page world
+FloatTabs isolated world
 ```
 
-The 2-generating state appeared in about 17% of checkpoint samples but contained 2/3 terminations. Treat this as small-sample correlation only.
-
-### Memory-pressure evidence
-
-Seven FloatTabs memory-pressure warnings were recorded in the same session. Each warning evaluated five resident Slots. Current code releases nothing at warning severity and records `warning_no_eviction`.
-
-At every warning at least one resident Slot already satisfied the same safe lifecycle boundary used by critical-pressure Warm eviction except for severity:
+Recent same-Slot timing observations:
 
 ```text
-residency_policy=warm
-pending inactive release plan exists
-not visible / not active
-media_protected=false
-attention_protected=false
+01:21:14Z cross-world liveness -> 01:21:15Z WebContent termination
+01:25:16Z cross-world liveness -> 01:25:17Z WebContent termination
+02:45:13Z cross-world liveness -> 02:45:15Z WebContent termination
 ```
 
-Safe-candidate counts by warning:
+Three of the four most recent measured terminations therefore occurred about 1–2.3 seconds after a same-Slot periodic cross-world sample. This is only a temporal correlation.
 
-```text
-00:23:12Z -> 2
-00:27:52Z -> 1
-00:50:05Z -> 2
-00:57:13Z -> 2
-00:59:57Z -> 1
-01:18:31Z -> 2
-01:21:25Z -> 2
-```
+The earlier Attention watchdog `2s -> 5s` experiment did not eliminate the crash family, so do not repeat that change here.
 
-Current source behavior:
+## Selected design
 
-```text
-WARNING  -> evaluate/log only
-CRITICAL -> evictInactiveWarmForMemoryPressure(...)
-```
+### Canonical ownership
 
-This establishes one bounded FloatTabs-owned mitigation opportunity. It does not establish memory as root cause.
+`WebAttentionCoordinator` remains the sole authoritative owner of `idle / generating / ready` state.
 
-## Authorized intervention — exactly one
+`SlotNavigationObserver` must not infer, retain, duplicate, or transition Attention state. It may consume only a read-only suppression decision projected from the canonical Attention owner through an existing or minimally injected composition seam.
+
+### Authorized intervention — exactly one
 
 Implement:
 
 ```text
-WARNING_PRESSURE_EARLY_WARM_RELEASE
+GENERATING_PERIODIC_CROSS_WORLD_SUPPRESSION
 ```
 
-On an OS memory-pressure `warning`, FloatTabs may immediately release only a runtime that already satisfies **all** of these conditions:
+For a ChatGPT Slot only, when the canonical Attention state is exactly `generating`:
+
+- skip the **timer-driven periodic** cross-world liveness cycle before any main-world or isolated-world JavaScript evaluation begins;
+- record a native diagnostic explaining that the periodic cycle was suppressed because the Slot was generating;
+- do not synthesize a liveness result from the skipped sample;
+- resume ordinary periodic sampling on later timer ticks after the Slot leaves `generating`.
+
+### Explicitly preserved
+
+Do not alter:
+
+- ChatGPT page-owned MutationObserver / bridge generation observation;
+- the existing 2-second Attention liveness watchdog;
+- current-document resync;
+- generation/Attention/Unread state transitions;
+- explicit/on-demand `captureCrossWorldLivenessOnce()` calls used by incident/recovery evidence;
+- renderer probes and incident health/page-app probes;
+- navigation recovery semantics;
+- warning-pressure early Warm release from the prior iteration;
+- active / visible / Hot / media / Attention residency protection;
+- Ready Alert;
+- RemoteOrbit external voice focus;
+- Browser Profile / cookies / sessions / website data / Slot config / preferences / backups / recovery data;
+- active-visible completion red-dot semantics.
+
+### Suppression semantics
+
+The suppression condition must be exact:
 
 ```text
-residencyPolicy == warm
-inactive / not visible
-existing inactive pending-release plan
-WebView still resident
-media protection == false
-Attention protection == false
+supported ChatGPT Slot
+AND canonical attention state == generating
+AND invocation source == periodic timer
 ```
 
-Use the existing lifecycle release path. The change should reuse the existing critical-pressure safety boundary rather than create a second release authority.
+Do not suppress because a Slot is merely Attention-protected or `ready`.
 
-### Required semantics
+If Attention state is unknown/not represented, do not guess `generating`; run the existing periodic sample.
 
-- `warning` may accelerate release of a Warm runtime that is already scheduled to be released later.
-- `critical` behavior must continue to work.
-- Active or actually visible runtimes must never be released.
-- ChatGPT `Generating` or `Ready` Attention-protected runtimes must never be released.
-- Media-protected runtimes must never be released.
-- `Hot` runtimes must not become warning-pressure eviction candidates in this task.
-- Browser Profile, cookie/session, website data, Slot config, preferences, backup and recovery data must not be deleted or reset.
-- Do not use reload/restart/reset as mitigation.
-- Do not alter generation, Attention/Unread, stable response identity, RemoteOrbit focus, background-media semantics or active-visible completion red-dot behavior.
+The explicit/on-demand capture path must remain available even while generating so incident/recovery diagnostics are not blinded.
 
-## Corrective implementation result
+## Diagnostics
 
-The single authorized intervention is implemented in:
+Add only the evidence needed for the experiment.
 
-```
-IMPLEMENTATION_COMMIT=3dff7e90d23918e69e12d2820ce6c1be31805e99
-CHANGED_PATHS=FloatTabs/Web/SlotLifecycleCoordinator.swift; FloatTabsTests/WebAttentionCrossFeatureTests.swift; FloatTabsTests/WebAttentionLifecycleTests.swift
-CODE_PATH=SlotLifecycleCoordinator.handleMemoryPressure(.warning) -> evictInactiveWarmForMemoryPressure(...)
-WARNING_RELEASE_BOUNDARY=existing inactive Warm pending-release resident WebView, not visible, media-protected=false, attention-protected=false
-WARNING_DIAGNOSTICS=pressure_level and warning_pressure_eligible are recorded; release_completed is not mislabeled critical_pressure_eligible
-```
-
-The implementation preserves the existing critical-pressure path and all active/visible, Hot, media and Attention protection boundaries. It does not alter generation, Attention/Unread, recovery, Browser Profile/session/user data or process-pool/data-store ownership.
-
-## Diagnostics requirement
-
-Memory-pressure diagnostics must tell the truth after the behavior change.
-
-For both warning and critical pressure, record per-Slot eligibility/decision consistently. A completed warning-driven release must not be mislabeled `critical_pressure_eligible`.
-
-The exact diagnostic naming may be chosen during implementation, but must distinguish at least:
+At minimum, a skipped periodic cycle must identify:
 
 ```text
-pressure_level=warning | critical
-release_eligible=true | false
-release_reason=<warning or critical eligible / protection reason>
-action=release_completed when release occurs
+slot_id
+reason=chatgpt_generating
+sample_source=periodic
+js_evaluation_started=false
 ```
 
-Do not add unrelated diagnostics.
+Prefer one event such as:
+
+```text
+web_runtime.cross_world_liveness_suppressed
+```
+
+Do not log page content.
+
+Existing successful `web_runtime.cross_world_liveness` events remain unchanged when a sample actually runs.
+
+## Implementation boundary
+
+Prefer the smallest wiring that preserves ownership. A valid implementation may add a read-only query/callback from the composition owner into `WebViewPool` / `SlotNavigationObserver`, but must not create a second generating-ID set or a second Attention state machine.
+
+Before mutation, the local executor must inspect the current construction/wiring path and confirm the chosen seam preserves canonical ownership.
+
+If implementing suppression requires WebView ownership redesign, process-pool/data-store redesign, duplicated Attention state, or broad scheduler replacement, STOP instead of expanding scope.
+
+## Required focused tests
+
+At minimum cover:
+
+1. periodic cycle + ChatGPT + `generating` => no main-world evaluator call and no isolated-world evaluator call;
+2. suppression diagnostic is emitted with `reason=chatgpt_generating` and `sample_source=periodic`;
+3. state `idle` => existing periodic cross-world sample still runs;
+4. state `ready` => existing periodic cross-world sample still runs;
+5. transition `generating -> idle` => later periodic tick resumes sampling without rebuild/reload;
+6. explicit/on-demand cross-world capture still runs while generating;
+7. non-ChatGPT runtime behavior is unchanged;
+8. warning-pressure early Warm release regression remains green;
+9. Attention generation/Ready/Unread regression coverage remains green.
 
 ## Verification gate
 
-Before a new Air soak:
+Before new Air soak:
 
-1. focused lifecycle/memory-pressure tests must cover:
-   - warning releases inactive Warm pending-release unprotected runtime;
-   - warning preserves active/visible runtime;
-   - warning preserves Attention-protected Generating runtime;
-   - warning preserves Attention-protected Ready runtime;
-   - warning preserves media-protected runtime;
-   - warning preserves Hot runtime;
-   - critical pressure behavior still passes;
-   - diagnostic reason/level for warning release is correct.
-2. full required XCTest suite passes;
+1. focused tests pass;
+2. full required XCTest passes;
 3. Debug arm64 build passes;
 4. Release arm64 build passes;
-5. branch is pushed to PR #162 and exact-head remote verified;
-6. exact-head CI and QA build pass;
-7. a local exact-head QA DMG is produced with:
-   - exact source revision;
+5. branch is pushed to PR #162 and remote exact head is verified;
+6. exact-head CI and QA DMG workflows pass;
+7. local exact-head QA DMG is produced with:
+   - source revision equal to final remote branch head;
    - `FloatTabsSourceRevisionExact=true`;
-   - arm64;
+   - arm64 architecture;
    - SHA256;
    - `hdiutil verify` PASS.
 
 ## Air soak comparison
 
-The next Air soak must compare against the diagnostic baseline above and record:
+The next Air soak must record:
 
 ```text
+periodic cross-world suppression count
+periodic cross-world successful sample count
+whether any generating Slot still receives timer-driven cross-world JS
+resident_attention_generating_count at each termination
+resident_attention_protected_count at each termination
 memory warning count
 warning-driven Warm release count
-resident_slot_count before/after warning when observable
-resident_attention_generating_count at any termination
-resident_attention_protected_count at any termination
+resident_slot_count around warnings
 WebContent termination count / timing
+same-Slot timing relative to the last actual cross-world sample
 clustered different-Slot termination timing
 confirmed post-finish stall count
 ```
 
-Interpretation rules:
+The key experiment assertion is:
+
+```text
+WHILE_GENERATING_PERIODIC_CROSS_WORLD_JS=0
+```
+
+for timer-driven samples only.
+
+## Interpretation rules
 
 ```text
 FEWER_CRASHES != ROOT_CAUSE_PROVEN
-WARNING_RELEASE_PRECEDES_LOWER_PRESSURE != MEMORY_ROOT_CAUSE_PROVEN
-MULTI_GENERATING_CORRELATION != CONCURRENT_GENERATION_ROOT_CAUSE
 NO_CRASH_DURING_BOUNDED_SOAK != FIX_PROVEN
+PROBE_ADJACENCY != PROBE_CAUSALITY
+CRASH_AFTER_SUPPRESSION != WEBSITE_ONLY_ROOT_CAUSE_PROVEN
+WARNING_RELEASE_SUCCESS != MEMORY_ROOT_CAUSE
 ```
 
 ## STOP conditions
 
 STOP and report rather than broaden scope if:
 
-- implementation requires releasing active, visible, Hot, media-protected or Attention-protected runtime;
-- the only way forward requires Browser Profile/session/user-data mutation;
+- suppression cannot be implemented without duplicating Attention state ownership;
+- product correctness would require disabling the page-owned generation observer or the Attention liveness watchdog;
+- explicit/on-demand incident capture would have to be disabled;
+- implementation requires reload/restart/reset as mitigation;
+- implementation requires Browser Profile/session/user-data mutation;
 - implementation requires WebView/process-pool/data-store ownership redesign;
-- tests/builds fail because of the intervention;
-- new evidence contradicts the lifecycle safety boundary;
-- a second speculative mitigation would be required.
+- focused/full tests or required builds fail because of the change;
+- a second behavioral mitigation would be required in the same iteration.
 
 ## Completion boundary
 
-This iteration reaches `AIR_SOAK_READY` only after the single warning-pressure Warm release intervention is implemented, verified, pushed to PR #162, and tied to a fresh exact-head QA DMG.
+This iteration reaches `AIR_SOAK_READY` only after the single periodic-cross-world suppression experiment is implemented, verified, pushed, and tied to a fresh exact-head QA DMG.
 
-Production release is not authorized.
-
-The implementation/verification boundary is now complete and the task is waiting for the user-owned Air soak. The fresh artifact identity, provenance, SHA256 and host-gate results are returned in the execution receipt; no Air install or soak is performed in this stage.
+Production release and merge are not authorized in this iteration.
 
 ## Separate follow-up not authorized here
 
-Active-visible ChatGPT completion currently suppresses persistent unread/red-dot state. That remains a separate product task and must not be mixed into this runtime corrective.
+Active-visible ChatGPT completion currently suppresses persistent unread/red-dot state. That remains a separate product task and must not be mixed into this runtime experiment.
