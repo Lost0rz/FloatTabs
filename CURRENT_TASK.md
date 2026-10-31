@@ -2,10 +2,10 @@
 
 **Task ID:** `FT-JSC-MULTI-RUNTIME-002`
 **Title:** Correct Warm warning-pressure residency semantics after generation-time diagnostic experiment
-**Status:** `ACTIVE / AUTHORIZED CORRECTIVE`
-**Mode:** `EXECUTE`
+**Status:** `ACTIVE / WAITING FOR AIR SOAK`
+**Mode:** `WAITING`
 **Task class:** `RUNTIME STABILITY / BOUNDED CORRECTIVE`
-**Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@94ae07a1ec31fa6fd4bdc31ad1bd1c700dc66288`
+**Authorized product baseline:** `codex/ft-jsc-multi-runtime-002@84acb0f467dd48ec469ee339cbdcb1b1c716624d`
 **Active PR:** `#162` / `codex/ft-jsc-multi-runtime-002`
 **JSC root cause:** `UNKNOWN`
 
@@ -260,7 +260,8 @@ This corrective reaches `AIR_SOAK_READY` only after the warning behavior, critic
 behavior, diagnostics, retention-plan preservation, Attention/Unread protections,
 generation-time suppression regressions, focused/full XCTest, Debug/Release arm64
 builds, remote exact-head verification, exact-head CI, and exact-head QA DMG all pass.
-Until then `AIR_SOAK=BLOCKED`. Do not merge or release.
+Those gates are verified for the current product head `84acb0f...`; therefore
+`AIR_SOAK=READY`. Do not install, start, merge, or release from this task.
 
 ## Execution result
 
@@ -279,19 +280,20 @@ Focused regression coverage proves that generating periodic sampling starts no m
 Verification evidence:
 
 ```text
-FOCUSED_XCTEST=185 tests, 3 skipped, 0 failures
-FULL_XCTEST=1065 tests, 3 skipped, 0 failures
+CORRECTIVE_HEAD=84acb0f467dd48ec469ee339cbdcb1b1c716624d
+FOCUSED_XCTEST=159 tests, 3 skipped, 0 failures
+FULL_XCTEST=1067 tests, 3 skipped, 0 failures
 DEBUG_ARM64_BUILD=PASS
 RELEASE_ARM64_BUILD=PASS
-MACOS_CI_RUN=41165487122 SUCCESS
-QA_DMG_RUN=41165487129 SUCCESS
-LOCAL_QA_DMG=PASS (final control-aligned exact-head provenance returned in execution receipt)
+MACOS_CI_RUN=41167486608 SUCCESS
+QA_DMG_RUN=41167486598 SUCCESS
+LOCAL_QA_DMG=PASS
 DMG_VERSION=0.5.8
 DMG_BUILD=26
 DMG_ARCHITECTURE=arm64
-DMG_SOURCE_REVISION=FINAL_CONTROL_ALIGNED_HEAD
+DMG_SOURCE_REVISION=84acb0f467dd48ec469ee339cbdcb1b1c716624d
 DMG_SOURCE_REVISION_EXACT=true
-DMG_SHA256=RETURNED_IN_EXECUTION_RECEIPT
+DMG_SHA256=ea543237c5b45af5d31cd8410e7be9337ce526ad9ae6b4e3064005c73a141c58
 HDIUTIL_VERIFY=PASS
 JSC_ROOT_CAUSE=UNKNOWN
 ```

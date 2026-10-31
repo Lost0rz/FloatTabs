@@ -6,9 +6,9 @@
 
 ## Mode
 
-**MODE: WARM WARNING SEMANTICS CORRECTIVE / EXECUTE**
+**MODE: WARM WARNING SEMANTICS CORRECTIVE / WAITING FOR AIR SOAK**
 
-Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AUTHORIZED CORRECTIVE`.
+Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / WAITING FOR AIR SOAK`.
 
 PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain unknown.
 
@@ -18,10 +18,11 @@ PR #162 remains open / draft / unmerged. JSC exact trigger and root cause remain
 MAIN=26c81d83d3bdd771e98e355337b78622e2b25b17
 ACTIVE_BRANCH=codex/ft-jsc-multi-runtime-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
-AUTHORITY_OBSERVED_HEAD=94ae07a1ec31fa6fd4bdc31ad1bd1c700dc66288
+AUTHORITY_OBSERVED_HEAD=84acb0f467dd48ec469ee339cbdcb1b1c716624d
 LAST_VERIFIED_GENERATION_PRODUCT_HEAD=be95a36467822a22a7d6ad78b9900f50c4ca69ca
-WARNING_PRESSURE_EARLY_WARM_RELEASE=CORRECTIVE_AUTHORIZED_WARNING_DISABLED
-AIR_SOAK=BLOCKED_PENDING_CORRECTIVE_VERIFICATION
+LAST_VERIFIED_WARNING_CORRECTIVE_HEAD=84acb0f467dd48ec469ee339cbdcb1b1c716624d
+WARNING_PRESSURE_EARLY_WARM_RELEASE=CORRECTED_DIAGNOSTICS_ONLY
+AIR_SOAK=READY
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
@@ -66,13 +67,13 @@ SlotLifecycleCoordinator.handleMemoryPressure(.warning)
   -> releaseInactiveSlot(...)
 ```
 
-Until the corrective is verified, the prior AIR_SOAK_READY state is revoked:
+The corrective is now verified locally and on the exact remote head:
 
 ```text
-WARNING_SEMANTICS_REGRESSION=CONFIRMED
-WARNING_EARLY_WARM_RELEASE=NOT_ACCEPTABLE
+WARNING_SEMANTICS_REGRESSION=CORRECTED
+WARNING_EARLY_WARM_RELEASE=DISABLED
 CRITICAL_EARLY_WARM_RELEASE=RETAINED
-AIR_SOAK=BLOCKED
+AIR_SOAK=READY_FOR_USER_OWNED_SOAK
 ```
 
 One WebContent termination still occurred at `2026-10-31T02:45:15Z`:
@@ -156,7 +157,24 @@ WATCHDOG=2_SECONDS_UNCHANGED
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-Focused tests, full XCTest, Debug arm64, Release arm64, exact-head macOS CI, and exact-head QA DMG all passed. The final control-aligned exact-head QA DMG provenance and checksum are returned in the execution receipt.
+The corrective verification evidence is:
+
+```text
+CORRECTIVE_HEAD=84acb0f467dd48ec469ee339cbdcb1b1c716624d
+FOCUSED_XCTEST=159 tests, 3 skipped, 0 failures
+FULL_XCTEST=1067 tests, 3 skipped, 0 failures
+DEBUG_ARM64_BUILD=PASS
+RELEASE_ARM64_BUILD=PASS
+MACOS_CI_RUN=41167486608 SUCCESS
+QA_DMG_RUN=41167486598 SUCCESS
+LOCAL_QA_DMG_SOURCE_REVISION=84acb0f467dd48ec469ee339cbdcb1b1c716624d
+LOCAL_QA_DMG_SOURCE_REVISION_EXACT=true
+LOCAL_QA_DMG_SHA256=ea543237c5b45af5d31cd8410e7be9337ce526ad9ae6b4e3064005c73a141c58
+LOCAL_QA_DMG_HDIUTIL_VERIFY=PASS
+```
+
+The branch is waiting for the user-owned Air soak on this exact-head QA DMG. The
+artifact has not been installed or started here.
 
 ## Next gate
 
