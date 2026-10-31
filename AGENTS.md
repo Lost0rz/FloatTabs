@@ -73,6 +73,20 @@ Before state-changing execution:
 
 A truly new task must first be authorized in `CURRENT_TASK.md`.
 
+### Phase / design execution gate
+
+For a multi-phase architecture or other high-risk program governed by an accepted design/architecture contract, do not jump from the high-level phase description directly into product mutation.
+
+Before each implementation phase:
+
+1. reread the active contract plus `CURRENT_STATUS.md` / `CURRENT_TASK.md`;
+2. perform a focused read-only audit of the exact production owners, call paths, lifecycle/retain boundaries, existing tests, and fresh repository evidence relevant to that phase;
+3. freeze the phase's concrete scope, expected files/symbols, verification matrix, acceptance criteria, and STOP conditions in repository Authority when they materially change the task;
+4. only then issue a concise execution card for the local executor;
+5. keep the execution card bounded and avoid duplicating the full repository contract.
+
+After implementation, run focused verification and independent audit before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
+
 ### During
 
 Do not expand the task for adjacent issues. Record material non-blocking items as Follow-ups in `CURRENT_STATUS.md`; they become executable only through a future task authorization.
