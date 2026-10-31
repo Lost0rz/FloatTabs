@@ -2,7 +2,7 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`
 **Title:** Runtime Lifecycle / Memory redesign — Phase 1 Safe Hibernate + Restore
-**Status:** `ACTIVE / PHASE 1 IMPLEMENTATION — V2 ACCEPTANCE`
+**Status:** `WAITING / REQUIRED PR CI ON PHASE 1 IMPLEMENTATION`
 **Mode:** `EXECUTE`
 **Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY`
 **Current program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`
@@ -108,6 +108,8 @@ Debug build: PASS
 Release build: PASS
 bounded live smoke: 2 existing Slots; resident drop and interactionState restore observed
 strict 1/2/4/8 benchmark: NOT RUN / DEFERRED TO PHASE 4
+PR: #170 OPEN; head dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
+required PR CI: NO_RUN_OBSERVED
 ```
 
 ## Phase 1 verification gate — current

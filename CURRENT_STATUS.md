@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 1 IMPLEMENTATION — V2 ACCEPTANCE`.
+Current execution state: `WAITING / REQUIRED PR CI ON PHASE 1 IMPLEMENTATION`.
 
 The program cadence has been intentionally refrozen: establish the Runtime lifecycle architecture first, prove bounded live correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
 
@@ -90,7 +90,7 @@ Existing benchmark tooling may be preserved, but strict benchmark expansion is n
 
 ## Current implementation evidence
 
-The existing dirty implementation was audited against the V2 Authority without a destructive sync. Fresh local verification on that final diff is:
+The existing dirty implementation was audited against the V2 Authority without a destructive sync, then committed and pushed. Fresh local verification on that final diff is:
 
 ```text
 FOCUSED_TESTS=146 executed / 0 failures
@@ -99,8 +99,13 @@ DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
 STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
 LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh restore, interactionState restore observed
-LOCAL_IMPLEMENTATION=DIRTY / UNCOMMITTED
-PR=NONE
+LOCAL_IMPLEMENTATION=COMMITTED
+LOCAL_COMMIT=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
+REMOTE_REF=origin/codex/ft-runtime-lifecycle-memory-001-phase1-implement-001
+REMOTE_COMMIT=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
+PR=#170 OPEN
+PR_HEAD=dd12ba89dc3ef11758c5f3d7bb04207b0307fafc
+REQUIRED_PR_CI=NO_RUN_OBSERVED
 ```
 
 ## Phase 1 validation gate — current
