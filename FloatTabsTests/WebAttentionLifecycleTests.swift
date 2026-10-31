@@ -129,7 +129,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
     }
 
-    func testMemoryWarningPreservesEligibleWarmRuntimesAndInactivePlans() throws {
+    func testMemoryWarningReleasesEligibleWarmRuntimes() throws {
         let pool = makePool()
         let profiles = [
             makeProfile(name: "WarningWarmOne", policy: .warm),
@@ -153,13 +153,10 @@ final class WebAttentionLifecycleTests: XCTestCase {
 
         lifecycle.handleMemoryPressure(.warning)
 
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, profiles.count)
-        XCTAssertTrue(releasedSlotIDs.isEmpty)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
+        XCTAssertEqual(Set(releasedSlotIDs), Set(profiles.map(\.id)))
         for profile in profiles {
-            XCTAssertTrue(
-                pool.contains(slotID: profile.id),
-                "Warning pressure should not release eligible Warm runtime \(profile.name) before its TTL."
-            )
+            XCTAssertFalse(pool.contains(slotID: profile.id))
         }
     }
 
@@ -205,7 +202,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.state(for: profile.id), .generating)
     }
 
-    func testMemoryWarningPreservesAttentionProtectedAndEligibleWarm() throws {
+    func testMemoryWarningPreservesAttentionProtectedAndReleasesEligibleWarm() throws {
         let pool = makePool()
         let protected = makeProfile(name: "Protected", policy: .warm)
         let eligibleB = makeProfile(name: "EligibleB", policy: .warm)
@@ -226,14 +223,15 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.handleMemoryPressure(.warning)
 
         XCTAssertTrue(pool.contains(slotID: protected.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleB.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleC.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertFalse(pool.contains(slotID: eligibleB.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleC.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
     }
 
-    func testMemoryWarningPreservesEligibleAndAttentionProtectedWarm() throws {
+    func testMemoryWarningPreservesMediaProtectedAndReleasesEligibleWarm() throws {
         let pool = makePool()
-        let protected = makeProfile(name: "WarningProtected", policy: .warm)
+        var protected = makeProfile(name: "WarningMediaProtected", policy: .warm)
+        protected.backgroundMediaPolicy = .allowBackgroundAudio
         let eligibleB = makeProfile(name: "WarningB", policy: .warm)
         let eligibleC = makeProfile(name: "WarningC", policy: .warm)
         for profile in [protected, eligibleB, eligibleC] {
@@ -241,7 +239,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         }
         let lifecycle = makeLifecycle(
             pool: pool,
-            attentionProtectionQuery: { $0 == protected.id }
+            mediaPlayingQuery: { _, completion in completion(true) }
         )
 
         makeInactive(lifecycle, profile: protected)
@@ -250,9 +248,112 @@ final class WebAttentionLifecycleTests: XCTestCase {
         lifecycle.handleMemoryPressure(.warning)
 
         XCTAssertTrue(pool.contains(slotID: protected.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleB.id))
-        XCTAssertTrue(pool.contains(slotID: eligibleC.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertTrue(lifecycle.mediaProtectedIDs.contains(protected.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleB.id))
+        XCTAssertFalse(pool.contains(slotID: eligibleC.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
+    }
+
+    func testMemoryWarningPreservesActiveVisibleWarmRuntime() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "WarningActiveVisible", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(pool: pool)
+
+        lifecycle.setPanelVisible(true, activeProfile: profile)
+        lifecycle.activate(profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
+    }
+
+    func testMemoryWarningPreservesHotRuntime() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "WarningHot", policy: .hot)
+        _ = try pool.webView(for: profile)
+        let lifecycle = makeLifecycle(pool: pool)
+
+        makeInactive(lifecycle, profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+
+        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
+    }
+
+    func testMemoryWarningPreservesAttentionProtectedGeneratingAndReadyWarmRuntimes() throws {
+        let pool = makePool()
+        let generating = makeProfile(name: "WarningGenerating", policy: .warm)
+        let ready = makeProfile(name: "WarningReady", policy: .warm)
+        for profile in [generating, ready] {
+            _ = try pool.webView(for: profile)
+        }
+        let coordinator = WebAttentionCoordinator()
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            attentionProtectionQuery: { slotID in
+                coordinator.isAttentionProtected(slotID)
+            }
+        )
+
+        coordinator.apply(.generationStarted, for: generating.id)
+        makeInactive(lifecycle, profile: generating)
+
+        coordinator.apply(.generationStarted, for: ready.id)
+        makeInactive(lifecycle, profile: ready)
+        coordinator.apply(
+            .generationFinished(userVisible: false),
+            for: ready.id
+        )
+
+        lifecycle.handleMemoryPressure(.warning)
+
+        XCTAssertEqual(coordinator.state(for: generating.id), .generating)
+        XCTAssertEqual(coordinator.state(for: ready.id), .ready)
+        XCTAssertTrue(pool.contains(slotID: generating.id))
+        XCTAssertTrue(pool.contains(slotID: ready.id))
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 2)
+    }
+
+    func testMemoryWarningReleaseDiagnosticUsesWarningEligibilityReason() throws {
+        let pool = makePool()
+        let profile = makeProfile(name: "WarningDiagnostic", policy: .warm)
+        _ = try pool.webView(for: profile)
+        let writer = RuntimeDiagnosticInMemoryWriter()
+        let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
+        let lifecycle = makeLifecycle(
+            pool: pool,
+            diagnostics: diagnostics
+        )
+
+        makeInactive(lifecycle, profile: profile)
+        lifecycle.handleMemoryPressure(.warning)
+
+        let evaluation = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "slot_lifecycle.memory_pressure_slot"
+                    && $0.fields["action"] == nil
+            }
+        )
+        XCTAssertEqual(evaluation.fields["pressure_level"], .string("warning"))
+        XCTAssertEqual(evaluation.fields["release_eligible"], .bool(true))
+        XCTAssertEqual(
+            evaluation.fields["release_reason"],
+            .string("warning_pressure_eligible")
+        )
+
+        let completion = try XCTUnwrap(
+            writer.events.first {
+                $0.event == "slot_lifecycle.memory_pressure_slot"
+                    && $0.fields["action"] == .string("release_completed")
+            }
+        )
+        XCTAssertEqual(completion.fields["pressure_level"], .string("warning"))
+        XCTAssertEqual(completion.fields["release_eligible"], .bool(true))
+        XCTAssertEqual(
+            completion.fields["release_reason"],
+            .string("warning_pressure_eligible")
+        )
     }
 
     func testMemoryCriticalEvictsEligibleWarmButNotAttentionProtectedWarm() throws {

@@ -377,7 +377,10 @@ final class SlotLifecycleCoordinator {
         )
         switch level {
         case .warning:
-            break
+            evictInactiveWarmForMemoryPressure(
+                protectionBoundary: "memory_pressure_warning",
+                incidentContext: incidentContext
+            )
         case .critical:
             evictInactiveWarmForMemoryPressure(
                 protectionBoundary: "memory_pressure",
@@ -745,17 +748,17 @@ final class SlotLifecycleCoordinator {
             let plan = inactivePlans[slotID]
             let protection = protectionState(slotID: slotID)
             let visible = isVisibleSlot(slotID)
-            let policy = webViewPool.residencyPolicy(for: slotID)
-            let eligible = level == .critical
-                && policy == .warm
+            let policy = plan?.residencyPolicy ?? webViewPool.residencyPolicy(for: slotID)
+            let pressureLevel = level == .critical ? "critical" : "warning"
+            let resident = webViewPool.contains(slotID: slotID)
+            let eligible = policy == .warm
                 && plan != nil
+                && resident
                 && !visible
                 && !protection.media
                 && !protection.attention
             let reason: String
-            if level == .warning {
-                reason = "warning_no_eviction"
-            } else if policy != .warm {
+            if policy != .warm {
                 reason = "not_warm"
             } else if visible {
                 reason = "visible"
@@ -765,14 +768,17 @@ final class SlotLifecycleCoordinator {
                 reason = "attention_protected"
             } else if plan == nil {
                 reason = "no_pending_release_plan"
+            } else if !resident {
+                reason = "not_resident"
             } else {
-                reason = "eligible"
+                reason = "\(pressureLevel)_pressure_eligible"
             }
 
             var fields = incidentContext.fields(phase: .trigger)
             fields.merge([
                 "slot_id": .string(slotID.uuidString),
-                "level": .string(level == .critical ? "critical" : "warning"),
+                "level": .string(pressureLevel),
+                "pressure_level": .string(pressureLevel),
                 "residency_policy": .string(policy?.rawValue ?? "unknown"),
                 "is_active": .bool(activeSlotID == slotID),
                 "is_visible": .bool(visible),
@@ -832,12 +838,18 @@ final class SlotLifecycleCoordinator {
         cancelInactivePlan(slotID: slotID)
         onRuntimeReleased(currentPlan.profile)
         if let memoryPressureIncident {
+            let pressureLevel = memoryPressureIncident.trigger
+            let releaseReason = pressureLevel == "warning"
+                ? "warning_pressure_eligible"
+                : "critical_pressure_eligible"
             var fields = memoryPressureIncident.fields(phase: .recovery)
             fields.merge([
                 "slot_id": .string(slotID.uuidString),
+                "pressure_level": .string(pressureLevel),
+                "release_eligible": .bool(true),
                 "decision": .string("release"),
                 "action": .string("release_completed"),
-                "release_reason": .string("critical_pressure_eligible")
+                "release_reason": .string(releaseReason)
             ]) { _, new in new }
             diagnostics.record(
                 event: "slot_lifecycle.memory_pressure_slot",

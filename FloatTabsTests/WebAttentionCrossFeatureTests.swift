@@ -1826,14 +1826,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
-        // Warning pressure is diagnostic only; critical pressure evicts the
-        // eligible Warm runtimes but never the Generating-protected runtime.
+        // Warning pressure accelerates release for eligible Warm runtimes but
+        // never the Generating-protected runtime.
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
-        XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
+        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
+        XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
-        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
+        XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 1)
 
+        // Critical pressure keeps the same protection boundary for the
+        // remaining Generating runtime.
         lifecycle.handleMemoryPressure(.critical)
         XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
         XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
@@ -1916,8 +1918,8 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
 
         lifecycle.handleMemoryPressure(.warning)
-        XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
-        XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
+        XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
+        XCTAssertFalse(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
 
         // Critical pressure evicts eligible runtimes but cannot take Ready.
