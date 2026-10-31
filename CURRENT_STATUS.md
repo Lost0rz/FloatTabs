@@ -6,18 +6,18 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 0 CONTROL FREEZE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 PRE-IMPLEMENTATION AUDIT**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 0 CONTROL-DOCS PR`.
+Current execution state: `ACTIVE / PHASE 1 FOCUSED READ-ONLY AUDIT`.
 
-No Runtime product mutation is authorized by the current Phase 0 state.
+No Runtime product mutation is authorized until the Phase 1 audit freezes an exact implementation boundary in repository Authority and a concise construction card is issued.
 
 ## Canonical / current state
 
 ```text
-PRODUCT_BASELINE_MAIN=26d1669198a6f94faa769fb27d2cd00d0fcd1184
+PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
 PR_162=MERGED
 PR_162_MERGE_COMMIT=26d1669198a6f94faa769fb27d2cd00d0fcd1184
 JSC_ROOT_CAUSE=UNKNOWN
@@ -26,13 +26,18 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 
 ACTIVE_PROGRAM=FT-RUNTIME-LIFECYCLE-MEMORY-001
-CURRENT_PHASE=PHASE_0_AUTHORITY_CONTRACT_FREEZE
-PHASE_0_BRANCH=codex/ft-runtime-lifecycle-memory-001-phase0-docs
-PHASE_0_PR=#163 OPEN / DRAFT / UNMERGED
-PRODUCT_CODE_CHANGED_IN_PHASE_0=NO
+PHASE_0_PR=#163 MERGED
+PHASE_0_PR_HEAD=546963e13c3a259bbb3e484d74d144910c48c39f
+PHASE_0_MERGE_COMMIT=18d9d8a0a0c07f4f6547907cfaae043741346080
+PHASE_0_REQUIRED_CI_RUN=41202810371 PASS
+PHASE_0_PRODUCT_CODE_CHANGED=NO
+CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_AUDIT
+CURRENT_PRODUCT_MUTATION=NOT_AUTHORIZED
 ```
 
 PR #162 is no longer an active development PR. Its bounded multi-runtime corrective/diagnostic work is part of `main`. The previously waived Air soak remains a waiver rather than a PASS, and the historical JSC/WebContent causal claim remains unknown.
+
+PR #163 completed the Phase 0 authority/contract freeze. It contained only the six authorized control/architecture Markdown files, passed `Build & Test (Apple Silicon arm64)`, had no submitted reviews or unresolved review threads, and merged as `18d9d8a0a0c07f4f6547907cfaae043741346080`.
 
 ## Accepted program contract
 
@@ -43,7 +48,7 @@ The accepted/frozen target architecture and phase order are defined by:
 - `docs/architecture/DOMAIN_MAP.md`
 - `AGENTS.md`
 
-The new contract is being delivered through Phase 0 PR #163 because protected `main` requires the repository-host `Build & Test (Apple Silicon arm64)` gate.
+The contract is now part of `main` and is the durable cross-conversation authority for this program.
 
 ### Frozen target direction
 
@@ -79,21 +84,21 @@ Accepted high-level decisions:
 ## Frozen phase sequence
 
 ```text
-Phase 0  Authority / contract freeze
-Phase 1  Safe Hibernate + Restore
-Phase 2  Ready / Unread decoupling
-Phase 3  Native ChatGPT Completion Notification
-Phase 4  Automatic Runtime Budget / Policy
-Phase 5  Long-running Background Generation Thrift
-Phase 6  Perceived-fast Restore
-Phase 7  Optional server-push / service-worker research
+Phase 0  Authority / contract freeze                         COMPLETE
+Phase 1  Safe Hibernate + Restore                            AUDIT ACTIVE
+Phase 2  Ready / Unread decoupling                           NOT STARTED
+Phase 3  Native ChatGPT Completion Notification              NOT STARTED
+Phase 4  Automatic Runtime Budget / Policy                   NOT STARTED
+Phase 5  Long-running Background Generation Thrift           NOT STARTED
+Phase 6  Perceived-fast Restore                              NOT STARTED
+Phase 7  Optional server-push / service-worker research      NOT STARTED
 ```
 
 The dependency order is frozen by the accepted contract. A material change requires evidence, task reconciliation, and a contract revision before product mutation.
 
 ## Development rhythm
 
-Every implementation phase after Phase 0 follows:
+Every implementation phase follows:
 
 ```text
 READ AUTHORITIES
@@ -124,23 +129,11 @@ The pre-program architecture audit established the following direction-setting f
 
 These are design inputs, not proof that Phase 1 is already implemented or that hibernation will necessarily reclaim the expected memory.
 
-## Next gate
+## Current gate — Phase 1 focused pre-implementation audit
 
-### Gate 0A — finish Phase 0 PR
+The next work is **read-only audit**, not implementation.
 
-PR #163 must:
-
-- contain only control/architecture documentation changes;
-- align `AGENTS.md`, `CURRENT_STATUS.md`, `CURRENT_TASK.md`, architecture navigation, and the frozen lifecycle contract;
-- pass required repository-host checks;
-- receive a final read-only diff/Authority audit;
-- merge before Runtime product work begins.
-
-### Gate 1A — Phase 1 focused pre-implementation audit
-
-After Phase 0 merges, the next authorized work is **read-only audit**, not implementation.
-
-The Phase 1 audit must freeze:
+The audit must freeze:
 
 - complete `WebViewPool` create/reuse/rebuild/release retain graph;
 - all `SlotLifecycleCoordinator` release callers and ordering;
@@ -153,7 +146,18 @@ The Phase 1 audit must freeze:
 - exact regression-test gaps;
 - a memory/restore benchmark plan and STOP criteria.
 
-Only after that audit updates the task with a concrete Phase 1 implementation boundary may a concise construction card be issued.
+The audit output must identify the exact Phase 1 product files/symbols to change, exact tests to add/update, explicit non-goals, benchmark method, and STOP conditions. Only then may `CURRENT_TASK.md` move to `PHASE 1 IMPLEMENTATION` and a concise local construction card be issued.
+
+## Phase 1 primary evidence gate
+
+```text
+Does clean WKWebView reclamation produce a meaningful and repeatable memory reduction
+without breaking Browser Profile/session/product-state invariants?
+```
+
+If **YES**, Phase 1 implementation may proceed after task reconciliation.
+
+If **NO / UNKNOWN**, STOP the policy rollout and investigate teardown retention / WebKit process residency first. Do not proceed to Phase 2/3/4 on an unproven reclamation mechanism.
 
 ## Program STOP conditions
 
@@ -171,6 +175,6 @@ STOP rather than continue when:
 ## Follow-ups / non-claims
 
 - Historical JSC root cause remains `UNKNOWN`.
-- PR #162 is merged, but no newer public release is authorized by this program yet.
+- No newer public release is authorized by this program yet.
 - No claim is made yet that a particular resident-runtime budget (1/2/3 etc.) is correct; that number is benchmark-gated.
 - No claim is made that ChatGPT generation can survive WebView destruction; optional server-push research is future-only.
