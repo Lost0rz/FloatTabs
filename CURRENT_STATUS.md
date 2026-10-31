@@ -1,6 +1,6 @@
 # FloatTabs Current Status
 
-**Status date:** 2026-10-30
+**Status date:** `2026-10-31`
 **Repository:** `Lost0rz/FloatTabs`
 **Default branch:** `main`
 
@@ -8,11 +8,11 @@
 
 **MODE: JSC / WEBCONTENT MULTI-RUNTIME PRESSURE INVESTIGATION**
 
-Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / AUTHORIZED`.
+Current task: `FT-JSC-MULTI-RUNTIME-002` — `ACTIVE / CORRECTIVE AUTHORIZED`.
 
-PR #161 (`FT-JSC-RUNTIME-STABILITY-001`) is closed `ARCHIVE-ONLY / UNMERGED`. Its `2s -> 5s` watchdog experiment reduced periodic workload but did not eliminate WebContent crash reproduction and must not be treated as production state.
+PR #161 is closed `ARCHIVE-ONLY / UNMERGED`. Its watchdog `2s -> 5s` experiment reduced periodic work but did not eliminate WebContent crashes and is not production state.
 
-## Canonical baseline
+## Canonical / active state
 
 ```text
 MAIN=26c81d83d3bdd771e98e355337b78622e2b25b17
@@ -20,11 +20,19 @@ ACTIVE_BRANCH=codex/ft-jsc-multi-runtime-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
-PREDECESSOR_PR_161=CLOSED / ARCHIVE_ONLY / UNMERGED
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-`AGENTS.md` was reviewed for this task transition; no durable project-rule change was required.
+The exact-head Air-soak artifact used for the latest evidence was:
+
+```text
+SOAK_SOURCE_REVISION=ca46c3fad6bb7c7c106fb8cbbdf7fbde89da3120
+SOAK_SOURCE_REVISION_EXACT=true
+SOAK_DMG_SHA256=e67d277c6d0287d58f04566b094da8cffde6626e45588f02b754cc29f256339e
+VERSION=0.5.8
+BUILD=26
+ARCH=arm64
+```
 
 ## Confirmed historical native family
 
@@ -34,117 +42,125 @@ SIGNAL=SIGSEGV
 COMMON_FAULT_ADDRESS=0x48
 COMMON_FAULT_SYMBOL=llint_entry_osr_function_for_call+120
 ASYNC_PATH=async-generator / async-iterator / microtask
-SAME_HISTORICAL_JSC_CRASH_FAMILY=YES
 JSC_EXACT_TRIGGER=UNKNOWN
 JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-## Negative predecessor experiment
+## PR #162 diagnostic-only measurement result
 
-PR #161 exact QA build reproduced six system-confirmed WebContent crashes after the generation liveness watchdog cadence was reduced from 2 seconds to 5 seconds.
-
-```text
-SYSTEM_CONFIRMED_WEBCONTENT_CRASHES=6/6
-CHATGPT_GENERATING_AT_TERMINATION=6/6
-ATTENTION_PROTECTED_AT_TERMINATION=6/6
-ACTIVE_SLOT_TERMINATIONS=1
-INACTIVE_SLOT_TERMINATIONS=5
-HOT_TERMINATIONS=2
-WARM_TERMINATIONS=4
-WATCHDOG_2S_TO_5S_ELIMINATED_CRASH=NO
-WATCHDOG_CADENCE_AS_PRIMARY_CAUSE=WEAKENED
-```
-
-All six were classified by WebKit as `reason=Crash`. No new optimized-soak `.ips` persisted because each ReportCrash type-309 attempt failed with `Log limit exceeded`.
-
-## Resource / clustering update
+PR #162 added read-only resident Attention counters:
 
 ```text
-ELEVATED_WEBCONTENT_FOOTPRINT_COMMON=YES
-SYSTEM_VM_PRESSURE_CRITICAL_REQUIRED_FOR_CRASH=NO
-MEMORY_PRESSURE_ROOT_CAUSE=UNKNOWN
-MULTI_SLOT_CRASH_CLUSTER_1=~18.4s
-MULTI_SLOT_CRASH_CLUSTER_2=~1.6s
+resident_attention_generating_count
+resident_attention_ready_count
+resident_attention_protected_count
 ```
 
-Critical system VM pressure was not observed before most crashes, so it is not a required observed trigger. The strongest next evidence axis is the combination of multiple long-lived ChatGPT runtimes, concurrent generation, Attention protection, and shared/system resource pressure.
+No generation, Attention/Unread, residency, recovery, Browser Profile, session or user-data semantics were changed by that measurement step.
 
-This remains correlation, not a causal claim.
+### Latest Air soak window
 
-## Active investigation direction
-
-The new task must first map:
+Uploaded runtime logs cover one continuous session:
 
 ```text
-simultaneous generating ChatGPT Slots
-× Attention-protected runtime count
-× WKWebView / WebContent / process-pool / data-store topology
-× per-Slot repeated FloatTabs-owned work
-× long-lived residency
-× non-protected runtime footprint under shared pressure
-× clustered termination timing
+SESSION_ID=E5464F6C-550B-4792-A7A8-3035874D9266
+UTC_WINDOW=2026-10-30T23:48:51Z -> 2026-10-31T01:38:30Z
+SOURCE_REVISION=ca46c3fad6bb7c7c106fb8cbbdf7fbde89da3120
+SOURCE_REVISION_EXACT=true
 ```
 
-The next product mutation, if any, must be one smallest evidence-supported intervention. Do not inherit PR #161's watchdog change by default.
-
-## Separate product follow-up
-
-Optimized-session logs and current code confirm that valid ChatGPT completions occurring while the Slot is actually presented intentionally skip persistent unread/red-dot state.
+Three FloatTabs-recorded WebContent terminations occurred:
 
 ```text
-ACTIVE_VISIBLE_COMPLETION_NO_RED_DOT=CONFIRMED_CURRENT_SEMANTICS
-PRODUCT_SEMANTIC_CHANGE_REQUIRED_IF_RED_DOT_SHOULD_ALWAYS_APPEAR=YES
-SEPARATE_FROM_RUNTIME_TASK=YES
+01:21:15Z  slot FA6B82CF...  generating=true  attention_protected=true
+            resident_generating=1  resident_ready=0  resident_protected=1
+
+01:25:17Z  slot 1FA8BE8B...  generating=true  attention_protected=true
+            resident_generating=2  resident_ready=0  resident_protected=2
+
+01:25:41Z  slot 8F6BC8A6...  generating=true  attention_protected=true
+            resident_generating=2  resident_ready=0  resident_protected=2
 ```
 
-No red-dot semantic change is authorized in `FT-JSC-MULTI-RUNTIME-002`.
-
-## Local PRE_AUDIT result (2026-10-30)
+Interpretation:
 
 ```text
-PRE_AUDIT=PASS
-SAFE_BOUNDED_INTERVENTION=NONE
-INTERVENTION=DIAGNOSTICS_ONLY
+SINGLE_GENERATING_CRASH_REPRODUCED=YES
+MULTI_GENERATING_REQUIRED_FOR_CRASH=NO
+MULTI_GENERATING_CLUSTER_CORRELATION=SUPPORTED
+JSC_ROOT_CAUSE=UNKNOWN
 ```
 
-The production topology is one app-owned `WebViewPool`, one native
-`WebAttentionCoordinator`, one `SlotLifecycleCoordinator`, one diagnostics
-writer queue and one shared `DownloadCoordinator`, with one pooled `WKWebView`
-and one per-Slot bridge/navigation observer for each resident Slot. FloatTabs
-does not assign an explicit `WKProcessPool`; each WebView receives the
-Browser-Profile-mapped `WKWebsiteDataStore`. WebKit therefore owns the actual
-WebContent process placement, and public APIs do not provide stable child-PID
-attribution.
+The second and third incidents were different Slots about 24 seconds apart. At the second incident two resident Slots were generating. After that Slot recovered/re-entered generation, the other still-generating Slot terminated about 24 seconds after the first clustered incident and about 7 seconds after dual generation resumed.
 
-Each generating protected Slot adds its own document observer/bridge state,
-coalesced DOM state reads, bounded liveness watchdog/probes, navigation
-observer work and per-Slot lifecycle timers. The app-wide memory-pressure
-source and long-term coordinator are shared, while critical pressure only
-evicts eligible inactive, non-generating, non-Attention-protected runtimes.
-Clustered terminations therefore share FloatTabs global coordinators and
-queues, but current evidence does not establish a shared FloatTabs causal
-resource or a JSC root cause.
+Across 107 roughly minute-scale performance checkpoints in the two uploaded logs:
 
-The diagnostics-only change adds resident generating/ready/protected counts to
-incident snapshots, long-term checkpoints and `runtimeDiagnosticSnapshot()`.
-These counts distinguish single- versus multi-generating conditions without
-querying WebContent, altering Attention/Unread semantics, or changing
-residency/recovery decisions.
+```text
+resident_generating=0 : 44 checkpoints
+resident_generating=1 : 45 checkpoints
+resident_generating=2 : 18 checkpoints
+```
+
+Two-generating state therefore appeared in about 17% of checkpoint samples but contained 2/3 observed terminations. This is a small-sample correlation only, not causal or a reliable crash-rate estimate.
+
+No confirmed post-finish stall occurred in these two logs.
+
+## Memory-pressure evidence and newly bounded intervention
+
+The same Air session recorded seven app-level memory-pressure `warning` incidents on a 24 GiB host. Every warning evaluated five resident Slots and released none because current production logic intentionally classifies warning as `warning_no_eviction`.
+
+At every warning there was at least one, and often two, resident Slots that already met the same safety boundary used by critical-pressure eviction except for pressure severity itself:
+
+```text
+residency=warm
+inactive / not visible
+existing pending inactive release plan
+media_protected=false
+attention_protected=false
+```
+
+Observed warning-time safe-candidate counts:
+
+```text
+00:23:12Z -> 2
+00:27:52Z -> 1
+00:50:05Z -> 2
+00:57:13Z -> 2
+00:59:57Z -> 1
+01:18:31Z -> 2
+01:21:25Z -> 2
+```
+
+Current code behavior is explicit:
+
+```text
+memory pressure WARNING  -> diagnostics only; no eviction
+memory pressure CRITICAL -> evict eligible inactive warm unprotected runtimes
+```
+
+The soak therefore establishes a bounded product-owned pressure gap: FloatTabs receives repeated OS memory warnings while keeping inactive Warm runtimes resident even when they are already scheduled for release and have no visibility/media/Attention protection.
+
+This does **not** prove memory pressure is the JSC root cause. It does establish one safe single-variable mitigation opportunity that can lower nonessential long-lived WebContent residency without touching active or protected work.
 
 ## Current decision
 
 ```text
 ACTIVE_TASK=FT-JSC-MULTI-RUNTIME-002
 ACTIVE_PR=#162 OPEN / DRAFT / UNMERGED
-NEXT_GATE=REMOTE DELIVERY / EXACT-HEAD CI / QA ARTIFACT
-PRODUCT_CODE_CHANGE=DIAGNOSTICS_ONLY
-PRE_AUDIT=PASS
-SAFE_BOUNDED_INTERVENTION=NONE
-FOCUSED_TESTS=122/122 PASSED
-FULL_XCTEST=1059/1059 PASSED
-DEBUG_ARM64_BUILD=SUCCEEDED
-RELEASE_ARM64_BUILD=SUCCEEDED
-PR161=ARCHIVED_NEGATIVE_EXPERIMENT
-PRODUCTION_RELEASE=NOT_AUTHORIZED
+AIR_SOAK_DIAGNOSTIC_GATE=COMPLETED
+SAFE_BOUNDED_INTERVENTION=WARNING_PRESSURE_EARLY_WARM_RELEASE
+INTERVENTION_AUTHORIZED=YES
+TARGET=existing inactive Warm pending-release runtimes only
+ACTIVE_OR_VISIBLE_RELEASE=FORBIDDEN
+ATTENTION_OR_MEDIA_PROTECTED_RELEASE=FORBIDDEN
+HOT_RUNTIME_RELEASE=FORBIDDEN
+PROFILE_SESSION_USER_DATA_MUTATION=FORBIDDEN
 JSC_ROOT_CAUSE=UNKNOWN
+PRODUCTION_RELEASE=NOT_AUTHORIZED
 ```
+
+Next gate: implement exactly this one bounded warning-pressure release policy, preserve the current protection boundary, verify locally and remotely, produce a new exact-head QA DMG, then run another Air soak.
+
+## Separate product follow-up
+
+Active-visible ChatGPT completion currently intentionally suppresses persistent unread/red-dot state. That is a separate product-semantic task and remains out of scope for `FT-JSC-MULTI-RUNTIME-002`.
