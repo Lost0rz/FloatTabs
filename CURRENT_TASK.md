@@ -2,11 +2,11 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`
 **Title:** Runtime Lifecycle / Memory redesign — governed phased implementation
-**Status:** `ACTIVE / PHASE 0 CONTROL FREEZE`
-**Mode:** `CONTROL / DESIGN FREEZE`
+**Status:** `ACTIVE / PHASE 1 FOCUSED AUDIT`
+**Mode:** `AUDIT`
 **Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY`
-**Product baseline:** `26d1669198a6f94faa769fb27d2cd00d0fcd1184`
-**Active PR:** `#163` / `codex/ft-runtime-lifecycle-memory-001-phase0-docs`
+**Pre-program product baseline:** `26d1669198a6f94faa769fb27d2cd00d0fcd1184`
+**Phase 0 merge:** `18d9d8a0a0c07f4f6547907cfaae043741346080`
 **Frozen contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`
 **JSC root cause:** `UNKNOWN`
 
@@ -16,32 +16,45 @@ Reduce FloatTabs steady-state resource use while preserving the product promise 
 
 The accepted architecture treats live `WKWebView` instances as disposable/bounded Runtime cache only after safe capture/release/restore is proven. Persistent Slot configuration, Browser Profile website data, user sessions, durable unread state, preferences, backups, and recovery data remain outside Runtime lifetime.
 
-## Current authorization
+## Phase 0 closeout
 
-### Authorized now — Phase 0 only
+Phase 0 is complete.
 
-The current PR may change only control/design/navigation documentation required to freeze this program:
+```text
+PHASE_0_PR=#163 MERGED
+PHASE_0_PR_HEAD=546963e13c3a259bbb3e484d74d144910c48c39f
+PHASE_0_MERGE_COMMIT=18d9d8a0a0c07f4f6547907cfaae043741346080
+PHASE_0_REQUIRED_CI_RUN=41202810371 PASS
+PHASE_0_CHANGED_FILES=6 CONTROL/ARCHITECTURE MARKDOWN FILES ONLY
+PHASE_0_PRODUCT_CODE_CHANGED=NO
+REVIEWS=0
+UNRESOLVED_REVIEW_THREADS=0
+```
 
-- `AGENTS.md`;
-- `CURRENT_STATUS.md`;
-- `CURRENT_TASK.md`;
-- `docs/architecture/README.md`;
-- `docs/architecture/DOMAIN_MAP.md`;
-- `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`.
+The accepted contract, architecture routing, Domain Map updates, and durable phase/audit execution gate are now part of `main`.
 
-No product/runtime source mutation is authorized in Phase 0.
+## Current authorization — Phase 1 audit only
 
-### Automatically authorized after Phase 0 merge — Phase 1 audit only
+The only currently authorized work is a **focused read-only pre-implementation audit** for:
 
-Once PR #163 is merged and control alignment on `main` is verified, the next authorized work is a **focused read-only Phase 1 pre-implementation audit**.
+`Phase 1 — Safe Hibernate + Restore`
 
-That audit may read production source, tests, current runtime/benchmark seams, Apple/WebKit public API documentation, and relevant open-source references. It may update repository control/design documents to freeze the exact Phase 1 implementation boundary.
+The audit may:
 
-It may **not** mutate Runtime product code until this task is reconciled from `PHASE 1 AUDIT` to an explicit `PHASE 1 IMPLEMENTATION` boundary.
+- read current production source and tests;
+- inspect current Git/GitHub branch/PR/history evidence relevant to the lifecycle boundary;
+- inspect supported public Apple/WebKit API documentation;
+- inspect relevant open-source WebKit browser implementations for bounded reference evidence;
+- run/read non-mutating benchmarks or existing diagnostic seams where safe;
+- update repository control/design documents to freeze the exact Phase 1 implementation boundary.
+
+The audit may **not** mutate Runtime product code.
+
+Runtime product mutation becomes authorized only after this task is intentionally reconciled to `ACTIVE / PHASE 1 IMPLEMENTATION` with exact files/symbols, acceptance criteria, tests, benchmark plan, and STOP conditions.
 
 ## Accepted/frozen architecture direction
 
-The complete contract lives in `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`. The following summary is a routing aid only.
+The complete contract lives in `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`. The following is a routing summary only.
 
 ### Ownership
 
@@ -67,14 +80,14 @@ Persistent Slot / Browser Profile / durable unread
 ### Frozen phase order
 
 ```text
-0  Authority / contract freeze
-1  Safe Hibernate + Restore
-2  Ready / Unread decoupling
-3  Native ChatGPT Completion Notification
-4  Automatic Runtime Budget / Policy
-5  Long-running Background Generation Thrift
-6  Perceived-fast Restore
-7  Optional server-push / service-worker research
+0  Authority / contract freeze                         COMPLETE
+1  Safe Hibernate + Restore                            AUDIT ACTIVE
+2  Ready / Unread decoupling                           NOT STARTED
+3  Native ChatGPT Completion Notification              NOT STARTED
+4  Automatic Runtime Budget / Policy                   NOT STARTED
+5  Long-running Background Generation Thrift           NOT STARTED
+6  Perceived-fast Restore                              NOT STARTED
+7  Optional server-push / service-worker research      NOT STARTED
 ```
 
 No later phase may be pulled forward merely because it is easier to implement.
@@ -98,53 +111,82 @@ READ AUTHORITIES
 
 The concise construction card is not repository Authority and must not duplicate the full contract.
 
-## Phase 0 acceptance criteria
+## Phase 1 audit scope
 
-PR #163 is ready to close Phase 0 only when:
+Before issuing any construction card, establish all of the following from the current `main` implementation.
 
-1. PR #162 is recorded as merged at `26d1669198a6f94faa769fb27d2cd00d0fcd1184`;
-2. historical JSC root cause remains `UNKNOWN` and no crash-elimination claim is introduced;
-3. the lifecycle/memory contract is present and marked `ACCEPTED / FROZEN`;
-4. `AGENTS.md` contains the durable phase/audit execution gate;
-5. architecture README and Domain Map route future work to the frozen contract;
-6. STATUS and TASK clearly identify the current phase and next gate;
-7. the PR contains no product/runtime code change;
-8. required GitHub check `Build & Test (Apple Silicon arm64)` is not failing;
-9. final read-only diff/Authority audit finds no scope or ownership contradiction.
+### A. Runtime creation / reuse / rebuild / release ownership
 
-If these pass, mark PR #163 ready and merge using the repository's normal accepted merge method. Production release is not authorized by Phase 0.
+Map exactly:
 
-## Phase 1 focused audit contract
+- `WebViewPool.webView(for:)` creation path;
+- runtime reuse criteria;
+- Browser Profile identity compatibility checks;
+- rendering-profile rebuild criteria;
+- runtime generation / WebView instance identity updates;
+- `WebViewPool.release(slotID:)` teardown order;
+- all per-Slot maps/sidecars held by `WebViewPool`;
+- all production callers of release/rebuild paths.
 
-The first product phase is **Safe Hibernate + Restore**, but implementation is not yet authorized.
+Produce an explicit retain/ownership graph identifying which references must be severed before a released WebView can deallocate.
 
-Before issuing a construction card, the audit must establish all of the following.
+### B. Lifecycle / presentation ownership
 
-### Runtime ownership / teardown
+Audit:
 
-- exact `WebViewPool.webView(for:)` create/reuse/rebuild path;
-- exact `WebViewPool.release(slotID:)` teardown path and every retained sidecar keyed by Slot;
-- navigation delegate/observer invalidation;
-- Attention bridge invalidation;
-- Response bridge invalidation;
-- popup coordinator / UI delegate lifetime;
-- `WKUserContentController` script-message-handler cleanup;
-- pending async tasks, probe callbacks, timers, closures, and stale runtime/navigation generation rejection;
-- container/superview removal and any fullscreen/supplemental-visible reparenting boundary.
+- all `SlotLifecycleCoordinator` inactive-plan/release paths;
+- active / panel-visible / hidden-active-grace behavior;
+- fullscreen source ownership;
+- supplemental/companion visible profile ownership;
+- `WebPanelContainerView` detach/reparent behavior;
+- media protection and Attention protection interactions;
+- memory-pressure behavior inherited from PR #162.
 
-### Restore state
+No Phase 1 design may allow a currently visible/fullscreen/supplemental-visible Runtime to be reclaimed.
 
-Audit `WKWebView.interactionState` against the current macOS support baseline and FloatTabs runtime model:
+### C. Observer / bridge / async teardown
+
+Establish exact cleanup for:
+
+- `SlotNavigationObserver`;
+- navigation delegate ownership;
+- ChatGPT Attention bridge;
+- ChatGPT Response bridge;
+- popup coordinator / UI delegate;
+- `WKUserContentController` script-message handlers;
+- pending health/liveness/page-app probes;
+- pending Tasks/timers/callback closures;
+- stale runtime-generation/navigation-generation rejection.
+
+The audit must identify any reference that could retain the released WebView or accept a stale callback after replacement.
+
+### D. Restore snapshot feasibility
+
+Audit public `WKWebView.interactionState` behavior against FloatTabs' supported macOS baseline and current runtime configuration.
+
+Freeze the intended ordering for:
+
+```text
+capture state
+→ prepare release
+→ teardown live Runtime
+→ create fresh WKWebView with same Browser Profile/configuration
+→ install document-start scripts/bridges
+→ restore interactionState when valid
+→ URL fallback when state is absent/invalid
+```
+
+Determine:
 
 - capture timing;
-- type/availability behavior;
-- restore ordering relative to WebView creation, user scripts, Browser Profile data store and initial load;
-- navigation/back-forward/scroll behavior;
-- fallback to current URL when state is absent/invalid;
-- whether the snapshot stays memory-local in Phase 1;
-- invalidation when rendering profile / Browser Profile identity materially changes.
+- data type / availability behavior;
+- whether Phase 1 state remains memory-local;
+- invalidation rules when Browser Profile/rendering identity changes;
+- back/forward/scroll restoration expectations;
+- failure/fallback behavior;
+- whether restore can introduce duplicate navigation or stale callbacks.
 
-### Product/data invariants
+### E. Product / data safety
 
 Prove the proposed Phase 1 design does not implicitly mutate/delete:
 
@@ -154,9 +196,13 @@ Prove the proposed Phase 1 design does not implicitly mutate/delete:
 - durable unread state;
 - user preferences/backups/recovery material.
 
-### Tests / benchmark
+Website Cache cleanup must remain outside Runtime reclamation except for already-authorized explicit cache policy behavior.
 
-Freeze the exact regression additions and benchmark evidence before construction. At minimum cover:
+### F. Tests / benchmark gate
+
+Freeze exact regression additions and benchmark evidence before construction.
+
+Minimum intended coverage:
 
 - create → capture → release → recreate → restore;
 - stale callback rejection across runtime generation change;
@@ -166,11 +212,28 @@ Freeze the exact regression additions and benchmark evidence before construction
 - active/fullscreen/supplemental-visible protection;
 - release order and bridge/observer cleanup;
 - URL fallback when interaction state is unavailable;
-- 1/2/4/8 configured Slot memory matrix where feasible;
-- pre-release, post-release (+ bounded settle window), and post-restore memory evidence;
-- restore latency / visible correctness.
+- 1 / 2 / 4 / 8 configured Slot memory matrix where feasible;
+- pre-release, post-release after a bounded settle window, and post-restore memory evidence;
+- restore latency and visible interaction correctness.
 
 Do not claim exact per-Slot WebContent memory when public WebKit evidence cannot prove the mapping.
+
+## Required Phase 1 audit output
+
+The audit must end with a repository-authorized implementation contract containing:
+
+1. exact production files/symbols to change;
+2. files/symbols explicitly out of scope;
+3. exact ownership/teardown sequence;
+4. restore snapshot shape and lifetime;
+5. exact tests to add/update;
+6. benchmark method and measurements;
+7. acceptance criteria;
+8. STOP conditions;
+9. rollback/recovery boundary;
+10. confirmation that Phase 2+ semantics are not included.
+
+Only after those facts are frozen in `CURRENT_TASK.md` / linked contract may a concise local construction card be issued.
 
 ## Phase 1 primary decision gate
 
@@ -181,7 +244,7 @@ Does clean WKWebView reclamation produce a meaningful and repeatable memory redu
 without breaking Browser Profile/session/product-state invariants?
 ```
 
-If **YES**, Phase 1 implementation can be frozen and a concise construction card can be issued.
+If **YES**, reconcile this task to `PHASE 1 IMPLEMENTATION` and issue the bounded construction card.
 
 If **NO / UNKNOWN**, STOP the lifecycle-policy rollout and investigate teardown retention / WebKit process residency first. Do not proceed to Phase 2/3/4 on the assumption that release is an effective memory mechanism.
 
@@ -197,30 +260,28 @@ Do not:
 - introduce manual permanent `WKProcessPool` topology as the primary optimization;
 - make Diagnostics or Attention a competing Runtime writer;
 - conflate durable unread with runtime Attention;
-- claim the historical JSC root cause is fixed because memory/reclamation behavior improves.
+- claim the historical JSC root cause is fixed because memory/reclamation behavior improves;
+- include Phase 2 Ready/Unread semantic changes in the Phase 1 implementation.
 
 ## STOP conditions
 
 STOP and reconcile before product mutation if:
 
-1. PR #163 is not merged / its control state is stale;
-2. the frozen contract needs a material change;
-3. Browser Profile/session/user-data safety cannot be preserved;
-4. exact Web Runtime ownership/teardown cannot be established;
-5. unknown overlapping unique work exists in the relevant lifecycle area;
-6. a required repository-host gate is failing;
-7. the proposed implementation depends on unsupported/private WebKit behavior for correctness;
-8. Phase 1 evidence does not support meaningful memory reclamation;
-9. implementation would cross into Phase 2+ semantics before Phase 1 closes.
+1. the frozen contract needs a material change;
+2. Browser Profile/session/user-data safety cannot be preserved;
+3. exact Web Runtime ownership/teardown cannot be established;
+4. unknown overlapping unique work exists in the relevant lifecycle area;
+5. a required repository-host gate is failing;
+6. the proposed implementation depends on unsupported/private WebKit behavior for correctness;
+7. Phase 1 evidence does not support meaningful memory reclamation;
+8. implementation would cross into Phase 2+ semantics before Phase 1 closes.
 
 ## Next action
 
-1. Complete PR #163 control/docs-only diff.
-2. Run repository-host checks and independent read-only audit.
-3. Merge PR #163 if Phase 0 acceptance passes.
-4. Verify `main` control alignment.
-5. Enter **Phase 1 focused read-only pre-implementation audit**.
-6. Update this task with exact Phase 1 implementation scope/tests/STOP conditions.
-7. Only then issue the concise local construction card.
+Perform the Phase 1 focused read-only audit. When the evidence is complete:
+
+1. update `CURRENT_STATUS.md` with the verified findings;
+2. reconcile this task to an exact `PHASE 1 IMPLEMENTATION` boundary or STOP disposition;
+3. if implementation is authorized, issue one concise local execution card that points back to repository Authority instead of duplicating it.
 
 Production release is not authorized by this task state.
