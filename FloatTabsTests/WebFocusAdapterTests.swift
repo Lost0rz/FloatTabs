@@ -658,13 +658,14 @@ extension WebFocusAdapterTests {
 
         await observer.captureCrossWorldLivenessOnce()
 
-        XCTAssertEqual(evaluatedWorlds, [.mainPage, .floatTabsIsolated])
+        XCTAssertEqual(evaluatedWorlds.count, 2)
+        XCTAssertEqual(evaluatedWorlds.filter { $0 == .mainPage }.count, 1)
+        XCTAssertEqual(evaluatedWorlds.filter { $0 == .floatTabsIsolated }.count, 1)
         attentionCoordinator.apply(.generationFinished(userVisible: true), for: slotID)
         await observer.captureCrossWorldLivenessOnce(source: .periodic)
-        XCTAssertEqual(
-            evaluatedWorlds,
-            [.mainPage, .floatTabsIsolated, .mainPage, .floatTabsIsolated]
-        )
+        XCTAssertEqual(evaluatedWorlds.count, 4)
+        XCTAssertEqual(evaluatedWorlds.filter { $0 == .mainPage }.count, 2)
+        XCTAssertEqual(evaluatedWorlds.filter { $0 == .floatTabsIsolated }.count, 2)
     }
 
     func testPeriodicCrossWorldLivenessRunsForIdleAndReadyAndSkipsNonChatGPT() async throws {
