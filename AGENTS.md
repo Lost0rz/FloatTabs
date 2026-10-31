@@ -109,6 +109,8 @@ Before each implementation phase:
 
 After implementation, run focused verification and independent audit before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
 
+Use phase-local verification. A structural phase should prove the ownership/lifecycle primitive, data safety, regressions and bounded real-runtime behavior needed for that phase. Do not make later policy/tuning-scale benchmarks blocking merely because they are measurable; defer them to the phase that actually uses those measurements unless the current accepted contract says the earlier decision depends on them.
+
 ### During
 
 Do not expand the task for adjacent issues. Record material non-blocking items as Follow-ups in `CURRENT_STATUS.md`; they become executable only through a future task authorization.
