@@ -6,18 +6,19 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 AUDIT COMPLETE / PLAN FREEZE**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 IMPLEMENTATION AUTHORIZED**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 1 PLAN PR`.
+Current execution state: `ACTIVE / PHASE 1 IMPLEMENTATION`.
 
-Runtime product mutation is **NOT YET AUTHORIZED**. The Phase 1 focused read-only audit is complete and its exact implementation contract is being frozen in PR #167. Product mutation starts only after that plan merges, Control Alignment moves `CURRENT_TASK.md` to `PHASE 1 IMPLEMENTATION`, and a concise construction card is issued.
+The Phase 1 focused audit and implementation-plan freeze are complete. Product mutation is now authorized only within the exact Phase 1 scope defined below and in the frozen Phase 1 plan.
 
 ## Canonical / current state
 
 ```text
-AUDIT_BASE_MAIN=1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088
+MAIN_AFTER_PHASE1_PLAN=672f7122f352f6cfb1704109db6488519480c628
+PHASE_1_AUDIT_BASE=1ba0ec7fe70c3d8a6fd42d586dcc813ed87d9088
 PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
 PR_162=MERGED
 JSC_ROOT_CAUSE=UNKNOWN
@@ -29,15 +30,17 @@ ACTIVE_PROGRAM=FT-RUNTIME-LIFECYCLE-MEMORY-001
 PHASE_0_CONTRACT_FREEZE=COMPLETE
 HISTORICAL_DOC_GATE=COMPLETE
 PHASE_1_FOCUSED_AUDIT=COMPLETE
-PHASE_1_PLAN=docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md
-PHASE_1_PLAN_PR=#167 OPEN / DRAFT / UNMERGED
-CURRENT_PRODUCT_MUTATION=NOT_AUTHORIZED
-OPEN_PRS_BEFORE_PHASE1_PLAN=0
+PHASE_1_PLAN_PR=#167 MERGED
+PHASE_1_PLAN_PR_HEAD=77508a34bf800199b55c78586c98cf132d4d8bca
+PHASE_1_PLAN_MERGE=672f7122f352f6cfb1704109db6488519480c628
+PHASE_1_PLAN_REQUIRED_CI_RUN=41209314609 PASS
+CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_IMPLEMENTATION
+PRODUCT_MUTATION=AUTHORIZED_WITHIN_FROZEN_PHASE1_SCOPE
 ```
 
-## Documentation / Authority
+## Current Authority
 
-Use:
+Read in this order:
 
 ```text
 AGENTS.md
@@ -50,90 +53,105 @@ AGENTS.md
 → current source/tests/fresh evidence
 ```
 
-The repository-wide historical-document reconciliation is complete. Historical Stage/design/audit/plan wording cannot override current Authority.
+## Phase 1 implementation target
 
-## Phase 1 audit verdict
-
-**VERDICT: IMPLEMENTATION DESIGN IS SUFFICIENT TO FREEZE.**
-
-The audit found no need to rewrite the whole Web container architecture. Phase 1 can remain bounded to the Web Runtime mechanism/lifecycle boundary.
-
-### Key audited facts
-
-1. `WebViewPool` already separates live `WKWebView` runtime from persistent Slot/Profile data.
-2. `BrowserProfileDataStoreProvider` resolves persistent Default/custom `WKWebsiteDataStore` independently from Runtime lifetime.
-3. current `release(slotID:)` removes runtime maps/bridges/observers but is not a complete hibernation primitive: it does not capture `interactionState`, explicitly `stopLoading`, explicitly clear delegates, explicitly invalidate the navigation KVO token, or clear `pendingTerminationIncidentContexts`.
-4. current lifecycle release order is correct: final protection checks → preparation → container detach → Pool teardown → callback.
-5. current `release()` has destructive callers (Slot deletion, stored-state/profile replacement, cache preparation, rebuild/recovery). It must not be globally redefined as hibernate.
-6. Phase 1 therefore requires an explicit semantic split:
+Implement a safe semantic split:
 
 ```text
-hibernate(slotID:) = capture bounded restore state + deterministic teardown
-release(slotID:)   = clear restore state + deterministic destructive teardown
+hibernate(slotID:)
+  capture compatible opaque WKWebView interaction state
+  → deterministic teardown
+  → keep one memory-local restore snapshot
+
+release(slotID:)
+  clear pending restore state
+  → deterministic destructive teardown
 ```
 
-7. only normal inactive lifecycle reclamation / eligible critical Warm pressure switches to `hibernate`; destructive callers remain destructive.
-8. public `WKWebView.interactionState` is available on macOS 12+ and is explicitly intended to restore back-forward list/current page/scroll/form state to another WebView. FloatTabs macOS 13+ baseline is compatible.
-9. the interaction state must remain opaque and memory-local in Phase 1; it is never persisted/logged.
-10. `WebPanelContainerView`, `WebSlotHostView`, `WebFocusRouter.currentWebView`, and Fullscreen source observed WebView references are weak. There is currently no evidence requiring Phase 1 changes in Panel/Fullscreen/Focus.
-11. ChatGPT Attention/Response bridges already use weak WebView references and explicit invalidation; stale async probe paths already validate runtime/WebView/navigation identity.
-12. `SlotNavigationObserver` needs an explicit idempotent invalidation seam so KVO/tasks are stopped deterministically instead of depending on deinit timing.
-13. current Cold release may trigger Website Cache cleanup, but cleanup is limited to disk/memory/fetch caches and excludes login/session data. Primary Phase 1 memory benchmark will use Warm release to avoid cache-cleanup confounding.
-14. the existing Debug benchmark control channel and lifecycle benchmark already capture process-tree RSS/CPU, helper counts and exact resident Slot count; no second benchmark control plane is needed.
+Only normal eligible inactive lifecycle reclamation, including eligible critical Warm memory pressure, switches to hibernate.
 
-## Frozen Phase 1 implementation scope
+All destructive callers remain destructive.
 
-Expected production changes are limited to:
+## Authorized production files
 
 - `FloatTabs/Web/WebViewPool.swift`
 - `FloatTabs/Web/SlotLifecycleCoordinator.swift`
 - `FloatTabs/Web/SlotNavigationObserver.swift`
 
-Expected tests/tooling are limited to:
+## Authorized tests / benchmark tooling
 
 - `FloatTabsTests/WebViewPoolTests.swift`
 - `FloatTabsTests/WebAttentionLifecycleTests.swift`
 - `FloatTabsTests/WebFocusAdapterTests.swift` only if needed for the narrow observer invalidation fixture
-- `tools/benchmark/floattabs_lifecycle_benchmark.py` only if Phase 1 reporting needs adaptation
-- `tools/benchmark/README.md` only for the accepted Phase 1 benchmark runbook
+- `tools/benchmark/floattabs_lifecycle_benchmark.py` only if Phase 1 matrix/reporting needs adaptation
+- `tools/benchmark/README.md` only for the Phase 1 runbook
 
-Full exact behavior/tests/benchmark/STOP conditions are frozen in the Phase 1 plan.
+Control/design documents may be updated only for factual progress/evidence.
 
-## Explicit Phase 1 non-scope
+## Key invariants
 
-Do not change in Phase 1 unless a STOP condition forces task reconciliation:
+- Browser Profile / `WKWebsiteDataStore` identity and persistent session data remain independent from Runtime lifetime.
+- `WKWebView.interactionState` remains opaque and memory-local; never persist or log contents.
+- compatible interaction-state restore must not also issue a competing ordinary URL load.
+- missing/incompatible state uses the existing currentURL/home fallback.
+- deterministic teardown explicitly invalidates bridges/popup/navigation observer, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination incident context, and removes the old runtime identity.
+- restored Runtime receives a fresh runtime generation/WebView instance identity.
+- current active/fullscreen/supplemental-visible/media/Attention protection remains unchanged.
+- current Generating/Ready protection remains unchanged in Phase 1.
+- Cold website-cache cleanup semantics remain separate and unchanged.
 
-- Ready/Unread semantics;
-- ChatGPT completion notification;
-- Hot/Warm/Cold UI/timings;
-- automatic Runtime Budget/ranking;
-- Browser Profile persistence/schema;
-- Website Cache data types/policy;
+## Phase 1 validation gate
+
+Implementation is not accepted merely because tests compile.
+
+Required evidence includes:
+
+1. focused regression tests for hibernate/restore, destructive release, compatibility invalidation, teardown and stale callbacks;
+2. existing Browser Profile/Attention/lifecycle/diagnostics/build suites remain green;
+3. controlled 1/2/4/8 Slot runtime benchmark using existing Debug lifecycle tooling;
+4. primary memory evidence uses Warm release to avoid Cold cache-cleanup confounding;
+5. resident runtime count drops exactly for eligible hibernated Slots;
+6. protected/visible runtimes remain resident;
+7. heavy 4/8 scenario process-tree reclaimed-memory signal is positive/repeatable and median exceeds `2×` same-family no-op/control drift;
+8. paired compatible interaction-state restore does not regress median versus URL fallback by more than `max(20%, 300 ms)`;
+9. manual macOS acceptance preserves Profile login/session, same conversation, sane history/scroll/form state, no visible double-load, and no focus/fullscreen regression.
+
+If logical residency falls but memory stays within control noise, verdict is `FAIL / UNKNOWN` and Phase 2+ does not begin.
+
+## Explicit non-scope
+
+Do not modify without STOP/reconciliation:
+
 - Panel/Fullscreen/Focus product semantics;
+- Browser Profile datastore behavior/schema;
+- Attention Generating/Ready semantics;
+- durable Unread semantics;
+- completion notifications;
+- Hot/Warm/Cold UI or timer values;
+- automatic Runtime Budget/ranking;
+- Website Cache policy/data types;
 - process-pool topology;
-- server Push;
-- recent-conversation native preview.
+- server Push/service-worker behavior;
+- native conversation preview.
 
-## Primary implementation/validation gate
+## Execution / handoff state
 
-After implementation, Phase 1 only passes if controlled evidence shows:
+The next action is local Phase 1 implementation using one concise construction card that references the frozen Phase 1 plan rather than duplicating it.
 
-- logical resident runtime count falls exactly for eligible hibernated Slots;
-- protected/visible Slots remain resident;
-- process-tree memory reduction for multiple heavy runtimes is positive/repeatable and larger than 2× the measured no-op/control drift;
-- restore creates one new runtime, preserves Profile/session/product invariants, and does not issue a competing URL load on compatible interaction-state restore;
-- paired restore timing does not regress versus URL fallback by more than `max(20%, 300 ms)` in median;
-- all required tests/CI/manual acceptance pass.
+The executor must:
 
-If runtime count falls but memory remains within control noise, or interaction-state restore needs private API/double-navigation/timer hacks, STOP before Phase 2+.
+- verify fresh `origin/main` and task authority before mutation;
+- preserve one canonical writer;
+- stop on any frozen STOP condition;
+- implement/tests/benchmark within scope;
+- commit and push the Phase 1 branch/PR;
+- stop at `WAITING_FOR_INDEPENDENT_WEB_AUDIT`.
 
-## Next gate
+Merge and release are not authorized by the construction card.
 
-1. complete independent read-only audit of PR #167;
-2. required GitHub CI must pass;
-3. merge #167 if scope/Authority remain clean;
-4. run Control Alignment on `main` to authorize `ACTIVE / PHASE 1 IMPLEMENTATION`;
-5. issue one concise local construction card referencing the frozen Phase 1 plan;
-6. local executor implements/tests/benchmarks and stops at `WAITING_FOR_INDEPENDENT_WEB_AUDIT`.
+## Non-claims
 
-No production release is authorized.
+- Historical JSC root cause remains `UNKNOWN`.
+- No Runtime Budget number is accepted yet.
+- No claim is made that ChatGPT generation survives WebView destruction.
+- No newer public release is authorized.
