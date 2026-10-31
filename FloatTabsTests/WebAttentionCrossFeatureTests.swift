@@ -1504,6 +1504,35 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         XCTAssertEqual(writer.events.filter { $0.event == "unread.marked" }.count, 1)
     }
 
+    func testRuntimeDiagnosticsDistinguishResidentSingleAndMultiGeneratingSlots() throws {
+        let (controller, coordinator, store, pool) = makeController(
+            profiles: [
+                spec(name: "ChatA", url: "https://chatgpt.com/chat-a"),
+                spec(name: "ChatB", url: "https://chatgpt.com/chat-b")
+            ]
+        )
+        let first = try materializeRuntime(pool: pool, store: store, slotName: "ChatA")
+        let second = try materializeRuntime(pool: pool, store: store, slotName: "ChatB")
+        let firstBridge = try attentionBridge(pool: pool, slot: first.profile)
+        let secondBridge = try attentionBridge(pool: pool, slot: second.profile)
+
+        acceptBaseline(generating: true, bridge: firstBridge, webView: first.webView)
+        acceptBaseline(generating: true, bridge: secondBridge, webView: second.webView)
+        XCTAssertEqual(coordinator.state(for: first.profile.id), .generating)
+        XCTAssertEqual(coordinator.state(for: second.profile.id), .generating)
+
+        var fields = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(fields["resident_attention_generating_count"], .integer(2))
+        XCTAssertEqual(fields["resident_attention_ready_count"], .integer(0))
+        XCTAssertEqual(fields["resident_attention_protected_count"], .integer(2))
+
+        acceptState(generating: false, bridge: secondBridge, webView: second.webView)
+        fields = controller.runtimeDiagnosticSnapshot().fields
+        XCTAssertEqual(fields["resident_attention_generating_count"], .integer(1))
+        XCTAssertEqual(fields["resident_attention_ready_count"], .integer(1))
+        XCTAssertEqual(fields["resident_attention_protected_count"], .integer(2))
+    }
+
     func testNativeRecoveredCompletionUsesExistingHiddenUnreadRoute() async throws {
         let writer = RuntimeDiagnosticInMemoryWriter()
         let diagnostics = RuntimeDiagnostics(mode: .standard, writer: writer)
@@ -1797,14 +1826,16 @@ final class WebAttentionCrossFeatureTests: XCTestCase {
         makeInactive(lifecycle, profile: ordinaryB)
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
-        // Warning pressure is diagnostic only; critical pressure evicts the
-        // eligible Warm runtimes but never the Generating-protected runtime.
+        // Warning pressure is diagnostics-only: it must not shorten the
+        // configured Warm deadline for any runtime.
         lifecycle.handleMemoryPressure(.warning)
         XCTAssertTrue(pool.contains(slotID: ordinaryA.id))
         XCTAssertTrue(pool.contains(slotID: ordinaryB.id))
         XCTAssertTrue(pool.contains(slotID: chat.id))
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 3)
 
+        // Critical pressure retains the bounded eviction boundary: ordinary
+        // Warm runtimes release, but the Generating-protected runtime stays.
         lifecycle.handleMemoryPressure(.critical)
         XCTAssertFalse(pool.contains(slotID: ordinaryA.id))
         XCTAssertFalse(pool.contains(slotID: ordinaryB.id))

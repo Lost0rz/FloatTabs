@@ -98,6 +98,11 @@ final class WebViewPool {
 
     var onResidentSetChange: (() -> Void)?
 
+    /// Read-only projection supplied by the canonical attention owner. The
+    /// pool and its navigation observers never retain or derive Attention
+    /// state.
+    var attentionStateQuery: WebAttentionStateQuery = { _ in .idle }
+
     /// Transient normalized-observation seam for later stages. The pool keeps
     /// no attention state here and assigns no visibility meaning.
     var onAttentionObservation: AttentionObservationHandler?
@@ -1008,7 +1013,8 @@ final class WebViewPool {
             diagnostics: diagnostics,
             navigationStallTimeout: navigationStallTimeout,
             rendererProbeTimeout: rendererProbeTimeout,
-            rendererJavaScriptEvaluator: rendererJavaScriptEvaluator
+            rendererJavaScriptEvaluator: rendererJavaScriptEvaluator,
+            attentionStateQuery: attentionStateQuery
         )
         let popupCoordinator = PopupCoordinator(
             parentWebView: webView,
