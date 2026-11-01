@@ -1,103 +1,138 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 1 Safe Hibernate + Restore  
-**Status:** `CLOSED / PHASE 1 COMPLETE`  
-**Mode:** `CLOSED`  
-**Task class:** `HIGH-RISK WEB RUNTIME LIFECYCLE / MEMORY`  
-**Current program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
-**Phase 1 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 2 Ready / Unread Decoupling  
+**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION`  
+**Mode:** `EXECUTE`  
+**Task class:** `HIGH-RISK ATTENTION / DURABLE UNREAD / RUNTIME LIFECYCLE HANDOFF`  
+**Program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
+**Phase 2 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`  
 **JSC root cause:** `UNKNOWN`
 
-## Terminal outcome
+## Authorization
 
-Phase 1 Safe Hibernate + Restore is complete and merged.
+Implement only the frozen Phase 2 Ready / Unread decoupling plan.
 
-```text
-IMPLEMENTATION_PR=#170 MERGED
-IMPLEMENTATION_HEAD=2e13d5eba51197fe991278caf4fb027c10a25893
-MERGE_COMMIT=188c524fd02e1c31b8a152b2bec224c947526610
-REQUIRED_CI_RUN=41257207390 PASS
-REQUIRED_CI_JOB=124702806620 PASS
-REQUIRED_CI_RUNNER=macmini-floattabs-01
-INDEPENDENT_WEB_AUDIT=PASS_WITH_FOLLOWUPS
-PRODUCT_RELEASE=NOT PERFORMED
-```
+The focused read-only audit is complete. It established that durable unread already exists independently from Runtime Attention; the required task is to stop transient Ready from indefinitely protecting a completed Runtime and to make persistent unread presentation derive from the durable unread owner.
 
-The CI routing blocker was separately corrected and merged in PR #171:
+## Frozen semantic contract
 
 ```text
-CI_CORRECTIVE_PR=#171 MERGED
-CI_CORRECTIVE_MERGE=ce92f99777507dd03a2e7267c33607fe5aea4c56
-RUNNER_LABELS=self-hosted,macOS,ARM64,mac-mini-ci
+WebAttentionCoordinator
+  idle       -> not Runtime-protected
+  generating -> Runtime-protected
+  ready      -> transient compatibility/diagnostic state only; not Runtime-protected
+
+ChatGPTUnreadResponseCoordinator + UnreadResponseStore
+  -> canonical durable unread owner
+  -> survives hibernate/runtimeReset/fresh Runtime/relaunch
+  -> canonical source for persistent rail/menu unread presentation
 ```
 
-## Delivered Phase 1 contract
+For a valid hidden completion:
 
 ```text
-hibernate(slotID:)
-  capture compatible opaque interaction state when available
-  → deterministic teardown
-  → retain one memory-local restore snapshot
-  → Runtime becomes non-resident
-
-release(slotID:)
-  clear pending restore state
-  → deterministic destructive teardown
-  → Runtime becomes non-resident
+capture pre-transition facts
+→ Runtime Attention completion transition
+→ durable unread commit
+→ unread presentation sync
+→ generation-completed callback as applicable
+→ protection-ended lifecycle restart
+→ existing policy may later hibernate Runtime
 ```
 
-Only normal eligible inactive lifecycle reclamation and the existing eligible critical-Warm pressure path use hibernate. Destructive delete/reset/rebuild/Profile/cache/recovery paths remain destructive.
+Durable unread commit must precede the lifecycle restart/reclaim boundary.
 
-Compatible restore creates a fresh Runtime and all sidecars before applying public `WKWebView.interactionState`; it does not issue a competing ordinary initial URL load. Missing/incompatible state uses the existing safe URL fallback.
+## Authorized production files
 
-Deterministic teardown invalidates Attention/Response bridges, PopupCoordinator, `SlotNavigationObserver` KVO/liveness/navigation/probe work, clears delegates, calls `stopLoading()`, clears transient Pool state including pending termination context, detaches/removes the old Runtime, and gives restored Runtime a fresh identity.
+Only:
 
-## Accepted evidence
+- `FloatTabs/Web/WebAttentionCoordinator.swift`
+- `FloatTabs/Panel/PanelController.swift`
+- `FloatTabs/App/AppCoordinator.swift`
+- `FloatTabs/MenuBar/StatusItemController.swift`
 
-```text
-focused tests: 146 executed / 0 failures
-full tests: 1073 executed / 3 skipped / 0 failures
-Debug build: PASS
-Release build: PASS
-bounded live smoke: PASS for architecture-level Runtime behavior
-required exact-head CI: PASS
-independent web audit: PASS_WITH_FOLLOWUPS
-```
+Do not add another Runtime/unread writer.
 
-The bounded smoke observed an eligible inactive Runtime become non-resident and one fresh Runtime restore through interaction state with no competing ordinary load. Default Browser Profile identity was preserved and no Profile/session-store mutation was observed.
+## Authorized test files
 
-Explicit login text was not independently captured by the automation surface. Under the accepted V2 architecture-first gate this remains a non-blocking follow-up, not a Phase 1 failure.
+- `FloatTabsTests/WebAttentionCoordinatorTests.swift`
+- `FloatTabsTests/WebAttentionLifecycleTests.swift`
+- `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
+- `FloatTabsTests/WebAttentionPresentationTests.swift`
+- `FloatTabsTests/UnreadResponseTests.swift` only when narrowly needed for durable-survival regression coverage
 
-## Deferred work
+## Required implementation outcomes
 
-The following are not Phase 1 blockers and remain deferred to Phase 4 Runtime Budget / Policy:
+1. Generating remains Attention-based Runtime protection.
+2. Ready is no longer Attention-based Runtime protection.
+3. Existing Ready state remains transient; do not remove it as a broad state-machine migration.
+4. Hidden completion writes durable unread before normal lifecycle reclaim can resume.
+5. Existing lifecycle fresh-plan restart is used; do not invent a second timer/policy path.
+6. Rail unread remains driven by durable unread.
+7. Status/menu unread count is driven by durable unread, with semantically truthful `unread` naming rather than `readyCount` naming.
+8. Runtime reset/hibernate/recreation never clears durable unread.
+9. Existing acknowledgement/visibility/response-identity behavior remains intact.
+10. No Browser Profile/session/configuration mutation.
 
-- strict `1 / 2 / 4 / 8` loaded-Slot matrix;
-- >=9 configured-Slot fixture;
-- heavy 4/8 repeated runs;
-- no-op/control drift study;
-- `median reclaimed > 2× drift` threshold;
-- final process-tree memory curve;
-- final restore p50/p95 policy threshold;
-- automatic Runtime budget/ranking selection.
+## Verification
 
-Historical JSC/WebContent stall root cause remains `UNKNOWN`; no claim is made that Phase 1 fixes it.
+Required before handoff to independent audit:
 
-## Next authorization
+- focused Phase 2 tests PASS;
+- full XCTest PASS;
+- Debug arm64 build PASS;
+- Release arm64 build PASS;
+- bounded real-runtime smoke from the frozen plan completed with evidence;
+- exact implementation diff remains in scope;
+- one Phase 2 implementation PR created/updated;
+- required `Build & Test (Apple Silicon arm64)` passes on the literal PR head using `macmini-floattabs-01` before merge readiness can be claimed.
 
-There is no active construction authorization after this closeout.
+The construction executor must not mark human UI acceptance PASS. If all machine gates pass, stop for independent web audit and user-owned UI acceptance.
 
-Phase 2 (`Ready / Unread decoupling`) is `NOT STARTED / NOT AUTHORIZED`.
+## Explicit non-scope / forbidden expansion
 
-Before Phase 2 implementation:
+Do not modify without STOP/reconciliation:
 
-1. perform the required focused read-only audit of Attention/Ready/Unread ownership and Runtime protection;
-2. freeze Phase 2 scope, affected owners, acceptance criteria and STOP conditions in repository Authority;
-3. issue a new bounded construction handoff only after that freeze.
+- `FloatTabs/Web/ChatGPTAttentionBridge.swift`
+- `FloatTabs/Web/ChatGPTResponseBridge.swift`
+- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
+- `FloatTabs/Web/ChatGPTUnreadResponseCoordinator.swift`
+- `FloatTabs/Persistence/UnreadResponseStore.swift`
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
+- `FloatTabs/Web/WebViewPool.swift`
+- Browser Profile / Tab persistence schema
+- attention visual-style renderer
+- native notification delivery
+- Runtime budget/ranking/timer policy
+- release/version metadata
 
-Do not infer Phase 2 authorization from Phase 1 completion.
+No user-data reset/deletion is authorized.
 
-## Release
+## STOP conditions
 
-No production release is authorized by this closed task.
+STOP and report evidence without workaround if:
+
+- durable unread can be lost on hibernate/runtimeReset/recreation;
+- reclaim can begin before durable unread commit;
+- a Generating Slot becomes reclaimable;
+- correct implementation requires any forbidden production file or schema change;
+- new competing unread/Attention/lifecycle writer would be required;
+- Phase 3 notification or Phase 4 policy work is required to make Phase 2 pass;
+- focused/full tests, Debug/Release build, or required CI fail because of the change;
+- overlapping unique work appears in an authorized file;
+- human UI acceptance later fails.
+
+## Delivery boundary
+
+Implementation may commit/push and create or update exactly one Phase 2 implementation PR.
+
+Do **not** merge, release, bump version, or start Phase 3/4.
+
+Terminal machine state for the construction handoff is one of:
+
+- `WAITING_FOR_INDEPENDENT_WEB_AUDIT`
+- `WAITING_FOR_HUMAN_UI_ACCEPTANCE` when independent audit has already occurred elsewhere and human UI is the only remaining gate
+- `STOP_RECONCILE` with exact evidence
+
+Return a receipt containing governance route, skills used, execution topology/subagents, start/final/remote heads, changed paths, focused/full/build/smoke results, scope/STOP assessment, PR state, merge state, and final STATUS/TASK state.
