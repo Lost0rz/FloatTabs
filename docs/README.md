@@ -21,7 +21,7 @@ Historical documents remain evidence only unless current Authority explicitly re
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION STARTED / GATE 0 PENDING**;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION ACTIVE / GATE 0 OUTCOME A**;
 - [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **PHASE 6 AUDIT / RATIONALE EVIDENCE**; execution scope is superseded by the Phase 6 implementation contract;
 - [`architecture/README.md`](architecture/README.md) — architecture routing/status;
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/test navigation only.
@@ -52,7 +52,7 @@ Do not use superseded per-phase human-acceptance wording to block intermediate p
 - Phase 3 Native ChatGPT Completion Notification — delivered.
 - Phase 4 Reference-derived Automatic Runtime Management — delivered in PR #181 / `c910441a954bddbaeca710395cd0d6ed89ec5e5c`.
 - Phase 5 Long-running Background Generation Thrift — delivered in PR #183 / `745d401bf9f282d19bc756c81be3f46f17161e4b`.
-- Phase 6 Perceived-fast Restore — audit complete; implementation contract **accepted/frozen**; execution **started**; WP0 / Gate 0 Real-Mac evidence is the current active gate; product implementation remains not started until Gate 0 Outcome A/B.
+- Phase 6 Perceived-fast Restore — audit complete; implementation contract **accepted/frozen**; execution **active**; WP0 / Gate 0 completed with **Outcome A — navigation-backed readiness**; product mutation is released within the frozen scope and WP1 is active.
 
 The old [`architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md) is historical Phase 4 planning evidence. Its strict benchmark-selection gate was superseded by the user's later reference-derived-default decision and is not current execution authority.
 
@@ -73,7 +73,7 @@ native restore shell immediately
 → return to AppKit run loop
 → bounded deferred fresh Runtime materialization
 → attach fresh WebView under restoring surface
-→ Gate 0-proven current-Runtime readiness
+→ exact-current-Runtime navigation-backed readiness
 → existing focus handoff
 ```
 
@@ -81,16 +81,32 @@ Resident Slot switching remains direct.
 
 The prior future-session hold was released by the user's explicit start instruction on `2026-11-01`. The active task remains `FT-RUNTIME-LIFECYCLE-MEMORY-001`; no successor task or redesign is required.
 
-Before any Phase 6 product-source mutation, execution must satisfy the frozen **Gate 0 Real-Mac interaction-state readiness evidence**. The contract pre-authorizes two evidence classes:
+### Gate 0 result
 
-- navigation-backed readiness from exact current-Runtime public callbacks/loading facts;
-- non-navigation readiness from bounded public current-Runtime renderer/page observation.
+The mandatory Real-Mac Gate 0 ran against an actually hibernated existing Slot and completed with **Outcome A**:
 
-If neither class is safely provable without private APIs, arbitrary delay/polling, reload/double-navigation, persistence/session mutation, screenshots or extra resident WebViews, execution stops before product mutation.
+- hibernate captured a memory-local interaction state and reclaimed the old Runtime;
+- reactivation created a fresh Runtime through the existing `WebViewPool` interaction-state restore path;
+- the exact fresh Runtime emitted `navigation.provisional_started → navigation.commit → navigation.finished`, with the callbacks classified non-stale;
+- the existing bounded cross-world observation on the same Runtime also succeeded and reported a current, complete, non-loading renderer;
+- focus recognition succeeded and no duplicate ordinary URL load was required.
 
-Current repository tooling is sufficient to run Gate 0 without first changing product Runtime code: the Debug benchmark channel can drive existing Slots, the lifecycle benchmark can force actual Cold hibernate/reclaim and later re-activation, and existing Runtime/navigation diagnostics expose the required content-free correlation facts.
+The verification made no source change, did not reset Browser Profile/session/persistent data, and restored the temporary Slot policy/active/panel state afterward.
 
-This contract intentionally does not guess a callback name from structural XCTest fixtures. `web_runtime.restore.completed` remains state-handoff evidence only, not readiness truth.
+Therefore Phase 6 may use the existing exact-current-Runtime navigation completion path as its readiness trigger. `web_runtime.restore.completed` remains state-handoff evidence only, not readiness truth.
+
+### Current work
+
+Execution now proceeds directly through:
+
+```text
+WP1 native restoring presentation
+→ WP2 two-stage PanelController materialization
+→ WP3 Outcome-A navigation-backed completion
+→ WP4 focused/full verification + required CI + Real-Mac smoke + independent audit
+```
+
+The current source already contains the required navigation owner: `SlotNavigationObserver` has a bounded `onNavigationFinish` seam. Phase 6 should reuse that existing finish fact through the smallest `WebViewPool` projection instead of adding a new readiness probe or changing restore semantics.
 
 ## 7. Other bounded current contracts
 
