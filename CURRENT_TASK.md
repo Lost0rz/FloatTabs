@@ -1,116 +1,83 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 5 long-running background generation thrift  
-**Status:** `WAITING_FOR_PHASE_5_MERGE_GATE`  
-**Mode:** `VERIFY / MERGE GATE`  
-**Task class:** `WEB RUNTIME / ATTENTION OBSERVATION THRIFT`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore audit  
+**Status:** `ACTIVE / PHASE_6_AUDIT_ONLY`  
+**Mode:** `READ-ONLY AUDIT → SOLUTION DESIGN`  
+**Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
 **JSC root cause:** `UNKNOWN`
 
-## Authorized objective
+## Authorization
 
-Reduce FloatTabs-owned observation work during long-running background ChatGPT generation without interrupting provider generation, weakening Runtime protection, changing Browser Profile/session semantics or moving canonical ownership.
+Phase 5 was merged on 2026-11-01 via PR #183. The user then authorized the next Phase 6 **detailed audit**.
 
-## Delivered implementation
+This authorization is read-only for product behavior. It permits repository/source/test/history inspection and design analysis needed to freeze the next implementation boundary. It does **not** authorize Phase 6 product code changes, Runtime-policy changes, persistence/schema changes, release/version changes or merge of a future Phase 6 implementation.
 
-PR #183 delivers the Phase 5 mechanism on semantic implementation head:
+## Phase 6 objective
 
-`e36589d4729f86b2e76609bcb699107e50f63919`
+The accepted V4 Runtime Lifecycle contract defines Phase 6 as **Perceived-fast Restore**:
 
-Delivered behavior:
+> improve user-perceived restoration after Runtime reclamation without retaining heavyweight `WKWebView`s merely for continuity.
 
-```text
-visible / unknown page
-→ 2s liveness fallback
+The audit must determine how FloatTabs can make a reclaimed Slot feel fast and continuous when selected again while preserving disposable Runtime architecture and durable Browser Profile/session truth.
 
-hidden page + generation age < 30s
-→ 2s fallback
+## Required audit questions
 
-hidden page + generation age >= 30s
-→ 5s fallback
+1. What is the exact current activation/restore path from a Slot with no live `WKWebView` to first usable presentation?
+2. Which component owns materialization, restore snapshot capture/apply, navigation, window attachment, first presentation, focus and loading affordance?
+3. Which steps are synchronous vs asynchronous, and which can delay first visual feedback or first usable input?
+4. What bounded restore state already exists (`interactionState`, URL/history/viewport/zoom or other state), and what is intentionally not persisted?
+5. What happens to Browser Profile/session identity when a Runtime is recreated?
+6. What stale-callback/navigation/observer/task risks exist when restore races with slot switching, hibernate, fullscreen, hidden-active grace or memory pressure?
+7. What current tests cover reclaimed-slot activation and restore correctness, and what coverage is missing?
+8. Which perceived-speed techniques are compatible with current ownership: early shell presentation, cached visual placeholder, progressive materialization, prewarm, navigation ordering, focus deferral, or other bounded mechanisms?
+9. Which options would accidentally reintroduce heavyweight persistent Runtime retention or duplicate lifecycle ownership and therefore must be rejected?
+10. What is the smallest credible Phase 6 implementation, its acceptance criteria and machine/runtime evidence requirements?
 
-first false probe
-→ existing 250ms confirmation
-→ second current-context false required for synthetic completion
-```
+## Non-negotiable invariants
 
-The liveness probe now carries `document.visibilityState` only as local bridge scheduling metadata. It does not replace `PanelController` product/presentation visibility truth.
+- persistent Slot/Profile/session lifetime stays separate from live Runtime lifetime;
+- Browser Profile / `WKWebsiteDataStore` identity is not reset or recreated as a recovery shortcut;
+- `WebViewPool` remains live Runtime mechanism owner unless a later accepted design explicitly changes ownership;
+- `SlotLifecycleCoordinator` remains sole lifecycle execution boundary;
+- `PanelController` remains product/presentation visibility authority;
+- `WebAttentionCoordinator` remains sole Attention authority;
+- Diagnostics remains evidence-only;
+- no private WebKit APIs;
+- no reload/reset/persistence workaround used to hide ownership bugs;
+- no policy change that simply keeps more heavyweight WebViews alive to fake faster restore.
 
-The implementation does not alter the primary event-driven ChatGPT detector, provider generation, Runtime hibernate/release behavior or persistent user data.
+## Expected audit output
 
-## Ownership / safety preserved
+The Phase 6 audit must produce:
 
-- `WebAttentionCoordinator` remains sole Attention state authority.
-- `.generating` remains Runtime-protecting for the complete generation.
-- `SlotLifecycleCoordinator` remains sole lifecycle release/hibernate executor.
-- `WebViewPool` remains Runtime mechanism/bridge-lifetime owner; its hibernate/restore contract is unchanged.
-- existing document token, semantic generation, physical Runtime epoch, watchdog-generation, WebView identity and timeout/stale-callback guards remain in force.
-- natural completion still stops the watchdog and does not require the fallback probe.
-- no Browser Profile/session/configuration/schema/reset/delete behavior changed.
-- no private WebKit API, Phase 6 work or release/version mutation was introduced.
-
-## Architecture/document reconciliation
-
-The same PR also closes the stale authority-routing gap identified after Phase 4:
-
-- current program contract advanced to `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`;
-- active Phase 5 plan frozen in `FloatTabs_Runtime_Lifecycle_Phase5_Background_Generation_Thrift_Plan_V1.md`;
-- `docs/README.md`, architecture README and `DOMAIN_MAP.md` now route to delivered truth;
-- V1–V3 contracts and the old Phase 4 strict benchmark plan remain historical evidence rather than active authority.
-
-## Verification evidence
-
-Semantic implementation head passed:
-
-- Debug arm64 build;
-- Release arm64 build;
-- native arm64 architecture verification;
-- full existing XCTest suite including new cadence/visibility tests;
-- required `Build & Test (Apple Silicon arm64)` run `1287` on `macmini-floattabs-01`;
-- QA DMG run `623`.
-
-Final semantic diff review found only the intended 9 files:
-
-- `CURRENT_STATUS.md`;
-- `CURRENT_TASK.md`;
-- `FloatTabs/Web/ChatGPTAttentionBridge.swift`;
-- `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`;
-- `docs/README.md`;
-- `docs/architecture/README.md`;
-- `docs/architecture/DOMAIN_MAP.md`;
-- V4 Runtime Lifecycle contract;
-- Phase 5 V1 plan.
-
-No temporary construction workflow/script remains in the final diff.
-
-## Literal-head merge gate
-
-This task is now control-only drift after the verified semantic implementation head. Before merge confirm against the **literal current PR head**:
-
-1. PR #183 remains open and scope-clean;
-2. required `Build & Test (Apple Silicon arm64)` is green for the literal head;
-3. PR is mergeable;
-4. changed paths remain the expected 9 files;
-5. no Runtime ownership, Browser Profile/session/persistence, Phase 6 or release/version drift is present.
+- current restore call-path and ownership map;
+- latency/UX risk inventory, ranked by severity and confidence;
+- existing test/evidence map and evidence gaps;
+- 2–3 credible solution options with rejected alternatives;
+- selected recommended architecture with consequences/reversibility;
+- exact bounded implementation scope;
+- acceptance and verification gates;
+- explicit STOP conditions;
+- `TASK_RECONCILIATION_REQUIRED: YES | NO` before any implementation.
 
 ## STOP conditions
 
-STOP/reconcile if the literal-head gate reveals:
+STOP before implementation if the recommended solution would require:
 
-- a second Attention or Runtime lifecycle writer;
-- Generating Runtime becoming reclaimable;
-- provider-generation pause/cancel semantics;
-- `WebViewPool` or `SlotLifecycleCoordinator` contract redesign;
-- canonical product visibility moving into page JavaScript;
-- persistence/schema/user-data reset/delete;
-- private WebKit APIs;
-- Phase 6/release work;
-- required CI failure.
+- a second Runtime lifecycle writer;
+- Browser Profile/session/persistent user-data mutation;
+- private WebKit API;
+- retaining reclaimed WebViews as hidden persistent continuity objects;
+- changing Phase 4 automatic budget semantics merely to mask restore cost;
+- changing Attention semantics;
+- release/version work;
+- unresolved ownership between `PanelController`, `SlotLifecycleCoordinator` and `WebViewPool`.
 
 ## Delivery boundary
 
-Current terminal state:
+Current state:
 
-`WAITING_FOR_PHASE_5_MERGE_GATE`
+`ACTIVE / PHASE_6_AUDIT_ONLY`
 
-Do not merge PR #183 or begin Phase 6 without the user's next merge authorization.
+Complete the detailed read-only audit and design recommendation. Do not mutate Phase 6 product code until the audit result is reconciled into current task authority and explicitly authorized for implementation.
