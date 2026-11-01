@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 4 COMPLETE / MERGED**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 5 BACKGROUND GENERATION THRIFT**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `PHASE_4_MERGED / READY_FOR_NEXT_AUTHORIZED_WORK`.
+Current execution state: `PHASE_5_ACTIVE / AUDIT_COMPLETE / DESIGN_FROZEN / IMPLEMENTATION_PENDING`.
 
 ## Canonical state
 
@@ -25,60 +25,72 @@ PHASE_3_NATIVE_COMPLETION_NOTIFICATION=COMPLETE / MERGED
 PHASE_4_REFERENCE_DERIVED_RUNTIME_MANAGEMENT=COMPLETE / MERGED
 PHASE_4_PR=#181
 PHASE_4_MERGE_COMMIT=c910441a954bddbaeca710395cd0d6ed89ec5e5c
-PHASE_4_FINAL_PR_HEAD=70584485b7a0444aba3df0ea5e4613681b6e5a14
-PHASE_4_REQUIRED_CI=PASS / RUN 1283
-PHASE_4_QA_DMG=PASS / RUN 622
-PHASE_4_EMPIRICAL_TUNING=DEFERRED
-PHASE_5=NOT_STARTED / NOT_AUTHORIZED
+PHASE_4_EMPIRICAL_TUNING=DEFERRED / FUTURE SETTINGS-BACKED TUNING
+PHASE_5=ACTIVE / AUTHORIZED
 PHASE_6=NOT_STARTED / NOT_AUTHORIZED
+PROGRAM_HUMAN_ACCEPTANCE=PENDING
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
-## Delivered Phase 4 behavior
+## Phase 4 authority cleanup
 
-- Hot remains an explicit user pin and is excluded from automatic budget eviction.
-- Warm/Cold are automatically managed.
-- Active/presented, fullscreen, supplemental-visible, media-protected, media-query-pending and Attention `generating` Runtime are hard protected.
-- Attention `ready`, durable unread and native notification do not protect Runtime.
-- Candidate order: `Cold → Warm`, then older `lastUsedAt`, then UUID lexical tie-break.
-- Normal/warning managed target currently defaults to **3 resident Warm/Cold runtimes** as a reference-derived initial product assumption, not measured truth.
-- Critical memory pressure targets `0` eligible inactive Warm/Cold runtimes.
-- Existing Warm/Cold timers remain maximum retention boundaries; budget pressure may reclaim eligible inactive Runtime earlier.
-- Runtime reclamation continues to use the existing `WebViewPool.hibernate` boundary; Browser Profile/session/persistence semantics are unchanged.
+Phase 4 shipped a conservative reference-derived managed target of 3 Warm/Cold runtimes. The previously frozen 1/2/4/8 benchmark-selection gate is historical for Phase 4 and no longer current execution authority.
 
-## Verification evidence
+The current program contract is being revisioned from V3 to V4 in this Phase 5 branch so durable architecture routing matches delivered Phase 4 truth. Historical Phase 4 planning files remain evidence and are not rewritten into fake present-day facts.
 
-Final literal PR head `70584485b7a0444aba3df0ea5e4613681b6e5a14` passed:
+## Phase 5 focused audit result
 
-- Debug arm64 build;
-- Release arm64 build;
-- native Release architecture verification;
-- full existing XCTest suite;
-- required `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01` — run `1283`;
-- QA DMG — run `622`.
+The audit found the relevant long-running generation cost boundary without requiring Runtime ownership changes:
 
-PR #181 was squash-merged to `main` as `c910441a954bddbaeca710395cd0d6ed89ec5e5c`.
+- `WebAttentionCoordinator` remains the sole Attention authority and `generating` remains the only Attention Runtime protection.
+- `SlotLifecycleCoordinator` must continue to protect Generating Runtime from automatic reclaim.
+- `PanelController` remains canonical product/presentation visibility truth.
+- `ChatGPTAttentionBridge` starts a native liveness watchdog when generation begins and currently evaluates a small isolated-world probe every 2 seconds until generation ends or Runtime resets.
+- the ordinary page detector is already mutation-driven, coalesced, and intentionally excludes token-stream character-data churn; it is not converted into a polling loop.
+- therefore the smallest Phase 5 target is the fixed native fallback cadence, not provider generation or Runtime lifetime.
 
-## Deferred tuning direction
+## Frozen Phase 5 behavior
 
-Phase 4 deliberately did not freeze machine-specific performance thresholds from a one-time benchmark.
+The bridge may use `document.visibilityState` as **local scheduling metadata only**.
 
-Future performance tuning should prefer a Settings-backed configuration model with conservative defaults and machine/user-specific override rather than hard-coding one universal value. Exact UI, ranges, presets and persistence semantics require a separately authorized design/implementation task.
+Initial policy:
 
-Safety boundaries remain non-negotiable configuration constraints: settings must not enable automatic eviction of Hot, active/presented, fullscreen, media-protected or Attention `generating` Runtime.
+```text
+visible/unknown document                      -> 2s watchdog
+hidden document, generation age < 30s         -> 2s watchdog
+hidden document, generation age >= 30s        -> 5s watchdog
+probe says idle                               -> existing 250ms second confirmation
+```
 
-## Current Authority
+This reduces FloatTabs-owned WebKit JS round trips for long-running hidden generation while keeping the primary detector, generation protection, completion correctness, session state and Runtime ownership unchanged.
+
+The 30s/5s values are initial conservative defaults. They are not represented as measured optimum; later machine/user-specific tuning belongs to the separately authorized Settings-backed performance work.
+
+## Data-safety / ownership boundary
+
+Phase 5 does not authorize:
+
+- Runtime hibernate/release/reload while Attention is `generating`;
+- provider-generation pause/cancel/suspend;
+- Browser Profile/session/schema changes;
+- persistence workarounds or user-data deletion/reset;
+- private WebKit APIs;
+- Diagnostics becoming product truth;
+- Phase 6 perceived-fast restore;
+- release/version changes.
+
+## Current authority
 
 ```text
 AGENTS.md
 → CURRENT_STATUS.md
 → CURRENT_TASK.md
-→ docs/architecture/README.md
-→ docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md
+→ docs/README.md
+→ current Runtime Lifecycle contract (V4 after this branch reconciliation)
 → docs/architecture/DOMAIN_MAP.md
 → current production source/tests/fresh evidence
 ```
 
 ## Next action
 
-Phase 4 is complete. Do not begin Phase 5/6 or implement the future performance-settings surface without a new authorized task/scope reconciliation.
+Finish the Phase 5 authority/document reconciliation on the active branch, implement the bounded ChatGPT liveness-watchdog thrift behavior and focused regression tests, then run full machine verification and required literal-head CI. Stop at Phase 5 merge gate unless a blocker requires bounded correction.
