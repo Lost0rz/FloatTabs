@@ -1,276 +1,216 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore  
-**Status:** `ACTIVE / WP4 EXACT-DIFF CORRECTIVE`  
-**Mode:** `EXECUTION ACTIVE / MERGE BLOCKED PENDING BOUNDED CORRECTIVE`  
-**Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 6 closeout + Phase 7 automatic lifecycle retirement  
+**Status:** `ACTIVE / CONTRACT RECONCILED / PHASE 7 READY AFTER PREDECESSOR GATE`  
+**Mode:** `DESIGN FROZEN / PRODUCT MUTATION HOLD`  
+**Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-Phase 6 audit/design is complete and the implementation contract is frozen.
+This remains the same Runtime Lifecycle / Memory task. The user requested a fresh audit of the final contract after Real-Mac QA showed that several legacy Hot ChatGPT Slots remained resident and memory stayed high.
 
-Durable audit/rationale record:
+The audit verified a material policy mismatch: V4 preserved Hot/Warm/Cold and therefore cannot be the program-final automatic lifecycle contract.
 
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`
+Task reconciliation is complete through the accepted V5 program contract and Phase 7 implementation contract.
 
-Frozen implementation contract:
+Current product-source mutation remains held until:
+
+1. Phase 6 PR #187 finishes its own merge gate and is merged;
+2. the user explicitly starts Phase 7 construction.
+
+## Current authority
+
+Program contract:
+
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
+
+Phase 6 bounded authority for PR #187:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-The user explicitly instructed FloatTabs to start remote Phase 6 construction on `2026-11-01`. WP0 / Gate 0 completed with **OUTCOME_A**. WP1–WP3 have now been implemented and pushed on PR #187. Machine verification is green, but WP4 independent exact-diff audit found bounded correctness issues that must be corrected before merge. This remains the same task and same frozen architecture; no successor task or redesign is authorized or required.
+Phase 7 frozen execution contract:
 
-## Gate 0 accepted evidence
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
 
-The Real-Mac verification used an actually hibernated existing Slot and returned the repository to its pre-run state with no source mutation.
+## Final objective
 
-Accepted facts:
-
-```text
-hibernate completed with interaction_state_present=true
-→ target Runtime reclaimed from resident set
-→ reactivation used restore_source=interaction_state
-→ fresh Runtime identity created
-→ exact fresh Runtime emitted navigation.provisional_started
-→ navigation.commit
-→ navigation.finished
-→ stale=false for the observed callback sequence
-→ bounded exact-current-Runtime liveness also succeeded
-→ focus recognition succeeded
-```
-
-The fresh Runtime identity differed from the pre-hibernate Runtime identity. No duplicate ordinary URL load was observed. Browser Profile/session/persistent user data were not reset or rewritten.
-
-Classification: **Outcome A — navigation-backed readiness**.
-
-`web_runtime.restore.completed` alone remains insufficient readiness truth.
-
-## Frozen objective
-
-Make a reclaimed persistent Slot feel immediately responsive without retaining extra heavyweight `WKWebView` runtimes:
+Deliver a persistent-Slot architecture where live `WKWebView` Runtime is disposable and automatically managed by default:
 
 ```text
-reclaimed Slot selected/summoned
-→ native FloatTabs shell + lightweight restoring state immediately
-→ return to AppKit run loop
-→ revalidate current materialization request
-→ existing WebViewPool creates/restores fresh Runtime
-→ attach Runtime under restoring state
-→ Outcome-A exact-current-Runtime navigation readiness
-→ remove restoring state
-→ existing focus/input ownership resumes
+persistent Slot/Profile/session
+→ Automatic Runtime policy
+→ active/protected/recent Runtime may stay live
+→ inactive Runtime reclaimed deterministically
+→ Phase 6 fast restore when selected again
 ```
 
-Resident Slot switching keeps the current direct fast path.
+Legacy Hot/Warm/Cold is not the final product model.
 
-## Frozen ownership
+## Frozen product policy
 
-- `PanelController` — Phase 6 presentation/materialization orchestration and stale request generation;
-- `WebPanelContainerView` — native restoring presentation only;
-- `WebViewPool` — existing Runtime creation/restore mechanism plus narrow read-only readiness projection;
-- `SlotLifecycleCoordinator` — sole lifecycle/budget executor;
-- `SlotNavigationObserver` — narrow navigation/readiness/terminal evidence seam only;
-- `WebFocusRouter` / existing Panel focus path — focus ownership unchanged;
-- `WebAttentionCoordinator` — Attention authority unchanged;
-- `RuntimeDiagnostics` — evidence only.
+### Per-Slot preference
 
-No second Runtime lifecycle, focus, Attention or presentation truth owner is authorized.
+```text
+Automatic   (default)
+Keep Loaded (normal-operation opt-out)
+```
 
-## Authorized implementation scope
+Legacy compatibility:
 
-Expected production files remain:
+```text
+hot        -> Keep Loaded
+warm/cold  -> Automatic
+```
 
-- `FloatTabs/Panel/PanelController.swift`
+### Automatic lifecycle defaults
+
+```text
+normal target   = 2
+inactive grace  = 30 seconds
+warning target  = 1
+critical target = 0
+```
+
+### Protection
+
+Hard protection remains:
+
+- active / actually presented;
+- fullscreen source;
+- supplemental visible surface;
+- Attention generating;
+- active/pending allowed-background-media protection;
+- current materialization/restoring ownership boundary.
+
+Keep Loaded is protected from ordinary Automatic reclaim but is reclaimable under critical pressure when inactive and not hard-protected.
+
+## Predecessor gate — Phase 6 PR #187
+
+Current PR state:
+
+```text
+PR=#187
+STATE=OPEN / DRAFT / UNMERGED
+PRODUCT_HEAD=76c092523fe343eacc0592bfac25086da0d0d83d
+CORRECTIVE=C1-C4 APPLIED
+REQUIRED_CI=PASS / RUN 1312
+QA_DMG=PASS / RUN 637
+REAL_MAC_RESTORE_SMOKE=PENDING COMPLETION
+FRESH_EXACT_DIFF_AUDIT=PENDING
+```
+
+Do not merge until the remaining bounded Phase 6 gates pass.
+
+Do not add Phase 7 product-source mutation to PR #187.
+
+## Phase 7 implementation scope
+
+Expected production owners:
+
+- `FloatTabs/Tabs/WebAppProfile.swift`
+- `FloatTabs/Tabs/TabStore.swift`
+- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
 - `FloatTabs/Web/WebViewContainer.swift`
 - `FloatTabs/Web/WebViewPool.swift`
-- `FloatTabs/Web/SlotNavigationObserver.swift`
+- `FloatTabs/Panel/PanelController.swift`
+- `FloatTabs/UI/ExternalTabRail.swift`
+- `FloatTabs/UI/GlobalSettingsController.swift`
+- `FloatTabs/Persistence/AppPreferencesStore.swift`
 
-Expected tests remain:
+Persistence/backup files may change only if compatibility evidence requires it.
 
-- `FloatTabsTests/ExternalShellTests.swift`
-- `FloatTabsTests/WebViewPoolTests.swift`
-- existing focus-related tests only if the corrective needs deterministic focus timing coverage.
+## Phase 7 work packages
 
-No production scope expansion is authorized.
+### WP0 — predecessor / fresh-main gate
 
-## Frozen implementation requirements
+- finish PR #187 smoke;
+- fresh exact-diff audit PASS;
+- merge PR #187;
+- refresh main/control identity;
+- create one Phase 7 implementation branch/worktree.
 
-1. Resident Slot fast path remains direct.
-2. Reclaimed Slot receives native restoring feedback before fresh Runtime materialization starts.
-3. Early shell presentation returns control to AppKit before WebKit materialization.
-4. One private materialization generation/request identity prevents stale attach/focus/activation/completion.
-5. Selection change, dismissal, termination/reset and incompatible fullscreen/source lock invalidate pending work.
-6. Revalidate request before materialization, before attachment, and before restoring-state dismissal.
-7. `WebViewPool` remains the only Runtime creation/interaction-state restore owner.
-8. Browser Profile/session identity remains unchanged.
-9. Compatible interaction-state restore still avoids duplicate ordinary URL load.
-10. Phase 4 Runtime budget/ranking/protection semantics remain unchanged.
-11. No page screenshot or opaque interaction state is persisted/logged.
-12. No arbitrary fixed timer becomes readiness truth.
-13. Existing focus/fullscreen ownership remains canonical.
-14. Outcome-A readiness completion must correlate the current materialization generation, current Slot and exact current Runtime before removing restoring UI.
-15. Existing focus/input flow resumes only after accepted readiness and restoring-state removal.
-16. Physical page visibility/Attention acknowledgement must not claim user visibility while the opaque restoring surface still covers the WebView.
+### WP1 — canonical model / persistence compatibility
 
-## Work packages
+- add `SlotRuntimeRetentionPreference`;
+- default Automatic;
+- legacy Hot -> Keep Loaded;
+- legacy Warm/Cold -> Automatic;
+- transitional derived legacy encoding for rollback;
+- preserve Browser Profile/session/config data.
 
-### WP0 — Gate 0 evidence — COMPLETE / OUTCOME_A
+### WP2 — automatic lifecycle / container simplification
 
-Real-Mac evidence established navigation-backed readiness on an exact fresh current Runtime.
+- one 30s Automatic grace;
+- targets 2 / 1 / 0;
+- deterministic LRU reclaim;
+- Keep Loaded normal preference + critical fallback;
+- remove Hot-only hidden host retention;
+- keep `SlotLifecycleCoordinator` as sole lifecycle writer.
 
-### WP1 — native restoring presentation — COMPLETE
+### WP3 — current UI/settings retirement
 
-Implemented in `WebPanelContainerView` with native presentation-only restoring UI and regression coverage.
+- replace Residency menu with Automatic / Keep Loaded;
+- remove Warm/Cold retention controls/current product copy;
+- retain old preference values only for rollback compatibility;
+- keep existing presentation Pin semantics separate.
 
-### WP2 — two-stage orchestration — COMPLETE
+### WP4 — recovery/cache integration
 
-Implemented deferred main-run-loop materialization plus generation-scoped stale rejection for selection/dismiss/fullscreen/termination boundaries.
+- update renderer-termination recovery metadata to new preference;
+- remove legacy Cold-only website-cache cleanup coupling;
+- preserve Phase 6 restore, Attention, media, focus and fullscreen ownership.
 
-### WP3 — readiness completion — COMPLETE / CORRECTIVE REQUIRED
+### WP5 — verification / Real-Mac evidence
 
-Exact-current Runtime finish/failure projection is implemented through the existing navigation/pool ownership path. WP4 audit found that focus/input and physical Attention visibility are resumed too early around this completion boundary, and that provisional fallback terminal classification needs correction.
-
-### WP4 — verification and merge readiness — ACTIVE / CHANGES REQUIRED
-
-Observed machine evidence on implementation head `0ad45bff7869cdf66ac26994396ff013c89b0fbe`:
-
-- focused Phase 6 tests: PASS;
-- `ExternalShellTests`: PASS;
-- `WebViewPoolTests`: PASS;
-- full XCTest: PASS (~1379 / 0 failures);
-- Debug build: PASS;
-- Release build: PASS;
-- native arm64: PASS;
-- required literal-head CI `Build & Test (Apple Silicon arm64)`: PASS, run 1302;
-- QA DMG: PASS, run 627.
-
-Independent exact-diff audit: **CHANGES REQUIRED**. Review record: PR #187 review `5728444391`.
-
-Bounded Real-Mac WP4 smoke remains pending until the corrective is pushed.
-
-## WP4 bounded corrective contract
-
-Correct only the following four findings. Do not broaden scope.
-
-### C1 — restore focus/input only after Outcome-A readiness — BLOCKER
-
-Current deferred attach can make the restoring WebView current for focus and can call native `orderFrontAndFocus` before `navigation.finished`; the existing commit path can also schedule DOM input focus while restoring is still active.
-
-Required behavior:
-
-```text
-attach fresh Runtime under opaque restoring surface
-→ keep Phase 6 focus/input flow gated
-→ exact-current Runtime navigation.finished accepted
-→ remove restoring surface
-→ resume the existing canonical native/DOM focus flow exactly once
-```
-
-Do not create a new focus owner or polling loop. Existing presentation-focus ownership remains canonical.
-
-### C2 — restoring overlay is not page-visible Attention — BLOCKER
-
-An attached WebView underneath the opaque restoring surface must not be treated as actually user-visible merely because its source window is visible/key.
-
-Keep `WebAttentionCoordinator` semantics and authority unchanged. Correct only the physical presentation fact/acknowledgement boundary so Attention acknowledgement cannot happen until the restoring surface is removed and the page is actually presented.
-
-### C3 — stop hidden spinner animation — CORRECTIVE
-
-`showRestoringState` / `hideRestoringState` must explicitly start/stop the native progress indicator. The hidden overlay may remain attached, but it must not continue animation indefinitely.
-
-Add deterministic regression coverage.
-
-### C4 — provisional HTTP fallback is not terminal — CORRECTIVE
-
-For `didFailProvisionalNavigation`, evaluate the existing safe HTTP-entry fallback before projecting the Phase 6 terminal failure. If a fallback load is started, keep the pending materialization/restoring transaction alive. Let the fallback navigation's own exact-current finish or terminal failure decide completion.
-
-Do not change the existing fallback eligibility semantics and do not add reload/double-navigation behavior.
-
-## Verification gates after corrective
-
-1. Focused tests covering C1–C4.
-2. Existing Phase 6 focused suite remains PASS.
-3. Full XCTest PASS.
-4. Debug + Release + native arm64 PASS.
-5. Fresh literal-head required CI PASS on the corrective head.
-6. Bounded Real-Mac smoke: resident switch, compatible reclaimed restore, safe fallback if reproducible, rapid switch-away, dismiss during pending restore.
-7. Fresh independent exact-diff audit PASS.
-8. Only then may PR #187 become merge-ready.
-9. Program-final user-owned human UI/runtime acceptance remains after integrated Phase 6 closeout; machine verification does not replace it.
+- focused migration/lifecycle/UI tests;
+- full XCTest;
+- Debug/Release native arm64;
+- required literal-head CI;
+- 3-Automatic-ChatGPT Real-Mac resident/PID/memory evidence;
+- fresh exact-diff audit.
 
 ## Acceptance criteria
 
-Merge readiness requires all of the following:
+Phase 7 merge readiness requires all of the following:
 
-- native shell/restoring state becomes visible before fresh Runtime materialization for a reclaimed visible Slot;
-- resident Slot path remains direct;
-- no extra persistent WebView residency;
-- stale materialization work cannot affect a newer selection/presentation;
-- interaction-state restore/session safety remains intact;
-- restoring-state dismissal uses Outcome-A exact-current-Runtime navigation readiness;
-- focus/input is not resumed before accepted readiness;
-- opaque restoring presentation is not counted as user-visible page presentation;
-- recoverable HTTP fallback remains within the same pending restore transaction;
-- hidden restoring UI does not retain active animation work;
-- Phase 4 budget semantics remain unchanged;
-- no screenshot/page-content/opaque-state persistence/logging;
-- focused/full tests and builds pass;
-- fresh required literal-head CI passes;
-- bounded Real-Mac restore smoke passes;
-- fresh independent exact-diff audit passes.
-
-## Explicit non-scope
-
-- Settings-backed Runtime budget tuning;
-- managed target/ranking changes;
-- predictive prewarm;
-- screenshot continuity cache;
-- Browser Profile migration/reset;
-- persistence schema change;
-- Attention/Unread policy change;
-- background-generation cadence changes;
-- fullscreen redesign;
-- generic WebView threading redesign;
-- private WebKit API;
-- release/version bump.
+- no current Hot/Warm/Cold UI or active lifecycle policy remains;
+- new Slots default Automatic;
+- compatibility decode/encode is deterministic and data-safe;
+- one active/no-protection 3-Slot scenario converges to one Automatic resident after grace;
+- rapid switching stays bounded rather than materializing every Slot indefinitely;
+- protected generation/media/fullscreen Runtime is preserved;
+- Keep Loaded does not preload at launch or require hidden presentation ownership;
+- critical pressure can reclaim inactive Keep Loaded after Automatic candidates;
+- Phase 6 restore/session continuity remains correct;
+- Runtime reclaim does not clear website/session data;
+- focused/full tests, builds, CI and Real-Mac evidence pass;
+- fresh exact-diff audit passes.
 
 ## STOP conditions
 
-STOP/reconcile if the corrective requires:
+STOP/reconcile if Phase 7 requires:
 
-- a second Runtime lifecycle writer or second presentation/focus/Attention truth owner;
-- Browser Profile/session/persistent-data mutation;
-- private WebKit API;
+- Browser Profile/cookie/session reset or destructive migration;
+- a second lifecycle writer;
 - hidden persistent WebViews as continuity objects;
-- larger Runtime budget merely to mask restore cost;
-- screenshot persistence;
-- arbitrary reload/double-navigation/fixed-delay workaround;
-- unbounded readiness polling;
-- material production scope outside the frozen paths;
+- restoring Hot/Warm/Cold as current policy;
+- private WebKit memory attribution/API;
+- weakening hard protection semantics outside this contract;
+- an unplanned persistence schema/version bump;
+- material product scope outside the frozen Phase 7 paths;
 - release/version work.
 
 ## Current execution state
 
 ```text
-PHASE_6_AUDIT=COMPLETE
-PHASE_6_CONTRACT=ACCEPTED / FROZEN
-SELECTED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
-READINESS_POLICY=OUTCOME_A_NAVIGATION_BACKED_EXACT_CURRENT_RUNTIME
-WP0_GATE0=COMPLETE / OUTCOME_A
-WP1_NATIVE_RESTORING_PRESENTATION=COMPLETE
-WP2_TWO_STAGE_ORCHESTRATION=COMPLETE
-WP3_READINESS_COMPLETION=COMPLETE / CORRECTIVE REQUIRED
-WP4_VERIFICATION=ACTIVE / EXACT_DIFF_AUDIT_CHANGES_REQUIRED
-WP4_IMPLEMENTATION_HEAD=0ad45bff7869cdf66ac26994396ff013c89b0fbe
-WP4_REQUIRED_CI=PASS / RUN 1302
-WP4_QA_DMG=PASS / RUN 627
-WP4_REAL_MAC_SMOKE=PENDING AFTER CORRECTIVE
-MERGE_READINESS=BLOCKED
-PRODUCT_MUTATION=AUTHORIZED WITHIN FROZEN CORRECTIVE SCOPE
-NEXT_USER_START_REQUIRED=NO
-TASK_RECONCILIATION_REQUIRED=NO
+PROGRAM_CONTRACT=V5_ACCEPTED_FROZEN
+PHASE6_PR187=OPEN_DRAFT_CLOSEOUT_PENDING
+PHASE7_CONTRACT=ACCEPTED_FROZEN
+PHASE7_IMPLEMENTATION=NOT_STARTED
+PHASE7_PRODUCT_MUTATION=HELD
+NEXT_REQUIRED_GATE=PHASE6_REAL_MAC_SMOKE + FRESH EXACT_DIFF AUDIT + MERGE
+NEXT_USER_START_REQUIRED=YES
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
-
-Next action: apply C1–C4 as one bounded corrective on the same branch and PR, then rerun the fresh WP4 gates. Do not merge or release before fresh independent audit passes.
