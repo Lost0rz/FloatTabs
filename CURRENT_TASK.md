@@ -2,21 +2,19 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 2 Ready / Unread Decoupling  
-**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION — TEST-SCOPE CORRECTIVE AUTHORIZED`  
+**Status:** `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFICATION`  
 **Mode:** `EXECUTE`  
 **Task class:** `HIGH-RISK ATTENTION / DURABLE UNREAD / RUNTIME LIFECYCLE HANDOFF`  
 **Program contract:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`  
-**Phase 2 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`  
+**Phase 2 plan:** `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`  
 **Scope reconciliation:** `docs/architecture/FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization
 
-Implement only the frozen Phase 2 Ready / Unread decoupling plan plus the accepted test-only scope reconciliation.
+Continue the same Phase 2 implementation. V2 changes only the verification/acceptance cadence: timing-sensitive real-product interaction is now user-owned human acceptance after machine implementation, CI and independent audit are complete.
 
-The focused read-only audit established that durable unread already exists independently from Runtime Attention; the required task is to stop transient Ready from indefinitely protecting a completed Runtime and to make persistent unread presentation derive from the durable unread owner.
-
-The first construction attempt then exposed one stale cross-domain regression assertion in `FloatTabsTests/BrowserProfileDuplicateTests.swift`. That test-only mismatch is now reconciled without expanding production scope.
+Do not retry CUA-driven ChatGPT live smoke as a construction gate.
 
 ## Frozen semantic contract
 
@@ -35,16 +33,14 @@ ChatGPTUnreadResponseCoordinator + UnreadResponseStore
 For a valid hidden completion:
 
 ```text
-capture pre-transition facts
-→ Runtime Attention completion transition
+Runtime Attention completion transition
 → durable unread commit
 → unread presentation sync
-→ generation-completed callback as applicable
 → protection-ended lifecycle restart
 → existing policy may later hibernate Runtime
 ```
 
-Durable unread commit must precede the lifecycle restart/reclaim boundary.
+Durable unread commit must precede reclaim.
 
 ## Authorized production files
 
@@ -55,69 +51,86 @@ Only:
 - `FloatTabs/App/AppCoordinator.swift`
 - `FloatTabs/MenuBar/StatusItemController.swift`
 
-Do not add another Runtime/unread writer.
-
 ## Authorized test files
 
 - `FloatTabsTests/WebAttentionCoordinatorTests.swift`
 - `FloatTabsTests/WebAttentionLifecycleTests.swift`
 - `FloatTabsTests/WebAttentionCrossFeatureTests.swift`
 - `FloatTabsTests/WebAttentionPresentationTests.swift`
-- `FloatTabsTests/UnreadResponseTests.swift` only when narrowly needed for durable-survival regression coverage
-- `FloatTabsTests/BrowserProfileDuplicateTests.swift` **only** for the reconciled stale Ready-protection cross-domain regression assertion
+- `FloatTabsTests/UnreadResponseTests.swift` only when narrowly needed
+- `FloatTabsTests/BrowserProfileDuplicateTests.swift` only for the reconciled Ready-protection assertion
 
-### Corrective test-only boundary
+The BrowserProfileDuplicate corrective remains test-only; the adjacent Generating-protected case must remain protected.
 
-In `BrowserProfileDuplicateTests.swift`, the executor may:
+## Current observed implementation evidence
 
-- rename `testSuccessfulDuplicateLeavesSourceRuntimeAndReadyAttentionUntouched` only if needed for semantic accuracy;
-- change its historical Ready-protection assertion to the Phase 2 expectation that Ready is **not** Attention-protected;
-- preserve its source WebView identity, source Attention bridge identity, Browser Profile identity, transient Ready-state, duplicate isolation and resident-runtime assertions.
+The preserved local workspace reports:
 
-The adjacent `testProtectedSourceDuplicateDoesNotAskSwitchConfirmation` uses a **Generating** source and must continue to verify protected behavior.
+```text
+9 authorized dirty files
+BrowserProfileDuplicate corrective: 1 / 0 failures
+focused Phase 2: 241 executed / 3 skipped / 0 failures
+full XCTest: 1073 executed / 3 skipped / 0 failures
+Debug arm64: PASS
+Release arm64: PASS
+first CUA smoke: visible_completion; durable unread correctly skipped
+```
 
-No Browser Profile production-code change, persistence/schema change, lifecycle-policy change or additional test-domain expansion is authorized by this corrective.
+The first smoke result is not a Phase 2 failure and is not a STOP condition under V2.
 
 ## Required implementation outcomes
 
 1. Generating remains Attention-based Runtime protection.
 2. Ready is no longer Attention-based Runtime protection.
-3. Existing Ready state remains transient; do not remove it as a broad state-machine migration.
-4. Hidden completion writes durable unread before normal lifecycle reclaim can resume.
-5. Existing lifecycle fresh-plan restart is used; do not invent a second timer/policy path.
-6. Rail unread remains driven by durable unread.
-7. Status/menu unread count is driven by durable unread, with semantically truthful `unread` naming rather than `readyCount` naming.
-8. Runtime reset/hibernate/recreation never clears durable unread.
-9. Existing acknowledgement/visibility/response-identity behavior remains intact.
-10. No Browser Profile/session/configuration production mutation.
+3. Ready remains transient compatibility/diagnostic state.
+4. Durable unread commit remains ordered before lifecycle reclaim can resume.
+5. Existing lifecycle restart path is used; no second timer/policy path.
+6. Rail/menu persistent unread derives from durable unread.
+7. Runtime reset/hibernate/recreation does not clear durable unread.
+8. Existing acknowledgement/visibility/response-identity semantics remain intact.
+9. No Browser Profile/session/configuration production mutation.
 
-## Verification
+## Machine verification and delivery
 
-Required before handoff to independent audit:
+The local construction executor is responsible for:
 
-- affected BrowserProfileDuplicate regression PASS after the narrow corrective;
-- focused Phase 2 tests PASS;
+- focused tests PASS;
 - full XCTest PASS;
-- Debug arm64 build PASS;
-- Release arm64 build PASS;
-- bounded real-runtime smoke from the frozen plan completed with evidence;
-- exact implementation diff remains in scope;
-- one Phase 2 implementation PR created/updated;
-- required `Build & Test (Apple Silicon arm64)` passes on the literal PR head using `macmini-floattabs-01` before merge readiness can be claimed.
+- Debug arm64 PASS;
+- Release arm64 PASS;
+- exact changed-path/scope/data-safety audit;
+- preserving current authorized local work while reconciling fresh Authority non-destructively;
+- commit + push;
+- exactly one Phase 2 implementation PR;
+- literal-head `Build & Test (Apple Silicon arm64)` PASS on `macmini-floattabs-01`.
 
-The construction executor must not mark human UI acceptance PASS. If all machine gates pass, stop for independent web audit and user-owned UI acceptance.
+After required CI, stop for independent web audit.
+
+The executor must **not** drive ChatGPT/UI interaction through CUA/automation to satisfy final real-product acceptance.
+
+After independent web audit passes, state becomes:
+
+`WAITING_FOR_HUMAN_UI_ACCEPTANCE`
+
+## Human acceptance — user owned
+
+The user will perform the timing-sensitive runtime/UI test in one concentrated acceptance pass after machine work is complete.
+
+The human pass covers hidden completion, durable unread, normal Runtime reclaim, unread persistence, restore/session continuity, acknowledgement, Generating protection, and obvious focus/fullscreen regression.
+
+Only explicit user feedback can set `HUMAN_UI_ACCEPTANCE=PASS` or `FAIL`.
 
 ## Explicit non-scope / forbidden expansion
 
 Do not modify without STOP/reconciliation:
 
-- `FloatTabs/Web/ChatGPTAttentionBridge.swift`
-- `FloatTabs/Web/ChatGPTResponseBridge.swift`
-- `FloatTabs/Web/ChatGPTResponseExtraction.swift`
-- `FloatTabs/Web/ChatGPTUnreadResponseCoordinator.swift`
-- `FloatTabs/Persistence/UnreadResponseStore.swift`
-- `FloatTabs/Web/SlotLifecycleCoordinator.swift`
-- `FloatTabs/Web/WebViewPool.swift`
+- `ChatGPTAttentionBridge.swift`
+- `ChatGPTResponseBridge.swift`
+- `ChatGPTResponseExtraction.swift`
+- `ChatGPTUnreadResponseCoordinator.swift`
+- `UnreadResponseStore.swift`
+- `SlotLifecycleCoordinator.swift`
+- `WebViewPool.swift`
 - Browser Profile / Tab production persistence schema or behavior
 - attention visual-style renderer
 - native notification delivery
@@ -128,31 +141,29 @@ No user-data reset/deletion is authorized.
 
 ## STOP conditions
 
-STOP and report evidence without workaround if:
+STOP/reconcile if:
 
-- durable unread can be lost on hibernate/runtimeReset/recreation;
-- reclaim can begin before durable unread commit;
-- a Generating Slot becomes reclaimable;
-- correct implementation requires any forbidden production file or schema change;
-- new competing unread/Attention/lifecycle writer would be required;
-- Phase 3 notification or Phase 4 policy work is required to make Phase 2 pass;
-- focused/full tests, Debug/Release build, or required CI still fail after the authorized stale-test correction because of the Phase 2 change;
-- any additional unauthorized test file proves to encode a materially conflicting semantic that requires mutation;
-- overlapping unique work appears in an authorized file;
-- human UI acceptance later fails.
+- focused/full tests, build or required CI fails for a new Phase 2 reason;
+- Generating becomes reclaimable;
+- code inspection/tests show reclaim may begin before durable unread commit;
+- correct implementation requires forbidden production/schema scope;
+- a competing unread/Attention/lifecycle writer would be required;
+- Phase 3/4 work is required;
+- overlapping unique work makes the writer unsafe;
+- later human acceptance reports an actual product failure contradicting the frozen semantics.
+
+Do **not** STOP merely because AI-driven live smoke is absent or inconclusive.
 
 ## Delivery boundary
 
-Resume the same implementation branch/workspace; do not discard the eight already-authorized uncommitted implementation files.
+Resume the same dirty implementation workspace and preserve all nine authorized changes.
 
-Implementation may commit/push and create or update exactly one Phase 2 implementation PR.
+Do not merge, release, bump version, or start Phase 3/4 from the construction step.
 
-Do **not** merge, release, bump version, or start Phase 3/4.
+Expected construction terminal state after commit/push/PR/CI is:
 
-Terminal machine state for the construction handoff is one of:
+`WAITING_FOR_INDEPENDENT_WEB_AUDIT`
 
-- `WAITING_FOR_INDEPENDENT_WEB_AUDIT`
-- `WAITING_FOR_HUMAN_UI_ACCEPTANCE` when independent audit has already occurred elsewhere and human UI is the only remaining gate
-- `STOP_RECONCILE` with exact evidence
+After independent audit passes:
 
-Return a receipt containing governance route, skills used, execution topology/subagents, start/final/remote heads, changed paths, focused/full/build/smoke results, scope/STOP assessment, PR state, merge state, and final STATUS/TASK state.
+`WAITING_FOR_HUMAN_UI_ACCEPTANCE`
