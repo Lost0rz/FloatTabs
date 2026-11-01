@@ -22,26 +22,32 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
+          def replace_once(text, old, new, label):
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f"{label}: expected exactly one match, found {count}")
               return text.replace(old, new, 1)
 
-          source_path = Path("FloatTabs/Web/ChatGPTAttentionBridge.swift")
-          source = source_path.read_text()
+          def regex_once(text, pattern, repl, label):
+              new, count = re.subn(pattern, repl, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one regex match, found {count}")
+              return new
 
-          source = replace_once(
-              source,
-              '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+          p = Path('FloatTabs/Web/ChatGPTAttentionBridge.swift')
+          s = p.read_text()
+
+          s = replace_once(s,
+          '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
               static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
               static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
               static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
 
               typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
           ''',
-              '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+          '''    static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
               static let longRunningGenerationThreshold: TimeInterval = 30
               static let hiddenLongRunningWatchdogIntervalNanoseconds: UInt64 = 5_000_000_000
               static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
@@ -60,124 +66,87 @@ jobs:
               }
 
               typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
-          ''',
-              "cadence constants"
+          ''', 'cadence constants')
+
+          s = regex_once(
+              s,
+              r'(globalThis\.__floatTabsAttentionProbeV1 = \(\) => \{.*?return \{\n\s+version: 1,\n\s+kind: "baseline",\n\s+token: TOKEN,\n\s+generating: generating,\n)(\s+responseIdentity: responseIdentity\n\s+\};\n\s+\};)',
+              r'\1              visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)\n                ? document.visibilityState : "other",\n\2',
+              'liveness probe visibility metadata'
           )
 
-          source = replace_once(
-              source,
-              '''              token: TOKEN,
-              generating: generating,
-              responseIdentity: responseIdentity
-            };
-          };
-
-          // BFCache/history restoration does not rerun document-start injection.
-          ''',
-              '''              token: TOKEN,
-              generating: generating,
-              visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
-                ? document.visibilityState : "other",
-              responseIdentity: responseIdentity
-            };
-          };
-
-          // BFCache/history restoration does not rerun document-start injection.
-          ''',
-              "liveness probe visibility metadata"
-          )
-
-          source = replace_once(
-              source,
-              '''    private var livenessWatchdogGeneration: UInt64 = 0
+          s = replace_once(s,
+          '''    private var livenessWatchdogGeneration: UInt64 = 0
               private var livenessGeneration: UInt64 = 0
               private var livenessCycleOwnerGeneration: UInt64?
           ''',
-              '''    private var livenessWatchdogGeneration: UInt64 = 0
+          '''    private var livenessWatchdogGeneration: UInt64 = 0
               private var livenessGeneration: UInt64 = 0
               private var lastLivenessDocumentWasHidden: Bool?
               private var livenessCycleOwnerGeneration: UInt64?
-          ''',
-              "watchdog visibility state"
-          )
+          ''', 'watchdog visibility state')
 
-          source = replace_once(
-              source,
-              '''        let documentEpoch = document.epoch
+          s = replace_once(s,
+          '''        let documentEpoch = document.epoch
               let token = document.token
               let webViewIdentity = ObjectIdentifier(webView)
           #if DEBUG
           ''',
-              '''        let documentEpoch = document.epoch
+          '''        let documentEpoch = document.epoch
               let token = document.token
               let webViewIdentity = ObjectIdentifier(webView)
               let watchdogStartedAt = ProcessInfo.processInfo.systemUptime
               lastLivenessDocumentWasHidden = nil
           #if DEBUG
-          ''',
-              "watchdog start timestamp"
-          )
+          ''', 'watchdog start timestamp')
 
-          source = replace_once(
-              source,
-              '''            "slot_id": .string(slotID.uuidString),
+          s = replace_once(s,
+          '''            "slot_id": .string(slotID.uuidString),
               "watchdog_interval_ms": .integer(2_000)
           ''',
-              '''            "slot_id": .string(slotID.uuidString),
+          '''            "slot_id": .string(slotID.uuidString),
               "watchdog_interval_ms": .integer(2_000),
               "long_running_threshold_ms": .integer(30_000),
               "hidden_long_running_interval_ms": .integer(5_000)
-          ''',
-              "watchdog diagnostics"
-          )
+          ''', 'watchdog diagnostics')
 
-          source = replace_once(
-              source,
-              '''            while !Task.isCancelled {
+          s = replace_once(s,
+          '''            while !Task.isCancelled {
                 guard await self.livenessSleeper(Self.livenessWatchdogIntervalNanoseconds) else { return }
                 guard !Task.isCancelled else { return }
                 await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
               }
           ''',
-              '''            while !Task.isCancelled {
-                let elapsed = max(
-                  ProcessInfo.processInfo.systemUptime - watchdogStartedAt,
-                  0
-                )
+          '''            while !Task.isCancelled {
+                let elapsed = max(ProcessInfo.processInfo.systemUptime - watchdogStartedAt, 0)
                 let interval = Self.nextLivenessWatchdogIntervalNanoseconds(
-                  elapsed: elapsed,
-                  documentIsHidden: self.lastLivenessDocumentWasHidden
+                    elapsed: elapsed,
+                    documentIsHidden: self.lastLivenessDocumentWasHidden
                 )
                 guard await self.livenessSleeper(interval) else { return }
                 guard !Task.isCancelled else { return }
                 await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
               }
-          ''',
-              "adaptive watchdog loop"
-          )
+          ''', 'adaptive watchdog loop')
 
-          source = replace_once(
-              source,
-              '''        livenessWatchdogTask?.cancel()
+          s = replace_once(s,
+          '''        livenessWatchdogTask?.cancel()
               livenessWatchdogTask = nil
               clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
           ''',
-              '''        livenessWatchdogTask?.cancel()
+          '''        livenessWatchdogTask?.cancel()
               livenessWatchdogTask = nil
               lastLivenessDocumentWasHidden = nil
               clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
-          ''',
-              "watchdog state reset"
-          )
+          ''', 'watchdog state reset')
 
-          source = replace_once(
-              source,
-              '''    private func parseLivenessProbe(_ value: Any?) -> ChatGPTBridgePayload? {
+          s = replace_once(s,
+          '''    private func parseLivenessProbe(_ value: Any?) -> ChatGPTBridgePayload? {
               guard let body = value as? [String: Any], let payload = ChatGPTBridgePayload.parse(body), payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
               return payload
             }
           ''',
-              '''    private struct LivenessProbeSnapshot {
+          '''    private struct LivenessProbeSnapshot {
               let payload: ChatGPTBridgePayload
               let documentIsHidden: Bool?
 
@@ -192,85 +161,54 @@ jobs:
                     payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
               let documentIsHidden: Bool?
               switch body["visibility_state"] as? String {
-              case "hidden":
-                  documentIsHidden = true
-              case "visible", "prerender", "unloaded", "other":
-                  documentIsHidden = false
-              default:
-                  documentIsHidden = nil
+              case "hidden": documentIsHidden = true
+              case "visible", "prerender", "unloaded", "other": documentIsHidden = false
+              default: documentIsHidden = nil
               }
-              return LivenessProbeSnapshot(
-                  payload: payload,
-                  documentIsHidden: documentIsHidden
-              )
+              return LivenessProbeSnapshot(payload: payload, documentIsHidden: documentIsHidden)
             }
-          ''',
-              "liveness probe parser"
+          ''', 'liveness probe parser')
+
+          s = regex_once(
+              s,
+              r'(let firstProbe = parseLivenessProbe\(firstValue\).*?firstProbe\.token == token else \{.*?\n\s+return\n\s+\}\n)(\s+if firstProbe\.generating \{)',
+              r'\1        lastLivenessDocumentWasHidden = firstProbe.documentIsHidden\n\2',
+              'first probe scheduling hint'
           )
 
-          source = replace_once(
-              source,
-              '''            return
-              }
-              if firstProbe.generating {
-          ''',
-              '''            return
-              }
-              lastLivenessDocumentWasHidden = firstProbe.documentIsHidden
-              if firstProbe.generating {
-          ''',
-              "first probe scheduling hint"
+          s = regex_once(
+              s,
+              r'(let secondProbe = parseLivenessProbe\(secondValue\).*?\n\s+clearLivenessIdleCandidate\(ownedBy: watchdogGeneration\)\n\s+return\n\s+\}\n)(\s+guard !secondProbe\.generating, livenessGeneration == generation else \{)',
+              r'\1        lastLivenessDocumentWasHidden = secondProbe.documentIsHidden\n\2',
+              'confirmation probe scheduling hint'
           )
 
-          source = replace_once(
-              source,
-              '''            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
-                return
-              }
-              guard !secondProbe.generating, livenessGeneration == generation else {
-          ''',
-              '''            clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
-                return
-              }
-              lastLivenessDocumentWasHidden = secondProbe.documentIsHidden
-              guard !secondProbe.generating, livenessGeneration == generation else {
-          ''',
-              "confirmation probe scheduling hint"
-          )
-
-          source = replace_once(
-              source,
-              '''#if DEBUG
+          s = replace_once(s,
+          '''#if DEBUG
             var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
 
             func debugRunLivenessCycle() async {
           ''',
-              '''#if DEBUG
+          '''#if DEBUG
             var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
             var debugLastLivenessDocumentWasHidden: Bool? { lastLivenessDocumentWasHidden }
 
             func debugRunLivenessCycle() async {
-          ''',
-              "debug scheduling hint"
-          )
+          ''', 'debug scheduling hint')
 
-          source_path.write_text(source)
+          p.write_text(s)
 
-          test_path = Path("FloatTabsTests/ChatGPTAttentionBridgeTests.swift")
-          tests = test_path.read_text()
-
-          tests = replace_once(
-              tests,
-              '''        XCTAssertTrue(probe.contains("generating: generating"))
+          tp = Path('FloatTabsTests/ChatGPTAttentionBridgeTests.swift')
+          t = tp.read_text()
+          t = replace_once(t,
+          '''        XCTAssertTrue(probe.contains("generating: generating"))
               XCTAssertTrue(probe.contains("isGenerating()"))
           ''',
-              '''        XCTAssertTrue(probe.contains("generating: generating"))
+          '''        XCTAssertTrue(probe.contains("generating: generating"))
               XCTAssertTrue(probe.contains("visibility_state:"))
               XCTAssertTrue(probe.contains("document.visibilityState"))
               XCTAssertTrue(probe.contains("isGenerating()"))
-          ''',
-              "probe contract test"
-          )
+          ''', 'probe contract test')
 
           anchor = '''    func testGeneratingBaselineActivatesOneLivenessWatchdogAndDuplicateStartDoesNotDuplicateIt() throws {
               let harness = ChatGPTAttentionBridgeHarness()
@@ -287,57 +225,21 @@ jobs:
             func testLongRunningHiddenWatchdogCadenceSelection() {
               let base = ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
               let thrift = ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds
-
-              XCTAssertEqual(
-                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
-                      elapsed: 0,
-                      documentIsHidden: true
-                  ),
-                  base
-              )
-              XCTAssertEqual(
-                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
-                      elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold - 0.001,
-                      documentIsHidden: true
-                  ),
-                  base
-              )
-              XCTAssertEqual(
-                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
-                      elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold,
-                      documentIsHidden: true
-                  ),
-                  thrift
-              )
-              XCTAssertEqual(
-                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
-                      elapsed: 120,
-                      documentIsHidden: false
-                  ),
-                  base
-              )
-              XCTAssertEqual(
-                  ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
-                      elapsed: 120,
-                      documentIsHidden: nil
-                  ),
-                  base
-              )
+              XCTAssertEqual(ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(elapsed: 0, documentIsHidden: true), base)
+              XCTAssertEqual(ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold - 0.001, documentIsHidden: true), base)
+              XCTAssertEqual(ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold, documentIsHidden: true), thrift)
+              XCTAssertEqual(ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(elapsed: 120, documentIsHidden: false), base)
+              XCTAssertEqual(ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(elapsed: 120, documentIsHidden: nil), base)
             }
 
             func testHiddenLivenessProbeUpdatesSchedulingHintWithoutAttentionTransition() async {
               let hiddenProbe: [String: Any] = [
-                  "version": 1,
-                  "kind": "baseline",
-                  "token": tokenA!,
-                  "generating": true,
-                  "visibility_state": "hidden"
+                  "version": 1, "kind": "baseline", "token": tokenA!,
+                  "generating": true, "visibility_state": "hidden"
               ]
               let harness = ChatGPTAttentionBridgeHarness(probeValues: [hiddenProbe])
-
               harness.accept(true, token: tokenA)
               await harness.bridge.debugRunLivenessCycle()
-
               XCTAssertEqual(harness.observations, [.generationStarted])
               XCTAssertEqual(harness.bridge.debugLastLivenessDocumentWasHidden, true)
               XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
@@ -345,16 +247,11 @@ jobs:
 
             func testMissingLivenessVisibilityMetadataKeepsConservativeCadenceHint() async {
               let probe: [String: Any] = [
-                  "version": 1,
-                  "kind": "baseline",
-                  "token": tokenA!,
-                  "generating": true
+                  "version": 1, "kind": "baseline", "token": tokenA!, "generating": true
               ]
               let harness = ChatGPTAttentionBridgeHarness(probeValues: [probe])
-
               harness.accept(true, token: tokenA)
               await harness.bridge.debugRunLivenessCycle()
-
               XCTAssertNil(harness.bridge.debugLastLivenessDocumentWasHidden)
               XCTAssertEqual(
                   ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
@@ -365,12 +262,12 @@ jobs:
               )
             }
           '''
-          tests = replace_once(tests, anchor, addition, "cadence tests")
-          test_path.write_text(tests)
+          t = replace_once(t, anchor, addition, 'cadence tests')
+          tp.write_text(t)
           PY
 
           git diff --check
-          git diff -- FloatTabs/Web/ChatGPTAttentionBridge.swift FloatTabsTests/ChatGPTAttentionBridgeTests.swift
+          git diff --stat
 
       - name: Commit construction and remove bootstrap workflow
         shell: bash
