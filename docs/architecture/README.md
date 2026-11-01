@@ -7,7 +7,7 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION STARTED / GATE 0 PENDING**;
+- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / EXECUTION ACTIVE / GATE 0 OUTCOME A**;
 - [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **AUDIT / RATIONALE EVIDENCE**; no longer the execution-scope authority;
 - `CURRENT_STATUS.md` — verified current state/evidence;
 - `CURRENT_TASK.md` — only active mutation authorization;
@@ -83,9 +83,10 @@ The primary ChatGPT page detector remains event-driven. `document.visibilityStat
 
 **Audit:** complete.  
 **Implementation contract:** accepted/frozen.  
-**Execution:** started by explicit user instruction on `2026-11-01`.  
-**Current gate:** WP0 / Gate 0 Real-Mac evidence.  
-**Product implementation:** not started; product mutation remains held until Gate 0 Outcome A/B.
+**Execution:** active.  
+**Gate 0:** complete / **OUTCOME_A — navigation-backed readiness**.  
+**Current work package:** WP1 native restoring presentation.  
+**Product mutation:** authorized within the frozen Phase 6 scope.
 
 Frozen architecture:
 
@@ -96,41 +97,41 @@ reclaimed Slot selected/summoned
 → revalidate materialization request
 → existing WebViewPool materializes/restores fresh Runtime
 → attach fresh WebView under restoring state
-→ Gate 0-proven current-Runtime readiness
+→ exact-current-Runtime navigation-backed readiness
 → remove restoring state
 → existing focus ownership resumes
 ```
 
 Resident Slot switching remains on the direct existing path.
 
-### Gate 0 readiness contract
+### Gate 0 accepted evidence
 
-The exact callback name is not frozen from structural fixtures. The implementation contract instead requires a Real-Mac evidence gate before product-source mutation.
+A Real-Mac verification drove an existing Slot through real product hibernate/reclaim and then reactivated it through the existing compatible `interactionState` restore path.
 
-Allowed evidence classes:
+The fresh restored Runtime emitted this exact non-stale navigation sequence:
 
-1. **navigation-backed readiness** — compatible `interactionState` restore exposes usable exact-current-Runtime navigation/loading callbacks that can trigger the final bounded readiness check;
-2. **non-navigation readiness** — compatible restore does not reliably emit the same navigation sequence, but bounded public current-Runtime renderer/page readiness is available without polling ownership drift.
+```text
+navigation.provisional_started
+→ navigation.commit
+→ navigation.finished
+```
 
-If neither class is provable without private API, arbitrary delay/unbounded polling, reload/double-navigation, persistence/session mutation, screenshot persistence, extra resident WebViews or ownership change, execution stops before product mutation.
+The callback Runtime identity matched the fresh `web_runtime.restore.completed` / `web_runtime.created` identity and differed from the pre-hibernate Runtime. The same Runtime also passed the existing bounded cross-world liveness observation with `runtime_context_current=true`, complete document readiness, `is_loading=false`, finished-navigation facts and successful focus recognition.
 
-Current repository evidence plumbing is already sufficient to execute Gate 0 without first changing product Runtime code:
+No duplicate ordinary URL load, private API, arbitrary fixed readiness delay, unbounded polling, screenshot persistence, Browser Profile/session reset, extra persistent WebView or ownership change was required.
 
-- Debug benchmark control can drive existing Slot `configure`, `activate`, `show` and `hide` operations;
-- `tools/benchmark/floattabs_lifecycle_benchmark.py` can cross actual Cold/Warm production timers, prove hibernate/reclaim, and later re-activate a reclaimed Slot;
-- `WebViewPool` diagnostics expose hibernate/restore/create identity;
-- `SlotNavigationObserver` diagnostics expose exact-current-Runtime provisional/commit/finish callbacks and bounded renderer/liveness evidence.
+Therefore the implementation must use **Outcome A**: exact-current-Runtime navigation-backed readiness. The bounded cross-world observation is corroborating evidence, not a new product readiness owner.
 
 `web_runtime.restore.completed` remains state-handoff evidence only and is not sufficient by itself to dismiss the restoring presentation.
 
-### Frozen implementation boundary after Gate 0 PASS
+### Frozen implementation boundary
 
 Primary expected production paths:
 
 - `FloatTabs/Panel/PanelController.swift` — materialization generation, early shell presentation, deferred materialization and stale-request orchestration;
 - `FloatTabs/Web/WebViewContainer.swift` — lightweight native restoring presentation only;
-- `FloatTabs/Web/WebViewPool.swift` — no semantic restore rewrite; narrow read-only seam only if required;
-- `FloatTabs/Web/SlotNavigationObserver.swift` — narrow readiness seam only when Gate 0 proves it necessary.
+- `FloatTabs/Web/WebViewPool.swift` — no semantic restore rewrite; only the narrow navigation-finish projection required by Outcome A;
+- `FloatTabs/Web/SlotNavigationObserver.swift` — existing navigation owner; no new probe is required because it already exposes an `onNavigationFinish` seam.
 
 Primary expected tests:
 
@@ -139,6 +140,24 @@ Primary expected tests:
 - existing focus tests only when focus timing is touched.
 
 Any material production scope outside those boundaries requires reconciliation.
+
+### Current implementation sequence
+
+```text
+WP1 native restoring presentation
+→ WP2 two-stage PanelController orchestration
+→ WP3 Outcome-A finish projection + exact-current request/runtime completion
+→ WP4 focused/full XCTest + Debug/Release arm64 + literal-head CI
+   + bounded Real-Mac restore smoke + independent exact-diff audit
+```
+
+The restoring surface may disappear only while all three still match:
+
+1. current private materialization generation/request;
+2. current active Slot;
+3. exact pooled Runtime that produced the approved navigation completion fact.
+
+Selection change, dismissal, termination/reset and incompatible fullscreen/source lock must invalidate pending work before it can attach, focus, activate or complete a stale presentation.
 
 ### Rejected Phase 6 V1 alternatives
 
@@ -154,7 +173,7 @@ Any material production scope outside those boundaries requires reconciliation.
 - private `RuntimeBudgetPolicy` inside `SlotLifecycleCoordinator.swift` — deterministic budget decision only;
 - `WebAttentionCoordinator` — sole native Attention state authority;
 - `ChatGPTAttentionBridge` — provider sensing and bounded liveness fallback;
-- `PanelController` — presentation truth and Phase 6 materialization orchestration after Gate 0 passes;
+- `PanelController` — presentation truth and Phase 6 materialization orchestration;
 - `WebPanelContainerView` — visible Web surface/native restoring presentation, not lifecycle policy;
 - `UnreadResponseStore` / unread coordinator — durable unread truth;
 - native notification coordinator — notification projection/routing;
