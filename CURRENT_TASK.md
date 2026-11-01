@@ -2,106 +2,115 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 5 long-running background generation thrift  
-**Status:** `ACTIVE / PHASE_5_AUDIT_AND_IMPLEMENTATION`  
-**Mode:** `AUDIT → DESIGN FREEZE → IMPLEMENT → VERIFY`  
+**Status:** `WAITING_FOR_PHASE_5_MERGE_GATE`  
+**Mode:** `VERIFY / MERGE GATE`  
 **Task class:** `WEB RUNTIME / ATTENTION OBSERVATION THRIFT`  
 **JSC root cause:** `UNKNOWN`
 
-## Authorization
+## Authorized objective
 
-The user authorized Phase 5 remote execution on 2026-11-01 after Phase 4 merged.
+Reduce FloatTabs-owned observation work during long-running background ChatGPT generation without interrupting provider generation, weakening Runtime protection, changing Browser Profile/session semantics or moving canonical ownership.
 
-This task first reconciles stale Runtime Lifecycle documentation, then implements the smallest Phase 5 change that reduces **FloatTabs-owned** work during long-running background ChatGPT generation without interrupting provider generation or weakening Runtime/data-safety boundaries.
+## Delivered implementation
 
-## Verified Phase 5 audit baseline
+PR #183 delivers the Phase 5 mechanism on semantic implementation head:
 
-Current production facts:
+`e36589d4729f86b2e76609bcb699107e50f63919`
 
-- `WebAttentionCoordinator` is the sole Attention state authority; only `generating` is Runtime-protecting.
-- `SlotLifecycleCoordinator` consumes that read-only protection and must continue to protect Generating Runtime from automatic hibernate.
-- `PanelController` remains the authoritative product/presentation visibility owner.
-- `WebViewPool` owns the `ChatGPTAttentionBridge` lifetime together with each live Runtime.
-- `ChatGPTAttentionBridge` starts a native liveness watchdog on `generationStarted` and currently probes the current WebKit document every **2 seconds** until completion/reset.
-- the page detector is already event-driven, coalesces DOM mutation work, and intentionally excludes token-stream `characterData`; Phase 5 does not replace that detector with polling.
-- the liveness watchdog is a completion-recovery safety net; the ordinary page detector remains the primary generation-state sensor.
-
-## Selected Phase 5 design
-
-### Product invariant
-
-`generating` remains Runtime-protected for the entire generation. Phase 5 must **not**:
-
-- hibernate/release/reload a Generating Runtime;
-- pause, suspend, cancel or otherwise control the provider generation;
-- change Browser Profile/session/persistence semantics;
-- use private WebKit APIs;
-- make Diagnostics a product-state owner.
-
-### Thrift mechanism
-
-Reduce only the native liveness-watchdog fallback frequency for a long-running **page-hidden** generation.
-
-Use the ChatGPT document's `document.visibilityState` only as a **local bridge scheduling hint**. It is not canonical product visibility and must not replace `PanelController` presentation truth.
-
-Initial conservative policy:
+Delivered behavior:
 
 ```text
-page visible / unknown
-→ watchdog interval 2s
+visible / unknown page
+→ 2s liveness fallback
 
-page hidden + generation age < 30s
-→ watchdog interval 2s
+hidden page + generation age < 30s
+→ 2s fallback
 
-page hidden + generation age >= 30s
-→ watchdog interval 5s
+hidden page + generation age >= 30s
+→ 5s fallback
 
-any probe reports not-generating
-→ keep existing 250ms second confirmation
-→ only two current-epoch false probes may emit generationFinished
+first false probe
+→ existing 250ms confirmation
+→ second current-context false required for synthetic completion
 ```
 
-The 30s / 5s values are initial engineering defaults, not measured optimum. Later Settings-backed performance tuning may revise them under a separate task.
+The liveness probe now carries `document.visibilityState` only as local bridge scheduling metadata. It does not replace `PanelController` product/presentation visibility truth.
 
-### Scope
+The implementation does not alter the primary event-driven ChatGPT detector, provider generation, Runtime hibernate/release behavior or persistent user data.
 
-Authorized product paths are bounded to:
+## Ownership / safety preserved
 
+- `WebAttentionCoordinator` remains sole Attention state authority.
+- `.generating` remains Runtime-protecting for the complete generation.
+- `SlotLifecycleCoordinator` remains sole lifecycle release/hibernate executor.
+- `WebViewPool` remains Runtime mechanism/bridge-lifetime owner; its hibernate/restore contract is unchanged.
+- existing document token, semantic generation, physical Runtime epoch, watchdog-generation, WebView identity and timeout/stale-callback guards remain in force.
+- natural completion still stops the watchdog and does not require the fallback probe.
+- no Browser Profile/session/configuration/schema/reset/delete behavior changed.
+- no private WebKit API, Phase 6 work or release/version mutation was introduced.
+
+## Architecture/document reconciliation
+
+The same PR also closes the stale authority-routing gap identified after Phase 4:
+
+- current program contract advanced to `FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`;
+- active Phase 5 plan frozen in `FloatTabs_Runtime_Lifecycle_Phase5_Background_Generation_Thrift_Plan_V1.md`;
+- `docs/README.md`, architecture README and `DOMAIN_MAP.md` now route to delivered truth;
+- V1–V3 contracts and the old Phase 4 strict benchmark plan remain historical evidence rather than active authority.
+
+## Verification evidence
+
+Semantic implementation head passed:
+
+- Debug arm64 build;
+- Release arm64 build;
+- native arm64 architecture verification;
+- full existing XCTest suite including new cadence/visibility tests;
+- required `Build & Test (Apple Silicon arm64)` run `1287` on `macmini-floattabs-01`;
+- QA DMG run `623`.
+
+Final semantic diff review found only the intended 9 files:
+
+- `CURRENT_STATUS.md`;
+- `CURRENT_TASK.md`;
 - `FloatTabs/Web/ChatGPTAttentionBridge.swift`;
-- focused tests in `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`;
-- task/control and architecture-routing documents needed for Phase 5 authority alignment.
+- `FloatTabsTests/ChatGPTAttentionBridgeTests.swift`;
+- `docs/README.md`;
+- `docs/architecture/README.md`;
+- `docs/architecture/DOMAIN_MAP.md`;
+- V4 Runtime Lifecycle contract;
+- Phase 5 V1 plan.
 
-A narrowly required project-file change is allowed only if source/test membership actually requires it.
+No temporary construction workflow/script remains in the final diff.
 
-## Acceptance / verification
+## Literal-head merge gate
 
-Phase 5 must prove:
+This task is now control-only drift after the verified semantic implementation head. Before merge confirm against the **literal current PR head**:
 
-1. Generating remains Attention-protected and is never hibernated by the thrift mechanism.
-2. foreground/visible or unknown document state keeps the existing 2s watchdog cadence.
-3. hidden generation does not back off before the 30s long-running threshold.
-4. hidden generation at/after the threshold selects the 5s cadence.
-5. page visibility is scheduling metadata only; no product visibility or lifecycle writer moves into the bridge.
-6. false→false completion confirmation remains 250ms and preserves current epoch/token/stale-callback guards.
-7. natural completion still stops the watchdog immediately and emits no duplicate completion.
-8. Runtime replacement/invalidation cancels old watchdog work and late callbacks remain harmless.
-9. existing full XCTest, Debug arm64 and Release arm64 builds pass.
-10. literal PR head passes required `Build & Test (Apple Silicon arm64)` on `macmini-floattabs-01`.
-11. no Browser Profile/session/configuration/user-data mutation is introduced.
+1. PR #183 remains open and scope-clean;
+2. required `Build & Test (Apple Silicon arm64)` is green for the literal head;
+3. PR is mergeable;
+4. changed paths remain the expected 9 files;
+5. no Runtime ownership, Browser Profile/session/persistence, Phase 6 or release/version drift is present.
 
 ## STOP conditions
 
-STOP/reconcile if implementation would require:
+STOP/reconcile if the literal-head gate reveals:
 
-- changing `WebViewPool` hibernate/restore semantics;
-- a second Runtime lifecycle or Attention-state writer;
-- using logical active state as canonical physical visibility;
+- a second Attention or Runtime lifecycle writer;
+- Generating Runtime becoming reclaimable;
 - provider-generation pause/cancel semantics;
-- private WebKit API;
-- persistence/schema migration;
-- user-data reset/delete;
-- Phase 6 perceived-fast restore work;
-- release/version work.
+- `WebViewPool` or `SlotLifecycleCoordinator` contract redesign;
+- canonical product visibility moving into page JavaScript;
+- persistence/schema/user-data reset/delete;
+- private WebKit APIs;
+- Phase 6/release work;
+- required CI failure.
 
 ## Delivery boundary
 
-Remote implementation may proceed on the single Phase 5 branch/PR after this authority reconciliation. Do not merge Phase 5 or begin Phase 6 without the next merge decision unless the user explicitly authorizes it.
+Current terminal state:
+
+`WAITING_FOR_PHASE_5_MERGE_GATE`
+
+Do not merge PR #183 or begin Phase 6 without the user's next merge authorization.
