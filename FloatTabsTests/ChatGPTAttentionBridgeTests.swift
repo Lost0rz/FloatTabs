@@ -2178,6 +2178,8 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
         XCTAssertTrue(probe.contains("kind: \"baseline\""))
         XCTAssertTrue(probe.contains("token: TOKEN"))
         XCTAssertTrue(probe.contains("generating: generating"))
+        XCTAssertTrue(probe.contains("visibility_state:"))
+        XCTAssertTrue(probe.contains("document.visibilityState"))
         XCTAssertTrue(probe.contains("isGenerating()"))
         XCTAssertFalse(probe.contains("lastSent"))
         XCTAssertFalse(probe.contains("postMessage"))
@@ -2374,6 +2376,88 @@ final class ChatGPTAttentionBridgeTests: XCTestCase {
 
         XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
         XCTAssertEqual(harness.bridge.debugLivenessWatchdogStartCount, 1)
+    }
+
+
+    func testLongRunningHiddenWatchdogCadenceSelection() {
+        let base = ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
+        let thrift = ChatGPTAttentionBridge.hiddenLongRunningWatchdogIntervalNanoseconds
+
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: 0,
+                documentIsHidden: true
+            ),
+            base
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold - 0.001,
+                documentIsHidden: true
+            ),
+            base
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: ChatGPTAttentionBridge.longRunningGenerationThreshold,
+                documentIsHidden: true
+            ),
+            thrift
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: 120,
+                documentIsHidden: false
+            ),
+            base
+        )
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: 120,
+                documentIsHidden: nil
+            ),
+            base
+        )
+    }
+
+    func testHiddenLivenessProbeUpdatesSchedulingHintWithoutAttentionTransition() async throws {
+        let hiddenProbe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": true,
+            "visibility_state": "hidden"
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [hiddenProbe])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertEqual(harness.observations, [.generationStarted])
+        XCTAssertEqual(harness.bridge.debugLastLivenessDocumentWasHidden, true)
+        XCTAssertTrue(harness.bridge.debugLivenessWatchdogActive)
+    }
+
+    func testMissingLivenessVisibilityMetadataKeepsConservativeCadenceHint() async throws {
+        let probe: [String: Any] = [
+            "version": 1,
+            "kind": "baseline",
+            "token": tokenA!,
+            "generating": true
+        ]
+        let harness = ChatGPTAttentionBridgeHarness(probeValues: [probe])
+
+        harness.accept(true, token: tokenA)
+        await harness.bridge.debugRunLivenessCycle()
+
+        XCTAssertNil(harness.bridge.debugLastLivenessDocumentWasHidden)
+        XCTAssertEqual(
+            ChatGPTAttentionBridge.nextLivenessWatchdogIntervalNanoseconds(
+                elapsed: 120,
+                documentIsHidden: harness.bridge.debugLastLivenessDocumentWasHidden
+            ),
+            ChatGPTAttentionBridge.livenessWatchdogIntervalNanoseconds
+        )
     }
 
     func testTrueLivenessProbeKeepsGenerationActiveWithoutDuplicateStart() async throws {

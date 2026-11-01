@@ -727,9 +727,22 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     static let defaultLivenessProbeTimeout: TimeInterval = 2
     static let defaultCurrentDocumentResyncTimeout: TimeInterval = 2
     static let livenessWatchdogIntervalNanoseconds: UInt64 = 2_000_000_000
+    static let longRunningGenerationThreshold: TimeInterval = 30
+    static let hiddenLongRunningWatchdogIntervalNanoseconds: UInt64 = 5_000_000_000
     static let livenessConfirmationDelayNanoseconds: UInt64 = 250_000_000
     static let livenessProbeScript = "globalThis.__floatTabsAttentionProbeV1?.()"
     static let benchmarkSnapshotScript = "globalThis.__floatTabsAttentionBenchmarkSnapshotV1?.()"
+
+    static func nextLivenessWatchdogIntervalNanoseconds(
+        elapsed: TimeInterval,
+        documentIsHidden: Bool?
+    ) -> UInt64 {
+        guard documentIsHidden == true,
+              elapsed >= longRunningGenerationThreshold else {
+            return livenessWatchdogIntervalNanoseconds
+        }
+        return hiddenLongRunningWatchdogIntervalNanoseconds
+    }
 
     typealias LivenessProbeProvider = @MainActor (WKWebView) async -> Any?
     typealias LivenessSleeper = @MainActor (UInt64) async -> Bool
@@ -1355,6 +1368,8 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
               kind: "baseline",
               token: TOKEN,
               generating: generating,
+              visibility_state: ["visible", "hidden", "prerender", "unloaded"].includes(document.visibilityState)
+                ? document.visibilityState : "other",
               responseIdentity: responseIdentity
             };
           };
@@ -1516,6 +1531,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
     private var livenessWatchdogTask: Task<Void, Never>?
     private var livenessWatchdogGeneration: UInt64 = 0
     private var livenessGeneration: UInt64 = 0
+    private var lastLivenessDocumentWasHidden: Bool?
     private var livenessCycleOwnerGeneration: UInt64?
     private var livenessIdleCandidateOwnerGeneration: UInt64?
     private var pendingLivenessProbes: [UUID: PendingLivenessProbe] = [:]
@@ -2660,17 +2676,26 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         let documentEpoch = document.epoch
         let token = document.token
         let webViewIdentity = ObjectIdentifier(webView)
+        let watchdogStartedAt = ProcessInfo.processInfo.systemUptime
+        lastLivenessDocumentWasHidden = nil
 #if DEBUG
         debugLivenessWatchdogStartCount += 1
 #endif
         diagnostics.record(event: "attention.liveness_watchdog.started", level: .info, subsystem: "attention", fields: [
             "slot_id": .string(slotID.uuidString),
-            "watchdog_interval_ms": .integer(2_000)
+            "watchdog_interval_ms": .integer(2_000),
+            "long_running_threshold_ms": .integer(30_000),
+            "hidden_long_running_interval_ms": .integer(5_000)
         ])
         livenessWatchdogTask = Task { [weak self, weak webView] in
             guard let self, let webView else { return }
             while !Task.isCancelled {
-                guard await self.livenessSleeper(Self.livenessWatchdogIntervalNanoseconds) else { return }
+                let elapsed = max(ProcessInfo.processInfo.systemUptime - watchdogStartedAt, 0)
+                let interval = Self.nextLivenessWatchdogIntervalNanoseconds(
+                    elapsed: elapsed,
+                    documentIsHidden: self.lastLivenessDocumentWasHidden
+                )
+                guard await self.livenessSleeper(interval) else { return }
                 guard !Task.isCancelled else { return }
                 await self.performLivenessCycle(watchdogGeneration: watchdogGeneration, documentEpoch: documentEpoch, webView: webView, webViewIdentity: webViewIdentity, token: token)
             }
@@ -2686,6 +2711,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         livenessWatchdogGeneration &+= 1
         livenessWatchdogTask?.cancel()
         livenessWatchdogTask = nil
+        lastLivenessDocumentWasHidden = nil
         clearLivenessIdleCandidate(ownedBy: stoppedGeneration)
         if wasActive {
             diagnostics.record(event: "attention.liveness_watchdog.stopped", level: .info, subsystem: "attention", fields: ["slot_id": .string(slotID.uuidString)])
@@ -2702,9 +2728,32 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
         return true
     }
 
-    private func parseLivenessProbe(_ value: Any?) -> ChatGPTBridgePayload? {
-        guard let body = value as? [String: Any], let payload = ChatGPTBridgePayload.parse(body), payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
-        return payload
+    private struct LivenessProbeSnapshot {
+        let payload: ChatGPTBridgePayload
+        let documentIsHidden: Bool?
+
+        var token: String { payload.token }
+        var generating: Bool { payload.generating }
+        var responseIdentity: ChatGPTResponseIdentity? { payload.responseIdentity }
+    }
+
+    private func parseLivenessProbe(_ value: Any?) -> LivenessProbeSnapshot? {
+        guard let body = value as? [String: Any],
+              let payload = ChatGPTBridgePayload.parse(body),
+              payload.kind == ChatGPTBridgePayload.baselineKind else { return nil }
+        let documentIsHidden: Bool?
+        switch body["visibility_state"] as? String {
+        case "hidden":
+            documentIsHidden = true
+        case "visible", "prerender", "unloaded", "other":
+            documentIsHidden = false
+        default:
+            documentIsHidden = nil
+        }
+        return LivenessProbeSnapshot(
+            payload: payload,
+            documentIsHidden: documentIsHidden
+        )
     }
 
     /// Bounds the physical WebKit callback budget independently from the
@@ -3023,6 +3072,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             }
             return
         }
+        lastLivenessDocumentWasHidden = firstProbe.documentIsHidden
         if firstProbe.generating {
             clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
@@ -3072,6 +3122,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
             clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
         }
+        lastLivenessDocumentWasHidden = secondProbe.documentIsHidden
         guard !secondProbe.generating, livenessGeneration == generation else {
             clearLivenessIdleCandidate(ownedBy: watchdogGeneration)
             return
@@ -3119,6 +3170,7 @@ final class ChatGPTAttentionBridge: NSObject, WKScriptMessageHandler {
 
 #if DEBUG
     var debugLivenessWatchdogActive: Bool { livenessWatchdogTask != nil }
+    var debugLastLivenessDocumentWasHidden: Bool? { lastLivenessDocumentWasHidden }
 
     func debugRunLivenessCycle() async {
         guard let document, let webView, livenessWatchdogTask != nil else { return }
