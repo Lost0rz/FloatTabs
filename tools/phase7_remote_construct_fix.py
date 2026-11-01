@@ -63,5 +63,39 @@ def replace_once(path, old, new):
 '''
 text = text.replace(marker, wrapper + marker, 1)
 
+# Fix 3: WebViewPool performs the disposition inline in a switch; the initial
+# transform was written against an intermediate local-variable shape.
+old = '''replace_once(
+    p,
+    ''' + '"""' + '''        let recoveryDisposition = Self.recoveryDisposition(
+            isActive: isActive,
+            residencyPolicy: residencyPolicy
+        )
+''' + '"""' + ''',
+    ''' + '"""' + '''        let recoveryDisposition = Self.recoveryDisposition(
+            isActive: isActive,
+            runtimeRetentionPreference: runtimeRetentionPreference
+        )
+''' + '"""' + '''
+)
+'''
+new = '''replace_once(
+    p,
+    ''' + '"""' + '''        switch Self.recoveryDisposition(
+            isActive: isActive,
+            residencyPolicy: residencyPolicy
+        ) {
+''' + '"""' + ''',
+    ''' + '"""' + '''        switch Self.recoveryDisposition(
+            isActive: isActive,
+            runtimeRetentionPreference: runtimeRetentionPreference
+        ) {
+''' + '"""' + '''
+)
+'''
+if text.count(old) != 1:
+    raise SystemExit(f"construction fix 3 expected one transform block, got {text.count(old)}")
+text = text.replace(old, new, 1)
+
 script.write_text(text)
 exec(compile(text, str(script), "exec"), {"__name__": "__main__", "__file__": str(script)})
