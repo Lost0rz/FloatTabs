@@ -10,7 +10,7 @@
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 2 CORRECTIVE — REQUIRED CI THEN INDEPENDENT WEB AUDIT`.
+Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFICATION THEN INDEPENDENT WEB AUDIT`.
 
 Phase 1 Safe Hibernate + Restore is complete. Phase 2 decouples transient Runtime `ready` state from durable unread truth so completed unseen work can remain unread after its `WKWebView` Runtime is reclaimed.
 
@@ -27,7 +27,7 @@ PHASE_2_PLAN_V1=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_2_PLAN_V2=ACCEPTED_FROZEN
 PHASE_2_IMPLEMENTATION=ACTIVE
 PHASE_2_SCOPE_RECONCILIATION_001=ACCEPTED_TEST_ONLY
-PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS/SCOPE PASS; CORRECTIVE_REQUIRED_CI PENDING ON CURRENT LITERAL PR HEAD
+PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS/SCOPE PASS; REQUIRED_CI ON CURRENT LITERAL PR HEAD
 PHASE_2_MENU_UNREAD_PROJECTION_CORRECTIVE=IMPLEMENTED / TARGETED REGRESSION PASS
 PHASE_2_REAL_UI_RUNTIME_ACCEPTANCE=USER_OWNED / DEFERRED UNTIL MACHINE WORK + AUDIT COMPLETE
 PHASE_3=NOT_STARTED / NOT_AUTHORIZED
@@ -164,4 +164,4 @@ Do not modify without STOP/reconciliation:
 
 ## Next action
 
-The existing nine-file Phase 2 implementation remains aligned with fresh Authority. This corrective adds one private `PanelController` durable-unread presentation boundary so completion, acknowledgement, late reconciliation, prune, and Slot-removal mutations refresh both the persistent rail and menu/status count projection. Targeted, focused, full XCTest, Debug arm64, Release arm64, and exact scope/data-safety checks pass locally. Push the corrective on the existing PR #176 and wait for its required literal-head CI; do not retry CUA/live-smoke automation. After required CI and independent web audit, hand the build to the user for concentrated human acceptance.
+The existing nine-file Phase 2 implementation remains aligned with fresh Authority. This corrective adds one private `PanelController` durable-unread presentation boundary so completion, acknowledgement, late reconciliation, prune, and Slot-removal mutations refresh both the persistent rail and menu/status count projection. Targeted, focused, full XCTest, Debug arm64, Release arm64, and exact scope/data-safety checks pass locally. The existing PR #176 carries the required literal-head CI gate before independent web audit; do not retry CUA/live-smoke automation. After the audit, hand the build to the user for concentrated human acceptance.
