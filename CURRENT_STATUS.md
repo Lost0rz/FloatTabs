@@ -1,23 +1,23 @@
 # FloatTabs Current Status
 
-**Status date:** `2026-10-31`  
+**Status date:** `2026-11-01`  
 **Repository:** `Lost0rz/FloatTabs`  
 **Default branch:** `main`
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 ARCHITECTURE-FIRST IMPLEMENTATION**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 1 CI ROUTING CORRECTIVE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 1 IMPLEMENTATION — V2 ACCEPTANCE`.
+Current execution state: `ACTIVE / BLOCKING CI ROUTING CORRECTIVE BEFORE PHASE 1 INDEPENDENT AUDIT`.
 
-The program cadence has been intentionally refrozen: establish the Runtime lifecycle architecture first, prove bounded live correctness, merge the structural primitive, and defer strict multi-Slot scale/performance tuning to Phase 4 Runtime Budget / Policy.
+The Phase 1 product implementation is complete on PR #170 and remains unmerged. Its required PR CI did not start. Fresh diagnosis established two independent CI facts: PR #170 currently conflicts with `main`, and GitHub does not create `pull_request` workflow runs while that conflict exists; additionally, FloatTabs macOS CI currently targets GitHub-hosted `macos-26` rather than the intended local Apple Silicon self-hosted runner.
 
 ## Canonical / current state
 
 ```text
-MAIN_BEFORE_V2_REFREEZE=e5b1a14b45277ff2eb8d109bac606a536e7938cd
+MAIN_BEFORE_CI_CORRECTIVE=766487bf9a94837e714f5da9637f353c9d8a01ae
 PRE_PROGRAM_PRODUCT_BASELINE=26d1669198a6f94faa769fb27d2cd00d0fcd1184
 PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
@@ -32,7 +32,13 @@ PHASE_1_V1_PLAN=SUPERSEDED_FOR_CURRENT_EXECUTION
 PHASE_1_V2_CONTRACT=ACCEPTED_FROZEN
 PHASE_1_V2_PLAN=ACCEPTED_FROZEN
 CURRENT_PHASE=PHASE_1_SAFE_HIBERNATE_RESTORE_IMPLEMENTATION
-PRODUCT_MUTATION=AUTHORIZED_WITHIN_PHASE1_V2_SCOPE
+PHASE_1_IMPLEMENTATION_PR=#170 OPEN / UNMERGED
+PHASE_1_PR_HEAD=b40bf1d63735700cb0c297d901bd284da1ac105a
+PHASE_1_PR_MERGEABLE=NO / CONFLICTING
+PHASE_1_REQUIRED_PR_CI=NO_RUN_CREATED
+CI_RUNNER_CURRENT=GITHUB_HOSTED macos-26
+CI_RUNNER_TARGET=SELF_HOSTED macOS ARM64 mac-mini-ci
+PRODUCT_MUTATION=NO NEW PRODUCT MUTATION IN CI CORRECTIVE
 STRICT_SCALE_BENCHMARK=DEFERRED_TO_PHASE_4
 ```
 
@@ -52,6 +58,33 @@ AGENTS.md
 ```
 
 V1 lifecycle contract/Phase 1 plan remain historical evidence for the original audit and benchmark rationale. They do not override V2's current phase gate.
+
+## Blocking CI corrective
+
+Verified fault boundary:
+
+1. PR #170 has merge conflicts against current `main`; `pull_request` workflow execution is therefore not created until the conflict is resolved.
+2. `.github/workflows/macos-ci.yml` currently uses `runs-on: macos-26`, which routes to GitHub-hosted macOS runners rather than the intended local self-hosted Mac mini.
+3. The established local Apple Silicon CI routing convention is `[self-hosted, macOS, ARM64, mac-mini-ci]`.
+4. Because FloatTabs is public, self-hosted jobs must reject fork PR code by default.
+
+The corrective is bounded to CI/control infrastructure. No Phase 1 Web Runtime product source may change in this corrective.
+
+Required corrective sequence:
+
+```text
+reconcile Authority
+→ switch required macOS job to [self-hosted, macOS, ARM64, mac-mini-ci]
+→ same-repository PR guard
+→ verify corrective PR generates/queues a workflow
+→ confirm observed runner identity is self-hosted/local when matched
+→ merge CI corrective after required check
+→ reconcile PR #170 onto fresh main
+→ required Phase 1 PR CI
+→ independent web audit
+```
+
+If the corrective workflow queues indefinitely with no matching runner, stop and treat repository runner registration/access as the remaining infrastructure blocker; do not switch back to GitHub-hosted CI as an implicit workaround.
 
 ## Phase 1 target
 
@@ -90,25 +123,23 @@ Existing benchmark tooling may be preserved, but strict benchmark expansion is n
 
 ## Current implementation evidence
 
-Local executor reported before this V2 refreeze:
+PR #170 implementation evidence reported and verified locally before CI:
 
 ```text
-FOCUSED_TESTS=174/174 PASS
+FOCUSED_TESTS=146 executed / 0 failures
 FULL_TESTS=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
-STRICT_1_2_4_8_BENCHMARK=NOT_RUN
-LOCAL_IMPLEMENTATION=DIRTY / UNCOMMITTED
-PR=NONE
+STRICT_1_2_4_8_BENCHMARK=NOT_RUN / DEFERRED_TO_PHASE_4
+LIVE_SMOKE=bounded 2 existing Slots; resident drop, fresh restore, interactionState restore observed
+PR=#170 OPEN
+PR_HEAD=b40bf1d63735700cb0c297d901bd284da1ac105a
+REQUIRED_PR_CI=NO_RUN_CREATED
 ```
-
-The strict benchmark did not run because the real configuration contains five Slots and the old 8-Slot matrix required at least nine configured Slots.
-
-Under V2 this is no longer a Phase 1 blocker. Those test/build results remain prior evidence and must be refreshed as appropriate on the final committed diff.
 
 ## Phase 1 validation gate — current
 
-Phase 1 merge readiness now requires:
+Phase 1 merge readiness still requires:
 
 1. exact hibernate vs destructive-release semantics remain correct;
 2. deterministic teardown and stale-callback rejection remain correct;
@@ -117,7 +148,7 @@ Phase 1 merge readiness now requires:
 5. full unit suite has no new Phase 1 failures;
 6. Debug and Release builds pass;
 7. bounded live 1–2 Slot Runtime smoke proves resident-count drop, fresh single Runtime restore, intact login/session/page/conversation, and no obvious competing double-load;
-8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the PR head;
+8. required GitHub `Build & Test (Apple Silicon arm64)` passes on the literal PR head after the branch is reconciled with current `main`;
 9. independent web audit passes before merge.
 
 The following are deferred to Phase 4 and are **not** Phase 1 merge blockers:
@@ -159,22 +190,11 @@ Do not modify without STOP/reconciliation:
 
 ## Execution / handoff state
 
-The next action is to continue the existing local Phase 1 implementation, not restart it.
+The immediate action is the bounded CI routing corrective. Do not alter the Phase 1 product implementation while correcting CI infrastructure.
 
-The local executor must:
+After the CI corrective merges, reconcile PR #170 with fresh `main` without discarding its validated product implementation, allow the required local self-hosted CI to run, then stop for independent web audit.
 
-- preserve the current dirty implementation and unknown local work;
-- refresh and read V2 Authority;
-- inspect the existing diff against the V2 boundary;
-- correct only real mismatches;
-- rerun focused/full verification and Debug/Release builds on the final diff;
-- perform the bounded 1–2 Slot live Runtime smoke;
-- commit + push one Phase 1 implementation branch and open/update one PR;
-- stop for independent web audit.
-
-Do not create temporary production Slots solely to satisfy the former V1 benchmark matrix.
-
-Merge and release are not authorized by the construction handoff.
+Merge/release of Phase 1 product code remains unauthorized until those gates pass.
 
 ## Non-claims
 
@@ -182,4 +202,5 @@ Merge and release are not authorized by the construction handoff.
 - No final Runtime Budget number is accepted yet.
 - No large-scale memory curve is accepted yet.
 - No claim is made that ChatGPT generation survives WebView destruction.
+- No claim is made yet that the FloatTabs repository can successfully dispatch to the local self-hosted runner until a matching workflow job is observed.
 - No newer public release is authorized.
