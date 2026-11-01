@@ -2,11 +2,11 @@
 
 **Program:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Phase:** `7 — Automatic Lifecycle Simplification + Legacy Residency Retirement`  
-**Status:** `ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED`  
+**Status:** `ACCEPTED / FROZEN / IMPLEMENTATION ACTIVE / CORRECTIVE`  
 **Parent contract:** `FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`  
-**Execution baseline:** fresh `main` after PR #187 is dispositioned and merged
+**Execution baseline:** `main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`
 
-This document freezes the Phase 7 product mutation boundary. It does not authorize product construction before the predecessor gate is complete and the user explicitly starts implementation.
+This document freezes the Phase 7 product mutation boundary. Product construction is authorized by `CURRENT_TASK.md` after the completed predecessor gate.
 
 ## 1. Objective
 
@@ -25,19 +25,22 @@ persistent Slot
 
 ## 2. Verified current-state findings
 
-Current production on the Phase 6 branch still contains all of these legacy paths:
+The Phase 6 baseline contained these legacy paths:
 
 - `WebAppProfile.swift` — persisted `SlotResidencyPolicy.hot / warm / cold`; default `.warm`;
-- `SlotLifecycleCoordinator.swift` — Hot excluded from automatic candidates; Warm/Cold separate timers; managed target `3`; critical pressure still excludes Hot;
-- `WebViewContainer.swift` — Hot-only host views keep inactive Hot `WKWebView` attached and hidden;
-- `ExternalTabRail.swift` — user-facing Residency submenu exposes Hot/Warm/Cold;
-- `GlobalSettingsController.swift` — Performance Settings exposes Warm retention and Cold release controls;
-- `AppPreferencesStore.swift` — Warm/Cold timing preferences remain active;
-- `WebViewPool.swift` — inactive Hot renderer termination reloads immediately while other policies defer;
-- `PanelController.swift` — Runtime release has a legacy Cold-only website-cache cleanup branch;
-- current docs describe Hot as explicit permanent pin and Warm/Cold as managed classes.
+- `SlotLifecycleCoordinator.swift` — Hot excluded from automatic candidates; Warm/Cold separate timers; managed target `3`; critical pressure excluded Hot;
+- `WebViewContainer.swift` — Hot-only host views kept inactive Hot `WKWebView` attached and hidden;
+- `ExternalTabRail.swift` — user-facing Residency submenu exposed Hot/Warm/Cold;
+- `GlobalSettingsController.swift` — Performance Settings exposed Warm retention and Cold release controls;
+- `AppPreferencesStore.swift` — Warm/Cold timing preferences remained active;
+- `WebViewPool.swift` — inactive Hot renderer termination reloaded immediately while other policies deferred;
+- `PanelController.swift` — Runtime release had a legacy Cold-only website-cache cleanup branch;
+- `AppCommandController.swift` — current shortcut catalog/settings exposed Set Hot/Warm/Cold Mode controls;
+- current docs described Hot as explicit permanent pin and Warm/Cold as managed classes.
 
 The Phase 6 restore path itself does not depend on preserving these legacy classes.
+
+Fresh Phase 7 machine evidence on product head `9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe` exposed one bounded compile corrective: a stale `handleRuntimeReleased(updatedProfile)` call remained after the Cold-cache handler was retired. The same read-only audit found that Hot-only hidden host implementation and the Hot/Warm/Cold shortcut catalog still remained as current/dead legacy surface. These findings are inside the existing lifecycle-retirement objective and are authorized by the reconciled scope below.
 
 ## 3. Frozen product model
 
@@ -65,8 +68,9 @@ After Phase 7:
 
 - no current Tab menu exposes Hot/Warm/Cold;
 - no current Settings UI exposes Warm retention or Cold release delay;
+- no current configurable keyboard shortcut exposes Set Hot/Warm/Cold Mode;
 - no Runtime decision may branch on legacy Warm-vs-Cold;
-- old raw values remain decode/rollback compatibility only.
+- old raw values and external legacy protocol values remain bounded decode/rollback/IPC compatibility only.
 
 ## 4. Persistence compatibility contract
 
@@ -114,11 +118,13 @@ Use one fixed automatic inactivity grace:
 
 This replaces user-configurable Warm/Cold timing as current policy.
 
+Presentation-hidden state must not retain the selected Runtime behind the historical 120-second hidden-active grace. Once the product is no longer actually presented, the Slot transitions to ordinary inactive lifecycle handling so the single 30-second Automatic grace is authoritative. Tests may inject a nonzero hidden-transition delay only as a bounded transition fixture; production must not layer a second long retention policy above Automatic.
+
 ### Managed targets
 
 ```text
-normal  = 2 Automatic resident runtimes
-warning = 1 Automatic resident runtime
+normal   = 2 Automatic resident runtimes
+warning  = 1 Automatic resident runtime
 critical = 0 Automatic resident runtimes
 ```
 
@@ -168,7 +174,7 @@ Required direction:
 
 - all ordinary selected Runtime uses the same presentation attachment path;
 - inactive resident Runtime may remain alive in `WebViewPool` without remaining attached to a hidden Hot host;
-- remove `hotHostViews`, `retainHotSlots` and Hot-only attach/deactivate behavior when no longer required by current behavior;
+- remove `hotHostViews`, `retainHotSlots`, `showHot` and Hot-only attach/deactivate behavior when no longer required by current behavior;
 - `SlotLifecycleCoordinator` decides residency; the container only presents/detaches views.
 
 Do not replace Hot hosts with another hidden-persistent-WebView continuity mechanism.
@@ -216,6 +222,7 @@ Primary expected production files:
 - `FloatTabs/UI/ExternalTabRail.swift`
 - `FloatTabs/UI/GlobalSettingsController.swift`
 - `FloatTabs/Persistence/AppPreferencesStore.swift`
+- `FloatTabs/Hotkeys/AppCommandController.swift` — retire current Hot/Warm/Cold user-configurable shortcut bindings; bounded external legacy IPC compatibility may remain as an adapter.
 
 Persistence/backup files may change only if deterministic compatibility tests require it:
 
@@ -236,6 +243,7 @@ At minimum:
 - `FloatTabsTests/ExternalShellTests.swift`
 - `FloatTabsTests/SettingsInformationArchitectureTests.swift`
 - `FloatTabsTests/WebsiteCacheCleanupTests.swift`
+- shortcut/catalog tests that currently assert legacy Hot/Warm/Cold user bindings.
 
 Update or retire old tests that assert Hot/Warm/Cold current-product semantics. Preserve historical evidence in docs rather than keeping obsolete tests green through compatibility shims.
 
@@ -243,16 +251,14 @@ Update or retire old tests that assert Hot/Warm/Cold current-product semantics. 
 
 ### WP0 — predecessor and control gate
 
-Before product mutation:
+Completed:
 
-1. finish PR #187 bounded Real-Mac restore smoke;
-2. clean/accept the known comment-only exact-diff churn;
-3. obtain fresh independent Phase 6 exact-diff audit PASS;
-4. merge PR #187;
-5. refresh `main` and control files;
-6. create Phase 7 implementation branch/worktree from fresh main.
-
-No Phase 7 product mutation occurs before this gate.
+1. Phase 6 bounded Real-Mac restore evidence accepted;
+2. known Phase 6 comment-only exact-diff churn explicitly dispositioned;
+3. fresh user-authorized Phase 6 exact-diff self-audit PASS;
+4. PR #187 merged as `54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`;
+5. Phase 7 control files refreshed;
+6. Phase 7 implementation branch created from fresh main.
 
 ### WP1 — canonical model + compatibility
 
@@ -281,15 +287,16 @@ Acceptance:
 - critical may reclaim inactive Keep Loaded only after Automatic candidates and only when no hard protection applies;
 - lifecycle mutation still executes only through `SlotLifecycleCoordinator` -> existing `WebViewPool.hibernate/release` boundaries.
 
-### WP3 — current UI/settings retirement
+### WP3 — current UI/settings/shortcut retirement
 
-Replace the Residency menu with Automatic / Keep Loaded and remove active Warm/Cold retention settings.
+Replace the Residency menu with Automatic / Keep Loaded and remove active Warm/Cold retention settings and Hot/Warm/Cold shortcut controls.
 
 Acceptance:
 
 - no current Hot/Warm/Cold product copy/control remains;
 - no Warm/Cold timing control remains active;
-- old UserDefaults values are not deleted;
+- no current shortcut catalog/settings row exposes Set Hot/Warm/Cold Mode;
+- old UserDefaults values and bounded compatibility protocol values are not destructively deleted;
 - accessibility labels/tooltips reflect current semantics;
 - no confusion with the existing presentation Pin feature.
 
@@ -332,7 +339,7 @@ PASS for grace, budget, ranking, protection, warning/critical and Keep Loaded se
 
 ### Gate C — UI/settings regressions
 
-PASS for current controls/copy and removal of legacy current-product settings.
+PASS for current controls/copy and removal of legacy current-product settings/shortcuts.
 
 ### Gate D — broad machine verification
 
@@ -387,14 +394,16 @@ STOP and reconcile if implementation requires:
 - material production files outside Section 9;
 - release/version work.
 
-## 15. Execution hold
+## 15. Execution state
 
 ```text
 PHASE7_CONTRACT=ACCEPTED_FROZEN
-PHASE7_PRODUCT_IMPLEMENTATION=NOT_STARTED
-PREDECESSOR_PR187=OPEN_DRAFT
-NEXT_REQUIRED_GATE=PHASE6_CLOSEOUT_AND_MERGE
-NEXT_USER_START_REQUIRED=YES
+PHASE7_PRODUCT_IMPLEMENTATION=ACTIVE_CORRECTIVE
+PREDECESSOR_PR187=MERGED
+CURRENT_PRODUCT_HEAD=9118b79cfee7e7a1a065ba5e2e82dca9ad6e19fe
+CURRENT_BUILD_EVIDENCE=QA_DMG_639_RELEASE_COMPILE_FAIL_STALE_COLD_CALLBACK
+NEXT_REQUIRED_GATE=BOUNDED_CORRECTIVE_THEN_MACHINE_VERIFICATION
+PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
 
-After the user explicitly starts Phase 7 construction and PR #187 is merged, execute this contract without reopening the Hot/Warm/Cold product-design question unless a STOP condition produces contrary evidence.
+Continue the frozen Phase 7 objective through bounded corrective, machine verification, fresh exact-diff self-audit and merge-readiness. Do not reopen the Hot/Warm/Cold product-design question unless a STOP condition produces contrary evidence.
