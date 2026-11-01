@@ -1,24 +1,19 @@
 # FloatTabs Current Task
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
-**Title:** Runtime Lifecycle / Memory redesign — Phase 6 closeout + Phase 7 automatic lifecycle retirement  
-**Status:** `ACTIVE / CONTRACT RECONCILED / PHASE 7 READY AFTER PREDECESSOR GATE`  
-**Mode:** `DESIGN FROZEN / PRODUCT MUTATION HOLD`  
+**Title:** Runtime Lifecycle / Memory redesign — Phase 7 automatic lifecycle retirement  
+**Status:** `ACTIVE / PHASE 7 CONSTRUCTION AUTHORIZED`  
+**Mode:** `IMPLEMENTATION / VERIFY / SELF-AUDIT TO MERGE-READY`  
 **Task class:** `WEB RUNTIME / LIFECYCLE / MEMORY`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-This remains the same Runtime Lifecycle / Memory task. The user requested a fresh audit of the final contract after Real-Mac QA showed that several legacy Hot ChatGPT Slots remained resident and memory stayed high.
+Phase 6 PR #187 passed its bounded merge gate and merged to `main` as `54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`.
 
-The audit verified a material policy mismatch: V4 preserved Hot/Warm/Cold and therefore cannot be the program-final automatic lifecycle contract.
+The user explicitly authorized remote Phase 7 construction on 2026-11-01 and instructed the executor to continue through implementation, verification and self-audit until merge-ready.
 
-Task reconciliation is complete through the accepted V5 program contract and Phase 7 implementation contract.
-
-Current product-source mutation remains held until:
-
-1. Phase 6 PR #187 finishes its own merge gate and is merged;
-2. the user explicitly starts Phase 7 construction.
+This remains the same task `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
 ## Current authority
 
@@ -26,13 +21,17 @@ Program contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V5.md`
 
-Phase 6 bounded authority for PR #187:
-
-`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
-
 Phase 7 frozen execution contract:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase7_Automatic_Lifecycle_Implementation_Contract_V1.md`
+
+Fresh implementation base:
+
+`main@54f2e43b0fbc224affa52d9662ac2ba5aa5b963c`
+
+Implementation branch:
+
+`codex/ft-runtime-lifecycle-phase7-automatic-001`
 
 ## Final objective
 
@@ -46,7 +45,7 @@ persistent Slot/Profile/session
 → Phase 6 fast restore when selected again
 ```
 
-Legacy Hot/Warm/Cold is not the final product model.
+Legacy Hot/Warm/Cold must cease to be current product policy.
 
 ## Frozen product policy
 
@@ -73,9 +72,7 @@ warning target  = 1
 critical target = 0
 ```
 
-### Protection
-
-Hard protection remains:
+### Hard protection
 
 - active / actually presented;
 - fullscreen source;
@@ -84,28 +81,9 @@ Hard protection remains:
 - active/pending allowed-background-media protection;
 - current materialization/restoring ownership boundary.
 
-Keep Loaded is protected from ordinary Automatic reclaim but is reclaimable under critical pressure when inactive and not hard-protected.
+Keep Loaded resists ordinary reclaim but may be reclaimed under critical pressure when inactive and otherwise unprotected.
 
-## Predecessor gate — Phase 6 PR #187
-
-Current PR state:
-
-```text
-PR=#187
-STATE=OPEN / DRAFT / UNMERGED
-PRODUCT_HEAD=76c092523fe343eacc0592bfac25086da0d0d83d
-CORRECTIVE=C1-C4 APPLIED
-REQUIRED_CI=PASS / RUN 1312
-QA_DMG=PASS / RUN 637
-REAL_MAC_RESTORE_SMOKE=PENDING COMPLETION
-FRESH_EXACT_DIFF_AUDIT=PENDING
-```
-
-Do not merge until the remaining bounded Phase 6 gates pass.
-
-Do not add Phase 7 product-source mutation to PR #187.
-
-## Phase 7 implementation scope
+## Authorized implementation scope
 
 Expected production owners:
 
@@ -119,85 +97,80 @@ Expected production owners:
 - `FloatTabs/UI/GlobalSettingsController.swift`
 - `FloatTabs/Persistence/AppPreferencesStore.swift`
 
-Persistence/backup files may change only if compatibility evidence requires it.
+Persistence/backup files may change only if deterministic compatibility evidence requires it.
 
-## Phase 7 work packages
-
-### WP0 — predecessor / fresh-main gate
-
-- finish PR #187 smoke;
-- fresh exact-diff audit PASS;
-- merge PR #187;
-- refresh main/control identity;
-- create one Phase 7 implementation branch/worktree.
+## Work packages
 
 ### WP1 — canonical model / persistence compatibility
 
-- add `SlotRuntimeRetentionPreference`;
-- default Automatic;
+- introduce `SlotRuntimeRetentionPreference`;
+- new Slot default Automatic;
 - legacy Hot -> Keep Loaded;
 - legacy Warm/Cold -> Automatic;
 - transitional derived legacy encoding for rollback;
+- duplicate/derived Slot copy canonical preference;
 - preserve Browser Profile/session/config data.
 
 ### WP2 — automatic lifecycle / container simplification
 
 - one 30s Automatic grace;
-- targets 2 / 1 / 0;
+- normal/warning/critical targets 2/1/0;
 - deterministic LRU reclaim;
 - Keep Loaded normal preference + critical fallback;
 - remove Hot-only hidden host retention;
-- keep `SlotLifecycleCoordinator` as sole lifecycle writer.
+- keep `SlotLifecycleCoordinator` sole lifecycle writer.
 
 ### WP3 — current UI/settings retirement
 
 - replace Residency menu with Automatic / Keep Loaded;
-- remove Warm/Cold retention controls/current product copy;
-- retain old preference values only for rollback compatibility;
-- keep existing presentation Pin semantics separate.
+- remove active Warm/Cold retention controls/current product copy;
+- leave old preference values stored only for rollback compatibility;
+- keep presentation Pin semantics separate.
 
 ### WP4 — recovery/cache integration
 
-- update renderer-termination recovery metadata to new preference;
+- renderer termination recovery uses canonical retention preference;
 - remove legacy Cold-only website-cache cleanup coupling;
 - preserve Phase 6 restore, Attention, media, focus and fullscreen ownership.
 
-### WP5 — verification / Real-Mac evidence
+### WP5 — verification / evidence
 
 - focused migration/lifecycle/UI tests;
 - full XCTest;
 - Debug/Release native arm64;
 - required literal-head CI;
-- 3-Automatic-ChatGPT Real-Mac resident/PID/memory evidence;
-- fresh exact-diff audit.
+- bounded Real-Mac lifecycle/memory evidence where remotely provable;
+- fresh user-authorized self-audit;
+- merge-readiness decision.
 
 ## Acceptance criteria
 
-Phase 7 merge readiness requires all of the following:
+Merge readiness requires:
 
-- no current Hot/Warm/Cold UI or active lifecycle policy remains;
+- no current Hot/Warm/Cold UI or active lifecycle decision path;
 - new Slots default Automatic;
 - compatibility decode/encode is deterministic and data-safe;
-- one active/no-protection 3-Slot scenario converges to one Automatic resident after grace;
-- rapid switching stays bounded rather than materializing every Slot indefinitely;
-- protected generation/media/fullscreen Runtime is preserved;
+- 3 Automatic loaded Slots converge to one resident after grace when only one is active and no protection applies;
+- rapid switching remains bounded;
+- protected generation/media/fullscreen Runtime remains resident;
 - Keep Loaded does not preload at launch or require hidden presentation ownership;
 - critical pressure can reclaim inactive Keep Loaded after Automatic candidates;
 - Phase 6 restore/session continuity remains correct;
 - Runtime reclaim does not clear website/session data;
-- focused/full tests, builds, CI and Real-Mac evidence pass;
-- fresh exact-diff audit passes.
+- focused/full tests, builds and required CI pass;
+- fresh self-audit passes;
+- any truly user-owned final runtime/UI acceptance remains `PENDING` until the user explicitly performs it.
 
 ## STOP conditions
 
-STOP/reconcile if Phase 7 requires:
+STOP/reconcile if implementation requires:
 
 - Browser Profile/cookie/session reset or destructive migration;
 - a second lifecycle writer;
 - hidden persistent WebViews as continuity objects;
 - restoring Hot/Warm/Cold as current policy;
 - private WebKit memory attribution/API;
-- weakening hard protection semantics outside this contract;
+- weakening hard protection semantics outside the contract;
 - an unplanned persistence schema/version bump;
 - material product scope outside the frozen Phase 7 paths;
 - release/version work.
@@ -206,11 +179,10 @@ STOP/reconcile if Phase 7 requires:
 
 ```text
 PROGRAM_CONTRACT=V5_ACCEPTED_FROZEN
-PHASE6_PR187=OPEN_DRAFT_CLOSEOUT_PENDING
+PHASE6=MERGED
 PHASE7_CONTRACT=ACCEPTED_FROZEN
-PHASE7_IMPLEMENTATION=NOT_STARTED
-PHASE7_PRODUCT_MUTATION=HELD
-NEXT_REQUIRED_GATE=PHASE6_REAL_MAC_SMOKE + FRESH EXACT_DIFF AUDIT + MERGE
-NEXT_USER_START_REQUIRED=YES
+PHASE7_IMPLEMENTATION=ACTIVE
+PHASE7_BRANCH=codex/ft-runtime-lifecycle-phase7-automatic-001
+NEXT_REQUIRED_GATE=WP1 IMPLEMENTATION
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 ```
