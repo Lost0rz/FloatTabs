@@ -1,0 +1,97 @@
+name: Phase7 Test Contract Corrective
+
+on:
+  push:
+    branches:
+      - codex/ft-runtime-lifecycle-phase7-automatic-001
+
+permissions:
+  contents: write
+
+jobs:
+  corrective:
+    if: github.repository == 'Lost0rz/FloatTabs'
+    runs-on: [self-hosted, macOS, ARM64, mac-mini-ci]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify bounded corrective branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "codex/ft-runtime-lifecycle-phase7-automatic-001"
+          test -f tools/phase7_test_contract_corrective.py
+
+      - name: Apply bounded test-contract corrective
+        run: python3 tools/phase7_test_contract_corrective.py
+
+      - name: Verify diff hygiene and scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          changed="$(git diff --name-only)"
+          printf '%s\n' "$changed"
+          test "$changed" = $'FloatTabsTests/AppCommandControllerTests.swift\nFloatTabsTests/WebsiteCacheCleanupTests.swift'
+
+      - name: Resolve Swift packages
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -resolvePackageDependencies
+          -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Debug build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Release build
+        run: >-
+          xcodebuild
+          -project FloatTabs.xcodeproj
+          -scheme FloatTabs
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Full XCTest
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project FloatTabs.xcodeproj \
+            -scheme FloatTabs \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/FloatTabsPhase7Corrective" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Remove temporary corrective machinery
+        shell: bash
+        run: |
+          rm -f tools/phase7_test_contract_corrective.py
+          rm -f .github/workflows/phase7-test-contract-corrective.yml
+
+      - name: Commit and push verified corrective
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Update Phase 7 tests for automatic lifecycle"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
