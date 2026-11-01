@@ -801,13 +801,23 @@ final class SlotLifecycleCoordinator {
             ]
         )
 
+        let pressureReleaseReason: String?
+        switch pressure {
+        case .critical:
+            pressureReleaseReason = "critical_pressure_eligible"
+        case .warning:
+            pressureReleaseReason = "warning_pressure_eligible"
+        case nil:
+            pressureReleaseReason = nil
+        }
+
         for slotID in decision.evictSlotIDs {
             guard let plan = inactivePlans[slotID] else { continue }
             releaseInactiveSlot(
                 slotID: slotID,
                 expectedPlan: plan,
                 memoryPressureIncident: incidentContext,
-                releaseReason: reason
+                releaseReason: pressureReleaseReason ?? reason
             )
         }
     }
@@ -829,6 +839,18 @@ final class SlotLifecycleCoordinator {
                 ?? webViewPool.residencyPolicy(for: slotID)
             let managed = policy == .warm || policy == .cold
             let selectedForRelease = selected.contains(slotID)
+            let decisionName: String
+            let releaseReason: String
+            if level == .warning && !selectedForRelease {
+                decisionName = "observe"
+                releaseReason = "warning_diagnostics_only"
+            } else if selectedForRelease {
+                decisionName = "hibernate"
+                releaseReason = "runtime_budget"
+            } else {
+                decisionName = "keep"
+                releaseReason = "protected_or_within_target"
+            }
 
             var fields = incidentContext.fields(phase: .trigger)
             fields.merge([
@@ -844,8 +866,8 @@ final class SlotLifecycleCoordinator {
                 "attention_protected": .bool(protection.attention),
                 "managed_runtime": .bool(managed),
                 "release_eligible": .bool(selectedForRelease),
-                "decision": .string(selectedForRelease ? "hibernate" : "keep"),
-                "release_reason": .string(selectedForRelease ? "runtime_budget" : "protected_or_within_target"),
+                "decision": .string(decisionName),
+                "release_reason": .string(releaseReason),
                 "budget_target": .integer(Int64(decision.target)),
                 "web_process_resource_attribution": .string("unavailable_public_api")
             ]) { _, new in new }
