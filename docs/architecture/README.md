@@ -7,7 +7,8 @@ Read [`../README.md`](../README.md) first. It is the repository-wide documentati
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **CURRENT PHASE 6 AUDIT / PROPOSED DESIGN / NOT IMPLEMENTATION AUTHORITY**;
+- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md) — **CURRENT PHASE 6 / ACCEPTED / FROZEN / IMPLEMENTATION NOT STARTED**;
+- [`FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **AUDIT / RATIONALE EVIDENCE**; no longer the execution-scope authority;
 - `CURRENT_STATUS.md` — verified current state/evidence;
 - `CURRENT_TASK.md` — only active mutation authorization;
 - [`DOMAIN_MAP.md`](DOMAIN_MAP.md) — navigation only;
@@ -80,38 +81,62 @@ The primary ChatGPT page detector remains event-driven. `document.visibilityStat
 
 ## Phase 6 — Perceived-fast Restore
 
-Detailed source/test/design audit is complete. Product implementation is **not authorized**.
+**Audit:** complete.  
+**Implementation contract:** accepted/frozen.  
+**Product implementation:** not started; held until a future explicit user start.
 
-Audit verdict:
-
-- current `WebViewPool` interaction-state restore and Browser Profile/session boundaries remain the correct foundation;
-- the strongest perceived-latency boundary is synchronous presentation ordering: a reclaimed selected Slot can synchronously materialize a fresh `WKWebView` before a hidden FloatTabs shell is ordered front;
-- the visible container has no explicit native `restoring` state;
-- current restore diagnostics prove state handoff, not first visual/usable readiness;
-- structural restore tests do not prove the real-WKWebView callback/paint sequence of `interactionState` restoration.
-
-Selected recommendation:
-
-**two-stage native restore shell + deferred fresh Runtime materialization**.
+Frozen architecture:
 
 ```text
 reclaimed Slot selected/summoned
-→ native shell + restoring surface immediately
+→ native shell + lightweight restoring state immediately
 → return to AppKit run loop
-→ revalidate current request
+→ revalidate materialization request
 → existing WebViewPool materializes/restores fresh Runtime
-→ attach WebView under restoring surface
-→ existing navigation/focus ownership establishes readiness
-→ remove restoring surface
+→ attach fresh WebView under restoring state
+→ Gate 0-proven current-Runtime readiness
+→ remove restoring state
+→ existing focus ownership resumes
 ```
 
-The exact interaction-state readiness callback must be frozen from a bounded Real-Mac public-API observation before implementation. See the Phase 6 audit document.
+Resident Slot switching remains on the direct existing path.
 
-Rejected for Phase 6 V1:
+### Gate 0 readiness contract
 
-- screenshot cache as default continuity mechanism;
+The exact callback name is not frozen from structural fixtures. Instead the implementation contract freezes a mandatory Real-Mac evidence gate before product-source mutation.
+
+Allowed evidence classes:
+
+1. **navigation-backed readiness** — compatible `interactionState` restore exposes usable exact-current-Runtime navigation/loading callbacks that can trigger the final bounded readiness check;
+2. **non-navigation readiness** — compatible restore does not reliably emit the same navigation sequence, but bounded public current-Runtime renderer/page readiness is available without polling ownership drift.
+
+If neither class is provable without private API, arbitrary delay/unbounded polling, reload/double-navigation, persistence/session mutation, screenshot persistence, extra resident WebViews or ownership change, execution stops before product mutation.
+
+`web_runtime.restore.completed` remains state-handoff evidence only and is not sufficient by itself to dismiss the restoring presentation.
+
+### Frozen implementation boundary
+
+Primary expected production paths:
+
+- `FloatTabs/Panel/PanelController.swift` — materialization generation, early shell presentation, deferred materialization and stale-request orchestration;
+- `FloatTabs/Web/WebViewContainer.swift` — lightweight native restoring presentation only;
+- `FloatTabs/Web/WebViewPool.swift` — no semantic restore rewrite; narrow read-only seam only if required;
+- `FloatTabs/Web/SlotNavigationObserver.swift` — narrow readiness seam only when Gate 0 proves it necessary.
+
+Primary expected tests:
+
+- `FloatTabsTests/ExternalShellTests.swift`;
+- `FloatTabsTests/WebViewPoolTests.swift`;
+- existing focus tests only when focus timing is touched.
+
+Any material production scope outside those boundaries requires reconciliation.
+
+### Rejected Phase 6 V1 alternatives
+
+- screenshot cache as the default continuity mechanism;
 - predictive prewarm or larger resident Runtime budget;
-- Browser Profile/interactionState restore rewrite without evidence.
+- Browser Profile / interaction-state restore rewrite without evidence;
+- arbitrary timer/polling/reload tricks to manufacture readiness.
 
 ## Current ownership
 
@@ -120,8 +145,8 @@ Rejected for Phase 6 V1:
 - private `RuntimeBudgetPolicy` inside `SlotLifecycleCoordinator.swift` — deterministic budget decision only;
 - `WebAttentionCoordinator` — sole native Attention state authority;
 - `ChatGPTAttentionBridge` — provider sensing and bounded liveness fallback;
-- `PanelController` — presentation truth and bounded cross-domain composition;
-- `WebPanelContainerView` — visible Web surface and native presentation states, not lifecycle policy;
+- `PanelController` — presentation truth and Phase 6 materialization orchestration;
+- `WebPanelContainerView` — visible Web surface/native restoring presentation, not lifecycle policy;
 - `UnreadResponseStore` / unread coordinator — durable unread truth;
 - native notification coordinator — notification projection/routing;
 - `RuntimeDiagnostics` — evidence only.
@@ -134,6 +159,7 @@ The following remain useful evidence but are not current execution authority:
 
 - `FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`, V2, V3;
 - `FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`;
-- delivered Phase 1–5 plans and reconciliation records.
+- delivered Phase 1–5 plans and reconciliation records;
+- the Phase 6 audit document for execution scope after the implementation contract freeze.
 
-Do not rewrite historical results to mimic current state. When they conflict with V4/current source/tests, follow current Authority.
+Do not rewrite historical results to mimic current state. When they conflict with V4/current Phase 6 implementation contract/current source/tests, follow current Authority.
