@@ -21,7 +21,7 @@ Historical documents remain evidence only unless current Authority explicitly re
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`:
 
 - [`architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md`](architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md) — **CURRENT / ACCEPTED / FROZEN** program contract;
-- [`architecture/FloatTabs_Runtime_Lifecycle_Phase5_Background_Generation_Thrift_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase5_Background_Generation_Thrift_Plan_V1.md) — **ACTIVE / ACCEPTED / FROZEN** Phase 5 plan;
+- [`architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md) — **CURRENT PHASE 6 AUDIT / PROPOSED DESIGN / NOT IMPLEMENTATION AUTHORITY**;
 - [`architecture/README.md`](architecture/README.md) — architecture routing/status;
 - [`architecture/DOMAIN_MAP.md`](architecture/DOMAIN_MAP.md) — derived source/test navigation only.
 
@@ -50,8 +50,8 @@ Do not use superseded per-phase human-acceptance wording to block intermediate p
 - Phase 2 Ready / Unread Decoupling — delivered.
 - Phase 3 Native ChatGPT Completion Notification — delivered.
 - Phase 4 Reference-derived Automatic Runtime Management — delivered in PR #181 / `c910441a954bddbaeca710395cd0d6ed89ec5e5c`.
-- Phase 5 Long-running Background Generation Thrift — **active** under the Phase 5 V1 plan.
-- Phase 6 Perceived-fast Restore — not started / not authorized.
+- Phase 5 Long-running Background Generation Thrift — delivered in PR #183 / `745d401bf9f282d19bc756c81be3f46f17161e4b`.
+- Phase 6 Perceived-fast Restore — detailed audit complete; selected design is proposed but **product implementation is not authorized**.
 
 The old [`architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md`](architecture/FloatTabs_Runtime_Lifecycle_Phase4_Automatic_Runtime_Budget_Policy_Plan_V1.md) is historical Phase 4 planning evidence. Its strict benchmark-selection gate was superseded by the user's later reference-derived-default decision and is not current execution authority.
 
@@ -63,12 +63,29 @@ The production Phase 4 default managed target is currently 3 Warm/Cold runtimes 
 
 The old strict `1 / 2 / 4 / 8` scale matrix, drift baseline, `4 → 3 → 2` candidate tournament and restore-latency tuning are deferred. Future tuning should prefer Settings-backed conservative presets/overrides rather than permanently hard-coding one machine-independent optimum. Safety protections remain non-overridable.
 
-## 6. Other bounded current contracts
+## 6. Phase 6 status
+
+The audit found that safe interaction-state hibernate/restore already exists; the primary perceived-latency issue is that a reclaimed selected Slot may synchronously create/restore a fresh `WKWebView` before the hidden shell is ordered front.
+
+Selected proposal:
+
+```text
+native restore shell immediately
+→ return to AppKit run loop
+→ bounded deferred fresh Runtime materialization
+→ attach fresh WebView under restoring surface
+→ evidence-backed readiness
+→ existing focus handoff
+```
+
+Before implementation, one bounded Real-Mac probe must establish the public callback/loading sequence for an actual `interactionState` restore. See the Phase 6 audit document for scope, alternatives, evidence gaps, acceptance gates and STOP conditions.
+
+## 7. Other bounded current contracts
 
 - [`design/FloatTabs_UI_Design_System_v1.3.md`](design/FloatTabs_UI_Design_System_v1.3.md) — shell/rail interaction baseline where not superseded by newer bounded contracts or production source/tests.
 - [`design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md`](design/FloatTabs_Attention_Active_Tab_Visual_Refinement_V1.md) — accepted active-tab/unread visual refinement.
 
-## 7. Historical by default
+## 8. Historical by default
 
 Treat as historical evidence unless current Authority explicitly restores a claim:
 
@@ -82,7 +99,7 @@ Treat as historical evidence unless current Authority explicitly restores a clai
 
 Do not rewrite historical evidence to make it look current. Update routing/status instead.
 
-## 8. Directory routing
+## 9. Directory routing
 
 | Directory | Current role |
 | --- | --- |
@@ -96,7 +113,7 @@ Do not rewrite historical evidence to make it look current. Update routing/statu
 | `docs/superpowers/` | Historical plans from older workflow |
 | `docs/uiux/` | Generated/reference UI material unless explicitly promoted |
 
-## 9. Conflict rule
+## 10. Conflict rule
 
 When historical material disagrees with current source/tests or a newer accepted contract:
 
