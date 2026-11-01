@@ -6,11 +6,11 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 6 PERCEIVED-FAST RESTORE AUDIT**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 6 PERCEIVED-FAST RESTORE**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `PHASE_6_AUDIT_ACTIVE / IMPLEMENTATION_NOT_AUTHORIZED`.
+Current execution state: `PHASE_6_AUDIT_COMPLETE / DESIGN_PROPOSED / IMPLEMENTATION_NOT_AUTHORIZED`.
 
 ## Canonical state
 
@@ -29,48 +29,90 @@ PHASE_5_MERGE_COMMIT=745d401bf9f282d19bc756c81be3f46f17161e4b
 PHASE_5_LITERAL_HEAD=f9cef25f8eee47d9973bfd9bd9401af072b1b8e6
 PHASE_5_REQUIRED_CI=PASS / RUN 1290
 PHASE_5_QA_DMG=PASS / RUN 626
-PHASE_6=AUDIT_ACTIVE / IMPLEMENTATION_NOT_AUTHORIZED
+PHASE_6_AUDIT=COMPLETE
+PHASE_6_RECOMMENDATION=TWO-STAGE NATIVE RESTORE SHELL
+PHASE_6_IMPLEMENTATION=NOT_AUTHORIZED
+PHASE_6_OPEN_EVIDENCE=REAL-MAC INTERACTIONSTATE READINESS SEQUENCE
+TASK_RECONCILIATION_REQUIRED=YES
 PROGRAM_HUMAN_ACCEPTANCE=PENDING
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
 ## Phase 5 closeout
 
-PR #183 merged after literal-head required CI and QA DMG passed. Delivered behavior preserves the existing event-driven ChatGPT detector, generation Runtime protection, two-probe completion confirmation, Runtime/document/token stale guards, `WebViewPool` ownership and Browser Profile/session/persistence boundaries.
+PR #183 is merged. Long-running hidden generation keeps Runtime protection but reduces FloatTabs-owned fallback liveness probing from 2s to 5s after 30s. Visible/unknown/short generation keeps the existing 2s cadence. Browser Profile/session/persistence and lifecycle ownership remain unchanged.
 
-Long-running hidden generation now reduces FloatTabs-owned liveness-watchdog cadence from 2s to 5s after 30s while visible/unknown/short generation keeps the existing 2s cadence. The values are conservative engineering defaults rather than measured optimum.
+## Phase 6 audit verdict
 
-## Phase 6 authority
+Phase 1 restore correctness is already structurally sound and should not be rewritten. Reclamation stores one opaque, memory-local `WKWebView.interactionState` snapshot and recreates a fresh Runtime against the same Browser Profile datastore; incompatible state falls back to the safe URL path.
 
-The accepted V4 Runtime Lifecycle contract defines Phase 6 as **Perceived-fast Restore**: improve user-perceived restoration after Runtime reclamation without retaining heavyweight `WKWebView`s merely for continuity.
+The strongest verified Phase 6 UX bottleneck is presentation ordering:
 
-The user has authorized a **detailed read-only Phase 6 audit** after Phase 5 merge. This does not authorize Phase 6 product implementation.
+- `PanelController.synchronizeSlotState()` synchronously calls `WebViewPool.webView(for:)` for a non-resident selected Slot;
+- fresh Runtime creation performs datastore resolution, bridge/script/observer setup, `WKWebView` allocation and restore-state application before returning;
+- on hidden → visible summon, `showFloatTabs` performs this synchronization before `panel.orderFrontRegardless()`;
+- therefore even the native FloatTabs shell can wait behind WebKit Runtime materialization;
+- after materialization there is no explicit native restoring presentation state or product-owned first-usable-content boundary.
 
-The audit must determine the current restore path, ownership boundaries, latency sources, available bounded restore state, focus/window/fullscreen interactions, Browser Profile/session continuity, stale-callback risks, credible solution options and the smallest safe implementation boundary.
+## Proposed Phase 6 architecture
 
-## Non-negotiable boundaries during audit
-
-- `WebViewPool` remains live Runtime mechanism owner unless a later accepted design explicitly changes ownership.
-- `SlotLifecycleCoordinator` remains sole Runtime lifecycle executor.
-- `PanelController` remains product/presentation visibility authority.
-- `WebAttentionCoordinator` remains Attention authority.
-- Browser Profile / website session / persistent user data must not be reset, deleted or rewritten as a restore shortcut.
-- no private WebKit API.
-- no Runtime retention policy change merely to hide restore latency.
-- no Phase 6 implementation before audit/design freeze and task reconciliation.
-
-## Current authority
+**Selected recommendation: two-stage native restore shell + deferred materialization.**
 
 ```text
-AGENTS.md
-→ CURRENT_STATUS.md
-→ CURRENT_TASK.md
-→ docs/README.md
-→ docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V4.md
-→ docs/architecture/DOMAIN_MAP.md
-→ current production source/tests/fresh runtime evidence
+select/summon reclaimed Slot
+→ native FloatTabs shell + lightweight restoring surface immediately
+→ return to AppKit run loop
+→ next bounded main-actor turn: revalidate current request
+→ existing WebViewPool materializes fresh WKWebView
+→ attach WebView under restoring surface
+→ existing navigation/focus ownership establishes readiness/input
+→ remove restoring surface on a proven current-Runtime readiness boundary
 ```
+
+This keeps the Phase 4 Runtime budget intact and does not retain extra WebViews.
+
+Rejected for Phase 6 V1:
+
+- page screenshot cache as default continuity mechanism — asynchronous capture, page-content/privacy/memory/staleness cost;
+- predictive prewarm or larger resident Runtime budget — conflicts with the memory objective and can create churn;
+- rewriting `interactionState` / Browser Profile restore — no evidence it is the current bottleneck.
+
+## Open evidence before implementation freeze
+
+One bounded Real-Mac probe is still required to freeze the exact overlay-dismiss/readiness signal for a real `interactionState` restore. Current structural tests inject interaction-state provider/applier seams; they do not prove which navigation/loading callbacks every relevant real restore emits.
+
+Required public-fact sequence to observe:
+
+```text
+selection/summon request
+→ shell ordered
+→ fresh WKWebView allocated
+→ interactionState applied
+→ navigation provisional/commit/finish callbacks, if any
+→ isLoading transition
+→ bounded renderer/page readiness
+→ focus success
+```
+
+No page content may be logged.
+
+## Durable audit record
+
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`
+
+Status: `AUDIT COMPLETE / PROPOSED DESIGN / NOT IMPLEMENTATION AUTHORITY`.
+
+## Non-negotiable boundaries
+
+- `WebViewPool` remains live Runtime mechanism owner;
+- `SlotLifecycleCoordinator` remains sole Runtime lifecycle executor;
+- `PanelController` remains product/presentation visibility authority;
+- `WebAttentionCoordinator` remains Attention authority;
+- Browser Profile/session/persistent user data are not reset/deleted/recreated as a restore shortcut;
+- no private WebKit API;
+- no Runtime budget expansion to hide restore latency;
+- no Phase 6 product implementation until task reconciliation and explicit authorization.
 
 ## Next action
 
-Complete the Phase 6 read-only audit against merged `main`. Produce a concrete restore-path/ownership map, risks, candidate designs, recommended bounded implementation, verification gates and unresolved evidence. Stop before product mutation until Phase 6 design/scope is explicitly authorized.
+Wait for explicit Phase 6 implementation authorization. If authorized, first reconcile `CURRENT_TASK.md` into a bounded implementation contract and freeze the final readiness signal using the Real-Mac evidence gate, then implement only the selected two-stage native restore presentation path.
