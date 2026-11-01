@@ -2,34 +2,22 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 4 reference-derived automatic Runtime management  
-**Status:** `WAITING_FOR_PHASE_4_MERGE_GATE`  
-**Mode:** `VERIFY / MERGE GATE`  
+**Status:** `COMPLETE / MERGED`  
+**Mode:** `CLOSEOUT`  
 **Task class:** `RUNTIME LIFECYCLE POLICY / REFERENCE-DERIVED DEFAULT`  
 **JSC root cause:** `UNKNOWN`
 
-## User-authorized reconciliation
+## Delivered outcome
 
-On 2026-11-01 the user explicitly replaced the Phase 4 tuning-first gate with implementation-first sequencing:
+Phase 4 is complete and merged.
 
 ```text
-mature-browser lifecycle reference
-→ conservative FloatTabs default
-→ implementation + repository correctness CI
-→ merge
-→ later empirical tuning if needed
+PR=#181
+FINAL_PR_HEAD=70584485b7a0444aba3df0ea5e4613681b6e5a14
+MERGE_COMMIT=c910441a954bddbaeca710395cd0d6ed89ec5e5c
+REQUIRED_BUILD_AND_TEST=PASS / RUN 1283
+QA_DMG=PASS / RUN 622
 ```
-
-Do not require the prior `1 / 2 / 4 / 8` benchmark, drift calculation, candidate tournament, or restore-latency statistics before this Phase 4 implementation/merge. Those are deferred tuning work.
-
-Required CI/data-safety gates remain in force.
-
-## Delivered implementation
-
-Phase 4 implementation is complete on PR #181.
-
-Implementation semantic head:
-
-`ce0231628a976ad41afba1e78ef1b0726212f95e`
 
 Delivered mechanism:
 
@@ -43,69 +31,43 @@ resident/protection/recency facts
 → existing WebViewPool hibernate/restore boundary
 ```
 
-Normal/warning managed target is **3 resident Warm/Cold runtimes** as an explicitly reference-derived initial product assumption. Critical pressure targets `0` eligible inactive Warm/Cold runtimes.
+Normal/warning managed target currently defaults to **3 resident Warm/Cold runtimes** as an explicitly reference-derived initial product assumption. Critical pressure targets `0` eligible inactive Warm/Cold runtimes.
 
-Hard protection covers active/presented, fullscreen, supplemental-visible, media-playing or media-query-pending, Attention `generating`, and Hot. Ready/unread/native notification do not protect Runtime.
+Hard protection covers active/presented, fullscreen, supplemental-visible, media-playing, media-query-pending, Attention `generating`, and Hot. Ready/unread/native notification do not protect Runtime.
 
 No Browser Profile/session/schema/reset/delete semantics changed.
 
-## Verification evidence
+## Verification
 
-Implementation semantic head passed:
+Final literal PR head passed:
 
 - Debug arm64 build;
 - Release arm64 build;
 - native arm64 architecture verification;
 - full existing XCTest suite;
-- required `Build & Test (Apple Silicon arm64)` run `1282` on `macmini-floattabs-01`;
-- QA DMG run `621`.
-
-Initial CI found two stale memory-pressure diagnostic assertions; the correction preserved backward-compatible diagnostic naming while retaining the new unified budget behavior. Full XCTest then passed.
-
-A final code audit also caught an async background-media protection race. The implementation now treats the playback-query window as protected, including the timer revalidation path, preventing budget eviction before media state is known.
+- required `Build & Test (Apple Silicon arm64)` run `1283` on `macmini-floattabs-01`;
+- QA DMG run `622`.
 
 ## Deferred tuning
 
-Not required for this merge:
+Not completed or required in this task:
 
 - Real-Mac `1 / 2 / 4 / 8` matrix;
 - no-op drift baseline;
 - candidate `4 → 3 → 2` tournament;
 - restore/materialization median/p95;
-- human performance tuning.
+- machine-specific performance tuning.
 
-These remain future tuning work and must not be retroactively reported as completed evidence.
+Future tuning direction accepted for later design: prefer a Settings-backed configuration surface with conservative defaults and per-machine/user adjustment rather than permanently hard-coding one universal performance threshold.
 
-## Merge gate
+The exact Settings UI, allowed ranges/presets, migration/persistence behavior and any automatic machine-class policy are **not authorized in this task** and require a new design/implementation scope.
 
-Before merge, confirm against the **literal current PR head**:
-
-1. PR #181 remains open, ready and mergeable;
-2. required `Build & Test (Apple Silicon arm64)` is green for the literal head;
-3. changed paths remain inside the reconciled Phase 4 scope;
-4. no Browser Profile/session/persistence or `WebViewPool` contract mutation was introduced;
-5. no release/version/Phase 5 work is present.
-
-This control-alignment commit is control-only drift after the verified implementation semantic head. Branch protection still governs the literal PR head; do not infer the final host gate from the older semantic-head CI.
-
-## STOP conditions
-
-STOP/reconcile if the final merge gate reveals:
-
-- a second Runtime lifecycle writer;
-- automatic Hot eviction;
-- eviction of visible/fullscreen/media/generating Runtime;
-- `WebViewPool` contract redesign;
-- persistence/session/schema changes;
-- private WebKit API;
-- user-data deletion/reset;
-- required literal-head CI failure;
-- Phase 5/6 work.
+Safety protections must remain outside unsafe user override: Hot, active/presented, fullscreen, media-protected and Attention `generating` Runtime may not become automatic-eviction candidates through tuning settings.
 
 ## Delivery boundary
 
-The construction phase is complete. Current terminal state is:
+This task is closed at:
 
-`WAITING_FOR_PHASE_4_MERGE_GATE`
+`COMPLETE / MERGED`
 
-Do not merge, release, bump version or begin Phase 5 without the next authorized merge decision.
+Do not begin Phase 5/6, release/version work, or performance-settings implementation without the next authorized task.
