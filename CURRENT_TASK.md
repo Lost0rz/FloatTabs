@@ -76,7 +76,7 @@ Release arm64: PASS
 first CUA smoke: visible_completion; durable unread correctly skipped
 fresh origin/main: 36d5850a9a5bad01b24cffa9a4bd1e1fbf628d4d; control/docs-only delta reconciled non-destructively
 exact implementation/test scope: 9 authorized dirty files; PASS
-required CI: run 41261953797, `Build & Test (Apple Silicon arm64)`, runner `macmini-floattabs-01`, literal head `3c15c3555ca5c25bc88f0d592b9cbec89693993a`, PASS
+required CI: run 41262161870, `Build & Test (Apple Silicon arm64)`, runner `macmini-floattabs-01`, literal head `6a407a7f0b44719fd016adceef6b00be82962951`, PASS
 ```
 
 The first smoke result is not a Phase 2 failure and is not a STOP condition under V2.
