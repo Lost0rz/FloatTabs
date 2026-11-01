@@ -107,9 +107,11 @@ Before each implementation phase:
 4. only then issue a concise execution card for the local executor;
 5. keep the execution card bounded and avoid duplicating the full repository contract.
 
-After implementation, run focused verification and independent audit before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
+After implementation, run the phase-local machine verification required by the active program contract before merge/closeout. A chat plan or execution card never overrides the accepted repository contract or `CURRENT_TASK.md`.
 
-Use phase-local verification. A structural phase should prove the ownership/lifecycle primitive, data safety, regressions and bounded real-runtime behavior needed for that phase. Do not make later policy/tuning-scale benchmarks blocking merely because they are measurable; defer them to the phase that actually uses those measurements unless the current accepted contract says the earlier decision depends on them.
+For the active Runtime Lifecycle / Memory program, the current contract uses an architecture-first sequence: merge each structurally correct phase after its frozen machine gate and required CI, then continue to the next dependent phase. Do not block every intermediate phase on repeated formal independent audit or human UI/runtime acceptance when the current program contract explicitly defers those gates to one unified final pass.
+
+Use phase-local verification. A structural phase should prove the ownership/lifecycle primitive, data safety, regressions and machine-observable behavior needed for that phase. Do not make later policy/tuning-scale benchmarks blocking merely because they are measurable; defer them to the phase that actually uses those measurements unless the current accepted contract says the earlier decision depends on them.
 
 ### During
 
@@ -174,11 +176,11 @@ Use focused tests first. Increase verification for changes involving:
 - persistence / migration;
 - canonical state writers.
 
-Real macOS interaction/runtime changes require relevant runtime acceptance; static review alone is insufficient.
+Real macOS interaction/runtime changes require relevant runtime acceptance before the owning program or release is finally accepted; static review alone is insufficient. A current accepted multi-phase contract may deliberately defer that human runtime/UI acceptance across intermediate architecture phases so the user tests the final integrated architecture once rather than repeatedly testing temporary intermediate states.
 
-For timing-sensitive real-product interaction acceptance, prefer a concentrated user-owned human acceptance pass after machine implementation, tests/builds, repository CI, and independent audit are complete. Local AI/Computer Use may assist debugging or evidence collection when explicitly needed, but should not impersonate the final human acceptance operator or block construction solely because an AI-driven UI smoke is awkward to reproduce, unless the current task explicitly requires that machine-run interaction as a separate gate.
+For the active Runtime Lifecycle / Memory program, timing-sensitive real-product interaction acceptance is program-final unless a phase contract explicitly requires earlier evidence for a safety or architecture decision. Local AI/Computer Use may assist debugging or evidence collection when explicitly needed, but should not impersonate the final human acceptance operator or block construction solely because an AI-driven UI smoke is awkward to reproduce.
 
-Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and applicable runtime acceptance. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
+Before merge/release, separately confirm current PR base/head, exact diff, required CI, reviews/mergeability, task scope, Authority integrity, and the acceptance gates applicable **at that boundary**. Repository-host gates apply to the literal identity GitHub governs and cannot be inferred from older semantic evidence.
 
 ## CI execution
 
