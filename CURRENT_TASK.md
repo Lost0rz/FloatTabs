@@ -2,139 +2,221 @@
 
 **Task ID:** `FT-RUNTIME-LIFECYCLE-MEMORY-001`  
 **Title:** Runtime Lifecycle / Memory redesign — Phase 6 perceived-fast restore  
-**Status:** `WAITING_FOR_PHASE_6_IMPLEMENTATION_AUTHORIZATION`  
-**Mode:** `AUDIT COMPLETE / DESIGN PROPOSED / NO PRODUCT MUTATION`  
+**Status:** `FROZEN / IMPLEMENTATION NOT STARTED / WAITING FOR FUTURE USER START`  
+**Mode:** `IMPLEMENTATION CONTRACT READY / CURRENT SESSION NO PRODUCT MUTATION`  
 **Task class:** `WEB RUNTIME / RESTORE RESPONSIVENESS`  
 **JSC root cause:** `UNKNOWN`
 
 ## Authorization state
 
-Phase 5 merged on 2026-11-01 via PR #183. The user then authorized a detailed Phase 6 audit. That audit is complete.
+Phase 6 audit/design is complete and the implementation contract is now frozen.
 
-The current authorization **does not permit Phase 6 product implementation**. Source/test mutation must wait for explicit implementation authorization and task reconciliation.
-
-Durable audit/design record:
+Durable audit/rationale record:
 
 `docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Audit_V1.md`
 
-Status: `AUDIT COMPLETE / PROPOSED DESIGN / NOT IMPLEMENTATION AUTHORITY`.
+Frozen implementation contract:
 
-## Verified audit findings
+`docs/architecture/FloatTabs_Runtime_Lifecycle_Phase6_Perceived_Fast_Restore_Implementation_Contract_V1.md`
 
-1. Safe hibernate/restore already exists and should remain the foundation.
-2. `WebViewPool` keeps one memory-local opaque interaction-state snapshot and recreates Runtime against the same Browser Profile datastore.
-3. incompatible Browser Profile/rendering/URL state is invalidated and uses URL fallback.
-4. the strongest perceived-latency boundary is synchronous presentation ordering: `PanelController.synchronizeSlotState()` can create/restore a fresh WKWebView before the hidden shell is ordered front.
-5. `WebPanelContainerView` has no explicit restoring presentation state.
-6. current `web_runtime.restore.completed` proves state handoff, not first visual/usable content.
-7. existing structural tests cover restore correctness but do not establish the real-WKWebView callback/paint sequence of `interactionState` restoration.
-8. existing navigation commit handling already validates the exact current WebView and is used as a page-readiness signal for presentation focus; this ownership should be reused.
+The user explicitly requested that this session **only freeze/update contracts and documentation**. Therefore no product source or test mutation is authorized in the current session.
 
-## Selected recommendation
+A future explicit user instruction to start/continue Phase 6 construction releases the execution hold. The executor must then follow the frozen implementation contract, beginning with Gate 0. No new design cycle or duplicate task contract is required merely because execution occurs in another conversation.
 
-**Option A — two-stage native restore shell + deferred materialization.**
+## Frozen objective
 
-Proposed flow:
+Make a reclaimed persistent Slot feel immediately responsive without retaining extra heavyweight `WKWebView` runtimes:
 
 ```text
-current selected Slot is non-resident
-→ PanelController creates a private materialization generation
-→ clear stale selected-WebView focus target
-→ WebPanelContainerView presents lightweight native restoring state
-→ existing shell/source window group becomes visible without waiting for WKWebView
+reclaimed Slot selected/summoned
+→ native FloatTabs shell + lightweight restoring state immediately
 → return to AppKit run loop
-→ next bounded main-actor turn revalidates generation/slot/visibility/fullscreen lock
-→ existing WebViewPool.webView(for:) materializes/restores Runtime
-→ attach fresh WebView under restoring state
-→ existing lifecycle/fullscreen/focus ownership resumes
-→ dismiss restoring state on proven current-Runtime readiness
+→ revalidate current materialization request
+→ existing WebViewPool creates/restores fresh Runtime
+→ attach Runtime under restoring state
+→ evidence-backed current-Runtime readiness
+→ remove restoring state
+→ existing focus/input ownership resumes
 ```
 
-Resident Slot switching keeps the existing direct fast path.
+Resident Slot switching keeps the current direct fast path.
 
-## Rejected alternatives for V1
+## Frozen ownership
 
-### Screenshot cache
+- `PanelController` — Phase 6 presentation/materialization orchestration and stale-request generation;
+- `WebPanelContainerView` — native restoring presentation only;
+- `WebViewPool` — existing Runtime creation/restore mechanism;
+- `SlotLifecycleCoordinator` — sole lifecycle/budget executor;
+- `SlotNavigationObserver` / existing Web Runtime seams — navigation/readiness evidence only if Gate 0 requires the narrow existing owner;
+- `WebFocusRouter` / existing Panel focus path — focus ownership unchanged;
+- `WebAttentionCoordinator` — Attention unchanged;
+- `RuntimeDiagnostics` — evidence only.
 
-Do not use a page image snapshot as the default Phase 6 continuity mechanism. Public WebKit snapshot capture is asynchronous and would introduce page-content handling, extra memory, staleness/privacy concerns and a new capture race at hibernate.
+No second Runtime lifecycle or presentation truth owner is authorized.
 
-### Prewarm / larger Runtime budget
+## Gate 0 — mandatory before product mutation
 
-Do not raise the Phase 4 budget or retain extra hidden WebViews merely to hide restore latency.
-
-### Restore rewrite
-
-Do not replace `interactionState` / Browser Profile restore without evidence of a correctness problem.
-
-## Open evidence gate
-
-Before freezing implementation readiness semantics, run one bounded Real-Mac probe using an actually hibernated existing Slot and record content-free timestamps/events for:
+On a Real Mac, use an existing Slot that has actually been hibernated and record only content-free public facts:
 
 ```text
-selection / summon
-→ native shell ordered
-→ WKWebView allocated
-→ interactionState assigned
-→ navigation provisional / commit / finish, if any
-→ isLoading transitions
-→ bounded page/renderer readiness
-→ focus success
+selection / summon request
+→ shell ordering boundary
+→ fresh WKWebView allocation
+→ interactionState assignment OR URL fallback classification
+→ navigation provisional / commit / finish callbacks, if any
+→ isLoading transitions, if observable
+→ bounded current-Runtime renderer/page readiness
+→ focus success/failure boundary
 ```
 
-This determines the exact overlay-dismiss signal. Do not guess it from structural tests.
+Do not record page text, screenshots, DOM content, cookies, session values or opaque interaction state.
 
-## Proposed implementation scope after authorization
+### Gate 0 allowed outcomes
 
-Expected product files:
+**Outcome A — navigation-backed readiness**
+
+A compatible interaction-state restore exposes usable current-Runtime navigation/loading callbacks. Reuse those validated callbacks as the trigger for the final bounded readiness check.
+
+**Outcome B — non-navigation readiness**
+
+A compatible interaction-state restore does not reliably expose the same navigation sequence, but readiness can be established through a bounded public current-Runtime renderer/page observation without ownership drift or unbounded polling.
+
+**STOP outcome**
+
+Stop before product mutation if no bounded public readiness fact exists or if readiness would require private WebKit API, arbitrary fixed delays, unbounded polling, reload/double-navigation, Browser Profile/session mutation, screenshot persistence, extra resident WebViews, or materially different ownership.
+
+The restoring presentation may be removed only after the current materialization generation, current Slot and exact current Runtime all still match and the Gate 0-approved public readiness fact succeeds.
+
+`web_runtime.restore.completed` alone is not readiness truth.
+
+## Authorized implementation scope after future user start + Gate 0 PASS
+
+Expected production files:
 
 - `FloatTabs/Panel/PanelController.swift`
 - `FloatTabs/Web/WebViewContainer.swift`
-- `FloatTabs/Web/WebViewPool.swift` only if a narrow read-only materialization/restore-source seam is required
-- `FloatTabs/Web/SlotNavigationObserver.swift` only if current navigation callbacks cannot expose the final evidence-backed readiness boundary without ownership drift
+- `FloatTabs/Web/WebViewPool.swift` only for a narrow read-only query/result if needed; no semantic restore rewrite
+- `FloatTabs/Web/SlotNavigationObserver.swift` only if Gate 0 Outcome A proves a narrow existing-owner readiness seam is required
 
 Expected tests:
 
 - `FloatTabsTests/ExternalShellTests.swift`
-- `FloatTabsTests/WebViewPoolTests.swift` for unchanged restore invariants
-- existing focus tests if the deferred path touches focus timing
+- `FloatTabsTests/WebViewPoolTests.swift`
+- existing focus-related tests only if deferred materialization changes focus timing
 
-## Acceptance gates for eventual implementation
+Any additional production file with material semantic responsibility requires STOP/reconciliation.
 
-1. resident Slot fast path remains direct;
-2. reclaimed visible Slot gets native restore feedback before fresh WebView materialization starts;
-3. no extra persistent WKWebView residency;
-4. stale materialization generations cannot attach/focus/activate;
-5. selection change/dismiss/fullscreen lock cancels pending presentation work;
-6. existing `WebViewPool` restore semantics and Browser Profile/session identity remain unchanged;
-7. no duplicate URL load on compatible interactionState restore;
-8. Phase 4 Runtime budget semantics remain unchanged;
-9. no page content / screenshot / opaque interaction state is persisted or logged;
-10. focused tests, full XCTest, Debug/Release arm64 and required PR CI pass;
-11. Real-Mac smoke captures request → shell-visible → WebView-attached → readiness/focus evidence before merge.
+## Frozen implementation requirements
+
+1. Resident Slot fast path remains direct.
+2. Reclaimed Slot receives native restoring feedback before fresh Runtime materialization starts.
+3. Early shell presentation returns control to AppKit before WebKit materialization.
+4. One private materialization generation/request identity prevents stale attach/focus/activation/completion.
+5. Selection change, dismissal, termination/reset and incompatible fullscreen/source lock invalidate pending work.
+6. Revalidate request before materialization, before attachment, and before restoring-state dismissal.
+7. `WebViewPool` remains the only Runtime creation/interaction-state restore owner.
+8. Browser Profile/session identity remains unchanged.
+9. Compatible interaction-state restore still avoids duplicate ordinary URL load.
+10. Phase 4 Runtime budget/ranking/protection semantics remain unchanged.
+11. No page screenshot or opaque interaction state is persisted/logged.
+12. No arbitrary fixed timer becomes readiness truth.
+13. Existing focus/fullscreen ownership remains canonical.
+
+## Work packages
+
+### WP0 — Gate 0 evidence
+
+Real-Mac readiness classification. Evidence/control only; no product source mutation.
+
+### WP1 — native restoring presentation
+
+Add the bounded native restoring surface to `WebPanelContainerView` with focused deterministic tests.
+
+### WP2 — two-stage orchestration
+
+Update `PanelController` so the native shell/restoring state is presented before reclaimed Runtime materialization and stale request generations are rejected.
+
+### WP3 — readiness completion
+
+Wire the Gate 0 Outcome A/B fact into current-Runtime restore completion using the smallest existing owner/seam.
+
+### WP4 — verification and merge readiness
+
+Run focused tests, full XCTest, Debug/Release arm64, required literal-head PR CI and bounded Real-Mac restore smoke; then independent exact-diff audit.
+
+This work-package structure is not a mandated Sub Agent topology.
+
+## Verification gates
+
+1. **Gate 0 Real-Mac evidence:** Outcome A or B; otherwise STOP.
+2. **Focused correctness:** resident fast path, restoring-before-materialization ordering, stale request rejection, dismiss/switch/fullscreen boundaries, current-request-only completion, unchanged restore/session invariants.
+3. **Full XCTest:** no Phase 6 regressions.
+4. **Debug + Release + native arm64:** PASS.
+5. **Required PR CI:** literal head `Build & Test (Apple Silicon arm64)` PASS on the established self-hosted runner.
+6. **Bounded Real-Mac smoke:** resident switch, compatible reclaimed restore, safe fallback if reproducible, rapid switch-away, dismiss during pending restore.
+7. **Independent exact-diff audit:** ownership/scope/data-safety/lifecycle verification before merge.
+
+No absolute latency target is frozen in V1; Phase 6 proves immediate native response ordering and correctness first.
+
+## Acceptance criteria
+
+Merge readiness requires all of the following:
+
+- native shell/restoring state becomes visible before fresh Runtime materialization for a reclaimed visible Slot;
+- resident Slot path remains direct;
+- no extra persistent WebView residency;
+- stale materialization work cannot affect a newer selection/presentation;
+- interaction-state restore/session safety remains intact;
+- readiness is based on Gate 0-proven public bounded evidence;
+- Phase 4 budget semantics remain unchanged;
+- no screenshot/page-content/opaque-state persistence/logging;
+- focused/full tests and builds pass;
+- required literal-head CI passes;
+- bounded Real-Mac restore smoke passes.
+
+## Explicit non-scope
+
+- Settings-backed Runtime budget tuning;
+- managed target/ranking changes;
+- predictive prewarm;
+- screenshot continuity cache;
+- Browser Profile migration/reset;
+- persistence schema change;
+- Attention/Unread changes;
+- background-generation cadence changes;
+- fullscreen redesign;
+- generic WebView threading redesign;
+- private WebKit API;
+- release/version bump.
 
 ## STOP conditions
 
-STOP/reconcile if implementation requires:
+STOP/reconcile if execution requires:
 
-- a second Runtime lifecycle writer;
-- Browser Profile/session/persistent data mutation;
+- a second Runtime lifecycle writer or second presentation truth owner;
+- Browser Profile/session/persistent-data mutation;
 - private WebKit API;
 - hidden persistent WebViews as continuity objects;
-- Phase 4 budget expansion merely to make restore look faster;
+- larger Runtime budget merely to mask restore cost;
 - screenshot persistence;
-- arbitrary reload/double-navigation/timer workaround to manufacture readiness;
+- arbitrary reload/double-navigation/fixed-delay workaround;
+- unbounded readiness polling;
 - Attention semantics change;
-- unresolved fullscreen source ownership outside the existing session-lock boundary;
+- unresolved fullscreen source ownership outside the current session-lock boundary;
+- material production scope outside the frozen paths;
 - release/version work.
 
-## Reconciliation status
+## Current execution hold
 
 ```text
 PHASE_6_AUDIT=COMPLETE
-RECOMMENDED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
-PRODUCT_IMPLEMENTATION=NOT_AUTHORIZED
-OPEN_EVIDENCE=REAL_MAC_INTERACTIONSTATE_READINESS
-TASK_RECONCILIATION_REQUIRED=YES
+PHASE_6_CONTRACT=ACCEPTED / FROZEN
+SELECTED_OPTION=TWO_STAGE_NATIVE_RESTORE_SHELL
+READINESS_POLICY=GATE0_EVIDENCE_BOUND
+PRODUCT_IMPLEMENTATION=NOT_STARTED
+CURRENT_SESSION_PRODUCT_MUTATION=FORBIDDEN
+NEXT_USER_START_REQUIRED=YES
+TASK_RECONCILIATION_REQUIRED=NO AFTER THIS FREEZE
 ```
 
-Next mutation requires explicit user authorization for the bounded Phase 6 implementation.
+Next session: when the user explicitly says to start/continue Phase 6 construction, refresh Authority and repository state, run WP0/Gate 0 first, then continue directly if Outcome A or B is proven and no STOP condition fires.
