@@ -987,12 +987,20 @@ private final class WebRestoringOverlayView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func startIndicatorAnimation() {
+        indicator.startAnimation(nil)
+    }
+
+    func stopIndicatorAnimation() {
+        indicator.stopAnimation(nil)
+    }
+
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        if superview != nil {
-            indicator.startAnimation(nil)
+        if superview != nil, !isHidden {
+            startIndicatorAnimation()
         } else {
-            indicator.stopAnimation(nil)
+            stopIndicatorAnimation()
         }
     }
 }
@@ -1087,6 +1095,7 @@ final class WebPanelContainerView: NSView {
             ])
         }
         restoringOverlayView.isHidden = false
+        restoringOverlayView.startIndicatorAnimation()
         needsLayout = true
         bringRestoringOverlayToFront()
     }
@@ -1094,6 +1103,7 @@ final class WebPanelContainerView: NSView {
     /// Removes the restoring surface, revealing the current presentation
     /// beneath it. Safe to call when no restoring state is shown.
     func hideRestoringState() {
+        restoringOverlayView.stopIndicatorAnimation()
         restoringOverlayView.isHidden = true
     }
 
