@@ -276,6 +276,22 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var presentationNativeFocusPending = false
     private var presentationNativeFocusTransferState = PresentationNativeFocusTransferState()
     private var presentationWebFocusPending = false
+
+    /// Phase 6 two-stage materialization request. Identity is independent from
+    /// the presentation-focus generation above and lives only here: a pending
+    /// request may materialize, attach, activate lifecycle state, focus or
+    /// dismiss restoring UI only while the materialization generation, the
+    /// active Slot and the exact current Runtime all still match.
+    private struct PendingRuntimeMaterialization {
+        let generation: UInt64
+        let slotID: UUID
+    }
+    private var runtimeMaterializationGeneration: UInt64 = 0
+    private var pendingRuntimeMaterialization: PendingRuntimeMaterialization?
+    /// Immutable runtime identity of the Runtime attached under the current
+    /// pending materialization. Correlates the Outcome-A navigation finish to
+    /// this exact Runtime before restoring UI may disappear.
+    private var pendingRuntimeMaterializationIdentity: WebRuntimeDiagnosticIdentity?
 #if DEBUG
     private var debugPresentationFactOverrides: [UUID: Bool] = [:]
     private var debugInteractionSurfaceFactOverrides: [UUID: Bool] = [:]
@@ -1268,6 +1284,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         webViewPool.onCommittedURLChange = { [weak self] slotID, url in
             self?.handleCommittedURLChange(slotID: slotID, url: url)
         }
+        webViewPool.onSlotNavigationFinish = { [weak self] slotID, identity in
+            self?.handleSlotNavigationFinish(slotID: slotID, runtimeIdentity: identity)
+        }
+        webViewPool.onSlotNavigationFailure = { [weak self] slotID, identity in
+            self?.handleSlotNavigationFailure(slotID: slotID, runtimeIdentity: identity)
+        }
         tabStore.onChange = { [weak self] in
             self?.synchronizeSlotState()
         }
@@ -1361,6 +1383,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         // cannot retain colors from an earlier appearance.
         synchronizeAppearance()
         guard !sourceHostController.isSessionLocked else {
+            // An incompatible fullscreen/source-session lock cannot accept a
+            // pending deferred materialization for this presentation.
+            cancelPendingRuntimeMaterialization(reason: "session_locked")
             fullscreenVisibilityIntent.requestPresentation()
             // A companion presentation is one movable window group. Remove its
             // old Space representation before placing it on the mouse display.
@@ -1456,6 +1481,9 @@ final class PanelController: NSObject, NSWindowDelegate {
         presentationNativeFocusPending = false
         presentationNativeFocusTransferState.reset()
         presentationWebFocusPending = false
+        // Dismissal invalidates any pending deferred materialization; a stale
+        // async turn must not attach a Runtime for a hidden presentation.
+        cancelPendingRuntimeMaterialization(reason: "panel_dismissed")
         addressOverlayView.dismiss()
         persistPanelFrame()
         panel.orderOut(nil)
@@ -1682,6 +1710,8 @@ final class PanelController: NSObject, NSWindowDelegate {
             subsystem: "app",
             trace: trace
         )
+        // Termination invalidates pending materialization work.
+        cancelPendingRuntimeMaterialization(reason: "app_terminating")
         persistPanelFrame()
     }
 
@@ -2716,6 +2746,17 @@ final class PanelController: NSObject, NSWindowDelegate {
         slotLifecycleCoordinator.pendingColdReleaseCount
     }
 
+    /// Read-only Phase 6 presentation facts so integration tests observe the
+    /// real restoring surface and attached WebView without exposing the root
+    /// view or creating a second presentation truth.
+    var debugIsShowingRestoringState: Bool {
+        rootView.webPanelContainerView.isShowingRestoringState
+    }
+
+    var debugPresentedWebView: WKWebView? {
+        rootView.webPanelContainerView.currentWebView
+    }
+
     var debugPendingWarmReleaseCount: Int {
         slotLifecycleCoordinator.pendingWarmReleaseCount
     }
@@ -3156,6 +3197,13 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func synchronizeSlotState() {
+        // A pending deferred materialization belongs to exactly one selected
+        // Slot. Any selection change makes it stale before presentation work
+        // continues, so the restoring surface cannot outlive its request.
+        if let pending = pendingRuntimeMaterialization,
+           pending.slotID != tabStore.activeTabID {
+            cancelPendingRuntimeMaterialization(reason: "active_slot_changed")
+        }
         synchronizeBrowserProfileMenuPresentation()
         let orderedProfiles = tabStore.orderedProfiles
         let unreadBeforePrune = unreadResponseCoordinator.unreadSlotIDs
@@ -3211,6 +3259,16 @@ final class PanelController: NSObject, NSWindowDelegate {
             applyPreferredViewport(activeProfile.renderingProfile.viewportSize)
         }
 
+        // Phase 6 two-stage path: a selected Slot with no live Runtime gets
+        // the native restoring surface first, returns to AppKit, and only a
+        // later main-run-loop turn may materialize the fresh Runtime. Hidden
+        // presentation keeps the existing synchronous materialization.
+        if webViewPool.existingWebView(for: activeProfile.id) == nil,
+           requestedVisibility || panel.isVisible {
+            beginDeferredRuntimeMaterialization(for: activeProfile)
+            return
+        }
+
         let webView: WKWebView
         do {
             webView = try webViewPool.webView(for: activeProfile)
@@ -3230,6 +3288,13 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
             synchronizeResidentIndicators()
             return
+        }
+        if pendingRuntimeMaterialization?.slotID == activeProfile.id {
+            // The selected Slot became resident through another valid path
+            // while a deferred request was still pending; the direct
+            // presentation below is authoritative and the restoring state is
+            // stale.
+            cancelPendingRuntimeMaterialization(reason: "resident_presentation")
         }
         rootView.webPanelContainerView.show(
             webView: webView,
@@ -3260,6 +3325,304 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func faviconURL(for profile: WebAppProfile) -> URL? {
         webViewPool.committedURL(for: profile.id) ?? profile.homeURL
+    }
+
+    // MARK: Phase 6 deferred Runtime materialization
+
+    /// Pure stale-request decision shared by every revalidation boundary.
+    /// A pending materialization is current only while the generation still
+    /// matches, the same Slot is still selected, presentation is still
+    /// requested, and fullscreen/source ownership permits synchronization.
+    static func runtimeMaterializationRequestIsValid(
+        requestGenerationMatches: Bool,
+        requestSlotID: UUID?,
+        activeSlotID: UUID?,
+        presentationRequested: Bool,
+        sessionLocked: Bool
+    ) -> Bool {
+        guard requestGenerationMatches,
+              let requestSlotID,
+              requestSlotID == activeSlotID,
+              presentationRequested,
+              !sessionLocked else {
+            return false
+        }
+        return true
+    }
+
+    private func isPendingRuntimeMaterializationCurrent(
+        _ request: PendingRuntimeMaterialization
+    ) -> Bool {
+        Self.runtimeMaterializationRequestIsValid(
+            requestGenerationMatches: pendingRuntimeMaterialization?.generation
+                == request.generation,
+            requestSlotID: request.slotID,
+            activeSlotID: tabStore.activeTabID,
+            presentationRequested: requestedVisibility || panel.isVisible,
+            sessionLocked: sourceHostController.isSessionLocked
+        )
+    }
+
+    /// Establishes the native restoring presentation and schedules exactly one
+    /// deferred materialization turn. Returns to the caller immediately so the
+    /// shell can be ordered/displayed by AppKit before WebKit work starts.
+    private func beginDeferredRuntimeMaterialization(for profile: WebAppProfile) {
+        if let pending = pendingRuntimeMaterialization, pending.slotID == profile.id {
+            // One scheduled turn per Slot; repeated synchronization while the
+            // same request is pending only refreshes the restoring surface.
+            rootView.webPanelContainerView.showRestoringState()
+            return
+        }
+
+        runtimeMaterializationGeneration += 1
+        let request = PendingRuntimeMaterialization(
+            generation: runtimeMaterializationGeneration,
+            slotID: profile.id
+        )
+        pendingRuntimeMaterialization = request
+        pendingRuntimeMaterializationIdentity = nil
+        // Early native feedback: the shell nameplate updates before any
+        // WebKit materialization begins.
+        onSelectedSlotPresentationChange?(
+            profile.name,
+            faviconURL(for: profile)
+        )
+        rootView.webPanelContainerView.showRestoringState()
+        // Selection bookkeeping advances now so repeated synchronization does
+        // not re-deactivate the previous Slot while this request is pending.
+        lastSynchronizedActiveID = profile.id
+        lastSynchronizedActiveProfile = profile
+        diagnostics.record(
+            event: "panel.materialization.deferred",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "materialization_generation": .integer(Int64(request.generation))
+            ]
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.performDeferredRuntimeMaterialization(request)
+        }
+    }
+
+    private func performDeferredRuntimeMaterialization(
+        _ request: PendingRuntimeMaterialization
+    ) {
+        // Revalidation 1: before Runtime materialization starts.
+        guard isPendingRuntimeMaterializationCurrent(request),
+              let profile = tabStore.profiles.first(where: { $0.id == request.slotID }) else {
+            cancelStaleRuntimeMaterialization(request, reason: "stale_before_materialization")
+            return
+        }
+
+        let webView: WKWebView
+        do {
+            webView = try webViewPool.webView(for: profile)
+        } catch {
+            finishPendingRuntimeMaterializationAsFailed(
+                profile: profile,
+                error: error
+            )
+            return
+        }
+
+        // Revalidation 2: after materialization, before attachment. A stale
+        // request may not attach, focus or activate; the fresh Runtime stays
+        // under existing pool/lifecycle ownership either way.
+        guard isPendingRuntimeMaterializationCurrent(request),
+              webViewPool.existingWebView(for: request.slotID) === webView else {
+            cancelStaleRuntimeMaterialization(request, reason: "stale_before_attach")
+            return
+        }
+
+        attachDeferredRuntime(webView: webView, profile: profile, request: request)
+    }
+
+    private func attachDeferredRuntime(
+        webView: WKWebView,
+        profile: WebAppProfile,
+        request: PendingRuntimeMaterialization
+    ) {
+        rootView.webPanelContainerView.show(
+            webView: webView,
+            slotID: profile.id,
+            residencyPolicy: profile.residencyPolicy
+        )
+        pendingRuntimeMaterializationIdentity = webViewPool.runtimeDiagnosticIdentity(
+            for: profile.id
+        )
+        webFocusRouter.setCurrentWebView(webView)
+        slotLifecycleCoordinator.activate(profile: profile)
+        WebViewFactory.configureHiddenScrollers(in: webView)
+        sourceHostController.observeFullscreenState(of: webView)
+        acknowledgeAttentionIfActuallyVisible(slotID: profile.id)
+
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(profile.id.uuidString),
+            "materialization_generation": .integer(Int64(request.generation))
+        ]
+        fields.merge(
+            pendingRuntimeMaterializationIdentity?.fields ?? [:]
+        ) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.attached",
+            level: .notice,
+            subsystem: "panel",
+            fields: fields
+        )
+
+        if panel.isVisible,
+           panel.isKeyWindow || sourceHostController.window.isKeyWindow {
+            sourceHostController.orderFrontAndFocus(webView)
+        }
+    }
+
+    private func cancelPendingRuntimeMaterialization(reason: String) {
+        guard let pending = pendingRuntimeMaterialization else { return }
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        diagnostics.record(
+            event: "panel.materialization.cancelled",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(pending.slotID.uuidString),
+                "materialization_generation": .integer(Int64(pending.generation)),
+                "reason": .string(reason)
+            ]
+        )
+    }
+
+    /// Generation-scoped stale discard for a deferred async turn. A stale
+    /// request must never destroy a newer pending request's state: only the
+    /// still-current generation may clear the pending materialization and its
+    /// restoring presentation.
+    private func cancelStaleRuntimeMaterialization(
+        _ request: PendingRuntimeMaterialization,
+        reason: String
+    ) {
+        let currentGeneration = pendingRuntimeMaterialization?.generation
+        if currentGeneration == request.generation {
+            pendingRuntimeMaterialization = nil
+            pendingRuntimeMaterializationIdentity = nil
+            rootView.webPanelContainerView.hideRestoringState()
+        }
+        diagnostics.record(
+            event: "panel.materialization.cancelled",
+            level: .notice,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(request.slotID.uuidString),
+                "materialization_generation": .integer(Int64(request.generation)),
+                "reason": .string(reason),
+                "replaced_by_newer_request": .bool(
+                    currentGeneration != nil && currentGeneration != request.generation
+                )
+            ]
+        )
+    }
+
+    private func finishPendingRuntimeMaterializationAsFailed(
+        profile: WebAppProfile,
+        error: Error
+    ) {
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        webFocusRouter.setCurrentWebView(nil)
+        if let profileName = Self.unsupportedBrowserProfileName(
+            for: profile,
+            error: error,
+            browserProfiles: tabStore.browserProfiles
+        ) {
+            rootView.webPanelContainerView.showUnsupportedBrowserProfile(
+                profileName: profileName,
+                defaultProfileName: tabStore.defaultBrowserProfilePresentation.name
+            )
+        } else {
+            rootView.webPanelContainerView.showEmptyState()
+        }
+        diagnostics.record(
+            event: "panel.materialization.failed",
+            level: .warning,
+            subsystem: "panel",
+            fields: [
+                "slot_id": .string(profile.id.uuidString),
+                "materialization_generation": .integer(
+                    Int64(runtimeMaterializationGeneration)
+                )
+            ].merging(RuntimeDiagnosticPrivacy.sanitizedErrorCategory(error)) {
+                current, _ in current
+            }
+        )
+    }
+
+    // MARK: Phase 6 Outcome-A readiness completion
+
+    /// Outcome-A readiness boundary. The restoring presentation disappears
+    /// only when the navigation finish belongs to the exact Runtime attached
+    /// under the still-current materialization request for the still-selected
+    /// Slot. `web_runtime.restore.completed` alone never reaches this method.
+    func handleSlotNavigationFinish(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
+        guard let pending = pendingRuntimeMaterialization,
+              pending.slotID == slotID,
+              isPendingRuntimeMaterializationCurrent(pending),
+              let expectedIdentity = pendingRuntimeMaterializationIdentity,
+              expectedIdentity == runtimeIdentity,
+              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
+              currentIdentity == runtimeIdentity else {
+            // A stale or foreign finish never dismisses the current
+            // restoring presentation.
+            return
+        }
+
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_finished")
+        ]
+        fields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.readiness_completed",
+            level: .notice,
+            subsystem: "panel",
+            fields: fields
+        )
+    }
+
+    /// Bounded terminal handling for a navigation failure on the exact pending
+    /// Runtime: the restoring surface is removed so the existing WebKit error
+    /// presentation beneath it stays reachable. No success is manufactured.
+    func handleSlotNavigationFailure(slotID: UUID, runtimeIdentity: WebRuntimeDiagnosticIdentity) {
+        guard let pending = pendingRuntimeMaterialization,
+              pending.slotID == slotID,
+              isPendingRuntimeMaterializationCurrent(pending),
+              let expectedIdentity = pendingRuntimeMaterializationIdentity,
+              expectedIdentity == runtimeIdentity,
+              let currentIdentity = webViewPool.runtimeDiagnosticIdentity(for: slotID),
+              currentIdentity == runtimeIdentity else {
+            return
+        }
+
+        pendingRuntimeMaterialization = nil
+        pendingRuntimeMaterializationIdentity = nil
+        rootView.webPanelContainerView.hideRestoringState()
+        var fields: [String: RuntimeDiagnosticValue] = [
+            "slot_id": .string(slotID.uuidString),
+            "materialization_generation": .integer(Int64(pending.generation)),
+            "readiness_source": .string("navigation_failed")
+        ]
+        fields.merge(runtimeIdentity.fields) { _, new in new }
+        diagnostics.record(
+            event: "panel.materialization.readiness_failed",
+            level: .warning,
+            subsystem: "panel",
+            fields: fields
+        )
     }
 
     private func handleCommittedURLChange(slotID: UUID, url: URL) {

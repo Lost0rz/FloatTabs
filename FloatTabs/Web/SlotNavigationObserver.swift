@@ -473,6 +473,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
     private let onIncidentRequest: @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void
     private let onNavigationCommit: @MainActor (UUID, URL?) -> Void
     private let onNavigationFinish: @MainActor (UUID, URL?) -> Void
+    private let onNavigationFailure: @MainActor (UUID) -> Void
     private let onInstantBackRequest: @MainActor (UUID, URL?) -> Void
     private let onInstantBackCancellation: @MainActor (UUID) -> Void
     private let onInstantBackActivation: @MainActor (UUID) -> Void
@@ -555,6 +556,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         onIncidentRequest: @escaping @MainActor (UUID, RuntimeDiagnosticIncidentContext) -> Void = { _, _ in },
         onNavigationCommit: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onNavigationFinish: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
+        onNavigationFailure: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackRequest: @escaping @MainActor (UUID, URL?) -> Void = { _, _ in },
         onInstantBackCancellation: @escaping @MainActor (UUID) -> Void = { _ in },
         onInstantBackActivation: @escaping @MainActor (UUID) -> Void = { _ in },
@@ -584,6 +586,7 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         self.onIncidentRequest = onIncidentRequest
         self.onNavigationCommit = onNavigationCommit
         self.onNavigationFinish = onNavigationFinish
+        self.onNavigationFailure = onNavigationFailure
         self.onInstantBackRequest = onInstantBackRequest
         self.onInstantBackCancellation = onInstantBackCancellation
         self.onInstantBackActivation = onInstantBackActivation
@@ -858,6 +861,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
             closeIncident(incidentContext, outcome: "navigation_failed")
         }
+        // Bounded terminal signal: a failed navigation must never leave a
+        // presentation owner waiting for a finish that cannot arrive.
+        onNavigationFailure(slotID)
     }
 
     func webView(
@@ -883,6 +889,9 @@ final class SlotNavigationObserver: NSObject, WKNavigationDelegate {
         if let incidentContext = activeIncidentContext, !incidentAwaitingRuntimeRecovery {
             closeIncident(incidentContext, outcome: "navigation_failed")
         }
+        // Bounded terminal signal, emitted before any HTTP entry fallback load;
+        // the fallback is a new navigation whose own finish follows normally.
+        onNavigationFailure(slotID)
         cancelPendingInstantBack()
         let failingURL = ((error as NSError).userInfo["NSErrorFailingURLStringKey"] as? String)
             .flatMap { URL(string: $0) }

@@ -951,6 +951,52 @@ final class WebSlotHostView: NSView {
     }
 }
 
+/// Phase 6 lightweight native restoring surface. Presentation only: a neutral
+/// indicator explaining that the Slot's Web runtime is materializing. It owns
+/// no runtime lifecycle, navigation, page content, screenshot or interaction
+/// state, and it never becomes a second presentation truth owner.
+private final class WebRestoringOverlayView: NSView {
+    private let indicator = NSProgressIndicator()
+    private let label = NSTextField(labelWithString: "Restoring…")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        indicator.style = .spinning
+        indicator.controlSize = .regular
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(indicator)
+
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            indicator.bottomAnchor.constraint(equalTo: centerYAnchor, constant: -6),
+            label.topAnchor.constraint(equalTo: centerYAnchor, constant: 10),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        if superview != nil {
+            indicator.startAnimation(nil)
+        } else {
+            indicator.stopAnimation(nil)
+        }
+    }
+}
+
 /// Owns the visible FloatTabs web surface. Warm/Cold use the accepted Stage 4
 /// transient host. Hot Slots instead receive one independent host each, so an
 /// inactive Hot WebView can stay attached to the FloatTabs window without being
@@ -960,6 +1006,7 @@ final class WebPanelContainerView: NSView {
     private let logicalHostView = NSView()
     private let emptyView = EmptyWebAppView()
     private let unsupportedBrowserProfileView = UnsupportedBrowserProfileView()
+    private let restoringOverlayView = WebRestoringOverlayView()
     private weak var currentContentView: NSView?
     private weak var hostedWebView: WKWebView?
     private weak var activeWebView: WKWebView?
@@ -1017,6 +1064,53 @@ final class WebPanelContainerView: NSView {
         }
     }
 
+    // MARK: Phase 6 restoring presentation
+
+    /// True while the native restoring surface is the topmost presentation.
+    /// The overlay is presentation-only state; it never implies runtime truth.
+    var isShowingRestoringState: Bool {
+        !restoringOverlayView.isHidden && restoringOverlayView.superview === clipView
+    }
+
+    /// Reveals the lightweight native restoring surface above any current
+    /// presentation. May appear before a fresh WebView exists; a WebView
+    /// attached afterwards stays beneath it until readiness completes.
+    func showRestoringState() {
+        if restoringOverlayView.superview !== clipView {
+            restoringOverlayView.translatesAutoresizingMaskIntoConstraints = false
+            clipView.addSubview(restoringOverlayView)
+            NSLayoutConstraint.activate([
+                restoringOverlayView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+                restoringOverlayView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+                restoringOverlayView.topAnchor.constraint(equalTo: clipView.topAnchor),
+                restoringOverlayView.bottomAnchor.constraint(equalTo: clipView.bottomAnchor),
+            ])
+        }
+        restoringOverlayView.isHidden = false
+        needsLayout = true
+        bringRestoringOverlayToFront()
+    }
+
+    /// Removes the restoring surface, revealing the current presentation
+    /// beneath it. Safe to call when no restoring state is shown.
+    func hideRestoringState() {
+        restoringOverlayView.isHidden = true
+    }
+
+    /// Keeps the restoring surface above the freshly attached Web content for
+    /// the entire Phase 6 restoring window. Content presentation calls
+    /// `bringToFront`, so an active overlay must be re-ordered afterwards.
+    private func bringRestoringOverlayToFront() {
+        guard isShowingRestoringState,
+              let index = clipView.subviews.firstIndex(where: { $0 === restoringOverlayView }) else {
+            return
+        }
+        var ordered = clipView.subviews
+        let selected = ordered.remove(at: index)
+        ordered.append(selected)
+        clipView.subviews = ordered
+    }
+
     func deactivate(slotID: UUID, residencyPolicy: SlotResidencyPolicy) {
         guard activeSlotID == slotID else { return }
 
@@ -1069,6 +1163,9 @@ final class WebPanelContainerView: NSView {
         }
         emptyView.isHidden = false
         bringToFront(emptyView)
+        // An empty presentation can never be mid-restore; clear stale
+        // restoring UI so it cannot outlive its presentation.
+        hideRestoringState()
     }
 
     func showUnsupportedBrowserProfile(
@@ -1087,6 +1184,9 @@ final class WebPanelContainerView: NSView {
         }
         unsupportedBrowserProfileView.isHidden = false
         bringToFront(unsupportedBrowserProfileView)
+        // An unsupported-profile presentation is terminal for this Slot; any
+        // restoring state it replaces is stale.
+        hideRestoringState()
     }
 
     private func prepareForNonWebPresentation() {
@@ -1159,6 +1259,9 @@ final class WebPanelContainerView: NSView {
         host.isHidden = false
         host.layoutSubtreeIfNeeded()
         bringToFront(host)
+        // A Hot host attaches beneath an active restoring surface; readiness
+        // completion owns when the overlay disappears.
+        bringRestoringOverlayToFront()
 
         websiteLayoutScale = host.websiteLayoutScale
         activeSlotID = slotID
@@ -1184,6 +1287,10 @@ final class WebPanelContainerView: NSView {
         }
         logicalHostView.isHidden = false
         bringToFront(logicalHostView)
+        // The transient host attaches beneath an active restoring surface so
+        // a not-yet-ready page cannot be interacted with or mistaken for the
+        // final presentation.
+        bringRestoringOverlayToFront()
 
         activeSlotID = slotID
         activeWebView = webView

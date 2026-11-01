@@ -2169,6 +2169,309 @@ final class ExternalShellTests: XCTestCase {
             lastUsedAt: Date(timeIntervalSince1970: TimeInterval(order))
         )
     }
+
+    // MARK: Phase 6 restoring presentation
+
+    private func makePhase6Harness(
+        slotName: String
+    ) throws -> (store: TabStore, pool: WebViewPool, controller: PanelController, profile: WebAppProfile) {
+        let store = TabStore(repository: MemoryProfileRepository())
+        let profile = try XCTUnwrap(
+            store.add(name: slotName, homeURL: URL(string: "https://\(slotName.lowercased()).example.com")!)
+        )
+        let pool = WebViewPool(
+            onURLChange: { _, _ in },
+            initialLoad: { _, _ in }
+        )
+        let controller = PanelController(
+            tabStore: store,
+            webViewPool: pool,
+            attentionCoordinator: WebAttentionCoordinator(),
+            frameStore: PanelFrameStore(),
+            preferencesStore: AppPreferencesStore()
+        )
+        return (store, pool, controller, profile)
+    }
+
+    /// Runs the main queue until every block enqueued before this call has
+    /// executed, deterministically flushing deferred materialization turns.
+    private func drainMainThreadTurns() {
+        let drained = expectation(description: "main-queue turn drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 5)
+    }
+
+    func testRestoringStateAppearsAboveAttachedWebViewAndHidesCleanly() {
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 800)
+        )
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(container.isShowingRestoringState)
+
+        container.showRestoringState()
+        XCTAssertTrue(container.isShowingRestoringState)
+
+        let webView = WKWebView(frame: .zero)
+        container.show(webView: webView, slotID: UUID(), residencyPolicy: .warm)
+        XCTAssertTrue(container.isShowingRestoringState)
+        XCTAssertTrue(container.currentWebView === webView)
+
+        // The restoring surface stays topmost and intercepts interaction with
+        // the not-yet-ready page underneath.
+        container.layoutSubtreeIfNeeded()
+        let hitDuringRestore = container.hitTest(NSPoint(x: 300, y: 400))
+        XCTAssertFalse(hitDuringRestore === webView)
+        XCTAssertFalse(hitDuringRestore?.isDescendant(of: webView) ?? false)
+
+        container.hideRestoringState()
+        XCTAssertFalse(container.isShowingRestoringState)
+        XCTAssertTrue(container.currentWebView === webView)
+    }
+
+    func testHotPresentationKeepsRestoringSurfaceAboveHost() {
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 800)
+        )
+        container.layoutSubtreeIfNeeded()
+        container.showRestoringState()
+
+        let hotWebView = WKWebView(frame: .zero)
+        container.show(webView: hotWebView, slotID: UUID(), residencyPolicy: .hot)
+        XCTAssertTrue(container.isShowingRestoringState)
+        XCTAssertTrue(container.currentWebView === hotWebView)
+
+        container.layoutSubtreeIfNeeded()
+        let hitDuringRestore = container.hitTest(NSPoint(x: 300, y: 400))
+        XCTAssertFalse(hitDuringRestore === hotWebView)
+        XCTAssertFalse(hitDuringRestore?.isDescendant(of: hotWebView) ?? false)
+    }
+
+    func testEmptyAndUnsupportedPresentationsClearStaleRestoringState() {
+        let container = WebPanelContainerView(
+            frame: NSRect(x: 0, y: 0, width: 600, height: 800)
+        )
+        container.layoutSubtreeIfNeeded()
+
+        container.showRestoringState()
+        XCTAssertTrue(container.isShowingRestoringState)
+        container.showEmptyState()
+        XCTAssertFalse(container.isShowingRestoringState)
+
+        container.showRestoringState()
+        container.showUnsupportedBrowserProfile(
+            profileName: "Custom",
+            defaultProfileName: "Default"
+        )
+        XCTAssertFalse(container.isShowingRestoringState)
+    }
+
+    func testRuntimeMaterializationRequestValidityRequiresAllFacts() {
+        let slot = UUID()
+        XCTAssertTrue(
+            PanelController.runtimeMaterializationRequestIsValid(
+                requestGenerationMatches: true,
+                requestSlotID: slot,
+                activeSlotID: slot,
+                presentationRequested: true,
+                sessionLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.runtimeMaterializationRequestIsValid(
+                requestGenerationMatches: false,
+                requestSlotID: slot,
+                activeSlotID: slot,
+                presentationRequested: true,
+                sessionLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.runtimeMaterializationRequestIsValid(
+                requestGenerationMatches: true,
+                requestSlotID: slot,
+                activeSlotID: UUID(),
+                presentationRequested: true,
+                sessionLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.runtimeMaterializationRequestIsValid(
+                requestGenerationMatches: true,
+                requestSlotID: slot,
+                activeSlotID: slot,
+                presentationRequested: false,
+                sessionLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PanelController.runtimeMaterializationRequestIsValid(
+                requestGenerationMatches: true,
+                requestSlotID: slot,
+                activeSlotID: slot,
+                presentationRequested: true,
+                sessionLocked: true
+            )
+        )
+    }
+
+    func testResidentSlotPresentationStaysDirectWithoutRestoringState() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "Resident")
+
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        let residentWebView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        XCTAssertTrue(controller.debugPresentedWebView === residentWebView)
+    }
+
+    func testReclaimedSlotShowsRestoringStateBeforeMaterializationAndAttachesNextTurn() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "Reclaimed")
+        pool.hibernate(slotID: profile.id)
+        XCTAssertNil(pool.existingWebView(for: profile.id))
+
+        controller.showFloatTabs()
+
+        // Synchronous shell phase: native restoring feedback exists, the
+        // fresh Runtime has not been materialized, and control returned to
+        // the caller before any WebKit work.
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+        XCTAssertNil(pool.existingWebView(for: profile.id))
+
+        // Deferred main-run-loop turn materializes and attaches beneath the
+        // restoring surface; only readiness completion removes it.
+        drainMainThreadTurns()
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        XCTAssertTrue(controller.debugPresentedWebView === webView)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+    }
+
+    func testExactCurrentRuntimeNavigationFinishDismissesRestoringState() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "FinishReady")
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>ready</body></html>", baseURL: nil)
+        )
+        observer.webView(webView, didFinish: navigation)
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testStaleOrForeignRuntimeFinishDoesNotDismissRestoringState() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "StaleFinish")
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let identity = try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: profile.id))
+        let replacedIdentity = WebRuntimeDiagnosticIdentity(
+            runtimeGeneration: identity.runtimeGeneration &+ 100,
+            webViewInstanceID: UUID()
+        )
+
+        // A finish correlated to a replaced Runtime must be rejected.
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: replacedIdentity
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        // A finish for a foreign Slot must be rejected.
+        controller.handleSlotNavigationFinish(
+            slotID: UUID(),
+            runtimeIdentity: identity
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        // The exact current Runtime finish completes the restoring window.
+        controller.handleSlotNavigationFinish(
+            slotID: profile.id,
+            runtimeIdentity: identity
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testNavigationFailureRemovesRestoringStateWithoutManufacturingSuccess() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "FailBounded")
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        drainMainThreadTurns()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        let webView = try XCTUnwrap(pool.existingWebView(for: profile.id))
+        let observer = try XCTUnwrap(webView.navigationDelegate as? SlotNavigationObserver)
+        webView.navigationDelegate = nil
+        let navigation = try XCTUnwrap(
+            webView.loadHTMLString("<html><body>fail</body></html>", baseURL: nil)
+        )
+        observer.webView(
+            webView,
+            didFail: navigation,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)
+        )
+
+        // Bounded terminal handling: the restoring surface cannot persist
+        // forever after a failed navigation, and the failed Runtime stays
+        // attached underneath for WebKit's own error presentation.
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        XCTAssertTrue(controller.debugPresentedWebView === webView)
+    }
+
+    func testRapidSlotChangeInvalidatesPendingMaterializationBeforeAttach() throws {
+        let (store, pool, controller, firstProfile) = try makePhase6Harness(slotName: "RapidA")
+        pool.hibernate(slotID: firstProfile.id)
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        // Selection changes before the deferred turn runs: the older request
+        // must never materialize or attach.
+        let secondProfile = try XCTUnwrap(
+            store.add(name: "RapidB", homeURL: URL(string: "https://rapidb.example.com")!)
+        )
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        drainMainThreadTurns()
+
+        XCTAssertNil(
+            pool.existingWebView(for: firstProfile.id),
+            "a stale materialization request must not create a runtime"
+        )
+        let secondWebView = try XCTUnwrap(pool.existingWebView(for: secondProfile.id))
+        XCTAssertTrue(controller.debugPresentedWebView === secondWebView)
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        // The newer request still completes through its own readiness path.
+        controller.handleSlotNavigationFinish(
+            slotID: secondProfile.id,
+            runtimeIdentity: try XCTUnwrap(pool.runtimeDiagnosticIdentity(for: secondProfile.id))
+        )
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+    }
+
+    func testDismissalDuringPendingRestoreInvalidatesMaterialization() throws {
+        let (_, pool, controller, profile) = try makePhase6Harness(slotName: "DismissPending")
+        pool.hibernate(slotID: profile.id)
+        controller.showFloatTabs()
+        XCTAssertTrue(controller.debugIsShowingRestoringState)
+
+        controller.hideFloatTabs()
+
+        XCTAssertFalse(controller.debugIsShowingRestoringState)
+        drainMainThreadTurns()
+        XCTAssertNil(
+            pool.existingWebView(for: profile.id),
+            "a stale materialization turn must not run after dismissal"
+        )
+    }
 }
 
 private final class FocusableTestView: NSView {
