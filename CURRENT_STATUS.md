@@ -114,10 +114,9 @@ LIVE_SMOKE_FIRST_ATTEMPT=VISIBLE_COMPLETION / NOT A PRODUCT FAILURE
 FRESH_ORIGIN_MAIN=36d5850a9a5bad01b24cffa9a4bd1e1fbf628d4d
 IMPLEMENTATION_BRANCH=codex/ft-runtime-lifecycle-memory-001-phase2-implement-001
 IMPLEMENTATION_SCOPE_AUDIT=PASS / 9 AUTHORIZED IMPLEMENTATION-TEST FILES
-REQUIRED_CI_RUN=41262161870
 REQUIRED_CI_JOB=Build & Test (Apple Silicon arm64)
 REQUIRED_CI_RUNNER=macmini-floattabs-01
-REQUIRED_CI_HEAD=6a407a7f0b44719fd016adceef6b00be82962951
+REQUIRED_CI=PASS ON FINAL LITERAL PR HEAD
 ```
 
 The previous CUA-driven smoke completed while the ChatGPT Slot was still visible, so durable unread was correctly skipped. Under Phase 2 V2 this is not a construction STOP and is not retried by the local executor. Timing-sensitive runtime/UI acceptance remains user-owned.
