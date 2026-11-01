@@ -12,10 +12,11 @@ enum WebAttentionState: Equatable, Sendable {
     /// user-visible, and the result has not yet been acknowledged.
     case ready
 
-    /// The Contract's residency protection condition: a Slot is protected
-    /// while it is generating or holds unacknowledged output.
+    /// The Runtime residency protection condition: only an active generation
+    /// keeps a Slot protected. `ready` remains transient attention state, but
+    /// durable unread owns unseen-completion truth after generation ends.
     var isAttentionProtected: Bool {
-        self == .generating || self == .ready
+        self == .generating
     }
 
     var diagnosticName: String {
@@ -70,7 +71,7 @@ final class WebAttentionCoordinator {
         states[slotID] ?? .idle
     }
 
-    /// Whether the Slot is attention-protected (`generating` or `ready`).
+    /// Whether the Slot is attention-protected (`generating` only).
     func isAttentionProtected(_ slotID: UUID) -> Bool {
         state(for: slotID).isAttentionProtected
     }

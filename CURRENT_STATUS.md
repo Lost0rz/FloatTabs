@@ -6,13 +6,15 @@
 
 ## Mode
 
-**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — PHASE 2 READY / UNREAD DECOUPLING**
+**MODE: RUNTIME LIFECYCLE / MEMORY PROGRAM — ARCHITECTURE-FIRST EXECUTION**
 
 Current program/task: `FT-RUNTIME-LIFECYCLE-MEMORY-001`.
 
-Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFICATION THEN HUMAN ACCEPTANCE`.
+Current execution state: `ACTIVE / PHASE 2 IMPLEMENTATION — MACHINE VERIFIED / MERGE-READY AFTER LITERAL-HEAD CI`.
 
 Phase 1 Safe Hibernate + Restore is complete. Phase 2 decouples transient Runtime `ready` state from durable unread truth so completed unseen work can remain unread after its `WKWebView` Runtime is reclaimed.
+
+The program now uses V3 cadence: finish the remaining architecture sequence with phase-local machine verification and CI, then run one unified independent audit across the integrated final architecture, then one user-owned full human acceptance pass.
 
 ## Canonical / current state
 
@@ -21,16 +23,25 @@ PUBLIC_RELEASE=v0.5.8
 PUBLIC_BUILD=26
 JSC_ROOT_CAUSE=UNKNOWN
 
+PROGRAM_CONTRACT_V2=SUPERSEDED_FOR_CURRENT_EXECUTION
+PROGRAM_CONTRACT_V3=ACCEPTED_FROZEN
+PROGRAM_UNIFIED_INDEPENDENT_AUDIT=DEFERRED_UNTIL_PHASES_1_6_COMPLETE
+PROGRAM_HUMAN_ACCEPTANCE=PENDING / DEFERRED_UNTIL_UNIFIED_AUDIT_PASS
+
 PHASE_1_SAFE_HIBERNATE_RESTORE=COMPLETE
 PHASE_2_FOCUSED_READ_ONLY_AUDIT=COMPLETE
 PHASE_2_PLAN_V1=SUPERSEDED_FOR_CURRENT_EXECUTION
-PHASE_2_PLAN_V2=ACCEPTED_FROZEN
-PHASE_2_IMPLEMENTATION=ACTIVE
+PHASE_2_PLAN_V2=ACCEPTED_FOR_PHASE_2_SEMANTICS / ACCEPTANCE_CADENCE_SUPERSEDED_BY_PROGRAM_V3
+PHASE_2_IMPLEMENTATION=MACHINE_VERIFIED / PR_176_OPEN
 PHASE_2_SCOPE_RECONCILIATION_001=ACCEPTED_TEST_ONLY
-PHASE_2_MACHINE_VERIFICATION=LOCAL_TESTS/BUILDS PASS ON CURRENT DIRTY IMPLEMENTATION
-PHASE_2_REAL_UI_RUNTIME_ACCEPTANCE=USER_OWNED / DEFERRED UNTIL MACHINE WORK + AUDIT COMPLETE
+PHASE_2_MACHINE_VERIFICATION=TARGETED/FOCUSED/FULL TESTS + DEBUG/RELEASE + SCOPE PASS
+PHASE_2_MENU_UNREAD_PROJECTION_CORRECTIVE=IMPLEMENTED / TARGETED REGRESSION PASS
+PHASE_2_PRIOR_INDEPENDENT_AUDIT=PASS ON PRE-V3 SEMANTIC PRODUCT HEAD / EXTRA EVIDENCE ONLY
+PHASE_2_HUMAN_ACCEPTANCE=DEFERRED_TO_PROGRAM_FINAL
 PHASE_3=NOT_STARTED / NOT_AUTHORIZED
 PHASE_4=NOT_STARTED / NOT_AUTHORIZED
+PHASE_5=NOT_STARTED / NOT_AUTHORIZED
+PHASE_6=NOT_STARTED / NOT_AUTHORIZED
 CI_RUNNER=macmini-floattabs-01 / self-hosted / macOS / ARM64 / mac-mini-ci
 ```
 
@@ -43,14 +54,14 @@ AGENTS.md
 → CURRENT_STATUS.md
 → CURRENT_TASK.md
 → docs/README.md
-→ docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md
+→ docs/architecture/FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md
 → docs/architecture/FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md
 → docs/architecture/FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md
 → docs/architecture/DOMAIN_MAP.md
 → current source/tests/fresh evidence
 ```
 
-Phase 2 V1 remains historical evidence for the original audit and verification rationale. V2 changes only the acceptance cadence, not architecture semantics or production scope.
+Program Contract V3 supersedes V2 for current execution cadence. Phase 2 Plan V2 remains the accepted bounded semantic/implementation reference for Ready / Unread decoupling, but any per-phase independent-audit or human-acceptance requirement in older material yields to Program Contract V3.
 
 ## Frozen Phase 2 semantic target
 
@@ -79,7 +90,7 @@ Generating
 
 Durable unread commit must precede reclaim.
 
-## Authorized scope
+## Authorized Phase 2 scope
 
 Production:
 
@@ -97,46 +108,58 @@ Tests:
 - `FloatTabsTests/UnreadResponseTests.swift` only if narrowly needed
 - `FloatTabsTests/BrowserProfileDuplicateTests.swift` only for the accepted stale Ready-protection assertion corrective
 
-No Browser Profile production code, unread persistence schema, lifecycle timer/policy, WebViewPool, detector/bridge, Phase 3/4 or release expansion is authorized.
+No Browser Profile production code, unread persistence schema, lifecycle timer/policy, WebViewPool, detector/bridge, Phase 3+ product expansion or release expansion is authorized inside Phase 2.
 
-## Current implementation evidence
-
-The current local implementation workspace reports:
+## Phase 2 implementation evidence
 
 ```text
-AUTHORIZED_DIRTY_FILES=9
 AFFECTED_BROWSER_PROFILE_TEST=1 executed / 0 failures
+TARGETED_MENU_UNREAD_REGRESSION=4 executed / 0 failures
 FOCUSED_TESTS=241 executed / 3 skipped / 0 failures
 FULL_XCTEST=1073 executed / 3 skipped / 0 failures
 DEBUG_BUILD=PASS
 RELEASE_BUILD=PASS
-LIVE_SMOKE_FIRST_ATTEMPT=VISIBLE_COMPLETION / NOT A PRODUCT FAILURE
+IMPLEMENTATION_SCOPE_AUDIT=PASS / 11 AUTHORIZED PR PATHS INCLUDING STATUS/TASK
+PRE_V3_LITERAL_HEAD=654eaef06b8c9e919a47bbe3842866033d9b69ea
+PRE_V3_REQUIRED_CI_RUN=41263638003 / PASS
+PRE_V3_QA_DMG_RUN=41263637956 / PASS
 ```
 
-The previous CUA-driven smoke completed while the ChatGPT Slot was still visible, so durable unread was correctly skipped. Under Phase 2 V2 this is not a construction STOP and is not retried by the local executor.
+The V3 Authority update is control/docs-only. It does not change the previously audited product/test blobs. The final literal #176 head must still pass the required self-hosted CI before merge because repository-host gates apply to the current PR identity.
 
 ## Verification / acceptance cadence
 
-Machine construction gates:
+Per-phase merge gates under Program Contract V3:
 
-1. focused tests PASS;
-2. full XCTest PASS;
-3. Debug arm64 build PASS;
-4. Release arm64 build PASS;
-5. exact diff/scope/data-safety review PASS;
-6. implementation commit/push/one PR;
-7. literal-head required CI PASS on `macmini-floattabs-01`;
-8. independent web audit PASS.
+1. frozen scope/ownership/STOP boundary;
+2. focused tests PASS;
+3. full XCTest PASS;
+4. Debug arm64 build PASS;
+5. Release arm64 build PASS;
+6. exact diff/scope/data-safety review PASS;
+7. phase-specific machine decision evidence when required by that phase;
+8. literal-head required CI PASS on `macmini-floattabs-01`;
+9. merge and continue to the next architecture phase after normal control alignment.
 
-Then stop at:
+Not required as routine intermediate-phase blockers:
 
-`WAITING_FOR_HUMAN_UI_ACCEPTANCE`
+- per-phase human UI/runtime acceptance;
+- per-phase AI/CUA live smoke;
+- per-phase formal independent web audit.
 
-Timing-sensitive ChatGPT interaction/runtime acceptance is performed by the user in one concentrated pass. Local AI/CUA must not be used as the final acceptance operator.
+After Phases 1–6 are structurally complete and merged:
 
-Minimum human acceptance includes hidden completion → durable unread → normal Runtime reclaim → unread survives → restore/session continuity → acknowledgement, plus no obvious focus/fullscreen regression.
+```text
+UNIFIED_PROGRAM_INDEPENDENT_AUDIT
+→ corrective work if needed
+→ AUDIT PASS
+→ ONE USER-OWNED FULL HUMAN ACCEPTANCE PASS
+→ final program closeout / release decision
+```
 
-## Explicit non-scope
+Phase 4 remains responsible for the scale/performance benchmark evidence needed to choose the Runtime Budget/policy; that machine evidence is not deferred because it directly determines the architecture decision.
+
+## Explicit Phase 2 non-scope
 
 Do not modify without STOP/reconciliation:
 
@@ -152,4 +175,4 @@ Do not modify without STOP/reconciliation:
 
 ## Next action
 
-Preserve the current nine authorized local implementation/test changes. Do not retry CUA/live-smoke automation. Finish repository delivery: align with fresh Authority non-destructively, commit, push, create exactly one Phase 2 implementation PR, run required CI, then independent web audit. After those machine gates pass, hand the build to the user for concentrated human acceptance.
+Do not perform Phase 2 human acceptance now. Keep PR #176 product semantics unchanged, allow the V3 Authority/docs-only update to obtain its literal-head required CI, then merge #176. After merge, begin Phase 3 with the normal focused read-only audit → scope freeze → construction sequence. Continue the architecture program through Phase 6 before the unified independent audit and final human acceptance.

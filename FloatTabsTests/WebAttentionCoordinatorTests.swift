@@ -114,14 +114,15 @@ final class WebAttentionCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.readySlotIDs.isEmpty)
     }
 
-    func testAttentionProtectedOnlyWhileGeneratingOrReady() {
+    func testAttentionProtectedOnlyWhileGenerating() {
         XCTAssertFalse(coordinator.isAttentionProtected(slotA))
 
         coordinator.apply(.generationStarted, for: slotA)
         XCTAssertTrue(coordinator.isAttentionProtected(slotA))
 
         coordinator.apply(.generationFinished(userVisible: false), for: slotA)
-        XCTAssertTrue(coordinator.isAttentionProtected(slotA))
+        XCTAssertFalse(coordinator.isAttentionProtected(slotA))
+        XCTAssertEqual(coordinator.state(for: slotA), .ready)
 
         coordinator.acknowledge(slotID: slotA, userVisible: true)
         XCTAssertFalse(coordinator.isAttentionProtected(slotA))

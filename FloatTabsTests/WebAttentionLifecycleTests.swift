@@ -193,7 +193,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
-    func testGeneratingToReadyWhileInactiveRemainsProtected() async throws {
+    func testGeneratingToReadyWhileInactiveCanReleaseAfterProtectionEnds() async throws {
         let pool = makePool()
         let profile = makeProfile(name: "GeneratingReady", policy: .cold)
         _ = try pool.webView(for: profile)
@@ -213,7 +213,8 @@ final class WebAttentionLifecycleTests: XCTestCase {
         try await wait(milliseconds: 70)
 
         XCTAssertEqual(coordinator.state(for: profile.id), .ready)
-        XCTAssertTrue(pool.contains(slotID: profile.id))
+        XCTAssertFalse(coordinator.isAttentionProtected(profile.id))
+        XCTAssertFalse(pool.contains(slotID: profile.id))
     }
 
     func testReleaseTimerCreatedBeforeGenerationStartsCannotReleaseProtectedSlot() async throws {
@@ -314,7 +315,7 @@ final class WebAttentionLifecycleTests: XCTestCase {
         XCTAssertEqual(lifecycle.pendingWarmReleaseCount, 0)
     }
 
-    func testMemoryWarningPreservesAttentionProtectedGeneratingAndReadyWarmRuntimes() throws {
+    func testMemoryWarningPreservesGeneratingAndEligibleWarmRuntimes() throws {
         let pool = makePool()
         let generating = makeProfile(name: "WarningGenerating", policy: .warm)
         let ready = makeProfile(name: "WarningReady", policy: .warm)

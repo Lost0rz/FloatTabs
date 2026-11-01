@@ -17,14 +17,29 @@ For source/Authority routing, use:
 
 For `FT-RUNTIME-LIFECYCLE-MEMORY-001`, current architecture authority is:
 
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — **ACCEPTED / FROZEN** current program-level contract;
-- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — **ACCEPTED / FROZEN** current Phase 2 implementation/acceptance plan;
-- [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — accepted test-only scope corrective;
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V3.md) — **ACCEPTED / FROZEN** current program-level contract and unified final acceptance cadence;
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V2.md) — **ACCEPTED / FROZEN** bounded Phase 2 semantic/implementation plan; its acceptance cadence yields to Program Contract V3 on conflict;
+- [`FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md`](FT_RUNTIME_LIFECYCLE_PHASE2_SCOPE_RECONCILIATION_001.md) — accepted Phase 2 test-only scope corrective;
 - `CURRENT_STATUS.md` — current program/phase/evidence state;
 - `CURRENT_TASK.md` — the only active execution authorization;
 - production code/tests/fresh evidence.
 
-The V2 program contract preserves the accepted target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and the architecture-first cadence.
+Program Contract V3 preserves the target architecture — persistent Slot/Profile/product state with disposable `WKWebView` Runtime cache — and changes the program verification cadence so intermediate architecture phases merge after phase-local machine correctness and required CI rather than repeatedly waiting for full human/runtime acceptance.
+
+Current program cadence:
+
+```text
+phase-focused audit / freeze
+→ implementation
+→ machine verification + required CI
+→ merge
+→ next dependent architecture phase
+...
+Phases 1–6 complete
+→ unified independent program audit
+→ one user-owned full human acceptance pass
+→ final closeout / release decision
+```
 
 Phase 1 Safe Hibernate + Restore is complete.
 
@@ -41,13 +56,16 @@ Durable Unread
   -> owns persistent rail/menu unread presentation
 ```
 
-The current Phase 2 V2 plan keeps the V1 architecture/scope but changes verification cadence: machine execution owns tests/builds/diff/PR/CI and independent audit; timing-sensitive real UI/runtime acceptance is performed by the user in one concentrated pass after machine work is complete. AI/CUA interaction is not a construction gate and cannot set human acceptance PASS.
+The Phase 2 V2 plan remains the bounded implementation reference for these semantics. Its earlier per-phase human-acceptance handoff is superseded by Program Contract V3: Phase 2 human/runtime UI acceptance is deferred into the final integrated program acceptance pass.
+
+Phase 4 still owns the strict scale/performance benchmark required to choose Runtime Budget/policy because that evidence directly determines the architecture decision.
 
 ## Completed / superseded Runtime Lifecycle documents
 
-- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — historical Phase 2 plan evidence; its AI-driven bounded live-smoke construction gate is superseded by Phase 2 V2.
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V2.md) — historical program-contract evidence. Its architecture-first separation of structural correctness from Phase 4 scale tuning remains useful; its repeated per-phase final-acceptance cadence is superseded by V3.
+- [`FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase2_Ready_Unread_Decoupling_Plan_V1.md) — historical Phase 2 plan evidence; its AI-driven bounded live-smoke construction gate was superseded by Phase 2 V2 and then by the V3 program cadence.
 - [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V2.md) — accepted/frozen delivered Phase 1 plan; Phase 1 is complete.
-- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence. Its strict Phase 1 scale-benchmark/STOP gate is superseded by V2.
+- [`FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md`](FloatTabs_Runtime_Lifecycle_Memory_Contract_V1.md) — historical program-contract evidence. Its strict Phase 1 scale-benchmark/STOP gate was superseded by V2/V3.
 - [`FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md`](FloatTabs_Runtime_Lifecycle_Phase1_Safe_Hibernate_Restore_Plan_V1.md) — historical Phase 1 audit/plan evidence.
 
 Their audit facts and rationale remain useful historical evidence where they do not conflict with current Authority.
